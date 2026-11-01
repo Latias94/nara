@@ -10,7 +10,7 @@ use nara_core::ItemLimit;
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentRegistry, ComponentRegistrySnapshot, ComponentSchema,
+    ComponentPropertyPath, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaOwnerSnapshot,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     PersistentComponentSchemaOwnerId,
@@ -134,23 +134,20 @@ fn data_owners() -> [ComponentSchemaOwnerSnapshot; 2] {
     ]
 }
 
-fn native_registry() -> ComponentRegistry {
-    let mut native = ComponentRegistry::new();
+fn native_registry() -> ComponentRegistrySnapshot {
+    let mut native = ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut native)
+        .register_into(&mut native)
         .unwrap();
-    native.freeze().unwrap();
-    native
+    native.freeze().unwrap()
 }
 
 fn empty_native() -> ComponentRegistrySnapshot {
-    let mut native = ComponentRegistry::new();
-    native.freeze().unwrap();
-    native.snapshot().unwrap()
+    ComponentRegistryBuilder::new().freeze().unwrap()
 }
 
 fn bindings() -> SceneComponentBindings {
-    SceneComponentBindings::new(native_registry().snapshot().unwrap(), data_owners()).unwrap()
+    SceneComponentBindings::new(native_registry(), data_owners()).unwrap()
 }
 
 fn mover(value: ComponentValue) -> SceneComponentRecord {
@@ -291,7 +288,7 @@ fn entity<'a>(document: &'a SceneDocument, entity: &SceneEntityId) -> &'a SceneE
 
 #[test]
 fn selection_retains_exact_native_and_data_owner_snapshots_without_native_data_codecs() {
-    let native = native_registry().snapshot().unwrap();
+    let native = native_registry();
     let owners = data_owners();
     let bindings = SceneComponentBindings::new(native.clone(), owners.clone()).unwrap();
     assert!(bindings.native_snapshot().ptr_eq(&native));
@@ -655,7 +652,7 @@ fn native_only_entry_point_rejects_data_instead_of_implicitly_selecting_storage(
 #[test]
 fn mixed_entry_point_retains_ownerless_native_name_convenience() {
     let native = native_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), data_owners()).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), data_owners()).unwrap();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("named"))
         .with_component(
             component("nara.scene.Name"),
@@ -689,7 +686,7 @@ fn native_and_data_cannot_share_an_owner_even_when_their_component_ids_are_disjo
     let owner = SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str();
     let data = admit(owner, catalog([mover_schema()], &[]), None);
     assert!(
-        matches!(SceneComponentBindings::new(native_registry().snapshot().unwrap(), [data]),
+        matches!(SceneComponentBindings::new(native_registry(), [data]),
         Err(SceneComponentBindingError::DuplicateOwner { owner: rejected }) if rejected == owner_id(owner))
     );
 
@@ -697,14 +694,14 @@ fn native_and_data_cannot_share_an_owner_even_when_their_component_ids_are_disjo
         ComponentSchemaCatalog::default(),
         catalog([], &["game.RetiredNative"]),
     ] {
-        let mut native = ComponentRegistry::from_owner_catalog_candidate(
+        let native = ComponentRegistryBuilder::from_owner_catalog_candidate(
             ComponentSchemaOwnerId::new("game.raw-native"),
             native_catalog,
             None,
         )
         .unwrap();
-        native.freeze().unwrap();
-        let snapshot = native.snapshot().unwrap();
+        let native = native.freeze().unwrap();
+        let snapshot = native.clone();
         assert_eq!(
             snapshot.schema_owners().collect::<Vec<_>>(),
             [ComponentSchemaOwnerId::new("game.raw-native")]
@@ -759,7 +756,7 @@ fn retired_lineage_stays_reserved_but_does_not_expose_a_current_schema_or_data_o
 
 #[test]
 fn native_active_and_retired_ids_reject_data_claims_from_another_owner() {
-    let native = native_registry().snapshot().unwrap();
+    let native = native_registry();
     let native_name = native
         .schema(&component("nara.scene.Name"))
         .unwrap()
@@ -775,17 +772,17 @@ fn native_active_and_retired_ids_reject_data_claims_from_another_owner() {
                 if claimed == component("nara.scene.Name"))
         );
     }
-    let mut native = ComponentRegistry::from_owner_catalog_candidate(
+    let native = ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("game.native-retired"),
         catalog([], &["game.Mover"]),
         None,
     )
     .unwrap();
-    native.freeze().unwrap();
+    let native = native.freeze().unwrap();
     for data_catalog in [catalog([mover_schema()], &[]), catalog([], &["game.Mover"])] {
         let data = admit("game.foreign", data_catalog, None);
         assert!(
-            matches!(SceneComponentBindings::new(native.snapshot().unwrap(), [data]),
+            matches!(SceneComponentBindings::new(native.clone(), [data]),
             Err(SceneComponentBindingError::DivergentComponentOwnership { component: claimed })
                 if claimed == component("game.Mover"))
         );

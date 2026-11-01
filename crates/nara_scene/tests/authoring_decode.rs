@@ -10,7 +10,7 @@ use nara_ecs::World;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentNumericBound, ComponentNumericInterval,
-    ComponentPropertyPath, ComponentRegistry, ComponentSchema, ComponentSchemaCatalog,
+    ComponentPropertyPath, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueShape, EntityReference, PersistentComponentSchemaOwnerId,
 };
@@ -588,7 +588,7 @@ fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
         ComponentValue::String("Renamed".to_owned())
     );
 
-    let registry = ComponentRegistry::new();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let undo = session.undo(&registry);
     assert!(undo.applied, "{:#?}", undo.diagnostics);
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
@@ -799,12 +799,11 @@ fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
     assert_eq!(scene.readiness(), AuthoringDocumentReadiness::Degraded);
     assert_eq!(prefab.readiness(), AuthoringDocumentReadiness::Degraded);
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let provider =
         nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
-    nara_reflect::__private::register_or_validate_resolved_schema_provider(&mut registry, provider)
-        .unwrap();
-    registry.freeze().unwrap();
+    nara_reflect::__private::register_resolved_schema_provider(&mut registry, provider).unwrap();
+    let registry = registry.freeze().unwrap();
     let mut world = World::new();
     let before = world.iter_entities().count();
 

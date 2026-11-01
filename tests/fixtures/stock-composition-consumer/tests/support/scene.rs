@@ -11,7 +11,7 @@ use nara::{
     hierarchy::HierarchyPlugin,
     image::ImagePreparePlugin,
     reflect::{
-        ComponentRegistry, ComponentRegistryPlugin, ComponentTypeId, ComponentValue,
+        ComponentRegistryPlugin, ComponentRegistrySnapshot, ComponentTypeId, ComponentValue,
         component_registry,
     },
     render::{RenderComponentsPlugin, RenderPlugin, WorldCanvas},
@@ -90,12 +90,9 @@ fn capture_runtime_with(
 
 fn spawn_document(world: &mut World) {
     let transparent = world.resource::<TransparentSource>().0;
-    let registry = ComponentRegistry::from_snapshot(
-        component_registry(world)
-            .expect("the actual admitted Runtime registry")
-            .snapshot()
-            .expect("Startup uses the frozen admitted component definitions"),
-    );
+    let registry = component_registry(world)
+        .expect("the actual admitted Runtime registry")
+        .clone();
     let candidate = ExpandedSceneCandidate::plain(
         SourceDocumentKey::named(
             "5e42bc45-cbbc-4e44-a4c4-cc12dc635047".parse().unwrap(),
@@ -181,11 +178,11 @@ fn finish_capture(mut runtime: RuntimeInstance, canvas: bool) -> nara_render_wgp
 }
 
 /// A red 4x2 Sprite centered in an 8x6 blue Camera view. All edges align to raster cells.
-pub fn document(registry: &ComponentRegistry) -> SceneDocument {
+pub fn document(registry: &ComponentRegistrySnapshot) -> SceneDocument {
     document_with_alpha(registry, false)
 }
 
-fn document_with_alpha(registry: &ComponentRegistry, transparent: bool) -> SceneDocument {
+fn document_with_alpha(registry: &ComponentRegistrySnapshot, transparent: bool) -> SceneDocument {
     let mut sprite = initial(registry, "nara.sprite.Sprite");
     let ComponentValue::Map(fields) = &mut sprite.value else {
         panic!("Sprite map")
@@ -234,7 +231,7 @@ fn document_with_alpha(registry: &ComponentRegistry, transparent: bool) -> Scene
     ])
 }
 
-fn initial(registry: &ComponentRegistry, name: &str) -> SceneComponentRecord {
+fn initial(registry: &ComponentRegistrySnapshot, name: &str) -> SceneComponentRecord {
     let schema = registry
         .schema(&ComponentTypeId::new(name))
         .expect("ordinary component schema");

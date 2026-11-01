@@ -9,7 +9,7 @@ use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentEntityReferenceRewriteError, ComponentRegistry,
+    ComponentDecodeContext, ComponentEntityReferenceRewriteError, ComponentRegistrySnapshot,
     ComponentValueCost, ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
 };
 
@@ -101,7 +101,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn instantiate_with_patch(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         patch: &ScenePatchDocument,
     ) -> PrefabInstantiationReport {
         let mut document = self.instantiate();
@@ -112,7 +112,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn instantiate_with_patch_and_asset_resolution(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         patch: &ScenePatchDocument,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabInstantiationReport {
@@ -123,14 +123,14 @@ impl PrefabDocument {
     }
 
     #[must_use]
-    pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+    pub fn validate(&self, registry: &ComponentRegistrySnapshot) -> DiagnosticReport {
         self.instantiate().validate(registry)
     }
 
     #[must_use]
     pub fn validate_with_asset_resolution(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
         self.instantiate()
@@ -140,7 +140,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
     ) -> PrefabExpansionReport {
         self.instantiate().expand_prefabs(registry, resolver)
@@ -149,7 +149,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
@@ -454,7 +454,7 @@ impl InMemoryPrefabSourceResolver {
         source: AssetRef,
         key: SourceDocumentKey,
         candidate: crate::PrefabDocumentCandidate,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
         Ok(self.insert(source, key, candidate.publish(registry)?.into_document()))
     }
@@ -465,7 +465,7 @@ impl InMemoryPrefabSourceResolver {
         source: AssetRef,
         key: SourceDocumentKey,
         candidate: crate::PrefabDocumentCandidate,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<Option<PrefabDocument>, crate::SceneFilePublicationError> {
         let (prefab, _) = candidate.into_canonical_document(registry)?;
@@ -1119,7 +1119,7 @@ impl SceneDocument {
     #[must_use]
     pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
     ) -> PrefabExpansionReport {
         self.expand_prefabs_with_options(registry, resolver, PrefabExpansionOptions::default())
@@ -1128,7 +1128,7 @@ impl SceneDocument {
     #[must_use]
     pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
@@ -1143,7 +1143,7 @@ impl SceneDocument {
     #[must_use]
     pub fn expand_prefabs_with_options<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
         options: PrefabExpansionOptions,
     ) -> PrefabExpansionReport {
@@ -1158,7 +1158,7 @@ impl SceneDocument {
     #[must_use]
     pub fn expand_prefabs_with_options_and_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         resolver: &R,
         options: PrefabExpansionOptions,
         asset_resolution: AssetReferenceResolver<'_>,
@@ -1183,7 +1183,7 @@ impl SceneDocument {
     /// held while loading is suspended. Resolver caches and decoding peaks belong to the loader.
     pub fn try_expand_prefabs_with_loader<F, E>(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         options: PrefabExpansionOptions,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
@@ -2030,8 +2030,9 @@ mod resolver_tests {
 
     #[test]
     fn expansion_report_borrows_the_document_and_complete_provenance_together() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let request = AssetRef::path("prefabs/hero.ron").unwrap();
         let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
             request.clone(),
@@ -2062,8 +2063,9 @@ mod resolver_tests {
 
     #[test]
     fn failed_expansion_report_exposes_neither_document_nor_provenance() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/missing.ron").unwrap(),

@@ -7,7 +7,7 @@ use nara_ecs::{Component, World};
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
+    ComponentPropertyPath, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
@@ -52,8 +52,8 @@ fn link_type() -> ComponentTypeId {
     ComponentTypeId::new("test.DeferredLink")
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<Amount, _, _>(
             ComponentSchema::new(amount_type(), "Amount", ComponentSchemaVersion::ONE)
@@ -95,8 +95,7 @@ fn registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn amount(value: i64) -> SceneComponentRecord {
@@ -187,7 +186,7 @@ fn pin_amount(target: PrefabEntityTarget, field: &str, value: i64) -> PrefabComp
 }
 
 fn expand(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     document: &SceneDocument,
     resolver: &InMemoryPrefabSourceResolver,
     expected_sources: &[&str],
@@ -270,7 +269,7 @@ fn entity<'a>(report: &'a PrefabExpansionReport, entity: &SceneEntityId) -> &'a 
         .expect("expected materialized entity")
 }
 
-fn materialize(registry: &ComponentRegistry, report: PrefabExpansionReport) -> World {
+fn materialize(registry: &ComponentRegistrySnapshot, report: PrefabExpansionReport) -> World {
     expanded(&report);
     let containing_source = SourceDocumentKey::named(
         UNIVERSE.parse().unwrap(),
@@ -292,7 +291,11 @@ fn materialize(registry: &ComponentRegistry, report: PrefabExpansionReport) -> W
     world
 }
 
-fn assert_native_amount(registry: &ComponentRegistry, report: PrefabExpansionReport, value: i64) {
+fn assert_native_amount(
+    registry: &ComponentRegistrySnapshot,
+    report: PrefabExpansionReport,
+    value: i64,
+) {
     let world = materialize(registry, report);
     let amounts = world
         .iter_entities()

@@ -19,7 +19,7 @@ use nara_identity::{
     WorldEntityLocator, WorldEntityToken, WorldIdentityDomain, resolve_in_world,
     spawn_identity_entity,
 };
-use nara_reflect::{ComponentRegistry, ComponentSchemaVersion, ComponentValue};
+use nara_reflect::{ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentValue};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
@@ -62,7 +62,7 @@ struct LifecycleCanary(u32);
 
 struct ReplacementFixture {
     world: World,
-    registry: ComponentRegistry,
+    registry: ComponentRegistrySnapshot,
     replacement: SceneDocument,
     current: SpawnedSceneInstance,
     target: SceneEntityId,
@@ -71,8 +71,9 @@ struct ReplacementFixture {
 
 impl ReplacementFixture {
     fn new() -> Self {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let target = scene_id("player");
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())]);
         let mut world = World::new();
@@ -194,8 +195,9 @@ fn spawn_retirement_token(world: &mut World) -> WorldEntityToken {
 
 #[test]
 fn product_replacement_commits_one_coherent_scene_generation() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
     let document = SceneDocument::new(
@@ -561,9 +563,9 @@ fn invalid_existing_hierarchy_rejects_product_replacement_without_scratch_mutati
 
 #[test]
 fn authored_component_collision_is_rejected_before_candidate_allocation() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let target = scene_id("player");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())
         .with_component(
@@ -679,8 +681,9 @@ fn overlay_lifecycle_rejection_rolls_back_scratch_and_resource_replacement() {
 
 #[test]
 fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     let root = scene_id("root");
     let child = scene_id("root/child");
     let document = SceneDocument::new(
@@ -749,7 +752,7 @@ struct OverlayLifecycleRejectionPort;
 
 impl nara_app::__RuntimeDriverPort for OverlayLifecycleRejectionPort {
     type Input = (
-        ComponentRegistry,
+        ComponentRegistrySnapshot,
         SceneDocument,
         SpawnedSceneInstance,
         SceneEntityId,
@@ -1080,8 +1083,9 @@ fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
 #[test]
 fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replacement() {
     use nara_asset::AssetRef;
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     let outer = AssetRef::path("prefabs/outer.ron").unwrap();
     let inner = AssetRef::path("prefabs/inner.ron").unwrap();
     let mut branch = SceneEntityRecord::new(scene_id("branch"));

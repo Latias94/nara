@@ -9,7 +9,7 @@ use nara_asset::{
 use nara_reflect::{
     __private::collect_declared_effective_asset_references_with_admission, ComponentCapability,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
-    ComponentPropertyStep, ComponentRegistry, ComponentSchema, ComponentSchemaCatalog,
+    ComponentPropertyStep, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId,
     ComponentValue, ComponentValueShape, DeclaredAssetReference, PersistentComponentSchemaOwnerId,
     encode_asset_reference_value, replace_component_property, rewrite_declared_asset_references,
@@ -131,10 +131,8 @@ impl Fixture {
             None,
         )
         .unwrap();
-        let mut native = ComponentRegistry::new();
-        native.freeze().unwrap();
-        let bindings =
-            SceneComponentBindings::new(native.snapshot().unwrap(), [owner.clone()]).unwrap();
+        let native = ComponentRegistryBuilder::new().freeze().unwrap();
+        let bindings = SceneComponentBindings::new(native.clone(), [owner.clone()]).unwrap();
         let mut value = ComponentValue::map([(
             "wire_links",
             ComponentValue::map([

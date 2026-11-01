@@ -4,7 +4,7 @@ use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath,
     ComponentMemberPathError, ComponentMemberPathSegment, ComponentPropertyError,
     ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
-    ComponentPropertyStep, ComponentRegistry, ComponentSchema, ComponentSchemaCatalog,
+    ComponentPropertyStep, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueShape, replace_component_property,
     resolve_component_property, resolve_component_property_in_root, validate_component_value,
@@ -974,7 +974,7 @@ fn selector_survives_explicit_wire_migration_but_unmigrated_and_future_versions_
         ComponentValueKind::U64,
     )]));
     current.version = ComponentSchemaVersion(2);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(current.clone()).unwrap();
     registry
         .register_native_component_with_codec::<NativeValue, _, _>(
@@ -1006,7 +1006,7 @@ fn selector_survives_explicit_wire_migration_but_unmigrated_and_future_versions_
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let admitted = registry.schema(&current.id).unwrap();
     for version in [ComponentSchemaVersion::ONE, ComponentSchemaVersion(3)] {
         assert!(matches!(

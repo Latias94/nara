@@ -4,7 +4,7 @@ use nara_ecs::{
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
+    ComponentFieldSchema, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponent,
     PersistentComponentProvider, validate_component_value,
@@ -163,11 +163,11 @@ fn generated_scalar_creation_template_is_typed_complete_data_and_not_decode_defa
         )]))
         .is_err()
     );
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<CreationProbe>()
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let mut catalog = ComponentSchemaCatalog {
         components: vec![schema],
         ..ComponentSchemaCatalog::default()
@@ -181,14 +181,13 @@ fn generated_scalar_creation_template_is_typed_complete_data_and_not_decode_defa
 
 #[test]
 fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_domains() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<ScalarProbe>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let id = ComponentTypeId::new("nara.test.ScalarProbe");
-    let schema = registry.schema(&id).unwrap();
+    let schema = snapshot.schema(&id).unwrap();
     for (field_id, kind, domain) in [
         ("enabled", ComponentValueKind::Bool, None),
         ("label", ComponentValueKind::String, None),
@@ -262,12 +261,11 @@ fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_
 fn generated_scalar_codecs_reject_wrong_kinds_and_narrowing_overflow() {
     let original = scalar_probe().__encode_persistent_component().unwrap();
     let schema = ScalarProbe::persistent_component_schema();
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<ScalarProbe>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     for (field, invalid) in [
         ("enabled", ComponentValue::U64(1)),
         ("label", ComponentValue::Bool(true)),
@@ -453,14 +451,13 @@ impl PersistentComponentProvider for InvalidProviderSchema {
 #[test]
 fn generated_provider_registers_schema_and_round_trips_component() {
     let component_id = ComponentTypeId::new("nara.test.GeneratedProbe");
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<GeneratedProbe>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
 
-    let schema = registry.schema(&component_id).unwrap();
+    let schema = snapshot.schema(&component_id).unwrap();
     assert_eq!(schema.aliases(), &["Generated probe"]);
     assert_eq!(schema.version().get(), 1);
     assert!(schema.has_capability(ComponentCapability::Scene));
@@ -469,7 +466,7 @@ fn generated_provider_registers_schema_and_round_trips_component() {
         &[ComponentFieldId::new("removed-field")]
     );
     assert_eq!(
-        registry
+        snapshot
             .resolve_field(&component_id, &ComponentFieldId::new("position"))
             .unwrap()
             .path(),
@@ -505,18 +502,17 @@ fn generated_provider_registers_schema_and_round_trips_component() {
 fn generated_empty_markers_register_and_round_trip_empty_maps() {
     let player_id = ComponentTypeId::new("nara.test.PlayerRole");
     let enemy_id = ComponentTypeId::new("nara.test.EnemyRole");
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<PlayerRole>()
         .unwrap();
     registry
         .register_persistent_component::<EnemyRole>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
 
     for component_id in [&player_id, &enemy_id] {
-        let schema = registry.schema(component_id).unwrap();
+        let schema = snapshot.schema(component_id).unwrap();
         assert!(schema.has_capability(ComponentCapability::Scene));
         assert!(schema.fields().is_empty());
     }
@@ -582,7 +578,7 @@ fn generated_empty_marker_catalogs_preserve_lineage_and_fingerprint() {
     assert_eq!(successor.predecessor(), Some(&predecessor_fingerprint));
     assert_eq!(successor.fingerprint(), predecessor_fingerprint);
 
-    ComponentRegistry::from_owner_catalog_candidate(
+    ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("nara.test.empty-markers"),
         successor,
         Some(predecessor),
@@ -605,7 +601,7 @@ fn provider_schema_uses_explicit_ids_instead_of_rust_field_names() {
 
 #[test]
 fn provider_validation_rejects_invalid_schema_without_registering_it() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
 
     let validation_error = registry
         .validate_persistent_component::<InvalidProviderSchema>()
@@ -627,7 +623,7 @@ fn provider_validation_rejects_invalid_schema_without_registering_it() {
 
 #[test]
 fn provider_validation_rejects_implicit_components_and_intrinsic_hooks() {
-    let registry = ComponentRegistry::new();
+    let registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         registry.validate_persistent_component::<RequiredPersistentProbe>(),
@@ -656,7 +652,7 @@ fn provider_validation_rejects_implicit_components_and_intrinsic_hooks() {
 
 #[test]
 fn manual_persistent_codecs_cannot_bypass_component_metadata_validation() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let required_id = ComponentTypeId::new("nara.test.ManualRequiredCodecProbe");
     let required_schema = ComponentSchema::new(
         required_id.clone(),
@@ -773,7 +769,7 @@ fn inspect_only_native_binding_keeps_normal_bevy_component_semantics() {
     fn inspect_only_on_add(_world: DeferredWorld<'_>, _context: HookContext) {}
 
     let id = ComponentTypeId::new("nara.test.InspectOnly");
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_component_schema(
             ComponentSchema::new(id.clone(), "Inspect only", ComponentSchemaVersion::ONE)

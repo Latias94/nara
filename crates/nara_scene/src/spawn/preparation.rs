@@ -1,7 +1,7 @@
 use nara_ecs::bevy_ecs::world::WorldId;
 use nara_reflect::{
     ComponentRegistryAuthorityError, ComponentRegistrySnapshot, component_registry,
-    validate_component_registry_authority,
+    component_registry_is_installed, validate_component_registry_authority,
 };
 
 use super::*;
@@ -66,29 +66,22 @@ enum SceneHostCompositionBasis {
 impl ScenePreparationDefinition {
     pub(super) fn capture(
         world: &World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, SceneSpawnReport> {
-        let snapshot = registry.snapshot().map_err(|_| {
-            preparation_rejection(
-                "scene.component-registry-not-frozen",
-                "Scene validation requires a frozen component registry",
-            )
-        })?;
         let host = match (
+            component_registry_is_installed(world),
             component_registry(world),
             validate_component_registry_authority(world),
         ) {
-            (Some(registry), Ok(())) => SceneHostCompositionBasis::Managed(
-                registry.snapshot().map_err(|_| definition_rejection())?,
-            ),
-            (None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => {
+            (true, Some(registry), Ok(())) => SceneHostCompositionBasis::Managed(registry.clone()),
+            (false, None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => {
                 SceneHostCompositionBasis::Standalone
             }
             _ => return Err(definition_rejection()),
         };
         Ok(Self {
             world: world.id(),
-            snapshot,
+            snapshot: registry.clone(),
             host,
             bindings: None,
         })
@@ -96,7 +89,7 @@ impl ScenePreparationDefinition {
 
     pub(super) fn capture_with_bindings(
         world: &World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         bindings: &SceneComponentBindings,
     ) -> Result<Self, SceneSpawnReport> {
         let mut definition = Self::capture(world, registry)?;
@@ -122,8 +115,8 @@ impl ScenePreparationDefinition {
         self.bindings.as_ref()
     }
 
-    pub(super) fn matches_registry(&self, registry: &ComponentRegistry) -> bool {
-        registry.shares_snapshot(&self.snapshot)
+    pub(super) fn matches_registry(&self, registry: &ComponentRegistrySnapshot) -> bool {
+        registry.ptr_eq(&self.snapshot)
     }
 
     pub(super) fn validate(&self, world: &World) -> Result<(), SceneSpawnReport> {
@@ -135,16 +128,18 @@ impl ScenePreparationDefinition {
         }
         match (
             &self.host,
+            component_registry_is_installed(world),
             component_registry(world),
             validate_component_registry_authority(world),
         ) {
-            (SceneHostCompositionBasis::Managed(snapshot), Some(registry), Ok(()))
-                if registry.shares_snapshot(snapshot) =>
+            (SceneHostCompositionBasis::Managed(snapshot), true, Some(registry), Ok(()))
+                if registry.ptr_eq(snapshot) =>
             {
                 Ok(())
             }
             (
                 SceneHostCompositionBasis::Standalone,
+                false,
                 None,
                 Err(ComponentRegistryAuthorityError::MissingAuthority),
             ) => Ok(()),
@@ -227,9 +222,22 @@ impl fmt::Debug for PreparedScene {
 }
 
 /// Prepares a source-bound Scene for its explicitly declared first logical placement.
+///
+/// Construction candidates cannot authorize Scene execution:
+///
+/// ```compile_fail
+/// use nara_ecs::World;
+/// use nara_reflect::ComponentRegistryBuilder;
+/// use nara_scene::{ExpandedSceneCandidate, SceneOccurrenceKey, prepare_scene};
+///
+/// fn prepare(world: &mut World, scene: &ExpandedSceneCandidate, occurrence: &SceneOccurrenceKey) {
+///     let builder = ComponentRegistryBuilder::new();
+///     prepare_scene(world, &builder, scene, occurrence, None);
+/// }
+/// ```
 pub fn prepare_scene(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -247,7 +255,7 @@ pub fn prepare_scene(
 /// Prepares replacement of one exact activation, reusing its declared logical occurrence.
 pub fn prepare_scene_replacement(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     current: &SpawnedSceneInstance,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -267,7 +275,7 @@ pub fn prepare_scene_replacement(
 
 pub(super) fn prepare_ordinary_scene(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -425,11 +433,11 @@ impl SceneComponentBindings {
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         let definition =
-            ScenePreparationDefinition::capture_with_bindings(world, self.native_registry(), self)?;
+            ScenePreparationDefinition::capture_with_bindings(world, self.native_snapshot(), self)?;
         let asset_bindings = SceneAssetBindings::from_world(world);
         let unbound = SceneSpawner::new().prepare_unbound_with_asset_context_and_product_bindings(
             world,
-            self.native_registry(),
+            self.native_snapshot(),
             definition,
             candidate,
             occurrence,
@@ -1051,9 +1059,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn retained_preparation_rejects_an_independently_admitted_equivalent_definition() {
+        let original = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
+        let retained = original.clone();
+        let replacement = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
+        assert_eq!(original.catalog(), replacement.catalog());
+        assert!(!original.ptr_eq(&replacement));
+        let mut world = World::new();
+        let entities_before = world.entities().len();
+        let definition = ScenePreparationDefinition::capture(&world, &original).unwrap();
+        assert!(definition.matches_registry(&retained));
+        drop(original);
+        let candidate = ExpandedSceneCandidate::plain(
+            SourceDocumentKey::named(
+                "4be07aef-1441-4fcb-9d89-2157bb2796b1".parse().unwrap(),
+                "definition-identity",
+                crate::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+            Arc::new(crate::SceneDocument::default()),
+        );
+        let occurrence = SceneOccurrenceKey::new("scene.tests", "definition-identity").unwrap();
+        let bindings = SceneAssetBindings::from_world(&world);
+        let report = SceneSpawner::new()
+            .prepare_unbound_with_asset_context_and_product_bindings(
+                &mut world,
+                &replacement,
+                definition,
+                SceneMaterializationInput::Expanded(&candidate),
+                &occurrence,
+                None,
+                SceneIdentityCommit::Register,
+                None,
+                bindings,
+                &SceneNativeRetirementClaims::default(),
+                ComponentValueMaterializationLimits::default(),
+            )
+            .err()
+            .expect("equivalent admission must not replace a captured definition");
+
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prepared-definition-changed"
+        }));
+        assert_eq!(world.entities().len(), entities_before);
+        assert!(!world.contains_resource::<WorldIdentityDomain>());
+    }
+
+    #[test]
     fn late_hierarchy_completion_observer_rejects_before_targets_or_publication() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let source = SourceDocumentKey::named(
             "4be07aef-1441-4fcb-9d89-2157bb2796b1".parse().unwrap(),
             "completion",

@@ -70,9 +70,9 @@ pub use persistent_apply::{
 pub use plugin::{
     COMPONENT_REGISTRY_PLUGIN_ID, COMPONENT_REGISTRY_PLUGIN_REQUIREMENT,
     ComponentRegistryAuthorityError, ComponentRegistryPlugin, component_registry,
-    preloaded_component_registry_plugin, register_schema_provider_for_plugin,
-    registry_for_plugin_preflight, report_component_registry_authority_fault,
-    validate_component_registry_authority,
+    component_registry_is_installed, preloaded_component_registry_plugin,
+    register_schema_provider_for_plugin, report_component_registry_authority_fault,
+    validate_component_registry_authority, validate_schema_provider_for_plugin,
 };
 pub use property::{
     ComponentPropertyError, ComponentPropertyKey, ComponentPropertyPath,
@@ -90,8 +90,9 @@ pub use provider::{
     PersistentComponentSchemaOwnerIdError, SchemaCompositionFingerprint,
 };
 pub use registry::{
-    ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
-    validate_component_value, validate_component_value_with_limits,
+    ComponentProjectionError, ComponentRegistryBuilder, ComponentRegistryError,
+    ComponentRegistryFreezeError, ComponentRegistrySnapshot, validate_component_value,
+    validate_component_value_with_limits,
 };
 pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,
@@ -153,7 +154,7 @@ pub mod __private {
     };
 
     use crate::{
-        ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+        ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,
         ComponentSchemaProviderDefinition,
     };
 
@@ -163,11 +164,11 @@ pub mod __private {
         provider.resolve()
     }
 
-    pub fn register_or_validate_resolved_schema_provider(
-        registry: &mut ComponentRegistry,
+    pub fn register_resolved_schema_provider(
+        registry: &mut ComponentRegistryBuilder,
         provider: ResolvedComponentSchemaProvider,
-    ) -> Result<&mut ComponentRegistry, ComponentRegistryError> {
-        registry.register_or_validate_resolved_schema_provider(provider)
+    ) -> Result<&mut ComponentRegistryBuilder, ComponentRegistryError> {
+        registry.register_resolved_schema_provider(provider)
     }
 
     pub fn component_registry_snapshot_witness(
@@ -205,19 +206,19 @@ pub mod prelude {
         ComponentMemberPathSegment, ComponentMigrationError, ComponentNumericBound,
         ComponentNumericDomain, ComponentNumericInterval, ComponentPropertyError,
         ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyReadBudget,
-        ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentRegistry,
-        ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
-        ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentShapeError,
-        ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId, ComponentValue,
-        ComponentValueError, ComponentValueKind, ComponentValueShape, DeclaredAssetReference,
-        DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
-        MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
-        PreparedComponent, PreparedComponentCandidate, ResolvedComponentProperty,
-        collect_declared_asset_references, collect_declared_value_asset_references_with_limits,
-        remap_declared_entity_references, replace_component_property, resolve_component_property,
-        resolve_component_property_in_root, resolve_component_property_schema_claim,
-        resolve_component_property_with_limits, rewrite_declared_entity_references,
-        validate_component_value,
+        ComponentPropertySchemaClaim, ComponentPropertyStep, ComponentRegistryBuilder,
+        ComponentRegistryError, ComponentRegistryFreezeError, ComponentRegistrySnapshot,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+        ComponentSchemaVersion, ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember,
+        ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueKind,
+        ComponentValueShape, DeclaredAssetReference, DeclaredAssetReferenceError, EntityReference,
+        EntityReferenceTraversalLimits, MigratedComponentValue, PersistentComponent,
+        PersistentComponentProvider, PreparedComponent, PreparedComponentCandidate,
+        ResolvedComponentProperty, collect_declared_asset_references,
+        collect_declared_value_asset_references_with_limits, remap_declared_entity_references,
+        replace_component_property, resolve_component_property, resolve_component_property_in_root,
+        resolve_component_property_schema_claim, resolve_component_property_with_limits,
+        rewrite_declared_entity_references, validate_component_value,
     };
     pub use bevy_reflect::prelude::*;
 }

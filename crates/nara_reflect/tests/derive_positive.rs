@@ -28,7 +28,7 @@ mod nested_aliases {
     use nara_asset::AssetRef;
     use nara_ecs::Component;
     use nara_identity::EntityReference;
-    use nara_reflect::{ComponentRegistry, PersistentComponent};
+    use nara_reflect::{ComponentRegistryBuilder, PersistentComponent};
 
     type EntityTargets = Vec<Option<EntityReference>>;
     type AssetGroups = BTreeMap<String, Vec<Option<AssetRef>>>;
@@ -52,7 +52,7 @@ mod nested_aliases {
 
     #[test]
     fn aliased_nested_references_register_and_freeze() {
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         registry
             .register_persistent_component::<NestedAliases>()
             .unwrap();
@@ -62,7 +62,9 @@ mod nested_aliases {
 
 mod typed_float_literals {
     use nara_ecs::Component;
-    use nara_reflect::{ComponentRegistry, PersistentComponent, PersistentComponentProvider};
+    use nara_reflect::{
+        ComponentRegistryBuilder, PersistentComponent, PersistentComponentProvider,
+    };
 
     mod wide_float_alias {
         #[allow(non_camel_case_types)]
@@ -101,7 +103,7 @@ mod typed_float_literals {
 
     #[test]
     fn actual_wide_alias_and_self_associated_type_register_and_freeze() {
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         registry
             .register_persistent_component::<TypedFloatLiterals>()
             .unwrap();

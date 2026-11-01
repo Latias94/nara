@@ -6,7 +6,7 @@ use nara_asset::AssetRef;
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentPropertyStep, ComponentRegistry, ComponentSchema,
+    ComponentPropertyPath, ComponentPropertyStep, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueShape,
 };
@@ -58,8 +58,8 @@ fn key(name: &str) -> SourceDocumentKey {
     .unwrap()
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
     registry
         .register_persistent_component_with_codec::<Position, _, _>(
@@ -83,8 +83,7 @@ fn registry() -> ComponentRegistry {
             |value| Ok(value.0.clone()),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 #[derive(Component)]

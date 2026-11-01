@@ -5,7 +5,7 @@ use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentEncodeContext, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentFloat, ComponentNumericBound, ComponentNumericDomain, ComponentNumericInterval,
-    ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueShape, PreparedComponentCandidate, validate_component_value,
 };
@@ -36,7 +36,7 @@ const UI_SCHEMA_VERSION_TWO: ComponentSchemaVersion = ComponentSchemaVersion(2);
 const UI_SCHEMA_VERSION_THREE: ComponentSchemaVersion = ComponentSchemaVersion(3);
 
 pub fn register_ui_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_ui_components(registry)?;
     registry.register_persistent_component_with_codec::<UiRoot, _, _>(
@@ -101,7 +101,7 @@ pub fn register_ui_components(
 }
 
 pub(crate) fn validate_ui_components(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     registry.validate_component_registration::<UiRoot>(&ComponentTypeId::new(UI_ROOT_ID))?;
     registry.validate_component_registration::<UiNode>(&ComponentTypeId::new(UI_NODE_ID))?;

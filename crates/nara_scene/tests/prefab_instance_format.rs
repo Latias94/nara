@@ -14,8 +14,8 @@ use nara_ecs::Component;
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentCapability, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentNumericBound, ComponentNumericInterval, ComponentPropertyPath,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     AuthoringDocumentSource, AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot,
@@ -374,8 +374,11 @@ fn snapshot_payloads_remain_subject_to_serde_shape_preflight() {
 #[derive(Component)]
 struct SnapshotComponent;
 
-fn registry(migrations: Arc<AtomicUsize>, native_calls: Arc<AtomicUsize>) -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry(
+    migrations: Arc<AtomicUsize>,
+    native_calls: Arc<AtomicUsize>,
+) -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let decode_calls = Arc::clone(&native_calls);
     registry
         .register_persistent_component_with_codec::<SnapshotComponent, _, _>(
@@ -415,8 +418,7 @@ fn registry(migrations: Arc<AtomicUsize>, native_calls: Arc<AtomicUsize>) -> Com
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn record_snapshot(version: ComponentSchemaVersion, value: ComponentValue) -> PrefabInstance {

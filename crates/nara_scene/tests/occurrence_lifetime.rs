@@ -4,7 +4,7 @@ use nara_asset::ProjectAssetDatabase;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::World;
 use nara_identity::{EntityLookup, WorldIdentityDomain};
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     ExpandedSceneCandidate, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
     SceneOccurrenceKey, SceneOccurrenceLimits, SceneProjection, SourceDocumentKey,
@@ -36,9 +36,10 @@ fn candidate(name: &str, empty: bool) -> ExpandedSceneCandidate {
     ExpandedSceneCandidate::plain(source(name), Arc::new(document))
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+fn registry() -> ComponentRegistrySnapshot {
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     registry
 }
 

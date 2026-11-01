@@ -18,7 +18,7 @@ use nara_identity::EntityReference;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentCodecError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyError,
-    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentRegistry,
+    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentRegistryBuilder,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeMember,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
     PersistentComponentSchemaOwnerId, replace_component_property, resolve_component_property,
@@ -578,7 +578,7 @@ fn captured_property_survives_explicit_wire_migration_and_keyed_reorder() {
         panic!("each row is a record");
     };
     members[1].name = "points".to_owned();
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(current.clone()).unwrap();
     registry
         .register_native_component_with_codec::<NativeSettings, _, _>(
@@ -613,7 +613,7 @@ fn captured_property_survives_explicit_wire_migration_and_keyed_reorder() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let schema = registry.schema(&current.id).unwrap();
     for version in [previous.version(), ComponentSchemaVersion(3)] {
         assert!(matches!(

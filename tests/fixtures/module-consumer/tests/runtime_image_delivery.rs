@@ -45,7 +45,7 @@ use nara_image::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
     ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
     ComponentTypeId, ComponentValueKind, ComponentValueShape, PreparedComponentCandidate,
@@ -158,7 +158,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
     })
 }
 
-fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component_codec_with_context::<Portrait, _, _>(
         schema(),
         |value, _| {

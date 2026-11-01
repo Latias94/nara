@@ -1,6 +1,6 @@
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentMemberPath,
-    ComponentMemberPathSegment, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentMemberPathSegment, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentShapeMember,
     ComponentTypeId, ComponentValueKind, ComponentValueShape,
 };
@@ -50,8 +50,8 @@ fn catalog(version: u32, fields: Vec<ComponentFieldSchema>) -> ComponentSchemaCa
 fn admit(
     catalog: ComponentSchemaCatalog,
     predecessor: Option<ComponentSchemaCatalog>,
-) -> Result<ComponentRegistry, ComponentRegistryError> {
-    ComponentRegistry::from_owner_catalog_candidate(
+) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
+    ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("game.scoped-members"),
         catalog,
         predecessor,

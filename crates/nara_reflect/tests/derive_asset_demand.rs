@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use nara_asset::{AssetRef, AssetReferenceDemand};
 use nara_ecs::{Component, World};
 use nara_reflect::{
-    ComponentRegistry, ComponentValue, ComponentValueShape, PersistentComponent,
+    ComponentRegistryBuilder, ComponentValue, ComponentValueShape, PersistentComponent,
     PersistentComponentProvider, collect_declared_asset_references_from_schema,
     validate_component_value,
 };
@@ -93,12 +93,11 @@ fn field_demand_overrides_recursive_shapes_including_aliases_and_associated_type
 
 #[test]
 fn demand_survives_native_round_trips_with_nested_empty_and_absent_values() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<AssetDemandProbe>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let schema = AssetDemandProbe::persistent_component_schema();
     let shared = AssetRef::path("scenes/shared.scene").unwrap();
     let other = AssetRef::path("scenes/later.scene").unwrap();

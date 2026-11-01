@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, time::Duration};
 use nara_app::{App, RuntimeInstance, StartupStage};
 use nara_asset::AssetRef;
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
-use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
+use nara_reflect::{ComponentRegistryBuilder, ComponentRegistryPlugin, component_registry};
 use nara_scene::{
     ExpandedSceneCandidate, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
     PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
@@ -27,9 +27,7 @@ fn source_and_occurrence_keep_equal_document_local_ui_roots_independent() {
     ] {
         let (mut app, surface) = source_identity_app();
         app.add_systems(StartupStage::Scene, move |world: &mut nara_ecs::World| {
-            let registry = ComponentRegistry::from_snapshot(
-                component_registry(world).unwrap().snapshot().unwrap(),
-            );
+            let registry = component_registry(world).unwrap().clone();
 
             let mut instances = Vec::new();
             for (root, marker) in [("root", "first-document"), (second_root, "second-document")] {
@@ -147,8 +145,8 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         )
         .with_prefab(first_request.clone(), canonical("outer"), outer.clone())
         .with_prefab(alias.clone(), canonical("outer"), outer);
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let candidates = [
         (first_request, "first"),
         (alias.clone(), "first"),
@@ -179,9 +177,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
             let Some(candidate) = candidates.get(index) else {
                 return;
             };
-            let registry = ComponentRegistry::from_snapshot(
-                component_registry(world).unwrap().snapshot().unwrap(),
-            );
+            let registry = component_registry(world).unwrap().clone();
             let prepared = match current.as_ref() {
                 Some(current) => nara_scene::prepare_scene_replacement(
                     world, &registry, candidate, current, None,
@@ -483,9 +479,7 @@ fn observe_shared_ui_roots(
             let Some(candidate) = candidates.get(index) else {
                 return;
             };
-            let registry = ComponentRegistry::from_snapshot(
-                component_registry(world).unwrap().snapshot().unwrap(),
-            );
+            let registry = component_registry(world).unwrap().clone();
             let prepared = match current.as_ref() {
                 Some(current) => nara_scene::prepare_scene_replacement(
                     world, &registry, candidate, current, None,
@@ -645,8 +639,8 @@ fn expand_ui_scene(
     document: SceneDocument,
     resolver: &InMemoryPrefabSourceResolver,
 ) -> ExpandedSceneCandidate {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let expansion = document.expand_prefabs(&registry, resolver);
     assert!(
         !expansion.diagnostics.has_errors(),

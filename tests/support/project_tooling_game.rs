@@ -4,8 +4,8 @@ use nara::{
     ecs::Query,
     prelude::{App, Component, PersistentComponent, PersistentComponentProvider, Plugin},
     reflect::{
-        ComponentCodecError, ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog,
-        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentCodecError, ComponentRegistryBuilder, ComponentRegistryError,
+        ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     },
@@ -61,7 +61,7 @@ fn pulse_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSour
     })
 }
 
-fn register_pulse(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_pulse(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component::<RenamedPulse>()?;
     registry.register_component_migration(
         &ComponentTypeId::new("studio.pulse.Pulse"),

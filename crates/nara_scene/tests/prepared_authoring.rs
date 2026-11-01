@@ -136,8 +136,9 @@ fn published_source_creation_owns_identity_without_widening_native_admission() {
             .is_err()
     );
 
-    let mut registry = nara_reflect::ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     assert!(
         scene
             .create_entity_with_registry(

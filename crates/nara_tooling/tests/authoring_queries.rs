@@ -48,7 +48,7 @@ fn tag_catalog() -> Result<ComponentSchemaCatalog, nara_reflect::ComponentSchema
 }
 
 fn register_tag_catalog(
-    registry: &mut nara_reflect::ComponentRegistry,
+    registry: &mut nara_reflect::ComponentRegistryBuilder,
 ) -> Result<(), nara_reflect::ComponentRegistryError> {
     registry.register_component_schema(tag_schema())?;
     Ok(())

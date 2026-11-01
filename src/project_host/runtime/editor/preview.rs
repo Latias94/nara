@@ -8,7 +8,7 @@ use nara_asset::{AssetPathScope, AssetRecord, Handle, ProjectAssetDatabase};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
-use nara_reflect::{ComponentRegistry, ComponentRegistrySnapshot};
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_render::{
     __private::{
         EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
@@ -292,7 +292,7 @@ impl EditorPreviewProjection {
 struct EditorPreviewInput(Arc<Mutex<Option<EditorPreviewRequest>>>);
 
 #[derive(Resource)]
-struct EditorPreviewRegistry(ComponentRegistry);
+struct EditorPreviewRegistry(ComponentRegistrySnapshot);
 
 #[derive(Resource)]
 enum EditorPreviewProject {
@@ -525,11 +525,7 @@ impl EditorPreviewSession {
             .map_err(|_| preview_error("project.editor.preview-policy-install-failed"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
-            .and_then(|app| {
-                app.insert_resource(EditorPreviewRegistry(ComponentRegistry::from_snapshot(
-                    registry.clone(),
-                )))
-            })
+            .and_then(|app| app.insert_resource(EditorPreviewRegistry(registry.clone())))
             .and_then(|app| app.insert_resource(project))
             .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::new()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))

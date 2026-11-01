@@ -9,9 +9,9 @@ use nara_ecs::Resource;
 use nara_identity::{EntityLookup, SceneEntityId, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PersistentComponentSchemaOwnerId, component_registry,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
+    component_registry,
 };
 use nara_scene::{
     SceneComponentRecord, SceneEntityRecord, SceneSpawnReport,
@@ -413,9 +413,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
         });
         assert_rejected(&report, "scene.current.expected-instance-mismatch");
 
-        let registry = ComponentRegistry::from_snapshot(
-            component_registry(world).unwrap().snapshot().unwrap(),
-        );
+        let registry = component_registry(world).unwrap().clone();
         let mut foreign_world = World::new();
         let foreign = nara_scene::spawn_scene(
             &mut foreign_world,

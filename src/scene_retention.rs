@@ -689,7 +689,7 @@ fn checked_add_to(total: &mut usize, value: usize) -> Result<(), SceneRetentionO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara_reflect::ComponentRegistry;
+    use nara_reflect::ComponentRegistryBuilder;
     use nara_scene::{
         InMemoryPrefabSourceResolver, PrefabDocument, SceneEntityProvenance, SourceDocumentKey,
         SourceDocumentKind,
@@ -763,8 +763,7 @@ mod tests {
 
     #[test]
     fn provenance_retention_distinguishes_source_entities_from_instance_additions() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let key = SourceDocumentKey::named(
             "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
             "retention.direct-prefab-source",
@@ -835,8 +834,7 @@ mod tests {
 
     #[test]
     fn provenance_retention_counts_both_origins_through_nested_prefab_anchors() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let universe = "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap();
         let outer_request = AssetRef::stable_id("602e48c3-50ce-467b-8e0d-80ec1b4f1d2a").unwrap();
         let inner_request = AssetRef::path("prefabs/nested-retained.prefab.ron").unwrap();
@@ -1044,8 +1042,7 @@ mod tests {
         };
         use nara_scene::{RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings};
 
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let document =
             std::sync::Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
                 scene_id("local"),
@@ -1081,8 +1078,7 @@ mod tests {
                 None,
             )
             .unwrap();
-            let bindings =
-                SceneComponentBindings::new(registry.snapshot().unwrap(), [owner]).unwrap();
+            let bindings = SceneComponentBindings::new(registry.clone(), [owner]).unwrap();
             RuntimeSceneCandidate::cook(
                 &ExpandedSceneCandidate::plain(key.clone(), std::sync::Arc::clone(&document)),
                 &bindings,

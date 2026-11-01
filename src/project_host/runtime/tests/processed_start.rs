@@ -193,7 +193,7 @@ impl Drop for Fixture {
 fn scene_bytes(plan: &RuntimeConfigurationPlan, reference: AssetProductRef, name: &str) -> Vec<u8> {
     let schema = plan
         .schema_validation()
-        .registry()
+        .snapshot()
         .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
         .unwrap();
     let mut value = schema.authoring_initial_value().unwrap().clone();

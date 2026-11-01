@@ -9,8 +9,8 @@ use nara_ecs::{Component, World};
 use nara_identity::{EntityLookup, EntityReference, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneComponentRecord,
@@ -38,7 +38,7 @@ fn local_target() -> EntityReference {
     }
 }
 
-fn registry(omit_default_on_encode: bool) -> ComponentRegistry {
+fn registry(omit_default_on_encode: bool) -> ComponentRegistrySnapshot {
     let mut field = ComponentFieldSchema::required(
         ComponentFieldId::new("target"),
         "Target",
@@ -51,7 +51,7 @@ fn registry(omit_default_on_encode: bool) -> ComponentRegistry {
     let schema = ComponentSchema::new(component_id(), "Default link", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields([field]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultLink, _, _>(
             schema,
@@ -72,8 +72,7 @@ fn registry(omit_default_on_encode: bool) -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn linked_source(omit_target: bool) -> SceneEntityRecord {
@@ -382,7 +381,7 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
 
 fn export_scene_with_limits(
     world: &World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     value_limits: nara_reflect::ComponentValueMaterializationLimits,
 ) -> nara_scene::SceneExportReport {
     nara_scene::export_scene_with_options(

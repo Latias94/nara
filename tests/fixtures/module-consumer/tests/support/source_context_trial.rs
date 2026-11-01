@@ -9,7 +9,7 @@ use nara_asset::{
 use nara_core::ItemLimit;
 use nara_ecs::{World, bevy_ecs::world::WorldId};
 use nara_identity::SpawnedSceneInstance;
-use nara_reflect::ComponentRegistry;
+use nara_reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot};
 use nara_scene::{
     ExpandedSceneCandidate, SceneDocument, SceneDocumentCandidate, SceneEntityId,
     SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
@@ -239,7 +239,7 @@ impl<'root> FileSources<'root> {
     pub fn load(
         &mut self,
         request: &AssetRef,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<BoundScene, Error> {
         if !request.is_primary() {
             return Err(Error::PolicyConflict);
@@ -391,14 +391,14 @@ pub struct PlacementIntent<'source> {
 
 pub struct TrialHost {
     world: World,
-    registry: ComponentRegistry,
+    registry: ComponentRegistrySnapshot,
     active: BTreeMap<Occurrence, Activation>,
 }
 
 impl TrialHost {
     pub fn new() -> Self {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new();
+        let registry = registry.freeze().unwrap();
         Self {
             world: World::new(),
             registry,
@@ -410,7 +410,7 @@ impl TrialHost {
         &self.world
     }
 
-    pub fn registry(&self) -> &ComponentRegistry {
+    pub fn registry(&self) -> &ComponentRegistrySnapshot {
         &self.registry
     }
 

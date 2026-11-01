@@ -8,10 +8,10 @@ use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentFloat,
     ComponentNumericBound::{Excluded, Included},
-    ComponentNumericDomain, ComponentNumericInterval, ComponentRegistry, ComponentRegistryError,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
-    ComponentShapeErrorKind, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, validate_component_value,
+    ComponentNumericDomain, ComponentNumericInterval, ComponentRegistryBuilder,
+    ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+    ComponentSchemaVersion, ComponentShapeErrorKind, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, validate_component_value,
 };
 
 fn float(value: f64) -> ComponentFloat {
@@ -50,8 +50,8 @@ fn catalog(schema: ComponentSchema) -> ComponentSchemaCatalog {
     }
 }
 
-fn admit(schema: ComponentSchema) -> Result<ComponentRegistry, ComponentRegistryError> {
-    ComponentRegistry::from_owner_catalog_candidate(
+fn admit(schema: ComponentSchema) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
+    ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
         catalog(schema),
         None,
@@ -354,7 +354,7 @@ fn native_preflight_rejects_interval_failure_before_calling_a_codec() {
     let id = schema.id.clone();
     let calls = Arc::new(AtomicUsize::new(0));
     let codec_calls = calls.clone();
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<NativeNumber, _, _>(
             schema,
@@ -370,8 +370,7 @@ fn native_preflight_rejects_interval_failure_before_calling_a_codec() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let invalid = ComponentValue::map([("value", ComponentValue::f64(f64::MIN_POSITIVE).unwrap())]);
     assert!(matches!(
         snapshot.preflight_component(&id, &invalid),
@@ -421,7 +420,7 @@ fn interval_identity_tracks_endpoints_and_all_semantic_changes_require_successor
         let mut successor = ComponentSchemaCatalog::successor_of(before).unwrap();
         successor.components = after.components.clone();
         assert!(matches!(
-            ComponentRegistry::from_owner_catalog_candidate(
+            ComponentRegistryBuilder::from_owner_catalog_candidate(
                 ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
                 successor.clone(),
                 Some(before.clone()),
@@ -429,7 +428,7 @@ fn interval_identity_tracks_endpoints_and_all_semantic_changes_require_successor
             Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { .. })
         ));
         successor.components[0].version = ComponentSchemaVersion::new(2).unwrap();
-        ComponentRegistry::from_owner_catalog_candidate(
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
             ComponentSchemaOwnerId::new("nara.test.numeric-interval-owner"),
             successor,
             Some(before.clone()),

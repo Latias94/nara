@@ -18,7 +18,7 @@ use nara_ecs::{
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,
+    ComponentRegistryBuilder, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
 };
@@ -69,12 +69,12 @@ fn data_owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 fn bindings() -> SceneComponentBindings {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap()
+    let registry = registry.freeze().unwrap();
+    SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap()
 }
 
 fn candidate(score: ComponentValue) -> ExpandedSceneCandidate {
@@ -374,11 +374,11 @@ fn exercise_managed_preparation(world: &mut World) {
 
     // A separately frozen native registry must fail through the advanced replacement entry as
     // well as ordinary prepare. An empty candidate cannot hide the mismatched definition.
-    let mut foreign_native = ComponentRegistry::new();
+    let mut foreign_native = ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut foreign_native)
+        .register_into(&mut foreign_native)
         .unwrap();
-    foreign_native.freeze().unwrap();
+    let foreign_native = foreign_native.freeze().unwrap();
     let empty = ExpandedSceneCandidate::plain(
         candidate(ComponentValue::U64(7)).source_key().clone(),
         Arc::new(SceneDocument::default()),
@@ -510,7 +510,7 @@ fn native_codec_cannot_claim_the_scene_owned_carrier_type() {
             .unwrap(),
     )));
     let decoder = Arc::clone(&held);
-    let mut native = ComponentRegistry::new();
+    let mut native = ComponentRegistryBuilder::new();
     native
         .register_persistent_component_with_codec::<SceneDataComponents, _, _>(
             ComponentSchema::new(
@@ -529,9 +529,9 @@ fn native_codec_cannot_claim_the_scene_owned_carrier_type() {
             |_| Ok(ComponentValue::map([] as [(String, ComponentValue); 0])),
         )
         .unwrap();
-    native.freeze().unwrap();
+    let native = native.freeze().unwrap();
     assert!(matches!(
-        SceneComponentBindings::new(native.snapshot().unwrap(), []),
+        SceneComponentBindings::new(native.clone(), []),
         Err(nara_scene::SceneComponentBindingError::ReservedNativeComponent { .. }),
     ));
     let input = ExpandedSceneCandidate::plain(

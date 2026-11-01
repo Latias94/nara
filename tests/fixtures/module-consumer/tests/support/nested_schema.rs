@@ -6,9 +6,9 @@ use nara_asset::{
 use nara_ecs::Component;
 use nara_identity::EntityReference;
 use nara_reflect::{
-    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentRegistry, ComponentSchemaCatalog,
-    ComponentSchemaVersion, ComponentTypeId, PersistentComponent, PersistentComponentProvider,
-    PersistentComponentSchemaOwnerId,
+    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentRegistryBuilder,
+    ComponentRegistrySnapshot, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+    PersistentComponent, PersistentComponentProvider, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -77,14 +77,13 @@ pub fn document() -> SceneDocument {
     ])
 }
 
-pub fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+pub fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
     registry
         .register_persistent_component::<Relationships>()
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 pub fn bundle() -> AuthoringSchemaBundle {

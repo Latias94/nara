@@ -213,7 +213,7 @@ fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
 #[test]
 fn sprite_codec_round_trip_preserves_anchor() {
     let registry = component_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let expected_anchor = SpriteAnchor {
         normalized: Vec2::new(-0.5, 0.75),
@@ -482,23 +482,21 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
     );
 }
 
-fn component_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn component_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     register_base_components(&mut registry);
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn component_registry_with_tilemap() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn component_registry_with_tilemap() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     register_base_components(&mut registry);
     nara::tilemap::register_tilemap_components(&mut registry)
         .expect("tilemap components should register once");
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn register_base_components(registry: &mut ComponentRegistry) {
+fn register_base_components(registry: &mut ComponentRegistryBuilder) {
     nara::scene::register_scene_components(registry)
         .expect("scene components should register once");
     nara::sprite::register_sprite_components(registry)

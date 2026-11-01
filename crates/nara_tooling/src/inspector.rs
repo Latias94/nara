@@ -5,8 +5,8 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_identity::WorldEntityLocator;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
     effective_component_value,
 };
 use nara_scene::{
@@ -30,7 +30,7 @@ impl SceneInspectorState {
     pub fn model(
         &self,
         session: &SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
         self.model_with_selection(session, registry, None, world_snapshot)
@@ -40,7 +40,7 @@ impl SceneInspectorState {
     pub fn model_with_selection(
         &self,
         session: &SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         selected_entity: Option<&SceneEntityId>,
         world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
@@ -72,7 +72,7 @@ impl SceneInspectorState {
     pub fn prefab_model_with_selection(
         &self,
         session: &PrefabAuthoringSession,
-        registry: Option<&ComponentRegistry>,
+        registry: Option<&ComponentRegistrySnapshot>,
         selected_entity: Option<&SceneEntityId>,
     ) -> SceneInspectorModel {
         build_inspector_model(
@@ -86,7 +86,7 @@ impl SceneInspectorState {
     pub fn apply_command(
         &self,
         session: &mut SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
         self.apply_command_with_patch_apply(session, registry, command, |session, patch| {
@@ -97,7 +97,7 @@ impl SceneInspectorState {
     pub fn apply_command_with_asset_resolution(
         &self,
         session: &mut SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
@@ -197,7 +197,7 @@ impl SceneInspectorState {
     fn apply_command_with_patch_apply(
         &self,
         session: &mut SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         command: SceneInspectorCommand,
         mut apply_patch: impl FnMut(&mut SceneAuthoringSession, &ScenePatchDocument) -> ScenePatchReport,
     ) -> SceneInspectorCommandReport {
@@ -465,7 +465,7 @@ impl SceneInspectorCommand {
     pub(crate) fn to_patch_for_document(
         &self,
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<ScenePatchDocument, Diagnostic> {
         let patch = self.to_patch(document)?;
         let Some((entity_id, component_id)) = self.component_target() else {
@@ -612,17 +612,11 @@ impl<'a> InspectorSession<'a> {
 
 fn build_inspector_model(
     session: InspectorSession<'_>,
-    registry: Option<&ComponentRegistry>,
+    registry: Option<&ComponentRegistrySnapshot>,
     selected_entity: Option<&SceneEntityId>,
     world_snapshot: Option<&WorldIdentitySnapshot>,
 ) -> SceneInspectorModel {
     let mut diagnostics = DiagnosticReport::default();
-    if registry.is_some_and(|registry| !registry.is_frozen()) {
-        diagnostics.push(diagnostic::error(
-            "tooling.inspector-registry-not-frozen",
-            "inspector requires a frozen component registry",
-        ));
-    }
     let document = session.document();
     let authoring_record_facts =
         DirectAuthoringRecordFactIndex::new(session.authoring_record_facts().unwrap_or_default());
@@ -706,16 +700,15 @@ fn build_inspector_model(
 
 fn build_composition_capabilities(
     session: InspectorSession<'_>,
-    registry: Option<&ComponentRegistry>,
+    registry: Option<&ComponentRegistrySnapshot>,
 ) -> SceneCompositionCapabilities {
     let generic_authoring = session.authoring_readiness().is_some();
     let schemas = if generic_authoring {
         session.catalog_components()
     } else {
         registry
-            .and_then(|registry| registry.schemas().ok())
             .into_iter()
-            .flatten()
+            .flat_map(|registry| registry.schemas())
             .map(|schema| (schema, true))
             .collect()
     };
@@ -754,7 +747,7 @@ fn build_composition_capabilities(
 fn inspectable_component_count(
     session: InspectorSession<'_>,
     entity: &nara_scene::SceneEntityRecord,
-    registry: Option<&ComponentRegistry>,
+    registry: Option<&ComponentRegistrySnapshot>,
     authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
 ) -> usize {
     entity
@@ -772,7 +765,6 @@ fn inspectable_component_count(
                 }
             }
             registry
-                .filter(|registry| registry.is_frozen())
                 .and_then(|registry| registry.schema(component_id))
                 .is_some_and(|schema| schema.has_capability(ComponentCapability::Inspect))
         })
@@ -783,7 +775,7 @@ fn build_entity_view(
     session: InspectorSession<'_>,
     entity: &nara_scene::SceneEntityRecord,
     parent: Option<&SceneEntityId>,
-    registry: Option<&ComponentRegistry>,
+    registry: Option<&ComponentRegistrySnapshot>,
     authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
     diagnostics: &mut DiagnosticReport,
 ) -> SceneInspectorEntityView {
@@ -869,7 +861,7 @@ fn build_entity_view(
                     ));
                 }
             }
-            let registry = registry.filter(|registry| registry.is_frozen())?;
+            let registry = registry?;
             let Some(schema) = registry.schema(component_id) else {
                 diagnostics.push(diagnostic::with_component(
                     diagnostic::with_entity(

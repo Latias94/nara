@@ -1,6 +1,6 @@
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentNumericDomain,
-    ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueShape, validate_component_value,
 };
@@ -75,7 +75,7 @@ fn catalog_defaults_and_creation_values_keep_their_complete_value_budget() {
         ..ComponentSchemaCatalog::default()
     };
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
             ComponentSchemaOwnerId::new("nara.test.payload-budget-owner"),
             catalog,
             None,
@@ -91,7 +91,7 @@ fn catalog_defaults_and_creation_values_keep_their_complete_value_budget() {
         ..ComponentSchemaCatalog::default()
     };
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
             ComponentSchemaOwnerId::new("nara.test.payload-budget-owner"),
             catalog,
             None,

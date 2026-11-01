@@ -1000,10 +1000,13 @@ fn unsupported_extension_refuses_the_complete_set_before_any_preparation_work() 
         Some(EditorDocumentKind::Extension(UnsupportedExtension::TYPE_ID))
     );
     // Compare the incumbent sources after closing only the untouched, clean extension fixture.
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     assert!(
         workspace
             .apply_command(
-                &nara_reflect::ComponentRegistry::new(),
+                &registry,
                 EditorWorkspaceCommand::CloseDocument {
                     document: extension
                 }

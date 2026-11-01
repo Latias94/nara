@@ -1,12 +1,19 @@
-use nara_app::PluginSchemaProviderId;
+use std::sync::{Arc, OnceLock};
+
+use nara_app::{
+    App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId, PluginPreflightContext,
+    PluginSchemaProviderId,
+};
 use nara_ecs::{Component, World};
 use nara_reflect::{
-    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentProjectionError, ComponentRegistry, ComponentRegistryError,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-    ComponentSchemaProviderSourceError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, validate_component_value,
+    COMPONENT_REGISTRY_PLUGIN_REQUIREMENT, ComponentCapability, ComponentCodecError,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentProjectionError,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
+    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape, component_registry,
+    preloaded_component_registry_plugin, register_schema_provider_for_plugin,
+    validate_component_value, validate_schema_provider_for_plugin,
 };
 
 #[test]
@@ -112,8 +119,12 @@ fn recursive_shape_fingerprints_canonicalize_members_and_track_nested_semantics(
     let mut successor = ComponentSchemaCatalog::successor_of(&first).unwrap();
     successor.components = changed.components;
     assert!(
-        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, successor, Some(first))
-            .is_err()
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
+            TEST_OWNER_ID,
+            successor,
+            Some(first)
+        )
+        .is_err()
     );
 }
 
@@ -130,7 +141,7 @@ fn recursive_shape_admission_rejects_duplicates_and_trusted_input_budgets() {
         ),
     ]));
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, duplicate, None),
+        ComponentRegistryBuilder::from_owner_catalog_candidate(TEST_OWNER_ID, duplicate, None),
         Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
     ));
     let mut deep = ComponentValueShape::scalar(ComponentValueKind::U64);
@@ -138,7 +149,11 @@ fn recursive_shape_admission_rejects_duplicates_and_trusted_input_budgets() {
         deep = ComponentValueShape::list(deep);
     }
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, shaped_catalog(deep), None),
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
+            TEST_OWNER_ID,
+            shaped_catalog(deep),
+            None
+        ),
         Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
     ));
     let wide = ComponentValueShape::record((0..16_384).map(|index| {
@@ -148,7 +163,11 @@ fn recursive_shape_admission_rejects_duplicates_and_trusted_input_budgets() {
         )
     }));
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, shaped_catalog(wide), None),
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
+            TEST_OWNER_ID,
+            shaped_catalog(wide),
+            None
+        ),
         Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
     ));
     let opaque = shaped_catalog(ComponentValueKind::List.into());
@@ -214,11 +233,6 @@ struct Position {
 }
 
 #[derive(Clone, Component)]
-struct Velocity {
-    dx: f32,
-}
-
-#[derive(Clone, Component)]
 struct CoverageProbe;
 
 const TEST_PROVIDER_ID: PluginSchemaProviderId =
@@ -253,11 +267,15 @@ fn empty_provider(
 fn owner_successor_candidate(
     predecessor: ComponentSchemaCatalog,
     components: impl IntoIterator<Item = ComponentSchema>,
-) -> Result<ComponentRegistry, ComponentRegistryError> {
+) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
     let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
         .expect("the test predecessor generation has a successor");
     current.components.extend(components);
-    ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, current, Some(predecessor))
+    ComponentRegistryBuilder::from_owner_catalog_candidate(
+        TEST_OWNER_ID,
+        current,
+        Some(predecessor),
+    )
 }
 
 fn empty_catalog_source() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
@@ -290,25 +308,31 @@ fn position_catalog_source() -> Result<ComponentSchemaCatalog, ComponentSchemaPr
 }
 
 fn register_empty_provider(
-    _registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     Ok(())
 }
 
 fn panic_if_provider_callback_runs(
-    _registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    panic!("a frozen registry must validate receipts without invoking provider code")
+    panic!("an admitted snapshot must validate receipts without invoking provider code")
+}
+
+fn panic_if_provider_validation_runs(
+    _registry: &ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
+    panic!("an admitted snapshot must validate receipts without replaying provider validation")
 }
 
 fn reject_provider_callback(
-    _registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    Err(ComponentRegistryError::Frozen)
+    Err(ComponentRegistryError::SchemaCompositionUnavailable)
 }
 
 fn register_position_provider(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
@@ -317,7 +341,7 @@ fn register_position_provider(
 }
 
 fn register_nested_provider(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     ComponentSchemaProviderDefinition::new(
         ComponentSchemaOwnerId::new("nara.test.nested-owner"),
@@ -326,13 +350,13 @@ fn register_nested_provider(
         panic_if_provider_source_runs,
         panic_if_provider_callback_runs,
     )
-    .register_or_validate_into(registry)
+    .register_into(registry)
 }
 
 fn replace_candidate_and_register_nested_provider(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    *registry = ComponentRegistry::new();
+    *registry = ComponentRegistryBuilder::new();
     ComponentSchemaProviderDefinition::new(
         ComponentSchemaOwnerId::new("nara.test.smuggled-owner"),
         PluginSchemaProviderId::new("nara.test.smuggled-provider"),
@@ -340,21 +364,21 @@ fn replace_candidate_and_register_nested_provider(
         empty_catalog_source,
         register_empty_provider,
     )
-    .register_or_validate_into(registry)
+    .register_into(registry)
 }
 
 fn register_position_then_reject(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema)?;
     register_position_binding(registry, &id)?;
-    Err(ComponentRegistryError::Frozen)
+    Err(ComponentRegistryError::SchemaCompositionUnavailable)
 }
 
 fn register_position_then_panic(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
@@ -406,15 +430,15 @@ fn position_schema_at_version(
 
 fn frozen_position_catalog(schema: ComponentSchema) -> ComponentSchemaCatalog {
     let id = schema.id().clone();
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
-    registry.freeze().unwrap();
-    registry.catalog().unwrap().clone()
+    let registry = registry.freeze().unwrap();
+    registry.catalog().clone()
 }
 
 fn register_position_binding(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
     id: &ComponentTypeId,
 ) -> Result<(), ComponentRegistryError> {
     registry.register_native_component_with_codec::<Position, _, _>(
@@ -453,26 +477,30 @@ fn stable_identifiers_are_bounded_and_schema_versions_are_non_zero() {
 
 #[test]
 fn freeze_is_atomic_and_missing_binding_can_be_repaired() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     let candidate_before = registry.catalog_candidate().clone();
 
-    assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::MissingNativeBinding { component_id })
-            if component_id == id
-    ));
-    assert!(!registry.is_frozen());
+    let failure = registry.freeze().unwrap_err();
+    let expected = ComponentRegistryError::MissingNativeBinding {
+        component_id: id.clone(),
+    };
+    assert_eq!(failure.error(), &expected);
+    let (mut registry, error) = failure.into_parts();
+    assert_eq!(error, expected);
     assert_eq!(registry.catalog_candidate(), &candidate_before);
 
     register_position_binding(&mut registry, &id).unwrap();
-    registry.freeze().unwrap();
-    let first = registry.snapshot().unwrap();
-    registry.freeze().unwrap();
-    let second = registry.snapshot().unwrap();
+    let first = registry.freeze().unwrap();
+    let second = first.clone();
     assert!(first.ptr_eq(&second));
+    let mut admitted_catalog = candidate_before;
+    admitted_catalog.canonicalize();
+    assert_eq!(first.catalog(), &admitted_catalog);
+    assert_eq!(first.schema_for_type::<Position>(), first.schema(&id));
+    assert!(first.schema(&id).is_some());
 }
 
 #[test]
@@ -484,26 +512,26 @@ fn frozen_snapshots_share_provider_behavior_receipts_without_replaying_callbacks
         empty_catalog_source,
         register_empty_provider,
     );
-    let mut registry = ComponentRegistry::new();
-    provider.register_or_validate_into(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let mut registry = ComponentRegistryBuilder::new();
+    provider.register_into(&mut registry).unwrap();
+    let snapshot = registry.freeze().unwrap();
     let receipt = snapshot.provider_receipt(TEST_PROVIDER_ID).unwrap();
     assert_eq!(receipt.binding(), TEST_PROVIDER_BINDING);
     assert_eq!(snapshot.provider_receipts().count(), 1);
 
-    let mut shared = ComponentRegistry::from_snapshot(snapshot.clone());
-    assert!(shared.shares_snapshot(&snapshot));
-    ComponentSchemaProviderDefinition::new(
+    let shared = snapshot.clone();
+    assert!(shared.ptr_eq(&snapshot));
+    ComponentSchemaProviderDefinition::with_validation(
         TEST_OWNER_ID,
         TEST_PROVIDER_ID,
         TEST_PROVIDER_BINDING,
         empty_catalog_source,
+        panic_if_provider_validation_runs,
         panic_if_provider_callback_runs,
     )
-    .register_or_validate_into(&mut shared)
+    .validate_snapshot(&shared)
     .unwrap();
-    assert!(shared.shares_snapshot(&snapshot));
+    assert!(shared.ptr_eq(&snapshot));
 
     for binding in [
         ComponentSchemaProviderBindingId::new("nara.test.registry-provider.native", 2),
@@ -518,7 +546,7 @@ fn frozen_snapshots_share_provider_behavior_receipts_without_replaying_callbacks
                 empty_catalog_source,
                 register_empty_provider,
             )
-            .preflight(&shared),
+            .validate_snapshot(&shared),
             Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider })
                 if provider == TEST_PROVIDER_ID
         ));
@@ -532,14 +560,83 @@ fn frozen_snapshots_share_provider_behavior_receipts_without_replaying_callbacks
             empty_catalog_source,
             register_empty_provider,
         )
-        .preflight(&shared),
+        .validate_snapshot(&shared),
         Err(ComponentRegistryError::MissingSchemaProviderReceipt { .. })
     ));
 }
 
 #[test]
+fn preloaded_app_retains_exact_snapshot_without_replaying_provider_callbacks() {
+    const PLUGIN_ID: PluginId = PluginId::new("nara.test.preloaded-provider");
+    const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginCategory::Core)
+        .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+        .provides_schema(&[TEST_PROVIDER_ID]);
+    const RECEIPT_ONLY_PROVIDER: ComponentSchemaProviderDefinition =
+        ComponentSchemaProviderDefinition::with_validation(
+            TEST_OWNER_ID,
+            TEST_PROVIDER_ID,
+            TEST_PROVIDER_BINDING,
+            empty_catalog_source,
+            panic_if_provider_validation_runs,
+            panic_if_provider_callback_runs,
+        );
+
+    struct ReceiptOnlyPlugin;
+
+    impl Plugin for ReceiptOnlyPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &DECLARATION
+        }
+
+        fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+            validate_schema_provider_for_plugin(
+                context,
+                PLUGIN_ID,
+                "test-provider",
+                &RECEIPT_ONLY_PROVIDER,
+            )
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            register_schema_provider_for_plugin(
+                app,
+                PLUGIN_ID,
+                "test-provider",
+                &RECEIPT_ONLY_PROVIDER,
+            )
+        }
+
+        fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+            register_schema_provider_for_plugin(
+                app,
+                PLUGIN_ID,
+                "test-provider",
+                &RECEIPT_ONLY_PROVIDER,
+            )
+        }
+    }
+
+    let mut builder = ComponentRegistryBuilder::new();
+    empty_provider(TEST_OWNER_ID, TEST_PROVIDER_ID, TEST_PROVIDER_BINDING)
+        .register_into(&mut builder)
+        .unwrap();
+    let snapshot = builder.freeze().unwrap();
+    let cell = Arc::new(OnceLock::new());
+    cell.set(snapshot.clone()).unwrap();
+    let mut app = App::new();
+    app.add_plugins(preloaded_component_registry_plugin(cell))
+        .unwrap();
+    app.add_plugin(ReceiptOnlyPlugin).unwrap();
+    assert!(component_registry(app.world()).is_none());
+
+    let app = app.seal().unwrap();
+
+    assert!(component_registry(app.world()).unwrap().ptr_eq(&snapshot));
+}
+
+#[test]
 fn failed_provider_registration_publishes_no_behavior_receipt() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let Err(error) = ComponentSchemaProviderDefinition::new(
         TEST_OWNER_ID,
         TEST_PROVIDER_ID,
@@ -547,13 +644,13 @@ fn failed_provider_registration_publishes_no_behavior_receipt() {
         empty_catalog_source,
         reject_provider_callback,
     )
-    .register_or_validate_into(&mut registry) else {
+    .register_into(&mut registry) else {
         panic!("the rejected provider unexpectedly registered");
     };
-    assert_eq!(error, ComponentRegistryError::Frozen);
+    assert_eq!(error, ComponentRegistryError::SchemaCompositionUnavailable);
 
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
     assert_eq!(snapshot.provider_receipt(TEST_PROVIDER_ID), None);
     assert_eq!(snapshot.provider_receipts().count(), 0);
     assert_eq!(snapshot.owner_receipts().count(), 0);
@@ -561,7 +658,7 @@ fn failed_provider_registration_publishes_no_behavior_receipt() {
 
 #[test]
 fn direct_registry_rejects_a_second_owner_definition_before_its_callback() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     ComponentSchemaProviderDefinition::new(
         TEST_OWNER_ID,
         TEST_PROVIDER_ID,
@@ -569,7 +666,7 @@ fn direct_registry_rejects_a_second_owner_definition_before_its_callback() {
         empty_catalog_source,
         register_empty_provider,
     )
-    .register_or_validate_into(&mut registry)
+    .register_into(&mut registry)
     .unwrap();
 
     assert!(matches!(
@@ -580,7 +677,7 @@ fn direct_registry_rejects_a_second_owner_definition_before_its_callback() {
             empty_catalog_source,
             panic_if_provider_callback_runs,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner })
             if owner == TEST_OWNER_ID
     ));
@@ -588,12 +685,12 @@ fn direct_registry_rejects_a_second_owner_definition_before_its_callback() {
 
 #[test]
 fn provider_receipt_cannot_be_repaired_with_an_unrelated_owner_receipt() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     empty_provider(OWNER_A, PROVIDER_P, PROVIDER_P_BINDING)
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
     empty_provider(OWNER_B, PROVIDER_Q, PROVIDER_Q_BINDING)
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
 
     assert!(matches!(
@@ -604,12 +701,12 @@ fn provider_receipt_cannot_be_repaired_with_an_unrelated_owner_receipt() {
             empty_catalog_source,
             panic_if_provider_callback_runs,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::DivergentSchemaProviderReceipt { provider })
             if provider == PROVIDER_P
     ));
 
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     assert!(matches!(
         ComponentSchemaProviderDefinition::new(
             OWNER_B,
@@ -618,7 +715,7 @@ fn provider_receipt_cannot_be_repaired_with_an_unrelated_owner_receipt() {
             empty_catalog_source,
             panic_if_provider_callback_runs,
         )
-        .preflight(&registry),
+        .validate_snapshot(&registry),
         Err(ComponentRegistryError::DivergentSchemaOwnerReceipt { owner })
             if owner == OWNER_B
     ));
@@ -632,15 +729,14 @@ fn executable_fingerprint_commits_the_provider_to_owner_mapping() {
             PluginSchemaProviderId,
             ComponentSchemaProviderBindingId,
         ); 2],
-    ) -> nara_reflect::ComponentRegistrySnapshot {
-        let mut registry = ComponentRegistry::new();
+    ) -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
         for (owner, provider, binding) in contributions {
             empty_provider(owner, provider, binding)
-                .register_or_validate_into(&mut registry)
+                .register_into(&mut registry)
                 .unwrap();
         }
-        registry.freeze().unwrap();
-        registry.snapshot().unwrap()
+        registry.freeze().unwrap()
     }
 
     let first = snapshot([
@@ -684,7 +780,7 @@ fn executable_fingerprint_commits_the_provider_to_owner_mapping() {
 
 #[test]
 fn direct_registry_rejects_a_known_cross_owner_claim_before_its_callback() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     ComponentSchemaProviderDefinition::new(
         TEST_OWNER_ID,
         TEST_PROVIDER_ID,
@@ -692,7 +788,7 @@ fn direct_registry_rejects_a_known_cross_owner_claim_before_its_callback() {
         position_catalog_source,
         register_position_provider,
     )
-    .register_or_validate_into(&mut registry)
+    .register_into(&mut registry)
     .unwrap();
 
     assert!(matches!(
@@ -703,7 +799,7 @@ fn direct_registry_rejects_a_known_cross_owner_claim_before_its_callback() {
             position_catalog_source,
             panic_if_provider_callback_runs,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::DuplicateComponentId(component_id))
             if component_id == ComponentTypeId::new("nara.test.Position")
     ));
@@ -711,7 +807,7 @@ fn direct_registry_rejects_a_known_cross_owner_claim_before_its_callback() {
 
 #[test]
 fn owner_candidate_rejects_nested_provider_registration_before_source_loading() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         ComponentSchemaProviderDefinition::new(
@@ -721,7 +817,7 @@ fn owner_candidate_rejects_nested_provider_registration_before_source_loading() 
             empty_catalog_source,
             register_nested_provider,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::NestedSchemaProviderRegistration { provider })
             if provider == PluginSchemaProviderId::new("nara.test.nested-provider")
     ));
@@ -733,7 +829,7 @@ fn owner_candidate_rejects_nested_provider_registration_before_source_loading() 
 
 #[test]
 fn owner_candidate_rejects_registry_replacement_without_publishing_smuggled_receipts() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         ComponentSchemaProviderDefinition::new(
@@ -743,19 +839,19 @@ fn owner_candidate_rejects_registry_replacement_without_publishing_smuggled_rece
             empty_catalog_source,
             replace_candidate_and_register_nested_provider,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::SchemaProviderCandidateAuthorityChanged { provider })
             if provider == TEST_PROVIDER_ID
     ));
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
     assert_eq!(snapshot.owner_receipts().count(), 0);
     assert_eq!(snapshot.provider_receipts().count(), 0);
 }
 
 #[test]
 fn provider_error_after_candidate_mutation_preserves_the_aggregate_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let before = registry.catalog_candidate().clone();
 
     let Err(error) = ComponentSchemaProviderDefinition::new(
@@ -765,14 +861,14 @@ fn provider_error_after_candidate_mutation_preserves_the_aggregate_registry() {
         position_catalog_source,
         register_position_then_reject,
     )
-    .register_or_validate_into(&mut registry) else {
+    .register_into(&mut registry) else {
         panic!("the rejected private candidate unexpectedly merged");
     };
-    assert_eq!(error, ComponentRegistryError::Frozen);
+    assert_eq!(error, ComponentRegistryError::SchemaCompositionUnavailable);
     assert_eq!(registry.catalog_candidate(), &before);
 
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
     assert_eq!(snapshot.catalog().components().len(), 0);
     assert_eq!(snapshot.provider_receipts().count(), 0);
     assert_eq!(snapshot.owner_receipts().count(), 0);
@@ -780,7 +876,7 @@ fn provider_error_after_candidate_mutation_preserves_the_aggregate_registry() {
 
 #[test]
 fn provider_panic_after_candidate_mutation_preserves_the_aggregate_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let before = registry.catalog_candidate().clone();
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ComponentSchemaProviderDefinition::new(
@@ -790,14 +886,14 @@ fn provider_panic_after_candidate_mutation_preserves_the_aggregate_registry() {
             position_catalog_source,
             register_position_then_panic,
         )
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
     }));
 
     assert!(outcome.is_err());
     assert_eq!(registry.catalog_candidate(), &before);
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
     assert_eq!(snapshot.catalog().components().len(), 0);
     assert_eq!(snapshot.provider_receipts().count(), 0);
     assert_eq!(snapshot.owner_receipts().count(), 0);
@@ -805,7 +901,7 @@ fn provider_panic_after_candidate_mutation_preserves_the_aggregate_registry() {
 
 #[test]
 fn raw_owner_local_and_provider_composition_modes_cannot_be_mixed() {
-    let mut raw = ComponentRegistry::new();
+    let mut raw = ComponentRegistryBuilder::new();
     raw.register_component_schema(position_schema("x", "Position X"))
         .unwrap();
     assert!(matches!(
@@ -816,14 +912,14 @@ fn raw_owner_local_and_provider_composition_modes_cannot_be_mixed() {
             panic_if_provider_source_runs,
             panic_if_provider_callback_runs,
         )
-        .register_or_validate_into(&mut raw),
+        .register_into(&mut raw),
         Err(ComponentRegistryError::MixedSchemaRegistrationModes { provider })
             if provider == TEST_PROVIDER_ID
     ));
 
-    let mut composed = ComponentRegistry::new();
+    let mut composed = ComponentRegistryBuilder::new();
     empty_provider(TEST_OWNER_ID, TEST_PROVIDER_ID, TEST_PROVIDER_BINDING)
-        .register_or_validate_into(&mut composed)
+        .register_into(&mut composed)
         .unwrap();
     assert!(matches!(
         composed.register_component_schema(position_schema("x", "Position X")),
@@ -833,13 +929,13 @@ fn raw_owner_local_and_provider_composition_modes_cannot_be_mixed() {
 
 #[test]
 fn raw_owner_local_snapshot_cannot_publish_product_fingerprints() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
 
     assert!(matches!(
         snapshot.schema_composition_fingerprint(),
@@ -856,7 +952,7 @@ fn raw_owner_local_snapshot_cannot_publish_product_fingerprints() {
 
 #[test]
 fn rejected_raw_registration_does_not_poison_an_undecided_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let unknown = ComponentTypeId::new("nara.test.Unknown");
     assert!(matches!(
         registry.register_native_component_with_codec::<Position, _, _>(
@@ -873,13 +969,13 @@ fn rejected_raw_registration_does_not_poison_an_undecided_registry() {
     ));
 
     empty_provider(TEST_OWNER_ID, TEST_PROVIDER_ID, TEST_PROVIDER_BINDING)
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
 }
 
 #[test]
 fn declared_owner_head_must_match_the_frozen_executable_candidate() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         ComponentSchemaProviderDefinition::new(
@@ -894,7 +990,7 @@ fn declared_owner_head_must_match_the_frozen_executable_candidate() {
                 register_position_binding(registry, &id)
             },
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::SchemaProviderCatalogMismatch { provider })
             if provider == TEST_PROVIDER_ID
     ));
@@ -909,8 +1005,8 @@ fn semantic_and_executable_registry_fingerprints_are_distinct_domains() {
     fn snapshot(
         owner: ComponentSchemaOwnerId,
         binding: ComponentSchemaProviderBindingId,
-    ) -> nara_reflect::ComponentRegistrySnapshot {
-        let mut registry = ComponentRegistry::new();
+    ) -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
         ComponentSchemaProviderDefinition::new(
             owner,
             TEST_PROVIDER_ID,
@@ -918,10 +1014,9 @@ fn semantic_and_executable_registry_fingerprints_are_distinct_domains() {
             empty_catalog_source,
             register_empty_provider,
         )
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-        registry.freeze().unwrap();
-        registry.snapshot().unwrap()
+        registry.freeze().unwrap()
     }
 
     let first = snapshot(TEST_OWNER_ID, TEST_PROVIDER_BINDING);
@@ -948,13 +1043,10 @@ fn semantic_and_executable_registry_fingerprints_are_distinct_domains() {
 
 #[test]
 fn equal_runtime_fingerprints_do_not_replace_owner_lineage_receipts() {
-    fn snapshot(
-        provider: ComponentSchemaProviderDefinition,
-    ) -> nara_reflect::ComponentRegistrySnapshot {
-        let mut registry = ComponentRegistry::new();
-        provider.register_or_validate_into(&mut registry).unwrap();
-        registry.freeze().unwrap();
-        registry.snapshot().unwrap()
+    fn snapshot(provider: ComponentSchemaProviderDefinition) -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
+        provider.register_into(&mut registry).unwrap();
+        registry.freeze().unwrap()
     }
 
     let initial = snapshot(ComponentSchemaProviderDefinition::new(
@@ -991,7 +1083,7 @@ fn equal_runtime_fingerprints_do_not_replace_owner_lineage_receipts() {
 
 #[test]
 fn schema_source_error_codes_are_bounded_public_identifiers() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         ComponentSchemaProviderDefinition::new(
@@ -1001,7 +1093,7 @@ fn schema_source_error_codes_are_bounded_public_identifiers() {
             invalid_source_error_code,
             register_empty_provider,
         )
-        .register_or_validate_into(&mut registry),
+        .register_into(&mut registry),
         Err(ComponentRegistryError::SchemaProviderSourceRejected { source, .. })
             if source.code() == "schema-provider-source-invalid-error-code"
     ));
@@ -1012,41 +1104,40 @@ fn schema_source_error_codes_are_bounded_public_identifiers() {
 }
 
 #[test]
-fn building_registry_does_not_expose_runtime_query_surface() {
-    let mut registry = ComponentRegistry::new();
+fn admitted_snapshot_queries_distinguish_registered_definitions_from_actual_absence() {
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
 
-    assert!(registry.schema(&id).is_none());
-    assert!(matches!(
-        registry.schemas(),
-        Err(ComponentRegistryError::NotFrozen)
-    ));
+    let snapshot = registry.freeze().unwrap();
+    let unknown = ComponentTypeId::new("nara.test.Unknown");
+    assert!(snapshot.schema(&id).is_some());
+    assert!(snapshot.schema(&unknown).is_none());
+    assert_eq!(snapshot.schemas().count(), 1);
     assert!(
-        registry
+        snapshot
             .resolve_field(&id, &ComponentFieldId::new("position.x"))
+            .is_some()
+    );
+    assert!(
+        snapshot
+            .resolve_field(&id, &ComponentFieldId::new("position.unknown"))
             .is_none()
     );
-    assert!(registry.schema_for_type::<Position>().is_none());
-    assert!(registry.native_rust_type_path(&id).is_none());
-    assert!(matches!(
-        registry.type_registry(),
-        Err(ComponentRegistryError::NotFrozen)
-    ));
-
-    registry.freeze().unwrap();
-    assert!(registry.schema(&id).is_some());
-    assert_eq!(registry.schemas().unwrap().count(), 1);
-    assert!(registry.schema_for_type::<Position>().is_some());
-    assert!(registry.native_rust_type_path(&id).is_some());
-    assert!(registry.type_registry().is_ok());
+    assert_eq!(snapshot.schema_for_type::<Position>(), snapshot.schema(&id));
+    assert!(snapshot.schema_for_type::<CoverageProbe>().is_none());
+    assert_eq!(
+        snapshot.native_rust_type_path(&id),
+        Some(std::any::type_name::<Position>())
+    );
+    assert!(snapshot.native_rust_type_path(&unknown).is_none());
 }
 
 #[test]
-fn building_registry_cannot_prepare_an_applicable_component() {
-    let mut registry = ComponentRegistry::new();
+fn consuming_freeze_publishes_an_applicable_component_definition() {
+    let mut registry = ComponentRegistryBuilder::new();
     let mut schema = position_schema("x", "Position X");
     schema.fields[1] = schema.fields[1]
         .clone()
@@ -1056,13 +1147,7 @@ fn building_registry_cannot_prepare_an_applicable_component() {
     register_position_binding(&mut registry, &id).unwrap();
     let value = ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]);
 
-    assert!(matches!(
-        registry.snapshot(),
-        Err(ComponentRegistryError::NotFrozen)
-    ));
-
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     assert!(snapshot.preflight_component(&id, &value).is_ok());
 }
 
@@ -1080,7 +1165,7 @@ fn catalog_generation_exhaustion_is_explicit() {
         Err(error) if error.generation() == u64::MAX
     ));
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
             TEST_OWNER_ID,
             predecessor.clone(),
             Some(predecessor),
@@ -1092,75 +1177,62 @@ fn catalog_generation_exhaustion_is_explicit() {
 }
 
 #[test]
-fn frozen_registry_rejects_all_mutations_without_changing_snapshot() {
-    let mut registry = ComponentRegistry::new();
+fn snapshots_retain_exact_identity_and_definition_across_independent_admission() {
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
-    let catalog = registry.catalog().unwrap().clone();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
+    let catalog = registry.catalog().clone();
 
-    let velocity_id = ComponentTypeId::new("nara.test.Velocity");
-    let velocity_schema = ComponentSchema::new(
-        velocity_id.clone(),
-        "Velocity",
-        ComponentSchemaVersion::new(1).unwrap(),
+    let mut equivalent = ComponentRegistryBuilder::new();
+    equivalent
+        .register_component_schema(position_schema("x", "Position X"))
+        .unwrap();
+    register_position_binding(&mut equivalent, &id).unwrap();
+    let equivalent = equivalent.freeze().unwrap();
+    assert_eq!(equivalent.catalog(), &catalog);
+    assert!(!snapshot.ptr_eq(&equivalent));
+
+    let v2 = ComponentSchemaVersion::new(2).unwrap();
+    let mut successor = owner_successor_candidate(
+        catalog.clone(),
+        [position_schema_at_version("x", "Position X", v2)],
     )
-    .with_capabilities(authoring_capabilities())
-    .with_fields([ComponentFieldSchema::required(
-        ComponentFieldId::new("velocity.dx"),
-        "Velocity X",
-        ComponentFieldPath::from_fields(["dx"]),
-        ComponentValueKind::F64,
-    )
-    .with_capabilities(authoring_capabilities())]);
+    .unwrap();
+    register_position_binding(&mut successor, &id).unwrap();
+    successor
+        .register_component_migration(&id, ComponentSchemaVersion::ONE, v2, Ok)
+        .unwrap();
+    let successor = successor.freeze().unwrap();
+    assert!(!snapshot.ptr_eq(&successor));
+    assert_eq!(successor.schema(&id).unwrap().version(), v2);
 
-    assert!(matches!(
-        registry.register_component_schema(velocity_schema),
-        Err(ComponentRegistryError::Frozen)
-    ));
-    assert!(matches!(
-        registry.register_native_component_with_codec::<Velocity, _, _>(
-            &velocity_id,
-            |_value| Ok(Velocity { dx: 0.0 }),
-            |velocity| Ok(ComponentValue::f64(f64::from(velocity.dx))?),
-        ),
-        Err(ComponentRegistryError::Frozen)
-    ));
-    assert!(matches!(
-        registry.register_component_migration(
-            &id,
-            ComponentSchemaVersion::new(1).unwrap(),
-            ComponentSchemaVersion::new(2).unwrap(),
-            Ok,
-        ),
-        Err(ComponentRegistryError::Frozen)
-    ));
-    assert!(matches!(
-        registry.declare_type_tombstone(ComponentTypeId::new("nara.test.Removed")),
-        Err(ComponentRegistryError::Frozen)
-    ));
-
-    assert_eq!(registry.catalog().unwrap(), &catalog);
-    assert!(snapshot.ptr_eq(&registry.snapshot().unwrap()));
+    assert!(snapshot.ptr_eq(&registry));
+    drop(registry);
+    assert_eq!(snapshot.catalog(), &catalog);
+    assert_eq!(
+        snapshot.schema(&id).unwrap().version(),
+        ComponentSchemaVersion::ONE
+    );
 }
 
 #[test]
 fn catalog_lineage_requires_tombstones_and_never_allows_reactivation() {
-    let mut first = ComponentRegistry::new();
+    let mut first = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     first.register_component_schema(schema).unwrap();
     register_position_binding(&mut first, &id).unwrap();
-    first.freeze().unwrap();
-    let predecessor = first.catalog().unwrap().clone();
+    let first = first.freeze().unwrap();
+    let predecessor = first.catalog().clone();
 
     let renamed_schema = position_schema("x", "Horizontal position");
     let mut renamed = owner_successor_candidate(predecessor.clone(), [renamed_schema]).unwrap();
     register_position_binding(&mut renamed, &id).unwrap();
-    renamed.freeze().unwrap();
+    let renamed = renamed.freeze().unwrap();
     assert_eq!(
         renamed
             .resolve_field(&id, &ComponentFieldId::new("position.x"))
@@ -1201,11 +1273,11 @@ fn catalog_lineage_requires_tombstones_and_never_allows_reactivation() {
             Ok,
         )
         .unwrap();
-    removed.freeze().unwrap();
+    let removed = removed.freeze().unwrap();
 
     assert!(matches!(
         owner_successor_candidate(
-            removed.catalog().unwrap().clone(),
+            removed.catalog().clone(),
             [position_schema("horizontal", "Horizontal position")],
         ),
         Err(ComponentRegistryError::ReactivatedFieldId { field_id, .. })
@@ -1338,20 +1410,30 @@ fn successor_freeze_requires_a_complete_predecessor_migration_chain() {
         .register_component_migration(&id, ComponentSchemaVersion::ONE, v2, Ok)
         .unwrap();
 
-    assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::MissingComponentMigrationChain {
-            component_id,
-            from_version: ComponentSchemaVersion(2),
-            target_version: ComponentSchemaVersion(3),
-        }) if component_id == id
-    ));
-    assert!(!registry.is_frozen());
+    let candidate_before = registry.catalog_candidate().clone();
+    let failure = registry.freeze().unwrap_err();
+    let expected = ComponentRegistryError::MissingComponentMigrationChain {
+        component_id: id.clone(),
+        from_version: v2,
+        target_version: v3,
+    };
+    assert_eq!(failure.error(), &expected);
+    let (mut registry, error) = failure.into_parts();
+    assert_eq!(error, expected);
+    assert_eq!(registry.catalog_candidate(), &candidate_before);
 
     registry
         .register_component_migration(&id, v2, v3, Ok)
         .unwrap();
-    registry.freeze().unwrap();
+    let snapshot = registry.freeze().unwrap();
+    assert_eq!(snapshot.catalog(), &candidate_before);
+    assert_eq!(snapshot.schema_for_type::<Position>(), snapshot.schema(&id));
+    let value = ComponentValue::map([("x", ComponentValue::f64(1.0).unwrap())]);
+    let migrated = snapshot
+        .migrate_component_value(&id, ComponentSchemaVersion::ONE, &value)
+        .unwrap();
+    assert_eq!(migrated.version, v3);
+    assert_eq!(migrated.value, value);
 }
 
 #[test]
@@ -1375,7 +1457,7 @@ fn schema_paths_must_not_overlap() {
             )
             .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect]),
         ]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(schema).unwrap();
     registry
         .register_native_component_with_codec::<Position, _, _>(
@@ -1391,8 +1473,8 @@ fn schema_paths_must_not_overlap() {
         .unwrap();
 
     assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::OverlappingComponentFieldPaths { component_id, .. })
+        registry.freeze().unwrap_err().into_error(),
+        ComponentRegistryError::OverlappingComponentFieldPaths { component_id, .. }
             if component_id == id
     ));
 }
@@ -1406,18 +1488,17 @@ fn asset_and_entity_reference_capabilities_are_field_only() {
         let schema = position_schema("x", "Position X")
             .with_capabilities(authoring_capabilities().into_iter().chain([capability]));
         let id = schema.id().clone();
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         registry.register_component_schema(schema).unwrap();
         register_position_binding(&mut registry, &id).unwrap();
 
         assert!(matches!(
-            registry.freeze(),
-            Err(ComponentRegistryError::InvalidComponentCapability {
+            registry.freeze().unwrap_err().into_error(),
+            ComponentRegistryError::InvalidComponentCapability {
                 component_id,
                 capability: actual,
-            }) if component_id == id && actual == capability
+            } if component_id == id && actual == capability
         ));
-        assert!(!registry.is_frozen());
     }
 }
 
@@ -1433,7 +1514,7 @@ fn schema_coverage_rejects_unregistered_payload_and_codec_fields() {
             ComponentValueKind::F64,
         )
         .with_capabilities(authoring_capabilities())]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<Position, _, _>(
             schema,
@@ -1454,13 +1535,13 @@ fn schema_coverage_rejects_unregistered_payload_and_codec_fields() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let unexpected_input = ComponentValue::map([
         ("x", ComponentValue::f64(1.0).unwrap()),
         ("ignored", ComponentValue::String("lost".to_owned())),
     ]);
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let input_error = snapshot
         .preflight_component(&id, &unexpected_input)
         .err()
@@ -1499,7 +1580,7 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
             )
             .with_capabilities(authoring_capabilities()),
         ]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<CoverageProbe, _, _>(
             schema,
@@ -1515,7 +1596,7 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let valid = ComponentValue::map([
         (
@@ -1524,7 +1605,7 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
         ),
         ("settings", ComponentValue::Map(Default::default())),
     ]);
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     assert!(snapshot.preflight_component(&id, &valid).is_ok());
 
     let undeclared_sibling = ComponentValue::map([
@@ -1552,12 +1633,12 @@ fn schema_coverage_preserves_declared_container_and_nested_field_semantics() {
 
 #[test]
 fn mixed_capability_whole_value_requires_an_explicit_projection() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = position_schema("x", "Position X");
     let id = schema.id().clone();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let error = registry
         .validate_whole_value_capabilities(
@@ -1584,9 +1665,8 @@ fn runtime_only_components_need_no_schema_or_reflection_registration() {
         Some(7)
     );
 
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
-    assert!(registry.catalog().unwrap().components().is_empty());
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+    assert!(registry.catalog().components().is_empty());
 }
 
 #[test]
@@ -1617,15 +1697,14 @@ fn duplicate_field_identity_and_locator_fail_before_snapshot_publication() {
         .with_capabilities(authoring_capabilities()),
     ]);
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
     assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::DuplicateComponentFieldId { field_id, .. })
+        registry.freeze().unwrap_err().into_error(),
+        ComponentRegistryError::DuplicateComponentFieldId { field_id, .. }
             if field_id == duplicate_id
     ));
-    assert!(!registry.is_frozen());
 
     let schema = ComponentSchema::new(
         id.clone(),
@@ -1649,12 +1728,12 @@ fn duplicate_field_identity_and_locator_fail_before_snapshot_publication() {
         )
         .with_capabilities(authoring_capabilities()),
     ]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry.register_component_schema(schema).unwrap();
     register_position_binding(&mut registry, &id).unwrap();
     assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::DuplicateComponentFieldPath { path, .. })
+        registry.freeze().unwrap_err().into_error(),
+        ComponentRegistryError::DuplicateComponentFieldPath { path, .. }
             if path == duplicate_path
     ));
 }

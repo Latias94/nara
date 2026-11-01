@@ -1,7 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-11-01 (construction and admitted-definition ownership)
 **Date**: 2026-07-12
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
@@ -246,7 +246,9 @@ Scene retains the exact frozen execution definition with both its unbound ordina
 later target-bound native-retirement token. Execution-definition custody and receiving Host
 composition are separate facts: capture one genuine Standalone basis or the exact valid managed
 snapshot, and retain that same basis through finalization without recapturing it. A missing
-registry under an installed authority, registry-only state, or a later composition change rejects.
+registry under an installed authority, an installed-but-unadmitted registry owner, or a later
+composition change rejects. Owner presence remains distinct from admitted-snapshot availability:
+Building and unfinished Preloaded owners cannot impersonate an owner-free Standalone World.
 Ordinary materialization additionally requires its execution definition to be the managed
 snapshot. Explicit advanced/product projection may select its own frozen native definition,
 as ADR 0114's typed preview does; this never bypasses Host authority, binding bijection or any
@@ -287,31 +289,48 @@ ADR 0076.
 
 ### Freeze and Runtime Ownership
 
-Each runtime-owned registry has a one-way state transition:
+Public construction and admitted execution have different owners. A mutable
+`ComponentRegistryBuilder` consumes itself to publish one immutable `ComponentRegistrySnapshot`.
+There is no mixed-phase public registry, frozen wrapper, snapshot-to-builder conversion or thaw.
+The [ownership unit](../../plans/2026-11-01-component-registry-ownership-plan.md) owns the complete
+consumer migration and qualification; this decision does not establish its implementation.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Building
-    Building --> Building: registration rejected without mutation
-    Building --> Frozen: full validation and snapshot publication succeeds
-    Building --> Building: freeze validation fails
-    Frozen --> Frozen: every mutation is rejected
+    [*] --> Builder
+    Builder --> Builder: rejected registration leaves candidate unchanged
+    Builder --> Snapshot: consuming freeze validates and publishes
+    Builder --> Builder: failed freeze returns candidate and original error
+    Snapshot --> Snapshot: immutable clones retain exact definition
 ```
 
-- Component owners register schemas and bindings only during plugin `build`.
+- In an App, component owners register schemas and bindings only during plugin `build`.
 - The reflection/schema registry plugin owns `freeze` in plugin `finish`. Schema provider plugins
   require that owner, so its build creates the registry before providers register and its finish
-  freezes before the app can become `Ready`.
+  admits it before the app can become `Ready`. Its private owner dispatches Building, Preloaded
+  and Admitted states without exposing those phases as one public registry type. A preloaded
+  definition validates exact source/contribution receipts without replaying provider callbacks.
 - Freeze atomically validates identity uniqueness/non-reuse, aliases, fields, capability scope,
   defaults, migrations, and required runtime bindings. Failure publishes no frozen snapshot and
-  causes normal fallible plugin finish failure.
-- Frozen registries expose no unchecked mutable Bevy type registry, codec table, migration table,
-  schema, or capability path.
-- Native codec execution belongs to the immutable frozen snapshot. Registration and freeze remain
-  on the registry; a building registry exposes no encode or preflight operation. Obtaining a
-  snapshot before freeze returns `NotFrozen`, and freeze rejects missing native bindings before
-  publishing an execution authority. A retained snapshot keeps its exact validated definition;
-  taking or using it does not certify the current target World's registry or lifecycle topology.
+  returns the original builder and error, permitting explicit repair and retry. Normal App
+  finish remains fallible and does not publish a partially admitted Runtime or retry activation
+  automatically. Provider errors and unwinding before merge leave aggregate indexes and receipts
+  unchanged; this does not roll back arbitrary callback side effects.
+- Snapshots expose no unchecked mutable Bevy type registry, codec table, migration table,
+  schema, or capability path. Queries, migration and native codec execution belong to that sole
+  immutable authority. Builder inspection is explicitly candidate inspection and cannot satisfy
+  an admitted Scene/query/codec parameter. A missing snapshot query means an absent admitted
+  declaration, never an uncompleted construction phase.
+- Consuming freeze rejects missing native bindings before publishing execution authority. A
+  retained snapshot keeps its exact validated definition; using it does not certify the target
+  World's registry or lifecycle topology. Independently re-admitting an equivalent catalog does
+  not reproduce the original definition identity.
+- The private App owner retains a stable installation identity across its internal admission.
+  Snapshot identity, installation instance and structural mutation revision all participate in
+  authority validation. Removal/reinsertion or replacement with another owner over the same
+  snapshot must still reject. Only an actually absent owner may use standalone Scene preparation,
+  commit or export; unfinished Building/Preloaded owners reject even an independently admitted
+  caller snapshot.
 - Preflight returns a prepared component or an explicit execution error. Encoding returns an
   encoded value, actual entity/component absence, or an explicit execution error. Unknown schema,
   unavailable native binding and codec failure must not collapse into the same absence result.
@@ -328,10 +347,13 @@ tombstones once; the derive generates the native `PersistentComponentProvider`, 
 and encoder. Runtime-only components continue to derive only `Component` and remain absent from
 the persistent catalog.
 
-Component-owning plugins call `validate_persistent_component::<T>` during read-only preflight and
-`register_persistent_component::<T>` during build. Validation performs the same complete schema
-and binding checks as registration without mutation. The registry owner still freezes the complete
-candidate during plugin finish; the derive cannot publish, replace, or unfreeze a catalog.
+Component-owning plugins declare a Schema provider, call `validate_schema_provider_for_plugin`
+during read-only preflight and register that provider during build. The provider validates or
+registers persistent components against its private builder candidate; a preloaded App instead
+checks its exact admitted receipts without replaying those callbacks. Direct builder users may
+call `validate_persistent_component::<T>` and `register_persistent_component::<T>` with the same
+Schema/binding checks. The registry owner consumes the complete candidate during plugin finish;
+the derive cannot publish, replace, or unfreeze a catalog.
 
 The first admitted field types are `i64`, `u64`, `Vec2`, and `EntityReference`.
 Entity references require `entity_ref`; `asset_ref`, collections, generics, enums, tuple
@@ -345,7 +367,7 @@ requires a component successor, explicit migration and exact predecessor catalog
 encoding alone is insufficient. The Reference Game retains catalog v4 and publishes catalog v5
 with InitialVelocity2d v2 and its explicit v1-to-v2 migration.
 
-External manual codecs register through the registry's closure-based codec methods, with public
+External manual codecs register through the builder's closure-based codec methods, with public
 encode/decode contexts and typed errors. The erased codec trait and storage are private registry
 implementation details; they do not constitute a second external codec installation interface.
 

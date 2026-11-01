@@ -159,7 +159,7 @@ fn optional_null_durable_field_creates_no_resolution_edge() {
 #[test]
 fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
     use nara_ecs::{Component, Resource};
-    use nara_reflect::{ComponentCodecError, ComponentRegistry, PreparedComponentCandidate};
+    use nara_reflect::{ComponentCodecError, ComponentRegistryBuilder, PreparedComponentCandidate};
 
     #[derive(Component)]
     struct DurableLink(EntityReference);
@@ -181,7 +181,7 @@ fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
         ComponentValueShape::EntityRef,
     )
     .with_capabilities([ComponentCapability::Scene, ComponentCapability::EntityRef])]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_codec_with_context::<DurableLink, _, _>(
             schema,
@@ -205,8 +205,7 @@ fn typed_deferred_codec_preserves_durable_reference_and_reads_encode_context() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let input = ComponentValue::map([("target", ComponentValue::EntityReference(reference()))]);
     let prepared = snapshot.preflight_component(&component_id, &input).unwrap();
     drop(input);

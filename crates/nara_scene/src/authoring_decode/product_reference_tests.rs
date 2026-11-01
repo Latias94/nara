@@ -6,7 +6,7 @@ use nara_asset::{
 };
 use nara_ecs::World;
 use nara_reflect::{
-    AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentValueKind,
 };
 
@@ -176,9 +176,8 @@ fn nested_product_inventory_survives_missing_adapter_unknown_payload_and_wire_ro
 #[test]
 fn scene_product_source_check_and_both_export_policies_preserve_complete_selection() {
     let (snapshot, _, _) = definition();
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
-    let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), [snapshot]).unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [snapshot]).unwrap();
     let document = document();
     let candidate = bindings
         .expand_prefabs(&document, &InMemoryPrefabSourceResolver::new())
@@ -325,8 +324,7 @@ fn nested_primary_prefab_conversion_retains_product_inventory_provenance_and_his
 
 #[test]
 fn auxiliary_prefab_sources_refuse_before_loader_and_primary_requires_matching_source_proof() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: product(false),

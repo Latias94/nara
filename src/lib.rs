@@ -219,9 +219,9 @@ pub mod prelude {
     };
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-        ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponent,
-        PersistentComponentProvider,
+        ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
+        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        ComponentValueShape, PersistentComponent, PersistentComponentProvider,
     };
     pub use nara_scene::{
         ExpandedSceneCandidate, ExpandedSceneDocument, Name, PrefabDocument, PreparedScene,

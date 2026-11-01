@@ -1051,7 +1051,7 @@ impl EditorProjectSession {
                 __export_apply_changes_from_world(
                     world,
                     slot.session(),
-                    lane.plan.schema_validation().registry(),
+                    lane.plan.schema_validation().snapshot(),
                     source_revision,
                     request.clone(),
                 )

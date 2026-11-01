@@ -6,8 +6,8 @@ use nara_ecs::{Component, World};
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     AssetReferenceDemand, ComponentCapability, ComponentFieldPath, ComponentNumericDomain,
-    ComponentRegistry, ComponentRegistryError, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponent, PersistentComponentProvider,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, PersistentComponent, PersistentComponentProvider,
     validate_component_value,
 };
 
@@ -76,14 +76,13 @@ fn nested_probe() -> NestedReferenceProbe {
 
 #[test]
 fn generated_nested_reference_codecs_round_trip_through_native_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<NestedReferenceProbe>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let component_id = ComponentTypeId::new("nara.test.NestedReferenceProbe");
-    let schema = registry.schema(&component_id).unwrap();
+    let schema = snapshot.schema(&component_id).unwrap();
     assert!(schema.fields().iter().all(|field| field.is_required()));
     assert_eq!(
         schema
@@ -230,14 +229,13 @@ struct AmbiguousOptionalProbe {
 
 #[test]
 fn generated_ambiguous_optional_shape_cannot_admit_a_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     assert!(
         registry
             .register_persistent_component::<AmbiguousOptionalProbe>()
-            .and_then(ComponentRegistry::freeze)
             .is_err()
     );
-    assert!(!registry.is_frozen());
+    assert!(registry.catalog_candidate().components().is_empty());
 }
 
 #[test]
@@ -260,12 +258,9 @@ fn generated_nested_reference_markers_are_checked_against_actual_shape() {
                 field.capabilities.insert(ComponentCapability::EntityRef);
             }
         }
-        let mut registry = ComponentRegistry::new();
-        let failure = registry
-            .register_component_schema(schema)
-            .and_then(ComponentRegistry::freeze)
-            .err()
-            .expect("reference markers must match the generated recursive shape");
+        let mut registry = ComponentRegistryBuilder::new();
+        registry.register_component_schema(schema).unwrap();
+        let failure = registry.freeze().unwrap_err().into_error();
         assert!(matches!(
             failure,
             ComponentRegistryError::InvalidFieldCapability { .. }

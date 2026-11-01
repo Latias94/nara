@@ -559,7 +559,7 @@ mod tests {
     fn native_value_candidate(
         id: SceneEntityId,
         probe: &Arc<NativePreparationProbe>,
-    ) -> (ComponentRegistry, ExpandedSceneCandidate) {
+    ) -> (ComponentRegistrySnapshot, ExpandedSceneCandidate) {
         let component_id = ComponentTypeId::new("test.PreparedNativeValue");
         let schema = ComponentSchema::new(
             component_id.clone(),
@@ -576,7 +576,7 @@ mod tests {
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_capability(ComponentCapability::AssetRef)]);
         let observed = Arc::clone(probe);
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_codec_with_context::<PreparedNativeValue, _, _>(
                 schema,
@@ -612,7 +612,7 @@ mod tests {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         let asset = AssetRef::path("textures/retained-native.png").unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id)
             .with_component(
@@ -630,7 +630,7 @@ mod tests {
 
     fn fixture() -> (
         World,
-        ComponentRegistry,
+        ComponentRegistrySnapshot,
         ExpandedSceneCandidate,
         SpawnedSceneInstance,
         Entity,
@@ -639,8 +639,9 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(Removed::default());
         world.insert_resource(ProductValue::new(1));
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let id = SceneEntityId::new("root").unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
         let candidate = ExpandedSceneCandidate::plain(source_key(), Arc::new(document));
@@ -659,7 +660,7 @@ mod tests {
 
     fn prepare_fixture_replacement(
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         current: &SpawnedSceneInstance,
     ) -> PreparedSceneReplacement {

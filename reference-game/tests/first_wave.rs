@@ -1252,7 +1252,7 @@ fn reexpand_modified_authored_scene(
         },
     );
     let expansion = scene.expand_prefabs_with_asset_resolution(
-        plan.schema_validation().registry(),
+        plan.schema_validation().snapshot(),
         &resolver,
         snapshot.asset_resolution(),
     );

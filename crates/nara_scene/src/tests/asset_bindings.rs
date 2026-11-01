@@ -23,13 +23,13 @@ impl SceneProductResource for RetainedProduct {
 
 struct Fixture {
     world: World,
-    registry: ComponentRegistry,
+    registry: ComponentRegistrySnapshot,
     current: SpawnedSceneInstance,
     old_entity: Entity,
 }
 
 impl Fixture {
-    fn new(registry: ComponentRegistry) -> Self {
+    fn new(registry: ComponentRegistrySnapshot) -> Self {
         let mut world = World::new();
         world.insert_resource(AssetServer::new());
         let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("old"))]);

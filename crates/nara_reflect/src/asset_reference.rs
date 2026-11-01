@@ -11,8 +11,8 @@ use nara_asset::{
 use crate::{
     AssetReferenceDemand, ComponentCodecError, ComponentEntityReferenceRewriteError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
     EntityReferenceTraversalLimits, effective_component_value,
     entity_reference::{
         PresentReferenceLeaf, ReferenceTraversalError, collect_present_field_reference_leaves,
@@ -63,7 +63,6 @@ impl DeclaredAssetReference {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeclaredAssetReferenceError {
-    RegistryNotFrozen,
     UnknownComponent {
         component: ComponentTypeId,
     },
@@ -127,9 +126,6 @@ pub enum DeclaredAssetReferenceError {
 impl Display for DeclaredAssetReferenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::RegistryNotFrozen => {
-                "component registry must be frozen before asset reference traversal"
-            }
             Self::UnknownComponent { .. } => {
                 "asset reference traversal targeted an unknown component"
             }
@@ -174,8 +170,7 @@ impl Error for DeclaredAssetReferenceError {
             Self::InvalidStableId { source, .. } => Some(source),
             Self::InvalidProductIdentity { source, .. } => Some(source),
             Self::Materialization { source, .. } => Some(source),
-            Self::RegistryNotFrozen
-            | Self::UnknownComponent { .. }
+            Self::UnknownComponent { .. }
             | Self::SchemaVersionMismatch { .. }
             | Self::RequiredFieldIsNull { .. }
             | Self::InvalidValueShape { .. }
@@ -338,7 +333,7 @@ fn materialize_asset_references_with_admission<E>(
 
 /// Collects schema-declared effective asset values using the convenience interpretation limits.
 pub fn collect_declared_asset_references(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     version: ComponentSchemaVersion,
     value: &ComponentValue,
@@ -355,16 +350,13 @@ pub fn collect_declared_asset_references(
 
 /// Collects effective asset values with explicit expansion and reference-work budgets.
 pub fn collect_declared_asset_references_with_limits(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     version: ComponentSchemaVersion,
     value: &ComponentValue,
     materialization_limits: ComponentValueMaterializationLimits,
     traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
-    if !registry.is_frozen() {
-        return Err(DeclaredAssetReferenceError::RegistryNotFrozen);
-    }
     let schema = registry.schema(component).ok_or_else(|| {
         DeclaredAssetReferenceError::UnknownComponent {
             component: component.clone(),

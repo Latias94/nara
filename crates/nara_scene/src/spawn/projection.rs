@@ -39,7 +39,7 @@ impl SceneProjection {
     pub fn publish(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> SceneSpawnReport {

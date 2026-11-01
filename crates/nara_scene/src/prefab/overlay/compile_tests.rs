@@ -10,8 +10,8 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticValueRef;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind,
 };
 
 use super::*;
@@ -38,7 +38,7 @@ fn key(value: &str) -> SourceDocumentKey {
     .unwrap()
 }
 
-fn registry() -> ComponentRegistry {
+fn registry() -> ComponentRegistrySnapshot {
     #[derive(nara_ecs::Component)]
     struct C(ComponentValue);
     #[derive(nara_ecs::Component)]
@@ -58,7 +58,7 @@ fn registry() -> ComponentRegistry {
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
     };
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
     registry
         .register_persistent_component_with_codec::<C, _, _>(
@@ -74,8 +74,7 @@ fn registry() -> ComponentRegistry {
             |value| Ok(value.0.clone()),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn instance(source: &str, overrides: Option<PrefabOverlay>) -> PrefabInstance {

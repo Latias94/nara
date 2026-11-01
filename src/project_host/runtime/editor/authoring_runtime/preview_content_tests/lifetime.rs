@@ -6,7 +6,7 @@ use super::*;
 use std::time::Instant;
 
 use nara_identity::{EntityLookup, IdentityDomainStats, WorldIdentityDomain, resolve_in_world};
-use nara_reflect::{ComponentFieldId, ComponentRegistry, ComponentTypeId, ComponentValue};
+use nara_reflect::{ComponentFieldId, ComponentRegistrySnapshot, ComponentTypeId, ComponentValue};
 use nara_scene::{
     SceneComponentRecord, SceneEntityId, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
     ScenePatchOperation,
@@ -45,13 +45,11 @@ impl Drop for RetiringOwner {
     }
 }
 
-fn fixture(population: usize) -> (ComponentRegistry, SceneAuthoringSession) {
-    let registry = ComponentRegistry::from_snapshot(
-        crate::project_host::authoring::first_party_authoring_preview_registry(
-            crate::project_host::composition::built_in_schema_providers(),
-        )
-        .unwrap(),
-    );
+fn fixture(population: usize) -> (ComponentRegistrySnapshot, SceneAuthoringSession) {
+    let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
+        crate::project_host::composition::built_in_schema_providers(),
+    )
+    .unwrap();
     let component = ComponentTypeId::new("nara.transform.Transform2d");
     let schema = registry.schema(&component).unwrap();
     let value = SceneComponentRecord::new(
@@ -67,7 +65,7 @@ fn fixture(population: usize) -> (ComponentRegistry, SceneAuthoringSession) {
 
 fn edit_rotation(
     source: &mut SceneAuthoringSession,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     angle: f32,
 ) -> bool {
     let before = source.revision();

@@ -417,7 +417,7 @@ fn escape_json(value: &str) -> String {
 mod tests {
     use nara::{
         asset::AssetRef,
-        prelude::ComponentRegistry,
+        prelude::ComponentRegistryBuilder,
         scene::{
             InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
             PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
@@ -430,8 +430,8 @@ mod tests {
 
     #[test]
     fn ui_source_identity_rejects_instance_additions_reusing_source_ids() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new();
+        let registry = registry.freeze().unwrap();
         let universe = "f037335a-e03a-41c7-8fb1-310ff21dd9be".parse().unwrap();
         let prefab_source =
             SourceDocumentKey::named(universe, "reference-ui", SourceDocumentKind::Prefab).unwrap();

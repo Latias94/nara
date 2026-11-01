@@ -2,7 +2,7 @@ use std::{fs, time::Duration};
 
 use nara::{
     asset::{AssetRef, AssetSourcePath},
-    reflect::{ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{ComponentRegistryBuilder, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
         PrefabEntityTarget, PrefabExpansionFailureKind, PrefabInstanceClaim, SceneComponentRecord,
@@ -437,8 +437,7 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
 
 #[test]
 fn composition_status_distinguishes_foreign_source_and_never_infers_success() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let mut overlay = PrefabOverlay::new(key());
     overlay
         .suppressions

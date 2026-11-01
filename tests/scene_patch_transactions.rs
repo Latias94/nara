@@ -1062,8 +1062,8 @@ fn remove_optional_field_and_set_asset_ref_field_are_schema_checked() {
     );
 }
 
-fn test_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn test_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let component_id = position_type_id();
     let schema = ComponentSchema::new(component_id, "Position", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -1145,12 +1145,11 @@ fn test_registry() -> ComponentRegistry {
             |blob| Ok(ComponentValue::String(blob.0.clone())),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn readonly_field_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn readonly_field_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let component_id = position_type_id();
     let schema = ComponentSchema::new(component_id, "Position", ComponentSchemaVersion::ONE)
         .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
@@ -1180,12 +1179,11 @@ fn readonly_field_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn renamed_field_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn renamed_field_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = ComponentSchema::new(
         position_type_id(),
         "Renamed position",
@@ -1218,12 +1216,11 @@ fn renamed_field_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn migrated_field_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn migrated_field_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = ComponentSchema::new(
         position_type_id(),
         "Migrated position",
@@ -1273,8 +1270,7 @@ fn migrated_field_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn scene_entity<'a>(scene: &'a SceneDocument, id: &SceneEntityId) -> &'a SceneEntityRecord {

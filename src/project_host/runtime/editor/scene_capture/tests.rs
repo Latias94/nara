@@ -17,8 +17,8 @@ use std::{
 use nara_asset::{AssetPath, AssetRef};
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
 use nara_reflect::{
-    AuthoringSchemaBundle, ComponentFieldId, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue,
+    AuthoringSchemaBundle, ComponentFieldId, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue,
 };
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabProjectionStep,
@@ -237,9 +237,7 @@ fn transform_component() -> ComponentTypeId {
 }
 
 fn leaf(rotation: f32) -> PrefabDocument {
-    let registry = ComponentRegistry::from_snapshot(
-        first_party_authoring_preview_registry(built_in_schema_providers()).unwrap(),
-    );
+    let registry = first_party_authoring_preview_registry(built_in_schema_providers()).unwrap();
     let component = transform_component();
     let schema = registry.schema(&component).unwrap();
     let ComponentValue::Map(mut fields) = schema.authoring_initial_value().unwrap().clone() else {
@@ -511,9 +509,7 @@ fn second_scene_hydrates_its_image_and_renders_from_the_captured_asset_database(
         .unwrap(),
     )
     .unwrap();
-    let registry = ComponentRegistry::from_snapshot(
-        first_party_authoring_preview_registry(built_in_schema_providers()).unwrap(),
-    );
+    let registry = first_party_authoring_preview_registry(built_in_schema_providers()).unwrap();
     let component = ComponentTypeId::new("nara.sprite.Sprite");
     let schema = registry.schema(&component).unwrap();
     let ComponentValue::Map(mut fields) = schema.authoring_initial_value().unwrap().clone() else {

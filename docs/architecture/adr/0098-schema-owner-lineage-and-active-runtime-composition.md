@@ -17,7 +17,7 @@ complete-binding Runtime publication.
 ## Context
 
 `ComponentSchemaCatalog` currently carries one generation and predecessor for the complete set of
-components registered into a `ComponentRegistry`. Its lineage validator interprets every active
+components registered into a `ComponentRegistryBuilder`. Its lineage validator interprets every active
 type that disappears from the next catalog as a deletion and requires a tombstone.
 
 That rule is correct for one schema owner publishing a successor. It is incorrect for a product
@@ -141,7 +141,7 @@ one failure-atomic path:
    all equal, then reject more than one distinct definition for an owner in the trusted-known set;
 4. reject any active or tombstoned `ComponentTypeId` claimed by different known owners;
 5. execute each selected callback exactly once against a new private owner-local
-   `ComponentRegistry` candidate that cannot inspect foreign owner schemas;
+   `ComponentRegistryBuilder` candidate that cannot inspect foreign owner schemas;
 6. freeze that candidate, validate owner-local lineage and its complete binding, codec, reflected
    type, and migration behavior, then compare its semantic catalog exactly with the declared
    current head;

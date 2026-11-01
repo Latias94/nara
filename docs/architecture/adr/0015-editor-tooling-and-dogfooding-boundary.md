@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-11-01
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -119,7 +119,7 @@ flowchart TD
     Editor[Editor application] --> Authoring[Document and tooling owners]
     Editor --> Host[Concrete executable Host]
     Host --> Runtime[Nara Runtime APIs]
-    Editor --> Registry[ComponentRegistry]
+    Editor --> Registry[ComponentRegistrySnapshot]
     Editor --> Assets[AssetServer]
     Editor --> Diagnostics[Diagnostics]
     Editor --> Commands[Scene/World Commands]

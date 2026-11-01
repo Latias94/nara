@@ -9,7 +9,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentPropertyPath, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
@@ -83,8 +83,8 @@ fn schema() -> ComponentSchema {
         .with_capabilities([ComponentCapability::Scene, ComponentCapability::EntityRef])])
 }
 
-fn registry(native: bool) -> ComponentRegistry {
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+fn registry(native: bool) -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("game.overlay-links"),
         ComponentSchemaCatalog::default(),
         None,
@@ -104,9 +104,7 @@ fn registry(native: bool) -> ComponentRegistry {
             )
             .unwrap();
     }
-    registry.freeze().unwrap();
-    assert!(registry.is_frozen());
-    registry
+    registry.freeze().unwrap()
 }
 
 fn binding(slot: ComponentFieldPath) -> PrefabReferenceBinding {
@@ -163,7 +161,7 @@ fn set(mode: PrefabComponentSetMode, target: PrefabEntityTarget) -> PrefabCompon
 }
 
 fn expand(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     document: &SceneDocument,
     sources: &InMemoryPrefabSourceResolver,
     limits: PrefabExpansionLimits,
@@ -399,10 +397,10 @@ fn orphan_addition_bindings_and_duplicate_component_declarations_refuse() {
 #[test]
 fn missing_native_noncurrent_and_foreign_owner_records_refuse_activation() {
     // A known schema without its native binding cannot reach a frozen registry.
-    let mut schema_only = ComponentRegistry::new();
+    let mut schema_only = nara_reflect::ComponentRegistryBuilder::new();
     schema_only.register_component_schema(schema()).unwrap();
     assert!(matches!(
-        schema_only.freeze(),
+        schema_only.freeze().map_err(|error| error.into_error()),
         Err(ComponentRegistryError::MissingNativeBinding { component_id })
             if component_id == component()
     ));

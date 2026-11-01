@@ -803,7 +803,7 @@ impl PreparedComponentApplyBatch {
 ///
 /// The candidate produces exactly `T`, including when preparation is deferred. It cannot insert
 /// additional components or mutate a target World. Candidates can only become applicable through
-/// a frozen [`crate::ComponentRegistry`].
+/// an admitted [`crate::ComponentRegistrySnapshot`].
 pub struct PreparedComponentCandidate<T: Component> {
     prepare: Box<
         dyn FnOnce(&mut ComponentApplyContext) -> Result<T, ComponentCodecError> + Send + 'static,

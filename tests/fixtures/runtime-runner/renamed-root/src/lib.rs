@@ -22,9 +22,9 @@ use engine::{
     prelude::{App, CoreStage, Plugin},
     project_host::{HeadlessRun, HeadlessRunOutcome},
     reflect::{
-        ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-        ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-        ComponentSchemaProviderSourceError,
+        ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
+        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
     },
 };
 
@@ -147,7 +147,9 @@ fn empty_schema_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProvi
     Ok(ComponentSchemaCatalog::default())
 }
 
-fn register_empty_schema(_registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_empty_schema(
+    _registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     Ok(())
 }
 

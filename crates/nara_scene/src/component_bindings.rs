@@ -6,8 +6,8 @@ use nara_reflect::{
         ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
         component_registry_snapshot_witness_matches, scene_component_composition_fingerprint,
     },
-    ComponentRegistry, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaOwnerSnapshot,
-    ComponentTypeId, PersistentComponentSchemaOwnerId, SchemaCompositionFingerprint,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaOwnerSnapshot, ComponentTypeId,
+    PersistentComponentSchemaOwnerId, SchemaCompositionFingerprint,
 };
 
 /// Bounds the data-owner and declaration indexes built for one Scene binding selection.
@@ -122,7 +122,6 @@ pub struct SceneComponentBindingsWitness {
 
 struct Bindings {
     native: ComponentRegistrySnapshot,
-    native_registry: ComponentRegistry,
     owners: Vec<ComponentSchemaOwnerSnapshot>,
     claims: BTreeMap<ComponentTypeId, usize>,
 }
@@ -185,8 +184,7 @@ impl SceneComponentBindings {
         owners: impl IntoIterator<Item = ComponentSchemaOwnerSnapshot>,
         limits: SceneComponentBindingLimits,
     ) -> Result<Self, SceneComponentBindingError> {
-        let native_registry = ComponentRegistry::from_snapshot(native.clone());
-        if let Some(schema) = native_registry.schema_for_type::<crate::SceneDataComponents>() {
+        if let Some(schema) = native.schema_for_type::<crate::SceneDataComponents>() {
             return Err(SceneComponentBindingError::ReservedNativeComponent {
                 component: schema.id().clone(),
             });
@@ -254,7 +252,6 @@ impl SceneComponentBindings {
             }
         }
         Ok(Self(Arc::new(Bindings {
-            native_registry,
             native,
             owners,
             claims,
@@ -303,10 +300,6 @@ impl SceneComponentBindings {
     #[must_use]
     pub fn composition_fingerprint(&self) -> SchemaCompositionFingerprint {
         scene_component_composition_fingerprint(self.native_snapshot(), self.data_owners())
-    }
-
-    pub(crate) fn native_registry(&self) -> &ComponentRegistry {
-        &self.0.native_registry
     }
 
     /// Tests exact immutable selection identity independently of the bindings container.

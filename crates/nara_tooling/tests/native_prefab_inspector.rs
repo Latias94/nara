@@ -1,5 +1,6 @@
 use nara_reflect::{
-    ComponentFieldId, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentFieldId, ComponentRegistryBuilder, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue,
 };
 use nara_scene::{
     PrefabAuthoringSession, PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord,
@@ -10,9 +11,9 @@ use nara_tooling::{
 
 #[test]
 fn native_prefab_shared_inspector_edits_its_own_document_and_undoes() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     nara_scene::register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let entity = SceneEntityId::new("native-prefab").unwrap();
     let component = ComponentTypeId::new("nara.scene.Name");
     let original = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())

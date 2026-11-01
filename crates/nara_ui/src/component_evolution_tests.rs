@@ -1,7 +1,7 @@
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentMigrationError, ComponentNumericDomain,
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueShape, validate_component_value,
+    ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueShape, validate_component_value,
 };
 
 use crate::{UI_SCHEMA_PROVIDER, UiText, register_ui_components};
@@ -21,10 +21,10 @@ fn text_value(logical_size: f64) -> ComponentValue {
     value
 }
 
-fn text_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn text_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     register_ui_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     registry
 }
 
@@ -82,11 +82,9 @@ fn text_size_successor_preserves_the_generation_two_catalog_and_other_components
     }
 
     // Exercise the actual owner admission as well as standalone native registration.
-    let mut registry = ComponentRegistry::new();
-    UI_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
-        .unwrap();
-    registry.freeze().unwrap();
+    let mut registry = ComponentRegistryBuilder::new();
+    UI_SCHEMA_PROVIDER.register_into(&mut registry).unwrap();
+    let registry = registry.freeze().unwrap();
     assert_eq!(
         registry
             .schema(&ComponentTypeId::new(TEXT_ID))
@@ -99,7 +97,6 @@ fn text_size_successor_preserves_the_generation_two_catalog_and_other_components
 #[test]
 fn shared_text_size_rules_match_native_f32_materialization_at_both_boundaries() {
     let registry = text_registry();
-    let snapshot = registry.snapshot().unwrap();
     let text_id = ComponentTypeId::new(TEXT_ID);
     let schema = registry.schema(&text_id).unwrap();
     let above_limit = f64::from(f32::from_bits(256.0_f32.to_bits() + 1));
@@ -126,7 +123,7 @@ fn shared_text_size_rules_match_native_f32_materialization_at_both_boundaries() 
             "{authored_size:?}"
         );
         assert_eq!(
-            snapshot.preflight_component(&text_id, &value).is_ok(),
+            registry.preflight_component(&text_id, &value).is_ok(),
             expected,
             "{authored_size:?}"
         );

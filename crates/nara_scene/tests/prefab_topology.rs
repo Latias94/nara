@@ -13,7 +13,7 @@ use nara_hierarchy::HierarchyRoots;
 use nara_identity::WorldIdentityDomain;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentPropertyPath, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
+    ComponentPropertyPath, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
@@ -69,8 +69,7 @@ fn assert_rejected_without_mutation(
     resolver: &impl PrefabSourceResolver,
     code: &str,
 ) {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let database = ProjectAssetDatabase::default();
     let before_document = document.clone();
 
@@ -266,8 +265,7 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
             [],
         ),
     );
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let document = SceneDocument::from_ordered_roots([anchor(source)]);
     let expansion = document.expand_prefabs(&registry, &resolver);
 
@@ -299,7 +297,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
     .with_fields([field]);
     let decode_count = Arc::new(AtomicUsize::new(0));
     let decode_probe = Arc::clone(&decode_count);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultAmount, _, _>(
             schema,
@@ -315,7 +313,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("root"))
         .with_component(
             component_id.clone(),

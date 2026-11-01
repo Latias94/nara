@@ -117,8 +117,6 @@ use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_image::ImageImportSettings;
-#[cfg(test)]
-use nara_reflect::ComponentRegistry;
 use nara_reflect::{
     ComponentCapability, ComponentRegistrySnapshot, component_registry,
     report_component_registry_authority_fault,
@@ -299,9 +297,7 @@ fn apply_editor_runtime_edit(world: &mut World) {
             });
             return;
         }
-        let registry = component_registry(world)
-            .ok_or(())
-            .and_then(|registry| registry.snapshot().map_err(|_| ()));
+        let registry = component_registry(world).cloned().ok_or(());
         let mut result = match registry {
             Ok(registry) => apply_runtime_edit(world, &registry, pending.request()),
             Err(_) => EditorRuntimeEditResult::Rejected {
@@ -1888,7 +1884,7 @@ impl EditorProjectSession {
             let opened = ScenePersistenceHost::open(
                 &scenes,
                 startup.as_str(),
-                plan.schema_validation().registry(),
+                plan.schema_validation().snapshot(),
             )
             .map_err(editor_persistence_open_error)?;
 
@@ -2645,7 +2641,7 @@ impl EditorProjectSession {
         match self.trusted_compiled() {
             Some(lane) => self
                 .workspace
-                .model(lane.plan.schema_validation().registry(), None),
+                .model(lane.plan.schema_validation().snapshot(), None),
             None => self.workspace.authoring_model(),
         }
     }
@@ -2656,9 +2652,8 @@ impl EditorProjectSession {
             .expect("the test schema snapshot is available only in the trusted compiled lane")
             .plan
             .schema_validation()
-            .registry()
             .snapshot()
-            .expect("the Editor plan registry is frozen")
+            .clone()
     }
 
     #[cfg(test)]
@@ -2667,7 +2662,7 @@ impl EditorProjectSession {
     ) -> Option<nara_reflect::ComponentRegistrySnapshot> {
         self.trusted_compiled()?
             .runtime_host
-            .with_running_world(|world| component_registry(world)?.snapshot().ok())
+            .with_running_world(|world| component_registry(world).cloned())
             .ok()
             .flatten()
     }
@@ -2848,7 +2843,7 @@ impl EditorProjectSession {
             EditorExecutionLane::Authoring(_) => self.workspace.apply_authoring_command(command),
             EditorExecutionLane::TrustedCompiled(lane) => self
                 .workspace
-                .apply_command(lane.plan.schema_validation().registry(), command),
+                .apply_command(lane.plan.schema_validation().snapshot(), command),
         };
         if report.applied
             && selected_document.is_some_and(|document| {
@@ -3782,7 +3777,7 @@ mod tests {
 
     #[test]
     fn runtime_edit_distinguishes_failed_encoding_from_a_missing_component() {
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         let component = ComponentTypeId::new("nara.test.EncodingFailure");
         let schema = ComponentSchema::new(
             component.clone(),
@@ -3813,8 +3808,7 @@ mod tests {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
-        let execution = registry.snapshot().unwrap();
+        let execution = registry.freeze().unwrap();
         let entity_id = SceneEntityId::new("encoding-failure").unwrap();
         let mut world = World::new();
         let entity = world
@@ -3858,7 +3852,7 @@ mod tests {
     fn runtime_edit_rejects_components_and_fields_without_edit_capability() {
         let component_read_only = ComponentTypeId::new("nara.test.ComponentReadOnlyProbe");
         let field_read_only = ComponentTypeId::new("nara.test.FieldReadOnlyProbe");
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         register_probe::<ComponentReadOnlyProbe>(
             &mut registry,
             component_read_only.clone(),
@@ -3875,8 +3869,7 @@ mod tests {
             |probe| probe.value,
             |value| FieldReadOnlyProbe { value },
         );
-        registry.freeze().unwrap();
-        let execution = registry.snapshot().unwrap();
+        let execution = registry.freeze().unwrap();
         let revision =
             nara_scene::SceneAuthoringSession::new(nara_scene::SceneDocument::default()).revision();
 
@@ -3931,7 +3924,7 @@ mod tests {
     }
 
     fn register_probe<T: Component>(
-        registry: &mut ComponentRegistry,
+        registry: &mut nara_reflect::ComponentRegistryBuilder,
         id: ComponentTypeId,
         component_capabilities: impl IntoIterator<Item = ComponentCapability>,
         field_capabilities: impl IntoIterator<Item = ComponentCapability>,
@@ -3963,8 +3956,9 @@ mod tests {
 
     fn scene_source(entity_id: SceneEntityId) -> SceneEntitySource {
         let mut fixture = World::new();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let candidate = nara_scene::ExpandedSceneCandidate::plain(
             nara_scene::SourceDocumentKey::named(
                 "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),

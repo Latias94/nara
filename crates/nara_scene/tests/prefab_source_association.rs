@@ -4,7 +4,7 @@ use nara_asset::{
     AssetProductRef, AssetRecord, AssetRef, AssetSourceKind, AssetSourcePath, ImportedProductId,
     StableAssetId,
 };
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{
     PrefabDocument, PrefabInstance, ResolvedPrefabSource, SceneDocument, SceneEntityId,
     SceneEntityRecord, SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKind,
@@ -52,8 +52,7 @@ fn explicit_source_association_keeps_location_identity_for_all_primary_lookup_fo
         .with_source_asset(&record())
         .unwrap();
     assert_eq!(source.key(), &key);
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let primary = AssetProductRef::new(source_id(), ImportedProductId::PRIMARY).unwrap();
     let mut expected_ids = None;
     for request in [
@@ -86,8 +85,7 @@ fn explicit_source_association_keeps_location_identity_for_all_primary_lookup_fo
 
 #[test]
 fn product_lookup_needs_the_actual_association_and_rejects_another_source() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let other: StableAssetId = "28d89092-497d-4ee1-92ed-42b669fbef78".parse().unwrap();
     let bound = ResolvedPrefabSource::bound(document(), location())
         .with_source_asset(&record())

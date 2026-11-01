@@ -4,7 +4,7 @@ use nara_asset::AssetReferenceResolver;
 use nara_diagnostic::DiagnosticReport;
 use nara_identity::SceneEntityId;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+    ComponentDecodeContext, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
 };
 
@@ -55,27 +55,30 @@ impl SceneDocument {
     }
 
     #[must_use]
-    pub fn validate(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+    pub fn validate(&self, registry: &ComponentRegistrySnapshot) -> DiagnosticReport {
         preflight_scene(self, registry).diagnostics
     }
 
     #[must_use]
     pub fn validate_with_asset_resolution(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
         preflight_scene_with_context(self, registry, &mut context).diagnostics
     }
 
-    pub(crate) fn validate_authoring(&self, registry: &ComponentRegistry) -> DiagnosticReport {
+    pub(crate) fn validate_authoring(
+        &self,
+        registry: &ComponentRegistrySnapshot,
+    ) -> DiagnosticReport {
         preflight_authoring_scene(self, registry).diagnostics
     }
 
     pub(crate) fn validate_authoring_for_patch(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         operation_index: usize,
     ) -> DiagnosticReport {
         preflight_authoring_scene_for_patch(self, registry, operation_index).diagnostics
@@ -83,7 +86,7 @@ impl SceneDocument {
 
     pub(crate) fn validate_authoring_with_asset_resolution(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> DiagnosticReport {
         let mut context = ComponentDecodeContext::new().with_asset_resolution(asset_resolution);
@@ -92,7 +95,7 @@ impl SceneDocument {
 
     pub(crate) fn validate_authoring_for_patch_with_asset_resolution(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
         operation_index: usize,
     ) -> DiagnosticReport {
@@ -128,7 +131,7 @@ impl SceneComponentBindings {
         }
         preflight_scene_with_context_and_bindings(
             document,
-            self.native_registry(),
+            self.native_snapshot(),
             self,
             &mut context,
         )

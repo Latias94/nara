@@ -115,14 +115,12 @@ impl Plugin for UiPlugin {
     }
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             UI_PLUGIN_ID,
             UI_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        UI_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
-            PluginError::component_registration(UI_PLUGIN_ID, UI_SCHEMA_PROVIDER_ID.as_str(), error)
-        })
+            &UI_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {

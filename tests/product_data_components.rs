@@ -1286,7 +1286,7 @@ fn one_native_contribution_can_own_data_admissions_without_data_codecs() {
     );
     assert!(
         plan.schema_validation()
-            .registry()
+            .snapshot()
             .schema_for_type::<NativeValue>()
             .is_some()
     );

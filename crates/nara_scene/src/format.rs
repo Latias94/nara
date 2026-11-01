@@ -22,7 +22,7 @@ use nara_core::{
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentRegistry, ComponentValueCost,
+    ComponentDecodeContext, ComponentRegistrySnapshot, ComponentValueCost,
     ComponentValueMaterializationLimits,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -554,7 +554,7 @@ impl CanonicalSceneDocumentCandidate {
 
     pub fn publish(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
         self.publish_with_optional_asset_resolution(registry, None)
     }
@@ -562,7 +562,7 @@ impl CanonicalSceneDocumentCandidate {
     /// Publishes with the asset identities admitted by the content source owner.
     pub fn publish_with_asset_resolution(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
         self.publish_with_optional_asset_resolution(registry, Some(asset_resolution))
@@ -570,7 +570,7 @@ impl CanonicalSceneDocumentCandidate {
 
     fn publish_with_optional_asset_resolution(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
         let mut context = ComponentDecodeContext::new()
@@ -620,7 +620,7 @@ impl CanonicalPrefabDocumentCandidate {
 
     pub fn publish(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         self.publish_with_optional_asset_resolution(registry, None)
     }
@@ -628,7 +628,7 @@ impl CanonicalPrefabDocumentCandidate {
     /// Publishes with the asset identities admitted by the content source owner.
     pub fn publish_with_asset_resolution(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         self.publish_with_optional_asset_resolution(registry, Some(asset_resolution))
@@ -636,7 +636,7 @@ impl CanonicalPrefabDocumentCandidate {
 
     fn publish_with_optional_asset_resolution(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         let document = self.document.instantiate();
@@ -1079,7 +1079,7 @@ impl SceneDocumentCandidate {
 
     pub fn canonicalize(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<CanonicalSceneDocumentCandidate, SceneFilePublicationError> {
         let limits = self.limits;
         let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
@@ -1092,14 +1092,14 @@ impl SceneDocumentCandidate {
 
     pub fn publish(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
         self.canonicalize(registry)?.publish(registry)
     }
 
     pub(crate) fn into_canonical_document(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<(SceneDocument, bool), SceneFilePublicationError> {
         crate::migration::canonicalize_scene_document(self.document, registry, self.limits)
     }
@@ -1151,7 +1151,7 @@ impl PrefabDocumentCandidate {
 
     pub fn canonicalize(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<CanonicalPrefabDocumentCandidate, SceneFilePublicationError> {
         let limits = self.limits;
         let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
@@ -1164,14 +1164,14 @@ impl PrefabDocumentCandidate {
 
     pub fn publish(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         self.canonicalize(registry)?.publish(registry)
     }
 
     pub(crate) fn into_canonical_document(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<(PrefabDocument, bool), SceneFilePublicationError> {
         crate::migration::canonicalize_prefab_document(self.document, registry, self.limits)
     }
@@ -1180,7 +1180,7 @@ impl PrefabDocumentCandidate {
 impl ScenePatchDocumentCandidate {
     pub(crate) fn into_canonical_document(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<(ScenePatchDocument, bool), SceneFilePublicationError> {
         crate::migration::canonicalize_scene_patch(self.document, registry, self.limits)
     }
@@ -1188,7 +1188,7 @@ impl ScenePatchDocumentCandidate {
     pub fn apply_to_scene(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> ScenePatchReport {
         match self.clone().into_canonical_document(registry) {
             Ok((patch, _)) => patch.apply_to_scene(document, registry),
@@ -1199,7 +1199,7 @@ impl ScenePatchDocumentCandidate {
     pub fn apply_to_scene_with_asset_resolution(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         match self.clone().into_canonical_document(registry) {
@@ -2099,8 +2099,9 @@ mod overlay_storage_tests {
         let mut entity = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         entity.prefab = Some(instance(overlay));
         let document = SceneDocument::from_ordered_roots([entity]);
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         for candidate in [
             SceneDocumentCandidate::decode_json_str(&document.to_json_string().unwrap()).unwrap(),
             SceneDocumentCandidate::decode_ron_str(&document.to_ron_string().unwrap()).unwrap(),

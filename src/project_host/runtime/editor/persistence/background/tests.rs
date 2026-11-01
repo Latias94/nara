@@ -5,7 +5,7 @@ use std::{
 };
 
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord};
 use nara_tasks::{TaskPoolConfig, TaskTerminal};
 use nara_tooling::{EditorPersistenceAuthority, EditorWorkspace};
@@ -78,8 +78,8 @@ impl SaveFixture {
             HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new();
+        let registry = registry.freeze().unwrap();
         let opened =
             ScenePersistenceHost::open(&directory, "current.scene.json", &registry).unwrap();
         let lane = PersistenceLane::Scene(EditorScenePersistenceLane {

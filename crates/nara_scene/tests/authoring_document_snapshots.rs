@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     PrefabAuthoringSession, PrefabDocument, SceneAuthoringHistoryLimits, SceneAuthoringSession,
     SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
@@ -28,9 +28,10 @@ fn add(names: &[&str]) -> ScenePatchDocument {
     }))
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+fn registry() -> ComponentRegistrySnapshot {
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     registry
 }
 

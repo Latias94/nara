@@ -21,11 +21,11 @@ use nara_engine::{
     },
     project_workflow::{ProjectCheckRequest, check_project},
     reflect::{
-        ComponentFieldId, ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog,
-        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
-        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponent,
-        PersistentComponentProvider, validate_component_value,
+        ComponentFieldId, ComponentRegistryBuilder, ComponentRegistryError,
+        ComponentRegistrySnapshot, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+        ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
+        ComponentSchemaProviderSourceError, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, PersistentComponent, PersistentComponentProvider, validate_component_value,
     },
     scene::{
         AuthoringFieldEdit, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -160,7 +160,7 @@ fn current_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSo
     Ok(catalog)
 }
 
-fn register_current(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_current(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     current_types::register(registry)?;
     registry.register_component_migration(
         &ComponentTypeId::new(COOLDOWN),
@@ -174,13 +174,145 @@ fn register_current(registry: &mut ComponentRegistry) -> Result<(), ComponentReg
     Ok(())
 }
 
-fn current_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
-    CURRENT_PROVIDER
-        .register_or_validate_into(&mut registry)
+fn current_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
+    CURRENT_PROVIDER.register_into(&mut registry).unwrap();
+    registry.freeze().unwrap()
+}
+
+#[test]
+fn failed_admission_returns_the_candidate_for_repair_and_retains_the_original_scene_definition() {
+    use nara_engine::{
+        identity::EntityLookup,
+        scene::{
+            ExpandedSceneCandidate, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+            prepare_scene, retire_and_despawn_scene_instance,
+        },
+    };
+
+    fn bind<T: PersistentComponentProvider>(builder: &mut ComponentRegistryBuilder) {
+        builder
+            .register_native_component_with_codec::<T, _, _>(
+                T::persistent_component_schema().id(),
+                T::__decode_persistent_component,
+                T::__encode_persistent_component,
+            )
+            .unwrap();
+    }
+
+    let id = ComponentTypeId::new(COOLDOWN);
+    let mut initial = ComponentRegistryBuilder::new();
+    INITIAL_PROVIDER.register_into(&mut initial).unwrap();
+    let original = initial.freeze().unwrap();
+    let retained = original.clone();
+    assert!(retained.ptr_eq(&original));
+    let value = ComponentValue::map([("seconds", ComponentValue::f64(1.25).unwrap())]);
+    let source = ExpandedSceneCandidate::plain(
+        SourceDocumentKey::named(
+            "46044116-21ed-563c-ac41-77db155ac518".parse().unwrap(),
+            "consumer.inventory.retained-generation",
+            SourceDocumentKind::Scene,
+        )
+        .unwrap(),
+        std::sync::Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            actor(),
+        )
+        .with_component(
+            id.clone(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value.clone()),
+        )])),
+    );
+    let mut world = World::new();
+    let pending = prepare_scene(
+        &mut world,
+        &original,
+        &source,
+        &SceneOccurrenceKey::new("consumer.inventory", "retained-generation").unwrap(),
+        None,
+    )
+    .unwrap();
+    drop(original);
+
+    let mut catalog = current_catalog().unwrap();
+    catalog.canonicalize();
+    let mut builder = ComponentRegistryBuilder::from_owner_catalog_candidate(
+        OWNER,
+        catalog.clone(),
+        Some(generation_one::initial_catalog().unwrap()),
+    )
+    .unwrap();
+    bind::<Health>(&mut builder);
+    bind::<Armor>(&mut builder);
+    let expected = ComponentRegistryError::MissingNativeBinding {
+        component_id: id.clone(),
+    };
+    let failure = builder.freeze().unwrap_err();
+    assert_eq!(failure.error(), &expected);
+    let (mut builder, error) = failure.into_parts();
+    assert_eq!(error, expected);
+    assert_eq!(builder.catalog_candidate(), &catalog);
+    bind::<Cooldown>(&mut builder);
+
+    let expected = ComponentRegistryError::MissingComponentMigrationChain {
+        component_id: id.clone(),
+        from_version: ComponentSchemaVersion::ONE,
+        target_version: V2,
+    };
+    let failure = builder.freeze().unwrap_err();
+    assert_eq!(failure.error(), &expected);
+    let (mut builder, error) = failure.into_parts();
+    assert_eq!(error, expected);
+    assert_eq!(builder.catalog_candidate(), &catalog);
+    builder
+        .register_component_migration(&id, ComponentSchemaVersion::ONE, V2, |value| {
+            validate_component_value(&Cooldown::persistent_component_schema(), &value)?;
+            Ok(value)
+        })
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    let current = builder.freeze().unwrap();
+    assert_eq!(current.catalog(), &catalog);
+    assert_eq!(current.schemas().count(), 3);
+    assert_eq!(current.schema_for_type::<Cooldown>().unwrap().version(), V2);
+    assert!(current.schema_for_type::<LegacyCooldown>().is_none());
+    assert!(!current.ptr_eq(&retained));
+    assert_eq!(
+        retained.schema(&id).unwrap().version(),
+        ComponentSchemaVersion::ONE
+    );
+
+    let migrated = current
+        .migrate_component_value(&id, ComponentSchemaVersion::ONE, &value)
+        .unwrap();
+    assert_eq!(migrated.version, V2);
+    let mut current_world = World::new();
+    let entity = current_world.spawn_empty().id();
+    current
+        .preflight_component(&id, &migrated.value)
+        .unwrap()
+        .apply(&mut current_world, entity)
+        .unwrap();
+    assert_eq!(current_world.get::<Cooldown>(entity).unwrap().seconds, 1.25);
+    assert_eq!(
+        current
+            .encode_component(&id, &current_world, entity)
+            .unwrap(),
+        Some(value)
+    );
+
+    let receipt = pending.commit(&mut world).instance.unwrap();
+    let EntityLookup::Resolved(old_entity) = receipt.resolve(&world, &actor()) else {
+        panic!("the retained Scene must commit with its original native definition");
+    };
+    assert_eq!(
+        world.get::<LegacyCooldown>(old_entity).unwrap().seconds,
+        1.25
+    );
+    assert!(world.get::<Cooldown>(old_entity).is_none());
+    assert_eq!(
+        retained.schema(&id).unwrap().version(),
+        ComponentSchemaVersion::ONE
+    );
+    retire_and_despawn_scene_instance(&mut world, &receipt).unwrap();
 }
 
 #[test]
@@ -201,11 +333,9 @@ fn one_current_inventory_extends_explicit_history_and_provider_admission_stays_a
     assert_eq!(current.components.len(), 3);
     assert_eq!(generation_one::initial_catalog().unwrap(), historical);
 
-    let mut initial = ComponentRegistry::new();
-    INITIAL_PROVIDER
-        .register_or_validate_into(&mut initial)
-        .unwrap();
-    initial.freeze().unwrap();
+    let mut initial = ComponentRegistryBuilder::new();
+    INITIAL_PROVIDER.register_into(&mut initial).unwrap();
+    let initial = initial.freeze().unwrap();
     assert_eq!(
         initial
             .schema(&ComponentTypeId::new(COOLDOWN))
@@ -214,7 +344,7 @@ fn one_current_inventory_extends_explicit_history_and_provider_admission_stays_a
         ComponentSchemaVersion::ONE
     );
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let before = registry.catalog_candidate().clone();
     let rejected = ComponentSchemaProviderDefinition::new(
         OWNER,
@@ -223,20 +353,24 @@ fn one_current_inventory_extends_explicit_history_and_provider_admission_stays_a
         current_catalog,
         |candidate| {
             register_current(candidate)?;
-            Err(ComponentRegistryError::Frozen)
+            Err(ComponentRegistryError::UnknownComponentId(
+                ComponentTypeId::new("consumer.inventory.RejectedProvider"),
+            ))
         },
     )
     .with_predecessor(generation_one::initial_catalog);
     assert_eq!(
-        rejected.register_or_validate_into(&mut registry),
-        Err(ComponentRegistryError::Frozen)
+        rejected.register_into(&mut registry),
+        Err(ComponentRegistryError::UnknownComponentId(
+            ComponentTypeId::new("consumer.inventory.RejectedProvider",)
+        ))
     );
     assert_eq!(registry.catalog_candidate(), &before);
-    CURRENT_PROVIDER
-        .register_or_validate_into(&mut registry)
-        .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    CURRENT_PROVIDER.register_into(&mut registry).unwrap();
+    let registry = registry.freeze().unwrap();
+    let snapshot = registry.clone();
+    assert!(snapshot.ptr_eq(&registry));
+    CURRENT_PROVIDER.validate_snapshot(&snapshot).unwrap();
     assert_eq!(snapshot.provider_receipts().count(), 1);
     assert_eq!(snapshot.owner_receipts().count(), 1);
     assert_eq!(
@@ -258,7 +392,7 @@ fn one_current_inventory_extends_explicit_history_and_provider_admission_stays_a
         registry.schema(&ComponentTypeId::new(COOLDOWN))
     );
     assert_eq!(
-        direct.snapshot().unwrap().provider_receipt(PROVIDER_ID),
+        direct.provider_receipt(PROVIDER_ID),
         snapshot.provider_receipt(PROVIDER_ID)
     );
 }
@@ -434,7 +568,7 @@ fn public_data_only_editor_creates_edits_rejects_saves_reopens_and_passes_compil
 #[test]
 fn historical_values_migrate_without_clamping_and_strict_check_uses_the_same_recipe() {
     let registry = current_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let id = ComponentTypeId::new(COOLDOWN);
     let original = ComponentValue::map([("seconds", ComponentValue::f64(3.1).unwrap())]);
     let migrated = registry

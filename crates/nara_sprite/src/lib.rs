@@ -13,7 +13,7 @@ use nara_image::ImageAsset;
 use nara_material::{AddressMode, AlphaMode2d, FilterMode, SamplerDescriptor};
 use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
-    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
@@ -260,14 +260,12 @@ impl Plugin for SpritePlugin {
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.sprite.Sprite");
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             SPRITE_PLUGIN_ID,
             component_id.as_str(),
-        )?;
-        SPRITE_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
-            PluginError::component_registration(SPRITE_PLUGIN_ID, component_id.as_str(), error)
-        })
+            &SPRITE_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -282,7 +280,7 @@ impl Plugin for SpritePlugin {
 }
 
 pub fn register_sprite_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_sprite_components(registry)?;
     registry.register_persistent_component_codec_with_context::<Sprite, _, _>(
@@ -441,7 +439,9 @@ fn sprite_schema_predecessor() -> ComponentSchema {
     .with_fields(sprite_fields())
 }
 
-fn validate_sprite_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn validate_sprite_components(
+    registry: &ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry.validate_component_registration::<Sprite>(&ComponentTypeId::new("nara.sprite.Sprite"))
 }
 
@@ -1079,12 +1079,12 @@ mod tests {
         AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
         ProjectAssetDatabase, StableAssetId,
     };
-    use nara_reflect::ComponentDecodeContext;
+    use nara_reflect::{ComponentDecodeContext, ComponentRegistrySnapshot};
 
-    fn frozen_sprite_registry() -> ComponentRegistry {
-        let mut registry = ComponentRegistry::new();
+    fn frozen_sprite_registry() -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
         register_sprite_components(&mut registry).expect("component registration should succeed");
-        registry.freeze().expect("component registry should freeze");
+        let registry = registry.freeze().expect("component registry should freeze");
         registry
     }
 
@@ -1101,9 +1101,8 @@ mod tests {
                 .is_none()
         );
         assert_eq!(current.components[0].version(), ComponentSchemaVersion::ONE);
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
-        let schema = registry
+        let snapshot = frozen_sprite_registry();
+        let schema = snapshot
             .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
             .unwrap();
         let value = schema.authoring_initial_value().unwrap();
@@ -1181,8 +1180,7 @@ mod tests {
 
     #[test]
     fn sprite_codec_preserves_y_sort_anchor_and_explicit_group() {
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
         let mut world = World::new();
         let original = Sprite::from_color(Vec2::ONE, Color::WHITE)
             .with_layer(3)
@@ -1207,8 +1205,7 @@ mod tests {
     fn sprite_codec_resolves_stable_and_primary_product_texture_refs_during_preflight() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "textures/player.png");
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
         for image in [
             AssetRef::StableId(stable_id),
             AssetRef::product(AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap()),
@@ -1250,8 +1247,7 @@ mod tests {
             stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
             "game/art/player.png",
         );
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
         for with_catalogue in [false, true] {
             let mut context = ComponentDecodeContext::new().with_asset_path_scope(&scope);
             if with_catalogue {
@@ -1306,8 +1302,7 @@ mod tests {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let image =
             AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
 
         let result = snapshot.preflight_component(&sprite_type_id(), &sprite_value(image.clone()));
 
@@ -1328,8 +1323,7 @@ mod tests {
         let reference = AssetProductRef::new(source, product).unwrap();
         let image = AssetRef::product(reference);
         let database = test_database(source, "textures/player.png");
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
 
         for with_server in [false, true] {
             let mut asset_server = AssetServer::new();
@@ -1363,8 +1357,7 @@ mod tests {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let auxiliary =
             ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
         for selection in [ImportedProductId::PRIMARY, auxiliary] {
             let reference = AssetProductRef::new(source, selection).unwrap();
             let mut server = AssetServer::new();
@@ -1415,8 +1408,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
 
         let result = snapshot.preflight_component_with_context(
             &sprite_type_id(),
@@ -1450,8 +1442,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
 
         let result = snapshot.preflight_component_with_context(
             &sprite_type_id(),
@@ -1472,8 +1463,7 @@ mod tests {
         let database = test_database(stable_id, "textures/player.png");
         let mut context = ComponentDecodeContext::new()
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_sprite_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_sprite_registry();
 
         let result = snapshot.preflight_component_with_context(
             &sprite_type_id(),

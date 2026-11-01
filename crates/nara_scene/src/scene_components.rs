@@ -2,7 +2,7 @@ use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind, Reflect,
     bevy_reflect,
 };
@@ -64,20 +64,12 @@ impl Plugin for SceneComponentsPlugin {
     }
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             SCENE_COMPONENTS_PLUGIN_ID,
             SCENE_COMPONENTS_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        SCENE_COMPONENTS_SCHEMA_PROVIDER
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    SCENE_COMPONENTS_PLUGIN_ID,
-                    SCENE_COMPONENTS_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
+            &SCENE_COMPONENTS_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -91,14 +83,16 @@ impl Plugin for SceneComponentsPlugin {
 }
 
 pub fn register_scene_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_scene_components(registry)?;
     register_name_component(registry)?;
     register_visibility_component(registry)
 }
 
-fn validate_scene_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn validate_scene_components(
+    registry: &ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry.validate_component_registration::<Name>(&ComponentTypeId::new("nara.scene.Name"))?;
     registry.validate_component_registration::<Visibility>(&ComponentTypeId::new(
         "nara.scene.Visibility",
@@ -106,7 +100,9 @@ fn validate_scene_components(registry: &ComponentRegistry) -> Result<(), Compone
     Ok(())
 }
 
-fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_name_component(
+    registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component_with_codec::<Name, _, _>(
         name_schema(),
         |value| {
@@ -120,7 +116,7 @@ fn register_name_component(registry: &mut ComponentRegistry) -> Result<(), Compo
 }
 
 fn register_visibility_component(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component_with_codec::<Visibility, _, _>(
         visibility_schema(),
@@ -219,16 +215,15 @@ mod tests {
                 .iter()
                 .all(|schema| schema.authoring_initial_value().is_none())
         );
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         register_scene_components(&mut registry).unwrap();
-        registry.freeze().unwrap();
-        let snapshot = registry.snapshot().unwrap();
+        let registry = registry.freeze().unwrap();
         let mut world = nara_ecs::World::new();
         let entity = world.spawn_empty().id();
         for schema in &current.components {
             assert_eq!(schema.version(), ComponentSchemaVersion::ONE);
             assert_eq!(registry.schema(schema.id()), Some(schema));
-            snapshot
+            registry
                 .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
                 .unwrap()
                 .apply(&mut world, entity)

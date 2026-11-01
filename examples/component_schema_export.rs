@@ -5,16 +5,16 @@ use nara::{
 };
 
 fn main() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).expect("scene components should register once");
     register_transform_components(&mut registry)
         .expect("transform components should register once");
     register_render_components(&mut registry).expect("render components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
     register_tilemap_components(&mut registry).expect("tilemap components should register once");
-    registry.freeze().expect("component registry should freeze");
+    let registry = registry.freeze().expect("component registry should freeze");
 
-    let catalog = registry.catalog().unwrap();
+    let catalog = registry.catalog();
     let json = catalog.to_json_string().unwrap();
 
     assert!(json.contains("nara.transform.Transform2d"));

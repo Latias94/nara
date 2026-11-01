@@ -157,7 +157,7 @@ impl SceneComponentBindingsAuthorityState {
         validate_component_registry_authority(world)
             .map_err(SceneComponentBindingsAuthorityError::NativeRegistry)?;
         if !component_registry(world)
-            .is_some_and(|registry| registry.shares_snapshot(self.bindings.native_snapshot()))
+            .is_some_and(|registry| registry.ptr_eq(self.bindings.native_snapshot()))
         {
             return Err(SceneComponentBindingsAuthorityError::NativeRegistry(
                 ComponentRegistryAuthorityError::Replaced,
@@ -278,8 +278,7 @@ impl Plugin for SceneComponentBindingsPlugin {
                 .ok_or_else(|| {
                     bindings_setup_error("managed native component registry is missing")
                 })?
-                .snapshot()
-                .map_err(bindings_setup_error)?;
+                .clone();
             let bindings = SceneComponentBindings::new_with_limits(
                 native,
                 resource.owners.iter().cloned(),
@@ -538,10 +537,11 @@ mod tests {
     fn replacing_the_native_basis_inside_the_selection_rejects_authority() {
         let mut app = app();
         app.add_plugin(FinishMutation(|world| {
-            let mut native = nara_reflect::ComponentRegistry::new();
-            native.freeze().unwrap();
+            let native = nara_reflect::ComponentRegistryBuilder::new()
+                .freeze()
+                .unwrap();
             let bindings = SceneComponentBindings::new(
-                native.snapshot().unwrap(),
+                native.clone(),
                 scene_component_bindings(world)
                     .unwrap()
                     .data_owners()

@@ -22,9 +22,9 @@ use nara::{
         add_fixed_transform_projection_systems,
     },
     reflect::{
-        ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-        ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-        ComponentSchemaProviderSourceError,
+        ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
+        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
     },
     render::Camera2d,
     sprite::Sprite,
@@ -173,7 +173,7 @@ fn predecessor_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProvid
     })
 }
 
-fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component::<PlayerConfig>()?;
     registry.register_persistent_component::<Collectible>()?;
     Ok(())

@@ -15,15 +15,14 @@ use nara_project::{
     ProductCapabilitySet, ProjectPath, SourceRuntimeProjection,
 };
 use nara_reflect::__private::{
-    ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
-    resolve_schema_provider,
+    ResolvedComponentSchemaProvider, register_resolved_schema_provider, resolve_schema_provider,
 };
 #[cfg(feature = "serde")]
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, PersistentComponentSchemaOwnerId,
 };
 use nara_reflect::{
-    ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
     ComponentSchemaOwnerId, ComponentSchemaOwnerSnapshot, ComponentSchemaProviderDefinition,
     ComponentSchemaProviderReceipt, ComponentTypeId, ExecutableRegistryFingerprint,
@@ -356,8 +355,6 @@ pub struct SchemaValidationInput {
     provider_receipts: Arc<[ComponentSchemaProviderReceipt]>,
     #[cfg(feature = "serde")]
     authoring_schema_bundle: AuthoringSchemaBundle,
-    snapshot: ComponentRegistrySnapshot,
-    registry: Arc<ComponentRegistry>,
     bindings: SceneComponentBindings,
     composition_fingerprint: SchemaCompositionFingerprint,
     executable_fingerprint: ExecutableRegistryFingerprint,
@@ -371,7 +368,7 @@ impl fmt::Debug for SchemaValidationInput {
             .field("provider_receipts", &self.provider_receipts)
             .field(
                 "contribution_count",
-                &self.snapshot.contribution_receipts().count(),
+                &self.snapshot().contribution_receipts().count(),
             )
             .field("composition_fingerprint", &self.composition_fingerprint)
             .field("executable_fingerprint", &self.executable_fingerprint)
@@ -395,7 +392,7 @@ impl SchemaValidationInput {
     pub fn contribution_receipts(
         &self,
     ) -> impl ExactSizeIterator<Item = ComponentSchemaContributionReceipt> + '_ {
-        self.snapshot.contribution_receipts()
+        self.snapshot().contribution_receipts()
     }
 
     #[must_use]
@@ -406,12 +403,12 @@ impl SchemaValidationInput {
     pub fn owner_receipts(
         &self,
     ) -> impl ExactSizeIterator<Item = ComponentSchemaOwnerContributionReceipt> + '_ {
-        self.snapshot.owner_receipts()
+        self.snapshot().owner_receipts()
     }
 
     #[must_use]
     pub fn snapshot(&self) -> &ComponentRegistrySnapshot {
-        &self.snapshot
+        self.bindings.native_snapshot()
     }
 
     #[must_use]
@@ -427,11 +424,6 @@ impl SchemaValidationInput {
     #[must_use]
     pub const fn executable_fingerprint(&self) -> ExecutableRegistryFingerprint {
         self.executable_fingerprint
-    }
-
-    #[must_use]
-    pub fn registry(&self) -> &ComponentRegistry {
-        &self.registry
     }
 }
 
@@ -1151,7 +1143,7 @@ fn resolve_schema_validation(
         }
     }
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     #[cfg(feature = "serde")]
     let mut authoring_schema_owners = Vec::with_capacity(selected_providers.len());
     for provider_id in &selected_providers {
@@ -1170,7 +1162,7 @@ fn resolve_schema_validation(
                 .map(|predecessor| predecessor.catalog().clone()),
         ));
         catch_unwind(AssertUnwindSafe(|| {
-            register_or_validate_resolved_schema_provider(&mut registry, provider)
+            register_resolved_schema_provider(&mut registry, provider)
         }))
         .map_err(|_| CompositionError::SchemaProviderPanicked {
             provider: *provider_id,
@@ -1180,17 +1172,11 @@ fn resolve_schema_validation(
             source: Box::new(source),
         })?;
     }
-    registry
+    let snapshot = registry
         .freeze()
         .map_err(|source| CompositionError::SchemaFreezeRejected {
-            source: Box::new(source),
+            source: Box::new(source.into_error()),
         })?;
-    let snapshot =
-        registry
-            .snapshot()
-            .map_err(|source| CompositionError::SchemaFreezeRejected {
-                source: Box::new(source),
-            })?;
     let bindings =
         SceneComponentBindings::new(snapshot.clone(), data_owners).map_err(|source| {
             CompositionError::SceneBindingsRejected {
@@ -1206,7 +1192,6 @@ fn resolve_schema_validation(
         .iter()
         .map(|receipt| receipt.provider())
         .collect::<Vec<_>>();
-    let registry = ComponentRegistry::from_snapshot(snapshot.clone());
     #[cfg(feature = "serde")]
     let authoring_schema_bundle = {
         authoring_schema_owners.extend(bindings.data_owners().iter().map(|owner| {
@@ -1225,8 +1210,6 @@ fn resolve_schema_validation(
         provider_receipts: provider_receipts.into(),
         #[cfg(feature = "serde")]
         authoring_schema_bundle,
-        snapshot,
-        registry: Arc::new(registry),
         bindings,
         composition_fingerprint,
         executable_fingerprint,

@@ -128,7 +128,7 @@ impl EditorProjectSession {
         let workspace = match self.trusted_compiled() {
             Some(lane) => self
                 .workspace
-                .model(lane.plan.schema_validation().registry(), preview_world),
+                .model(lane.plan.schema_validation().snapshot(), preview_world),
             None => self.workspace.authoring_model(),
         };
         let project = self.editor_project_view(project_browser);

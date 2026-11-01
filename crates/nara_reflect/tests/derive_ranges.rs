@@ -1,7 +1,7 @@
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCodecError, ComponentNumericBound as Bound, ComponentNumericInterval,
-    ComponentRegistry, ComponentValue, PersistentComponent, PersistentComponentProvider,
+    ComponentRegistryBuilder, ComponentValue, PersistentComponent, PersistentComponentProvider,
     validate_component_value,
 };
 
@@ -67,10 +67,9 @@ fn typed_range_literals_and_aliases_reach_shared_validation() {
             )),
         })
     );
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     inventory::register(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     for (seconds, offset, count, valid) in [
         (0.0, -9, 0, true),
         (30.0, 10, 4, true),
@@ -103,16 +102,16 @@ fn inventory_callbacks_validate_the_same_explicit_membership() {
     let initial = inventory::initial_catalog().unwrap();
     assert_eq!(schemas, initial.components);
     assert_eq!(initial.generation(), 1);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     inventory::register(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    assert_eq!(registry.catalog().unwrap().components, schemas);
+    let registry = registry.freeze().unwrap();
+    assert_eq!(registry.catalog().components, schemas);
     assert!(duplicate_inventory::schemas().is_err());
     assert!(duplicate_inventory::initial_catalog().is_err());
     assert_eq!(nested_inventory::types::schemas().unwrap(), schemas);
     assert_eq!(nested_inventory::types::initial_catalog().unwrap(), initial);
-    let mut nested = ComponentRegistry::new();
+    let mut nested = ComponentRegistryBuilder::new();
     nested_inventory::types::register(&mut nested).unwrap();
-    nested.freeze().unwrap();
-    assert_eq!(nested.catalog().unwrap().components, schemas);
+    let nested = nested.freeze().unwrap();
+    assert_eq!(nested.catalog().components, schemas);
 }

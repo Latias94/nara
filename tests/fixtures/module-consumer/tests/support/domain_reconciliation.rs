@@ -23,8 +23,9 @@ use nara_image::{
     prepare_images,
 };
 use nara_reflect::{
-    ComponentRegistry, ComponentRegistryError, ComponentRegistryPlugin, ComponentSchemaCatalog,
-    ComponentSchemaOwnerId, ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistryPlugin,
+    ComponentRegistrySnapshot, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
     ComponentSchemaProviderSourceError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     PersistentComponent, PersistentComponentProvider, component_registry,
     register_schema_provider_for_plugin,
@@ -276,7 +277,9 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
     })
 }
 
-fn register_configuration(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_configuration(
+    registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component::<Configuration>()?;
     Ok(())
 }
@@ -324,8 +327,8 @@ pub fn configuration_entity(world: &World) -> Option<Entity> {
     }
 }
 
-fn registry(world: &World) -> ComponentRegistry {
-    ComponentRegistry::from_snapshot(component_registry(world).unwrap().snapshot().unwrap())
+fn registry(world: &World) -> ComponentRegistrySnapshot {
+    component_registry(world).unwrap().clone()
 }
 
 fn start_domain(world: &mut World) -> Result<(), BevyError> {
@@ -377,7 +380,7 @@ fn update_domain(world: &mut World) {
 
 fn accept(
     domain: &mut Domain,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     control: &Control,
     candidate: SceneDocumentCandidate,
 ) -> bool {
@@ -397,7 +400,7 @@ fn accept(
 fn reconcile(
     world: &mut World,
     domain: &mut Domain,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     control: &Control,
 ) {
     let revision = domain.session.revision();

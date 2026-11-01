@@ -307,7 +307,7 @@ impl EditorProjectSession {
         let opened = PrefabPersistenceHost::open(
             &lane.prefab_root,
             source_binding.clone(),
-            lane.plan.schema_validation().registry(),
+            lane.plan.schema_validation().snapshot(),
         );
         let OpenedPrefabPersistence {
             host,

@@ -22,7 +22,7 @@ use nara_engine::{
     },
     project_workflow::{ProjectCheckErrorKind, ProjectCheckRequest, check_project},
     reflect::{
-        ComponentFieldId, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+        ComponentFieldId, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
         ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponent,
@@ -112,7 +112,7 @@ fn initial_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSo
     Ok(catalog)
 }
 
-fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     types::register(registry)?;
     registry.register_persistent_component_with_codec::<ReferenceFields, _, _>(
         reference_schema(),

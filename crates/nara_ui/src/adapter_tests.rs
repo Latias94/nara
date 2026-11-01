@@ -22,8 +22,9 @@ use nara_input::{
 };
 use nara_reflect::__macro_support::PersistentFieldCodec;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentEncodeContext, ComponentFieldPath, ComponentRegistry,
-    ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentDecodeContext, ComponentEncodeContext, ComponentFieldPath, ComponentRegistryBuilder,
+    ComponentRegistryPlugin, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
@@ -439,10 +440,10 @@ fn place_invalid_button_modal(world: &mut World, root_local: &str, button_local:
     place_ui_tree(world, modal, &[invalid_child]);
 }
 
-fn frozen_ui_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_ui_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     register_ui_components(&mut registry).expect("UI component registration should succeed");
-    registry
+    let registry = registry
         .freeze()
         .expect("UI component registry should freeze");
     registry
@@ -586,8 +587,7 @@ fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
 
 #[test]
 fn image_brush_preserves_complete_products_without_source_database() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let component_id = ComponentTypeId::new("nara.ui.UiVisual");
     let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
     let auxiliary =
@@ -642,7 +642,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
             )
             .unwrap();
         let references = nara_reflect::collect_declared_asset_references(
-            &registry,
+            &snapshot,
             &component_id,
             ComponentSchemaVersion(2),
             &value,
@@ -686,8 +686,7 @@ fn image_brush_preserves_complete_products_without_source_database() {
 
 #[test]
 fn image_brush_binds_actual_scope_and_exports_local_alias_or_known_product() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let component_id = ComponentTypeId::new("nara.ui.UiVisual");
     let scope = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
     let other = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
@@ -834,8 +833,7 @@ fn image_brush_binds_actual_scope_and_exports_local_alias_or_known_product() {
 
 #[test]
 fn image_text_and_border_are_rejected_before_runtime_binding() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let image = crate::codec::image_visual_value(
         &AssetRef::path("panel.png").unwrap(),
         UiColor::rgba(1.0, 1.0, 1.0, 1.0),
@@ -869,8 +867,7 @@ fn image_text_and_border_are_rejected_before_runtime_binding() {
 
 #[test]
 fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let mut world = World::new();
     let mut server = nara_asset::AssetServer::new();
@@ -901,8 +898,7 @@ fn opaque_named_and_external_image_ids_never_acquire_a_persistent_binding() {
 
 #[test]
 fn image_asset_binding_survives_shape_changes_and_clears_on_background_replacement() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let mut server = nara_asset::AssetServer::new();
     let handle = server
@@ -965,8 +961,7 @@ fn image_asset_binding_survives_shape_changes_and_clears_on_background_replaceme
 
 #[test]
 fn long_scoped_image_alias_is_not_limited_by_widget_keys_and_checks_source_kind() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let local = format!("{}.png", "a".repeat(244));
     assert_eq!(local.len(), 248);
@@ -1019,8 +1014,7 @@ fn long_scoped_image_alias_is_not_limited_by_widget_keys_and_checks_source_kind(
 
 #[test]
 fn runtime_image_product_requires_an_existing_correctly_typed_binding() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let id = ComponentTypeId::new("nara.ui.UiVisual");
     let source = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
     let product = AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap();
@@ -1047,8 +1041,7 @@ fn runtime_image_product_requires_an_existing_correctly_typed_binding() {
 
 #[test]
 fn legacy_root_and_defaulted_node_shapes_are_rejected() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
 
     let legacy_root = ComponentValue::map([
         (
@@ -1074,8 +1067,7 @@ fn legacy_root_and_defaulted_node_shapes_are_rejected() {
 
 #[test]
 fn button_visual_roles_round_trip_as_canonical_scene_data() {
-    let registry = frozen_ui_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = frozen_ui_registry();
     let component_id = ComponentTypeId::new("nara.ui.UiButtonVisuals");
     let expected = UiButtonVisuals::new()
         .with_normal_text(UiColorRole::SecondaryText)
@@ -4989,12 +4981,7 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     ]);
     app.configuration()
         .add_systems(nara_app::StartupStage::Scene, move |world: &mut World| {
-            let registry = ComponentRegistry::from_snapshot(
-                nara_reflect::component_registry(world)
-                    .unwrap()
-                    .snapshot()
-                    .unwrap(),
-            );
+            let registry = nara_reflect::component_registry(world).unwrap().clone();
             let expansion = document.expand_prefabs(&registry, &resolver);
             assert!(
                 !expansion.diagnostics.has_errors(),
@@ -5134,12 +5121,7 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
     install_test_surface(app.configuration_world());
     app.configuration()
         .add_systems(nara_app::StartupStage::Scene, |world: &mut World| {
-            let registry = ComponentRegistry::from_snapshot(
-                nara_reflect::component_registry(world)
-                    .unwrap()
-                    .snapshot()
-                    .unwrap(),
-            );
+            let registry = nara_reflect::component_registry(world).unwrap().clone();
             let mut roots = Vec::new();
             let mut buttons = Vec::new();
             for (index, (source, slot)) in [("panel", "one"), ("panel", "two"), ("other", "three")]
@@ -5391,12 +5373,7 @@ fn persistent_rebuild_keeps_keys_but_not_runtime_or_unpresented_behavior_authori
             if applied_step == Some(step) {
                 return;
             }
-            let registry = ComponentRegistry::from_snapshot(
-                nara_reflect::component_registry(world)
-                    .unwrap()
-                    .snapshot()
-                    .unwrap(),
-            );
+            let registry = nara_reflect::component_registry(world).unwrap().clone();
             let candidate = nara_scene::ExpandedSceneCandidate::plain(
                 scene_source_key(if step == 2 { "other" } else { "panel" }),
                 Arc::new(SceneDocument::new(

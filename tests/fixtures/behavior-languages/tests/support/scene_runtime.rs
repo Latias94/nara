@@ -6,8 +6,8 @@ use nara_asset::AssetRef;
 use nara_ecs::{Entity, World, bevy_ecs::world::WorldId};
 use nara_identity::EntityLookup;
 use nara_reflect::{
-    ComponentRegistry, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentTypeId,
-    PersistentComponentSchemaOwnerId,
+    ComponentRegistryBuilder, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+    ComponentTypeId, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     ExpandedSceneCandidate, InMemoryPrefabSourceResolver, Name, PrefabDocument,
@@ -45,16 +45,13 @@ impl Definition {
             None,
         )
         .map_err(|error| error.to_string())?;
-        let mut native = ComponentRegistry::new();
+        let mut native = ComponentRegistryBuilder::new();
         SCENE_COMPONENTS_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut native)
+            .register_into(&mut native)
             .map_err(|error| error.to_string())?;
-        native.freeze().map_err(|error| error.to_string())?;
-        let bindings = SceneComponentBindings::new(
-            native.snapshot().map_err(|error| error.to_string())?,
-            [owner.clone()],
-        )
-        .map_err(|error| error.to_string())?;
+        let native = native.freeze().map_err(|error| error.to_string())?;
+        let bindings = SceneComponentBindings::new(native, [owner.clone()])
+            .map_err(|error| error.to_string())?;
         Ok(Arc::new(Self { owner, bindings }))
     }
 }

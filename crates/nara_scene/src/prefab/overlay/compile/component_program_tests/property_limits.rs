@@ -57,8 +57,8 @@ fn large_value() -> ComponentValue {
     ])
 }
 
-fn large_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+fn large_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("game.overlay-links"),
         ComponentSchemaCatalog::default(),
         None,
@@ -71,8 +71,7 @@ fn large_registry() -> ComponentRegistry {
             |value| Ok(value.0.clone()),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn large_sources() -> InMemoryPrefabSourceResolver {

@@ -34,11 +34,10 @@ fn record_removal(mut world: DeferredWorld<'_>, _context: HookContext) {
     world.resource_mut::<Removals>().0 += 1;
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -92,7 +91,7 @@ fn assert_rejected(report: &SceneSpawnReport, code: &str) {
 
 struct ProjectionFixture {
     world: World,
-    registry: ComponentRegistry,
+    registry: ComponentRegistrySnapshot,
     database: ProjectAssetDatabase,
     projection: SceneProjection,
     id: SceneEntityId,

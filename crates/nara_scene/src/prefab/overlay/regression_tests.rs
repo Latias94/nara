@@ -1157,7 +1157,7 @@ mod expansion {
     use nara_identity::EntityReference;
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-        ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchema,
+        ComponentFieldPath, ComponentFieldSchema, ComponentRegistrySnapshot, ComponentSchema,
         ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
         ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
     };
@@ -1275,10 +1275,12 @@ mod expansion {
         ])
     }
 
-    fn registry_with(schemas: impl IntoIterator<Item = ComponentSchema>) -> ComponentRegistry {
+    fn registry_with(
+        schemas: impl IntoIterator<Item = ComponentSchema>,
+    ) -> ComponentRegistrySnapshot {
         #[derive(nara_ecs::Component)]
         struct Value(ComponentValue);
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         for schema in schemas {
             registry
                 .register_persistent_component_with_codec::<Value, _, _>(
@@ -1288,11 +1290,10 @@ mod expansion {
                 )
                 .unwrap();
         }
-        registry.freeze().unwrap();
-        registry
+        registry.freeze().unwrap()
     }
 
-    fn registry() -> ComponentRegistry {
+    fn registry() -> ComponentRegistrySnapshot {
         registry_with([schema()])
     }
 

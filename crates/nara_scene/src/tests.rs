@@ -32,7 +32,7 @@ use nara_reflect::bevy_reflect;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentDomainError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     PreparedComponentCandidate, Reflect,
 };
@@ -269,7 +269,7 @@ fn scene_diagnostics_redact_legacy_codec_text_and_sensitive_locators() {
 fn native_scene_validation_keeps_distinct_component_domain_codes_and_root_fields() {
     let canary = "qvM7k2p8Nx4J";
     let component = ComponentTypeId::new("nara.test.DomainFailure");
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<TestPosition, _, _>(
             test_component_schema(
@@ -317,7 +317,7 @@ fn native_scene_validation_keeps_distinct_component_domain_codes_and_root_fields
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     for (x, expected_code) in [
         (-1, "demo.cooldown.negative"),
         (-2, "demo.cooldown.disabled"),
@@ -1795,9 +1795,9 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
 
 #[test]
 fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let source = AssetRef::path("prefabs/unit.ron").unwrap();
     let payload = "x".repeat(64 * 1024);
     let payload_bytes = payload.len();
@@ -2229,7 +2229,7 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
 
 #[test]
 fn missing_component_migration_reports_unsupported_version() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         position_type_id(),
         "Position",
@@ -2260,7 +2260,7 @@ fn missing_component_migration_reports_unsupported_version() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("bad"))
         .with_component(
             position_type_id(),
@@ -2560,8 +2560,9 @@ fn scene_instance_allocation_is_world_global_across_explicit_occurrences() {
 
 #[test]
 fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     let document = SceneDocument::from_ordered_roots([]);
     let mut world = World::new();
 
@@ -2943,8 +2944,9 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
 
 #[test]
 fn empty_persistent_set_rejects_event_global_observer_before_target_allocation() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("empty"))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
@@ -3740,9 +3742,9 @@ fn parented_transform_materializes_through_every_entry_point() {
 
 #[test]
 fn inherited_visibility_is_rejected_by_the_shared_scene_preflight() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let flat_document =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("flat"))
             .with_component(
@@ -4704,38 +4706,6 @@ fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
 }
 
 #[test]
-fn export_rejects_a_building_component_registry() {
-    let frozen_registry = test_registry();
-    let entity_id = scene_id("entity");
-    let document =
-        SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity_id)
-            .with_component(position_type_id(), position_record(1))]);
-    let mut world = World::new();
-    let report = crate::spawn_scene(
-        &mut world,
-        &frozen_registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("export_rejects_a_building_component_registry/document"),
-            std::sync::Arc::new((document).clone()),
-        ),
-        &scene_occurrence("export_rejects_a_building_component_registry/report"),
-        None,
-    );
-    assert!(!report.diagnostics.has_errors());
-    let mut building_registry = ComponentRegistry::new();
-    register_test_position(&mut building_registry).unwrap();
-
-    let export = export_scene(&world, &building_registry);
-
-    assert!(export.output().is_none());
-    assert!(
-        export.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.component-registry-not-frozen"
-        })
-    );
-}
-
-#[test]
 fn repeated_scene_spawns_export_with_injective_generated_ids() {
     let registry = test_registry();
     let id = scene_id("enemy");
@@ -5565,9 +5535,9 @@ fn empty_source_patch_canonicalizes_storage_preserves_root_order_and_has_an_empt
 
 #[test]
 fn source_patch_preserves_its_component_payload_and_undo_restores_the_source() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let entity_id = scene_id("named");
     let payload = "exact-source-patch-payload".repeat(128);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
@@ -5912,9 +5882,9 @@ fn patch_json_rejects_unknown_document_and_operation_fields() {
 
 #[test]
 fn scene_component_schemas_expose_scalar_fields() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).expect("component registration should succeed");
-    registry.freeze().expect("component registry should freeze");
+    let registry = registry.freeze().expect("component registry should freeze");
 
     let name_schema = registry
         .schema(&ComponentTypeId::new("nara.scene.Name"))
@@ -5941,8 +5911,8 @@ fn scene_component_schemas_expose_scalar_fields() {
     );
 }
 
-fn coupled_fields_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn coupled_fields_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<TestCoupledFields, _, _>(
             test_component_schema(
@@ -5978,8 +5948,7 @@ fn coupled_fields_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn coupled_fields_entity(horizontal: i64, vertical: i64) -> SceneEntityRecord {
@@ -6009,7 +5978,9 @@ fn coupled_fields_patch(
     }))
 }
 
-fn register_test_position(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_test_position(
+    registry: &mut nara_reflect::ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     let schema = test_component_schema(
         position_type_id(),
         "Position",
@@ -6043,15 +6014,14 @@ fn register_test_position(registry: &mut ComponentRegistry) -> Result<(), Compon
     Ok(())
 }
 
-fn test_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn test_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_test_position(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn deferred_transform_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn deferred_transform_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DeferredTransform, _, _>(
             test_component_schema(
@@ -6075,8 +6045,7 @@ fn deferred_transform_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn deferred_transform_record(value: i64) -> SceneComponentRecord {
@@ -6090,8 +6059,8 @@ fn deferred_transform_type_id() -> ComponentTypeId {
     ComponentTypeId::new("nara.transform.Transform2d")
 }
 
-fn entity_link_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn entity_link_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         entity_link_type_id(),
         "Entity link",
@@ -6120,12 +6089,11 @@ fn entity_link_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn large_data_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn large_data_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         large_data_type_id(),
         "Large data",
@@ -6156,12 +6124,11 @@ fn large_data_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn migrated_entity_link_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn migrated_entity_link_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         entity_link_type_id(),
         "Entity link",
@@ -6206,12 +6173,11 @@ fn migrated_entity_link_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn migrated_position_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn migrated_position_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         position_type_id(),
         "Position",
@@ -6258,12 +6224,11 @@ fn migrated_position_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn test_asset_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn test_asset_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         asset_link_type_id(),
         "Asset link",
@@ -6308,12 +6273,11 @@ fn test_asset_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn alternate_asset_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn alternate_asset_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         asset_link_type_id(),
         "Alternate asset link",
@@ -6336,12 +6300,11 @@ fn alternate_asset_registry() -> ComponentRegistry {
             |_component| Ok(ComponentValue::map([] as [(&str, ComponentValue); 0])),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn deferred_asset_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn deferred_asset_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         asset_link_type_id(),
         "Deferred asset link",
@@ -6379,12 +6342,11 @@ fn deferred_asset_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn broken_export_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn broken_export_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     let schema = test_component_schema(
         broken_export_type_id(),
         "Broken export",
@@ -6406,12 +6368,11 @@ fn broken_export_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn failing_apply_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn failing_apply_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_test_position(&mut registry).unwrap();
     let resolves_asset_schema = test_component_schema(
         apply_resolves_asset_type_id(),
@@ -6491,8 +6452,7 @@ fn failing_apply_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 enum PreparedTestAsset {

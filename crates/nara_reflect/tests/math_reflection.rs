@@ -3,7 +3,7 @@ use std::any::TypeId;
 use nara_core::{Mat3, Vec2, Vec3};
 use nara_ecs::{Component, World};
 use nara_reflect::{
-    ComponentFieldPath, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
+    ComponentFieldPath, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueShape, FromReflect, PartialReflect,
     PersistentComponent, PersistentComponentProvider, Reflect, validate_component_value,
@@ -18,12 +18,12 @@ struct SpatialConfiguration {
 
 #[test]
 fn public_math_types_share_registration_and_dynamic_reflection() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_reflected_type::<SpatialConfiguration>()
         .expect("public math configuration registers through the ordinary reflection API");
-    registry.freeze().expect("reflection registry freezes");
-    let types = registry.type_registry().expect("frozen type registry");
+    let registry = registry.freeze().expect("reflection registry freezes");
+    let types = registry.type_registry();
     for id in [
         TypeId::of::<SpatialConfiguration>(),
         TypeId::of::<Vec2>(),
@@ -103,12 +103,11 @@ fn persistent_vec2_declares_one_closed_numeric_shape_and_keeps_xy_wire_encoding(
         ])
     );
     validate_component_value(&schema, &encoded).unwrap();
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<MotionPath>()
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let mut world = World::new();
     let entity = world.spawn_empty().id();
     snapshot
@@ -177,12 +176,13 @@ fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migrati
     current.components = vec![MotionPath::persistent_component_schema()];
     let owner = ComponentSchemaOwnerId::new("math.motion");
     assert!(matches!(
-        ComponentRegistry::from_owner_catalog_candidate(owner, current.clone(), Some(previous.clone())),
+        ComponentRegistryBuilder::from_owner_catalog_candidate(owner, current.clone(), Some(previous.clone())),
         Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { component_id }) if component_id == id
     ));
     current.components[0].version = ComponentSchemaVersion::new(2).unwrap();
     let mut registry =
-        ComponentRegistry::from_owner_catalog_candidate(owner, current, Some(previous)).unwrap();
+        ComponentRegistryBuilder::from_owner_catalog_candidate(owner, current, Some(previous))
+            .unwrap();
     registry
         .register_native_component_with_codec::<MotionPath, _, _>(
             &id,
@@ -190,10 +190,14 @@ fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migrati
             MotionPath::__encode_persistent_component,
         )
         .unwrap();
+    let candidate_before = registry.catalog_candidate().clone();
+    let failure = registry.freeze().unwrap_err();
+    let (mut registry, error) = failure.into_parts();
     assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::MissingComponentMigrationChain { .. })
+        error,
+        ComponentRegistryError::MissingComponentMigrationChain { .. }
     ));
+    assert_eq!(registry.catalog_candidate(), &candidate_before);
     registry
         .register_component_migration(
             &id,
@@ -202,7 +206,7 @@ fn adopting_closed_vectors_requires_both_an_owner_successor_and_explicit_migrati
             Ok,
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let original = motion_path().__encode_persistent_component().unwrap();
     let migrated = registry
         .migrate_component_value(&id, ComponentSchemaVersion::ONE, &original)

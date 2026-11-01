@@ -241,7 +241,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let sprite = enemy.components.get(&sprite_id).unwrap();
     let references = collect_declared_asset_references(
-        loaded.plan.schema_validation().registry(),
+        loaded.plan.schema_validation().snapshot(),
         &sprite_id,
         sprite.version,
         &sprite.value,

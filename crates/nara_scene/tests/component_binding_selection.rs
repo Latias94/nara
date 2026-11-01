@@ -13,11 +13,11 @@ use nara_ecs::Component;
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-    ComponentSchemaProviderSourceError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
+    ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaOwnerId, ComponentSchemaOwnerSnapshot, ComponentSchemaProviderBindingId,
+    ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
+    PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindingError, SceneComponentBindingLimits,
@@ -74,7 +74,9 @@ fn score_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSour
 #[derive(Component)]
 struct Score(u64);
 
-fn register_score(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_score(
+    registry: &mut nara_reflect::ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry.register_persistent_component_with_codec::<Score, _, _>(
         score_schema(7),
         |value| Ok(Score(value.field_u64("value")?)),
@@ -106,18 +108,18 @@ fn retired_owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 fn native() -> ComponentRegistrySnapshot {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    registry.snapshot().unwrap()
+    registry.freeze().unwrap()
 }
 
 fn empty_native() -> ComponentRegistrySnapshot {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
-    registry.snapshot().unwrap()
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
+    registry.clone()
 }
 
 fn score_entity(name: &str) -> SceneEntityRecord {
@@ -170,7 +172,7 @@ fn retained_witness_does_not_keep_native_codec_captures_alive() {
     let (witness, code_capture) = {
         let calls = Arc::new(AtomicUsize::new(0));
         let weak = Arc::downgrade(&calls);
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_with_codec::<Score, _, _>(
                 score_schema(7),
@@ -186,8 +188,8 @@ fn retained_witness_does_not_keep_native_codec_captures_alive() {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
-        let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), []).unwrap();
+        let registry = registry.freeze().unwrap();
+        let bindings = SceneComponentBindings::new(registry.clone(), []).unwrap();
         let witness = bindings.witness();
         assert!(witness.matches(&bindings));
         assert!(weak.upgrade().is_some());
@@ -213,35 +215,23 @@ fn mixed_fingerprint_reuses_the_native_owner_composition_domain() {
         native_only.composition_fingerprint()
     );
 
-    let mut all_native = ComponentRegistry::new();
-    SCORE_PROVIDER
-        .register_or_validate_into(&mut all_native)
-        .unwrap();
-    all_native.freeze().unwrap();
+    let mut all_native = nara_reflect::ComponentRegistryBuilder::new();
+    SCORE_PROVIDER.register_into(&mut all_native).unwrap();
+    let all_native = all_native.freeze().unwrap();
     let data_only = SceneComponentBindings::new(empty_native(), [score.clone()]).unwrap();
     assert_eq!(
         data_only.composition_fingerprint(),
-        all_native
-            .snapshot()
-            .unwrap()
-            .schema_composition_fingerprint()
-            .unwrap()
+        all_native.clone().schema_composition_fingerprint().unwrap()
     );
-    let mut all_native = ComponentRegistry::new();
-    SCORE_PROVIDER
-        .register_or_validate_into(&mut all_native)
-        .unwrap();
+    let mut all_native = nara_reflect::ComponentRegistryBuilder::new();
+    SCORE_PROVIDER.register_into(&mut all_native).unwrap();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut all_native)
+        .register_into(&mut all_native)
         .unwrap();
-    all_native.freeze().unwrap();
+    let all_native = all_native.freeze().unwrap();
     assert_eq!(
         mixed.composition_fingerprint(),
-        all_native
-            .snapshot()
-            .unwrap()
-            .schema_composition_fingerprint()
-            .unwrap()
+        all_native.clone().schema_composition_fingerprint().unwrap()
     );
     let readmitted = SceneComponentBindings::new(native.clone(), [score_owner()]).unwrap();
     assert_eq!(

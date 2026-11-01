@@ -4,7 +4,7 @@ use nara_core::{ByteLimit, SerdeShapeLimits};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability,
     ComponentCatalogFileError, ComponentCatalogFileLimits, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
+    ComponentFieldSchema, ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId, validate_component_value,
 };
@@ -102,13 +102,13 @@ fn catalog_admission_requires_complete_templates_but_record_decode_keeps_optiona
                 ComponentRegistryError::InvalidComponentAuthoringInitialValue { .. }
             ))
         ));
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         registry
             .register_component_schema(candidate.components[0].clone())
             .unwrap();
         assert!(matches!(
-            registry.freeze(),
-            Err(ComponentRegistryError::InvalidComponentAuthoringInitialValue { .. })
+            registry.freeze().unwrap_err().into_error(),
+            ComponentRegistryError::InvalidComponentAuthoringInitialValue { .. }
         ));
     }
     let mut duplicate = schema().with_authoring_initial_value(initial(10));

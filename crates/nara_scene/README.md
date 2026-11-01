@@ -17,8 +17,9 @@ bevy_ecs = "0.20"
 
 - `nara_scene` owns the canonical scene file candidate, scene component registration, stable scene
   identity, and spawn operation. Enable `serde` to decode canonical scene files.
-- `nara_reflect` supplies the caller-owned `ComponentRegistry`. Register the required component
-  providers and freeze the registry before publishing, validating, or spawning a scene.
+- `nara_reflect` supplies the caller-owned `ComponentRegistryBuilder`. Register the required
+  component providers, then consume the builder with `freeze` to obtain the
+  `ComponentRegistrySnapshot` used to publish, validate, and spawn scenes.
 - `bevy_ecs` supplies the caller-owned `World`. Its version must match the version supported by the
   selected `nara_scene` release.
 

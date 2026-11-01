@@ -1,6 +1,6 @@
 use nara_reflect::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentNumericDomain, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentNumericDomain, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueShape, validate_component_value,
 };
@@ -29,8 +29,10 @@ fn catalog(field: ComponentFieldSchema) -> ComponentSchemaCatalog {
     }
 }
 
-fn admit(catalog: ComponentSchemaCatalog) -> Result<ComponentRegistry, ComponentRegistryError> {
-    ComponentRegistry::from_owner_catalog_candidate(
+fn admit(
+    catalog: ComponentSchemaCatalog,
+) -> Result<ComponentRegistryBuilder, ComponentRegistryError> {
+    ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
         catalog,
         None,
@@ -131,7 +133,7 @@ fn numeric_domain_addition_change_and_removal_require_a_component_version_bump()
         let mut successor = ComponentSchemaCatalog::successor_of(&predecessor).unwrap();
         successor.components = catalog(field(ComponentValueKind::U64, after)).components;
         assert!(matches!(
-            ComponentRegistry::from_owner_catalog_candidate(
+            ComponentRegistryBuilder::from_owner_catalog_candidate(
                 ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
                 successor.clone(),
                 Some(predecessor.clone()),
@@ -139,7 +141,7 @@ fn numeric_domain_addition_change_and_removal_require_a_component_version_bump()
             Err(ComponentRegistryError::ComponentSchemaChangedWithoutVersionBump { .. })
         ));
         successor.components[0].version = ComponentSchemaVersion::new(2).unwrap();
-        ComponentRegistry::from_owner_catalog_candidate(
+        ComponentRegistryBuilder::from_owner_catalog_candidate(
             ComponentSchemaOwnerId::new("nara.test.numeric-owner"),
             successor,
             Some(predecessor),

@@ -19,9 +19,9 @@ use nara_reflect::__private::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentEncodeContext, ComponentEntityReferenceRewriteError,
-    ComponentRegistry, ComponentRegistryAuthorityError, ComponentSchema, ComponentValue,
+    ComponentRegistryAuthorityError, ComponentRegistrySnapshot, ComponentSchema, ComponentValue,
     ComponentValueMaterializationLimits, collect_declared_asset_references_from_schema_with_limits,
-    component_registry, validate_component_registry_authority,
+    component_registry, component_registry_is_installed, validate_component_registry_authority,
     validate_component_value_with_limits,
 };
 
@@ -143,14 +143,14 @@ enum ExportReferenceResolutionError {
 /// This is distinct from source Save and requires the exact installed native definition in a
 /// managed World. Independent preview publication does not make another registry the managed
 /// export authority. Any encountered data-family member refuses the complete output.
-pub fn export_scene(world: &World, registry: &ComponentRegistry) -> SceneExportReport {
+pub fn export_scene(world: &World, registry: &ComponentRegistrySnapshot) -> SceneExportReport {
     export_scene_with_options(world, registry, SceneExportOptions::default())
 }
 
 #[must_use]
 pub fn export_scene_with_options(
     world: &World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     options: SceneExportOptions,
 ) -> SceneExportReport {
     export_scene_selected(world, registry, None, options, None)
@@ -161,7 +161,7 @@ pub fn export_scene_with_options(
 #[must_use]
 pub fn export_scene_with_asset_resolution(
     world: &World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     options: SceneExportOptions,
     asset_resolution: AssetReferenceResolver<'_>,
 ) -> SceneExportReport {
@@ -186,7 +186,7 @@ impl SceneComponentBindings {
     ) -> SceneExportReport {
         export_scene_selected(
             world,
-            self.native_registry(),
+            self.native_snapshot(),
             Some(self),
             options,
             asset_resolution,
@@ -196,7 +196,7 @@ impl SceneComponentBindings {
 
 fn export_scene_selected(
     world: &World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     bindings: Option<&SceneComponentBindings>,
     options: SceneExportOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -206,13 +206,12 @@ fn export_scene_selected(
     let mut exported_value_bytes = 0_usize;
     if bindings.is_none() {
         let native_authority = match (
+            component_registry_is_installed(world),
             component_registry(world),
             validate_component_registry_authority(world),
         ) {
-            (None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => true,
-            (Some(installed), Ok(())) => registry
-                .snapshot()
-                .is_ok_and(|selected| installed.shares_snapshot(&selected)),
+            (false, None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => true,
+            (true, Some(installed), Ok(())) => installed.ptr_eq(registry),
             _ => false,
         };
         if !native_authority {
@@ -227,13 +226,14 @@ fn export_scene_selected(
         }
     }
     if let Some(bindings) = bindings {
-        let standalone = component_registry(world).is_none()
+        let standalone = !component_registry_is_installed(world)
+            && component_registry(world).is_none()
             && validate_component_registry_authority(world)
                 == Err(ComponentRegistryAuthorityError::MissingAuthority);
         let native_matches = standalone
             || (validate_component_registry_authority(world).is_ok()
                 && component_registry(world)
-                    .is_some_and(|registry| registry.shares_snapshot(bindings.native_snapshot())));
+                    .is_some_and(|registry| registry.ptr_eq(bindings.native_snapshot())));
         let selection_matches = match (
             scene_component_bindings(world),
             validate_scene_component_bindings_authority(world),
@@ -253,23 +253,9 @@ fn export_scene_selected(
             };
         }
     }
-    let execution = match registry.snapshot() {
-        Ok(snapshot) => snapshot,
-        Err(_) => {
-            diagnostics.push(diagnostic_error(
-                "scene.component-registry-not-frozen",
-                "Component registry must be frozen before scene publication",
-            ));
-            return SceneExportReport {
-                output: None,
-                diagnostics,
-            };
-        }
-    };
+    let execution = registry;
     let schemas = execution
-        .catalog()
-        .components
-        .iter()
+        .schemas()
         .filter(|schema| schema.has_capability(ComponentCapability::Scene))
         .collect::<Vec<_>>();
     let Some(domain) = world.get_resource::<WorldIdentityDomain>() else {

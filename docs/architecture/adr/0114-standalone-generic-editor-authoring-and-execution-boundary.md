@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-18
-**Last Revised**: 2026-10-28
+**Last Revised**: 2026-11-01
 **Owner**: Private `nara-editor`, project Host, `nara_project`, `nara_reflect`, `nara_scene`,
 `nara_tooling`, and project workflow owners
 **Refines**: [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md) and
@@ -117,8 +117,8 @@ completeness, native binding, executable composition, or publication authority. 
 The Authoring transaction retains exact bundle fingerprint, owner lineage, project-root binding,
 source revision, open-attempt generation, aggregate budget use, and diagnostic generation. Every
 dependency is read through the same exact root capability rather than validated and later reopened
-by ambient name. It never creates a `ComponentRegistry`, calls a native codec, constructs an ECS
-`World`, or publishes runtime content.
+by ambient name. It never constructs or admits a native `ComponentRegistryBuilder`, calls a native
+codec, constructs an ECS `World`, or publishes runtime content.
 
 `AuthoringProjectSnapshot` is the immutable source authority for the installed workspace,
 persistence, Scene View, UI Canvas, and prepared authoring assets. It owns the startup Scene and

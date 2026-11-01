@@ -15,10 +15,10 @@ use nara::{
 };
 
 fn main() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).expect("scene components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
-    registry
+    let registry = registry
         .freeze()
         .expect("component registry should freeze before scene expansion");
 
@@ -125,7 +125,7 @@ fn main() {
 
 fn expand(
     scene: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     resolver: &InMemoryPrefabSourceResolver,
 ) -> ExpandedSceneCandidate {
     let expansion = scene.expand_prefabs(registry, resolver);

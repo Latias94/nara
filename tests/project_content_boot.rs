@@ -1149,7 +1149,7 @@ fn ui_visual_asset_reference_alone_enters_the_startup_content_closure() {
         asset::{AssetPathScope, AssetServer, AssetSourcePath},
         ecs::World,
         image::ImageAsset,
-        reflect::{ComponentEncodeContext, ComponentRegistry, ComponentTypeId},
+        reflect::{ComponentEncodeContext, ComponentRegistrySnapshot, ComponentTypeId},
         ui::{UiColor, UiLayer, UiNode, UiRoot, UiStyle, UiVisual},
     };
 
@@ -1177,7 +1177,7 @@ requested = ["runtime-2d", "runtime-ui"]
     )
     .unwrap();
     let (candidate, plan, root) = project.candidate_plan_and_root();
-    let registry = plan.schema_validation().registry();
+    let registry = plan.schema_validation().snapshot();
     let mut world = World::new();
     let mut server = AssetServer::new();
     let handle = server
@@ -1234,14 +1234,14 @@ requested = ["runtime-2d", "runtime-ui"]
     }));
 
     fn encoded_component(
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         world: &World,
         entity: nara::ecs::Entity,
         component: &str,
     ) -> SceneComponentRecord {
         let component = ComponentTypeId::new(component);
         let schema = registry.schema(&component).unwrap();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = registry.clone();
         let scope = AssetPathScope::under(AssetSourcePath::new("assets").unwrap());
         let context = ComponentEncodeContext::new().with_asset_path_scope(&scope);
         let value = snapshot

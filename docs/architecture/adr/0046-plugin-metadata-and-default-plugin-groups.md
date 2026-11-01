@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-01 (explicit render capture and policy composition)
+**Last Revised**: 2026-11-01 (render policy composition and admitted Schema ownership)
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
@@ -139,9 +139,10 @@ The plugin metadata contract is:
 - Schema-contributing declarations name stable provider IDs. Root product resolution binds the
   selected IDs to exact typed provider definitions with an explicit stable versioned native
   binding ID, rejects divergent bindings or multiple distinct provider definitions for one durable
-  schema owner, registers them into a scratch `ComponentRegistry`, and freezes that registry before
-  publishing `SchemaValidationInput`. A `RuntimePlan` retains the sorted provider IDs and catalog
-  fingerprint without retaining an App, World, native authority, or live plugin instance.
+  schema owner, registers them into a scratch `ComponentRegistryBuilder`, and consumes that builder
+  to admit the immutable snapshot before publishing `SchemaValidationInput`. A `RuntimePlan`
+  retains the sorted provider IDs and catalog fingerprint without retaining an App, World, native
+  authority, or live plugin instance.
 - Multiple plugin declarations may select the same provider. When `ComponentRegistryPlugin`
   publishes runtime schema authority, the union of the final installed declarations' provider IDs
   must exactly match actual provider receipts before freezing. This applies to direct Apps and

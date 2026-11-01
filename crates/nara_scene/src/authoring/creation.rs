@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use nara_asset::AssetReferenceResolver;
-use nara_reflect::{ComponentRegistry, ComponentTypeId};
+use nara_reflect::{ComponentRegistrySnapshot, ComponentTypeId};
 
 use super::{
     PrefabAuthoringSession, SceneAuthoringRevision, SceneAuthoringSession, history_error_report,
@@ -50,7 +50,7 @@ macro_rules! source_creation {
             pub fn create_entity_with_registry(
                 &mut self,
                 base_revision: SceneAuthoringRevision,
-                registry: &ComponentRegistry,
+                registry: &ComponentRegistrySnapshot,
                 placement: ScenePlacement,
                 components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
             ) -> Result<CreatedSourceEntity, ScenePatchReport> {
@@ -64,7 +64,7 @@ macro_rules! source_creation {
             pub fn create_entity_with_asset_resolution(
                 &mut self,
                 base_revision: SceneAuthoringRevision,
-                registry: &ComponentRegistry,
+                registry: &ComponentRegistrySnapshot,
                 asset_resolution: AssetReferenceResolver<'_>,
                 placement: ScenePlacement,
                 components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
@@ -81,7 +81,7 @@ macro_rules! source_creation {
             fn create_native_entity(
                 &mut self,
                 base_revision: SceneAuthoringRevision,
-                registry: &ComponentRegistry,
+                registry: &ComponentRegistrySnapshot,
                 asset_resolution: Option<AssetReferenceResolver<'_>>,
                 placement: ScenePlacement,
                 components: BTreeMap<ComponentTypeId, SceneComponentRecord>,

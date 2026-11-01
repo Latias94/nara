@@ -158,7 +158,7 @@ impl Fixture {
             .unwrap()
             .plan
             .schema_validation()
-            .registry();
+            .snapshot();
         match kind {
             EditorDocumentKind::Scene => {
                 fs::write(
@@ -270,7 +270,7 @@ impl Fixture {
             .unwrap()
             .plan
             .schema_validation()
-            .registry();
+            .snapshot();
         match editor.capture_persistence_lane(document).unwrap() {
             PersistenceLane::Scene(mut lane) => {
                 let directory = self

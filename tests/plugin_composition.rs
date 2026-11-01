@@ -26,7 +26,7 @@ use nara::{
         CompositionError, RuntimePlanError, ingest_project_manifest, resolve_product_recipe,
     },
     reflect::{
-        ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
+        ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
         ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId,
@@ -599,20 +599,12 @@ impl Plugin for CountedSchemaProviderPlugin {
         &self,
         context: &nara::app::PluginPreflightContext<'_>,
     ) -> Result<(), PluginError> {
-        let registry = nara::reflect::registry_for_plugin_preflight(
+        nara::reflect::validate_schema_provider_for_plugin(
             context,
             TEST_COUNTED_SCHEMA_PLUGIN_ID,
             TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        counted_schema_provider()
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TEST_COUNTED_SCHEMA_PLUGIN_ID,
-                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
+            &counted_schema_provider(),
+        )
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
@@ -669,20 +661,12 @@ impl Plugin for ConfiguredSchemaProviderPlugin {
         &self,
         context: &nara::app::PluginPreflightContext<'_>,
     ) -> Result<(), PluginError> {
-        let registry = nara::reflect::registry_for_plugin_preflight(
+        nara::reflect::validate_schema_provider_for_plugin(
             context,
             TEST_CONFIGURED_SCHEMA_PLUGIN_ID,
             TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        counted_schema_provider()
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TEST_CONFIGURED_SCHEMA_PLUGIN_ID,
-                    TEST_COUNTED_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
+            &counted_schema_provider(),
+        )
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
@@ -713,18 +697,12 @@ impl Plugin for ReceiptValidatingSchemaProviderPlugin {
         &self,
         context: &nara::app::PluginPreflightContext<'_>,
     ) -> Result<(), PluginError> {
-        let registry = nara::reflect::registry_for_plugin_preflight(
+        nara::reflect::validate_schema_provider_for_plugin(
             context,
             TEST_SCHEMA_PLUGIN_ID,
             TEST_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        self.provider.preflight(registry).map_err(|error| {
-            PluginError::component_registration(
-                TEST_SCHEMA_PLUGIN_ID,
-                TEST_SCHEMA_PROVIDER_ID.as_str(),
-                error,
-            )
-        })
+            &self.provider,
+        )
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
@@ -899,11 +877,7 @@ fn schema_contribution_binds_provider_once_with_direct_and_file_backed_parity() 
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     let file_registry = nara::reflect::component_registry(file_app.world()).unwrap();
-    let file_fingerprint = file_registry
-        .snapshot()
-        .unwrap()
-        .schema_composition_fingerprint()
-        .unwrap();
+    let file_fingerprint = file_registry.schema_composition_fingerprint().unwrap();
 
     COUNTED_PROVIDER_VALIDATIONS.store(0, Ordering::SeqCst);
     COUNTED_PROVIDER_REGISTRATIONS.store(0, Ordering::SeqCst);
@@ -916,11 +890,7 @@ fn schema_contribution_binds_provider_once_with_direct_and_file_backed_parity() 
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     let direct_registry = nara::reflect::component_registry(direct_app.world()).unwrap();
     assert_eq!(
-        direct_registry
-            .snapshot()
-            .unwrap()
-            .schema_composition_fingerprint()
-            .unwrap(),
+        direct_registry.schema_composition_fingerprint().unwrap(),
         file_fingerprint
     );
     assert_eq!(
@@ -1148,17 +1118,13 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
 
     let app = first.plugin_plan().instantiate().unwrap();
     let runtime_registry = nara::reflect::component_registry(app.world()).unwrap();
-    let runtime_fingerprint = runtime_registry
-        .snapshot()
-        .unwrap()
-        .schema_composition_fingerprint()
-        .unwrap();
+    let runtime_fingerprint = runtime_registry.schema_composition_fingerprint().unwrap();
     assert_eq!(
         runtime_fingerprint,
         first.schema_validation().composition_fingerprint()
     );
     assert!(
-        runtime_registry.shares_snapshot(first.schema_validation().snapshot()),
+        runtime_registry.ptr_eq(first.schema_validation().snapshot()),
         "the plan and instantiated World must share one executable behavior snapshot"
     );
 
@@ -1170,10 +1136,7 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );
     let direct_app = direct_app.seal().unwrap();
-    let raw_snapshot = nara::reflect::component_registry(direct_app.world())
-        .unwrap()
-        .snapshot()
-        .unwrap();
+    let raw_snapshot = nara::reflect::component_registry(direct_app.world()).unwrap();
     assert_eq!(
         raw_snapshot.schema_composition_fingerprint().unwrap(),
         first.schema_validation().composition_fingerprint()
@@ -1233,7 +1196,7 @@ fn omitted_known_owner_component_rejects_before_world_mutation() {
 
     let report = nara::scene::spawn_scene(
         &mut world,
-        plan.schema_validation().registry(),
+        plan.schema_validation().snapshot(),
         &nara::scene::ExpandedSceneCandidate::plain(
             scene_source_key(
                 "omitted_known_owner_component_rejects_before_world_mutation/document",
@@ -1287,7 +1250,7 @@ fn file_backed_schema_provider_callbacks_run_once_in_the_private_candidate() {
 
     let app = plan.plugin_plan().instantiate().unwrap();
     let registry = nara::reflect::component_registry(app.world()).unwrap();
-    assert!(registry.shares_snapshot(plan.schema_validation().snapshot()));
+    assert!(registry.ptr_eq(plan.schema_validation().snapshot()));
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
 }
@@ -1403,10 +1366,15 @@ fn code_first_schema_provider_builds_and_freezes_once_without_a_host() {
     app.add_plugins(CountedSchemaProviderPlugin).unwrap();
     assert_eq!(COUNTED_PROVIDER_VALIDATIONS.load(Ordering::SeqCst), 1);
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
+    assert!(nara::reflect::component_registry(app.world()).is_none());
 
     let app = app.seal().unwrap();
     let registry = nara::reflect::component_registry(app.world()).unwrap();
-    assert!(registry.is_frozen());
+    assert!(
+        registry
+            .provider_receipt(TEST_COUNTED_SCHEMA_PROVIDER_ID)
+            .is_some()
+    );
     assert_eq!(COUNTED_PROVIDER_REGISTRATIONS.load(Ordering::SeqCst), 1);
     nara::reflect::validate_component_registry_authority(app.world()).unwrap();
 }
@@ -1454,13 +1422,13 @@ fn validation_rejection_and_panic_have_direct_and_file_backed_parity() {
     for (validation, panics, configuration) in [
         (
             reject_counted_schema_provider_validation
-                as fn(&ComponentRegistry) -> Result<(), ComponentRegistryError>,
+                as fn(&ComponentRegistryBuilder) -> Result<(), ComponentRegistryError>,
             false,
             b"reject".as_slice(),
         ),
         (
             panic_counted_schema_provider_validation
-                as fn(&ComponentRegistry) -> Result<(), ComponentRegistryError>,
+                as fn(&ComponentRegistryBuilder) -> Result<(), ComponentRegistryError>,
             true,
             b"panic".as_slice(),
         ),
@@ -2222,7 +2190,9 @@ fn schema_provider_callback_rejection_preserves_the_composition_phase() {
         resolve_runtime_plan(&candidate, request, providers).unwrap_err(),
         RuntimePlanError::Composition(CompositionError::SchemaProviderRejected {
             provider: TEST_SCHEMA_PROVIDER_ID,
-            source: Box::new(ComponentRegistryError::Frozen),
+            source: Box::new(ComponentRegistryError::UnknownComponentId(
+                ComponentTypeId::new("test.RejectedSchemaProvider",)
+            )),
         })
     );
 }
@@ -2995,7 +2965,7 @@ fn overlapping_product_groups_accept_atomic_type_directed_edits() {
 }
 
 fn register_empty_schema_provider(
-    _registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     Ok(())
 }
@@ -3026,28 +2996,30 @@ fn alternate_counted_schema_provider() -> ComponentSchemaProviderDefinition {
 }
 
 fn counted_schema_provider_validation(
-    _registry: &ComponentRegistry,
+    _registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
     Ok(())
 }
 
 fn reject_counted_schema_provider_validation(
-    _registry: &ComponentRegistry,
+    _registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
-    Err(ComponentRegistryError::Frozen)
+    Err(ComponentRegistryError::UnknownComponentId(
+        ComponentTypeId::new("test.RejectedSchemaProvider"),
+    ))
 }
 
 fn panic_counted_schema_provider_validation(
-    _registry: &ComponentRegistry,
+    _registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     COUNTED_PROVIDER_VALIDATIONS.fetch_add(1, Ordering::SeqCst);
     panic!("schema provider validation panic")
 }
 
 fn counted_schema_provider_registration(
-    _registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     COUNTED_PROVIDER_REGISTRATIONS.fetch_add(1, Ordering::SeqCst);
     Ok(())
@@ -3069,24 +3041,27 @@ fn plugin_error_contains_receipt_rejection(error: &PluginError) -> bool {
 }
 
 fn register_second_empty_schema_provider(
-    registry: &mut ComponentRegistry,
+    _registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
-    if registry.is_frozen() {
-        return Err(ComponentRegistryError::Frozen);
-    }
     Ok(())
 }
 
-fn reject_schema_provider(_registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
-    Err(ComponentRegistryError::Frozen)
+fn reject_schema_provider(
+    _registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
+    Err(ComponentRegistryError::UnknownComponentId(
+        ComponentTypeId::new("test.RejectedSchemaProvider"),
+    ))
 }
 
-fn panic_schema_provider(_registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn panic_schema_provider(
+    _registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     panic!("schema provider probe")
 }
 
 fn register_unbound_component_schema(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     registry
         .register_component_schema(ComponentSchema::new(

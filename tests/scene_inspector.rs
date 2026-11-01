@@ -235,29 +235,6 @@ fn inspector_model_omits_components_without_observation_eligibility() {
 }
 
 #[test]
-fn inspector_model_does_not_project_an_unfrozen_registry_candidate() {
-    let registry = building_test_registry();
-    let player = scene_id("player");
-    let session = SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
-        player.clone(),
-        "Player",
-    )]));
-    let inspector = SceneInspectorState::new();
-
-    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
-
-    assert!(model.diagnostics.has_errors());
-    assert_eq!(model.entities[0].inspectable_component_count, 0);
-    assert!(
-        model
-            .selected_entity_view
-            .expect("selected entity should retain its structural view")
-            .components
-            .is_empty()
-    );
-}
-
-#[test]
 fn inspector_read_only_field_command_is_failure_atomic() {
     let registry = visibility_registry();
     let player = scene_id("player");
@@ -500,14 +477,13 @@ fn inspector_migrates_legacy_component_for_display_and_atomic_edit() {
     assert_eq!(session.history_status().undo_depth, 0);
 }
 
-fn test_registry() -> ComponentRegistry {
-    let mut registry = building_test_registry();
-    registry.freeze().unwrap();
-    registry
+fn test_registry() -> ComponentRegistrySnapshot {
+    let registry = building_test_registry();
+    registry.freeze().unwrap()
 }
 
-fn default_inspector_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn default_inspector_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let component = ComponentTypeId::new("nara.test.DefaultInspectorLabel");
     let mut text = ComponentFieldSchema::required(
         ComponentFieldId::new("text"),
@@ -539,12 +515,11 @@ fn default_inspector_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn building_test_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn building_test_registry() -> ComponentRegistryBuilder {
+    let mut registry = ComponentRegistryBuilder::new();
     let label_id = label_type_id();
     let schema = ComponentSchema::new(label_id, "Label", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -590,8 +565,8 @@ fn building_test_registry() -> ComponentRegistry {
     registry
 }
 
-fn visibility_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn visibility_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let visible_id = label_type_id();
     registry
         .register_persistent_component_with_codec::<TestLabel, _, _>(
@@ -648,12 +623,11 @@ fn visibility_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn migrating_position_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn migrating_position_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<MigratingPosition, _, _>(
             ComponentSchema::new(
@@ -699,8 +673,7 @@ fn migrating_position_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn labeled_entity(id: SceneEntityId, label: &str) -> SceneEntityRecord {

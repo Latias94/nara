@@ -7,8 +7,8 @@ use nara::{
     },
     identity::{EntityLookup, WorldIdentityDomain},
     prelude::{
-        Component, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        PersistentComponent, Resource, World,
+        Component, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, PersistentComponent, Resource, World,
     },
     reflect::{
         ComponentRegistryError, PersistentApplyRejection, PersistentLifecycleEvent,
@@ -101,8 +101,8 @@ fn component_record(version: ComponentSchemaVersion, value: i64) -> SceneCompone
     )
 }
 
-fn frozen_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component::<CompositionProbe>()
         .unwrap();
@@ -114,8 +114,7 @@ fn frozen_registry() -> ComponentRegistry {
             Ok,
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn record(id: &SceneEntityId, version: ComponentSchemaVersion, value: i64) -> SceneEntityRecord {
@@ -137,7 +136,7 @@ fn resolved_entity(
 
 #[test]
 fn provider_validation_rejects_implicit_composition_but_runtime_ecs_keeps_bevy_behavior() {
-    let registry = ComponentRegistry::new();
+    let registry = ComponentRegistryBuilder::new();
 
     assert!(matches!(
         registry.validate_persistent_component::<RequiredCompositionProbe>(),
@@ -261,7 +260,7 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
 
     let mut direct_world = World::new();
     let direct_entity = direct_world.spawn_empty().id();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     snapshot
         .preflight_component(
             &component_id(),
@@ -385,7 +384,7 @@ fn late_required_component_metadata_rejects_public_apply_before_persistent_mutat
     let mut direct_world = World::new();
     let target = direct_world.spawn_empty().id();
     direct_world.register_required_components::<CompositionProbe, ImplicitDependency>();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let prepared = snapshot
         .preflight_component(
             &component_id(),
@@ -443,7 +442,7 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
     world.entity_mut(entity).remove::<CompositionProbe>();
     assert_eq!(world.resource::<HookCanary>().0, 1);
 
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let prepared = snapshot
         .preflight_component(
             &component_id(),

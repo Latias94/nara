@@ -6,7 +6,7 @@ use nara_diagnostic::{DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::World;
 use nara_hierarchy::HierarchyRoots;
 use nara_identity::WorldIdentityDomain;
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     PrefabAddition, PrefabDocument, PrefabEntityTarget, PrefabExpansionBudgetKind,
     PrefabExpansionLimits, PrefabExpansionOptions, PrefabInstance, PrefabOverlay, PrefabPlacement,
@@ -20,9 +20,10 @@ fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+fn registry() -> ComponentRegistrySnapshot {
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     registry
 }
 

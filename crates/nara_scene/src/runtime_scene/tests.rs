@@ -13,10 +13,10 @@ use nara_asset::{
 use nara_core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape, EntityReference, PersistentComponentSchemaOwnerId,
-    encode_asset_reference_value,
+    ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentShapeMember, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueShape, EntityReference,
+    PersistentComponentSchemaOwnerId, encode_asset_reference_value,
 };
 
 use super::*;
@@ -96,8 +96,7 @@ fn root_schema(name: &str, shape: ComponentValueShape) -> ComponentSchema {
 }
 
 fn bindings() -> SceneComponentBindings {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let asset_shape = ComponentValueShape::record_members([ComponentShapeMember::new(
         "items",
         ComponentValueShape::list(ComponentValueShape::map(ComponentValueShape::optional(
@@ -180,7 +179,7 @@ fn bindings() -> SceneComponentBindings {
         None,
     )
     .unwrap();
-    SceneComponentBindings::new(registry.snapshot().unwrap(), [owner]).unwrap()
+    SceneComponentBindings::new(registry.clone(), [owner]).unwrap()
 }
 
 fn record(value: ComponentValue) -> SceneComponentRecord {
@@ -990,9 +989,8 @@ fn admission_refuses_current_schema_owner_shape_defaults_and_surviving_reference
         }
         assert!(admit_json(&invalid, &bindings).is_err(), "case {mutate}");
     }
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
-    let no_data = SceneComponentBindings::new(registry.snapshot().unwrap(), []).unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+    let no_data = SceneComponentBindings::new(registry.clone(), []).unwrap();
     assert!(admit_json(&original, &no_data).is_err());
 }
 
@@ -1216,7 +1214,7 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
     struct Counted;
     let calls = Arc::new(AtomicUsize::new(0));
     let decode_calls = Arc::clone(&calls);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<Counted, _, _>(
             root_schema(
@@ -1230,8 +1228,8 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
             |_| Ok(ComponentValue::U64(7)),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), []).unwrap();
+    let registry = registry.freeze().unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), []).unwrap();
     let input = plain(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
         id("local"),
     )

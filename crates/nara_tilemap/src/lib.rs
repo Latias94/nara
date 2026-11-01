@@ -16,7 +16,7 @@ use nara_image::ImageAsset;
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_reflect::{
     ComponentApplyContext, ComponentCapability, ComponentCodecError, ComponentDecodeContext,
-    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistry,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentRegistryError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
@@ -567,16 +567,12 @@ impl Plugin for TilemapPlugin {
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.tilemap.Tilemap");
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             TILEMAP_PLUGIN_ID,
             component_id.as_str(),
-        )?;
-        TILEMAP_SCHEMA_PROVIDER
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(TILEMAP_PLUGIN_ID, component_id.as_str(), error)
-            })
+            &TILEMAP_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -592,7 +588,7 @@ impl Plugin for TilemapPlugin {
 }
 
 pub fn register_tilemap_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_tilemap_components(registry)?;
     registry.register_persistent_component_codec_with_context::<Tilemap, _, _>(
@@ -692,7 +688,9 @@ fn tilemap_schema() -> ComponentSchema {
     .with_fields(tilemap_fields())
 }
 
-fn validate_tilemap_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn validate_tilemap_components(
+    registry: &ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry
         .validate_component_registration::<Tilemap>(&ComponentTypeId::new("nara.tilemap.Tilemap"))
 }
@@ -1101,12 +1099,12 @@ mod tests {
         AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
         ProjectAssetDatabase, StableAssetId,
     };
-    use nara_reflect::ComponentDecodeContext;
+    use nara_reflect::{ComponentDecodeContext, ComponentRegistrySnapshot};
 
-    fn frozen_tilemap_registry() -> ComponentRegistry {
-        let mut registry = ComponentRegistry::new();
+    fn frozen_tilemap_registry() -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
         register_tilemap_components(&mut registry).expect("component registration should succeed");
-        registry.freeze().expect("component registry should freeze");
+        let registry = registry.freeze().expect("component registry should freeze");
         registry
     }
 
@@ -1211,8 +1209,7 @@ mod tests {
 
     #[test]
     fn tilemap_codec_preserves_y_sort_anchor_and_explicit_group() {
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         let mut world = World::new();
         let original = Tilemap::new(Vec2::ONE)
             .with_layer(3)
@@ -1235,8 +1232,7 @@ mod tests {
 
     #[test]
     fn tilemap_codec_rejects_duplicate_cell_coordinates() {
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         let value = tilemap_value_with_cells(
             Vec2::new(16.0, 16.0),
             vec![tile_cell_value(2, 3, 1), tile_cell_value(2, 3, 2)],
@@ -1253,8 +1249,7 @@ mod tests {
 
     #[test]
     fn tilemap_codec_rejects_non_positive_tile_size() {
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         for (width, height, expected_field) in [
             (0.0, 16.0, "tile_size.x"),
             (-1.0, 16.0, "tile_size.x"),
@@ -1309,8 +1304,7 @@ mod tests {
     fn tilemap_codec_resolves_stable_and_primary_product_tileset_refs_during_preflight() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "tilesets/terrain.ron");
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         for tileset in [
             AssetRef::StableId(stable_id),
             AssetRef::product(AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap()),
@@ -1352,8 +1346,7 @@ mod tests {
             stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f"),
             "game/art/terrain.ron",
         );
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         for with_catalogue in [false, true] {
             let mut context = ComponentDecodeContext::new().with_asset_path_scope(&scope);
             if with_catalogue {
@@ -1410,8 +1403,7 @@ mod tests {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let tileset =
             AssetRef::product(AssetProductRef::new(source, ImportedProductId::PRIMARY).unwrap());
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
 
         let result =
             snapshot.preflight_component(&tilemap_type_id(), &tilemap_value(tileset.clone()));
@@ -1433,8 +1425,7 @@ mod tests {
         let reference = AssetProductRef::new(source, product).unwrap();
         let tileset = AssetRef::product(reference);
         let database = test_database(source, "tilesets/terrain.ron");
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
 
         for with_server in [false, true] {
             let mut asset_server = AssetServer::new();
@@ -1467,8 +1458,7 @@ mod tests {
         let source = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let auxiliary =
             ImportedProductId::parse_subproduct("011a8cc0-343a-4b95-8adb-3aa6d81977ed").unwrap();
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
         for selection in [ImportedProductId::PRIMARY, auxiliary] {
             let reference = AssetProductRef::new(source, selection).unwrap();
             let mut server = AssetServer::new();
@@ -1857,8 +1847,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
 
         let result = snapshot.preflight_component_with_context(
             &tilemap_type_id(),
@@ -1892,8 +1881,7 @@ mod tests {
         let mut asset_server = AssetServer::new();
         let mut context = ComponentDecodeContext::with_asset_server(&mut asset_server)
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
 
         let result = snapshot.preflight_component_with_context(
             &tilemap_type_id(),
@@ -1914,8 +1902,7 @@ mod tests {
         let database = test_database(stable_id, "tilesets/terrain.ron");
         let mut context = ComponentDecodeContext::new()
             .with_asset_resolution(database.resolver(&nara_asset::AssetPathScope::ROOT));
-        let registry = frozen_tilemap_registry();
-        let snapshot = registry.snapshot().unwrap();
+        let snapshot = frozen_tilemap_registry();
 
         let result = snapshot.preflight_component_with_context(
             &tilemap_type_id(),

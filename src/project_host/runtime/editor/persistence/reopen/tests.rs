@@ -5,7 +5,7 @@ use std::{
 };
 
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
-use nara_reflect::ComponentRegistry;
+use nara_reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot};
 use nara_scene::{SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord};
 use nara_tasks::TaskPoolConfig;
 use nara_tooling::EditorWorkspace;
@@ -18,7 +18,7 @@ struct ReopenFixture {
     directory: PathBuf,
     original: Vec<u8>,
     host: RetainedHost<ScenePersistenceHost>,
-    registry: ComponentRegistry,
+    registry: ComponentRegistrySnapshot,
     workspace: EditorWorkspace,
     document: EditorDocumentId,
 }
@@ -41,8 +41,8 @@ impl ReopenFixture {
             HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new();
+        let registry = registry.freeze().unwrap();
         let host =
             ScenePersistenceHost::open(&directory_capability, "current.scene.json", &registry)
                 .unwrap()

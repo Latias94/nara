@@ -63,7 +63,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
             },
         ]);
         let report =
-            patch.apply_to_scene(&mut document, loaded.plan.schema_validation().registry());
+            patch.apply_to_scene(&mut document, loaded.plan.schema_validation().snapshot());
         assert!(report.applied, "typed prefab patch must apply: {report:#?}");
 
         let edited = PrefabDocument::new(document.roots, document.entities);

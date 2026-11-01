@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-11-01
 **Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze; 2026-10-24 by
 R5a for scoped Schema-relative property selectors; 2026-10-27 for caller-owned property value budgets
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0045: Component
@@ -24,8 +24,9 @@ Rules:
 - Do not use raw Rust `type_name` as the stable file ID.
 - Every persistent component has a `ComponentTypeId`, stable `ComponentFieldId` values, and a
   schema version. Runtime-only ECS components do not need schema registration.
-- `ComponentRegistry` keeps the runtime-independent catalog separate from native Rust/Bevy
-  bindings, codecs, reflection metadata, and migration functions.
+- `ComponentRegistryBuilder` keeps the runtime-independent catalog separate from native Rust/Bevy
+  bindings, codecs, reflection metadata, and migration functions. Consuming admission publishes
+  the immutable `ComponentRegistrySnapshot` used by readers and codec execution under ADR 0081.
 - Migrations are registered per component type and version.
 - Runtime-only components can opt out of serialization/schema.
 - A persistent field owns one bounded recursive value shape. Scalar numeric domains, closed
@@ -73,9 +74,9 @@ flowchart TD
     RustType[Rust Component Type] --> Binding[Native binding and codecs]
     Source[Schema declaration] --> StableId[Stable type and field IDs]
     StableId --> Catalog[Runtime-independent catalog]
-    Catalog --> Registry[Building registry]
+    Catalog --> Registry[ComponentRegistryBuilder]
     Binding --> Registry
-    Registry -->|atomic freeze| Snapshot[Immutable runtime snapshot]
+    Registry -->|consuming atomic freeze| Snapshot[ComponentRegistrySnapshot]
     Snapshot --> Scene[Scene validation and patches]
     Snapshot --> Schema[Editor schema]
     Snapshot --> Migrations[Component migrations]
@@ -114,25 +115,28 @@ bindings, and makes aliases independent from durable IDs.
 
 ## Implementation Notes
 
-As of RGF-U1 on 2026-07-12:
+Current construction and admitted-read ownership, refining the original RGF-U1 slice:
 
 - `ComponentTypeId` and `ComponentFieldId` are bounded opaque persistent identities. Aliases are
   mutable presentation data; removed IDs remain type or field tombstones and cannot be reused.
 - `ComponentSchemaVersion` is stored with each `SceneComponentRecord`.
-- `ComponentRegistry::catalog_candidate()` exposes build-time semantic data; `catalog()` and
-  `snapshot()` require a successful atomic freeze. A trusted single-owner catalog can seed
-  `from_owner_catalog_candidate` with an explicit owner before native bindings are registered; a
+- `ComponentRegistryBuilder::catalog_candidate()` exposes build-time semantic data without
+  execution authority. `freeze(self)` returns the sole admitted snapshot; its `catalog()` and
+  Schema queries operate on the complete immutable definition. A trusted single-owner catalog can
+  seed `from_owner_catalog_candidate` with an explicit owner before native bindings are registered; a
   flattened Runtime composition cannot be reused as that owner's predecessor. Normal plugin and
   product composition uses `ComponentSchemaProviderDefinition` instead.
 - Component owners register explicit schemas and native codecs before freeze. Freeze validates
   catalog lineage, aliases, tombstones, capability scope, current field locators, defaults,
   migrations, and required bindings without publishing a partial snapshot.
-- Every mutation path rejects after freeze. Failed freeze leaves the registry repairable in
-  `Building`; repeated successful freeze is idempotent.
+- Successful freeze consumes the builder; the snapshot has no registration or mutation entries.
+  Failed freeze returns the same builder and original error through
+  `ComponentRegistryFreezeError::into_parts`, allowing explicit repair and retry without partial
+  publication. Cloning a snapshot retains that exact admitted definition.
 - `ComponentFieldId` is the durable address used by scene patches. Structured
   `ComponentFieldPath` values locate the field in the current `ComponentValue` layout only;
   display strings remain diagnostic/UI conveniences.
-- `ComponentRegistry::register_component_migration` composes one-step `ComponentValue` migrations
+- `ComponentRegistryBuilder::register_component_migration` composes one-step `ComponentValue` migrations
   before scene/prefab preflight rejects older schema versions.
 - A successor catalog is validated only against its exact direct predecessor: generation must be
   `previous + 1`, its predecessor fingerprint must match, and migrations must connect the
@@ -164,4 +168,4 @@ occurrence identity. See the [verification evidence](../../knowledge/engineering
 |---|---|---:|---|
 | IDs collide | High | Low | Use reverse-domain or crate-qualified namespace plus validation |
 | Migrations are forgotten | Medium | High | Validate schema version changes in tests/tooling |
-| AI schema diverges from runtime schema | High | Medium | Generate AI schema from `ComponentRegistry` |
+| AI schema diverges from runtime schema | High | Medium | Generate AI schema from the admitted `ComponentRegistrySnapshot` |

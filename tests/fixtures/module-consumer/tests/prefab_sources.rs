@@ -1,6 +1,6 @@
 use nara_asset::AssetRef;
 use nara_ecs::World;
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
@@ -23,8 +23,8 @@ fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
 
 #[test]
 fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let path = AssetRef::path("prefabs/character.ron").unwrap();
     let stable = AssetRef::StableId("602e48c3-50ce-467b-8e0d-80ec1b4f1d2a".parse().unwrap());
     let key = SourceDocumentKey::named(
@@ -117,8 +117,8 @@ fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
 
 #[test]
 fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let universe = "46806b15-ef25-4da2-9983-32078fd5b5a7".parse().unwrap();
     let outer_request = AssetRef::path("prefabs/outer.ron").unwrap();
     let inner_request = AssetRef::path("prefabs/inner.ron").unwrap();

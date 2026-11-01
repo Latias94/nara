@@ -7,7 +7,7 @@ use std::{
 
 use nara_diagnostic::Diagnostic;
 use nara_reflect::{
-    ComponentCapability, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+    ComponentCapability, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
 };
 use nara_scene::{
     PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, ScenePatchDocument,
@@ -168,7 +168,7 @@ pub(crate) fn prepare_generic_composition(
 
 pub(crate) fn prepare_scene_composition(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     selected: Option<&SceneEntityId>,
     command: SceneCompositionCommand,
 ) -> Result<PreparedSceneComposition, Diagnostic> {
@@ -231,7 +231,7 @@ pub(crate) fn prepare_scene_composition(
 }
 
 pub(crate) fn scene_entity_components(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     kind: SceneCompositionEntityKind,
 ) -> Result<BTreeMap<ComponentTypeId, SceneComponentRecord>, Diagnostic> {
     match kind {
@@ -381,7 +381,7 @@ impl PreparedPrefabComposition {
 
 pub(crate) fn prepare_prefab_composition(
     document: &PrefabDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     selected: Option<&SceneEntityId>,
     command: PrefabCompositionCommand,
 ) -> Result<PreparedPrefabComposition, Diagnostic> {
@@ -502,7 +502,7 @@ fn creation_requires_source_owner() -> Diagnostic {
 }
 
 fn component_draft(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     component: ComponentTypeId,
 ) -> Result<(ComponentTypeId, SceneComponentRecord), Diagnostic> {
     let (component_id, version) = admitted_component(registry, component)?;
@@ -523,15 +523,9 @@ fn component_draft(
 }
 
 fn admitted_component(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     component: ComponentTypeId,
 ) -> Result<(ComponentTypeId, ComponentSchemaVersion), Diagnostic> {
-    if !registry.is_frozen() {
-        return Err(diagnostic::error(
-            "tooling.composition-registry-not-frozen",
-            "scene composition requires a frozen component registry",
-        ));
-    }
     let component_id = component;
     let Some(schema) = registry.schema(&component_id) else {
         return Err(diagnostic::with_component(

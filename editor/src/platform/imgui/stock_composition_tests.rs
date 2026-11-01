@@ -15,7 +15,7 @@ use std::{
 use dear_imgui_rs::{ConfigFlags, Context, MouseButton};
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
-    reflect::{ComponentFieldId, ComponentRegistry, ComponentTypeId, ComponentValue},
+    reflect::{ComponentFieldId, ComponentRegistryBuilder, ComponentTypeId, ComponentValue},
     render::{RenderFrameTarget, ViewLoadOp},
     render_wgpu::{
         WgpuCompositeColor, WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuProgramTextureOutput,
@@ -841,11 +841,11 @@ fn authoring_center(
 fn write_scene(project: &Path) -> Result<(), String> {
     // Author a regular source document with real registered component defaults. No Sprite
     // extraction, render packet, stock lowering or alternate preview Runtime is built here.
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     nara::transform::register_transform_components(&mut registry)
         .map_err(|error| error.to_string())?;
     nara::sprite::register_sprite_components(&mut registry).map_err(|error| error.to_string())?;
-    registry.freeze().map_err(|error| error.to_string())?;
+    let registry = registry.freeze().map_err(|error| error.to_string())?;
     let initial = |id: &str| -> Result<SceneComponentRecord, String> {
         let schema = registry
             .schema(&ComponentTypeId::new(id))

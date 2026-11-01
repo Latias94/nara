@@ -5,9 +5,9 @@ use nara_asset::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    ComponentValueShape, PersistentComponentSchemaOwnerId,
+    ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
     SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -56,9 +56,8 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
             None,
         )
         .unwrap();
-        let mut native = ComponentRegistry::new();
-        native.freeze().unwrap();
-        let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [snapshot]).unwrap();
+        let native = ComponentRegistryBuilder::new().freeze().unwrap();
+        let bindings = SceneComponentBindings::new(native.clone(), [snapshot]).unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
             SceneEntityId::new("image").unwrap(),
         )

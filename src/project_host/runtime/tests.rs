@@ -7270,8 +7270,7 @@ fn running_owner_identity(host: &ProjectHost) -> RunningOwnerIdentity {
             as usize,
         registry_snapshot: nara_reflect::component_registry(world)
             .expect("the published runtime registry is installed")
-            .snapshot()
-            .expect("the published runtime registry remains frozen"),
+            .clone(),
         plan_fingerprint: published._plan.plugin_plan().fingerprint(),
     }
 }

@@ -12,8 +12,8 @@ use nara_ecs::Component;
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
     PrefabAuthoringSession, PrefabDocument, SceneAuthoringSession, SceneComponentRecord,
@@ -85,8 +85,8 @@ fn reference_schema() -> ComponentSchema {
     .with_fields([link_field, image_field])
 }
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<ReferenceHolder, _, _>(
             reference_schema(),
@@ -98,8 +98,7 @@ fn registry() -> ComponentRegistry {
             |_| Ok(reference_value("old", "textures/present.png")),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn reference_value(target: &str, image: &str) -> ComponentValue {
@@ -342,7 +341,7 @@ fn effective_asset_defaults_require_catalogue_membership_only_when_database_is_s
     assert_eq!(logical, catalogued);
 }
 
-fn budget_registry() -> ComponentRegistry {
+fn budget_registry() -> ComponentRegistrySnapshot {
     let mut field = ComponentFieldSchema::required(
         ComponentFieldId::new("values"),
         "Values",
@@ -358,7 +357,7 @@ fn budget_registry() -> ComponentRegistry {
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_fields([field]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<BudgetHolder, _, _>(
             schema,
@@ -374,8 +373,7 @@ fn budget_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn budget_document() -> SceneDocument {

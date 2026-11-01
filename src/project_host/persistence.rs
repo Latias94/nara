@@ -10,7 +10,7 @@ use nara_fs::{
     ContentDigest, DirectoryCapability, DurabilityProgress, FileCapability, FileIdentity, FsError,
     PublicationAtomicity, PublicationIdentityEvidence, RelativePath, StageStatus,
 };
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     AuthoringDocumentReadmission, PrefabAuthoringSession, PrefabDocumentCandidate,
     SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
@@ -393,7 +393,7 @@ impl ScenePersistenceHost {
     pub(super) fn open(
         scenes: &DirectoryCapability,
         scene_path: &str,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<OpenedScenePersistence, EditorPersistenceFailureStage> {
         let limits = SceneFileLimits::default();
         let (file, bytes) = PersistenceFileState::open(scenes, scene_path, limits)?;
@@ -534,7 +534,7 @@ impl PrefabPersistenceHost {
     pub(super) fn open(
         prefabs: &DirectoryCapability,
         source_binding: nara_tooling::EditorDocumentSourceBinding,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<OpenedPrefabPersistence, EditorPersistenceFailureStage> {
         let limits = SceneFileLimits::default();
         let (file, bytes) = PersistenceFileState::open(prefabs, source_binding.locator(), limits)?;
@@ -671,7 +671,7 @@ fn decode_scene_session(
     encoding: DocumentEncoding,
     bytes: &[u8],
     limits: SceneFileLimits,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> Result<SceneAuthoringSession, EditorPersistenceFailureStage> {
     let candidate = match encoding {
         DocumentEncoding::Json => {
@@ -731,7 +731,7 @@ fn decode_prefab_session(
     encoding: DocumentEncoding,
     bytes: &[u8],
     limits: SceneFileLimits,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> Result<PrefabAuthoringSession, EditorPersistenceFailureStage> {
     let candidate = match encoding {
         DocumentEncoding::Json => {
@@ -922,7 +922,7 @@ mod tests {
         let root = TestRoot::new();
         let directory = root.capability();
         let callbacks = Arc::new(Mutex::new(Vec::new()));
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         let component = ComponentTypeId::new("nara.test.ReopenThreadProbe");
         let decode_calls = Arc::clone(&callbacks);
         let encode_calls = Arc::clone(&callbacks);
@@ -975,7 +975,7 @@ mod tests {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         let scene_host = ScenePersistenceHost::open(&directory, "startup.scene.json", &registry)
             .unwrap()
             .host;
@@ -1306,8 +1306,9 @@ mod tests {
     fn uncertain_receipt_blocks_save_until_reopen_is_committed() {
         let root = TestRoot::new();
         let scenes = root.capability();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let opened = ScenePersistenceHost::open(&scenes, "startup.scene.json", &registry).unwrap();
         let mut host = opened.host;
         let first = scene_with_entity("first");
@@ -1389,8 +1390,9 @@ mod tests {
     fn prefab_lane_saves_and_reopens_the_prefab_source_without_scene_projection() {
         let root = TestRoot::new();
         let prefabs = root.capability();
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         let source_binding = EditorDocumentSourceBinding::new("reference-ui.prefab.json");
         let opened =
             PrefabPersistenceHost::open(&prefabs, source_binding.clone(), &registry).unwrap();
@@ -1557,7 +1559,9 @@ mod tests {
         );
         let base_revision = workspace.scene(document).unwrap().revision();
         let report = workspace.apply_command(
-            &ComponentRegistry::new(),
+            &nara_reflect::ComponentRegistryBuilder::new()
+                .freeze()
+                .unwrap(),
             EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,

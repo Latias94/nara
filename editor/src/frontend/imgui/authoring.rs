@@ -830,10 +830,14 @@ fn tree_position<'a>(
 mod tests {
     use super::*;
     use nara::{
-        reflect::{ComponentRegistry, ComponentTypeId},
+        reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentTypeId},
         scene::{SceneAuthoringSession, SceneDocument, SceneEntityRecord},
         tooling::{EditorExternalReloadState, SceneEditorState},
     };
+
+    fn frozen_empty_registry() -> ComponentRegistrySnapshot {
+        ComponentRegistryBuilder::new().freeze().unwrap()
+    }
 
     fn scene(kind: EditorDocumentKind) -> EditorSceneModel {
         let session = SceneAuthoringSession::new(SceneDocument::from_ordered_roots([
@@ -848,7 +852,7 @@ mod tests {
             saved_revision: session.revision(),
             external_reload: EditorExternalReloadState::Clean,
             selection: Default::default(),
-            editor: SceneEditorState::new().model(&session, &ComponentRegistry::default(), None),
+            editor: SceneEditorState::new().model(&session, &frozen_empty_registry(), None),
         }
     }
 
@@ -879,7 +883,7 @@ mod tests {
                 .unwrap();
         }
         EditorFrameClock::new().publish(
-            workspace.model(&ComponentRegistry::default(), None),
+            workspace.model(&frozen_empty_registry(), None),
             EditorProjectView::new(
                 EditorProjectReadinessView::new(
                     EditorAuthoringReadiness::Complete,
@@ -1130,7 +1134,7 @@ mod tests {
         let revision = workspace.scene(document).unwrap().revision();
         let mut clock = EditorFrameClock::new();
         let source = clock.publish(
-            workspace.model(&ComponentRegistry::default(), None),
+            workspace.model(&frozen_empty_registry(), None),
             EditorProjectView::new(
                 EditorProjectReadinessView::new(
                     EditorAuthoringReadiness::Complete,
@@ -1165,7 +1169,7 @@ mod tests {
             ),
         ] {
             let frame = clock.publish(
-                workspace.model(&ComponentRegistry::default(), None),
+                workspace.model(&frozen_empty_registry(), None),
                 EditorProjectView::new(
                     EditorProjectReadinessView::new(
                         EditorAuthoringReadiness::Complete,

@@ -19,7 +19,8 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
     ComponentValueMaterializationLimits, DeclaredAssetReferenceError,
     collect_declared_asset_references_from_schema_with_limits, component_registry,
-    validate_component_registry_authority, validate_component_value_with_limits,
+    component_registry_is_installed, validate_component_registry_authority,
+    validate_component_value_with_limits,
 };
 
 use crate::{
@@ -396,12 +397,13 @@ impl SceneComponentBindings {
         entity: Entity,
     ) -> Result<SceneInstanceId, SceneDataComponentError> {
         let standalone = match (
+            component_registry_is_installed(world),
             component_registry(world),
             validate_component_registry_authority(world),
         ) {
-            (None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => true,
-            (Some(registry), Ok(())) if registry.shares_snapshot(self.native_snapshot()) => false,
-            (_, Err(error)) => return Err(SceneDataComponentError::NativeAuthority(error)),
+            (false, None, Err(ComponentRegistryAuthorityError::MissingAuthority)) => true,
+            (true, Some(registry), Ok(())) if registry.ptr_eq(self.native_snapshot()) => false,
+            (_, _, Err(error)) => return Err(SceneDataComponentError::NativeAuthority(error)),
             _ => return Err(SceneDataComponentError::BindingsMismatch),
         };
         match (

@@ -14,7 +14,7 @@ use nara_ecs::{Component, Entity, Resource, World};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValueKind, ComponentValueShape, PreparedComponentCandidate,
     decode_asset_reference_value, encode_asset_reference_value,
 };
@@ -92,7 +92,7 @@ fn occurrence() -> SceneOccurrenceKey {
 }
 
 fn bindings(calls: &Arc<AtomicUsize>) -> SceneComponentBindings {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let calls = Arc::clone(calls);
     registry
         .register_persistent_component_codec_with_context::<Sample, _, _>(
@@ -131,8 +131,8 @@ fn bindings(calls: &Arc<AtomicUsize>) -> SceneComponentBindings {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    SceneComponentBindings::new(registry.snapshot().unwrap(), []).unwrap()
+    let registry = registry.freeze().unwrap();
+    SceneComponentBindings::new(registry, []).unwrap()
 }
 
 fn cooked(

@@ -1,7 +1,7 @@
 //! Schema admission shared by native and data-only Prefab compilation.
 
 use nara_reflect::{
-    ComponentCapability, ComponentMigrationError, ComponentRegistry, ComponentSchema,
+    ComponentCapability, ComponentMigrationError, ComponentRegistrySnapshot, ComponentSchema,
     ComponentTypeId, ComponentValue, MigratedComponentValue,
 };
 
@@ -9,17 +9,17 @@ use crate::{PrefabExpansionFailureKind, SceneComponentBindings, SceneComponentRe
 
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaAuthority<'a> {
-    Native(&'a ComponentRegistry),
+    Native(&'a ComponentRegistrySnapshot),
     Mixed(&'a SceneComponentBindings),
     #[cfg(feature = "serde")]
     Authoring(&'a crate::AuthoringSchemaBasis),
 }
 
 impl<'a> SchemaAuthority<'a> {
-    pub(crate) fn native_registry(self) -> Option<&'a ComponentRegistry> {
+    pub(crate) fn native_snapshot(self) -> Option<&'a ComponentRegistrySnapshot> {
         match self {
             Self::Native(registry) => Some(registry),
-            Self::Mixed(bindings) => Some(bindings.native_registry()),
+            Self::Mixed(bindings) => Some(bindings.native_snapshot()),
             #[cfg(feature = "serde")]
             Self::Authoring(_) => None,
         }
@@ -106,7 +106,7 @@ impl<'a> SchemaAuthority<'a> {
             Self::Mixed(bindings) => {
                 if bindings.data_owner(component).is_none() {
                     bindings
-                        .native_registry()
+                        .native_snapshot()
                         .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
                         .map_err(|_| PrefabExpansionFailureKind::Component)?;
                 } else {
@@ -140,7 +140,7 @@ impl<'a> SchemaAuthority<'a> {
                 registry.migrate_component_value_owned(component, record.version, value)
             }
             Self::Mixed(bindings) if bindings.data_owner(component).is_none() => bindings
-                .native_registry()
+                .native_snapshot()
                 .migrate_component_value_owned(component, record.version, value),
             Self::Mixed(_) => current_version_value(self, component, record, value),
             #[cfg(feature = "serde")]
@@ -201,8 +201,8 @@ fn current_version_value(
     })
 }
 
-impl<'a> From<&'a ComponentRegistry> for SchemaAuthority<'a> {
-    fn from(registry: &'a ComponentRegistry) -> Self {
+impl<'a> From<&'a ComponentRegistrySnapshot> for SchemaAuthority<'a> {
+    fn from(registry: &'a ComponentRegistrySnapshot) -> Self {
         Self::Native(registry)
     }
 }

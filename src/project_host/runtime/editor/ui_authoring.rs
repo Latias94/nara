@@ -180,7 +180,7 @@ impl EditorProjectSession {
                 }
                 Some(_)
                     if !self.workspace.__prefab_field_target_exists(
-                        lane.plan.schema_validation().registry(),
+                        lane.plan.schema_validation().snapshot(),
                         target,
                     ) =>
                 {
@@ -290,7 +290,7 @@ impl EditorProjectSession {
                         preview
                             .apply_patch(
                                 &gesture.preview().to_patch(),
-                                lane.plan.schema_validation().registry(),
+                                lane.plan.schema_validation().snapshot(),
                             )
                             .applied
                             .then(|| preview.document().clone())

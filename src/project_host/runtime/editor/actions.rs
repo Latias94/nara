@@ -626,7 +626,7 @@ impl EditorProjectSession {
                 };
                 if !is_prefab
                     || !self.workspace.__prefab_field_edit_matches(
-                        lane.plan.schema_validation().registry(),
+                        lane.plan.schema_validation().snapshot(),
                         &baseline,
                     )
                     || !self.ui_authoring_field_edit_matches(frame, &baseline)

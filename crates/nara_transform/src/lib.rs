@@ -18,7 +18,7 @@ use nara_core::{Mat3, Vec2};
 use nara_ecs::{Component, bevy_ecs::system::ScheduleSystem, schedule::IntoScheduleConfigs};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
@@ -162,20 +162,12 @@ impl Plugin for TransformPlugin {
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.transform.Transform2d");
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             TRANSFORM_PLUGIN_ID,
             component_id.as_str(),
-        )?;
-        TRANSFORM_SCHEMA_PROVIDER
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    TRANSFORM_PLUGIN_ID,
-                    component_id.as_str(),
-                    error,
-                )
-            })
+            &TRANSFORM_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -192,7 +184,7 @@ impl Plugin for TransformPlugin {
 }
 
 pub fn register_transform_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_transform_components(registry)?;
     registry.register_persistent_component_with_codec::<Transform2d, _, _>(
@@ -264,7 +256,7 @@ fn transform_schema_predecessor() -> ComponentSchema {
 }
 
 fn validate_transform_components(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     registry.validate_component_registration::<Transform2d>(&ComponentTypeId::new(
         "nara.transform.Transform2d",
@@ -391,16 +383,15 @@ mod tests {
                 .is_none()
         );
         assert_eq!(current.components[0].version(), ComponentSchemaVersion::ONE);
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         register_transform_components(&mut registry).unwrap();
-        registry.freeze().unwrap();
-        let snapshot = registry.snapshot().unwrap();
+        let registry = registry.freeze().unwrap();
         let schema = registry
             .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
             .unwrap();
         let mut world = nara_ecs::World::new();
         let entity = world.spawn_empty().id();
-        snapshot
+        registry
             .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
             .unwrap()
             .apply(&mut world, entity)
@@ -586,10 +577,10 @@ mod tests {
 
     #[test]
     fn transform_schema_exposes_authoring_fields() {
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         register_transform_components(&mut registry)
             .expect("component registration should succeed");
-        registry.freeze().expect("component registry should freeze");
+        let registry = registry.freeze().expect("component registry should freeze");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.transform.Transform2d"))

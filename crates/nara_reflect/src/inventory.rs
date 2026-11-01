@@ -54,7 +54,7 @@ macro_rules! persistent_components {
                 })
             }
 
-            pub fn register(registry: &mut $crate::ComponentRegistry)
+            pub fn register(registry: &mut $crate::ComponentRegistryBuilder)
                 -> ::core::result::Result<(), $crate::ComponentRegistryError>
             {
                 $(registry.register_persistent_component::<super::$component>()?;)+

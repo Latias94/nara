@@ -18,7 +18,7 @@ use nara_engine::{
 use nara_identity::{EntityLookup, EntityReference, SpawnedSceneInstance};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentSchema,
+    ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
     PersistentComponentSchemaOwnerId,
@@ -154,13 +154,13 @@ impl Definition {
                 .map(AuthoringSchemaBundleOwner::from),
         )
         .unwrap();
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         SCENE_COMPONENTS_SCHEMA_PROVIDER
-            .register_or_validate_into(&mut registry)
+            .register_into(&mut registry)
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         Self {
-            bindings: SceneComponentBindings::new(registry.snapshot().unwrap(), owners).unwrap(),
+            bindings: SceneComponentBindings::new(registry, owners).unwrap(),
             bundle,
         }
     }

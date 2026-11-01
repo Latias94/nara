@@ -6,7 +6,7 @@ mod reference_project_copy;
 use std::fs;
 
 use nara::{
-    prelude::{ComponentRegistry, Vec2},
+    prelude::{ComponentRegistryBuilder, ComponentRegistrySnapshot, Vec2},
     project_workflow::{ProjectCheckRequest, check_project},
     reflect::{
         ComponentFieldPath, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
@@ -20,13 +20,12 @@ use reference_project_copy::ReferenceProjectCopy;
 
 const LEGACY: &[u8] = include_bytes!("fixtures/initial-velocity-v1.scene.json");
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     REFERENCE_GAME_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 #[test]

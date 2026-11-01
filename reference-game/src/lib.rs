@@ -26,8 +26,8 @@ use nara::{
         GameplayCommandValue,
     },
     prelude::{
-        App, ComponentRegistry, CoreStage, FixedUpdateSet, PersistentComponentProvider, Plugin,
-        Resource, Vec2, add_fixed_transform_projection_systems,
+        App, ComponentRegistryBuilder, CoreStage, FixedUpdateSet, PersistentComponentProvider,
+        Plugin, Resource, Vec2, add_fixed_transform_projection_systems,
     },
     project_host::{HeadlessRun, HeadlessRunIntent},
     reflect::{
@@ -613,7 +613,7 @@ fn reference_game_schema_v5() -> Result<ComponentSchemaCatalog, ComponentSchemaP
 }
 
 pub fn register_reference_game_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_reference_game_components(registry)?;
     register_component::<PlayerRole>(registry)?;
@@ -660,7 +660,7 @@ fn migrate_weapon_v1_to_v2(
 }
 
 fn validate_reference_game_components(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     registry.validate_persistent_component::<PlayerRole>()?;
     registry.validate_persistent_component::<EnemyRole>()?;
@@ -670,7 +670,9 @@ fn validate_reference_game_components(
     registry.validate_persistent_component::<Weapon>()
 }
 
-fn register_component<T>(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError>
+fn register_component<T>(
+    registry: &mut ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError>
 where
     T: PersistentComponentProvider,
 {

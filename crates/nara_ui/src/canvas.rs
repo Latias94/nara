@@ -657,12 +657,7 @@ mod tests {
         app.add_systems(
             nara_app::StartupStage::Scene,
             move |world: &mut nara_ecs::World| {
-                let registry = nara_reflect::ComponentRegistry::from_snapshot(
-                    nara_reflect::component_registry(world)
-                        .unwrap()
-                        .snapshot()
-                        .unwrap(),
-                );
+                let registry = nara_reflect::component_registry(world).unwrap().clone();
                 let bound = nara_scene::ExpandedSceneCandidate::plain(
                     source.clone(),
                     Arc::new(prefab.instantiate()),

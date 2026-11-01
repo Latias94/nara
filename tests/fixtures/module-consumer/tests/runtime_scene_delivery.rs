@@ -23,7 +23,7 @@ use nara_hierarchy::Parent;
 use nara_identity::{EntityLookup, EntityReference, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryPlugin, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryPlugin, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueShape, PersistentComponentSchemaOwnerId,
     decode_asset_reference_value, encode_asset_reference_value,
@@ -109,7 +109,7 @@ impl Definition {
         let drops = Arc::new(AtomicUsize::new(0));
         let native_calls = Arc::clone(&calls);
         let native_drops = Arc::clone(&drops);
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_with_codec::<Probe, _, _>(
                 root_schema(PROBE, ComponentValueShape::scalar(ComponentValueKind::I64)),
@@ -131,7 +131,7 @@ impl Definition {
                 |probe| Ok(ComponentValue::I64(probe.amount)),
             )
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         let defaults =
             ComponentSchema::new(component(DEFAULTS), "Defaults", ComponentSchemaVersion::ONE)
                 .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -168,7 +168,7 @@ impl Definition {
         )
         .unwrap();
         Self {
-            bindings: SceneComponentBindings::new(registry.snapshot().unwrap(), [data]).unwrap(),
+            bindings: SceneComponentBindings::new(registry, [data]).unwrap(),
             calls,
             drops,
         }

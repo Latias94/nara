@@ -1,8 +1,8 @@
 use nara::{
     identity::EntityLookup,
     prelude::{
-        Component, ComponentRegistry, ComponentTypeId, Parent, PersistentComponent, Transform2d,
-        Vec2, World,
+        Component, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentTypeId, Parent,
+        PersistentComponent, Transform2d, Vec2, World,
     },
     reflect::{
         ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -157,7 +157,7 @@ fn migrate_lineage_v1_to_v2(value: ComponentValue) -> Result<ComponentValue, Com
 }
 
 fn bind_persistent_component<T>(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError>
 where
     T: PersistentComponentProvider,
@@ -176,7 +176,7 @@ fn register_lineage_successor<T>(
     predecessor: ComponentSchemaCatalog,
     from_version: ComponentSchemaVersion,
     to_version: ComponentSchemaVersion,
-) -> Result<ComponentRegistry, ComponentRegistryError>
+) -> Result<ComponentRegistryBuilder, ComponentRegistryError>
 where
     T: PersistentComponentProvider,
 {
@@ -184,7 +184,7 @@ where
     let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
         .expect("the lineage fixture has a successor generation");
     current.components.push(T::persistent_component_schema());
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+    let mut registry = ComponentRegistryBuilder::from_owner_catalog_candidate(
         LINEAGE_PROBE_OWNER_ID,
         current,
         Some(predecessor),
@@ -196,14 +196,14 @@ where
     Ok(registry)
 }
 
-fn frozen_lineage_successor(predecessor: ComponentSchemaCatalog) -> ComponentRegistry {
+fn frozen_lineage_successor(predecessor: ComponentSchemaCatalog) -> ComponentRegistrySnapshot {
     let id = ComponentTypeId::new(LINEAGE_PROBE_ID);
     let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
         .expect("the lineage fixture has a successor generation");
     current
         .components
         .push(LineageProbe::persistent_component_schema());
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+    let mut registry = ComponentRegistryBuilder::from_owner_catalog_candidate(
         LINEAGE_PROBE_OWNER_ID,
         current,
         Some(predecessor),
@@ -218,8 +218,7 @@ fn frozen_lineage_successor(predecessor: ComponentSchemaCatalog) -> ComponentReg
             migrate_lineage_v1_to_v2,
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 #[test]
@@ -239,13 +238,12 @@ fn generated_catalog_preserves_stable_ids_across_rename_and_deletion() {
     )
     .unwrap();
     let registry = frozen_lineage_successor(predecessor.clone());
-    assert_eq!(registry.catalog().unwrap(), &expected);
+    assert_eq!(registry.catalog(), &expected);
     assert_eq!(
         format!(
             "{}\n",
             registry
                 .catalog()
-                .unwrap()
                 .to_json_string_with_predecessor(Some(&predecessor))
                 .unwrap()
         ),
@@ -299,7 +297,7 @@ fn generated_catalog_preserves_stable_ids_across_rename_and_deletion() {
     );
     let mut world = World::new();
     let entity = world.spawn_empty().id();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     snapshot
         .preflight_component(&id, &migrated.value)
         .unwrap()
@@ -416,18 +414,15 @@ fn reference_game_catalog_preserves_v1_through_v4_and_matches_the_v5_successor()
     }
 
     let registry = frozen_reference_game_successor();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let owner_receipt = snapshot
         .owner_receipt(REFERENCE_GAME_SCHEMA_OWNER_ID)
         .unwrap();
     assert_eq!(owner_receipt.generation(), v5.generation());
     assert_eq!(owner_receipt.catalog(), v5.fingerprint());
     assert_eq!(owner_receipt.predecessor(), v5.predecessor().copied());
-    assert_eq!(registry.catalog().unwrap().components(), v5.components());
-    assert_eq!(
-        registry.catalog().unwrap().type_tombstones(),
-        v5.type_tombstones()
-    );
+    assert_eq!(registry.catalog().components(), v5.components());
+    assert_eq!(registry.catalog().type_tombstones(), v5.type_tombstones());
     for id in [
         "reference_game.PlayerRole",
         "reference_game.EnemyRole",
@@ -443,7 +438,7 @@ fn reference_game_catalog_preserves_v1_through_v4_and_matches_the_v5_successor()
 #[test]
 fn weapon_v1_migrates_to_v2_without_persisting_runtime_cooldown() {
     let registry = frozen_reference_game_successor();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let weapon_id = ComponentTypeId::new("reference_game.Weapon");
     let legacy_value = ComponentValue::map([
         ("cooldown-ticks", ComponentValue::U64(3)),
@@ -477,7 +472,7 @@ fn weapon_v1_migrates_to_v2_without_persisting_runtime_cooldown() {
 #[test]
 fn removed_aggregate_component_records_are_explicitly_tombstoned_and_rejected() {
     let registry = frozen_reference_game_successor();
-    let tombstones = registry.catalog().unwrap().type_tombstones();
+    let tombstones = registry.catalog().type_tombstones();
     for id in [
         "reference_game.Player",
         "reference_game.Enemy",
@@ -674,11 +669,11 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     );
 }
 
-fn assert_round_trip<T>(expected: T, id: &str, registry: &ComponentRegistry)
+fn assert_round_trip<T>(expected: T, id: &str, registry: &ComponentRegistrySnapshot)
 where
     T: nara::prelude::Component + Clone + PartialEq + std::fmt::Debug,
 {
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let mut source = World::new();
     let source_entity = source.spawn(expected.clone()).id();
     let component_id = ComponentTypeId::new(id);
@@ -702,25 +697,23 @@ fn reference_game_predecessor_catalog() -> ComponentSchemaCatalog {
         .unwrap()
 }
 
-fn frozen_reference_game_successor() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_reference_game_successor() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     REFERENCE_GAME_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn frozen_reference_game_authoring_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_reference_game_authoring_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     nara::transform::TRANSFORM_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
     REFERENCE_GAME_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn scene_id(id: &str) -> SceneEntityId {
@@ -730,14 +723,14 @@ fn scene_id(id: &str) -> SceneEntityId {
 fn scene_component_record<T>(
     component: T,
     component_id: &ComponentTypeId,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> SceneComponentRecord
 where
     T: Component,
 {
     let mut world = World::new();
     let entity = world.spawn(component).id();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let value = snapshot
         .encode_component(component_id, &world, entity)
         .unwrap()

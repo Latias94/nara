@@ -51,7 +51,7 @@ use nara_ecs::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::PresentedSpatialSnapshot2d;
@@ -427,18 +427,12 @@ impl Plugin for RenderComponentsPlugin {
 
     fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
         let component_id = ComponentTypeId::new("nara.render.Camera2d");
-        let registry = nara_reflect::registry_for_plugin_preflight(
+        nara_reflect::validate_schema_provider_for_plugin(
             context,
             RENDER_COMPONENTS_PLUGIN_ID,
             component_id.as_str(),
-        )?;
-        RENDER_SCHEMA_PROVIDER.preflight(registry).map_err(|error| {
-            PluginError::component_registration(
-                RENDER_COMPONENTS_PLUGIN_ID,
-                component_id.as_str(),
-                error,
-            )
-        })
+            &RENDER_SCHEMA_PROVIDER,
+        )
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
@@ -529,7 +523,7 @@ impl Plugin for RenderPlugin {
 }
 
 pub fn register_render_components(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
 ) -> Result<(), ComponentRegistryError> {
     validate_render_components(registry)?;
     registry.register_persistent_component_with_codec::<Camera2d, _, _>(
@@ -591,7 +585,9 @@ fn camera_schema() -> ComponentSchema {
     .with_fields(camera_fields())
 }
 
-fn validate_render_components(registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn validate_render_components(
+    registry: &ComponentRegistryBuilder,
+) -> Result<(), ComponentRegistryError> {
     registry
         .validate_component_registration::<Camera2d>(&ComponentTypeId::new("nara.render.Camera2d"))
 }
@@ -1722,9 +1718,9 @@ mod tests {
 
     #[test]
     fn camera_schema_exposes_authoring_fields() {
-        let mut registry = ComponentRegistry::new();
+        let mut registry = ComponentRegistryBuilder::new();
         register_render_components(&mut registry).expect("component registration should succeed");
-        registry.freeze().expect("component registry should freeze");
+        let registry = registry.freeze().expect("component registry should freeze");
 
         let schema = registry
             .schema(&ComponentTypeId::new("nara.render.Camera2d"))

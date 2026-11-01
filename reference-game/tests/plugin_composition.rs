@@ -170,15 +170,9 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
 
     let first_app = first.plugin_plan().instantiate().unwrap();
     let second_app = first.plugin_plan().instantiate().unwrap();
-    let first_registry = nara::reflect::component_registry(first_app.world())
-        .unwrap()
-        .snapshot()
-        .unwrap();
-    let second_registry = nara::reflect::component_registry(second_app.world())
-        .unwrap()
-        .snapshot()
-        .unwrap();
-    assert!(first_registry.ptr_eq(&second_registry));
+    let first_registry = nara::reflect::component_registry(first_app.world()).unwrap();
+    let second_registry = nara::reflect::component_registry(second_app.world()).unwrap();
+    assert!(first_registry.ptr_eq(second_registry));
     assert!(first_registry.ptr_eq(first.schema_validation().snapshot()));
     assert_eq!(
         first_registry.schema_composition_fingerprint().unwrap(),

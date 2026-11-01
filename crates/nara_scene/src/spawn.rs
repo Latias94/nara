@@ -40,7 +40,8 @@ use nara_reflect::{
         validate_declared_persistent_apply_targets, validate_fresh_persistent_component_apply,
         validate_persistent_apply_support_topology, validate_registered_persistent_apply_targets,
     },
-    ComponentCodecError, ComponentRegistry, ComponentTypeId, ComponentValueMaterializationLimits,
+    ComponentCodecError, ComponentRegistrySnapshot, ComponentTypeId,
+    ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -280,7 +281,7 @@ impl SceneSpawner {
     pub(crate) fn sync(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -302,7 +303,7 @@ impl SceneSpawner {
     fn spawn_with_asset_context_and_product(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -325,7 +326,7 @@ impl SceneSpawner {
     fn spawn_with_asset_context_and_product_bindings(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -352,7 +353,7 @@ impl SceneSpawner {
     fn prepare_with_asset_context_and_product_bindings(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         candidate: &ExpandedSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -384,7 +385,7 @@ impl SceneSpawner {
     fn prepare_unbound_with_asset_context_and_product_bindings(
         &mut self,
         world: &mut World,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         definition: preparation::ScenePreparationDefinition,
         candidate: SceneMaterializationInput<'_>,
         occurrence: &SceneOccurrenceKey,
@@ -676,7 +677,7 @@ impl SceneSpawner {
 #[must_use]
 pub fn replace_expanded_scene_with_product<F>(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
@@ -714,7 +715,7 @@ where
 #[must_use]
 pub fn replace_expanded_scene_with_product_and_bindings<F>(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
@@ -751,7 +752,7 @@ where
 #[doc(hidden)]
 pub fn prepare_expanded_scene_replacement_with_claims<F>(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
@@ -875,13 +876,13 @@ impl SceneComponentBindings {
             .clone();
         let definition = preparation::ScenePreparationDefinition::capture_with_bindings(
             world,
-            self.native_registry(),
+            self.native_snapshot(),
             self,
         )?;
         SceneSpawner::new()
             .prepare_unbound_with_asset_context_and_product_bindings(
                 world,
-                self.native_registry(),
+                self.native_snapshot(),
                 definition,
                 candidate,
                 &occurrence,
@@ -972,7 +973,7 @@ fn validate_scene_predecessor(
 
 fn prepare_scene_product_transaction(
     world: &World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     scene: &PreflightScene,
     product: SceneProductTransactionInput<'_>,
 ) -> Result<PendingSceneProductTransaction, PrepareSceneProductTransactionError> {
@@ -1618,7 +1619,7 @@ pub fn retire_and_despawn_scene_entity(
 #[must_use]
 pub fn spawn_scene(
     world: &mut World,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     candidate: &ExpandedSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -1651,8 +1652,9 @@ mod provenance_admission_tests {
         use crate::{SceneDocument, SourceDocumentKind};
         for installed in [false, true] {
             let mut world = World::new();
-            let mut registry = ComponentRegistry::new();
-            registry.freeze().unwrap();
+            let registry = nara_reflect::ComponentRegistryBuilder::new()
+                .freeze()
+                .unwrap();
             let candidate = ExpandedSceneCandidate::plain(
                 SourceDocumentKey::named(
                     "56d73fb3-6fc0-435b-956b-1d4df1569e3a".parse().unwrap(),

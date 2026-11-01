@@ -66,18 +66,21 @@ composition path shared by runtime Hosts and strict project tools.
 Product composition loads and validates every trusted owner source before it runs selected native
 callbacks. Each selected validation and registration callback runs once against a private
 owner-local candidate. A failed source, callback, freeze, or merge leaves the aggregate registry
-unchanged; a frozen registry rejects every mutation.
+unchanged. Published snapshots expose no registration methods.
 
 At App sealing, the registry owner checks the final installed `provides_schema` union against
 actual provider receipts. Missing declarations or registrations reject before schema authority
 is published. Several plugins may select the same provider, and a recipe may register it on
-their behalf. Standalone `ComponentRegistry` users can still register and freeze directly.
+their behalf. Standalone users register with `ComponentRegistryBuilder` and consume it with
+`freeze` to obtain an admitted snapshot.
 
-Codec execution uses the `ComponentRegistrySnapshot` returned by `registry.snapshot()` after a
-successful freeze. The building registry has no encode or preflight methods, and requesting its
-snapshot returns `ComponentRegistryError::NotFrozen`. Freeze rejects missing native bindings before
-publishing a snapshot. Retain one snapshot for a complete operation or batch so all component work
-uses the same validated schema and native definition.
+Queries, migration and codec execution use the `ComponentRegistrySnapshot` returned directly by
+consuming `ComponentRegistryBuilder::freeze`. The builder exposes candidate inspection and
+registration, and cannot satisfy a Scene or codec input. Admission failure returns
+`ComponentRegistryFreezeError`; `into_parts` returns the unchanged builder and original validation
+error so the caller can repair and retry. Use `into_error` only when explicitly discarding that
+candidate. Missing native bindings reject before snapshot publication. Retain one snapshot for
+a complete operation or batch so all component work uses the same validated definition.
 
 The inventory generates `schemas`, `initial_catalog` and `register` callbacks from one explicit
 list of type identifiers. Import or alias qualified component types into the invocation module
@@ -290,9 +293,10 @@ residency or every ProjectAssetDatabase revision. The advanced native-retirement
 target-bound scratch entities and still requires its explicit `discard(world)` lifecycle.
 
 In an `App`, materialize initial Scenes from `StartupStage::Scene`, after the managed definition
-has been sealed. Read `component_registry(world)`, obtain its frozen `snapshot()`, and use
-`ComponentRegistry::from_snapshot` for the Scene operation. Do not substitute a separately frozen
-registry during App configuration, even for an empty Scene. The
+has been sealed. Clone the admitted `component_registry(world)` snapshot when the Scene operation
+needs a mutable World borrow. No wrapper or independent readmission is needed. An installed
+Building or unfinished Preloaded owner cannot use the standalone fallback, even with a separately
+admitted snapshot or an empty Scene. The
 [interaction lab](../../crates/nara_ui/examples/interaction_lab/fixture.rs) demonstrates this path
 and publishes its entity handles only after successful materialization.
 
@@ -344,7 +348,7 @@ encoder borrowing that component:
 use nara::prelude::Component;
 use nara::reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
@@ -353,7 +357,7 @@ struct Health {
     current: i64,
 }
 
-fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_health(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     let schema = ComponentSchema::new(
         ComponentTypeId::new("example.Health"),
         "Health",
@@ -391,10 +395,9 @@ fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegi
 After registration, execute through the frozen snapshot:
 
 ```rust
-let mut registry = ComponentRegistry::new();
+let mut registry = ComponentRegistryBuilder::new();
 register_health(&mut registry)?;
-registry.freeze()?;
-let execution = registry.snapshot()?;
+let execution = registry.freeze()?;
 
 let component_id = ComponentTypeId::new("example.Health");
 let source = ComponentValue::map([("current", ComponentValue::I64(42))]);
@@ -812,8 +815,8 @@ re-export prevents normal direct dependency discovery; it is not an ECS derive p
 
 The derive emits one native provider. It does not publish catalogs, mutate a frozen registry,
 select a predecessor, synthesize migrations, allocate tombstones, or implement dynamic non-Rust
-storage. Those responsibilities remain explicit in `ComponentRegistry` and the owning project or
-plugin workflow.
+storage. Construction remains explicit in `ComponentRegistryBuilder` and its owning project or
+plugin workflow; admitted queries and execution use `ComponentRegistrySnapshot`.
 
 See [`reference-game/src/components.rs`](../../reference-game/src/components.rs) for
 production-shaped declarations and [`reference-game/tests/authoring.rs`](../../reference-game/tests/authoring.rs)

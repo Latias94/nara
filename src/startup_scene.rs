@@ -897,7 +897,7 @@ mod tests {
     use std::sync::OnceLock;
 
     use nara_ecs::bevy_ecs::system::SystemState;
-    use nara_reflect::ComponentRegistry;
+    use nara_reflect::ComponentRegistryBuilder;
     use nara_scene::spawn_scene;
 
     use super::*;
@@ -932,8 +932,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let report = spawn_scene(
             &mut world,
             &registry,

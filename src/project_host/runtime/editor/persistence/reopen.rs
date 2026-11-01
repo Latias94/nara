@@ -357,7 +357,7 @@ impl EditorProjectSession {
         // Recheck before invoking native code. The registry never crosses into the worker.
         let registry = self
             .trusted_compiled()
-            .map(|lane| lane.plan.schema_validation().registry());
+            .map(|lane| lane.plan.schema_validation().snapshot());
         match (prepared, &admission.lane) {
             (ReopenCompletion::Scene(prepared, source), PersistenceLane::Scene(lane)) => {
                 let identity = match prepared.preparation_identity() {

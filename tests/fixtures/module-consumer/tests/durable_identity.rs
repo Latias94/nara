@@ -787,7 +787,7 @@ fn persistent_owner(id: &str) -> PersistentRuntimeReference {
 
 fn spawn_owned_instance(
     world: &mut World,
-    registry: &nara_reflect::ComponentRegistry,
+    registry: &nara_reflect::ComponentRegistrySnapshot,
     scene: &nara_scene::SceneDocument,
     resolver: &InMemoryPrefabSourceResolver,
     database: &nara_asset::ProjectAssetDatabase,

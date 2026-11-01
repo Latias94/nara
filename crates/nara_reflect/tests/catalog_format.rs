@@ -5,7 +5,7 @@ use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCatalogFileBudgetKind, ComponentCatalogFileError,
     ComponentCatalogFileLimits, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
     ComponentShapeErrorKind, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueShape,
@@ -417,7 +417,7 @@ fn loaded_catalog_remains_separate_from_native_binding_until_atomic_freeze() {
     let encoded = sample_catalog().to_json_string().unwrap();
     let catalog = ComponentSchemaCatalog::from_json_bytes(encoded.as_bytes()).unwrap();
     let id = ComponentTypeId::new("nara.test.Position");
-    let mut registry = ComponentRegistry::from_owner_catalog_candidate(
+    let registry = ComponentRegistryBuilder::from_owner_catalog_candidate(
         ComponentSchemaOwnerId::new("nara.test.loaded-catalog"),
         catalog,
         None,
@@ -425,12 +425,14 @@ fn loaded_catalog_remains_separate_from_native_binding_until_atomic_freeze() {
     .unwrap();
     let before = registry.catalog_candidate().clone();
 
-    assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::MissingNativeBinding { component_id }) if component_id == id
-    ));
+    let failure = registry.freeze().unwrap_err();
+    let expected = ComponentRegistryError::MissingNativeBinding {
+        component_id: id.clone(),
+    };
+    assert_eq!(failure.error(), &expected);
+    let (mut registry, error) = failure.into_parts();
+    assert_eq!(error, expected);
     assert_eq!(registry.catalog_candidate(), &before);
-    assert!(!registry.is_frozen());
 
     registry
         .register_native_component_with_codec::<Position, _, _>(
@@ -444,8 +446,10 @@ fn loaded_catalog_remains_separate_from_native_binding_until_atomic_freeze() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    assert!(registry.is_frozen());
+    let registry = registry.freeze().unwrap();
+    assert_eq!(registry.catalog(), &before);
+    assert_eq!(registry.schema_for_type::<Position>(), registry.schema(&id));
+    assert!(registry.schema(&id).is_some());
 }
 
 #[test]

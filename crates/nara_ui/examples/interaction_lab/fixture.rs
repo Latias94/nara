@@ -10,7 +10,7 @@ use nara_input::{
     ActionMapLimits, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId,
     KeyCode,
 };
-use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin, component_registry};
+use nara_reflect::{ComponentRegistryPlugin, component_registry};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource};
 use nara_ui::{
     advanced::{
@@ -165,11 +165,9 @@ fn capture_gameplay_outcome(outcomes: Res<ActionOutcomes>, mut probe: ResMut<Gam
 }
 
 fn spawn_scene_overlay(world: &mut World) -> Result<Entity, Box<dyn Error>> {
-    let registry = ComponentRegistry::from_snapshot(
-        component_registry(world)
-            .ok_or("the managed component registry is unavailable")?
-            .snapshot()?,
-    );
+    let registry = component_registry(world)
+        .ok_or("the managed component registry is unavailable")?
+        .clone();
     let source_id = SceneEntityId::new("scene-overlay")?;
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(source_id.clone())]);
     let report = nara_scene::spawn_scene(

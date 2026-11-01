@@ -8,8 +8,8 @@ use nara_ecs::Component;
 use nara_identity::EntityReference;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueShape,
+    ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueShape,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord,
@@ -38,7 +38,10 @@ pub fn durable_links_value(reference: &EntityReference) -> ComponentValue {
     )])
 }
 
-pub fn durable_links_registry(required: bool, reference: &EntityReference) -> ComponentRegistry {
+pub fn durable_links_registry(
+    required: bool,
+    reference: &EntityReference,
+) -> ComponentRegistrySnapshot {
     let shape = ComponentValueShape::map(ComponentValueShape::list(ComponentValueShape::optional(
         ComponentValueShape::EntityRef,
     )));
@@ -60,7 +63,7 @@ pub fn durable_links_registry(required: bool, reference: &EntityReference) -> Co
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_capability(ComponentCapability::EntityRef);
     links.default_value = Some(durable_links_value(reference));
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DurableLinks, _, _>(
             ComponentSchema::new(
@@ -74,8 +77,7 @@ pub fn durable_links_registry(required: bool, reference: &EntityReference) -> Co
             |links| Ok(ComponentValue::map([("links", links.0.clone())])),
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 pub fn durable_links_document(omitted: bool, reference: &EntityReference) -> SceneDocument {
@@ -146,7 +148,7 @@ pub fn merged_database() -> ProjectAssetDatabase {
 
 pub fn load_prefab(
     database: &ProjectAssetDatabase,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     id: StableAssetId,
 ) -> PrefabDocument {
     let record = database
@@ -164,7 +166,7 @@ pub fn load_prefab(
 
 pub fn prefab_resolver(
     database: &ProjectAssetDatabase,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> InMemoryPrefabSourceResolver {
     [stable_id(ACTOR_ID), stable_id(SHARED_ID)]
         .into_iter()
@@ -214,7 +216,7 @@ impl Error for ConversionError {}
 )]
 pub fn stabilize_v1_scene_bytes(
     encoded: &mut Vec<u8>,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     database: &ProjectAssetDatabase,
 ) -> Result<(), ConversionError> {
     let invalid = |error: &dyn Error| ConversionError::InvalidDocument(error.to_string());
@@ -251,7 +253,7 @@ pub fn stabilize_v1_scene_bytes(
 }
 
 pub fn stable_scene(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     database: &ProjectAssetDatabase,
 ) -> SceneDocument {
     let mut encoded = fixture_bytes(SCENE_PATH);

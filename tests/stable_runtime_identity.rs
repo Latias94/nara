@@ -3,15 +3,15 @@ use nara::{
     core::ItemLimit,
     gameplay::GameplayCommandTarget,
     identity::{EntityLookup, SceneEntityId, resolve_in_world},
-    reflect::ComponentRegistry,
+    reflect::ComponentRegistryBuilder,
     scene::{SceneDocument, SceneEntityRecord},
     tooling::WorldIdentitySnapshot,
 };
 
 #[test]
 fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
-    let mut registry = ComponentRegistry::new();
-    registry
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry
         .freeze()
         .expect("component registry should freeze before scene spawn");
     let entity_id = SceneEntityId::new("player").unwrap();

@@ -11,7 +11,7 @@ use nara_ecs::{
 };
 use nara_hierarchy::{Children, Parent};
 use nara_identity::SceneEntityId;
-use nara_reflect::{ComponentRegistry, ComponentTypeId};
+use nara_reflect::{ComponentRegistrySnapshot, ComponentTypeId};
 
 use crate::{spawn::SceneEntitySource, validation::PreparedScene};
 
@@ -116,7 +116,7 @@ type CommitResourceWrite = dyn FnOnce(&mut World) + Send + Sync;
 /// the caller, so neither a candidate map nor a candidate-World handle can escape the call.
 pub struct SceneProductOverlayWriter<'world> {
     world: &'world World,
-    registry: &'world ComponentRegistry,
+    registry: &'world ComponentRegistrySnapshot,
     authored_components: BTreeMap<SceneEntityId, BTreeSet<ComponentTypeId>>,
     limit: usize,
     writes: usize,
@@ -130,7 +130,7 @@ pub struct SceneProductOverlayWriter<'world> {
 impl<'world> SceneProductOverlayWriter<'world> {
     pub(crate) fn new(
         world: &'world World,
-        registry: &'world ComponentRegistry,
+        registry: &'world ComponentRegistrySnapshot,
         scene: &PreparedScene,
         limit: ItemLimit,
     ) -> Self {

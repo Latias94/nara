@@ -330,10 +330,9 @@ mod tests {
     #[test]
     fn binding_a_source_moves_the_exact_expanded_document_and_provenance() {
         use crate::{InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance};
-        use nara_reflect::ComponentRegistry;
+        use nara_reflect::ComponentRegistryBuilder;
 
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let request = AssetRef::path("prefabs/source.ron").unwrap();
         let prefab_key = crate::tests::prefab_source_key(&request);
         let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -463,9 +462,8 @@ mod tests {
     #[test]
     fn independent_expansions_keep_same_generated_keys_bound_to_their_own_sources() {
         use crate::{InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance};
-        use nara_reflect::ComponentRegistry;
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        use nara_reflect::ComponentRegistryBuilder;
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let expand = |path: &str, source_id: &str| {
             let source = AssetRef::path(path).unwrap();
             let resolver = InMemoryPrefabSourceResolver::new().with_prefab(

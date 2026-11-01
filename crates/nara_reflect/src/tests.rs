@@ -43,9 +43,10 @@ struct ResourceImplemented;
 impl<T: Resource + ?Sized> AmbiguousIfResource<ResourceImplemented> for T {}
 
 #[test]
-fn component_registry_is_not_an_ecs_resource() {
-    // Inference succeeds only while ComponentRegistry does not implement Resource.
-    let _ = <ComponentRegistry as AmbiguousIfResource<_>>::marker;
+fn public_registry_owners_are_not_ecs_resources() {
+    // Inference succeeds only while each public owner does not implement Resource.
+    let _ = <ComponentRegistryBuilder as AmbiguousIfResource<_>>::marker;
+    let _ = <ComponentRegistrySnapshot as AmbiguousIfResource<_>>::marker;
 }
 
 struct TestAsset;
@@ -72,8 +73,8 @@ fn apply_probe_schema() -> ComponentSchema {
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
 }
 
-fn frozen_apply_probe_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_apply_probe_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<ApplyProbe, _, _>(
             apply_probe_schema(),
@@ -93,8 +94,7 @@ fn frozen_apply_probe_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn apply_probe_value(value: i64) -> ComponentValue {
@@ -291,7 +291,7 @@ fn component_value_bounded_cost_preserves_entity_reference_accounting() {
 
 #[test]
 fn declared_asset_reference_traversal_uses_schema_paths_only() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.AssetCarrier");
     let schema = ComponentSchema::new(id.clone(), "AssetCarrier", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -323,7 +323,7 @@ fn declared_asset_reference_traversal_uses_schema_paths_only() {
             |_| Ok(ComponentValue::Null),
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let declared = AssetRef::path("textures/player.png").unwrap();
     let value = ComponentValue::map([
@@ -387,7 +387,7 @@ fn declared_asset_reference_traversal_uses_schema_paths_only() {
 
 #[test]
 fn asset_reference_defaults_require_the_exact_canonical_shape() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.AssetDefault");
     let invalid_default = ComponentValue::map([
         ("kind", ComponentValue::String("path".to_owned())),
@@ -435,7 +435,7 @@ fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
 
 #[test]
 fn migrates_component_values_to_current_schema_version() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.Position");
     register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(3));
     registry
@@ -471,7 +471,7 @@ fn migrates_component_values_to_current_schema_version() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let migrated = registry
         .migrate_component_value(
@@ -487,7 +487,7 @@ fn migrates_component_values_to_current_schema_version() {
 
 #[test]
 fn owned_component_migration_reuses_storage_and_matches_borrowed_migration() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.Position");
     register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(2));
     registry
@@ -507,7 +507,7 @@ fn owned_component_migration_reuses_storage_and_matches_borrowed_migration() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let current = ComponentValue::map([(
         "payload",
@@ -568,10 +568,10 @@ fn owned_component_migration_reuses_storage_and_matches_borrowed_migration() {
 
 #[test]
 fn reports_missing_component_migration_chain() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.Position");
     register_migration_test_component(&mut registry, &id, ComponentSchemaVersion(2));
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let error = registry
         .migrate_component_value(
@@ -592,7 +592,7 @@ fn reports_missing_component_migration_chain() {
 }
 
 fn register_migration_test_component(
-    registry: &mut ComponentRegistry,
+    registry: &mut ComponentRegistryBuilder,
     id: &ComponentTypeId,
     version: ComponentSchemaVersion,
 ) {
@@ -763,7 +763,7 @@ fn invalid_component_value_path_does_not_mutate_original() {
 
 #[test]
 fn preflights_applies_and_encodes_scene_component() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.Position");
     let schema = ComponentSchema::new(id.clone(), "Position", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -807,7 +807,7 @@ fn preflights_applies_and_encodes_scene_component() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
 
     let schema = registry.schema(&id).unwrap();
     assert!(schema.has_capability(ComponentCapability::Scene));
@@ -824,7 +824,7 @@ fn preflights_applies_and_encodes_scene_component() {
         ("x", ComponentValue::f64(2.0).unwrap()),
         ("y", ComponentValue::f64(3.0).unwrap()),
     ]);
-    let execution = registry.snapshot().unwrap();
+    let execution = registry.clone();
     let prepared = execution.preflight_component(&id, &value).unwrap();
     let mut world = World::new();
     let entity = world.spawn_empty().id();
@@ -860,7 +860,7 @@ fn failed_prepared_component_does_not_mutate_existing_world_state() {
 #[test]
 fn frozen_execution_distinguishes_unknown_schema_from_component_absence() {
     let registry = frozen_apply_probe_registry();
-    let execution = registry.snapshot().unwrap();
+    let execution = registry.clone();
     let mut world = World::new();
     let entity = world.spawn_empty().id();
     let unknown = ComponentTypeId::new("nara.test.Unknown");
@@ -885,27 +885,27 @@ fn frozen_execution_distinguishes_unknown_schema_from_component_absence() {
 
 #[test]
 fn missing_native_binding_prevents_execution_snapshot_publication() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_component_schema(apply_probe_schema())
         .unwrap();
-    assert!(matches!(
-        registry.freeze(),
-        Err(ComponentRegistryError::MissingNativeBinding { component_id })
-            if component_id == ComponentTypeId::new("nara.test.ApplyProbe")
-    ));
-    assert!(matches!(
-        registry.snapshot(),
-        Err(ComponentRegistryError::NotFrozen)
-    ));
+    let candidate_before = registry.catalog_candidate().clone();
+    let failure = registry.freeze().unwrap_err();
+    let expected = ComponentRegistryError::MissingNativeBinding {
+        component_id: ComponentTypeId::new("nara.test.ApplyProbe"),
+    };
+    assert_eq!(failure.error(), &expected);
+    let (registry, error) = failure.into_parts();
+    assert_eq!(registry.catalog_candidate(), &candidate_before);
+    assert_eq!(error, expected);
 }
 
 #[test]
 fn retained_execution_uses_its_exact_frozen_definition_after_registry_drop() {
     let registry = frozen_apply_probe_registry();
-    let execution = registry.snapshot().unwrap();
-    assert!(execution.ptr_eq(&registry.snapshot().unwrap()));
-    assert!(!execution.ptr_eq(&frozen_apply_probe_registry().snapshot().unwrap()));
+    let execution = registry.clone();
+    assert!(execution.ptr_eq(&registry));
+    assert!(!execution.ptr_eq(&frozen_apply_probe_registry()));
     drop(registry);
 
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
@@ -937,7 +937,7 @@ fn custom_encoder_receives_the_selected_component_and_skips_missing_targets() {
         atomic::{AtomicUsize, Ordering},
     };
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
     let calls = Arc::new(AtomicUsize::new(0));
     let encoder_calls = Arc::clone(&calls);
@@ -955,8 +955,8 @@ fn custom_encoder_receives_the_selected_component_and_skips_missing_targets() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let execution = registry.snapshot().unwrap();
+    let registry = registry.freeze().unwrap();
+    let execution = registry.clone();
     let mut world = World::new();
     let missing = world.spawn(Velocity { dx: 1.0, dy: 2.0 }).id();
     let selected = world.spawn(ApplyProbe(37)).id();
@@ -985,7 +985,7 @@ fn deferred_dynamic_hook_rejects_existing_target_before_component_mutation() {
 
     let registry = frozen_apply_probe_registry();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
-    let execution = registry.snapshot().unwrap();
+    let execution = registry.clone();
     let prepared = execution
         .preflight_component(&id, &apply_probe_value(7))
         .unwrap();
@@ -1021,7 +1021,7 @@ fn entity_component_observer_rejects_existing_target_before_component_mutation()
 
     let registry = frozen_apply_probe_registry();
     let id = ComponentTypeId::new("nara.test.ApplyProbe");
-    let execution = registry.snapshot().unwrap();
+    let execution = registry.clone();
     let prepared = execution
         .preflight_component(&id, &apply_probe_value(8))
         .unwrap();

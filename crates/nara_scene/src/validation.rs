@@ -9,7 +9,7 @@ use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext,
     ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentMigrationError,
-    ComponentRegistry, ComponentSchema, ComponentTypeId, ComponentValue,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentTypeId, ComponentValue,
     ComponentValueMaterializationLimits, DeclaredAssetReference, EntityReference,
     EntityReferenceTraversalLimits, PreparedComponent,
     collect_declared_asset_references_from_schema_with_limits,
@@ -125,18 +125,7 @@ fn validate_effective_values<E>(
 ) -> Result<EffectiveSceneValidation, E> {
     let (placement, mut diagnostics) = validate_scene_structure_with_operation(document, None);
     let mut asset_references = Vec::new();
-    if let Some(registry) = authority.native_registry() {
-        if registry.snapshot().is_err() {
-            diagnostics.push(diagnostic_error(
-                "scene.component-registry-not-frozen",
-                "Scene validation requires a frozen component registry",
-            ));
-            return Ok(EffectiveSceneValidation {
-                diagnostics,
-                #[cfg(feature = "serde")]
-                asset_references,
-            });
-        }
+    if let Some(registry) = authority.native_snapshot() {
         if let Some(entity) = placement.as_ref().and_then(|placement| {
             first_unavailable_hierarchy_projection_entity(document, placement, registry)
         }) {
@@ -336,7 +325,7 @@ fn validate_effective_values<E>(
 
 pub(crate) fn preflight_scene(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> PreparedScene {
     let mut context = ComponentDecodeContext::new();
     preflight_scene_with_context(document, registry, &mut context)
@@ -344,7 +333,7 @@ pub(crate) fn preflight_scene(
 
 pub(crate) fn preflight_authoring_scene(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> PreparedScene {
     let mut context = ComponentDecodeContext::new();
     preflight_authoring_scene_with_context(document, registry, &mut context)
@@ -352,7 +341,7 @@ pub(crate) fn preflight_authoring_scene(
 
 pub(crate) fn preflight_authoring_scene_for_patch(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation_index: usize,
 ) -> PreparedScene {
     let mut context = ComponentDecodeContext::new();
@@ -372,7 +361,7 @@ pub(crate) fn preflight_authoring_scene_for_patch(
 
 pub(crate) fn validate_patch_intermediate_scene_with_limits(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation_index: usize,
     limits: ComponentValueMaterializationLimits,
 ) -> DiagnosticReport {
@@ -394,7 +383,7 @@ pub(crate) fn validate_patch_intermediate_scene_with_limits(
 
 pub(crate) fn preflight_scene_with_context(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
     preflight_scene_with_context_options(
@@ -414,7 +403,7 @@ pub(crate) fn preflight_scene_with_context(
 /// Preflights both representations through the same admission and reference-validation path.
 pub(crate) fn preflight_scene_with_context_and_bindings(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     bindings: &SceneComponentBindings,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
@@ -434,7 +423,7 @@ pub(crate) fn preflight_scene_with_context_and_bindings(
 
 pub(crate) fn preflight_authoring_scene_with_context(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
     preflight_authoring_scene_with_context_at_operation(document, registry, context, None)
@@ -442,7 +431,7 @@ pub(crate) fn preflight_authoring_scene_with_context(
 
 pub(crate) fn preflight_authoring_scene_with_context_at_operation(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
     operation_index: Option<usize>,
 ) -> PreparedScene {
@@ -462,7 +451,7 @@ pub(crate) fn preflight_authoring_scene_with_context_at_operation(
 
 pub(crate) fn preflight_authoring_scene_with_context_for_patch(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
     operation_index: usize,
 ) -> PreparedScene {
@@ -534,7 +523,7 @@ fn validate_scene_structure_with_operation(
 
 fn preflight_scene_with_context_options(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     bindings: Option<&SceneComponentBindings>,
     context: &mut ComponentDecodeContext<'_>,
     options: ScenePreflightOptions,
@@ -548,20 +537,7 @@ fn preflight_scene_with_context_options(
     let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
     let (placement, mut diagnostics) =
         validate_scene_structure_with_operation(document, operation_index);
-    let execution = match registry.snapshot() {
-        Ok(snapshot) => snapshot,
-        Err(_) => {
-            diagnostics.push(diagnostic_error(
-                "scene.component-registry-not-frozen",
-                "Scene validation requires a frozen component registry",
-            ));
-            return PreparedScene {
-                roots: Vec::new(),
-                entities: Vec::new(),
-                diagnostics,
-            };
-        }
-    };
+    let execution = registry;
     if bindings.is_some_and(|bindings| !execution.ptr_eq(bindings.native_snapshot())) {
         diagnostics.push(diagnostic_error(
             "scene.component-bindings-mismatch",
@@ -1065,7 +1041,7 @@ fn component_payload_diagnostic(
             .data_owner(component_id)
             .map(|owner| owner.owner_id().as_str()),
         _ => authority
-            .native_registry()
+            .native_snapshot()
             .and_then(|registry| registry.component_schema_owner(component_id))
             .map(|owner| owner.as_str()),
     };
@@ -1079,7 +1055,7 @@ fn component_payload_diagnostic(
 pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
     document: &'document SceneDocument,
     placement: &ValidatedScenePlacement,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> Option<&'document SceneEntityId> {
     let requires_unavailable_projection = |component_id: &ComponentTypeId| {
         component_id.as_str() == "nara.scene.Visibility" && registry.schema(component_id).is_some()
@@ -1389,8 +1365,8 @@ mod tests {
             .with_fields(fields)
     }
 
-    fn definitions(schema: ComponentSchema) -> (ComponentRegistry, SceneComponentBindings) {
-        let mut registry = ComponentRegistry::new();
+    fn definitions(schema: ComponentSchema) -> (ComponentRegistrySnapshot, SceneComponentBindings) {
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_with_codec::<NativeFlag, _, _>(
                 ComponentSchema::new(native_id(), "Flag", ComponentSchemaVersion::ONE)
@@ -1406,7 +1382,7 @@ mod tests {
                 |flag| Ok(ComponentValue::map([("x", ComponentValue::Bool(flag.0))])),
             )
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         let owner = ComponentSchemaOwnerSnapshot::admit(
             PersistentComponentSchemaOwnerId::try_new("game.data").unwrap(),
             ComponentSchemaCatalog {
@@ -1416,7 +1392,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), [owner]).unwrap();
+        let bindings = SceneComponentBindings::new(registry.clone(), [owner]).unwrap();
         (registry, bindings)
     }
 
@@ -1447,7 +1423,7 @@ mod tests {
 
     fn prepare(
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         bindings: &SceneComponentBindings,
         limits: ComponentValueMaterializationLimits,
     ) -> PreparedScene {
@@ -1673,7 +1649,7 @@ mod tests {
         };
 
         let calls = Arc::new(AtomicUsize::new(0));
-        let mut registry = ComponentRegistry::new();
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_with_codec::<NativeFlag, _, _>(
                 ComponentSchema::new(native_id(), "Flag", ComponentSchemaVersion(2))
@@ -1701,7 +1677,7 @@ mod tests {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
+        let registry = registry.freeze().unwrap();
         for (value, limits) in [
             (
                 ComponentValue::List(vec![ComponentValue::List(vec![ComponentValue::Null])]),

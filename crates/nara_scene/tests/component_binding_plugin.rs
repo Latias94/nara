@@ -82,10 +82,7 @@ fn caller_definitions_do_not_install_a_missing_managed_scene_owner() {
         .unwrap();
     let runtime = RuntimeInstance::start(app).unwrap();
     let caller_bindings = SceneComponentBindings::new(
-        component_registry(runtime.world())
-            .unwrap()
-            .snapshot()
-            .unwrap(),
+        component_registry(runtime.world()).unwrap().clone(),
         owners(),
     )
     .unwrap();
@@ -120,7 +117,7 @@ fn seal_selects_the_actual_native_snapshot_and_exact_data_admissions() {
     assert!(
         bindings
             .native_snapshot()
-            .ptr_eq(&component_registry(app.world()).unwrap().snapshot().unwrap())
+            .ptr_eq(&component_registry(app.world()).unwrap().clone())
     );
     assert_eq!(bindings.data_owners().len(), selected.len());
     for expected in &selected {

@@ -776,7 +776,7 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     let failed_sync = session
         .sync_world(
             &mut world,
-            &ComponentRegistry::new(),
+            &ComponentRegistryBuilder::new().freeze().unwrap(),
             &scene_source_key(
                 "authoring_revision_changes_only_for_successful_document_mutations/authored",
             ),
@@ -838,8 +838,8 @@ fn authoring_revision_source_identity_prevents_cross_session_equality() {
     assert_ne!(first.revision(), second.revision());
 }
 
-fn scene_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn scene_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let label_id = label_type_id();
     let schema = ComponentSchema::new(label_id, "Label", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
@@ -866,8 +866,7 @@ fn scene_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn labeled_entity(id: SceneEntityId, label: &str) -> SceneEntityRecord {

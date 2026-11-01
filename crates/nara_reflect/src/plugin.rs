@@ -12,7 +12,10 @@ use nara_app::{
 };
 use nara_ecs::{Resource, World, bevy_ecs::lifecycle::HookContext, bevy_ecs::world::DeferredWorld};
 
-use crate::{ComponentRegistry, ComponentRegistrySnapshot, ComponentSchemaProviderDefinition};
+use crate::{
+    ComponentRegistryBuilder, ComponentRegistryError, ComponentRegistrySnapshot,
+    ComponentSchemaProviderDefinition,
+};
 
 pub const COMPONENT_REGISTRY_PLUGIN_ID: PluginId = PluginId::new("nara.reflect.registry");
 pub const COMPONENT_REGISTRY_PLUGIN_REQUIREMENT: &[PluginId] = &[COMPONENT_REGISTRY_PLUGIN_ID];
@@ -63,21 +66,71 @@ pub fn preloaded_component_registry_plugin(
     on_discard = record_component_registry_structure_change
 )]
 struct ComponentRegistryResource {
-    registry: ComponentRegistry,
+    instance_token: Arc<()>,
+    state: ComponentRegistryState,
+}
+
+enum ComponentRegistryState {
+    Building(Option<ComponentRegistryBuilder>),
+    Preloaded(ComponentRegistrySnapshot),
+    Admitted(ComponentRegistrySnapshot),
 }
 
 impl Default for ComponentRegistryResource {
     fn default() -> Self {
         Self {
-            registry: ComponentRegistry::new(),
+            instance_token: Arc::new(()),
+            state: ComponentRegistryState::Building(Some(ComponentRegistryBuilder::new())),
         }
     }
 }
 
 impl ComponentRegistryResource {
-    fn from_snapshot(snapshot: ComponentRegistrySnapshot) -> Self {
+    fn preloaded(snapshot: ComponentRegistrySnapshot) -> Self {
         Self {
-            registry: ComponentRegistry::from_snapshot(snapshot),
+            instance_token: Arc::new(()),
+            state: ComponentRegistryState::Preloaded(snapshot),
+        }
+    }
+
+    fn admitted_snapshot(&self) -> Option<&ComponentRegistrySnapshot> {
+        match &self.state {
+            ComponentRegistryState::Admitted(snapshot) => Some(snapshot),
+            ComponentRegistryState::Building(_) | ComponentRegistryState::Preloaded(_) => None,
+        }
+    }
+
+    fn shares_snapshot(&self, expected: &ComponentRegistrySnapshot) -> bool {
+        match &self.state {
+            ComponentRegistryState::Preloaded(snapshot)
+            | ComponentRegistryState::Admitted(snapshot) => snapshot.ptr_eq(expected),
+            ComponentRegistryState::Building(_) => false,
+        }
+    }
+
+    fn validate_schema_provider(
+        &self,
+        provider: &ComponentSchemaProviderDefinition,
+    ) -> Result<(), ComponentRegistryError> {
+        match &self.state {
+            ComponentRegistryState::Building(builder) => {
+                provider.preflight(builder.as_ref().expect("registry admission is synchronous"))
+            }
+            ComponentRegistryState::Preloaded(snapshot)
+            | ComponentRegistryState::Admitted(snapshot) => provider.validate_snapshot(snapshot),
+        }
+    }
+
+    fn register_schema_provider(
+        &mut self,
+        provider: &ComponentSchemaProviderDefinition,
+    ) -> Result<(), ComponentRegistryError> {
+        match &mut self.state {
+            ComponentRegistryState::Building(builder) => {
+                provider.register_into(builder.as_mut().expect("registry admission is synchronous"))
+            }
+            ComponentRegistryState::Preloaded(snapshot)
+            | ComponentRegistryState::Admitted(snapshot) => provider.validate_snapshot(snapshot),
         }
     }
 }
@@ -153,10 +206,10 @@ impl ComponentRegistryAuthorityState {
         let revision = world
             .get_resource::<ComponentRegistryMutationRevision>()
             .ok_or(ComponentRegistryAuthorityError::Replaced)?;
-        if registry.registry.shares_snapshot(&self.snapshot)
-            && registry
-                .registry
-                .shares_instance_token(&self.instance_token)
+        if registry
+            .admitted_snapshot()
+            .is_some_and(|snapshot| snapshot.ptr_eq(&self.snapshot))
+            && Arc::ptr_eq(&registry.instance_token, &self.instance_token)
             && revision.0 == self.mutation_revision
         {
             Ok(())
@@ -189,39 +242,56 @@ impl ComponentRegistryAuthorityState {
     }
 }
 
-pub fn registry_for_plugin_preflight<'a>(
-    context: &'a PluginPreflightContext<'_>,
+/// Preflights one schema provider against the private App registry owner.
+///
+/// Building owners check source and contribution collisions without running provider callbacks.
+/// Preloaded and admitted owners compare receipts with their exact retained snapshot.
+pub fn validate_schema_provider_for_plugin(
+    context: &PluginPreflightContext<'_>,
     plugin: PluginId,
     component: &str,
-) -> Result<&'a ComponentRegistry, PluginError> {
-    context
+    provider: &ComponentSchemaProviderDefinition,
+) -> Result<(), PluginError> {
+    let resource = context
         .get_structural_resource::<ComponentRegistryResource>()
-        .map(|resource| &resource.registry)
         .ok_or_else(|| {
             PluginError::component_registration(
                 plugin,
                 component,
                 "component registry resource is unavailable",
             )
-        })
+        })?;
+    resource
+        .validate_schema_provider(provider)
+        .map_err(|error| PluginError::component_registration(plugin, component, error))
 }
 
-/// Returns the immutable component registry owned by the current App or runtime World.
+/// Returns the admitted immutable component registry owned by this App or runtime World.
 ///
-/// `ComponentRegistry` is intentionally not an ECS resource. Schema-owning plugins register
-/// through [`register_schema_provider_for_plugin`], and runtime consumers receive only this
-/// shared read view, so native code cannot temporarily replace the executable behavior authority.
+/// Building and unfinished preloaded owners expose no snapshot. Schema-owning plugins use
+/// [`register_schema_provider_for_plugin`]; runtime consumers receive only this admitted view.
+/// Snapshot availability alone does not establish valid runtime authority.
 #[must_use]
-pub fn component_registry(world: &World) -> Option<&ComponentRegistry> {
+pub fn component_registry(world: &World) -> Option<&ComponentRegistrySnapshot> {
     world
         .get_resource::<ComponentRegistryResource>()
-        .map(|resource| &resource.registry)
+        .and_then(ComponentRegistryResource::admitted_snapshot)
+}
+
+/// Returns whether this World has a component registry owner installation.
+///
+/// Presence includes Building and unfinished Preloaded owners and conveys no runtime authority.
+/// Only a World without an owner may use standalone Scene operations; an installed owner must
+/// complete admission and pass [`validate_component_registry_authority`].
+#[must_use]
+pub fn component_registry_is_installed(world: &World) -> bool {
+    world.contains_resource::<ComponentRegistryResource>()
 }
 
 /// Registers or validates one schema provider against the registry owned by `app`.
 ///
-/// The private owner resource keeps mutation scoped to this operation. A preloaded frozen
-/// registry accepts only an exact compatible provider; it cannot be replaced through this API.
+/// The private owner resource keeps mutation scoped to this operation. Preloaded and admitted
+/// owners accept only exact compatible receipts without replaying provider callbacks.
 /// `plugin` and `component` identify failures in diagnostics; durable ownership comes from the
 /// provider receipt and registration may be delegated by a recipe.
 pub fn register_schema_provider_for_plugin(
@@ -240,8 +310,8 @@ pub fn register_schema_provider_for_plugin(
                 "component registry resource is unavailable",
             )
         })?;
-    provider
-        .register_or_validate_into(&mut resource.registry)
+    resource
+        .register_schema_provider(provider)
         .map_err(|error| PluginError::component_registration(plugin, component, error))
 }
 
@@ -282,7 +352,7 @@ fn build_component_registry(
         let existing_matches = app
             .world_mut()?
             .get_resource::<ComponentRegistryResource>()
-            .map(|existing| existing.registry.shares_snapshot(snapshot));
+            .map(|existing| existing.shares_snapshot(snapshot));
         match existing_matches {
             Some(true) => {}
             Some(false) => {
@@ -293,7 +363,7 @@ fn build_component_registry(
                 ));
             }
             None => {
-                app.insert_resource(ComponentRegistryResource::from_snapshot(snapshot.clone()))?;
+                app.insert_resource(ComponentRegistryResource::preloaded(snapshot.clone()))?;
             }
         }
     } else {
@@ -318,7 +388,7 @@ fn build_component_registry(
                 )
             })?;
         ComponentRegistryBuildSeed {
-            instance_token: registry.registry.instance_token().clone(),
+            instance_token: Arc::clone(&registry.instance_token),
             mutation_revision: revision.0,
         }
     };
@@ -352,54 +422,58 @@ fn finish_component_registry(
         let mut registry = world
             .get_resource_mut::<ComponentRegistryResource>()
             .ok_or_else(|| component_registry_authority_changed("component registry is missing"))?;
-        if !registry
-            .registry
-            .shares_instance_token(&seed.instance_token)
+        if !Arc::ptr_eq(&registry.instance_token, &seed.instance_token)
             || mutation_revision != seed.mutation_revision
         {
             return Err(component_registry_authority_changed(
                 "component registry authority changed after installation",
             ));
         }
-        registry
-            .registry
-            .validate_declared_providers(&declared_providers)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    COMPONENT_REGISTRY_PLUGIN_ID,
-                    "component-schema-catalog",
-                    error,
-                )
-            })?;
-        let snapshot = registry
-            .registry
-            .freeze()
-            .map_err(|error| {
-                PluginError::component_registration(
-                    COMPONENT_REGISTRY_PLUGIN_ID,
-                    "component-schema-catalog",
-                    error,
-                )
-            })?
-            .snapshot()
-            .map_err(|error| {
-                PluginError::component_registration(
-                    COMPONENT_REGISTRY_PLUGIN_ID,
-                    "component-schema-catalog",
-                    error,
-                )
-            })?;
-        (snapshot, registry.registry.instance_token().clone())
+        if let Some(expected) = expected
+            && !registry.shares_snapshot(expected)
+        {
+            return Err(component_registry_authority_changed(
+                "component registry finished with a different admitted snapshot",
+            ));
+        }
+        let registration_error = |error| {
+            PluginError::component_registration(
+                COMPONENT_REGISTRY_PLUGIN_ID,
+                "component-schema-catalog",
+                error,
+            )
+        };
+        let snapshot = match &mut registry.state {
+            ComponentRegistryState::Building(builder) => {
+                let candidate = builder.as_ref().expect("registry admission is synchronous");
+                candidate
+                    .validate_declared_providers(&declared_providers)
+                    .map_err(registration_error)?;
+                let candidate = builder.take().expect("registry admission is synchronous");
+                match candidate.freeze() {
+                    Ok(snapshot) => snapshot,
+                    Err(failure) => {
+                        let (candidate, error) = failure.into_parts();
+                        *builder = Some(candidate);
+                        return Err(registration_error(error));
+                    }
+                }
+            }
+            ComponentRegistryState::Preloaded(snapshot) => {
+                snapshot
+                    .validate_declared_providers(&declared_providers)
+                    .map_err(registration_error)?;
+                snapshot.clone()
+            }
+            ComponentRegistryState::Admitted(_) => {
+                return Err(component_registry_authority_changed(
+                    "component registry was already admitted",
+                ));
+            }
+        };
+        registry.state = ComponentRegistryState::Admitted(snapshot.clone());
+        (snapshot, Arc::clone(&registry.instance_token))
     };
-    if let Some(expected) = expected
-        && !snapshot.ptr_eq(expected)
-    {
-        return Err(PluginError::component_registration(
-            COMPONENT_REGISTRY_PLUGIN_ID,
-            "component-schema-catalog",
-            "component registry finished with a different admitted snapshot",
-        ));
-    }
     let world = app.world_mut()?;
     let mutation_revision = world.resource::<ComponentRegistryMutationRevision>().0;
     let reporter = world.resource::<RuntimeFaultReporter>().clone();
@@ -454,8 +528,14 @@ mod tests {
         time::Duration,
     };
 
-    use nara_app::{CoreStage, FrameExecutionStart, RealTime, VirtualTime};
-    use nara_ecs::schedule::ScheduleLabel;
+    use nara_app::{CoreStage, FrameExecutionStart, PluginSchemaProviderId, RealTime, VirtualTime};
+    use nara_ecs::{Component, schedule::ScheduleLabel};
+
+    use crate::{
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
+        ComponentSchemaProviderBindingId, ComponentSchemaProviderSourceError,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    };
 
     use super::*;
 
@@ -463,6 +543,105 @@ mod tests {
         PluginId::new("nara.test.reflect.registry-mutation");
     const REGISTRY_MUTATION_DECLARATION: PluginDeclaration =
         PluginDeclaration::new(REGISTRY_MUTATION_PLUGIN_ID, PluginCategory::Runtime);
+    const REGISTRY_PROVIDER_PLUGIN_ID: PluginId =
+        PluginId::new("nara.test.reflect.registry-provider");
+    const REGISTRY_PROVIDER_ID: PluginSchemaProviderId =
+        PluginSchemaProviderId::new("nara.test.reflect.registry-provider.components");
+    const REGISTRY_PROVIDER_OWNER: ComponentSchemaOwnerId =
+        ComponentSchemaOwnerId::new("nara.test.reflect.registry-provider.components");
+    const REGISTRY_PROVIDER_BINDING: ComponentSchemaProviderBindingId =
+        ComponentSchemaProviderBindingId::new("nara.test.reflect.registry-provider.native", 1);
+    const REGISTRY_PROVIDER_DECLARATION: PluginDeclaration =
+        PluginDeclaration::new(REGISTRY_PROVIDER_PLUGIN_ID, PluginCategory::Core)
+            .requires_plugins(COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
+            .provides_schema(&[REGISTRY_PROVIDER_ID]);
+    const REGISTRY_PROVIDER: ComponentSchemaProviderDefinition =
+        ComponentSchemaProviderDefinition::new(
+            REGISTRY_PROVIDER_OWNER,
+            REGISTRY_PROVIDER_ID,
+            REGISTRY_PROVIDER_BINDING,
+            empty_provider_catalog,
+            register_empty_provider,
+        );
+
+    struct RegistryProviderPlugin {
+        provider: ComponentSchemaProviderDefinition,
+    }
+
+    impl Plugin for RegistryProviderPlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &REGISTRY_PROVIDER_DECLARATION
+        }
+
+        fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
+            validate_schema_provider_for_plugin(
+                context,
+                REGISTRY_PROVIDER_PLUGIN_ID,
+                "test-provider",
+                &self.provider,
+            )
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            register_schema_provider_for_plugin(
+                app,
+                REGISTRY_PROVIDER_PLUGIN_ID,
+                "test-provider",
+                &self.provider,
+            )
+        }
+
+        fn finish(&self, app: &mut App) -> Result<(), PluginError> {
+            register_schema_provider_for_plugin(
+                app,
+                REGISTRY_PROVIDER_PLUGIN_ID,
+                "test-provider",
+                &self.provider,
+            )
+        }
+    }
+
+    fn empty_provider_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>
+    {
+        Ok(ComponentSchemaCatalog::default())
+    }
+
+    fn register_empty_provider(
+        _: &mut ComponentRegistryBuilder,
+    ) -> Result<(), ComponentRegistryError> {
+        Ok(())
+    }
+
+    fn panic_provider_validation(
+        _: &ComponentRegistryBuilder,
+    ) -> Result<(), ComponentRegistryError> {
+        panic!("preloaded provider validation callback must not run");
+    }
+
+    fn panic_provider_registration(
+        _: &mut ComponentRegistryBuilder,
+    ) -> Result<(), ComponentRegistryError> {
+        panic!("preloaded provider registration callback must not run");
+    }
+
+    fn receipt_only_provider(
+        binding: ComponentSchemaProviderBindingId,
+    ) -> ComponentSchemaProviderDefinition {
+        ComponentSchemaProviderDefinition::with_validation(
+            REGISTRY_PROVIDER_OWNER,
+            REGISTRY_PROVIDER_ID,
+            binding,
+            empty_provider_catalog,
+            panic_provider_validation,
+            panic_provider_registration,
+        )
+    }
+
+    fn provider_snapshot() -> ComponentRegistrySnapshot {
+        let mut builder = ComponentRegistryBuilder::new();
+        REGISTRY_PROVIDER.register_into(&mut builder).unwrap();
+        builder.freeze().unwrap()
+    }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
     struct RegistryMutationSchedule;
@@ -488,9 +667,7 @@ mod tests {
         fn build(&self, app: &mut App) -> Result<(), PluginError> {
             match &self.mutation {
                 RegistryBuildMutation::ReplaceBuilding => {
-                    app.insert_resource(ComponentRegistryResource {
-                        registry: ComponentRegistry::new(),
-                    })?;
+                    app.insert_resource(ComponentRegistryResource::default())?;
                 }
                 RegistryBuildMutation::Rewrap(snapshot) => {
                     let existing_token = {
@@ -498,15 +675,13 @@ mod tests {
                             .world_mut()?
                             .get_resource::<ComponentRegistryResource>()
                             .expect("the registry owner installed its resource first");
-                        assert!(existing.registry.shares_snapshot(snapshot));
-                        existing.registry.instance_token().clone()
+                        assert!(existing.shares_snapshot(snapshot));
+                        Arc::clone(&existing.instance_token)
                     };
-                    let replacement = ComponentRegistry::from_snapshot(snapshot.clone());
+                    let replacement = ComponentRegistryResource::preloaded(snapshot.clone());
                     assert!(replacement.shares_snapshot(snapshot));
-                    assert!(!replacement.shares_instance_token(&existing_token));
-                    app.insert_resource(ComponentRegistryResource {
-                        registry: replacement,
-                    })?;
+                    assert!(!Arc::ptr_eq(&replacement.instance_token, &existing_token));
+                    app.insert_resource(replacement)?;
                 }
                 RegistryBuildMutation::Reinsert => {
                     let registry = app
@@ -534,9 +709,7 @@ mod tests {
         }
 
         fn finish(&self, app: &mut App) -> Result<(), PluginError> {
-            app.insert_resource(ComponentRegistryResource::from_snapshot(
-                self.snapshot.clone(),
-            ))?;
+            app.insert_resource(ComponentRegistryResource::preloaded(self.snapshot.clone()))?;
             Ok(())
         }
     }
@@ -555,12 +728,12 @@ mod tests {
     }
 
     fn rewrap_registry_during_frame(world: &mut World) {
-        let snapshot = world
-            .resource::<ComponentRegistryResource>()
-            .registry
-            .snapshot()
-            .expect("the registry is frozen before managed execution");
-        world.insert_resource(ComponentRegistryResource::from_snapshot(snapshot));
+        let snapshot = component_registry(world)
+            .expect("the registry is admitted before managed execution")
+            .clone();
+        let mut replacement = ComponentRegistryResource::preloaded(snapshot.clone());
+        replacement.state = ComponentRegistryState::Admitted(snapshot);
+        world.insert_resource(replacement);
     }
 
     fn rewrap_registry_then_panic(world: &mut World) {
@@ -573,9 +746,302 @@ mod tests {
     }
 
     fn empty_snapshot() -> ComponentRegistrySnapshot {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
-        registry.snapshot().unwrap()
+        ComponentRegistryBuilder::new().freeze().unwrap()
+    }
+
+    #[test]
+    fn registry_admission_preserves_installation_identity_and_mutation_revision() {
+        for preloaded in [None, Some(empty_snapshot())] {
+            let mut app = App::new();
+            assert!(!component_registry_is_installed(app.world()));
+            assert!(component_registry(app.world()).is_none());
+            if let Some(snapshot) = &preloaded {
+                app.add_plugin(PreloadedComponentRegistryPlugin {
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap();
+            } else {
+                app.add_plugin(ComponentRegistryPlugin).unwrap();
+            }
+
+            assert!(component_registry_is_installed(app.world()));
+            assert!(component_registry(app.world()).is_none());
+            assert_eq!(
+                validate_component_registry_authority(app.world()),
+                Err(ComponentRegistryAuthorityError::MissingAuthority)
+            );
+            let token = Arc::clone(
+                &app.world()
+                    .resource::<ComponentRegistryResource>()
+                    .instance_token,
+            );
+            let revision = app
+                .world()
+                .resource::<ComponentRegistryMutationRevision>()
+                .0;
+
+            let app = app.seal().unwrap();
+
+            let owner = app.world().resource::<ComponentRegistryResource>();
+            let snapshot = component_registry(app.world()).unwrap();
+            assert!(component_registry_is_installed(app.world()));
+            assert!(Arc::ptr_eq(&owner.instance_token, &token));
+            assert_eq!(
+                app.world()
+                    .resource::<ComponentRegistryMutationRevision>()
+                    .0,
+                revision
+            );
+            assert!(
+                !app.world()
+                    .contains_resource::<ComponentRegistryBuildSeed>()
+            );
+            if let Some(preloaded) = preloaded {
+                assert!(snapshot.ptr_eq(&preloaded));
+            }
+            validate_component_registry_authority(app.world()).unwrap();
+        }
+    }
+
+    #[derive(Component)]
+    struct MissingBinding;
+
+    #[test]
+    fn failed_freeze_restores_the_candidate_and_cannot_retry_app_admission() {
+        let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
+        let component_id = ComponentTypeId::new("nara.test.MissingBinding");
+        let candidate_before = {
+            let mut owner = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<ComponentRegistryResource>();
+            let ComponentRegistryState::Building(Some(builder)) = &mut owner.state else {
+                panic!("the registry must still be building");
+            };
+            builder
+                .register_component_schema(ComponentSchema::new(
+                    component_id.clone(),
+                    "Missing binding",
+                    ComponentSchemaVersion::ONE,
+                ))
+                .unwrap();
+            builder.catalog_candidate().clone()
+        };
+        let token = Arc::clone(
+            &app.world()
+                .resource::<ComponentRegistryResource>()
+                .instance_token,
+        );
+        let revision = app
+            .world()
+            .resource::<ComponentRegistryMutationRevision>()
+            .0;
+
+        let error = finish_component_registry(&mut app, None).unwrap_err();
+
+        assert_eq!(
+            error,
+            PluginError::component_registration(
+                COMPONENT_REGISTRY_PLUGIN_ID,
+                "component-schema-catalog",
+                ComponentRegistryError::MissingNativeBinding {
+                    component_id: component_id.clone(),
+                },
+            )
+        );
+        assert!(component_registry_is_installed(app.world()));
+        assert!(component_registry(app.world()).is_none());
+        assert!(
+            !app.world()
+                .contains_resource::<ComponentRegistryAuthority>()
+        );
+        assert!(
+            !app.world()
+                .contains_resource::<ComponentRegistryBuildSeed>()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ComponentRegistryMutationRevision>()
+                .0,
+            revision
+        );
+        {
+            let mut owner = app
+                .world_mut()
+                .unwrap()
+                .resource_mut::<ComponentRegistryResource>();
+            assert!(Arc::ptr_eq(&owner.instance_token, &token));
+            let ComponentRegistryState::Building(Some(builder)) = &mut owner.state else {
+                panic!("failed admission must restore the original builder");
+            };
+            assert_eq!(builder.catalog_candidate(), &candidate_before);
+            builder
+                .register_native_component_with_codec::<MissingBinding, _, _>(
+                    &component_id,
+                    |_| Ok(MissingBinding),
+                    |_| Ok(ComponentValue::Null),
+                )
+                .unwrap();
+        }
+
+        let Err(error) = app.seal() else {
+            panic!("a failed registry admission unexpectedly retried");
+        };
+        assert_eq!(
+            error.error(),
+            &component_registry_authority_changed("component registry build seed is missing")
+        );
+    }
+
+    #[test]
+    fn building_provider_helpers_admit_the_registered_receipt() {
+        let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
+        app.world()
+            .resource::<ComponentRegistryResource>()
+            .validate_schema_provider(&receipt_only_provider(REGISTRY_PROVIDER_BINDING))
+            .unwrap();
+        app.add_plugin(RegistryProviderPlugin {
+            provider: REGISTRY_PROVIDER,
+        })
+        .unwrap();
+        assert!(component_registry(app.world()).is_none());
+
+        let app = app.seal().unwrap();
+
+        assert_eq!(
+            component_registry(app.world())
+                .unwrap()
+                .provider_receipt(REGISTRY_PROVIDER_ID),
+            Some(REGISTRY_PROVIDER.receipt())
+        );
+        validate_component_registry_authority(app.world()).unwrap();
+    }
+
+    #[test]
+    fn preloaded_provider_preflight_build_and_finish_never_replay_callbacks() {
+        let snapshot = provider_snapshot();
+        let mut app = App::new();
+        app.add_plugin(PreloadedComponentRegistryPlugin {
+            snapshot: snapshot.clone(),
+        })
+        .unwrap();
+        app.add_plugin(RegistryProviderPlugin {
+            provider: receipt_only_provider(REGISTRY_PROVIDER_BINDING),
+        })
+        .unwrap();
+        assert!(component_registry(app.world()).is_none());
+
+        let app = app.seal().unwrap();
+
+        assert!(component_registry(app.world()).unwrap().ptr_eq(&snapshot));
+        validate_component_registry_authority(app.world()).unwrap();
+    }
+
+    #[test]
+    fn preloaded_provider_rejection_retains_the_unadmitted_definition() {
+        for (snapshot, binding, expected) in [
+            (
+                empty_snapshot(),
+                REGISTRY_PROVIDER_BINDING,
+                ComponentRegistryError::MissingSchemaProviderReceipt {
+                    provider: REGISTRY_PROVIDER_ID,
+                },
+            ),
+            (
+                provider_snapshot(),
+                REGISTRY_PROVIDER_BINDING.with_codec_version(2),
+                ComponentRegistryError::DivergentSchemaProviderReceipt {
+                    provider: REGISTRY_PROVIDER_ID,
+                },
+            ),
+        ] {
+            let mut app = App::new();
+            app.add_plugin(PreloadedComponentRegistryPlugin {
+                snapshot: snapshot.clone(),
+            })
+            .unwrap();
+
+            let error = app
+                .add_plugin(RegistryProviderPlugin {
+                    provider: receipt_only_provider(binding),
+                })
+                .err()
+                .expect("missing or divergent preloaded receipts must reject");
+            let nara_app::AddPluginsError::Plugin(error) = error else {
+                panic!("provider receipt validation must fail in plugin preflight");
+            };
+
+            let expected = PluginError::component_registration(
+                REGISTRY_PROVIDER_PLUGIN_ID,
+                "test-provider",
+                expected,
+            );
+            assert_eq!(error.error(), &expected);
+            let error = register_schema_provider_for_plugin(
+                &mut app,
+                REGISTRY_PROVIDER_PLUGIN_ID,
+                "test-provider",
+                &receipt_only_provider(binding),
+            )
+            .unwrap_err();
+            assert_eq!(error, expected);
+            assert!(component_registry_is_installed(app.world()));
+            assert!(component_registry(app.world()).is_none());
+            assert!(
+                app.world()
+                    .resource::<ComponentRegistryResource>()
+                    .shares_snapshot(&snapshot)
+            );
+            assert!(
+                !app.world()
+                    .contains_resource::<ComponentRegistryAuthority>()
+            );
+        }
+    }
+
+    #[test]
+    fn finish_rejects_undeclared_provider_receipts_before_admission() {
+        for preloaded in [false, true] {
+            let snapshot = provider_snapshot();
+            let mut app = App::new();
+            if preloaded {
+                app.add_plugin(PreloadedComponentRegistryPlugin {
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap();
+            } else {
+                app.add_plugin(ComponentRegistryPlugin).unwrap();
+                register_schema_provider_for_plugin(
+                    &mut app,
+                    REGISTRY_PROVIDER_PLUGIN_ID,
+                    "test-provider",
+                    &REGISTRY_PROVIDER,
+                )
+                .unwrap();
+            }
+
+            let error =
+                finish_component_registry(&mut app, preloaded.then_some(&snapshot)).unwrap_err();
+
+            assert_eq!(
+                error,
+                PluginError::component_registration(
+                    COMPONENT_REGISTRY_PLUGIN_ID,
+                    "component-schema-catalog",
+                    ComponentRegistryError::UndeclaredSchemaProviderReceipt {
+                        provider: REGISTRY_PROVIDER_ID,
+                    },
+                )
+            );
+            assert!(component_registry_is_installed(app.world()));
+            assert!(component_registry(app.world()).is_none());
+            assert!(
+                !app.world()
+                    .contains_resource::<ComponentRegistryAuthority>()
+            );
+        }
     }
 
     #[test]

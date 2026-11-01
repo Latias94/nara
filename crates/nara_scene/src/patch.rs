@@ -7,9 +7,9 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
     ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentProjectionError, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueKind,
-    ComponentValueMaterializationLimits,
+    ComponentFieldSchema, ComponentProjectionError, ComponentRegistrySnapshot,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
+    ComponentValueKind, ComponentValueMaterializationLimits,
 };
 
 use crate::{
@@ -85,7 +85,7 @@ impl ScenePatchDocument {
     pub fn apply_to_scene(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_limits(document, registry, ScenePatchApplyLimits::default())
     }
@@ -93,7 +93,7 @@ impl ScenePatchDocument {
     pub fn apply_to_scene_with_limits(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         limits: ScenePatchApplyLimits,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_validator(
@@ -109,7 +109,7 @@ impl ScenePatchDocument {
     pub fn apply_to_scene_with_asset_resolution(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> ScenePatchReport {
         self.apply_to_scene_with_asset_resolution_and_limits(
@@ -123,7 +123,7 @@ impl ScenePatchDocument {
     pub fn apply_to_scene_with_asset_resolution_and_limits(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
         limits: ScenePatchApplyLimits,
     ) -> ScenePatchReport {
@@ -146,7 +146,7 @@ impl ScenePatchDocument {
     pub(crate) fn prepare_to_scene(
         &self,
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PreparedScenePatch, ScenePatchReport> {
         self.prepare_to_scene_with_validator(
             document,
@@ -164,7 +164,7 @@ impl ScenePatchDocument {
     pub(crate) fn prepare_to_scene_with_asset_resolution(
         &self,
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PreparedScenePatch, ScenePatchReport> {
         self.prepare_to_scene_with_validator(
@@ -188,7 +188,7 @@ impl ScenePatchDocument {
     pub(crate) fn prepare_to_prefab(
         &self,
         document: &PrefabDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
         self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
             match index {
@@ -203,7 +203,7 @@ impl ScenePatchDocument {
     pub(crate) fn prepare_to_prefab_with_asset_resolution(
         &self,
         document: &PrefabDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
         self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
@@ -225,8 +225,12 @@ impl ScenePatchDocument {
     fn prepare_to_prefab_with_validator(
         &self,
         document: &PrefabDocument,
-        registry: &ComponentRegistry,
-        mut validate: impl FnMut(&PrefabDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+        registry: &ComponentRegistrySnapshot,
+        mut validate: impl FnMut(
+            &PrefabDocument,
+            &ComponentRegistrySnapshot,
+            Option<usize>,
+        ) -> DiagnosticReport,
     ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
         let limits = ScenePatchApplyLimits::default();
         if let Some(format_version) = self.unsupported_format_version() {
@@ -339,9 +343,13 @@ impl ScenePatchDocument {
     fn apply_to_scene_with_validator(
         &self,
         document: &mut SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         limits: ScenePatchApplyLimits,
-        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+        mut validate: impl FnMut(
+            &SceneDocument,
+            &ComponentRegistrySnapshot,
+            Option<usize>,
+        ) -> DiagnosticReport,
     ) -> ScenePatchReport {
         match self.prepare_to_scene_with_validator(document, registry, limits, &mut validate) {
             Ok(prepared) => prepared.publish_into(document),
@@ -352,9 +360,13 @@ impl ScenePatchDocument {
     fn prepare_to_scene_with_validator(
         &self,
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         limits: ScenePatchApplyLimits,
-        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+        mut validate: impl FnMut(
+            &SceneDocument,
+            &ComponentRegistrySnapshot,
+            Option<usize>,
+        ) -> DiagnosticReport,
     ) -> Result<PreparedScenePatch, ScenePatchReport> {
         let source_work =
             match self.validate_patch_source(document, registry, limits, &mut validate) {
@@ -405,9 +417,13 @@ impl ScenePatchDocument {
     fn validate_patch_source(
         &self,
         document: &SceneDocument,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         limits: ScenePatchApplyLimits,
-        validate: &mut impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+        validate: &mut impl FnMut(
+            &SceneDocument,
+            &ComponentRegistrySnapshot,
+            Option<usize>,
+        ) -> DiagnosticReport,
     ) -> Result<SceneValidationWork, Box<ScenePatchReport>> {
         if let Some(format_version) = self.unsupported_format_version() {
             let mut diagnostics = DiagnosticReport::default();
@@ -1457,8 +1473,9 @@ mod bounded_cost_tests {
 
     #[test]
     fn source_transactions_reject_deep_input_before_validation_or_mutation() {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
         for expected_side in [false, true] {
             let patch = set_instance(deep_declaration(128, false), expected_side);
             let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
@@ -1886,7 +1903,7 @@ fn validation_work_budget_diagnostic(
 
 fn apply_operation_for_patch(
     document: &mut SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Box<ScenePatchReport>> {
@@ -1906,7 +1923,7 @@ fn apply_operation_for_patch(
 
 fn validate_patch_candidate(
     document: &SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     operation_index: Option<usize>,
     limits: ScenePatchApplyLimits,
@@ -1927,12 +1944,16 @@ fn validate_patch_candidate(
 
 fn validate_applied_operation(
     document: &mut SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation_index: usize,
     validation_work: &mut SceneValidationWork,
     limits: ScenePatchApplyLimits,
     final_operation: bool,
-    validate: &mut impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+    validate: &mut impl FnMut(
+        &SceneDocument,
+        &ComponentRegistrySnapshot,
+        Option<usize>,
+    ) -> DiagnosticReport,
 ) -> Result<(), Box<ScenePatchReport>> {
     let operation_work = scene_validation_work(document);
     let observed = validation_work.saturating_add(operation_work);
@@ -1973,7 +1994,7 @@ fn validate_applied_operation(
 
 #[derive(Clone, Copy)]
 struct FieldPatchTarget<'a> {
-    registry: &'a ComponentRegistry,
+    registry: &'a ComponentRegistrySnapshot,
     entity: &'a SceneEntityId,
     component: &'a ComponentTypeId,
     component_version: &'a ComponentSchemaVersion,
@@ -1983,7 +2004,7 @@ struct FieldPatchTarget<'a> {
 
 impl<'a> FieldPatchTarget<'a> {
     fn new(
-        registry: &'a ComponentRegistry,
+        registry: &'a ComponentRegistrySnapshot,
         entity: &'a SceneEntityId,
         component: &'a ComponentTypeId,
         component_version: &'a ComponentSchemaVersion,
@@ -2003,7 +2024,7 @@ impl<'a> FieldPatchTarget<'a> {
 
 fn apply_prefab_operation(
     document: &mut PrefabDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
@@ -2124,7 +2145,7 @@ pub(crate) fn apply_authoring_structure_operation(
 
 fn apply_operation(
     document: &mut SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
@@ -2162,7 +2183,7 @@ fn apply_operation(
 
 fn apply_non_component_operation<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     operation: &ScenePatchOperation,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
@@ -2293,7 +2314,7 @@ fn prefab_instance_record<'document, D: EntityDocument + ?Sized>(
 
 fn add_entity<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityRecord,
     placement: &ScenePlacement,
     operation_index: usize,
@@ -2310,7 +2331,7 @@ fn add_entity<D: EntityDocument>(
 
 fn remove_entity<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     from: &ScenePlacement,
     operation_index: usize,
@@ -2330,7 +2351,7 @@ fn remove_entity<D: EntityDocument>(
 
 fn restore_entity<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityRecord,
     descendants: &[SceneEntityRecord],
     placement: &ScenePlacement,
@@ -2356,7 +2377,7 @@ fn restore_entity<D: EntityDocument>(
 
 fn add_component<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     value: &SceneComponentRecord,
@@ -2393,7 +2414,7 @@ fn add_component_record<D: EntityDocument>(
 
 fn remove_component<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     operation_index: usize,
@@ -2428,7 +2449,7 @@ fn remove_component_record<D: EntityDocument>(
 
 fn replace_component<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     value: &SceneComponentRecord,
@@ -2563,7 +2584,7 @@ fn set_field_value<D: EntityDocument>(
 
 fn remove_field<D: EntityDocument>(
     document: &mut D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     component_version: &ComponentSchemaVersion,
@@ -2698,7 +2719,7 @@ struct ResolvedInsertion {
 
 fn prepare_entity_insertion<D: EntityDocument + ?Sized>(
     document: &D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityRecord,
     placement: &ScenePlacement,
     operation_index: usize,
@@ -2741,7 +2762,7 @@ fn prepare_entity_placement<D: EntityDocument + ?Sized>(
 
 fn prepare_subtree_removal<D: EntityDocument + ?Sized>(
     document: &D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     from: &ScenePlacement,
     operation_index: usize,
@@ -2801,7 +2822,7 @@ fn prepare_subtree_removal_with<D: EntityDocument + ?Sized>(
 
 fn prepare_entity_restoration<D: EntityDocument + ?Sized>(
     document: &D,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityRecord,
     descendants: &[SceneEntityRecord],
     placement: &ScenePlacement,
@@ -3282,7 +3303,7 @@ fn component_mut_for_field<'a, D: EntityDocument + ?Sized>(
 }
 
 fn require_whole_component_edit(
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     operation_index: usize,
@@ -3295,14 +3316,6 @@ fn require_whole_component_edit(
         // Let the normal document validator aggregate every unknown component instead of
         // truncating a multi-component failure to the first structural operation target.
         Err(ComponentProjectionError::UnknownComponentId(_)) => Ok(()),
-        Err(ComponentProjectionError::RegistryNotFrozen) => Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-registry-not-frozen",
-            "Patch application requires a frozen component registry",
-            Some(entity),
-            Some(component),
-            None,
-        )),
         Err(ComponentProjectionError::MissingComponentCapability { capability, .. }) => {
             Err(with_capability(
                 patch_diagnostic(
@@ -3338,7 +3351,7 @@ fn require_whole_component_edit(
 }
 
 fn field_schema<'a>(
-    registry: &'a ComponentRegistry,
+    registry: &'a ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     component_version: &ComponentSchemaVersion,
     field: &ComponentFieldId,

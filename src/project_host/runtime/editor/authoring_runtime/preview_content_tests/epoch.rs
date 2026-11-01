@@ -14,7 +14,7 @@ use nara_ecs::bevy_ecs::world::WorldId;
 use nara_identity::{
     EntityLookup, WorldEntityToken, WorldIdentityDomain, resolve_in_world, spawn_identity_entity,
 };
-use nara_reflect::{ComponentFieldId, ComponentRegistry, ComponentTypeId, ComponentValue};
+use nara_reflect::{ComponentFieldId, ComponentRegistrySnapshot, ComponentTypeId, ComponentValue};
 use nara_render::RenderFrameSourceGeneration;
 use nara_scene::{
     SceneComponentRecord, SceneEntityId, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
@@ -74,16 +74,14 @@ impl RuntimeOwners {
     }
 }
 
-fn registry() -> ComponentRegistry {
-    ComponentRegistry::from_snapshot(
-        crate::project_host::authoring::first_party_authoring_preview_registry(
-            crate::project_host::composition::built_in_schema_providers(),
-        )
-        .unwrap(),
+fn registry() -> ComponentRegistrySnapshot {
+    crate::project_host::authoring::first_party_authoring_preview_registry(
+        crate::project_host::composition::built_in_schema_providers(),
     )
+    .unwrap()
 }
 
-fn entity(registry: &ComponentRegistry, id: &str) -> SceneEntityRecord {
+fn entity(registry: &ComponentRegistrySnapshot, id: &str) -> SceneEntityRecord {
     let component = ComponentTypeId::new("nara.transform.Transform2d");
     let schema = registry.schema(&component).unwrap();
     SceneEntityRecord::new(SceneEntityId::new(id).unwrap()).with_component(
@@ -95,14 +93,18 @@ fn entity(registry: &ComponentRegistry, id: &str) -> SceneEntityRecord {
     )
 }
 
-fn source(registry: &ComponentRegistry) -> SceneAuthoringSession {
+fn source(registry: &ComponentRegistrySnapshot) -> SceneAuthoringSession {
     SceneAuthoringSession::new(SceneDocument::from_ordered_roots([
         entity(registry, "edited"),
         entity(registry, "retained"),
     ]))
 }
 
-fn edit_rotation(source: &mut SceneAuthoringSession, registry: &ComponentRegistry, rotation: f32) {
+fn edit_rotation(
+    source: &mut SceneAuthoringSession,
+    registry: &ComponentRegistrySnapshot,
+    rotation: f32,
+) {
     let component = ComponentTypeId::new("nara.transform.Transform2d");
     let before = source.revision();
     let report = source.apply_patch(
@@ -884,11 +886,10 @@ fn inject_foreign_identity(world: &mut World) {
 #[test]
 fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good() {
     // Install the fault-injection system before startup; no production mutation seam is added.
-    let registry_snapshot = crate::project_host::authoring::first_party_authoring_preview_registry(
+    let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
         crate::project_host::composition::built_in_schema_providers(),
     )
     .unwrap();
-    let registry = ComponentRegistry::from_snapshot(registry_snapshot.clone());
     let mut source = source(&registry);
     let requested = Arc::new(AtomicBool::new(false));
     let mut app = build_authoring_app().unwrap();
@@ -901,7 +902,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
         .unwrap();
     let preview = EditorPreviewSession::install_authoring(
         &mut app,
-        &registry_snapshot,
+        &registry,
         Arc::new(ProjectAssetDatabase::default()),
     )
     .unwrap();

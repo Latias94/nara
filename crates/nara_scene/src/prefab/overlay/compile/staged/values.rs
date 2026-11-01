@@ -205,7 +205,7 @@ where
                     return Err(PrefabExpansionFailureKind::Component.into());
                 }
             };
-            if authority.native_registry().is_some() && migrated.version != previous_version {
+            if authority.native_snapshot().is_some() && migrated.version != previous_version {
                 self.context.source_upgrade_required = true;
             }
             record.version = migrated.version;

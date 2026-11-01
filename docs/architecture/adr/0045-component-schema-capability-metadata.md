@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-25
+**Last Revised**: 2026-11-01
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -10,9 +10,10 @@ ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 ## Context
 
-`nara_reflect::ComponentRegistry` now owns stable component IDs, schema versions, field schemas,
-value codecs, and component migrations. That gives scenes, prefabs, patches, tooling, and AI agents
-one structural description of component data.
+`nara_reflect::ComponentRegistrySnapshot` retains admitted stable component IDs, schema versions,
+field schemas, value codecs, and component migrations. Its consuming `ComponentRegistryBuilder`
+owns construction. That gives scenes, prefabs, patches, tooling, and AI agents one structural
+description of component data.
 
 The remaining risk is that structure alone is not enough. Save games, networking, animation,
 scripting, editor inspection, editor mutation, and accessibility/debug views all need to know which
@@ -32,7 +33,7 @@ Component schemas include stable capability metadata at both component and field
 
 ```mermaid
 flowchart TD
-    RustType[Rust component type] --> Registry[ComponentRegistry registration]
+    RustType[Rust component type] --> Registry[ComponentRegistryBuilder admission]
     Registry --> Schema[ComponentSchema]
     Schema --> Fields[ComponentFieldSchema]
     Fields --> Capabilities[Field capabilities]

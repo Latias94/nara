@@ -8,8 +8,9 @@ use nara_ecs::{Component, World};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, PreparedComponentCandidate,
+    ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    PreparedComponentCandidate,
 };
 use nara_scene::{
     ExpandedSceneCandidate, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -31,8 +32,12 @@ impl Drop for Probe {
     }
 }
 
-fn registry(runs: &Arc<AtomicUsize>, drops: &Arc<AtomicUsize>, assets: bool) -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry(
+    runs: &Arc<AtomicUsize>,
+    drops: &Arc<AtomicUsize>,
+    assets: bool,
+) -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     let schema = ComponentSchema::new(component(), "Prepared probe", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields([ComponentFieldSchema::required(
@@ -94,8 +99,7 @@ fn registry(runs: &Arc<AtomicUsize>, drops: &Arc<AtomicUsize>, assets: bool) -> 
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn component() -> ComponentTypeId {
@@ -361,9 +365,7 @@ fn managed_registry_loss_is_not_a_standalone_definition() {
         let found = Arc::clone(&found_registry);
         let accepted = Arc::clone(&accepted);
         app.add_systems(CorruptRegistry, move |world: &mut World| {
-            let registry = ComponentRegistry::from_snapshot(
-                component_registry(world).unwrap().snapshot().unwrap(),
-            );
+            let registry = component_registry(world).unwrap().clone();
             let pending = retained.then(|| {
                 prepare_scene(
                     world,
@@ -422,11 +424,11 @@ fn managed_definition_requires_the_exact_snapshot_not_a_structurally_equal_regis
     let mut app = App::new();
     app.add_plugin(ComponentRegistryPlugin).unwrap();
     app.add_systems(CompareDefinitions, move |world: &mut World| {
-        let compatible = ComponentRegistry::from_snapshot(
-            component_registry(world).unwrap().snapshot().unwrap(),
-        );
-        let mut different = ComponentRegistry::new();
-        different.freeze().unwrap();
+        let compatible = component_registry(world).unwrap().clone();
+        assert!(compatible.ptr_eq(component_registry(world).unwrap()));
+        let different = ComponentRegistryBuilder::new().freeze().unwrap();
+        assert_eq!(compatible.catalog(), different.catalog());
+        assert!(!compatible.ptr_eq(&different));
         let source = candidate("managed", &[]);
         let rejected = prepare_scene(world, &different, &source, &slot("managed"), None).is_err();
         let prepared = prepare_scene(world, &compatible, &source, &slot("managed"), None).unwrap();
@@ -597,13 +599,19 @@ fn explicit_projection_definition_preserves_the_distinct_managed_host_basis() {
     let mut app = App::new();
     app.add_plugin(ComponentRegistryPlugin).unwrap();
     app.add_systems(Project, move |world: &mut World| {
-        let host = component_registry(world).unwrap().snapshot().unwrap();
-        assert!(!native.shares_snapshot(&host));
+        let host = component_registry(world).unwrap().clone();
+        assert!(!native.ptr_eq(&host));
         let source = candidate("explicit-projection", &[7]);
         assert!(prepare_scene(world, &native, &source, &slot("explicit"), None).is_err());
         assert_eq!(prepared_runs.load(Ordering::SeqCst), 0);
         let mut projection = SceneProjection::new(slot("explicit"));
-        let report = projection.publish(world, &native, &source, &Default::default());
+        let database = nara_asset::ProjectAssetDatabase::default();
+        let report = projection.publish(
+            world,
+            &native,
+            &source,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        );
         let receipt = report
             .instance
             .expect("explicit preview definition is not Host definition selection");
@@ -614,7 +622,7 @@ fn explicit_projection_definition_preserves_the_distinct_managed_host_basis() {
                 .value,
             7
         );
-        assert!(component_registry(world).unwrap().shares_snapshot(&host));
+        assert!(component_registry(world).unwrap().ptr_eq(&host));
         validate_component_registry_authority(world).unwrap();
         projection.clear(world).unwrap();
         result.fetch_add(1, Ordering::SeqCst);

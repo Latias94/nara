@@ -672,7 +672,7 @@ impl ProjectContentSnapshot {
         source_key: &SourceDocumentKey,
         document: &SceneDocument,
         world: &mut nara_ecs::World,
-        registry: &nara_reflect::ComponentRegistry,
+        registry: &nara_reflect::ComponentRegistrySnapshot,
     ) -> nara_scene::SceneSpawnReport {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
@@ -1324,10 +1324,7 @@ impl ProjectContentLoader {
         }
         let validation = plan.schema_validation();
         let bindings = validation.bindings();
-        if !validation.registry().shares_snapshot(validation.snapshot())
-            || !validation.snapshot().ptr_eq(bindings.native_snapshot())
-            || bindings.composition_fingerprint() != validation.composition_fingerprint()
-        {
+        if bindings.composition_fingerprint() != validation.composition_fingerprint() {
             return Err(ProjectContentError::single(
                 ProjectContentErrorKind::SchemaMismatch,
                 "project.content.schema-mismatch",

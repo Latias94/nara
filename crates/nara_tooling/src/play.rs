@@ -7,8 +7,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Entity, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEncodeContext, ComponentMigrationError,
-    ComponentRegistry, ComponentRegistrySnapshot, ComponentSchema, ComponentTypeId,
-    PersistentApplyRejection,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentTypeId, PersistentApplyRejection,
 };
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord, SceneEntityId,
@@ -376,7 +375,7 @@ impl SceneEditorState {
     pub fn model(
         &self,
         session: &SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneEditorModel {
         self.model_with_selection(session, registry, None, edit_world_snapshot)
@@ -386,7 +385,7 @@ impl SceneEditorState {
     pub fn model_with_selection(
         &self,
         session: &SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         selected_entity: Option<&SceneEntityId>,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneEditorModel {
@@ -405,7 +404,7 @@ impl SceneEditorState {
     pub fn apply_inspector_command(
         &self,
         session: &mut SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
         self.inspector.apply_command(session, registry, command)
@@ -414,7 +413,7 @@ impl SceneEditorState {
     pub fn apply_inspector_command_with_asset_resolution(
         &self,
         session: &mut SceneAuthoringSession,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         asset_resolution: AssetReferenceResolver<'_>,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
@@ -434,7 +433,7 @@ impl SceneEditorState {
 pub fn __export_apply_changes_from_world(
     world: &World,
     session: &SceneAuthoringSession,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     source_revision: SceneAuthoringRevision,
     request: SceneApplyChangesRequest,
 ) -> SceneApplyChangesReport {
@@ -523,17 +522,6 @@ pub fn __export_apply_changes_from_world(
         };
     }
 
-    let execution = match registry.snapshot() {
-        Ok(snapshot) => snapshot,
-        Err(_) => {
-            return apply_changes_error_report(
-                Some(source_revision),
-                current_revision,
-                "tooling.apply-changes-registry-not-frozen",
-                "Apply Changes requires a frozen component registry",
-            );
-        }
-    };
     let context =
         ComponentEncodeContext::new().with_asset_ref_export_policy(request.asset_ref_export_policy);
     let mut seen_components = BTreeSet::new();
@@ -561,7 +549,6 @@ pub fn __export_apply_changes_from_world(
             runtime_entity,
             document_entity,
             registry,
-            &execution,
             component,
             &context,
         );
@@ -656,8 +643,7 @@ fn export_component_change(
     world: &World,
     play_entity: Entity,
     document_entity: &SceneEntityRecord,
-    registry: &ComponentRegistry,
-    execution: &ComponentRegistrySnapshot,
+    registry: &ComponentRegistrySnapshot,
     component: &ComponentTypeId,
     context: &ComponentEncodeContext<'_>,
 ) -> ExportedComponentChange {
@@ -696,7 +682,7 @@ fn export_component_change(
     }
 
     let runtime_value =
-        match execution.encode_component_with_context(component, world, play_entity, context) {
+        match registry.encode_component_with_context(component, world, play_entity, context) {
             Ok(value) => value,
             Err(error) => {
                 return ExportedComponentChange {

@@ -1,6 +1,6 @@
 use nara_reflect::{
-    ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
-    EntityReference, validate_component_value_with_limits,
+    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueCost, EntityReference, validate_component_value_with_limits,
 };
 
 use crate::{
@@ -15,10 +15,9 @@ use crate::{
 
 pub(crate) fn canonicalize_scene_document(
     mut document: SceneDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) -> Result<(SceneDocument, bool), SceneFilePublicationError> {
-    require_frozen_registry(registry)?;
     let mut budget = PublicationValueBudget::new(limits);
     let changed = canonicalize_entities(&mut document.entities, registry, &mut budget)?;
     document.canonicalize();
@@ -31,10 +30,9 @@ pub(crate) fn canonicalize_scene_document(
 
 pub(crate) fn canonicalize_prefab_document(
     mut document: PrefabDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) -> Result<(PrefabDocument, bool), SceneFilePublicationError> {
-    require_frozen_registry(registry)?;
     let mut budget = PublicationValueBudget::new(limits);
     let changed = canonicalize_entities(&mut document.entities, registry, &mut budget)?;
     document.canonicalize();
@@ -47,10 +45,9 @@ pub(crate) fn canonicalize_prefab_document(
 
 pub(crate) fn canonicalize_scene_patch(
     mut patch: ScenePatchDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) -> Result<(ScenePatchDocument, bool), SceneFilePublicationError> {
-    require_frozen_registry(registry)?;
     let mut budget = PublicationValueBudget::new(limits);
     let changed = canonicalize_patch(&mut patch, registry, &mut budget)?;
     if changed {
@@ -60,19 +57,9 @@ pub(crate) fn canonicalize_scene_patch(
     Ok((patch, changed))
 }
 
-fn require_frozen_registry(registry: &ComponentRegistry) -> Result<(), SceneFilePublicationError> {
-    if registry.is_frozen() {
-        return Ok(());
-    }
-    Err(publication_error(diagnostic_error(
-        "scene.component-registry-not-frozen",
-        "Component registry must be frozen before scene publication",
-    )))
-}
-
 fn canonicalize_entities(
     entities: &mut [SceneEntityRecord],
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
@@ -84,7 +71,7 @@ fn canonicalize_entities(
 
 fn canonicalize_entity(
     entity: &mut SceneEntityRecord,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
@@ -99,7 +86,7 @@ fn canonicalize_entity(
 
 fn canonicalize_patch(
     patch: &mut ScenePatchDocument,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
     let mut changed = false;
@@ -197,7 +184,7 @@ fn canonicalize_patch(
 
 fn validate_exact_instance_snapshot(
     instance: &PrefabInstance,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<(), SceneFilePublicationError> {
     let Some(overlay) = &instance.overrides else {
@@ -256,7 +243,7 @@ fn validate_exact_instance_snapshot(
 fn require_component_schema<'a>(
     entity: &SceneEntityId,
     component_id: &ComponentTypeId,
-    registry: &'a ComponentRegistry,
+    registry: &'a ComponentRegistrySnapshot,
 ) -> Result<&'a nara_reflect::ComponentSchema, SceneFilePublicationError> {
     registry.schema(component_id).ok_or_else(|| {
         publication_error(with_public_locator(
@@ -278,7 +265,7 @@ fn validate_exact_component_record(
     entity: &SceneEntityId,
     component_id: &ComponentTypeId,
     record: &SceneComponentRecord,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<(), SceneFilePublicationError> {
     let schema = require_component_schema(entity, component_id, registry)?;
@@ -313,7 +300,7 @@ fn migrate_component_record(
     entity: &SceneEntityId,
     component_id: &ComponentTypeId,
     record: &mut SceneComponentRecord,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
     require_component_schema(entity, component_id, registry)?;
@@ -350,7 +337,7 @@ fn canonicalize_field_target(
     component_id: &ComponentTypeId,
     component_version: &mut ComponentSchemaVersion,
     field_id: &str,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     version_policy: FieldVersionPolicy,
 ) -> Result<bool, SceneFilePublicationError> {
     let Some(schema) = registry.schema(component_id) else {
@@ -701,8 +688,8 @@ mod overlay_snapshot_tests {
         number: u64,
     }
 
-    fn registry(calls: Arc<AtomicUsize>) -> ComponentRegistry {
-        let mut registry = ComponentRegistry::new();
+    fn registry(calls: Arc<AtomicUsize>) -> ComponentRegistrySnapshot {
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
         registry
             .register_persistent_component_with_codec::<SnapshotComponent, _, _>(
                 ComponentSchema::new(component(), "Snapshot", ComponentSchemaVersion(2))
@@ -738,8 +725,7 @@ mod overlay_snapshot_tests {
                 },
             )
             .unwrap();
-        registry.freeze().unwrap();
-        registry
+        registry.freeze().unwrap()
     }
 
     fn overlay() -> PrefabOverlay {

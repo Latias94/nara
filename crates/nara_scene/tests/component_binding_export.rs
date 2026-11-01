@@ -16,10 +16,11 @@ use nara_identity::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry, ComponentRegistryPlugin,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits,
-    ComponentValueShape, PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistryPlugin,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaCatalog,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
 };
 use nara_scene::{
     ExpandedSceneCandidate, Name, SceneComponentBindings, SceneComponentBindingsPlugin,
@@ -106,8 +107,8 @@ struct FixtureImage;
 #[derive(Component)]
 struct NativeImage(Handle<FixtureImage>);
 
-fn native_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn native_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     nara_scene::register_scene_components(&mut registry).unwrap();
     registry
         .register_persistent_component_with_codec::<NativeLink, _, _>(
@@ -185,13 +186,13 @@ fn native_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn empty_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+fn empty_registry() -> ComponentRegistrySnapshot {
+    let registry = nara_reflect::ComponentRegistryBuilder::new()
+        .freeze()
+        .unwrap();
     registry
 }
 
@@ -335,8 +336,7 @@ fn linked_scene(
 #[test]
 fn live_export_observes_retirement_later_instances_and_nested_persistent_references() {
     let registry = native_registry();
-    let bindings =
-        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap();
     let internal = persistent("11111111-1111-4111-8111-111111111111");
     let external = persistent("22222222-2222-4222-8222-222222222222");
     let mut world = World::new();
@@ -426,8 +426,7 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
 fn native_only_missing_and_same_byte_foreign_selections_refuse_actual_data() {
     let native = empty_registry();
     let owner = data_owner();
-    let bindings =
-        SceneComponentBindings::new(native.snapshot().unwrap(), [owner.clone()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [owner.clone()]).unwrap();
     let mut world = World::new();
     spawn(
         &bindings,
@@ -447,17 +446,17 @@ fn native_only_missing_and_same_byte_foreign_selections_refuse_actual_data() {
         "scene.export-data-binding-unavailable",
     );
 
-    let missing = SceneComponentBindings::new(native.snapshot().unwrap(), []).unwrap();
+    let missing = SceneComponentBindings::new(native.clone(), []).unwrap();
     rejected(
         missing.export_scene(&world),
         "scene.export-data-binding-unavailable",
     );
-    let foreign = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let foreign = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     rejected(
         foreign.export_scene(&world),
         "scene.export-data-owner-mismatch",
     );
-    let shared = SceneComponentBindings::new(native.snapshot().unwrap(), [owner]).unwrap();
+    let shared = SceneComponentBindings::new(native.clone(), [owner]).unwrap();
     output(shared.export_scene(&world));
 }
 
@@ -470,7 +469,7 @@ struct DifferentNativeName(String);
 #[test]
 fn native_export_rejects_same_stable_id_bound_to_a_different_rust_type() {
     let registered = native_registry();
-    let bindings = SceneComponentBindings::new(registered.snapshot().unwrap(), []).unwrap();
+    let bindings = SceneComponentBindings::new(registered.clone(), []).unwrap();
     let mut world = World::new();
     spawn(
         &bindings,
@@ -485,7 +484,7 @@ fn native_export_rejects_same_stable_id_bound_to_a_different_rust_type() {
         "native-type-coverage",
         None,
     );
-    let mut incompatible = ComponentRegistry::new();
+    let mut incompatible = nara_reflect::ComponentRegistryBuilder::new();
     incompatible
         .register_persistent_component_with_codec::<DifferentNativeName, _, _>(
             registered
@@ -501,12 +500,12 @@ fn native_export_rejects_same_stable_id_bound_to_a_different_rust_type() {
             |name| Ok(ComponentValue::String(name.0.clone())),
         )
         .unwrap();
-    incompatible.freeze().unwrap();
+    let incompatible = incompatible.freeze().unwrap();
     rejected(
         export_scene(&world, &incompatible),
         "scene.export-native-binding-unavailable",
     );
-    let mixed = SceneComponentBindings::new(incompatible.snapshot().unwrap(), []).unwrap();
+    let mixed = SceneComponentBindings::new(incompatible.clone(), []).unwrap();
     rejected(
         mixed.export_scene(&world),
         "scene.export-native-binding-unavailable",
@@ -517,7 +516,7 @@ fn native_export_rejects_same_stable_id_bound_to_a_different_rust_type() {
 #[test]
 fn native_export_rejects_unselected_live_members_but_allows_removed_members() {
     let registered = native_registry();
-    let bindings = SceneComponentBindings::new(registered.snapshot().unwrap(), []).unwrap();
+    let bindings = SceneComponentBindings::new(registered.clone(), []).unwrap();
     let mut world = World::new();
     let instance = spawn(
         &bindings,
@@ -537,7 +536,7 @@ fn native_export_rejects_unselected_live_members_but_allows_removed_members() {
         export_scene(&world, &empty),
         "scene.export-native-binding-unavailable",
     );
-    let unselected = SceneComponentBindings::new(empty.snapshot().unwrap(), []).unwrap();
+    let unselected = SceneComponentBindings::new(empty.clone(), []).unwrap();
     rejected(
         unselected.export_scene(&world),
         "scene.export-native-binding-unavailable",
@@ -555,7 +554,7 @@ fn native_export_rejects_unselected_live_members_but_allows_removed_members() {
 #[test]
 fn native_export_rejects_known_persistent_members_without_their_entity_receipt() {
     let registry = native_registry();
-    let bindings = SceneComponentBindings::new(registry.snapshot().unwrap(), []).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), []).unwrap();
     let mut world = World::new();
     let instance = spawn(
         &bindings,
@@ -586,7 +585,7 @@ fn native_export_rejects_known_persistent_members_without_their_entity_receipt()
 #[test]
 fn moving_a_real_carrier_to_another_registered_entity_refuses_export() {
     let native = empty_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     let mut world = World::new();
     let instance = spawn(
         &bindings,
@@ -680,8 +679,7 @@ fn managed_export_cannot_install_caller_data_definitions_implicitly() {
     let bindings = SceneComponentBindings::new(
         nara_reflect::component_registry(app.world())
             .unwrap()
-            .snapshot()
-            .unwrap(),
+            .clone(),
         [data_owner()],
     )
     .unwrap();
@@ -694,7 +692,7 @@ fn managed_export_cannot_install_caller_data_definitions_implicitly() {
 #[test]
 fn a_retired_declared_target_refuses_the_entire_live_export() {
     let native = empty_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     let mut world = World::new();
     let instance = spawn(
         &bindings,
@@ -773,8 +771,7 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
     let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
     let foreign = AssetPathScope::under(AssetSourcePath::new("package/art").unwrap());
     let registry = native_registry();
-    let bindings =
-        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap();
     let (mut database, stable) = database("game/art/shared.png");
     let source = stable.as_stable_id().unwrap();
     database
@@ -913,8 +910,7 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
     }
 
     let registry = native_registry();
-    let bindings =
-        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap();
     let assets = AssetPathScope::under(AssetSourcePath::new("game/art").unwrap());
     let declarations = AssetPathScope::under(AssetSourcePath::new("game/prefabs").unwrap());
     let (mut database, _) = database("game/art/shared.png");
@@ -985,8 +981,7 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
 #[test]
 fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output() {
     let registry = native_registry();
-    let bindings =
-        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap();
     let path = AssetRef::path("textures/icon.png").unwrap();
     let (database, stable) = database("textures/icon.png");
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("images"))
@@ -1067,7 +1062,7 @@ fn mixed_nested_assets_obey_both_policies_and_missing_conversion_has_no_output()
 #[test]
 fn unknown_data_paths_remain_paths_without_native_handles_or_loading() {
     let native = empty_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     let value = images_value([(
         "unindexed",
         AssetRef::path("textures/unindexed.png").unwrap(),
@@ -1112,8 +1107,7 @@ fn limits(nodes: usize, bytes: usize, depth: usize) -> ComponentValueMaterializa
 #[test]
 fn native_and_data_values_share_exact_aggregate_output_limits() {
     let registry = native_registry();
-    let bindings =
-        SceneComponentBindings::new(registry.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap();
     let mut world = World::new();
     for slot in ["first", "second"] {
         spawn(
@@ -1188,7 +1182,7 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
             None,
         )
         .unwrap();
-        let mut native = ComponentRegistry::new();
+        let mut native = nara_reflect::ComponentRegistryBuilder::new();
         nara_scene::register_scene_components(&mut native).unwrap();
         let encoded = raw.clone();
         native
@@ -1198,8 +1192,8 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
                 move |_| Ok(encoded.clone()),
             )
             .unwrap();
-        native.freeze().unwrap();
-        let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [owner]).unwrap();
+        let native = native.freeze().unwrap();
+        let bindings = SceneComponentBindings::new(native.clone(), [owner]).unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("defaulted"))
             .with_component(
                 component("nara.scene.Name"),
@@ -1247,7 +1241,7 @@ fn residual_admission_accepts_zero_byte_defaults_and_charges_default_keys() {
 #[test]
 fn generated_entity_reference_growth_uses_the_shared_output_budget() {
     let native = empty_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     let mut world = World::new();
     for slot in ["first", "second"] {
         spawn(
@@ -1298,7 +1292,7 @@ fn generated_entity_reference_growth_uses_the_shared_output_budget() {
 #[test]
 fn asset_policy_growth_is_admitted_before_owning_replacement() {
     let native = empty_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [data_owner()]).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), [data_owner()]).unwrap();
     let path = format!("textures/{}.png", "x".repeat(160));
     let (database, stable) = database(&path);
     let mut world = World::new();
@@ -1349,7 +1343,7 @@ fn asset_policy_growth_is_admitted_before_owning_replacement() {
 fn native_coverage_refusal_happens_before_any_encoder_callback() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let native = native_registry();
-    let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), []).unwrap();
+    let bindings = SceneComponentBindings::new(native.clone(), []).unwrap();
     let mut world = World::new();
     spawn(
         &bindings,
@@ -1380,7 +1374,7 @@ fn native_coverage_refusal_happens_before_any_encoder_callback() {
     );
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&calls);
-    let mut subset = ComponentRegistry::new();
+    let mut subset = nara_reflect::ComponentRegistryBuilder::new();
     subset
         .register_persistent_component_with_codec::<Name, _, _>(
             native
@@ -1394,7 +1388,7 @@ fn native_coverage_refusal_happens_before_any_encoder_callback() {
             },
         )
         .unwrap();
-    subset.freeze().unwrap();
+    let subset = subset.freeze().unwrap();
     rejected(
         export_scene(&world, &subset),
         "scene.export-native-binding-unavailable",
@@ -1409,12 +1403,7 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
     app.add_plugins((ComponentRegistryPlugin, SceneComponentsPlugin))
         .unwrap();
     app.add_systems(nara_app::StartupStage::Scene, |world: &mut World| {
-        let native = ComponentRegistry::from_snapshot(
-            nara_reflect::component_registry(world)
-                .unwrap()
-                .snapshot()
-                .unwrap(),
-        );
+        let native = nara_reflect::component_registry(world).unwrap().clone();
         let candidate = ExpandedSceneCandidate::plain(
             source_key("managed-native"),
             Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
@@ -1444,7 +1433,7 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
     let installed = nara_reflect::component_registry(runtime.world()).unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&calls);
-    let mut foreign = ComponentRegistry::new();
+    let mut foreign = nara_reflect::ComponentRegistryBuilder::new();
     foreign
         .register_persistent_component_with_codec::<Name, _, _>(
             installed
@@ -1458,7 +1447,7 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
             },
         )
         .unwrap();
-    foreign.freeze().unwrap();
+    let foreign = foreign.freeze().unwrap();
     rejected(
         export_scene(runtime.world(), &foreign),
         "scene.export-native-authority-invalid",
@@ -1495,7 +1484,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             None,
         )
         .unwrap();
-        let mut native = ComponentRegistry::new();
+        let mut native = nara_reflect::ComponentRegistryBuilder::new();
         native
             .register_persistent_component_with_codec::<NativeDefault, _, _>(
                 definition("game.NativeDefault"),
@@ -1503,8 +1492,8 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
                 |_| Ok(ComponentValue::Map(Default::default())),
             )
             .unwrap();
-        native.freeze().unwrap();
-        let bindings = SceneComponentBindings::new(native.snapshot().unwrap(), [owner]).unwrap();
+        let native = native.freeze().unwrap();
+        let bindings = SceneComponentBindings::new(native.clone(), [owner]).unwrap();
         let mut world = World::new();
         let instance = spawn(
             &bindings,
@@ -1524,7 +1513,7 @@ fn native_and_data_asset_defaults_use_the_same_metadata_policy() {
             "default-assets",
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
         );
-        let native_only = SceneComponentBindings::new(native.snapshot().unwrap(), []).unwrap();
+        let native_only = SceneComponentBindings::new(native.clone(), []).unwrap();
         let mut native_world = World::new();
         spawn(
             &native_only,

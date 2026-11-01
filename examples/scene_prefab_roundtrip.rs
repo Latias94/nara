@@ -17,14 +17,14 @@ const PLAYER_TEXTURE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const TILESET_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 
 fn main() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).expect("scene components should register once");
     register_transform_components(&mut registry)
         .expect("transform components should register once");
     register_render_components(&mut registry).expect("render components should register once");
     register_sprite_components(&mut registry).expect("sprite components should register once");
     register_tilemap_components(&mut registry).expect("tilemap components should register once");
-    registry.freeze().expect("component registry should freeze");
+    let registry = registry.freeze().expect("component registry should freeze");
 
     let scene = sample_scene();
     let asset_database = sample_asset_database();

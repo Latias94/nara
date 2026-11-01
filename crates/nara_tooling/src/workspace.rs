@@ -10,7 +10,7 @@ use nara_diagnostic::DiagnosticReport;
 use nara_fs::{
     FileIdentity, PublicationAtomicity, PublicationIdentityEvidence, ReplaceReceipt, StageStatus,
 };
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     AuthoringDocumentReadiness, AuthoringFieldEdit, AuthoringRecordFact, AuthoringSchemaBasis,
     PrefabAuthoringSession, PrefabDocument, PublishedAuthoringPrefabDocument,
@@ -825,7 +825,7 @@ impl EditorWorkspace {
     #[must_use]
     pub fn __prefab_field_edit_matches(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         edit: &EditorAtomicFieldEdit,
     ) -> bool {
         edit.writes().iter().all(|write| {
@@ -838,7 +838,7 @@ impl EditorWorkspace {
     #[must_use]
     pub fn __prefab_field_target_exists(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         target: &EditorFieldTarget,
     ) -> bool {
         prefab_field_value(self, registry, target, target.field()).is_some()
@@ -1007,7 +1007,7 @@ impl EditorWorkspace {
 
     pub fn apply_command(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
         match command {
@@ -1184,7 +1184,7 @@ impl EditorWorkspace {
     #[must_use]
     pub fn model(
         &self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorWorkspaceModel {
         let active_scene =
@@ -1353,7 +1353,7 @@ impl EditorWorkspace {
 
     fn apply_inspector_command(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         command: SceneInspectorCommand,
@@ -1472,7 +1472,7 @@ impl EditorWorkspace {
 
     fn apply_scene_patch(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
@@ -1488,7 +1488,7 @@ impl EditorWorkspace {
 
     fn apply_prefab_patch(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
@@ -1744,7 +1744,7 @@ impl EditorWorkspace {
 
     fn apply_scene_composition(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         command: SceneCompositionCommand,
@@ -1812,7 +1812,7 @@ impl EditorWorkspace {
 
     fn apply_prefab_composition(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         command: PrefabCompositionCommand,
@@ -1881,7 +1881,7 @@ impl EditorWorkspace {
 
     fn undo(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
@@ -1908,7 +1908,7 @@ impl EditorWorkspace {
 
     fn redo(
         &mut self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
@@ -2420,7 +2420,7 @@ impl EditorSceneSlot {
     fn model(
         &self,
         document: EditorDocumentId,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorSceneModel {
         let editor = self.editor.model_with_selection(
@@ -2480,7 +2480,7 @@ impl EditorPrefabSlot {
     fn model(
         &self,
         document: EditorDocumentId,
-        registry: Option<&ComponentRegistry>,
+        registry: Option<&ComponentRegistrySnapshot>,
     ) -> EditorSceneModel {
         let inspector = crate::SceneInspectorState::new().prefab_model_with_selection(
             &self.session,
@@ -3433,7 +3433,7 @@ fn prefab_has_entity(document: &PrefabDocument, entity: &SceneEntityId) -> bool 
 
 fn prefab_field_value<'a>(
     workspace: &'a EditorWorkspace,
-    registry: &'a ComponentRegistry,
+    registry: &'a ComponentRegistrySnapshot,
     target: &EditorFieldTarget,
     field: &nara_reflect::ComponentFieldId,
 ) -> Option<&'a nara_reflect::ComponentValue> {
@@ -3471,9 +3471,9 @@ mod tests {
     use nara_asset::AssetRef;
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::{
-        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentRegistry,
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, PersistentComponentSchemaOwnerId,
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId,
+        ComponentRegistryBuilder, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+        ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
         AuthoringDocumentSource, PrefabDocument, PrefabDocumentCandidate,
@@ -5730,7 +5730,7 @@ mod tests {
 
     fn apply_patch(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         patch: ScenePatchDocument,
     ) -> EditorWorkspaceCommandReport {
@@ -5747,7 +5747,7 @@ mod tests {
 
     fn apply_inspector(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         command: SceneInspectorCommand,
     ) -> EditorWorkspaceCommandReport {
@@ -5764,7 +5764,7 @@ mod tests {
 
     fn compose(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         command: SceneCompositionCommand,
     ) -> EditorWorkspaceCommandReport {
@@ -5781,7 +5781,7 @@ mod tests {
 
     fn compose_prefab(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
         command: PrefabCompositionCommand,
     ) -> EditorWorkspaceCommandReport {
@@ -5798,7 +5798,7 @@ mod tests {
 
     fn undo(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
     ) -> EditorWorkspaceCommandReport {
         let base_revision = workspace.scene(document).unwrap().revision();
@@ -5813,7 +5813,7 @@ mod tests {
 
     fn redo(
         workspace: &mut EditorWorkspace,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistrySnapshot,
         document: EditorDocumentId,
     ) -> EditorWorkspaceCommandReport {
         let base_revision = workspace.scene(document).unwrap().revision();
@@ -5826,10 +5826,8 @@ mod tests {
         )
     }
 
-    fn frozen_empty_registry() -> ComponentRegistry {
-        let mut registry = ComponentRegistry::new();
-        registry.freeze().unwrap();
-        registry
+    fn frozen_empty_registry() -> ComponentRegistrySnapshot {
+        ComponentRegistryBuilder::new().freeze().unwrap()
     }
 
     fn authoring_basis_bundle(alias: &str) -> AuthoringSchemaBundle {
@@ -5865,12 +5863,11 @@ mod tests {
         .publish()
     }
 
-    fn composition_registry() -> ComponentRegistry {
-        let mut registry = ComponentRegistry::new();
+    fn composition_registry() -> ComponentRegistrySnapshot {
+        let mut registry = ComponentRegistryBuilder::new();
         nara_transform::register_transform_components(&mut registry).unwrap();
         nara_sprite::register_sprite_components(&mut registry).unwrap();
-        registry.freeze().unwrap();
-        registry
+        registry.freeze().unwrap()
     }
 
     fn open_scene(

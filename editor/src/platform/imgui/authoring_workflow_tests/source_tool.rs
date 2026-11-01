@@ -16,7 +16,7 @@ use nara::{
         open_explicit_product_project_root,
     },
     reflect::{
-        AuthoringSchemaBundle, ComponentRegistry, ComponentSchemaCatalog,
+        AuthoringSchemaBundle, ComponentRegistryBuilder, ComponentSchemaCatalog,
         ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
         PersistentComponentSchemaOwnerId,
     },
@@ -1245,16 +1245,13 @@ fn assert_saved_rust_data(
     saved: &SceneDocument,
     owner: &ComponentSchemaOwnerSnapshot,
 ) -> Result<(), String> {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .map_err(|error| error.to_string())?;
-    registry.freeze().map_err(|error| error.to_string())?;
-    let bindings = SceneComponentBindings::new(
-        registry.snapshot().map_err(|error| error.to_string())?,
-        [owner.clone()],
-    )
-    .map_err(|error| error.to_string())?;
+    let registry = registry.freeze().map_err(|error| error.to_string())?;
+    let bindings = SceneComponentBindings::new(registry, [owner.clone()])
+        .map_err(|error| error.to_string())?;
     let expanded = bindings.expand_prefabs(saved, &InMemoryPrefabSourceResolver::new());
     if expanded.diagnostics.has_errors() {
         return Err(format!("{:?}", expanded.diagnostics));

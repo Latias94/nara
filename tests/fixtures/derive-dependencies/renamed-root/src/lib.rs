@@ -49,23 +49,38 @@ fn root_prelude_derives_execute_without_a_bevy_dependency() {
 
 #[test]
 fn root_only_dependency_exposes_the_inventory_and_typed_range_derive() {
-    let mut registry = engine::reflect::ComponentRegistry::new();
+    let mut registry = engine::reflect::ComponentRegistryBuilder::new();
     inventory::register(&mut registry).unwrap();
-    registry.freeze().unwrap();
+    let registry: engine::reflect::ComponentRegistrySnapshot = registry.freeze().unwrap();
+    let retained = registry.clone();
+    assert!(retained.ptr_eq(&registry));
     let catalog = inventory::initial_catalog().unwrap();
-    assert_eq!(registry.catalog().unwrap().components, catalog.components);
+    assert_eq!(registry.catalog().components, catalog.components);
+    assert_eq!(registry.schemas().count(), catalog.components.len());
     let schema = &catalog.components[0];
+    assert_eq!(registry.schema_for_type::<RenamedRoot>(), Some(schema));
     for (value, valid) in [(-5, true), (9, true), (10, false)] {
+        let stored = engine::reflect::ComponentValue::map([(
+            "value",
+            engine::reflect::ComponentValue::I64(value),
+        )]);
         assert_eq!(
-            engine::reflect::validate_component_value(
-                schema,
-                &engine::reflect::ComponentValue::map([(
-                    "value",
-                    engine::reflect::ComponentValue::I64(value)
-                ),]),
-            )
-            .is_ok(),
+            engine::reflect::validate_component_value(schema, &stored).is_ok(),
             valid
         );
+        let prepared = registry.preflight_component(schema.id(), &stored);
+        assert_eq!(prepared.is_ok(), valid);
+        if valid {
+            let mut world = engine::ecs::World::new();
+            let entity = world.spawn_empty().id();
+            prepared.unwrap().apply(&mut world, entity).unwrap();
+            assert_eq!(world.get::<RenamedRoot>(entity).unwrap().value, value);
+            assert_eq!(
+                retained
+                    .encode_component(schema.id(), &world, entity)
+                    .unwrap(),
+                Some(stored)
+            );
+        }
     }
 }

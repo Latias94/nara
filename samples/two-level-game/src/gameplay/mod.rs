@@ -17,9 +17,10 @@ use nara::{
     identity::{EntityLookup, SceneEntityId, WorldEntityToken},
     prelude::{App, CoreStage, FixedUpdateSet, Plugin, PluginError, Resource, Transform2d, Vec2},
     reflect::{
-        ComponentRegistry, ComponentRegistryError, ComponentSchemaCatalog, ComponentSchemaOwnerId,
-        ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
-        ComponentSchemaProviderSourceError, PersistentComponentProvider,
+        ComponentRegistryBuilder, ComponentRegistryError, ComponentSchemaCatalog,
+        ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
+        ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
+        PersistentComponentProvider,
     },
     scene::advanced::SceneProductResource,
 };
@@ -318,7 +319,7 @@ fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceErro
         ..Default::default()
     })
 }
-fn register(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     registry
         .register_persistent_component::<content::ObjectRole>()
         .map(|_| ())

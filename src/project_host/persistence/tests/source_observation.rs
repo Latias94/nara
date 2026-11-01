@@ -1,3 +1,5 @@
+use nara_reflect::ComponentRegistryBuilder;
+
 use super::*;
 
 #[test]
@@ -56,8 +58,8 @@ fn accepted_observation_uses_the_retained_parent_and_does_not_reopen_the_target(
 fn scene_and_prefab_hosts_expose_only_their_accepted_persistence_observation() {
     let root = TestRoot::new();
     let directory = root.capability();
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let mut scene = ScenePersistenceHost::open(&directory, "startup.scene.json", &registry)
         .unwrap()
         .host;

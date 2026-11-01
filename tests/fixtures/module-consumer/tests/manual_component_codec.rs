@@ -1,9 +1,9 @@
 use nara_ecs::{Component, World};
 use nara_reflect::{
     ComponentApplyBatch, ComponentCapability, ComponentCodecError, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldSchema, ComponentRegistry, ComponentRegistryError,
-    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    PreparedComponentCandidate,
+    ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder, ComponentRegistryError,
+    ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PreparedComponentCandidate,
 };
 
 #[test]
@@ -40,7 +40,7 @@ struct Health {
     current: i64,
 }
 
-fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn register_health(registry: &mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     let schema = ComponentSchema::new(
         ComponentTypeId::new("example.Health"),
         "Health",
@@ -76,12 +76,12 @@ fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegi
 
 #[test]
 fn documented_manual_codec_round_trips_through_the_public_registry() {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     register_health(&mut registry).expect("manual codec should register");
-    registry
+    let registry = registry
         .freeze()
         .expect("manual component schema should freeze");
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
 
     let component_id = ComponentTypeId::new("example.Health");
     let source = ComponentValue::map([("current", ComponentValue::I64(42))]);
@@ -161,10 +161,10 @@ fn asset_codec_value(text: &str) -> ComponentValue {
     ])
 }
 
-fn asset_codec_registry() -> ComponentRegistry {
+fn asset_codec_registry() -> ComponentRegistrySnapshot {
     use nara_asset::{AssetRef, AssetServer};
 
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_codec_with_context::<Portrait, _, _>(
             asset_codec_schema("example.Portrait"),
@@ -236,8 +236,7 @@ fn asset_codec_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 #[test]
@@ -245,7 +244,7 @@ fn typed_asset_codecs_own_inputs_and_share_one_batch_asset_server() {
     use nara_asset::AssetServer;
 
     let registry = asset_codec_registry();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     for eager_decode in [false, true] {
         for fail in [false, true] {
             let mut world = World::new();

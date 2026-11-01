@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-11-01
 **Refines**: ADR 0003
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0046:
 Plugin Metadata and Default Plugin Groups
@@ -132,8 +132,9 @@ error and never stop later shutdown hooks.
 - Every public plugin/group installation entry checks for an active hook and records this sticky
   violation before lifecycle-state, duplicate/already-installed, declaration, group expansion, or
   skip logic. No apparent no-op or earlier error may bypass the poison rule.
-- Built-in component plugins inspect an existing `ComponentRegistry` during preflight with the same
-  stable-ID and Rust-type uniqueness checks used at commit. Registration remains fallible and maps
+- Built-in component plugins preflight their provider through
+  `validate_schema_provider_for_plugin`, using the private App owner's candidate collision checks
+  or exact admitted receipt validation. Registration remains fallible and maps
   `ComponentRegistryError` to a plugin/component-contextual `PluginError`; no recoverable
   registration path uses `expect`.
 

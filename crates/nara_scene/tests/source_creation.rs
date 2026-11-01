@@ -1,16 +1,17 @@
 use std::collections::BTreeMap;
 
-use nara_reflect::{ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue};
+use nara_reflect::{
+    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+};
 use nara_scene::{
     PrefabAuthoringSession, PrefabDocument, SceneAuthoringSession, SceneComponentRecord,
     SceneDocument, SceneEntityId, ScenePlacement, ScenePlacementOwner, register_scene_components,
 };
 
-fn registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn components() -> BTreeMap<ComponentTypeId, SceneComponentRecord> {
@@ -36,7 +37,7 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
     struct DatabaseBound;
 
     let component = ComponentTypeId::new("consumer.DatabaseBound");
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_codec_with_context::<DatabaseBound, _, _>(
             ComponentSchema::new(
@@ -61,7 +62,7 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
             |_, _, _| Ok(ComponentValue::String("bound".into())),
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let components = || {
         BTreeMap::from([(
             component.clone(),

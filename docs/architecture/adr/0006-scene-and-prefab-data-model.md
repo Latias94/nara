@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-29
+**Last Revised**: 2026-11-01
 **Implemented Slices**: Scene/Prefab/Patch document foundation; RGF-U29 explicit persistent
 composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
@@ -32,7 +32,7 @@ They store stable scene-local entity identities, component data, hierarchy relat
 flowchart TD
     SceneFile[Scene / Prefab File] --> SceneEntity[SceneEntityId]
     SceneEntity --> Components[Registered Component Data]
-    Components --> Registry[ComponentRegistry / Reflect Metadata]
+    Components --> Registry[Admitted component Schema metadata]
     SceneFile --> Assets[Typed Asset References]
     SceneFile --> PrefabRefs[Prefab References]
     Loader[Scene Loader] --> Map[SceneEntityId -> bevy_ecs::Entity]
@@ -290,7 +290,7 @@ but process-local ECS behavior is not implicit persistent meaning.
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| Component type IDs become unstable | High | Medium | Define stable nara component type IDs through `ComponentRegistry` |
+| Component type IDs become unstable | High | Medium | Define stable nara component type IDs in the admitted Schema catalog |
 | Prefab overrides become complex | Medium | High | Separate declarative inheritance intent from exact edit history; share Schema validation and explicit source ownership |
 | JSON/RON divergence | Medium | Medium | Keep one semantic model and format adapters |
 | Scene validation slows iteration | Medium | Low | Provide fast diagnostics and partial validation for tooling |

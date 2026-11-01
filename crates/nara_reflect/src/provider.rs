@@ -7,12 +7,13 @@ use std::{
 use nara_app::PluginSchemaProviderId;
 
 use crate::{
-    CatalogFingerprint, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
-    ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
+    CatalogFingerprint, ComponentRegistryBuilder, ComponentRegistryError,
+    ComponentRegistrySnapshot, ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot,
 };
 
-type RegisterComponentSchemas = fn(&mut ComponentRegistry) -> Result<(), ComponentRegistryError>;
-type ValidateComponentSchemas = fn(&ComponentRegistry) -> Result<(), ComponentRegistryError>;
+type RegisterComponentSchemas =
+    fn(&mut ComponentRegistryBuilder) -> Result<(), ComponentRegistryError>;
+type ValidateComponentSchemas = fn(&ComponentRegistryBuilder) -> Result<(), ComponentRegistryError>;
 
 /// Trusted, deterministic source for one owner's current or predecessor catalog.
 ///
@@ -24,7 +25,7 @@ type ValidateComponentSchemas = fn(&ComponentRegistry) -> Result<(), ComponentRe
 pub type ComponentSchemaProviderSource =
     fn() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError>;
 
-fn no_provider_validation(_: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+fn no_provider_validation(_: &ComponentRegistryBuilder) -> Result<(), ComponentRegistryError> {
     Ok(())
 }
 
@@ -560,38 +561,47 @@ impl ComponentSchemaProviderDefinition {
         })
     }
 
-    pub(crate) fn register_into(
+    pub(crate) fn register_candidate(
         self,
-        registry: &mut ComponentRegistry,
+        registry: &mut ComponentRegistryBuilder,
     ) -> Result<(), ComponentRegistryError> {
         (self.register)(registry)
     }
 
-    pub(crate) fn validate_into(
+    pub(crate) fn validate_candidate(
         self,
-        registry: &ComponentRegistry,
+        registry: &ComponentRegistryBuilder,
     ) -> Result<(), ComponentRegistryError> {
         (self.validate)(registry)
     }
 
     /// Preflights this provider without mutating the aggregate registry.
     ///
-    /// A building registry loads the owner source and validates owner, catalog, and aggregate
+    /// The builder loads the owner source and validates owner, catalog, and aggregate
     /// collisions without invoking validation or registration callbacks. Those callbacks each run
-    /// once later against the same private owner-local candidate. A frozen registry compares stable
-    /// owner and executable receipts and never replays provider code.
-    pub fn preflight(self, registry: &ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    /// once later against the same private owner-local candidate. Admitted snapshots use
+    /// [`Self::validate_snapshot`] instead.
+    pub fn preflight(
+        self,
+        registry: &ComponentRegistryBuilder,
+    ) -> Result<(), ComponentRegistryError> {
         registry.validate_schema_provider(self)
     }
 
-    /// Registers this provider once or validates it against an admitted frozen snapshot.
-    pub fn register_or_validate_into(
+    /// Registers this provider through a private candidate before atomic aggregate merge.
+    pub fn register_into(
         self,
-        registry: &mut ComponentRegistry,
+        registry: &mut ComponentRegistryBuilder,
     ) -> Result<(), ComponentRegistryError> {
-        registry
-            .register_or_validate_schema_provider(self)
-            .map(|_| ())
+        registry.register_schema_provider(self).map(|_| ())
+    }
+
+    /// Validates exact source and executable receipts without replaying provider callbacks.
+    pub fn validate_snapshot(
+        self,
+        snapshot: &ComponentRegistrySnapshot,
+    ) -> Result<(), ComponentRegistryError> {
+        snapshot.validate_schema_provider(self)
     }
 }
 

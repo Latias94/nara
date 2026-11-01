@@ -21,7 +21,7 @@ use nara_ecs::{
 use nara_identity::{EntityLookup, EntityReference, SpawnedSceneInstance};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentRegistry, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,
+    ComponentRegistryBuilder, ComponentRegistryPlugin, ComponentSchema, ComponentSchemaCatalog,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
     PersistentComponentSchemaOwnerId, component_registry,
@@ -107,12 +107,12 @@ fn owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 fn bindings() -> SceneComponentBindings {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     SCENE_COMPONENTS_SCHEMA_PROVIDER
-        .register_or_validate_into(&mut registry)
+        .register_into(&mut registry)
         .unwrap();
-    registry.freeze().unwrap();
-    SceneComponentBindings::new(registry.snapshot().unwrap(), [owner()]).unwrap()
+    let registry = registry.freeze().unwrap();
+    SceneComponentBindings::new(registry.clone(), [owner()]).unwrap()
 }
 
 fn record(value: ComponentValue) -> SceneComponentRecord {
@@ -592,11 +592,9 @@ fn managed_native_registry_never_auto_installs_caller_data_bindings() {
     let mut app = App::new();
     app.add_plugin(ComponentRegistryPlugin).unwrap();
     let app = app.seal().unwrap();
-    let caller = SceneComponentBindings::new(
-        component_registry(app.world()).unwrap().snapshot().unwrap(),
-        [owner()],
-    )
-    .unwrap();
+    let caller =
+        SceneComponentBindings::new(component_registry(app.world()).unwrap().clone(), [owner()])
+            .unwrap();
     assert!(
         caller
             .data_components(app.world(), Entity::PLACEHOLDER)

@@ -145,7 +145,7 @@ impl PreparedSceneReopen {
 
     pub(in crate::project_host) fn admit(
         self,
-        registry: Option<&ComponentRegistry>,
+        registry: Option<&ComponentRegistrySnapshot>,
     ) -> SceneReopenOutcome {
         let (admission, file, content_digest) = match self.result {
             Ok(result) => result,
@@ -231,7 +231,7 @@ impl PreparedPrefabReopen {
 
     pub(in crate::project_host) fn admit(
         self,
-        registry: Option<&ComponentRegistry>,
+        registry: Option<&ComponentRegistrySnapshot>,
     ) -> PrefabReopenOutcome {
         let (admission, file, content_digest) = match self.result {
             Ok(result) => result,

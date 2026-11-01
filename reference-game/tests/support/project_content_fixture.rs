@@ -12,7 +12,7 @@ use nara::{
     app::PluginDefinition,
     asset::{AssetRef, AssetSourceKind, AssetSourcePath, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
-    prelude::{Component, ComponentRegistry, Transform2d, Vec2, World},
+    prelude::{Component, ComponentRegistrySnapshot, Transform2d, Vec2, World},
     project_host::advanced::{RuntimeProbe, resolve_product_recipe_with_probe},
     project_host::{
         ProjectContentLoader, ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan,
@@ -231,7 +231,7 @@ pub fn resolve_reference_plan(candidate: &ProjectSettingsCandidate) -> RuntimePl
 }
 
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
-    let registry = plan.schema_validation().registry();
+    let registry = plan.schema_validation().snapshot();
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let player_role_id = ComponentTypeId::new("reference_game.PlayerRole");
@@ -316,7 +316,7 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
 fn enemy_anchor(
     id: &str,
     override_values: Option<(f64, u64)>,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> SceneEntityRecord {
     let overrides = override_values.map(|(x, spawn_tick)| {
         let mut overlay = PrefabOverlay::new(SourceDocumentKey::project_location(
@@ -361,7 +361,7 @@ fn enemy_anchor(
 }
 
 pub fn expected_enemy_prefab(plan: &RuntimePlan) -> PrefabDocument {
-    let registry = plan.schema_validation().registry();
+    let registry = plan.schema_validation().snapshot();
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
     let enemy_role_id = ComponentTypeId::new("reference_game.EnemyRole");
     let health_id = ComponentTypeId::new("reference_game.InitialHealth");
@@ -447,14 +447,14 @@ pub fn scene_id(value: &str) -> nara::identity::SceneEntityId {
 fn component_record<T>(
     component: T,
     component_id: &ComponentTypeId,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
 ) -> SceneComponentRecord
 where
     T: Component,
 {
     let mut world = World::new();
     let entity = world.spawn(component).id();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.clone();
     let value = snapshot
         .encode_component(component_id, &world, entity)
         .unwrap()

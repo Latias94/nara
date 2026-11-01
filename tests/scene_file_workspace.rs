@@ -16,8 +16,8 @@ struct MigratingText(String);
 
 #[test]
 fn canonical_scene_file_publishes_through_a_validated_workspace_session() {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new();
+    let registry = registry.freeze().unwrap();
     let mut workspace = EditorWorkspace::new();
 
     let invalid = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("invalid"))
@@ -82,8 +82,8 @@ fn migrated_scene_file_stays_dirty_until_a_persistence_host_accepts_the_upgrade(
     assert!(slot.session().source_upgrade_required());
 }
 
-fn migrating_text_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn migrating_text_registry() -> ComponentRegistrySnapshot {
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<MigratingText, _, _>(
             ComponentSchema::new(
@@ -125,8 +125,7 @@ fn migrating_text_registry() -> ComponentRegistry {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn migrating_text_id() -> ComponentTypeId {

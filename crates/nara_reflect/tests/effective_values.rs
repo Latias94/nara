@@ -11,7 +11,7 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{Component, World};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentDecodeContext, ComponentFieldId,
-    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistry,
+    ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema, ComponentRegistryBuilder,
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     ComponentValueMaterializationLimits, ComponentValueShape, DeclaredAssetReferenceError,
     EntityReferenceTraversalLimits, collect_declared_asset_references,
@@ -44,7 +44,7 @@ fn required_default_is_effective_before_native_preflight() {
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_fields([field]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultAmount, _, _>(
             schema.clone(),
@@ -57,8 +57,7 @@ fn required_default_is_effective_before_native_preflight() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let omitted = ComponentValue::Map(Default::default());
     let source = omitted.clone();
     assert!(validate_component_value(&schema, &omitted).is_ok());
@@ -99,7 +98,7 @@ fn whole_component_asset_collection_includes_omitted_default() {
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)
     .with_capability(ComponentCapability::AssetRef)]);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultImage, _, _>(
             schema,
@@ -107,7 +106,7 @@ fn whole_component_asset_collection_includes_omitted_default() {
             |_| Ok(ComponentValue::Map(Default::default())),
         )
         .unwrap();
-    registry.freeze().unwrap();
+    let registry = registry.freeze().unwrap();
     let explicit = ComponentValue::map([("image", default)]);
     let omitted = ComponentValue::Map(Default::default());
     let source = omitted.clone();
@@ -639,7 +638,7 @@ fn decode_context_budget_rejects_before_the_native_callback() {
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     let calls = Arc::new(AtomicUsize::new(0));
     let decode_calls = Arc::clone(&calls);
-    let mut registry = ComponentRegistry::new();
+    let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultAmount, _, _>(
             schema.clone(),
@@ -655,8 +654,7 @@ fn decode_context_budget_rejects_before_the_native_callback() {
             },
         )
         .unwrap();
-    registry.freeze().unwrap();
-    let snapshot = registry.snapshot().unwrap();
+    let snapshot = registry.freeze().unwrap();
     let omitted = ComponentValue::map([] as [(&str, ComponentValue); 0]);
     let exact = materialization_limits(2, 14, 2);
     let small = materialization_limits(1, 14, 2);

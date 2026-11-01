@@ -1884,7 +1884,7 @@ fn verify_runtime_component_bindings(
             "Project runtime component registry is missing",
         ))
     })?;
-    if !registry.shares_snapshot(expected.native_snapshot()) {
+    if !registry.ptr_eq(expected.native_snapshot()) {
         return Err(HostFault::new(single_error(
             "project.run.registry-mismatch",
             "Project runtime component registry does not match its admitted behavior snapshot",

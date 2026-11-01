@@ -9,7 +9,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticReport, DiagnosticValueRef};
 use nara_ecs::Component;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentPropertyPath, ComponentRegistry, ComponentSchema,
+    ComponentFieldSchema, ComponentPropertyPath, ComponentRegistrySnapshot, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
@@ -922,20 +922,7 @@ fn nested_unknown_fields_are_rejected_and_existing_document_is_unchanged() {
 }
 
 #[test]
-fn semantic_scene_publication_requires_frozen_registry_and_is_atomic() {
-    let empty_json = SceneDocument::default().to_json_string().unwrap();
-    let building_registry = ComponentRegistry::new();
-    let error = SceneAuthoringSession::try_from_file_candidate(
-        SceneDocumentCandidate::decode_json_bytes(empty_json.as_bytes()).unwrap(),
-        &building_registry,
-    )
-    .unwrap_err();
-    assert!(
-        error.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.component-registry-not-frozen"
-        })
-    );
-
+fn semantic_scene_publication_with_an_admitted_snapshot_is_atomic() {
     let registry = frozen_scene_registry();
     let player = scene_id("player");
     let existing = SceneDocument::from_ordered_roots([SceneEntityRecord::new(player.clone())
@@ -1783,14 +1770,13 @@ fn canonical_scene_prefab_and_patch_v1_fixtures_reserialize_exactly() {
     );
 }
 
-fn frozen_scene_registry() -> ComponentRegistry {
-    let mut registry = ComponentRegistry::new();
+fn frozen_scene_registry() -> ComponentRegistrySnapshot {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     register_scene_components(&mut registry).unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
-fn migrating_text_registry(migrated_len: usize) -> ComponentRegistry {
+fn migrating_text_registry(migrated_len: usize) -> ComponentRegistrySnapshot {
     migrating_text_registry_with_migration(move |value| {
         let ComponentValue::Map(mut fields) = value else {
             return Err(ComponentCodecError::invalid_field("<root>", "map"));
@@ -1813,16 +1799,16 @@ fn migrating_text_registry(migrated_len: usize) -> ComponentRegistry {
     })
 }
 
-fn migrating_text_registry_with_value(value: ComponentValue) -> ComponentRegistry {
+fn migrating_text_registry_with_value(value: ComponentValue) -> ComponentRegistrySnapshot {
     migrating_text_registry_with_migration(move |_| Ok(value.clone()))
 }
 
-fn migrating_text_registry_with_migration<Migrate>(migrate: Migrate) -> ComponentRegistry
+fn migrating_text_registry_with_migration<Migrate>(migrate: Migrate) -> ComponentRegistrySnapshot
 where
     Migrate:
         Fn(ComponentValue) -> Result<ComponentValue, ComponentCodecError> + Send + Sync + 'static,
 {
-    let mut registry = ComponentRegistry::new();
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<MigratingText, _, _>(
             ComponentSchema::new(
@@ -1865,8 +1851,7 @@ where
             migrate,
         )
         .unwrap();
-    registry.freeze().unwrap();
-    registry
+    registry.freeze().unwrap()
 }
 
 fn migration_shape_limits(
@@ -1887,7 +1872,7 @@ fn migration_shape_limits(
 fn assert_scene_migration_shape_rejected(
     case: &str,
     expected_code: &str,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) {
     let incoming =
@@ -1913,7 +1898,7 @@ fn assert_scene_migration_shape_rejected(
 fn assert_prefab_migration_shape_rejected(
     case: &str,
     expected_code: &str,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) {
     let source = AssetRef::path(format!("prefabs/{case}.ron")).unwrap();
@@ -1952,7 +1937,7 @@ fn assert_prefab_migration_shape_rejected(
 fn assert_patch_migration_shape_rejected(
     case: &str,
     expected_code: &str,
-    registry: &ComponentRegistry,
+    registry: &ComponentRegistrySnapshot,
     limits: SceneFileLimits,
 ) {
     let before = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("target"))]);

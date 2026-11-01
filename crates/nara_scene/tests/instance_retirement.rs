@@ -1,6 +1,6 @@
 use nara_ecs::{Component, Entity, Resource, World};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
-use nara_reflect::ComponentRegistry;
+use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityRecord, retire_and_despawn_scene_entity,
     retire_and_despawn_scene_instance,
@@ -16,8 +16,7 @@ fn spawn(
     source: nara_scene::SourceDocumentKey,
     occurrence: &nara_scene::SceneOccurrenceKey,
 ) -> SpawnedSceneInstance {
-    let mut registry = ComponentRegistry::new();
-    registry.freeze().unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let document = if empty {
         SceneDocument::default()
     } else {
