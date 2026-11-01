@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b3b7a5ab0fe4d9bacc2f298b59cf6efdf4d2b77ad90a516d57e16ce4c54a101b"
+source_fingerprint: "47f95d40fa63eb128bfa91a4363a7ee2ffad83f66768d6a1439618142db85fca"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "b3b7a5ab0fe4d9bacc2f298b59cf6efdf4d2b77ad90a516d57e16ce4c54
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b3b7a5ab0fe4d9bacc2f298b59cf6efdf4d2b77ad90a516d57e16ce4c54a101b`
-- Immutable records: 1155
+- Source fingerprint: `47f95d40fa63eb128bfa91a4363a7ee2ffad83f66768d6a1439618142db85fca`
+- Immutable records: 1165
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Shared stock composition qualified and registry ownership successor planned](registry/2026-11/2026-11-01T014119Z-nara-foundation-rebaseline-codex-main-7ab3b3f65ae54301abc6ec2cf828af44.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Nara foundation rebaseline Codex main](registry/2026-11/2026-11-01T033903Z-nara-foundation-rebaseline-codex-main-90d60b07212e40508e436097fd4034c1.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Consuming registry admission and exact App Scene ownership qualification](verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md) - Builder to immutable snapshot replacement, failed-candidate recovery, installed-but-unadmitted refusal and complete migrated consumers qualified on Windows with scoped DX12 evidence.
+- **Work Progress**: [Registry public and DX12 consumers pass before final independent and feature checks](progress/2026-11/2026-11-01T030917Z-registry-public-and-dx12-consumers-pass-before-final-independent-and-feature-checks-c82a8b32f14745cba8cabdb0c035b463.md) - Root 1668, selected native4, owning and independent doctests and thirty direct consumers pass; renamed-root qualification and final checks remain active.
+- **Work Progress**: [Supplied research coverage rechecked and registry public qualification running](progress/2026-11/2026-11-01T024221Z-supplied-research-coverage-rechecked-and-registry-public-qualification-running-a9175ee5fe6a461f8a4de88657cfe000.md) - Both independent research lanes find no uncovered plan requirement; root and Editor targets compiled and the 1668-test consumer cohort is running.
+- **Work Progress**: [Research reconciliation and registry ownership qualification in progress](progress/2026-11/2026-11-01T022356Z-research-reconciliation-and-registry-ownership-qualification-in-progress-f5649fbb861a414a85096145c166f56f.md) - The supplied research matches the integrated archive; domain ownership tests and the corrected rejection oracle pass while public and native qualification remains open.
+- **Work Progress**: [Registry construction and immutable authority replacement in integration](progress/2026-11/2026-11-01T015531Z-registry-construction-and-immutable-authority-replacement-in-integration-282689551434409ab234964eb2e997ab.md) - Consuming builder admission and private App ownership landed; downstream readers and independent consumers are migrating before qualification.
 - **Verification Evidence**: [Shared stock composition original captures and native Scene effects qualification](verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md) - Production stock-stage composition and exact rendered resource ownership qualified through independent Runtime Editor and offscreen consumers.
 - **Work Progress**: [Actual stock Runtime and native Scene qualification with final owner gates in progress](progress/2026-11/2026-11-01T005125Z-actual-stock-runtime-and-native-scene-qualification-with-final-owner-gates-in-progress-097be6576e5c42949c40e1af15329253.md) - Work Progress for Actual stock Runtime and native Scene qualification with final owner gates in progress.
 - **Work Progress**: [Exact rendered-image resource ownership and stock composition qualification integration](progress/2026-10/2026-10-31T234222Z-exact-rendered-image-resource-ownership-and-stock-composition-qualification-integration-e3de32058cbc4331bd2f30afcb4fd1db.md) - Original typed image leases, ordinary renderer383 and selected DX12 publication20 evidence; external Runtime and Editor Scene View integration remains unqualified.
@@ -77,11 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Native composition physical pump handoff and retained stock input qualification](verification/2026-10/2026-10-31T225517Z-native-composition-physical-pump-handoff-and-retained-stock-input-qualification-f0cd93c17a3c47fa905993cee07e6c5c.md) - Production native-window ownership, sequential Source/Processed runs and independent numeric composition qualified with honest platform and performance limits.
 - **Work Progress**: [Native composition stack correction and physical pump ownership integration](progress/2026-10/2026-10-31T221831Z-native-composition-stack-correction-and-physical-pump-ownership-integration-33af692382f5443998b6c1bd125f7550.md) - Records actual native stack reproduction, heap slot correction, external drawing qualification and the selected reusable physical event-loop successor.
 - **Work Progress**: [Public native window composition and complete independent consumers integrating](progress/2026-10/2026-10-31T214041Z-public-native-window-composition-and-complete-independent-consumers-integrating-d3f6a6a45a4a4f5c9797bbd00deac863.md) - Bounded native paint/read-use and sealed CPU observation are implemented; actual multi-window, content and clipped drawing qualification remains in progress.
-- **Verification Evidence**: [Captured View histories and original submission cleanup production qualification](verification/2026-10/2026-10-31T210034Z-captured-view-histories-and-original-submission-cleanup-production-qualification-5c061376803446c0bff1a95495ca55c7.md) - Scoped production history candidates, independent numeric and Runtime consumers, and final submitted-custody cleanup evidence.
-- **Work Progress**: [History View leases independent numeric qualification and publication review corrections](progress/2026-10/2026-10-31T203210Z-history-view-leases-independent-numeric-qualification-and-publication-review-corrections-a0e84fabb63d49f6b893582e58a20926.md) - Six independent GPU history cases pass; publication cleanup, program budget and final storage corrections remain in final integration.
-- **Work Progress**: [Captured View lifetimes and production history candidates in integration](progress/2026-10/2026-10-31T200950Z-captured-view-lifetimes-and-production-history-candidates-in-integration-adb17185d2534fb5bd768a08ed6e22dc.md) - Neutral View ownership verified; original logical declarations, move-owned candidates and complete Host history publication are integrating.
-- **Verification Evidence**: [Original typed render policy capture and complete consumer qualification](verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md) - Typed renderer policy custody, public UI transfer, stock consumer replacement and scoped native evidence.
-- **Work Progress**: [Typed policy integrated owners and native consumers qualified pending final checks](progress/2026-10/2026-10-31T184954Z-typed-policy-integrated-owners-and-native-consumers-qualified-pending-final-checks-b002ff50f627472a952f92373c1c6284.md) - Records final ordinary owner and Root results, native Editor and independent policy/image/program evidence, and the corrected device-loss admission classification.
 
 # Integration Notes
 

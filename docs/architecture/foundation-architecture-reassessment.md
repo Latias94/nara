@@ -1134,12 +1134,13 @@ These are narrow constraints, not arguments that all extension calls must use IP
 ## Completion Boundary
 
 The [registry ownership follow-up](../plans/2026-11-01-component-registry-ownership-plan.md) refines
-R12 from repeated actual consumer mistakes. A mutable builder should publish the existing
-immutable executable snapshot, whose absent query then means an absent admitted declaration.
-No production thaw requirement was found. This selected candidate removes the public mixed-phase
-carrier and duplicate Frozen wrappers while preserving recoverable failed admission, provider
-atomicity and exact App/Scene authority. It requires an ADR0081 amendment and complete public
-consumer qualification; neither has occurred in the current render checkpoint.
+R12 from repeated actual consumer mistakes. A mutable builder publishes the existing immutable
+executable snapshot, whose absent query means an absent admitted declaration. No production thaw
+requirement was found. ADR0081 now selects this replacement, and the implementation removes the
+public mixed-phase carrier and duplicate Frozen wrappers while preserving recoverable failed
+admission, provider atomicity and exact App/Scene authority. Implementation `7f69d53` has its own
+[public/independent and selected native qualification](../knowledge/engineering/verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md),
+separate from the prior render checkpoint and the still-open complete foundation Goal.
 
 A complete design review records a considered disposition for every topic/ADR, including explicit
 unknowns and their bounded experiments. It does not mean all replacements are implemented or all

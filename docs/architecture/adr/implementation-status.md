@@ -16,6 +16,18 @@ now have scoped evidence. Shared stock-stage Scene effects have their own comple
 native Scene View and offscreen qualification below; the editable Nara-drawn Inspector remains
 open. Exact native binding and stock-render ownership are retained.
 
+The [registry ownership unit](../../plans/2026-11-01-component-registry-ownership-plan.md) is
+implemented as `7f69d53` under ADR0081. Consuming `ComponentRegistryBuilder` admission publishes
+the sole `ComponentRegistrySnapshot`; failed admission returns its original candidate and error.
+Private App phases preserve installation identity, provider atomicity and exact managed/standalone
+World eligibility, including installed-but-unadmitted refusal. Duplicate native reader wrappers
+and phase-only query branches are removed across Scene, Root, Tooling and Editor. Its
+[qualification](../../knowledge/engineering/verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md)
+records Reflect395, affected-domain results with one corrected assertion's focused rerun,
+Root/Editor/public1668, independent30+7, Reference40, compile-fail docs19 and four actual DX12
+trajectories, plus strict consumer lint and portable compilation. This completes the ownership
+unit, not coordinated authored evolution, complete R12 or Proposed0120/0121.
+
 The first-party processed Host successor is qualified as `44470ed` under the
 [ordered asset-delivery plan](../../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 ADRs 0007/0033/0103 now specify explicit source-execution facets and plan-owned Runtime codec

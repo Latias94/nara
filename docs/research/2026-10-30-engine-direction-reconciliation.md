@@ -272,5 +272,13 @@ roadmap or full0121 promotion follows. A separate actual-consumer ergonomics aud
 [registry ownership sub-unit](../plans/2026-11-01-component-registry-ownership-plan.md) inside R12:
 mutable construction publishes the existing immutable snapshot, keeping failed-candidate recovery
 and exact App/Scene eligibility. Its independent review added the installed-but-unadmitted owner
-refusal boundary. That plan is unimplemented and does not replace the still-open authored
-evolution, joint motion/execution, durable material or editable Nara-drawn Inspector work.
+refusal boundary. Its Builder/Snapshot replacement is implemented as `7f69d53`, with
+[owning/public/independent and selected native qualification](../knowledge/engineering/verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md).
+This does not replace the still-open authored evolution, joint motion/execution,
+durable material or editable Nara-drawn Inspector work. Independent read-only content/runtime and
+render/UI/Editor reviews against `5acab02` and that replacement found no additional uncovered
+requirement in the supplied studies. They specifically retained coordinated value/claim/occurrence
+evolution, interrupted recovery, derived-output provenance, phase/executor selection, material
+generations, numeric color/mapping and editable-text/platform gates. The archive's 91 manifest
+entries and ten imported studies still match; its historical research and current owner
+qualification retain their separate evidence scopes.

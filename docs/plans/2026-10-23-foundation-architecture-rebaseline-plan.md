@@ -529,6 +529,13 @@ unresolved members, fence external edits and make retries idempotent. Per-file r
 project-wide atomicity. Recovered Check/Play consumes a coherent admitted generation or refuses.
 This is meaningful authored evolution, not a requirement to retain abandoned pre-release readers.
 
+The [reviewed authored-upgrade unit](2026-11-01-authored-schema-upgrade-plan.md) concretizes CP1
+and process-interruption recovery with the existing independent EnemyStats consumer. It proposes
+an explicit new history checkpoint, all-profile source inventory, project-owned Pending/Ready
+admission and complete Workspace/persistence-lane installation. Its six adversarial review
+corrections are recorded in the proposal; Accepted contract reconciliation and implementation
+remain separate work. CP2 nested-source extraction retains its own occurrence-remap consumer.
+
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
 protection without silently exhausting lifetime identity. Amend 0058 before changing classification:
@@ -1087,7 +1094,7 @@ justify deleting the working frontend or claim its native capability has transfe
 ## R12: Consumer Integration And Canonical Contract Consolidation
 
 **Design:** D01, D18. **State:** consumer integration accompanies the qualified owner units;
-the complete production/consolidation outcome and the registry ownership sub-unit remain open.
+the registry ownership sub-unit is qualified; the complete production/consolidation outcome remains open.
 **Owners:** affected modules and integration owner.
 
 For the selected completed units, run independent direct/renamed/public consumers and relevant
@@ -1128,13 +1135,15 @@ closed Scene data-family implementation or require a generic extension framework
 
 The [registry ownership sub-unit](2026-11-01-component-registry-ownership-plan.md) addresses a
 concrete repeated consumer failure: successful registration followed by `schema` on a Building
-`ComponentRegistry` silently reports absence. The selected candidate separates mutable
+`ComponentRegistry` silently reports absence. The selected replacement separates mutable
 `ComponentRegistryBuilder` admission from the existing immutable `ComponentRegistrySnapshot`,
 removes Frozen wrappers and duplicate reader views, and keeps App build/preloaded dispatch
 private. Failed admission returns the original candidate and error for repair/retry. Provider
 atomicity, exact definition identity, preloaded receipt checks and installation mutation detection
-remain mandatory. Reconcile ADR0081 before implementation; no registry replacement is qualified
-by this plan. Finish the current render unit before migrating its shared consumers.
+remain mandatory. ADR0081 selects that ownership split. Implementation `7f69d53` and its
+[qualification](../knowledge/engineering/verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md)
+cover owning domains, migrated public/independent consumers and the selected Windows/DX12
+trajectories. The registry sub-unit closes without closing complete R12 or the foundation Goal.
 
 Consolidate affected 0117 amendments into owning ADRs; narrow or replace obsolete proposals and
 remove duplicate current rules. Update guides, catalogue, ledger and immutable evidence. Keep

@@ -1,21 +1,26 @@
 # R12 Component Registry Construction And Admitted Ownership
 
-**Status:** Planned candidate; implementation and qualification have not started.
+**Status:** Implemented as `7f69d53` and qualified for the migrated public/independent workflows
+and selected Windows/DX12 trajectories. Full foundation work remains open.
 **Parent:** [Foundation rebaseline R12](2026-10-23-foundation-architecture-rebaseline-plan.md#r12-consumer-integration-and-canonical-contract-consolidation).
 **Scope:** One ownership and ergonomics unit within the existing foundation plan, preserving R5's
 Schema, migration and retained-definition contracts. This is not a separate roadmap.
+**Evidence:** [Owning, public, independent and native qualification](../knowledge/engineering/verification/2026-11/2026-11-01T033745Z-consuming-registry-admission-and-exact-app-scene-ownership-qualification-c1678b22b0424f55b3dd73f149d8e7e2.md).
 
 ## Problem And Source Evidence
 
-Successful registration currently leaves a public `ComponentRegistry` in Building state. Calling
-`schema` then returns `None`, including when the requested declaration and binding were registered
+At the starting baseline `5acab02`, successful registration leaves a public `ComponentRegistry`
+in Building state. Calling `schema` then returns `None`, including when the requested declaration and binding were registered
 successfully. Repeated fixture mistakes expose a real ordering burden: callers must know that an
 apparently ordinary lookup is meaningful only after a separate admission operation.
 
-This behavior is intentional in the current implementation. The repair must preserve admission,
+This behavior was intentional in that implementation. The replacement must preserve admission,
 while making its prerequisite visible in ownership and parameter types.
 
-| Current fact | Source evidence |
+The source anchors below describe that starting implementation, rather than the replacement's
+current symbol locations.
+
+| Starting fact | Source evidence |
 | --- | --- |
 | One public type contains Building, Frozen and an internal transition state. | [Registry state and public type](../../crates/nara_reflect/src/registry.rs#L836). |
 | Registration updates a candidate; freeze validates before moving it into an immutable `Arc`. | [Schema registration](../../crates/nara_reflect/src/registry.rs#L1364), [freeze](../../crates/nara_reflect/src/registry.rs#L1185), [complete validation](../../crates/nara_reflect/src/registry.rs#L2184). |
@@ -163,17 +168,18 @@ World eligibility. Neither contract grants execution to a builder or to a metada
 `ComponentSchemaOwnerSnapshot`. Keep that existing data-only owner family separate; no new
 representation, reload protocol or relaxation of native admission is part of this unit.
 
-This plan itself changes no Accepted ADR. During implementation, update only directly affected
-guides, exports, evidence and ledger entries after the contract is reconciled. Parent-plan and
-reassessment navigation are integration-owner work.
+ADR0081 selects this construction/admission split. Implementation `7f69d53` replaces the mixed
+public type and migrates the actual consumers; the linked evidence records qualification and
+limits. Directly affected guides, exports and current architecture references use that contract.
 
 ## Bounded Verification And Completion
 
-This document records planned acceptance, not executed tests. Documentation-only delivery requires
-document checks; it does not trigger Cargo or native qualification.
+The requirements below define this unit's acceptance. The linked evidence records executed checks,
+including original integration failures and their focused corrections. The contract amendment
+alone does not qualify the replacement or trigger unrelated product acceptance.
 
-For the future implementation, run Cargo serially in the existing target directory, set
-`CARGO_BUILD_JOBS=1`, prefer focused nextest selections, and use `cargo fmt --all` after reviewing
+Run Cargo serially in the existing target directory with `CARGO_BUILD_JOBS=1` to qualify the
+replacement. Prefer focused nextest selections, and use `cargo fmt --all` after reviewing
 concurrent changes. Select coverage from the final affected diff and existing harnesses.
 
 | Evidence | Required result |
