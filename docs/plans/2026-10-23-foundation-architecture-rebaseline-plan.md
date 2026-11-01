@@ -1086,7 +1086,9 @@ justify deleting the working frontend or claim its native capability has transfe
 
 ## R12: Consumer Integration And Canonical Contract Consolidation
 
-**Design:** D01, D18. **State:** not started. **Owners:** affected modules and integration owner.
+**Design:** D01, D18. **State:** consumer integration accompanies the qualified owner units;
+the complete production/consolidation outcome and the registry ownership sub-unit remain open.
+**Owners:** affected modules and integration owner.
 
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
@@ -1123,6 +1125,16 @@ expanding facade-aware derives; and make unbound preparation, staged replacement
 reservations and current-live export naming match their actual workflows. Remove unused storage
 or entry points only after tracing real consumers. These follow-ups do not block the current
 closed Scene data-family implementation or require a generic extension framework.
+
+The [registry ownership sub-unit](2026-11-01-component-registry-ownership-plan.md) addresses a
+concrete repeated consumer failure: successful registration followed by `schema` on a Building
+`ComponentRegistry` silently reports absence. The selected candidate separates mutable
+`ComponentRegistryBuilder` admission from the existing immutable `ComponentRegistrySnapshot`,
+removes Frozen wrappers and duplicate reader views, and keeps App build/preloaded dispatch
+private. Failed admission returns the original candidate and error for repair/retry. Provider
+atomicity, exact definition identity, preloaded receipt checks and installation mutation detection
+remain mandatory. Reconcile ADR0081 before implementation; no registry replacement is qualified
+by this plan. Finish the current render unit before migrating its shared consumers.
 
 Consolidate affected 0117 amendments into owning ADRs; narrow or replace obsolete proposals and
 remove duplicate current rules. Update guides, catalogue, ledger and immutable evidence. Keep
