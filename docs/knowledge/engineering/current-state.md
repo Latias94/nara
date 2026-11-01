@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "1937ffe7ab3d95ff3fab2475985c4715cd7f42464d227d25bc46e1326c440522"
+source_fingerprint: "62b934f2f158357c32c5bac024eb40f697fc341f6e70b9d851dc7767cb0a82b8"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "1937ffe7ab3d95ff3fab2475985c4715cd7f42464d227d25bc46e1326c4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `1937ffe7ab3d95ff3fab2475985c4715cd7f42464d227d25bc46e1326c440522`
-- Immutable records: 1212
+- Source fingerprint: `62b934f2f158357c32c5bac024eb40f697fc341f6e70b9d851dc7767cb0a82b8`
+- Immutable records: 1215
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Nara foundation architecture rebaseline](registry/2026-11/2026-11-01T204429Z-nara-foundation-rebaseline-codex-main-d0aac6a8d75840b3976278a867fa311e.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Nara foundation architecture rebaseline](registry/2026-11/2026-11-01T220105Z-nara-foundation-rebaseline-codex-main-5c1e8d1a01514490a73502b84fe2b385.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Canonical source identity ownership prerequisite](verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md) - Pure source IDs paths and document keys move to Identity; Asset retains metadata comparison, with owning public independent and portable evidence.
+- **Work Progress**: [Prefab extraction representation selected after root ordering and reference value counterexamples](progress/2026-11/2026-11-01T212648Z-prefab-extraction-representation-selected-after-root-ordering-and-reference-value-counterexamples-044888fa29f7401b91a5904e8a230cb1.md) - CP2 selects explicit roots, source placements, inline references and flat compiled output; pure identity ownership is being replaced before product qualification.
 - **Verification Evidence**: [Reviewed authored Schema upgrades and fresh-process recovery qualification](verification/2026-11/2026-11-01T203621Z-reviewed-authored-schema-upgrades-and-fresh-process-recovery-qualification-cf7c8ecab10c4e21b4cfcff4906805de.md) - Complete CP1/S2 live and independent consumers, source authority, canonical UI construction and bounded Windows qualification.
 - **Work Progress**: [Native DX12 and final construction budget controls pass before full Root Editor test run](progress/2026-11/2026-11-01T202529Z-native-dx12-and-final-construction-budget-controls-pass-before-full-root-editor-test-run-1e968c417b1940b4a9ac61ad5051d20d.md) - Seven native trajectories, owning802 and final budget12 pass; correctness Clippy all-targets succeeds, full Root and Editor all-feature libraries are compiling.
 - **Work Progress**: [Complete Reference UI source workflow passes after construction budget scope correction](progress/2026-11/2026-11-01T201206Z-complete-reference-ui-source-workflow-passes-after-construction-budget-scope-correction-ac4dc7362e464029bb70551fd9d200b4.md) - Actual bundle production and exact UI owner sync pass; complete Reference UI and readiness2 pass after separating full construction from standalone eight-field batches.
@@ -80,8 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Exact captured predecessors and retained Task inputs pass final Root and Application handoffs](progress/2026-11/2026-11-01T190332Z-exact-captured-predecessors-and-retained-task-inputs-pass-final-root-and-application-handoffs-95571bffbb114d509693a5c6cab03243.md) - The three independent handoff findings are corrected and reviewed; final Root392 and Application35 pass before fresh-process and native qualification.
 - **Work Progress**: [Final source persistence qualification exposes retained-operation handoff gaps](progress/2026-11/2026-11-01T184711Z-final-source-persistence-qualification-exposes-retained-operation-handoff-gaps-65b35fa4127c475d80aba798bdb3c2f0.md) - Source persistence cleanup passes Root388 and Application34; independent review reproduces a stale saved predecessor and selects two original-owner retry corrections.
 - **Work Progress**: [Source authority scoped writeback and immutable preview report controls pass](progress/2026-11/2026-11-01T182221Z-source-authority-scoped-writeback-and-immutable-preview-report-controls-pass-6efcd54caabb41828d0d23606c44fc6b.md) - Final source-owner corrections pass 66 owner tests and the complete Root cohort with its corrected scoped Sprite consumer; obsolete Root Native persistence is being removed.
-- **Work Progress**: [Compiled Editor source authority and actual preview coverage integration](progress/2026-11/2026-11-01T175639Z-compiled-editor-source-authority-and-actual-preview-coverage-integration-213786a7d977402d9678e8ab570c1e82.md) - Source authority dispatch, real preview Native coverage, complete Scripts recovery and source-safe Apply Changes are under final integration.
-- **Work Progress**: [Process recovery and v2 product execution evidence with final integration continuing](progress/2026-11/2026-11-01T170936Z-process-recovery-and-v2-product-execution-evidence-with-final-integration-continuing-fb79542928e445f9a19d66671ccb4f43.md) - Real independent recovery, v2 Check/Runtime/Editor Play and ordinary history workflows pass; scripts membership and compiled source admission need final integration checks.
 
 # Integration Notes
 

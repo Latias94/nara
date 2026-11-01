@@ -3,6 +3,7 @@
 mod allocator;
 mod domain;
 mod remap;
+mod source;
 mod types;
 
 pub use allocator::IdentityAllocationError;
@@ -15,6 +16,11 @@ pub use domain::{
     retire_identity_entity, retire_identity_entity_with_disposition, spawn_identity_entity,
 };
 pub use remap::{EntityReferenceRemap, IdentityRemapError, WorldEntityLocatorRemap};
+pub use source::{
+    AssetPathError, AssetSourcePath, SourceDocumentBindingError, SourceDocumentKey,
+    SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
+    StableAssetIdError, StableAssetIdGenerationError,
+};
 pub use types::{
     EntityReference, PersistentRuntimeId, PersistentRuntimeIdError, PersistentRuntimeNamespaceId,
     PersistentRuntimeNamespaceIdError, PersistentRuntimeReference, RuntimeEntityIncarnation,

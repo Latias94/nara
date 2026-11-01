@@ -665,19 +665,21 @@ impl LoadContext<'_> {
             .asset_database
             .record_for_path(source_path)
             .expect("indexed native metadata has its actual source record");
-        source_key.validate_asset_source(record).map_err(|_| {
-            ProjectContentError::with_identifier(
-                ProjectContentErrorKind::AssetMetaMismatch,
-                if source_key.kind() == SourceDocumentKind::Prefab {
-                    "project.content.prefab-source-association-invalid"
-                } else {
-                    "project.content.scene-source-association-invalid"
-                },
-                "Native document metadata conflicts with its admitted source",
-                "source",
-                source_path.as_str(),
-            )
-        })?;
+        record
+            .validate_source_document_key(source_key)
+            .map_err(|_| {
+                ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::AssetMetaMismatch,
+                    if source_key.kind() == SourceDocumentKind::Prefab {
+                        "project.content.prefab-source-association-invalid"
+                    } else {
+                        "project.content.scene-source-association-invalid"
+                    },
+                    "Native document metadata conflicts with its admitted source",
+                    "source",
+                    source_path.as_str(),
+                )
+            })?;
         let path_work = self.reserve_work(checked_plan_sum(
             ProjectContentBudgetKind::WorkBytes,
             [path.len(), ".meta".len(), STRING_ALLOCATION_OVERHEAD],

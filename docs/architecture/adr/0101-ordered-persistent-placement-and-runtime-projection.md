@@ -4,6 +4,8 @@
 **Date**: 2026-08-04
 **Amended**: 2026-08-15 to clarify the implemented Prefab-root projection order
 **Amended**: 2026-10-23 to bind spatial consumption to captured structural order
+**Amended**: 2026-11-02 to select source-owned typed desired placements and a separate flat
+compiled hierarchy under the complete CP2 replacement
 **Owner**: Persistent Scene/Prefab/Patch documents, runtime hierarchy, authoring tools, and UI projection
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0006](0006-scene-and-prefab-data-model.md),
@@ -46,10 +48,14 @@ flowchart LR
     Runtime -. never writes back .-> Source
 ```
 
-- A document owns one ordered root list. Each parent record owns one ordered child list. Canonical
-  entity records remain sorted by stable entity ID for lookup and serialization.
-- Every entity occurs exactly once in either the root list or one parent's child list. Persistent
-  entity records do not also store a parent field.
+- Authored source declarations own one ordered desired-placement set, using typed source/addition
+  targets, canonical-base instance hops, root-or-entity parent and First/Last/Before/After slots.
+  Each source-local entity has one owning placement; a containing source may sparsely place
+  inherited entities without transferring declaration ownership. Entity lookup/serialization order
+  remains independent of placement declaration order.
+- Compilation produces one ordered root list and ordered child lists. Every effective entity
+  appears exactly once. Those lists are derived flat data, not a second authored placement store;
+  source files do not keep both desired placements and roots/children as competing authorities.
 - Placement uses stable root-or-parent ownership plus `first`, `last`, `before stable sibling`, or
   `after stable sibling`. Add, move, reparent, reorder, remove, and restore share this vocabulary.
 - Validation rejects missing, duplicate, dangling, cyclic, overlapping, or multiply owned
@@ -58,10 +64,15 @@ flowchart LR
 - Prefab expansion, overrides, copy/export, and nested instance projection preserve the ordered
   closure. They never reconstruct order from map iteration, a numeric rank, source order that is
   not part of the document, or runtime entity allocation.
-- Expanding a prefab instance preserves the prefab's ordered roots and inserts their namespaced
-  projections before children authored directly on the instance anchor. This makes base prefab
-  content precede scene-local additions without deriving order from canonical entity-record
-  sorting.
+- An explicit forest mount initially places inherited roots before directly authored children.
+  This is a default composition order. Valid containing-source or outer placement can interleave
+  same-parent siblings, including inherited and locally declared nodes. A rooted instance binds
+  its specified source root to the anchor instead of adding a wrapper. Normalize effective root
+  aliases before sibling, duplicate, self-relative and cycle checks, while preserving each source
+  predicate and declaration facet in authored intent.
+- Source and overlay placements share the layout implementation and declaration-order cohort
+  rules. The declaration's own source/base determines its address context; a source is not made
+  into a synthetic instance of itself merely to express its ordinary layout.
 - `nara_hierarchy` owns the synchronized non-linked runtime parent/ordered-children projection.
   Supported first-party mutation goes through its writer/command transaction. Structure remains
   independent from lifecycle ownership, transform math, visibility, and UI state.
@@ -94,8 +105,16 @@ win without an arbitrary repair policy.
 
 ### Option 3: Own ordered roots and children with stable placement anchors
 
-Selected. It gives documents, patches, runtime projection, tooling, and UI one structural fact and
-supports exact inverse operations.
+The earlier implemented representation. Flat roots/children remain selected for compiled data and
+Runtime projection. Local-only source lists cannot express a P-owned child between two children
+inherited from Q without changing its declaration ownership.
+
+### Option 4: Source-owned typed placements, compiled ordered roots/children
+
+Selected for the [CP2 replacement](../../plans/2026-11-02-prefab-extraction-plan.md). It preserves
+one source layout authority, explicit sparse inheritance intent and exact source-operation inverses.
+Ordinary reorder edits persistent placement rather than a snapshot of the current expanded list.
+The current implementation/qualification boundary remains in the implementation ledger.
 
 ## Consequences
 

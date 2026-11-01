@@ -416,13 +416,15 @@ pub(super) fn load_resource(
             return Err(changed(observed));
         }
     }
-    native.key().validate_asset_source(&record).map_err(|_| {
-        AuthoringProjectSourceAdmissionError::NativeSource(
-            AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
-        )
-    })?;
+    record
+        .validate_source_document_key(native.key())
+        .map_err(|_| {
+            AuthoringProjectSourceAdmissionError::NativeSource(
+                AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
+            )
+        })?;
     if deferred {
-        // The admitted key checks actual native source identity and metadata. It does not turn
+        // Native admission and metadata comparison bind the actual source identity. They do not turn
         // an open dirty Session or the saved body into an Immediate preview participant.
         let native_retained = native
             .retained_bytes()

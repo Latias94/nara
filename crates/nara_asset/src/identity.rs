@@ -1,14 +1,10 @@
 use std::{
-    borrow::Borrow,
-    error::Error,
     fmt::{self, Debug, Display, Formatter},
-    str::FromStr,
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use uuid::{Builder, Uuid};
-
 use crate::{AssetProductRef, ImportedProductId};
+use nara_identity::{AssetPathError, AssetSourcePath, StableAssetId, StableAssetIdError};
 
 static NEXT_RUNTIME_ASSET_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -82,207 +78,44 @@ impl Debug for AssetId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StableAssetId(Uuid);
-
-impl StableAssetId {
-    pub fn try_random() -> Result<Self, StableAssetIdGenerationError> {
-        let mut bytes = [0_u8; 16];
-        getrandom::fill(&mut bytes).map_err(StableAssetIdGenerationError::new)?;
-        Ok(Self(Builder::from_random_bytes(bytes).into_uuid()))
-    }
-
-    pub fn parse_str(id: impl AsRef<str>) -> Result<Self, StableAssetIdError> {
-        Uuid::parse_str(id.as_ref())
-            .map(Self)
-            .map_err(|_| StableAssetIdError::Invalid(id.as_ref().to_string()))
-    }
-
-    #[must_use]
-    pub const fn from_uuid(uuid: Uuid) -> Self {
-        Self(uuid)
-    }
-
-    #[must_use]
-    pub const fn as_uuid(self) -> Uuid {
-        self.0
-    }
-}
-
-#[derive(Debug)]
-pub struct StableAssetIdGenerationError {
-    source: getrandom::Error,
-}
-
-impl StableAssetIdGenerationError {
-    const fn new(source: getrandom::Error) -> Self {
-        Self { source }
-    }
-}
-
-impl Display for StableAssetIdGenerationError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str("stable asset identity generation failed")
-    }
-}
-
-impl Error for StableAssetIdGenerationError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.source)
-    }
-}
-
-impl Display for StableAssetId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, formatter)
-    }
-}
-
-impl FromStr for StableAssetId {
-    type Err = StableAssetIdError;
-
-    fn from_str(id: &str) -> Result<Self, Self::Err> {
-        Self::parse_str(id)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for StableAssetId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for StableAssetId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::parse_str(&id).map_err(serde::de::Error::custom)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StableAssetIdError {
-    Invalid(String),
-}
-
-impl Display for StableAssetIdError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Invalid(id) => write!(formatter, "invalid stable asset id '{id}'"),
-        }
-    }
-}
-
-impl Error for StableAssetIdError {}
-
 /// An authored relative alias interpreted through an explicit [`AssetPathScope`].
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AssetPath(String);
-
-impl AssetPath {
-    pub fn new(path: impl Into<String>) -> Result<Self, AssetPathError> {
-        let path = path.into();
-        validate_asset_path(&path)?;
-        Ok(Self(path))
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    #[cfg(feature = "serde")]
-    pub(crate) fn retained_bytes(&self) -> usize {
-        self.0.capacity()
-    }
-
-    #[must_use]
-    pub fn meta_path(&self) -> String {
-        format!("{}.meta", self.0)
-    }
-}
-
-impl Display for AssetPath {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-/// A canonical logical source location in one admitted catalogue.
 ///
-/// This lexical value grants no filesystem access and cannot be used as an authored alias
-/// without an explicit [`AssetPathScope`].
+/// This lexical value grants no filesystem access; resolution requires an explicit scope.
+///
+/// The alias and canonical source types are intentionally distinct, even when they contain the
+/// same path spelling:
 ///
 /// ```compile_fail,E0308
 /// let source = nara_asset::AssetSourcePath::new("assets/player.png").unwrap();
 /// let _: &nara_asset::AssetPath = &source;
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct AssetSourcePath(String);
+pub struct AssetPath(AssetSourcePath);
 
-impl AssetSourcePath {
+impl AssetPath {
     pub fn new(path: impl Into<String>) -> Result<Self, AssetPathError> {
-        let path = path.into();
-        validate_asset_path(&path)?;
-        Ok(Self(path))
+        Ok(Self(AssetSourcePath::new(path)?))
     }
 
     #[must_use]
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.0.retained_bytes()
     }
 
     #[must_use]
     pub fn meta_path(&self) -> String {
-        format!("{}.meta", self.0)
-    }
-
-    pub(crate) fn retained_bytes(&self) -> usize {
-        self.0.capacity()
-    }
-
-    pub(crate) fn case_fold_key(&self) -> String {
-        self.0.to_lowercase()
+        self.0.meta_path()
     }
 }
 
-impl Display for AssetSourcePath {
+impl Display for AssetPath {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
-    }
-}
-
-impl Borrow<str> for AssetSourcePath {
-    fn borrow(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for AssetSourcePath {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for AssetSourcePath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let path = <String as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(path).map_err(serde::de::Error::custom)
     }
 }
 
@@ -313,14 +146,8 @@ impl AssetPathScope {
     #[must_use]
     pub fn resolve(&self, path: &AssetPath) -> AssetSourcePath {
         match &self.prefix {
-            Some(prefix) => {
-                let mut source = String::with_capacity(prefix.0.len() + 1 + path.0.len());
-                source.push_str(prefix.as_str());
-                source.push('/');
-                source.push_str(path.as_str());
-                AssetSourcePath(source)
-            }
-            None => AssetSourcePath(path.0.clone()),
+            Some(prefix) => prefix.joined(&path.0),
+            None => path.0.clone(),
         }
     }
 
@@ -342,8 +169,10 @@ impl AssetPathScope {
 
     #[must_use]
     pub fn relativize(&self, path: &AssetSourcePath) -> Option<AssetPath> {
-        self.relative_path(path)
-            .map(|local| AssetPath(local.to_owned()))
+        self.relative_path(path).map(|local| {
+            AssetPath::new(local.to_owned())
+                .expect("a complete-segment suffix of a validated source path is valid")
+        })
     }
 }
 
@@ -367,43 +196,6 @@ impl<'de> serde::Deserialize<'de> for AssetPath {
         Self::new(path).map_err(serde::de::Error::custom)
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssetPathError {
-    Empty,
-    Absolute,
-    ContainsBackslash,
-    ContainsDrivePrefix,
-    ContainsCurrentDirectory,
-    ContainsParentDirectory,
-    ContainsEmptySegment,
-    ContainsNull,
-}
-
-impl Display for AssetPathError {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("asset path is empty"),
-            Self::Absolute => formatter.write_str("asset path must be relative"),
-            Self::ContainsBackslash => formatter.write_str("asset path must use '/' separators"),
-            Self::ContainsDrivePrefix => {
-                formatter.write_str("asset path must not contain a drive prefix")
-            }
-            Self::ContainsCurrentDirectory => {
-                formatter.write_str("asset path must not contain '.' segments")
-            }
-            Self::ContainsParentDirectory => {
-                formatter.write_str("asset path must not contain '..' segments")
-            }
-            Self::ContainsEmptySegment => {
-                formatter.write_str("asset path must not contain empty segments")
-            }
-            Self::ContainsNull => formatter.write_str("asset path must not contain NUL"),
-        }
-    }
-}
-
-impl Error for AssetPathError {}
 
 /// A complete authored asset selection.
 ///
@@ -615,35 +407,6 @@ impl Display for AssetRef {
             Self::Product(reference) => write!(formatter, "product:{reference}"),
         }
     }
-}
-
-fn validate_asset_path(path: &str) -> Result<(), AssetPathError> {
-    if path.is_empty() {
-        return Err(AssetPathError::Empty);
-    }
-    if path.starts_with('/') {
-        return Err(AssetPathError::Absolute);
-    }
-    if path.contains('\\') {
-        return Err(AssetPathError::ContainsBackslash);
-    }
-    if path.contains(':') {
-        return Err(AssetPathError::ContainsDrivePrefix);
-    }
-    if path.contains('\0') {
-        return Err(AssetPathError::ContainsNull);
-    }
-
-    for segment in path.split('/') {
-        match segment {
-            "" => return Err(AssetPathError::ContainsEmptySegment),
-            "." => return Err(AssetPathError::ContainsCurrentDirectory),
-            ".." => return Err(AssetPathError::ContainsParentDirectory),
-            _ => {}
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

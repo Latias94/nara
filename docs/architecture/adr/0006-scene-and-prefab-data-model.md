@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-01
+**Last Revised**: 2026-11-02
 **Implemented Slices**: Scene/Prefab/Patch document foundation; RGF-U29 explicit persistent
 composition and guarded target-World apply on 2026-07-18
 **Refined By**: ADR 0038: Scene/Prefab Authoring Identity and Provenance; ADR 0043:
@@ -187,34 +187,69 @@ source-free startup/later acquisition belong to their Host and asset owners. Imp
 qualification remain recorded separately; this section alone establishes neither a catalog nor
 a completed source-free product.
 
-## Data Shape
+## Authored Source And Compiled Data
+
+The [CP2 source replacement](../../plans/2026-11-02-prefab-extraction-plan.md) separates authored
+declarations from the flat hierarchy and references consumed by materialization. An authored
+source owns typed desired placements, inline reference intent, instance declarations and contextual
+entity-reference defaults. It does not persist an expanded child list as another layout authority.
+The source and overlay paths share one Scene compiler and one Reflect value language.
+
+A compiled result owns a complete ordered flat closure with resolved document-local or Persistent
+references and complete canonical provenance. It contains neither executable Prefab declarations,
+instance inputs nor unresolved authored targets. Only the owner-created compiled boundary may
+advance to activation. Every direct Native path also rejects residual authored-only references
+after default materialization and before invoking codecs or mutating a World. Pure values, a
+generic codec, or a successful Schema shape check cannot establish that closure.
+
+Unknown source records retain their complete values and declarations without lowering. Source
+preservation grants no interpretation, extraction or Native execution authority. The compiler's
+authoring observation and its Native projection keep that distinction explicit.
+
+Root-bound instances substitute the selected source root into the containing anchor's effective
+entity; forest mounts remain an explicit independent composition form. Source-root declarations
+and containing-anchor declarations keep distinct facets and instance slots even when they
+contribute to one canonical output occurrence. No new World identity axis or universal node base
+type is introduced.
+
+## Target Data Shape
 
 Conceptually:
 
 ```text
-SceneDocument
-  entities: Vec<SceneEntityRecord>
-  roots: Vec<SceneEntityId>
+Authored Scene / Prefab
+  entities: source-owned entity declarations
+  placements: ordered typed desired-placement declarations
+  inputs: declared source reference inputs
 
-SceneEntityRecord
+Source entity declaration
   id: SceneEntityId
-  children: ordered Vec<SceneEntityId>
   components: map ComponentTypeId -> SceneComponentRecord
   prefab: optional PrefabInstance
 
 SceneComponentRecord
   owner: optional PersistentComponentSchemaOwnerId
   version: ComponentSchemaVersion
-  value: ComponentValue
+  value: ComponentValue with inline authored references
+  contextual defaults: version/field-bound source-dependent entity-reference defaults
 
 PrefabInstance
   source: AssetRef
+  topology: explicit forest mount or specified root binding
+  inputs: source-bound reference arguments
   overrides: optional PrefabOverlay
+
+Compiled Scene
+  entities: flat records with resolved component values and ordered local child IDs
+  roots: ordered local IDs
+  provenance: one canonical occurrence per effective entity
+  root correspondence: retained source declaration facets, not extra Runtime identities
 ```
 
-The exact serialized syntax can evolve, but these semantic fields should remain.
+The exact syntax follows the owning implementation. The implementation ledger distinguishes the
+selected replacement from the incumbent roots/children source format while CP2 is in progress.
 
-Current source representation:
+Representation rules:
 
 - `SceneEntityId` is a validated path-like stable ID.
 - `SceneComponentRecord` stores declared owner, `ComponentSchemaVersion` and `ComponentValue`.
@@ -224,8 +259,16 @@ Current source representation:
   are separate from durable property/component/instance claims, additions and desired layout.
 - Nested prefab expansion uses `PrefabSourceResolver`; the first adapter is
   `InMemoryPrefabSourceResolver`.
-- A prefab instance remains as an anchor entity. Materialized locators are private and non-durable;
-  typed source/addition ancestry carries identity. Effective roots precede the anchor's local children.
+- Materialized locators are private and non-durable; typed source/addition ancestry carries
+  identity. Explicit same-parent placements can interleave inherited and local children without
+  moving their declarations. Mount roots-before-local is the initial composition order, not an
+  immutable partition.
+- Inline reference values move with their field/list element and inverse. Persistent payload-slot
+  sidecars are removed by the replacement; temporary Schema traversal plans may still use paths.
+- A contextual reference default remains declared when hidden by an explicit value. Reset/Absent
+  exposes that declaration, and Revert resumes inheritance. Scope-changing extraction rewrites
+  hidden defaults too; it does not freeze an effective value into an ordinary field pin. Schema
+  succession and field-capability/preservation checks include those default declarations.
 
 ## Alternatives Considered
 

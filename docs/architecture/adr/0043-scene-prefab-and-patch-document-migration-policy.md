@@ -8,6 +8,7 @@ and source-owned canonical identity encoding
 **Amended**: 2026-10-27 for composition selection before component interpretation
 **Amended**: 2026-11-01 for explicit reviewed authored-data upgrades and history checkpoints
 **Amended**: 2026-11-02 for headless recovery ownership and fresh model/native provenance
+**Amended**: 2026-11-02 for the selected CP2 source/compiled representation and topology boundary
 **Implemented Slice**: RGF-U1 on 2026-07-12
 **Refines**: ADR 0006, ADR 0011, ADR 0026, ADR 0038
 **Refined By**: ADR 0047: Editor Workspace and Scene Document State; ADR 0049: Untrusted Project
@@ -153,6 +154,36 @@ process-interruption recovery at the actual filesystem guarantee tier, not cross
 or power-loss durability. The
 [authored-upgrade unit](../../plans/2026-11-01-authored-schema-upgrade-plan.md) owns implementation
 and qualification; this amendment alone establishes neither.
+
+### Source Representation And Topology Operations
+
+The [complete CP2 replacement](../../plans/2026-11-02-prefab-extraction-plan.md) changes the
+unreleased source grammar together: source-owned typed placements replace authored roots/children,
+inline reference values replace persistent payload-coordinate sidecars, and contextual
+entity-reference defaults/input arguments remain explicit declarations. Direct records, additions,
+complete Sets, property values and dormant branches all use the same value language. The flat
+compiled hierarchy/reference result is a distinct owner-created representation. Rewrite current
+fixtures and producers together; do not retain a prototype reader or sidecar-to-inline converter.
+
+Ordinary value migration does not silently supply source-context or topology correspondence.
+Schema upgrades include contextual default declarations and every affected inline reference in
+their complete-tree proof, while preserving out-of-scope placements, instance topology, input
+meaning and canonical source predicates. Reset/Absent exposes the proper declared default;
+source movement cannot covertly turn omission into a fixed effective-value pin. Unknown affected
+meaning refuses rather than being reinterpreted in a new source namespace.
+
+Extraction is a separate topology operation under the unchanged actual Schema basis. It proves
+declaration ownership and an injective old/new effective occurrence correspondence separately:
+root contributor facets may share one canonical output entity, but originally distinct effective
+entities cannot merge. Reusing publication kernels does not justify a fabricated Schema successor
+or field-upgrade receipt. Recovery distinguishes modified original members from new observed-absent
+Q/sidecar destinations, with fixed IDs/output bytes and actual per-file outcomes before final Ready.
+
+Stored authored-only references are not Native values. Selected composition resolves them under
+the original declaration scope; every direct Native admission rejects leftovers after defaults and
+before codecs/World mutation. Grammar admission, lossless preservation and a pure canonical key
+remain separate from that proof. Implementation and qualification remain in the CP2 plan; the
+pure identity ownership prerequisite alone does not establish these selected contracts.
 
 ### Current Compatibility Matrix
 

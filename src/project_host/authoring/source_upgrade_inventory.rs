@@ -547,9 +547,9 @@ impl SourceUpgradeInventory {
             let native = native_result?;
             metadata_release?;
             if let Some(metadata) = metadata {
-                native
-                    .key()
-                    .validate_asset_source(&metadata.record)
+                metadata
+                    .record
+                    .validate_source_document_key(native.key())
                     .map_err(|_| SourceUpgradeInventoryError::IdentityConflict)?;
                 if let Some(observed) = native.metadata_source()
                     && (observed.project_path().as_str() != metadata.file.path

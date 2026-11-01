@@ -327,7 +327,7 @@ impl ResolvedPrefabSource {
         if self.key.kind() != crate::SourceDocumentKind::Prefab {
             return Err(SourceDocumentBindingError::DocumentKind);
         }
-        self.key.validate_asset_source(record)?;
+        record.validate_source_document_key(&self.key)?;
         if self.source_asset.is_some_and(|id| id != record.stable_id()) {
             return Err(SourceDocumentBindingError::SourceKeyMismatch);
         }

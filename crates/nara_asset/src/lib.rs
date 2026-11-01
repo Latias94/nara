@@ -33,16 +33,18 @@ pub use database::{
 pub use format::{
     AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
 };
-pub use identity::{
-    AssetId, AssetPath, AssetPathError, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId,
-    StableAssetIdError, StableAssetIdGenerationError,
-};
+pub use identity::{AssetId, AssetPath, AssetPathScope, AssetRef};
 #[cfg(feature = "serde")]
 pub use import::{AssetImportError, AssetImportLimits, AssetImportSource, SourceAssetImporter};
 pub use import_recipe::{
     DigestParseError, ImportDependency, ImportDependencyDigest, ImportDependencyRole,
     ImportLabelError, ImportLabelKind, ImportRecipe, ImportRecipeDigest, ImportSettingsHash,
     ImporterId, ImporterVersion, SourceHash,
+};
+pub use nara_identity::{
+    AssetPathError, AssetSourcePath, SourceDocumentBindingError, SourceDocumentKey,
+    SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
+    StableAssetIdError, StableAssetIdGenerationError,
 };
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;

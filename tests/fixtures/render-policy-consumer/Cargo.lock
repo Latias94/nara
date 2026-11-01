@@ -1260,11 +1260,11 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "blake3",
- "getrandom 0.3.4",
  "nara_app",
  "nara_core",
  "nara_diagnostic",
  "nara_ecs",
+ "nara_identity",
  "serde",
  "serde_json",
  "uuid",
@@ -1349,8 +1349,10 @@ name = "nara_identity"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "getrandom 0.3.4",
  "nara_core",
  "nara_ecs",
+ "serde",
  "thiserror 2.0.21",
  "uuid",
 ]

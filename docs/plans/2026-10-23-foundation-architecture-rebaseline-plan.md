@@ -540,6 +540,12 @@ The [pinned extraction study](../research/2026-11-02-prefab-extraction-and-occur
 identifies instance-root identity and cross-boundary source references as representation gates.
 Settle the expected branch-to-Prefab workflow before freezing a child-only extraction subset;
 reuse neutral publication mechanisms without fabricating a Schema successor for topology changes.
+The [complete CP2 unit](2026-11-02-prefab-extraction-plan.md) now owns representation selection,
+source/compiler replacement, complete correspondence and the independent publication/recovery
+consumer. Its selected direction combines explicit root binding/forest mounting, source-owned
+typed placements, inline reference values and separate flat compiled output. The pure identity
+ownership prerequisite is qualified separately; no extraction qualification follows from that
+prerequisite, the earlier source study or CP1 result.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

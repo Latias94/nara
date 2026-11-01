@@ -46,6 +46,18 @@ records exact test cohorts, corrected failures, independent review and Windows/p
 limits. Its predecessor shards preserve the earlier implementation checkpoints. CP2 and the
 broader foundation units remain open; this does not promote complete R5 or Proposed0120/0121.
 
+The [CP2 extraction unit](../../plans/2026-11-02-prefab-extraction-plan.md) selects explicit root
+binding/forest mounting, source-owned typed placements, inline reference values and separate
+flat compiled output. A mixed local/inherited sibling-order counterexample requires replacing
+the authored hierarchy contract, not just adding a root flag. The
+[pure identity ownership prerequisite](../../knowledge/engineering/verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md)
+is qualified under ADRs0007/0038/0058: Identity owns canonical pure values, Asset compares metadata
+and Scene retains interpretation, with772 owner tests,220 Root controls,15 independent consumers,
+three public association controls, docs and minimal/portable compilation. New reference variants, contextual defaults,
+source graph compilation and complete extraction/recovery remain unimplemented. The generic
+value-tree alternative and record-owned sidecar alternative retain their comparison rationale
+in the plan; no source/Native qualification follows from representation selection.
+
 The first-party processed Host successor is qualified as `44470ed` under the
 [ordered asset-delivery plan](../../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).
 ADRs 0007/0033/0103 now specify explicit source-execution facets and plan-owned Runtime codec

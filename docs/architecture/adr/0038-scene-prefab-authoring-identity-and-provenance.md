@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-11-02
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
@@ -12,6 +12,8 @@ and exact containing-source instance-declaration transactions, plus source-owned
 **Amended**: 2026-10-26 by declarative instance intent and selection before recursive activation
 **Amended**: 2026-10-27 by source-owned declaration observation and exact selected-intent Revert
 **Amended**: 2026-10-29 by complete typed provenance in derived Runtime Scenes
+**Amended**: 2026-11-02 by lower pure source-key representation under ADR0058 and the selected
+CP2 root/placement/inline-reference replacement, with separate implementation evidence
 **Refines**: ADR 0006: Scene and Prefab Data Model
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
 Editor Workspace and Scene Document State; ADR 0058: Stable Runtime Identity and Entity References;
@@ -36,12 +38,22 @@ invent write-back rules.
 
 Scene/prefab authoring identity is document-relative and provenance-aware.
 
+The canonical `SourceDocumentKey` value and its format are shared Identity representations.
+Scene binds those values to the actual admitted source and owns declaration/occurrence meaning;
+Asset checks their compatibility with actual metadata records. Re-exporting the canonical value
+does not give a higher module an independent identity constructor, source registry or resolver.
+Identity remains independent of Asset/App services. The
+[CP2 source-model replacement](../../plans/2026-11-02-prefab-extraction-plan.md) separately owns
+root, placement and inline-reference replacement; value relocation alone does not qualify it.
+
 - `SceneEntityId` identifies an entity inside one authoring document.
 - A scene-local entity is owned by the scene document that contains its record.
 - A prefab source entity is owned by its prefab document.
-- A prefab instance anchor belongs to its containing source. Expanded children retain either
-  inherited source-entity origin or explicit instance-overlay addition origin; visual parentage
-  does not transfer an addition into the base Prefab's source ownership.
+- A prefab instance anchor belongs to its containing source. An explicit forest mount expands
+  source roots below it; an explicit root binding contributes the specified source root to its
+  canonical effective entity without a wrapper. Declaration facets and instance slots stay
+  distinct from effective root aliases. Expanded content retains inherited source-entity or
+  explicit instance-addition origin; visual parentage never transfers declaration ownership.
 - Scene projection exposes private instance-local materialization locators. They are not durable
   source identities; UI, session, semantics, selection and persistence keys must not parse or
   extend their generated encoding.
@@ -83,7 +95,8 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
 - Copying whole source documents creates independent canonical source namespaces and may retain
   their document-local IDs and local references. The source owner remaps every copied instance
   reference, overlay base and occurrence-hop constraint, including nested additions, claims,
-  bindings and structural targets. Reflect interprets declared payload references; the Host
+  inline references, contextual defaults, input arguments and structural targets. Reflect
+  interprets declared payload references; the Host
   admits source aliases, allocates destination identities and owns file/sidecar publication.
   Schema-owner identities remain unchanged. Reference-bearing defaults need explicit copied
   intent or refusal; a hidden old default must not reconnect the copy to its original source.
@@ -102,8 +115,11 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   it compares and retains the complete old declaration in one inverse. Unrelated unavailable
   declarations and direct component records remain protected; a generic field/placement edit
   cannot acquire this repair authority by changing derived projection data.
-- Cross-document references should use `AssetRef` plus document-relative `SceneEntityId` when they
-  become necessary. They must not rely on runtime entity IDs or backend handles.
+- Cross-source entity references use inline typed occurrence targets or declared reference inputs,
+  preserving origin and canonical-base checks at every hop. Reference meaning travels with its
+  value and declaration scope; persistent payload-coordinate sidecars are removed by the CP2
+  replacement. Runtime entity IDs, private materialization locators and backend handles are not
+  source references. A path to an independent source is not an automatic World/activation lookup.
 - Compilation failures retain their actual source declaration when established: the containing
   input or a resolved canonical Prefab, its local anchor, and the nested addition/instance-claim
   path. Declaration-array indices address one immutable snapshot, not durable entity identity.
@@ -126,7 +142,10 @@ Scene/prefab authoring identity is document-relative and provenance-aware.
   surviving projected record whose complete typed ancestry belongs to that anchor, including
   nested sources and overlay additions. The anchor keeps its local ID, raw components and
   placement. Ordinary local children and their independent instance links remain outside the
-  selected projection. Converted roots precede those ordinary children in their existing order.
+  selected projection. For a root-bound instance, localize its merged effective root into that
+  same canonical anchor and rewrite its contributor references/defaults; do not create a second
+  root. Preserve actual mixed sibling order. Forest mounts retain their initial projected order
+  unless explicit placement intent interleaves the children.
 - New local IDs come from the source owner's allocation policy, never expanded locator spelling
   or a terminal inherited ID. A read-only remap retains each original typed provenance beside its
   new ID. Declared local references translate through that complete mapping; actual untouched
@@ -250,8 +269,8 @@ flowchart TD
 - Complete overlay additions retain explicit addition origin independently of source-local
   spelling, including an added anchor with its own nested declaration. Placements are their sole
   hierarchy authority. Bound declarations, targets, bindings, payload/default costs and provenance
-  before copying or compiling. No generated-ID prefix encodes origin. ADR 0101's nested-root
-  prefix and containing-layer child sequences still govern final order; `Parent::Root` means
+  before copying or compiling. No generated-ID prefix encodes origin. ADR 0101's source-owned
+  typed placements govern final order across actual same-parent siblings; `Parent::Root` means
   the declaring overlay's effective roots, not its eventual physical anchor's local children.
 - Apply Changes may remain narrow. Any future prefab-expanded write-back must declare whether it is
   producing an override patch, editing the prefab source, or converting to local scene data.

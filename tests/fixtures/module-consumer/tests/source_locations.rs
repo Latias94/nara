@@ -33,6 +33,28 @@ fn identity(id: &str, path: &str, kind: AssetSourceKind) -> AssetMetaIdentity {
 }
 
 #[test]
+fn canonical_identity_values_flow_through_asset_and_scene_without_conversion() {
+    let stable = nara_identity::StableAssetId::parse_str(FIRST).unwrap();
+    let path = nara_identity::AssetSourcePath::new("Content/Blueprints/actor.ron").unwrap();
+    let record = nara_asset::AssetRecord::new(stable, path.clone(), AssetSourceKind::Prefab);
+    let key = nara_identity::SourceDocumentKey::project_location(
+        "b9b672cb-b732-4316-a85c-bef72f4e7a56".parse().unwrap(),
+        path,
+        nara_identity::SourceDocumentKind::Prefab,
+    );
+    let scene_key: nara_scene::SourceDocumentKey = key;
+    let source = nara_scene::ResolvedPrefabSource::bound(
+        std::sync::Arc::new(nara_scene::PrefabDocument::default()),
+        scene_key.clone(),
+    )
+    .with_source_asset(&record)
+    .unwrap();
+    assert_eq!(source.key(), &scene_key);
+    assert_eq!(record.validate_source_document_key(source.key()), Ok(()));
+    assert_eq!(source.document(), &nara_scene::PrefabDocument::default());
+}
+
+#[test]
 fn same_local_name_resolves_independently_across_document_and_resource_roots() {
     let roots = [
         (scope("Content/Art"), FIRST, AssetSourceKind::Image),

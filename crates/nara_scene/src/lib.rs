@@ -29,7 +29,6 @@ mod runtime_hierarchy;
 mod runtime_scene;
 mod scene_components;
 mod schema_authority;
-mod source;
 mod spawn;
 mod validation;
 
@@ -96,7 +95,11 @@ pub use format::{
     SceneFileBudgetKind, SceneFileEncoding, SceneFileLimits, SceneFilePublicationError,
     SceneFormatError, ScenePatchDocumentCandidate,
 };
-pub use nara_identity::{SceneEntityId, SceneEntityIdError, SceneInstanceId, SpawnedSceneInstance};
+pub use nara_identity::{
+    SceneEntityId, SceneEntityIdError, SceneInstanceId, SourceDocumentBindingError,
+    SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind, SourceDocumentOrigin,
+    SpawnedSceneInstance,
+};
 pub use occurrence::{SceneOccurrenceKey, SceneOccurrenceKeyError, SceneOccurrenceLimits};
 pub use patch::{
     ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
@@ -145,10 +148,6 @@ pub use scene_components::{
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
     SCENE_COMPONENTS_SCHEMA_PROVIDER_ID, SceneComponentsPlugin, Visibility,
     register_scene_components,
-};
-pub use source::{
-    SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKeyError, SourceDocumentKind,
-    SourceDocumentOrigin,
 };
 pub use spawn::{
     PreparedScene, SceneEntityRetirementError, SceneEntitySource, SceneProjection,

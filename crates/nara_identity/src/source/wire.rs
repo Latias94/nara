@@ -1,8 +1,9 @@
-use nara_asset::{AssetSourcePath, StableAssetId};
 use nara_core::SourceUniverseId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin};
+use super::{
+    AssetSourcePath, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin, StableAssetId,
+};
 
 // Text is borrowed for serialization and owned for deserialization. The same private grammar
 // serves both directions without cloning names or paths during serialization.

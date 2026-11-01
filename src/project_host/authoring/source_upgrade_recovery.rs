@@ -853,11 +853,10 @@ fn validate_configurations(
                         .iter()
                         .find(|member| member.path == source_path)
                     {
-                        // Use the native source model's validator. The enclosing Host must still
+                        // Compare metadata with the canonical key. The enclosing Host must still
                         // establish this sidecar's actual location through NativeDocumentSourcePolicy.
-                        member
-                            .key
-                            .validate_asset_source(&record)
+                        record
+                            .validate_source_document_key(&member.key)
                             .map_err(|_| SourceUpgradeRecoveryError::MetadataConflict)?;
                     } else if matches!(
                         record.source_kind(),

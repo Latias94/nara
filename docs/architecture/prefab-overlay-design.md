@@ -932,4 +932,4 @@ object model, fallback policy or currently missing feature set.
 - [ADR 0038](adr/0038-scene-prefab-authoring-identity-and-provenance.md)
 - [ADR 0043](adr/0043-scene-prefab-and-patch-document-migration-policy.md)
 - `crates/nara_scene/src/prefab.rs`, `authoring/property.rs`, `authoring/prepared.rs`, `patch.rs`
-- `crates/nara_scene/src/source.rs`, `provenance.rs`
+- `crates/nara_identity/src/source.rs`, `crates/nara_scene/src/provenance.rs`

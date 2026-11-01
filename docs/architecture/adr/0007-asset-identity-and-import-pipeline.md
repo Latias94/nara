@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-31
+**Last Revised**: 2026-11-02
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
 Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -91,6 +91,13 @@ standalone consumers. `AssetReferenceResolver` borrows the catalogue and that sc
 does not contain a hidden default root or infer resolution from file kind. Metadata becomes a
 record only through an explicit scope binding after its actual local path is checked. Remove the
 unconditional metadata-to-record conversion. None of these lexical values grants file access.
+
+The pure `StableAssetId` and canonical `AssetSourcePath` representations are owned by Identity
+under ADR0058 and exposed by the Asset facade. `AssetPath`, scope interpretation, metadata and
+catalogue association remain Asset responsibilities. In particular, an AssetRecord checks a
+canonical entity-document key against its actual source kind, UUID and location; the key itself
+does not depend on the Asset service or certify that association. Preserve one lexical path
+validator and one identity serialization, without an Asset-to-Identity-to-Asset dependency cycle.
 
 Source-bound runtime aliases and source-change queues use canonical locations. Reference decoding
 resolves an authored alias through the explicit context before reserving the same primary Product

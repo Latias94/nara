@@ -5,6 +5,9 @@ use std::{
 };
 
 use nara_ecs::Resource;
+use nara_identity::{
+    SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
+};
 
 use crate::{AssetPath, AssetPathScope, AssetRef, AssetSourcePath, StableAssetId};
 
@@ -130,6 +133,35 @@ impl AssetRecord {
     #[must_use]
     pub const fn source_kind(&self) -> &AssetSourceKind {
         &self.source_kind
+    }
+
+    /// Checks metadata compatibility with a canonical Scene or Prefab source-document key.
+    ///
+    /// This validates only the identity facts represented by the record. It does not admit a
+    /// source file, inspect metadata, or grant filesystem authority to the key or record owner.
+    pub fn validate_source_document_key(
+        &self,
+        key: &SourceDocumentKey,
+    ) -> Result<(), SourceDocumentBindingError> {
+        let expected = match key.kind() {
+            SourceDocumentKind::Scene => AssetSourceKind::Scene,
+            SourceDocumentKind::Prefab => AssetSourceKind::Prefab,
+        };
+        if self.source_kind() != &expected {
+            return Err(SourceDocumentBindingError::SourceKind);
+        }
+        if self.stable_id().as_uuid().is_nil() {
+            return Err(SourceDocumentBindingError::SourceIdentity);
+        }
+        let matches_key = match key.origin() {
+            SourceDocumentOrigin::StableAsset { stable_id } => *stable_id == self.stable_id(),
+            SourceDocumentOrigin::ProjectLocation { path, .. } => path == self.path(),
+            SourceDocumentOrigin::Named { .. } => true,
+        };
+        if !matches_key {
+            return Err(SourceDocumentBindingError::SourceKeyMismatch);
+        }
+        Ok(())
     }
 
     pub(crate) fn retained_bytes(&self) -> Option<usize> {
@@ -268,7 +300,7 @@ impl ProjectAssetDatabase {
         self.by_stable_id
             .insert(record.stable_id(), record.path().clone());
         self.case_folded_paths
-            .insert(record.path().case_fold_key(), record.path().clone());
+            .insert(record.path().as_str().to_lowercase(), record.path().clone());
         self.by_path.insert(record.path().clone(), record);
         Ok(())
     }
@@ -292,7 +324,7 @@ impl ProjectAssetDatabase {
             });
         }
 
-        let case_key = record.path().case_fold_key();
+        let case_key = record.path().as_str().to_lowercase();
         if let Some(existing_path) = self.case_folded_paths.get(&case_key).cloned()
             && existing_path != *record.path()
         {
@@ -333,7 +365,7 @@ impl ProjectAssetDatabase {
         self.by_path.remove(expected.path());
         self.by_stable_id.remove(&expected.stable_id());
         self.case_folded_paths
-            .remove(&expected.path().case_fold_key());
+            .remove(&expected.path().as_str().to_lowercase());
         true
     }
 
@@ -522,5 +554,98 @@ mod insertion_tests {
         database.insert(accepted.clone()).unwrap();
         assert_eq!(database.record_for_stable_id(second_id), Some(&accepted));
         assert_eq!(database.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod source_document_binding_tests {
+    use super::*;
+
+    fn stable_id() -> StableAssetId {
+        StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
+    }
+
+    fn universe() -> nara_core::SourceUniverseId {
+        "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap()
+    }
+
+    fn record() -> AssetRecord {
+        AssetRecord::new(
+            stable_id(),
+            AssetSourcePath::new("content/templates/leaf.prefab.json").unwrap(),
+            AssetSourceKind::Prefab,
+        )
+    }
+
+    #[test]
+    fn source_document_binding_checks_kind_identity_and_exact_location() {
+        let record = record();
+        let path = record.path().clone();
+
+        assert_eq!(
+            record.validate_source_document_key(&SourceDocumentKey::project_location(
+                universe(),
+                path.clone(),
+                SourceDocumentKind::Prefab,
+            )),
+            Ok(())
+        );
+        assert_eq!(
+            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
+                stable_id(),
+                SourceDocumentKind::Prefab,
+            )),
+            Ok(())
+        );
+        assert_eq!(
+            record.validate_source_document_key(
+                &SourceDocumentKey::named(
+                    universe(),
+                    "generated-prefab",
+                    SourceDocumentKind::Prefab,
+                )
+                .unwrap(),
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            record.validate_source_document_key(&SourceDocumentKey::project_location(
+                universe(),
+                AssetSourcePath::new("content/templates/other.prefab.json").unwrap(),
+                SourceDocumentKind::Prefab,
+            )),
+            Err(SourceDocumentBindingError::SourceKeyMismatch)
+        );
+        assert_eq!(
+            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
+                StableAssetId::parse_str("b73f0f16-09e8-4265-b090-b689b41c197e").unwrap(),
+                SourceDocumentKind::Prefab,
+            )),
+            Err(SourceDocumentBindingError::SourceKeyMismatch)
+        );
+        assert_eq!(
+            record.validate_source_document_key(&SourceDocumentKey::stable_asset(
+                stable_id(),
+                SourceDocumentKind::Scene,
+            )),
+            Err(SourceDocumentBindingError::SourceKind)
+        );
+    }
+
+    #[test]
+    fn source_document_binding_rejects_nil_record_identity() {
+        let record = AssetRecord::new(
+            StableAssetId::from_uuid(uuid::Uuid::nil()),
+            AssetSourcePath::new("content/templates/leaf.prefab.json").unwrap(),
+            AssetSourceKind::Prefab,
+        );
+        let key =
+            SourceDocumentKey::named(universe(), "generated-prefab", SourceDocumentKind::Prefab)
+                .unwrap();
+
+        assert_eq!(
+            record.validate_source_document_key(&key),
+            Err(SourceDocumentBindingError::SourceIdentity)
+        );
     }
 }

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-10-26
+**Last Revised**: 2026-11-02
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -39,6 +39,27 @@ ECS storage primitive.
 `nara_identity` owns the canonical types, the world-owned allocator/index, lookup outcomes, remap
 records, and bounded tombstone evidence. No higher crate may define a competing scene or persistent
 runtime identity type.
+
+### Canonical source identity values
+
+Identity also owns the pure canonical source-key representation: document kind, named/universe,
+project-location and stable-asset origins, validated canonical logical source paths and stable
+source UUIDs. Asset and Scene expose these canonical values through their domain facades; they
+do not maintain independent copies or compatibility wrappers. Lexical construction, identity
+serialization and bounded retained-size measurement grant neither source resolution nor access.
+
+Keep Identity below Asset and App. Asset owns authored aliases, explicit path scopes, metadata,
+catalogues, Product association and source-record compatibility checks. Scene owns actual admitted
+document meaning, Prefab interpretation, declaration scopes and occurrence composition. Moving a
+canonical key into Identity must not move an AssetRecord, resolver, file observation, import,
+source registry or Runtime residency authority with it. Random stable-ID generation is format
+support, not a metadata publication receipt.
+
+This is the first prerequisite of the
+[CP2 replacement](../../plans/2026-11-02-prefab-extraction-plan.md). It does not add an authored
+reference variant, a root-binding rule or another World identity axis by itself. The subsequent
+inline-reference and source/compiled representation changes retain their own implementation and
+qualification requirements.
 
 ### Identity layers
 

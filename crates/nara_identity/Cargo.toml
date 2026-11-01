@@ -7,13 +7,18 @@ license.workspace = true
 
 [dependencies]
 bevy_ecs.workspace = true
+getrandom.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 uuid.workspace = true
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
 [dev-dependencies]
+ron.workspace = true
 serde_json.workspace = true
 
 [features]
