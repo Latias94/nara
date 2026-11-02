@@ -10,7 +10,7 @@ mod editor_action_driver;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::fs;
+use std::{fs, time::Duration};
 
 use nara::{
     ProductRecipe, SchemaContribution,
@@ -34,7 +34,10 @@ use nara::{
         SceneComponentRecord, SceneDocument, SceneEntityRecord, ScenePatchDocument,
         ScenePatchOperation,
     },
-    tooling::{EditorAction, EditorActionOutcome, EditorDocumentMutation},
+    tooling::{
+        EditorAction, EditorActionOutcome, EditorDocumentMutation, EditorPersistenceCommand,
+        EditorPersistenceRequestResult, EditorPersistenceResult,
+    },
 };
 use project_content_fixture::{TestProject, scene_id};
 
@@ -205,7 +208,7 @@ fn assert_domain(report: &DiagnosticReport, code: &str) {
 }
 
 #[test]
-fn strict_check_and_editor_actions_preserve_native_domain_failures_without_payload_text() {
+fn strict_check_reports_native_domain_failures_after_schema_admitted_editor_save() {
     let project = project();
     for (duration, code) in [
         (-1, "demo.cooldown.negative"),
@@ -227,11 +230,17 @@ fn strict_check_and_editor_actions_preserve_native_domain_failures_without_paylo
     .unwrap();
     let frame = editor.current_frame();
     let document = frame.workspace().active_document.unwrap();
-    let base_revision = frame.workspace().scene(document).unwrap().revision;
     for (duration, code) in [
-        (-1, "demo.cooldown.negative"),
-        (-2, "demo.cooldown.disabled"),
+        (-1, Some("demo.cooldown.negative")),
+        (-2, Some("demo.cooldown.disabled")),
+        (0, None),
     ] {
+        let base_revision = editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .revision;
         let result = editor_action_driver::dispatch_one(
             &mut editor,
             EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
@@ -249,8 +258,48 @@ fn strict_check_and_editor_actions_preserve_native_domain_failures_without_paylo
         let EditorActionOutcome::Workspace(report) = result else {
             panic!("expected an Editor workspace result");
         };
-        assert!(!report.applied);
-        assert_domain(&report.diagnostics, code);
+        // The source owner admits the declared I64 value without executing a project codec.
+        // The same saved bytes must still meet the independent strict Native business gate.
+        assert!(report.applied, "{:?}", report.diagnostics);
+        let edited = editor.drive_editor_frame(Duration::ZERO);
+        let revision = edited.workspace().scene(document).unwrap().revision;
+        assert_ne!(revision, base_revision);
+        assert!(edited.workspace().scene(document).unwrap().dirty);
+        assert!(matches!(
+            editor_action_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::Save {
+                    document: Some(document)
+                },
+            ),
+            EditorPersistenceRequestResult::Accepted { .. },
+        ));
+        let saved = editor_action_driver::drive_persistence_until_result(&mut editor);
+        assert!(matches!(
+            saved.persistence().result(),
+            Some(EditorPersistenceResult::Saved { document: target, revision: saved_revision, .. })
+                if target == document && saved_revision == revision
+        ));
+        assert!(!saved.workspace().scene(document).unwrap().dirty);
+        let attempt = saved.persistence().attempt().unwrap();
+        assert!(matches!(
+            editor_action_driver::request_persistence(
+                &mut editor,
+                EditorPersistenceCommand::AcknowledgeResult { attempt },
+            ),
+            EditorPersistenceRequestResult::Acknowledged { .. },
+        ));
+        editor.drive_editor_frame(Duration::ZERO);
+        let checked = check_project(ProjectCheckRequest::new(
+            project.root_capability(),
+            recipe(),
+        ));
+        if let Some(code) = code {
+            let rejected = checked.unwrap_err();
+            assert_domain(rejected.content_error().unwrap().diagnostics(), code);
+        } else {
+            checked.unwrap();
+        }
         assert_eq!(
             editor
                 .current_frame()
@@ -258,7 +307,7 @@ fn strict_check_and_editor_actions_preserve_native_domain_failures_without_paylo
                 .scene(document)
                 .unwrap()
                 .revision,
-            base_revision
+            revision,
         );
     }
 }

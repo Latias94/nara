@@ -12,7 +12,7 @@ use serde_json::Value as JsonValue;
 use toml::Value as TomlValue;
 
 // The exact dev-only workflow facade is validated separately from direct module consumption.
-const EXPECTED_DEPENDENCIES: [&str; 17] = [
+const EXPECTED_DEPENDENCIES: [&str; 24] = [
     "dependencies.nara_reflect",
     "dependencies.nara_scene",
     "dev-dependencies.bevy_ecs",
@@ -24,12 +24,19 @@ const EXPECTED_DEPENDENCIES: [&str; 17] = [
     "dev-dependencies.nara_hierarchy",
     "dev-dependencies.nara_identity",
     "dev-dependencies.nara_image",
+    "dev-dependencies.nara_material",
     "dev-dependencies.nara_render",
     "dev-dependencies.nara_tasks",
+    "dev-dependencies.nara_tilemap",
     "dev-dependencies.nara_tooling",
     "dev-dependencies.nara_transform",
+    "dev-dependencies.nara_ui_kernel",
     "dev-dependencies.ron",
     "dev-dependencies.serde",
+    "dev-dependencies.serde_json",
+    "dev-dependencies.tempfile",
+    "dev-dependencies.toml",
+    "dev-dependencies.uuid",
 ];
 const FS_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara_fs"];
 const PROJECT_WORKFLOW_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara"];
@@ -61,6 +68,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
             TomlValue::String("project-workflow-consumer".to_owned()),
             TomlValue::String("material-consumer".to_owned()),
             TomlValue::String("editor-panel-consumer".to_owned()),
+            TomlValue::String("asset-domain-consumer".to_owned()),
         ])
     );
     assert_eq!(
@@ -73,6 +81,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
             TomlValue::String("project-workflow-consumer".to_owned()),
             TomlValue::String("material-consumer".to_owned()),
             TomlValue::String("editor-panel-consumer".to_owned()),
+            TomlValue::String("asset-domain-consumer".to_owned()),
         ])
     );
 
@@ -165,6 +174,7 @@ fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facad
         "nara-project-workflow-consumer",
         "nara-material-module-consumer",
         "nara-editor-panel-module-consumer",
+        "nara-asset-domain-consumer",
     ] {
         let package = packages
             .iter()
@@ -228,7 +238,7 @@ fn manifest_boundary_rejects_product_and_workspace_shortcuts() {
 }
 
 #[test]
-fn workflow_facade_is_dev_only_and_has_exact_headless_features() {
+fn workflow_facade_is_dev_only_and_has_exact_declared_features() {
     let source = fs::read_to_string(module_consumer_root().join("Cargo.toml")).unwrap();
     let manifest = toml::from_str::<TomlValue>(&source).unwrap();
     assert_manifest_boundary(&manifest).unwrap();
@@ -451,6 +461,7 @@ fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
             TomlValue::Array(vec![
                 TomlValue::String("tooling".to_owned()),
                 TomlValue::String("project-workflow".to_owned()),
+                TomlValue::String("presentation-2d".to_owned()),
             ]),
         ),
     ]);
@@ -483,10 +494,13 @@ fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
             "nara_hierarchy",
             "nara_identity",
             "nara_image",
+            "nara_material",
             "nara_render",
             "nara_tasks",
+            "nara_tilemap",
             "nara_tooling",
             "nara_transform",
+            "nara_ui_kernel",
         ],
     )
 }

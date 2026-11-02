@@ -385,16 +385,24 @@ fn assert_external_manifest_boundaries() {
             "dev-dependencies.nara_hierarchy",
             "dev-dependencies.nara_identity",
             "dev-dependencies.nara_image",
+            "dev-dependencies.nara_material",
             "dev-dependencies.nara_render",
             "dev-dependencies.nara_tasks",
+            "dev-dependencies.nara_tilemap",
             "dev-dependencies.nara_tooling",
             "dev-dependencies.nara_transform",
+            "dev-dependencies.nara_ui_kernel",
             "dev-dependencies.ron",
             "dev-dependencies.serde",
+            "dev-dependencies.serde_json",
+            "dev-dependencies.tempfile",
+            "dev-dependencies.toml",
+            "dev-dependencies.uuid",
         ]),
         "module-consumer must keep its direct-domain library and explicit test-only integration dependencies"
     );
     // The inventory test shares one public component recipe between native and Editor consumers.
+    // TileSet delivery also inspects the stock 2D presentation output.
     let engine = &module["dev-dependencies"]["nara_engine"];
     assert_eq!(
         engine.get("package").and_then(TomlValue::as_str),
@@ -409,6 +417,7 @@ fn assert_external_manifest_boundaries() {
         Some(&vec![
             TomlValue::String("tooling".to_owned()),
             TomlValue::String("project-workflow".to_owned()),
+            TomlValue::String("presentation-2d".to_owned()),
         ])
     );
     assert_no_workspace_dependencies(&module, "module-consumer");
