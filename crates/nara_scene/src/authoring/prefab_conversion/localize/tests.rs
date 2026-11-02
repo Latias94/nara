@@ -1,5 +1,6 @@
 use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
+use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueKind,
@@ -9,10 +10,10 @@ use nara_reflect::{
 use super::*;
 use crate::{
     AuthoringDocumentSource, PrefabAddition, PrefabAuthoringSession, PrefabDocument,
-    PrefabDocumentCandidate, PrefabEntityTarget, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep, PrefabReferenceBinding,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SourceDocumentKey, SourceDocumentKind,
+    PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
+    PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabProjectionStep, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     authoring::prefab_conversion::tests::{
         admit_schema, basis, component, id, instance, original, schema_owner,
     },
@@ -47,15 +48,22 @@ fn source() -> SceneDocument {
         .unwrap();
     let mut overlay = PrefabOverlay::new(key("base"));
     let mut addition = PrefabAddition::new(id("leaf"));
-    addition.components.insert(component(), reference("leaf"));
-    addition.bindings.insert(
-        component(),
-        vec![PrefabReferenceBinding {
-            slot: ComponentFieldPath::from_fields(["target"]),
-            expected: id("leaf"),
-            target: PrefabEntityTarget::source(id("root-a")),
-        }],
-    );
+    let mut link = reference("leaf");
+    link.value = ComponentValue::map([(
+        "target",
+        ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                    expected_base: key("base"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "root-a",
+                ))),
+            },
+        }),
+    )]);
+    addition.components.insert(component(), link);
     overlay.additions.push(addition);
     overlay.placements.push(PrefabPlacement {
         target: PrefabEntityTarget::addition(id("leaf")),
@@ -801,6 +809,16 @@ fn remaining_conversion_allowance_refuses_large_unrelated_root_before_document_c
 fn last_loader_restriction_governs_complete_root_and_classification_copies() {
     let basis = basis();
     let mut document = original();
+    // Exceed the accept-only certificate's depth while remaining valid source data. This
+    // exercises the budgeted publication buffer rather than its allocation-free fast path.
+    let payload = (0..14).fold(
+        ComponentValue::List(
+            (0..4)
+                .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
+                .collect(),
+        ),
+        |value, _| ComponentValue::List(vec![value]),
+    );
     document
         .entities
         .iter_mut()
@@ -809,14 +827,7 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         .components
         .insert(
             nara_reflect::ComponentTypeId::new("test.LargeUnavailable"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::List(
-                    (0..4)
-                        .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
-                        .collect(),
-                ),
-            ),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, payload),
         );
     let session = open_scene(&document, &basis, Default::default());
     let prefab = PrefabAuthoringSession::from_published_authoring_document(
@@ -1027,7 +1038,6 @@ fn classification_reuse_removes_only_selected_overlay_inventory_and_preserves_de
                 intent: PrefabPropertyIntent::Set(crate::patch::asset_ref_value(
                     &AssetRef::path(path).unwrap(),
                 )),
-                bindings: Vec::new(),
             }],
         });
         entity.prefab.as_mut().unwrap().overrides = Some(overlay);

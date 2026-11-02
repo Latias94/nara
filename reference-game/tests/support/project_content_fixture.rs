@@ -299,6 +299,7 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let mut ui = SceneEntityRecord::new(scene_id("reference-ui"));
     ui.prefab = Some(PrefabInstance {
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     SceneDocument::new(
@@ -332,7 +333,6 @@ fn enemy_anchor(
                 claims: vec![PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("translation.x")),
                     intent: PrefabPropertyIntent::Set(ComponentValue::f64(x).unwrap()),
-                    bindings: Vec::new(),
                 }],
             },
             PrefabComponentIntent::Properties {
@@ -342,7 +342,6 @@ fn enemy_anchor(
                 claims: vec![PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("tick")),
                     intent: PrefabPropertyIntent::Set(ComponentValue::U64(spawn_tick)),
-                    bindings: Vec::new(),
                 }],
             },
         ];
@@ -355,6 +354,7 @@ fn enemy_anchor(
     );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides,
     });
     anchor

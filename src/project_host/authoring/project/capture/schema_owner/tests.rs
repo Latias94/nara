@@ -58,6 +58,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let project = independent_project();
     let mut startup = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
     startup.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
     });

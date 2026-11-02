@@ -410,10 +410,10 @@ fn declaration(malformed: bool) -> PrefabInstance {
         target: PrefabEntityTarget::source(id("inherited")),
         component: ComponentTypeId::new(RECOVERED),
         record: value,
-        bindings: Vec::new(),
     });
     PrefabInstance {
         source: AssetRef::path("prefabs/reclassification-base.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -1269,6 +1269,7 @@ fn real_complete_prefab_conversion_history_reclassifies_without_fabricated_footp
     let request_source = AssetRef::path("prefabs/conversion-base.json").unwrap();
     anchor.prefab = Some(PrefabInstance {
         source: request_source.clone(),
+        arguments: None,
         overrides: None,
     });
     let document = SceneDocument::from_ordered_roots([anchor]);

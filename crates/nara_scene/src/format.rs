@@ -145,7 +145,7 @@ impl SceneFileLimits {
         self.patch_operations
     }
 
-    /// Raw overlays, declarations, property claims and reference bindings across all instances.
+    /// Raw overlays, inputs, arguments, property claims and contextual defaults.
     #[must_use]
     pub const fn overlay_declarations(self) -> ItemLimit {
         self.overlay_declarations
@@ -765,6 +765,8 @@ struct SceneDocumentWire {
 #[serde(deny_unknown_fields)]
 struct PrefabDocumentWire {
     #[serde(default)]
+    inputs: BTreeSet<nara_identity::ReferenceInputId>,
+    #[serde(default)]
     roots: OrderedRootsField,
     entities: Vec<SceneEntityRecordWire>,
 }
@@ -858,6 +860,10 @@ trait SceneFilePayload: Clone + Serialize {
     fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
         None
     }
+
+    fn reference_inputs(&self) -> Option<&BTreeSet<nara_identity::ReferenceInputId>> {
+        None
+    }
 }
 
 impl SceneFilePayload for SceneDocument {
@@ -894,7 +900,11 @@ impl SceneFilePayload for PrefabDocument {
 
     fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
         let (roots, entities) = document_wire_parts(wire.roots, wire.entities)?;
-        Ok(Self { roots, entities })
+        Ok(Self {
+            inputs: wire.inputs,
+            roots,
+            entities,
+        })
     }
 
     fn canonicalize_payload(&mut self) {
@@ -906,11 +916,27 @@ impl SceneFilePayload for PrefabDocument {
     }
 
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError> {
-        SceneFileCounts::validate_entities(&self.roots, &self.entities, limits)
+        let mut counts = SceneFileCounts::default();
+        increase(
+            &mut counts.overlay_declarations,
+            self.inputs.len(),
+            limits.overlay_declarations(),
+            SceneFileBudgetKind::OverlayDeclarations,
+        )?;
+        counts.overlay_nodes = self.inputs.len();
+        counts.validate_raw_cost(ComponentValueCost::ZERO, 0, limits)?;
+        for input in &self.inputs {
+            counts.observe_structural_bytes(input.as_str().len(), limits)?;
+        }
+        counts.observe_entities(&self.roots, &self.entities, limits)
     }
 
     fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
         Some((&self.roots, &self.entities))
+    }
+
+    fn reference_inputs(&self) -> Option<&BTreeSet<nara_identity::ReferenceInputId>> {
+        Some(&self.inputs)
     }
 }
 
@@ -1237,6 +1263,7 @@ impl PrefabDocumentCandidate {
             return Err(SceneFilePublicationError::new(diagnostics));
         }
         Ok(PrefabDocument {
+            inputs: self.document.inputs,
             roots: document.roots,
             entities: document.entities,
         })
@@ -1355,7 +1382,13 @@ fn validate_publication_shape<T: SceneFilePayload>(
         .payload()
         .entity_document()
         .is_some_and(|(roots, entities)| {
-            publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+            publication_shape::certifies_entity_document(
+                &envelope,
+                roots,
+                entities,
+                envelope.payload().reference_inputs(),
+                limits.shape(),
+            )
         });
     validate_json_publication_shape(&envelope, limits, certified, None)?;
     validate_ron_publication_shape(&envelope, limits, certified, None)
@@ -1375,7 +1408,13 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     // serializing an envelope does not require a second canonical document copy.
     let envelope = publication_envelope(payload, T::KIND).map_err(Format)?;
     let certified = payload.entity_document().is_some_and(|(roots, entities)| {
-        publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+        publication_shape::certifies_entity_document(
+            &envelope,
+            roots,
+            entities,
+            payload.reference_inputs(),
+            limits.shape(),
+        )
     });
     let mut refusal = None;
     let mut admit = |bytes| {
@@ -1759,10 +1798,21 @@ impl SceneFileCounts {
         entities: &[SceneEntityRecord],
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
-        let mut counts = Self::default();
-        counts.observe_placements(roots.len(), limits)?;
+        Self::default().observe_entities(roots, entities, limits)
+    }
+
+    fn observe_entities(
+        &mut self,
+        roots: &[SceneEntityId],
+        entities: &[SceneEntityRecord],
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
+        self.observe_placements(roots.len(), limits)?;
+        for root in roots {
+            self.observe_structural_bytes(root.as_str().len(), limits)?;
+        }
         for entity in entities {
-            counts.observe_entity(entity, limits)?;
+            self.observe_entity(entity, limits)?;
         }
         validate_placement_depth(roots, entities, limits)?;
         Ok(())
@@ -1788,6 +1838,10 @@ impl SceneFileCounts {
             SceneFileBudgetKind::Entities,
         )?;
         self.observe_placements(entity.children.len(), limits)?;
+        self.observe_structural_bytes(entity.id.as_str().len(), limits)?;
+        for child in &entity.children {
+            self.observe_structural_bytes(child.as_str().len(), limits)?;
+        }
         self.observe_diagnostic_source(limits)?;
         increase(
             &mut self.components,
@@ -2044,7 +2098,21 @@ impl SceneFileCounts {
             5_usize.saturating_add(record.owner().map_or(0, |owner| owner.as_str().len())),
             limits,
         )?;
-        self.observe_component_value(record.value.cost(), limits)
+        increase(
+            &mut self.overlay_declarations,
+            record.contextual_defaults.len(),
+            limits.overlay_declarations(),
+            SceneFileBudgetKind::OverlayDeclarations,
+        )?;
+        self.overlay_nodes = self
+            .overlay_nodes
+            .saturating_add(record.contextual_defaults.len());
+        self.observe_component_value(record.value.cost(), limits)?;
+        for (field, value) in &record.contextual_defaults {
+            self.observe_structural_bytes(field.as_str().len(), limits)?;
+            self.observe_component_value(value.cost(), limits)?;
+        }
+        Ok(())
     }
 
     fn observe_structural_bytes(
@@ -2170,6 +2238,7 @@ mod overlay_storage_tests {
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("missing.prefab.json").unwrap()),
+            arguments: None,
             overrides: Some(overlay),
         }
     }
@@ -2263,7 +2332,6 @@ mod overlay_storage_tests {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("removed-field")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::String("original".to_owned())),
-                bindings: Vec::new(),
             }],
         });
         let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());

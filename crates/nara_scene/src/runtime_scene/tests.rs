@@ -196,6 +196,7 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> ExpandedSceneCandi
     let mut nested = SceneEntityRecord::new(id("nested"));
     nested.prefab = Some(PrefabInstance {
         source: nested_request.clone(),
+        arguments: None,
         overrides: None,
     });
     let outer = PrefabDocument::new(
@@ -215,6 +216,7 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> ExpandedSceneCandi
     let mut addition = PrefabAddition::new(id("added"));
     addition.prefab = Some(PrefabInstance {
         source: nested_request.clone(),
+        arguments: None,
         overrides: None,
     });
     let mut overlay = PrefabOverlay::new(prefab_key("canonical.outer"));
@@ -234,6 +236,7 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> ExpandedSceneCandi
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: outer_request,
+        arguments: None,
         overrides: Some(overlay),
     });
     let report = bindings.expand_prefabs(
@@ -1104,9 +1107,10 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
             )
         },
     )));
-    // Each normalized value is two nodes and fourteen logical bytes; Scene metadata is five
-    // bytes plus the durable owner and component IDs for each record.
-    let exact_bytes = 2 * (14 + 5 + owner_id().as_str().len() + "game.Defaults".len());
+    // Each normalized value is two nodes and fourteen logical bytes. Each record retains
+    // its version/owner metadata and component ID; each one-byte local ID appears in both
+    // its root placement and entity record. Cook preserves these local IDs.
+    let exact_bytes = 2 * (14 + 5 + owner_id().as_str().len() + "game.Defaults".len() + 2);
     for (nodes, bytes, accepted) in [
         (4, exact_bytes, true),
         (3, exact_bytes, false),
@@ -1118,15 +1122,16 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
                 .with_component_value_nodes(ItemLimit::new(nodes).unwrap())
                 .with_component_value_bytes(ByteLimit::new(bytes).unwrap()),
         );
+        let result = RuntimeSceneCandidate::cook(
+            &input,
+            &bindings,
+            database().resolver(&nara_asset::AssetPathScope::ROOT),
+            limits,
+        );
         assert_eq!(
-            RuntimeSceneCandidate::cook(
-                &input,
-                &bindings,
-                database().resolver(&nara_asset::AssetPathScope::ROOT),
-                limits
-            )
-            .is_ok(),
-            accepted
+            result.is_ok(),
+            accepted,
+            "{nodes} nodes, {bytes} bytes: {result:?}"
         );
     }
 }
@@ -1217,15 +1222,18 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
     let mut registry = ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<Counted, _, _>(
-            root_schema(
-                "game.Native",
-                ComponentValueShape::scalar(ComponentValueKind::U64),
-            ),
+            root_schema("game.Native", ComponentValueShape::EntityRef),
             move |_| {
                 decode_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(Counted)
             },
-            |_| Ok(ComponentValue::U64(7)),
+            |_| {
+                Ok(ComponentValue::EntityReference(
+                    EntityReference::SceneLocal {
+                        entity: id("local"),
+                    },
+                ))
+            },
         )
         .unwrap();
     let registry = registry.freeze().unwrap();
@@ -1235,7 +1243,12 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
     )
     .with_component(
         component("game.Native"),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7)),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: id("local"),
+            }),
+        ),
     )]));
     let cooked = RuntimeSceneCandidate::cook(
         &input,
@@ -1250,6 +1263,46 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
         .admit(&containing(), &bindings)
         .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    for reference in [
+        nara_identity::AuthoredEntityReference::source(id("outside")),
+        nara_identity::AuthoredEntityReference::input(
+            nara_identity::ReferenceInputId::new("required-input").unwrap(),
+        ),
+    ] {
+        for metadata in [false, true] {
+            let mut malicious: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let component = &mut malicious["payload"]["entities"][0]["components"]["game.Native"];
+            let authored =
+                serde_json::to_value(ComponentValue::EntityReference(EntityReference::Authored {
+                    reference: reference.clone(),
+                }))
+                .unwrap();
+            if metadata {
+                // Even a hidden declaration is source metadata and cannot enter processed
+                // Scene admission beside an otherwise flat explicit value.
+                component["contextual_defaults"] = serde_json::json!({"value": authored});
+            } else {
+                component["value"] = authored;
+            }
+            let candidate = RuntimeSceneDocumentCandidate::from_json_bytes(
+                &serde_json::to_vec(&malicious).unwrap(),
+                cooked.limits(),
+            )
+            .unwrap();
+            let error = candidate.admit(&containing(), &bindings).unwrap_err();
+            assert!(error.diagnostics().iter().any(|diagnostic| {
+                diagnostic.fields().iter().any(|field| {
+                    field.key().as_str() == "codec-error-kind"
+                        && field.value()
+                            == nara_diagnostic::DiagnosticValueRef::Identifier(
+                                "unresolved-authored-reference",
+                            )
+                })
+            }));
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
 }
 
 #[test]

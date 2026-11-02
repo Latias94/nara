@@ -211,7 +211,7 @@ fn scene_bytes(plan: &RuntimeConfigurationPlan, reference: AssetProductRef, name
         "kind": "runtime_scene", "format_version": 1, "engine_min_version": "0.1.0",
         "generator": {"name": "processed-start-test", "version": "0.0.0"},
         "payload": {
-            "source_key": {"kind": "scene", "origin": {"stable_asset": {"stable_id": reference.source()}}},
+            "source_key": SourceDocumentKey::stable_asset(reference.source(), SourceDocumentKind::Scene),
             "roots": [name],
             "entities": [{"id": name, "children": [], "components": {
                 "nara.sprite.Sprite": SceneComponentRecord::new(schema.version, value)

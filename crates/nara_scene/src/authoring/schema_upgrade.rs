@@ -224,6 +224,7 @@ pub fn admit_authored_upgrade_scene_source(
             source,
             previous,
             AuthoringDocumentKind::Scene,
+            Some(0),
             limits,
             work,
         )?;
@@ -258,6 +259,8 @@ pub fn admit_authored_upgrade_prefab_source(
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<(PrefabAuthoringSession, RetainedAuthoredSchemaUpgradeSource), ScenePatchReport> {
     let (document, limits) = candidate.into_authoring_parts();
+    let inputs = document.inputs;
+    let inputs_bytes = crate::authoring_decode::retained_prefab_inputs_bytes(&inputs);
     let document = SceneDocument {
         roots: document.roots,
         entities: document.entities,
@@ -269,6 +272,7 @@ pub fn admit_authored_upgrade_prefab_source(
             source,
             previous,
             AuthoringDocumentKind::Prefab,
+            inputs_bytes,
             limits,
             work,
         )?;
@@ -277,6 +281,7 @@ pub fn admit_authored_upgrade_prefab_source(
         Ok((
             PrefabAuthoringSession {
                 document: Arc::new(PrefabDocument {
+                    inputs,
                     roots: document.roots,
                     entities: document.entities,
                 }),
@@ -296,6 +301,7 @@ fn admit_unopened_source(
     source: AuthoringDocumentSource,
     previous: &AuthoringSchemaBasis,
     kind: AuthoringDocumentKind,
+    inputs_bytes: Option<usize>,
     limits: SceneFileLimits,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
@@ -305,6 +311,7 @@ fn admit_unopened_source(
         limits,
         |bytes| work.reserve("authored-upgrade-source-scan", bytes),
     )?;
+    let original = original.and_then(|bytes| bytes.checked_add(inputs_bytes?));
     work.reserve("authored-upgrade-unopened-source", original)?;
     let storage = incumbent_storage_bytes(kind);
     work.reserve("authored-upgrade-unopened-storage", storage)?;

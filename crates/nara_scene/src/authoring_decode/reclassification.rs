@@ -349,7 +349,12 @@ pub(super) fn unavailable_copy_bytes(
         .checked_add(retention::placement_dynamic_bytes(placement)?)?
         .checked_add(retention::placement_dynamic_bytes(anchor_placement)?)?
         .checked_add(provenance_string_bytes(component.as_str())?)?
-        .checked_add(retention::value_bytes_impl(&record.value, limits, scratch)?)
+        .checked_add(retention::value_bytes_impl(&record.value, limits, scratch)?)?
+        .checked_add(retention::contextual_defaults_bytes(
+            &record.contextual_defaults,
+            limits,
+            scratch,
+        )?)
 }
 
 pub(super) fn asset_references(
@@ -391,25 +396,17 @@ pub(super) fn asset_references(
 
 pub(super) fn effective_value<'value>(
     schema: &ComponentSchema,
-    value: &'value ComponentValue,
+    record: &'value SceneComponentRecord,
     limits: SceneFileLimits,
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<std::borrow::Cow<'value, ComponentValue>, AuthoringDocumentPublicationError> {
-    nara_reflect::__private::effective_component_value_with_admission(
-        schema,
-        value,
-        limits.component_materialization_limits(),
-        |nodes, bytes, allocated| {
-            reference_charge(
-                admission,
-                "classification-defaults",
-                nodes,
-                bytes,
-                allocated,
-            )
-        },
-    )
-    .map_err(|error| match error {
+    // Hidden declarations remain charged and validated even when no default is selected.
+    // The shared planner admits each selected contextual or canonical default before copying.
+    charge_measured(admission, "classification-contextual-defaults", |scratch| {
+        retention::contextual_defaults_bytes(&record.contextual_defaults, limits, scratch)
+    })?;
+    complete_value::validate_contextual_record(schema, record, limits)?;
+    selected_effective_value(schema, record, limits, admission).map_err(|error| match error {
         nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
         nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
             rejection(with_codec_error(
@@ -428,15 +425,42 @@ pub(super) fn effective_value<'value>(
     })
 }
 
+/// The caller admits contextual declarations and selects strict or preserving interpretation.
+pub(super) fn selected_effective_value<'value>(
+    schema: &ComponentSchema,
+    record: &'value SceneComponentRecord,
+    limits: SceneFileLimits,
+    admission: &mut Option<&mut ClassificationCallback<'_>>,
+) -> Result<
+    std::borrow::Cow<'value, ComponentValue>,
+    nara_reflect::__private::EffectiveValueAdmissionError<AuthoringDocumentPublicationError>,
+> {
+    nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
+        schema,
+        &record.value,
+        &record.contextual_defaults,
+        limits.component_materialization_limits(),
+        |nodes, bytes, allocated| {
+            reference_charge(
+                admission,
+                "classification-defaults",
+                nodes,
+                bytes,
+                allocated,
+            )
+        },
+    )
+}
+
 pub(super) fn complete_value<'value>(
     schema: &ComponentSchema,
     owner: &PersistentComponentSchemaOwnerId,
     component: &ComponentTypeId,
-    value: &'value ComponentValue,
+    record: &'value SceneComponentRecord,
     limits: SceneFileLimits,
     admission: &mut Option<&mut ClassificationCallback<'_>>,
 ) -> Result<std::borrow::Cow<'value, ComponentValue>, AuthoringDocumentPublicationError> {
-    let effective = effective_value(schema, value, limits, admission)?;
+    let effective = effective_value(schema, record, limits, admission)?;
     nara_reflect::__private::validate_component_value_with_admission(
         schema,
         &effective,
@@ -531,6 +555,53 @@ pub(super) fn validate_local_references(
     }).map_err(|_| invalid())
 }
 
+pub(super) fn validate_reference_grammar(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    limits: nara_reflect::EntityReferenceTraversalLimits,
+    admission: &mut Option<&mut ClassificationCallback<'_>>,
+) -> Result<(), AuthoringDocumentPublicationError> {
+    check_reference_grammar(schema, value, limits, admission).map_err(|error| match error {
+        nara_reflect::__private::EntityReferencePlanError::Admission(report) => report,
+        nara_reflect::__private::EntityReferencePlanError::Reference(_) => {
+            rejection(with_public_locator(
+                diagnostic_error(
+                    "scene.authoring-reference-grammar-invalid",
+                    "Known source value does not satisfy its declared reference grammar",
+                ),
+                "component-id",
+                schema.id().as_str(),
+            ))
+        }
+    })
+}
+
+pub(super) fn check_reference_grammar(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    limits: nara_reflect::EntityReferenceTraversalLimits,
+    admission: &mut Option<&mut ClassificationCallback<'_>>,
+) -> Result<
+    (),
+    nara_reflect::__private::EntityReferencePlanError<(), AuthoringDocumentPublicationError>,
+> {
+    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), _>(
+        schema,
+        value,
+        limits,
+        |nodes, bytes, allocated| {
+            reference_charge(
+                admission,
+                "classification-reference-grammar",
+                nodes,
+                bytes,
+                allocated,
+            )
+        },
+    )
+    .map(|_| ())
+}
+
 pub(super) fn validate_prefab_shape(
     document: &PrefabDocument,
     limits: SceneFileLimits,
@@ -589,10 +660,16 @@ pub(super) fn admit_patch_copy(
 }
 
 pub(super) fn placement_index_bytes(document: &SceneDocument) -> Option<usize> {
+    placement_parts_index_bytes(&document.roots, &document.entities)
+}
+
+fn placement_parts_index_bytes(
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
+) -> Option<usize> {
     let mut bytes = size_of::<BTreeMap<SceneEntityId, crate::ScenePlacement>>();
-    for (parent, siblings) in std::iter::once((None, document.roots.as_slice())).chain(
-        document
-            .entities
+    for (parent, siblings) in std::iter::once((None, roots)).chain(
+        entities
             .iter()
             .map(|entity| (Some(&entity.id), entity.children.as_slice())),
     ) {
@@ -619,12 +696,15 @@ pub(super) fn placement_index_bytes(document: &SceneDocument) -> Option<usize> {
     Some(bytes)
 }
 
-pub(super) fn structure_bytes(document: &SceneDocument) -> Option<usize> {
+pub(super) fn structure_parts_bytes(
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
+) -> Option<usize> {
     // Match validate_scene_placement's actual collections: owned IDs, owner and parent maps,
     // completed IDs, per-chain positions/path/current, and each parent's local-child set.
     // Charge cumulative chain storage (each valid source ID enters one unfinished chain).
-    let mut bytes = placement_index_bytes(document)?;
-    for entity in &document.entities {
+    let mut bytes = placement_parts_index_bytes(roots, entities)?;
+    for entity in entities {
         let id = provenance_string_bytes(entity.id.as_str())?;
         bytes = bytes
             // Classification's borrowed namespace.
@@ -661,13 +741,22 @@ pub(super) fn structure_bytes(document: &SceneDocument) -> Option<usize> {
     Some(bytes)
 }
 
+#[cfg(test)]
 pub(super) fn overlay_copies_bytes(
     document: &SceneDocument,
     limits: SceneFileLimits,
     scratch: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
 ) -> Option<usize> {
+    overlay_parts_copies_bytes(&document.entities, limits, scratch)
+}
+
+pub(super) fn overlay_parts_copies_bytes(
+    entities: &[SceneEntityRecord],
+    limits: SceneFileLimits,
+    scratch: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
+) -> Option<usize> {
     let mut bytes = 0usize;
-    for entity in &document.entities {
+    for entity in entities {
         if let Some(instance) = &entity.prefab {
             let cost = match scratch.as_deref_mut() {
                 Some(admit) => crate::prefab::prefab_instance_cost_with_admission(
@@ -823,13 +912,13 @@ mod measurement_tests {
         let mut anchor = SceneEntityRecord::new(entity);
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/measurement.prefab.json").unwrap(),
+            arguments: None,
             overrides: None,
         });
         let document = SceneDocument::from_ordered_roots([anchor]);
         let property = PrefabPropertyClaim {
             path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("value")),
             intent: PrefabPropertyIntent::Set(ComponentValue::List(vec![ComponentValue::Null])),
-            bindings: Vec::new(),
         };
         for measurement in 0..3 {
             let mut stages = Vec::new();

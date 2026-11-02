@@ -36,7 +36,7 @@ fn at_path(report: &PrefabExpansionReport, steps: &[PrefabProjectionStep]) -> Sc
 }
 
 #[test]
-fn surviving_binding_checks_the_actual_nested_canonical_source_and_terminal() {
+fn surviving_inline_reference_checks_the_actual_nested_canonical_source_and_terminal() {
     let registry = registry(true);
     let mut nested = SceneEntityRecord::new(id("nested"));
     nested.prefab = Some(instance("leaf", None));
@@ -68,13 +68,18 @@ fn surviving_binding_checks_the_actual_nested_canonical_source_and_terminal() {
                 key(actual_key),
                 PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("socket"))]),
             );
-        let mut reference = binding(ComponentFieldPath::empty());
-        reference.target = PrefabEntityTarget {
-            through: vec![PrefabInstanceHop {
-                anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
-                expected_base: key("leaf"),
-            }],
-            entity: PrefabEntityOrigin::SourceEntity(id(terminal)),
+        let reference = AuthoredEntityReference {
+            through: vec![
+                PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+                    expected_base: key("base"),
+                },
+                PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                    expected_base: key("leaf"),
+                },
+            ],
+            target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(terminal))),
         };
         let mut overlay = PrefabOverlay::new(key("base"));
         overlay.components.push(PrefabComponentIntent::Properties {
@@ -83,8 +88,7 @@ fn surviving_binding_checks_the_actual_nested_canonical_source_and_terminal() {
             version: ComponentSchemaVersion::ONE,
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-                intent: PrefabPropertyIntent::Set(local(&id("socket"))),
-                bindings: vec![reference],
+                intent: PrefabPropertyIntent::Set(authored(reference)),
             }],
         });
         let report = expand(&registry, &scene(overlay), &sources, Default::default());
@@ -101,13 +105,16 @@ fn surviving_binding_checks_the_actual_nested_canonical_source_and_terminal() {
                 nested_socket,
                 at_path(&report, &[source_step("base", "socket")])
             );
-            assert_eq!(stored(&report, "host"), &record(payload(&nested_socket)));
+            assert_eq!(
+                stored(&report, "host"),
+                &effective_record(payload(&nested_socket))
+            );
         }
     }
 }
 
 #[test]
-fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_origins() {
+fn keyed_container_reorder_preserves_literal_map_keys_and_untouched_leaf_origins() {
     #[derive(nara_ecs::Component)]
     struct MixedLinks(ComponentValue);
 
@@ -192,7 +199,7 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
     let base = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(id("host")).with_component(
             component.clone(),
-            record(ComponentValue::map([(
+            effective_record(ComponentValue::map([(
                 "wire_links",
                 ComponentValue::List(vec![first.clone(), second.clone()]),
             )])),
@@ -200,11 +207,28 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
         SceneEntityRecord::new(id("socket")),
     ]);
 
-    for (reordered, binding_index) in [(false, 0), (true, 1), (true, 0)] {
+    for reordered in [false, true] {
+        let mut replacement_first = first.clone();
+        for name in ["name.with.dot", "untouched"] {
+            replacement_first
+                .set_path(
+                    &ComponentFieldPath::from_fields(["wire_others", name]),
+                    authored(AuthoredEntityReference {
+                        through: vec![PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                            expected_base: key("base"),
+                        }],
+                        target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(
+                            id("socket"),
+                        )),
+                    }),
+                )
+                .unwrap();
+        }
         let rows = if reordered {
-            vec![second.clone(), first.clone()]
+            vec![second.clone(), replacement_first]
         } else {
-            vec![first.clone(), second.clone()]
+            vec![replacement_first, second.clone()]
         };
         let mut inner = PrefabOverlay::new(key("base"));
         inner.components.push(PrefabComponentIntent::Properties {
@@ -214,16 +238,6 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("links")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::List(rows)),
-                bindings: ["name.with.dot", "untouched"]
-                    .into_iter()
-                    .map(|name| {
-                        binding(ComponentFieldPath::new([
-                            nara_reflect::ComponentFieldPathSegment::index(binding_index),
-                            nara_reflect::ComponentFieldPathSegment::field("wire_others"),
-                            nara_reflect::ComponentFieldPathSegment::field(name),
-                        ]))
-                    })
-                    .collect(),
             }],
         });
         let mut nested = SceneEntityRecord::new(id("nested"));
@@ -237,8 +251,6 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
             );
         let mut outer = PrefabOverlay::new(key("outer"));
         add(&mut outer, PrefabAddition::new(id("socket")));
-        let mut reference = binding(ComponentFieldPath::empty());
-        reference.target = PrefabEntityTarget::addition(id("socket"));
         outer.components.push(PrefabComponentIntent::Properties {
             target: PrefabEntityTarget {
                 through: vec![PrefabInstanceHop {
@@ -258,8 +270,15 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
                     ComponentPropertyStep::Member(ComponentFieldId::new("others")),
                     ComponentPropertyStep::MapEntry("name.with.dot".into()),
                 ]),
-                intent: PrefabPropertyIntent::Set(local(&id("socket"))),
-                bindings: vec![reference],
+                intent: PrefabPropertyIntent::Set(authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+                        expected_base: key("outer"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::InstanceAddition(
+                        id("socket"),
+                    )),
+                })),
             }],
         });
         let mut anchor = SceneEntityRecord::new(id("instance"));
@@ -267,13 +286,7 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
         let document = SceneDocument::from_ordered_roots([anchor]);
         let report = expand(&registry, &document, &sources, Default::default());
 
-        if reordered && binding_index == 0 {
-            rejected(&report, "scene.prefab-compilation-failed");
-            assert_eq!(
-                report.failure.as_ref().unwrap().reason(),
-                &PrefabExpansionFailureKind::Reference,
-            );
-        } else {
+        {
             let inherited = at_path(
                 &report,
                 &[
@@ -305,7 +318,7 @@ fn keyed_container_reorder_replans_literal_slots_and_preserves_untouched_leaf_or
             let stored = &entity(&report, "host").components[&component];
             assert_eq!(
                 stored,
-                &record(ComponentValue::map([(
+                &effective_record(ComponentValue::map([(
                     "wire_links",
                     ComponentValue::List(expected_rows),
                 )])),

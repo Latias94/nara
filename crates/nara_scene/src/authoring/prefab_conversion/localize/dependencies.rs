@@ -323,6 +323,7 @@ mod tests {
         let mut record = SceneEntityRecord::new(anchor.clone());
         record.prefab = Some(PrefabInstance {
             source: request("base"),
+            arguments: None,
             overrides: None,
         });
         let scene = SceneDocument::new([anchor.clone()], [record]);

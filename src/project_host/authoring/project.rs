@@ -2008,7 +2008,11 @@ impl AuthoringDocumentMetrics for SceneDocument {
 
 impl AuthoringDocumentMetrics for PrefabDocument {
     fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        document_retained_bytes(size_of::<Self>(), &self.roots, &self.entities)
+        checked_sum([
+            document_retained_bytes(size_of::<Self>(), &self.roots, &self.entities)?,
+            crate::scene_retention::reference_inputs_retained_bytes(&self.inputs)
+                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+        ])
     }
 }
 
@@ -2057,6 +2061,10 @@ fn entity_retained_bytes(
                 record.owner().map_or(0, |owner| owner.as_str().len()),
                 cost.logical_bytes(),
                 checked_product(cost.nodes(), VALUE_NODE_RETAINED_BYTES)?,
+                crate::scene_retention::contextual_defaults_retained_bytes(
+                    &record.contextual_defaults,
+                )
+                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
             ])?,
         )?;
     }
@@ -2069,18 +2077,8 @@ fn entity_retained_bytes(
 fn prefab_instance_retained_bytes(
     prefab: &PrefabInstance,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    checked_sum([
-        asset_ref_retained_bytes(&prefab.source)?,
-        if matches!(&prefab.source, AssetRef::Path(_)) {
-            crate::scene_retention::STRING_ALLOCATION_OVERHEAD
-        } else {
-            0
-        },
-        prefab.overrides.as_ref().map_or(Ok(0), |overlay| {
-            crate::scene_retention::overlay_retained_bytes(overlay)
-                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
-        })?,
-    ])
+    crate::scene_retention::prefab_instance_retained_bytes(prefab)
+        .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
 }
 
 fn manifest_overlay_declarations_retained_bytes(

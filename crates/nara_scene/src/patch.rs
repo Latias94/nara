@@ -254,6 +254,9 @@ impl ScenePatchDocument {
             });
         }
 
+        if bounded_prefab_source_cost(document, limits).is_none() {
+            return Err(source_cost_rejection());
+        }
         let mut validation_work = prefab_validation_work(document);
         if let Some(diagnostic) = validation_work_budget_diagnostic(validation_work, limits, None) {
             let mut diagnostics = DiagnosticReport::default();
@@ -446,6 +449,9 @@ impl ScenePatchDocument {
             }));
         }
 
+        if bounded_scene_entities_source_cost(&document.entities, limits).is_none() {
+            return Err(Box::new(source_cost_rejection()));
+        }
         let source_work = scene_validation_work(document);
         if let Some(diagnostic) = validation_work_budget_diagnostic(source_work, limits, None) {
             let mut diagnostics = DiagnosticReport::default();
@@ -690,12 +696,14 @@ pub(crate) fn authoring_entity_placements<'a>(
 }
 
 enum ValueCostNode<'a> {
+    Prefab(&'a PrefabDocument, usize),
     Entity(&'a SceneEntityRecord, usize),
     Instance(&'a PrefabInstance, usize),
     Entities(std::slice::Iter<'a, SceneEntityRecord>, usize),
     Patch(&'a ScenePatchDocument, usize),
     Operations(std::slice::Iter<'a, ScenePatchOperation>, usize),
     Value(&'a ComponentValue, usize),
+    Record(&'a SceneComponentRecord, usize),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -739,6 +747,35 @@ pub(crate) fn bounded_scene_entities_source_cost(
         Some(limits),
         None,
     )
+}
+
+/// Admits nominal Prefab storage, including its independent declared inputs and ordered roots.
+pub(crate) fn bounded_prefab_source_cost(
+    document: &PrefabDocument,
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    tree_cost(ValueCostNode::Prefab(document, 1), Some(limits), None)
+}
+
+pub(crate) fn bounded_prefab_source_cost_with_admission<E>(
+    document: &PrefabDocument,
+    limits: ScenePatchApplyLimits,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<ScenePatchCost>, E> {
+    admitted_tree_cost(ValueCostNode::Prefab(document, 1), limits, admit)
+}
+
+fn source_cost_rejection() -> ScenePatchReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic_error(
+        "scene.patch-validation-work-budget-exceeded",
+        "Source declarations exceed the replay data or depth budget",
+    ));
+    ScenePatchReport {
+        applied: false,
+        inverse: None,
+        diagnostics,
+    }
 }
 
 /// Reuses the raw source walker, admitting every scratch growth before allocation.
@@ -809,6 +846,31 @@ fn tree_cost(
     let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
+            ValueCostNode::Prefab(document, depth) => {
+                admit_data_depth(depth, limits)?;
+                cost.operation_count = cost
+                    .operation_count
+                    .saturating_add(1)
+                    .saturating_add(document.roots.len())
+                    .saturating_add(document.inputs.len());
+                if limits
+                    .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
+                {
+                    return None;
+                }
+                for root in &document.roots {
+                    cost.structural_logical_bytes = cost
+                        .structural_logical_bytes
+                        .saturating_add(root.as_str().len());
+                }
+                for input in &document.inputs {
+                    cost.structural_logical_bytes = cost
+                        .structural_logical_bytes
+                        .saturating_add(input.as_str().len());
+                }
+                reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+                pending.push(ValueCostNode::Entities(document.entities.iter(), depth));
+            }
             ValueCostNode::Entity(entity, depth) => {
                 admit_data_depth(depth, limits)?;
                 cost.operation_count = cost
@@ -831,16 +893,7 @@ fn tree_cost(
                         bytes.saturating_add(component.as_str().len())
                     }));
                 for component in entity.components.values() {
-                    cost.structural_logical_bytes = cost
-                        .structural_logical_bytes
-                        .saturating_add(component.owner().map_or(0, |owner| owner.as_str().len()));
-                    add_patch_value_cost(
-                        &mut cost,
-                        &component.value,
-                        depth + 1,
-                        limits,
-                        &mut admission,
-                    )?;
+                    add_patch_record_cost(&mut cost, component, depth + 1, limits, &mut admission)?;
                 }
                 if let Some(prefab) = &entity.prefab {
                     reserve_cost_scratch(&mut pending, 1, &mut admission)?;
@@ -867,7 +920,8 @@ fn tree_cost(
                     allowance.value_bytes = limits
                         .validation_value_bytes()
                         .get()
-                        .checked_sub(cost.value_cost.logical_bytes())?;
+                        .checked_sub(cost.logical_bytes())?;
+                    allowance.logical_bytes = allowance.value_bytes;
                 }
                 let instance_cost = if let Some(admit) = admission.as_deref_mut() {
                     crate::prefab::prefab_instance_cost_with_admission(instance, allowance, admit)
@@ -935,11 +989,7 @@ fn tree_cost(
                         } => {
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
-                            cost.structural_logical_bytes =
-                                cost.structural_logical_bytes.saturating_add(
-                                    value.owner().map_or(0, |owner| owner.as_str().len()),
-                                );
-                            pending.push(ValueCostNode::Value(&value.value, depth + 1));
+                            pending.push(ValueCostNode::Record(value, depth + 1));
                         }
                         ScenePatchOperation::RemoveComponent { entity, component } => {
                             add_scene_entity_id_cost(&mut cost, entity);
@@ -1018,9 +1068,45 @@ fn tree_cost(
             ValueCostNode::Value(value, depth) => {
                 add_patch_value_cost(&mut cost, value, depth, limits, &mut admission)?;
             }
+            ValueCostNode::Record(record, depth) => {
+                add_patch_record_cost(&mut cost, record, depth, limits, &mut admission)?;
+            }
+        }
+        if limits.is_some_and(|limits| {
+            cost.operation_count > limits.validation_work().get()
+                || cost.value_cost.nodes() > limits.validation_value_nodes().get()
+                || cost.logical_bytes() > limits.validation_value_bytes().get()
+        }) {
+            return None;
         }
     }
     Some(cost)
+}
+
+fn add_patch_record_cost(
+    cost: &mut ScenePatchCost,
+    record: &SceneComponentRecord,
+    depth: usize,
+    limits: Option<ScenePatchApplyLimits>,
+    admission: &mut Option<&mut CostScratchAdmission<'_>>,
+) -> Option<()> {
+    cost.structural_logical_bytes = cost
+        .structural_logical_bytes
+        .saturating_add(record.owner().map_or(0, |owner| owner.as_str().len()));
+    cost.operation_count = cost
+        .operation_count
+        .saturating_add(record.contextual_defaults.len());
+    if limits.is_some_and(|limits| cost.operation_count > limits.validation_work().get()) {
+        return None;
+    }
+    add_patch_value_cost(cost, &record.value, depth, limits, admission)?;
+    for (field, value) in &record.contextual_defaults {
+        cost.structural_logical_bytes = cost
+            .structural_logical_bytes
+            .saturating_add(field.as_str().len());
+        add_patch_value_cost(cost, value, depth + 1, limits, admission)?;
+    }
+    Some(())
 }
 
 fn add_patch_value_cost(
@@ -1040,7 +1126,7 @@ fn add_patch_value_cost(
                 limits
                     .validation_value_bytes()
                     .get()
-                    .saturating_sub(cost.value_cost.logical_bytes()),
+                    .saturating_sub(cost.logical_bytes()),
                 |bytes| {
                     if admission.as_deref_mut().is_some_and(|admit| admit(bytes)) {
                         Ok(())
@@ -1058,7 +1144,7 @@ fn add_patch_value_cost(
             limits
                 .validation_value_bytes()
                 .get()
-                .saturating_sub(cost.value_cost.logical_bytes()),
+                .saturating_sub(cost.logical_bytes()),
         )?,
         None => value.cost(),
     };
@@ -1119,6 +1205,7 @@ mod bounded_cost_tests {
     fn deep_declaration(depth: usize, through_entities: bool) -> PrefabInstance {
         let mut declaration = PrefabInstance {
             source: AssetRef::path("p").unwrap(),
+            arguments: None,
             overrides: None,
         };
         for _ in 0..depth {
@@ -1141,6 +1228,7 @@ mod bounded_cost_tests {
             }
             declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
+                arguments: None,
                 overrides: Some(overlay),
             };
         }
@@ -1200,6 +1288,7 @@ mod bounded_cost_tests {
             ];
             let declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
+                arguments: None,
                 overrides: Some(overlay),
             };
             assert!(
@@ -1303,24 +1392,24 @@ mod bounded_cost_tests {
         entity.prefab = Some(deep_declaration(1, true));
         let entities = [entity];
         let limits = ScenePatchApplyLimits::default()
-            .with_validation_work(ItemLimit::new(8).unwrap())
+            .with_validation_work(ItemLimit::new(9).unwrap())
             .with_validation_value_nodes(ItemLimit::new(2).unwrap())
-            .with_validation_value_bytes(ByteLimit::new(4).unwrap());
+            .with_validation_value_bytes(ByteLimit::new(77).unwrap());
         let cost = bounded_scene_entities_source_cost(&entities, limits).unwrap();
-        assert_eq!(cost.operation_count(), 8);
+        assert_eq!(cost.operation_count(), 9);
         assert_eq!(cost.value_cost().nodes(), 2);
         assert_eq!(cost.value_cost().logical_bytes(), 4);
-        // Entity/component IDs (2), payload (4), canonical base (19), addition ID (1),
+        // Entity/component IDs (2), payload (4), canonical base (38), addition ID (1),
         // placement target/tags (4), and two AssetRef wire payloads (14 each).
-        assert_eq!(cost.logical_bytes(), 2 + 4 + 19 + 1 + 4 + 2 * 14);
+        assert_eq!(cost.logical_bytes(), 2 + 4 + 38 + 1 + 4 + 2 * 14);
         assert_eq!(
             cost.value_cost(),
             scene_entities_source_value_cost(&entities)
         );
         for insufficient in [
-            limits.with_validation_work(ItemLimit::new(7).unwrap()),
+            limits.with_validation_work(ItemLimit::new(8).unwrap()),
             limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
-            limits.with_validation_value_bytes(ByteLimit::new(3).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(76).unwrap()),
         ] {
             assert!(bounded_scene_entities_source_cost(&entities, insufficient).is_none());
         }
@@ -1567,11 +1656,11 @@ mod bounded_cost_tests {
                         target: PrefabEntityTarget::source(id.clone()),
                         component: component.clone(),
                         record: value,
-                        bindings: Vec::new(),
                     });
                 }
                 PrefabInstance {
                     source: AssetRef::path("p").unwrap(),
+                    arguments: None,
                     overrides: Some(overlay),
                 }
             };
@@ -1593,15 +1682,15 @@ mod bounded_cost_tests {
                 );
                 assert_eq!(
                     claimed.logical_bytes(),
-                    // Both forms retain the 14-byte source claim and 19-byte base claim.
+                    // Both forms retain the 14-byte source claim and 38-byte base claim.
                     // Added entity/placement uses one more structural byte than component Set.
-                    1 + snapshots * if whole_entity { 54 } else { 53 },
+                    1 + snapshots * if whole_entity { 73 } else { 72 },
                 );
                 assert_eq!(claimed.value_cost().nodes(), snapshots);
                 assert_eq!(claimed.value_cost().logical_bytes(), 0);
                 assert_eq!(
                     claimed.operation_count(),
-                    1 + snapshots * if whole_entity { 7 } else { 6 },
+                    1 + snapshots * if whole_entity { 8 } else { 7 },
                 );
                 let limits = ScenePatchApplyLimits::default()
                     .with_validation_work(ItemLimit::new(claimed.operation_count()).unwrap())
@@ -1643,7 +1732,7 @@ mod bounded_cost_tests {
         let limits = ScenePatchApplyLimits::default()
             .with_validation_work(ItemLimit::new(5).unwrap())
             .with_validation_value_nodes(ItemLimit::new(2).unwrap())
-            .with_validation_value_bytes(ByteLimit::new(4).unwrap());
+            .with_validation_value_bytes(ByteLimit::new(16).unwrap());
         let cost = bounded_scene_patch_cost(&patch, limits).unwrap();
         assert_eq!(cost.operation_count(), 5);
         assert_eq!(cost.value_cost().nodes(), 2);
@@ -1653,7 +1742,7 @@ mod bounded_cost_tests {
         for insufficient in [
             limits.with_validation_work(ItemLimit::new(4).unwrap()),
             limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
-            limits.with_validation_value_bytes(ByteLimit::new(3).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(15).unwrap()),
         ] {
             assert!(bounded_scene_patch_cost(&patch, insufficient).is_none());
         }

@@ -75,6 +75,7 @@ fn linked(entity: &str, source: &str) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(entity));
     record.prefab = Some(PrefabInstance {
         source: AssetRef::path(source).unwrap(),
+        arguments: None,
         overrides: None,
     });
     record

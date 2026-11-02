@@ -1238,6 +1238,10 @@ impl WorldIdentityDomain {
         EntityLookup::Missing
     }
 
+    /// Resolves native references against this world and an optional scene instance.
+    ///
+    /// Authored references require Scene's lexical source interpretation and always return
+    /// [`EntityLookup::ContextRequired`] in a correctly bound world, even with a scene instance.
     #[must_use]
     pub fn resolve_entity_reference(
         &self,
@@ -1249,6 +1253,7 @@ impl WorldIdentityDomain {
             return EntityLookup::WrongWorldBinding;
         }
         match reference {
+            EntityReference::Authored { .. } => EntityLookup::ContextRequired,
             EntityReference::SceneLocal { entity } => {
                 let Some(instance) = scene_context else {
                     return EntityLookup::ContextRequired;

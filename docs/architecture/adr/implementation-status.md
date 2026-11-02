@@ -57,10 +57,13 @@ three public association controls, docs and minimal/portable compilation. The
 [final-reference-demand correction](../../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md)
 is qualified at `74d5fc7`: scoped normalized values survive property composition before lookup,
 only surviving references open sources, actual IDs lower last, and retained storage paths are
-admitted before copying. New reference variants, lexical input environments, contextual defaults,
-source graph replacement and complete extraction/recovery remain unimplemented. The generic
-value-tree alternative and record-owned sidecar alternative retain their comparison rationale
-in the plan; no source/Native qualification follows from representation selection.
+admitted before copying. Inline reference values, lexical input environments, contextual defaults,
+source-only copy admission and complete Native value gates now have their
+[production prerequisite qualification](../../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
+Independent flat compiled storage, root/placement replacement and complete extraction/recovery
+remain unfinished. The generic value-tree and record-owned sidecar alternatives retain their
+comparison rationale in the plan. This prerequisite does not establish compiled-only activation
+or complete extraction.
 
 The first-party processed Host successor is qualified as `44470ed` under the
 [ordered asset-delivery plan](../../plans/2026-10-29-asset-import-and-runtime-delivery-plan.md).

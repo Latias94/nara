@@ -950,6 +950,7 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: request,
+        arguments: None,
         overrides: None,
     });
     let document = SceneDocument::from_ordered_roots([anchor]);

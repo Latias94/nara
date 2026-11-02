@@ -4843,6 +4843,7 @@ mod tests {
             .unwrap();
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new(local).unwrap());
             anchor.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::Product(
                     AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap(),
                 ),
@@ -5266,7 +5267,6 @@ mod tests {
                         ComponentSchemaVersion::ONE,
                         ComponentValue::String("Repaired".into()),
                     ),
-                    bindings: Vec::new(),
                 }),
                 "suppress" => overlay.components.push(PrefabComponentIntent::Suppress {
                     target: PrefabEntityTarget::source(id("n")),
@@ -5276,6 +5276,7 @@ mod tests {
             }
             let mut anchor = SceneEntityRecord::new(id("host"));
             anchor.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::path("p.prefab.json").unwrap(),
                 overrides: Some(overlay),
             });
@@ -5430,6 +5431,7 @@ requested = ["runtime-2d"]
                 ),
             );
             nested.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::path("missing-q.prefab.json").unwrap(),
                 overrides: Some(obsolete),
             });
@@ -5439,6 +5441,7 @@ requested = ["runtime-2d"]
             overlay.instances.push(PrefabInstanceClaim {
                 target: PrefabEntityTarget::source(id("n")),
                 value: Some(PrefabInstance {
+                    arguments: None,
                     source: AssetRef::path("r.prefab.json").unwrap(),
                     overrides: None,
                 }),
@@ -5450,6 +5453,7 @@ requested = ["runtime-2d"]
             let scene = SceneDocument::from_ordered_roots(["outer-a", "outer-b"].map(|name| {
                 let mut anchor = SceneEntityRecord::new(id(name));
                 anchor.prefab = Some(PrefabInstance {
+                    arguments: None,
                     source: AssetRef::path("p.prefab.json").unwrap(),
                     overrides: Some(overlay.clone()),
                 });

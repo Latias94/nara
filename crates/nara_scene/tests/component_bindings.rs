@@ -7,7 +7,7 @@ use std::{collections::BTreeSet, convert::Infallible};
 
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
-use nara_identity::EntityReference;
+use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentSchema,
@@ -19,7 +19,7 @@ use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionReport, PrefabInstance,
     PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding, PrefabSourceResolver,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindingError,
     SceneComponentBindingLimits, SceneComponentBindings, SceneComponentRecord, SceneDocument,
     SceneEntityId, SceneEntityRecord, SourceDocumentKey,
@@ -153,6 +153,7 @@ fn bindings() -> SceneComponentBindings {
 fn mover(value: ComponentValue) -> SceneComponentRecord {
     SceneComponentRecord::new(ComponentSchemaVersion::ONE, value)
         .with_owner(owner_id("game.motion"))
+        .with_contextual_default(ComponentFieldId::new("target"), local("socket"))
 }
 
 fn data_node(name: &str) -> SceneEntityRecord {
@@ -179,6 +180,7 @@ fn anchor(name: &str, prefab: &str, overrides: Option<PrefabOverlay>) -> SceneEn
     let mut entity = SceneEntityRecord::new(id(name));
     entity.prefab = Some(PrefabInstance {
         source: source(prefab),
+        arguments: None,
         overrides,
     });
     entity
@@ -215,22 +217,28 @@ fn mixed_scene() -> SceneDocument {
             PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("speed")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::U64(42)),
-                bindings: Vec::new(),
             },
             PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-                intent: PrefabPropertyIntent::Set(local("socket")),
-                bindings: vec![PrefabReferenceBinding {
-                    slot: ComponentFieldPath::empty(),
-                    expected: id("socket"),
-                    target: PrefabEntityTarget {
-                        through: vec![PrefabInstanceHop {
-                            anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
-                            expected_base: key("leaf"),
-                        }],
-                        entity: PrefabEntityOrigin::SourceEntity(id("socket")),
+                intent: PrefabPropertyIntent::Set(ComponentValue::EntityReference(
+                    EntityReference::Authored {
+                        reference: AuthoredEntityReference {
+                            through: vec![
+                                PrefabInstanceHop {
+                                    anchor: PrefabEntityOrigin::SourceEntity(id("left")),
+                                    expected_base: key("outer"),
+                                },
+                                PrefabInstanceHop {
+                                    anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                                    expected_base: key("leaf"),
+                                },
+                            ],
+                            target: AuthoredReferenceTarget::Entity(
+                                PrefabEntityOrigin::SourceEntity(id("socket")),
+                            ),
+                        },
                     },
-                }],
+                )),
             },
         ],
     });
@@ -389,15 +397,19 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
             let records = &entity(expanded, node).components;
             assert_eq!(
                 records[&component("game.Mover")],
-                mover(ComponentValue::map([
-                    (
-                        "target",
-                        ComponentValue::EntityReference(EntityReference::SceneLocal {
-                            entity: target.clone()
-                        })
-                    ),
-                    ("speed", ComponentValue::U64(speed)),
-                ]))
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        (
+                            "target",
+                            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                                entity: target.clone()
+                            })
+                        ),
+                        ("speed", ComponentValue::U64(speed)),
+                    ]),
+                )
+                .with_owner(owner_id("game.motion"))
             );
             let sensor = &records[&component("game.Sensor")];
             assert_eq!(sensor.owner(), Some(&owner_id("game.sensing")));
@@ -477,6 +489,7 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
         target: PrefabEntityTarget::source(id("nested")),
         value: Some(PrefabInstance {
             source: source("replacement"),
+            arguments: None,
             overrides: None,
         }),
     });
@@ -578,8 +591,24 @@ fn invalid_local_and_prefab_records_refuse_without_publishing_valid_siblings() {
 fn invalid_overlay_sets_do_not_degrade_into_a_native_preview_candidate() {
     let bindings = bindings();
     let sources = sources();
-    for (component, record) in invalid_records() {
+    for (component, mut record) in invalid_records() {
         let known = component.as_str() == "game.Mover";
+        if known {
+            record.contextual_defaults.insert(
+                ComponentFieldId::new("target"),
+                ComponentValue::EntityReference(EntityReference::Authored {
+                    reference: AuthoredEntityReference {
+                        through: vec![PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+                            expected_base: key("outer"),
+                        }],
+                        target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(
+                            id("socket"),
+                        )),
+                    },
+                }),
+            );
+        }
         let mut overlay = PrefabOverlay::new(key("outer"));
         overlay.components.push(PrefabComponentIntent::Set {
             mode: if known {
@@ -590,15 +619,6 @@ fn invalid_overlay_sets_do_not_degrade_into_a_native_preview_candidate() {
             target: PrefabEntityTarget::source(id("node")),
             component,
             record,
-            bindings: if known {
-                vec![PrefabReferenceBinding {
-                    slot: ComponentFieldPath::from_fields(["target"]),
-                    expected: id("socket"),
-                    target: PrefabEntityTarget::source(id("socket")),
-                }]
-            } else {
-                Vec::new()
-            },
         });
         let document =
             SceneDocument::from_ordered_roots([anchor("instance", "outer", Some(overlay))]);

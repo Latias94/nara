@@ -609,13 +609,13 @@ fn prefab_overlay_collects_only_the_effective_door_scene_target() {
         target: PrefabEntityTarget::source(inherited),
         component: ComponentTypeId::new(DOOR),
         record: door_record(product(B)),
-        bindings: vec![],
     });
     let mut authored = document(A, &[]);
     authored.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::Product(
             AssetProductRef::new(prefab_id, ImportedProductId::PRIMARY).unwrap(),
         ),
+        arguments: None,
         overrides: Some(overlay),
     });
     fixture.write_scene(A, &authored);

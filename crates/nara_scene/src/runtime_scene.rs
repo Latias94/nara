@@ -25,7 +25,7 @@ use crate::{
 ///
 /// Working bytes are cumulative modeled allocation requests, without refunds for discarded
 /// scratch. They are not allocator capacity or resident memory. The shared final Schema gate's
-/// declared-asset traversal and aggregate inventory join this ledger. Existing hierarchy,
+/// Schema/value/reference scratch and aggregate asset inventory join this ledger. Existing hierarchy,
 /// default-validation and local-reference scratch, core shape-preflight scratch and allocations
 /// internal to the JSON syntax adapter retain their existing base limits; they do not join it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

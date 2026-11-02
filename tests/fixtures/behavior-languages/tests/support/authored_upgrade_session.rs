@@ -83,6 +83,7 @@ fn source_key(path: &str, kind: SourceDocumentKind) -> SourceDocumentKey {
 fn linked(path: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path(path).unwrap(),
+        arguments: None,
         overrides: overlay,
     }
 }

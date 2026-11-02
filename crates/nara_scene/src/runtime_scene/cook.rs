@@ -127,6 +127,7 @@ pub(super) fn cook(
                         work.reserve(Some(entity.namespace.as_str().len()))?;
                         Ok(reference.clone())
                     }
+                    EntityReference::Authored { .. } => Err(reference_error()),
                 }
             })
             .map_err(|failure| match failure {

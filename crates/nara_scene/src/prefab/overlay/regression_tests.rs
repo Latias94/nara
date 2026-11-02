@@ -1,8 +1,8 @@
 use nara_reflect::{
-    ComponentFieldId, ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyKey,
-    ComponentPropertyPath, ComponentPropertyStep, ComponentSchema, ComponentShapeMember,
-    ComponentTypeId, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
-    effective_component_value,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment, ComponentFieldSchema,
+    ComponentPropertyKey, ComponentPropertyPath, ComponentPropertyStep, ComponentSchema,
+    ComponentShapeMember, ComponentTypeId, ComponentValueKind, ComponentValueMaterializationLimits,
+    ComponentValueShape, effective_component_value,
 };
 
 use super::*;
@@ -120,7 +120,6 @@ fn set(path: ComponentPropertyPath, value: ComponentValue) -> PropertyClaim {
     PropertyClaim {
         path,
         intent: PropertyIntent::Set(value),
-        bindings: vec![],
     }
 }
 
@@ -128,7 +127,6 @@ fn absent(root: &str) -> PropertyClaim {
     PropertyClaim {
         path: ComponentPropertyPath::new(id(root)),
         intent: PropertyIntent::Absent,
-        bindings: vec![],
     }
 }
 
@@ -522,7 +520,6 @@ fn absent_rejects_required_nested_and_non_map_terminal_roots() {
             &[PropertyClaim {
                 path: hp(),
                 intent: PropertyIntent::Absent,
-                bindings: vec![],
             }]
         ),
         Err(Conflict::Component),
@@ -780,104 +777,11 @@ fn production_wire_claims_round_trip_and_reject_unknown_members() {
     );
 }
 
-mod reference_regressions {
-    use std::collections::BTreeMap;
-
-    use nara_identity::EntityReference;
-    use nara_reflect::{
-        ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathSegment,
-        ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueShape,
-    };
-
-    use super::super::references::plan_bindings;
-    use super::super::*;
-
-    fn id(name: &str) -> SceneEntityId {
-        SceneEntityId::new(name).unwrap()
-    }
-
-    fn local(name: &str) -> ComponentValue {
-        ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id(name) })
-    }
-
-    fn nested(anchor: &str) -> PrefabEntityTarget {
-        PrefabEntityTarget {
-            through: vec![PrefabInstanceHop {
-                anchor: PrefabEntityOrigin::SourceEntity(id(anchor)),
-                expected_base: crate::tests::named_prefab_source_key("inner"),
-            }],
-            entity: PrefabEntityOrigin::SourceEntity(id("socket")),
-        }
-    }
-
-    fn schema(shape: ComponentValueShape) -> ComponentSchema {
-        ComponentSchema::new(
-            ComponentTypeId::new("game.OverlayReferences"),
-            "References",
-            ComponentSchemaVersion::ONE,
-        )
-        .with_fields([ComponentFieldSchema::required(
-            ComponentFieldId::new("links"),
-            "Links",
-            ComponentFieldPath::from_fields(["links"]),
-            shape,
-        )
-        .with_capabilities([ComponentCapability::EntityRef])])
-    }
-
-    fn slot(index: u32) -> ComponentFieldPath {
-        ComponentFieldPath::new([
-            ComponentFieldPathSegment::field("links"),
-            ComponentFieldPathSegment::index(index),
-        ])
-    }
-
-    fn binding(slot: ComponentFieldPath, target: PrefabEntityTarget) -> PrefabReferenceBinding {
-        PrefabReferenceBinding {
-            slot,
-            expected: id("socket"),
-            target,
-        }
-    }
-
-    #[test]
-    fn serialized_bindings_preserve_exact_slot_targets_without_resolving_them() {
-        let schema = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
-        let value =
-            ComponentValue::map([("links", ComponentValue::List(vec![local("socket"); 3]))]);
-        // Deliberately differ from payload order and preserve each complete typed target.
-        let bindings = vec![
-            binding(slot(2), PrefabEntityTarget::addition(id("socket"))),
-            binding(slot(0), nested("left")),
-            binding(slot(1), nested("right")),
-        ];
-        let expected = BTreeMap::from([
-            (slot(0), nested("left")),
-            (slot(1), nested("right")),
-            (slot(2), PrefabEntityTarget::addition(id("socket"))),
-        ]);
-        let before = (value.clone(), bindings.clone());
-        let json: Vec<PrefabReferenceBinding> =
-            serde_json::from_slice(&serde_json::to_vec(&bindings).unwrap()).unwrap();
-        let ron: Vec<PrefabReferenceBinding> =
-            ron::from_str(&ron::to_string(&bindings).unwrap()).unwrap();
-        for loaded in [json, ron] {
-            assert_eq!(loaded, bindings);
-            assert_eq!(
-                plan_bindings(&schema, &value, &loaded, Default::default()),
-                Ok(expected.clone()),
-            );
-        }
-        assert_eq!((value, bindings), before);
-    }
-}
-
 mod expansion {
     use std::collections::BTreeSet;
 
     use nara_asset::AssetRef;
-    use nara_identity::EntityReference;
+    use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
         ComponentFieldPath, ComponentFieldSchema, ComponentRegistrySnapshot, ComponentSchema,
@@ -941,7 +845,11 @@ mod expansion {
         overrides: Option<PrefabOverlay>,
     ) -> SceneEntityRecord {
         let mut record = SceneEntityRecord::new(id(name));
-        record.prefab = Some(PrefabInstance { source, overrides });
+        record.prefab = Some(PrefabInstance {
+            source,
+            arguments: None,
+            overrides,
+        });
         record
     }
 
@@ -1136,28 +1044,20 @@ mod expansion {
         )
     }
 
-    fn binding(slot: ComponentFieldPath, target: PrefabEntityTarget) -> PrefabReferenceBinding {
-        PrefabReferenceBinding {
-            slot,
-            expected: id("socket"),
-            target,
-        }
+    fn authored(reference: AuthoredEntityReference) -> ComponentValue {
+        ComponentValue::EntityReference(EntityReference::Authored { reference })
     }
 
     fn link(
         target: PrefabEntityTarget,
-        referent: PrefabEntityTarget,
+        reference: ComponentValue,
         note: &str,
     ) -> PrefabComponentIntent {
         PrefabComponentIntent::Set {
             mode: PrefabComponentSetMode::Add,
             target,
             component: ComponentTypeId::new("game.Link"),
-            record: link_record(note, local("socket")),
-            bindings: vec![binding(
-                ComponentFieldPath::from_fields(["target"]),
-                referent,
-            )],
+            record: link_record(note, reference),
         }
     }
 
@@ -1190,11 +1090,7 @@ mod expansion {
         base
     }
 
-    fn property(
-        name: &str,
-        intent: PrefabPropertyIntent,
-        bindings: Vec<PrefabReferenceBinding>,
-    ) -> PrefabComponentIntent {
+    fn property(name: &str, intent: PrefabPropertyIntent) -> PrefabComponentIntent {
         PrefabComponentIntent::Properties {
             target: direct("socket"),
             component: ComponentTypeId::new("game.Link"),
@@ -1202,7 +1098,6 @@ mod expansion {
             claims: vec![PrefabPropertyClaim {
                 path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new(name)),
                 intent,
-                bindings,
             }],
         }
     }
@@ -1560,6 +1455,7 @@ mod expansion {
         let mut anchor = PrefabAddition::new(id("added_anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: path("leaf"),
+            arguments: None,
             overrides: Some(leaf_overlay),
         });
         overlay.additions.push(anchor);
@@ -1586,17 +1482,53 @@ mod expansion {
         overlay.components = vec![
             link(
                 inherited_addition.clone(),
-                added_inherited.clone(),
+                authored(AuthoredEntityReference {
+                    through: vec![
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                            expected_base: key("outer"),
+                        },
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::InstanceAddition(id("added_anchor")),
+                            expected_base: key("leaf"),
+                        },
+                    ],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "socket",
+                    ))),
+                }),
                 "source to addition",
             ),
             link(
                 added_inherited.clone(),
-                added_addition.clone(),
+                authored(AuthoredEntityReference {
+                    through: vec![
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                            expected_base: key("outer"),
+                        },
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::InstanceAddition(id("added_anchor")),
+                            expected_base: key("leaf"),
+                        },
+                    ],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::InstanceAddition(
+                        id("added_leaf"),
+                    )),
+                }),
                 "added anchor source",
             ),
             link(
                 added_addition.clone(),
-                direct("added_leaf"),
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                        expected_base: key("outer"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "added_leaf",
+                    ))),
+                }),
                 "added anchor addition",
             ),
         ];
@@ -1667,14 +1599,24 @@ mod expansion {
         let mut addition = PrefabAddition::new(id("socket"));
         addition.components.insert(
             ComponentTypeId::new("game.Link"),
-            link_record("added to nested", local("socket")),
-        );
-        addition.bindings.insert(
-            ComponentTypeId::new("game.Link"),
-            vec![binding(
-                ComponentFieldPath::from_fields(["target"]),
-                nested("nest_a", "socket"),
-            )],
+            link_record(
+                "added to nested",
+                authored(AuthoredEntityReference {
+                    through: vec![
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                            expected_base: key("outer"),
+                        },
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("nest_a")),
+                            expected_base: key("leaf"),
+                        },
+                    ],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "socket",
+                    ))),
+                }),
+            ),
         );
         overlay.additions.push(addition);
         overlay.placements.push(place(
@@ -1683,10 +1625,36 @@ mod expansion {
             PrefabPlacementSlot::Before(direct("socket")),
         ));
         overlay.components = vec![
-            link(direct("socket"), added("socket"), "inherited to added"),
+            link(
+                direct("socket"),
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                        expected_base: key("outer"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::InstanceAddition(
+                        id("socket"),
+                    )),
+                }),
+                "inherited to added",
+            ),
             link(
                 nested("nest_a", "socket"),
-                nested("nest_b", "socket"),
+                authored(AuthoredEntityReference {
+                    through: vec![
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                            expected_base: key("outer"),
+                        },
+                        PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("nest_b")),
+                            expected_base: key("leaf"),
+                        },
+                    ],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "socket",
+                    ))),
+                }),
                 "nested to repeated",
             ),
         ];
@@ -1726,7 +1694,6 @@ mod expansion {
         overlay.components.push(property(
             "note",
             PrefabPropertyIntent::Set(ComponentValue::String("old base".into())),
-            vec![],
         ));
         let report = accepted(base.clone(), overlay.clone());
         assert_link(&report, direct("socket"), direct("tail"), "old base");
@@ -1736,16 +1703,26 @@ mod expansion {
     }
 
     #[test]
-    fn scalar_property_reference_uses_payload_relative_empty_slot() {
+    fn scalar_property_reference_uses_a_complete_containing_document_route() {
         let base = with_link("kept", ComponentValue::Null);
         let mut overlay = PrefabOverlay::new(key("outer"));
         overlay.components.push(property(
             "target",
-            PrefabPropertyIntent::Set(local("socket")),
-            vec![binding(
-                ComponentFieldPath::empty(),
-                nested("nest_b", "socket"),
-            )],
+            PrefabPropertyIntent::Set(authored(AuthoredEntityReference {
+                through: vec![
+                    PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                        expected_base: key("outer"),
+                    },
+                    PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("nest_b")),
+                        expected_base: key("leaf"),
+                    },
+                ],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "socket",
+                ))),
+            })),
         ));
         let report = accepted(base.clone(), overlay.clone());
         assert_link(
@@ -1762,9 +1739,19 @@ mod expansion {
     fn modes_overlap_and_last_invalid_value_reject_without_mutating_source_or_history() {
         let base = with_link("base", ComponentValue::Null);
         let mut overlay = PrefabOverlay::new(key("outer"));
-        overlay
-            .components
-            .push(link(direct("socket"), direct("tail"), "add"));
+        overlay.components.push(link(
+            direct("socket"),
+            authored(AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                    expected_base: key("outer"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "tail",
+                ))),
+            }),
+            "add",
+        ));
         rejected(base.clone(), overlay.clone());
         let PrefabComponentIntent::Set { mode, target, .. } = &mut overlay.components[0] else {
             unreachable!()
@@ -1776,23 +1763,26 @@ mod expansion {
             property(
                 "note",
                 PrefabPropertyIntent::Set(ComponentValue::String("pin".into())),
-                vec![],
             ),
-            property(
-                "target",
-                PrefabPropertyIntent::Set(ComponentValue::Null),
-                vec![],
-            ),
+            property("target", PrefabPropertyIntent::Set(ComponentValue::Null)),
         ];
         rejected(base.clone(), overlay.clone());
 
         overlay.components = vec![
-            link(direct("tail"), direct("socket"), "valid first"),
-            property(
-                "note",
-                PrefabPropertyIntent::Set(ComponentValue::U64(3)),
-                vec![],
+            link(
+                direct("tail"),
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                        expected_base: key("outer"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "socket",
+                    ))),
+                }),
+                "valid first",
             ),
+            property("note", PrefabPropertyIntent::Set(ComponentValue::U64(3))),
         ];
         let source = scene(overlay, true);
         let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
@@ -1841,7 +1831,19 @@ mod expansion {
     fn replacement_suppression_and_dangling_reference_use_final_owner_admission() {
         let base = with_link("base", ComponentValue::Null);
         let mut overlay = PrefabOverlay::new(key("outer"));
-        let mut replacement = link(direct("socket"), direct("tail"), "replacement");
+        let mut replacement = link(
+            direct("socket"),
+            authored(AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                    expected_base: key("outer"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "tail",
+                ))),
+            }),
+            "replacement",
+        );
         let PrefabComponentIntent::Set { mode, .. } = &mut replacement else {
             unreachable!()
         };
@@ -1851,10 +1853,19 @@ mod expansion {
         assert_link(&report, direct("socket"), direct("tail"), "replacement");
         overlay.suppressions.push(direct("tail"));
         rejected(base.clone(), overlay.clone());
-        let PrefabComponentIntent::Set { bindings, .. } = &mut overlay.components[0] else {
+        let PrefabComponentIntent::Set {
+            record: payload, ..
+        } = &mut overlay.components[0]
+        else {
             unreachable!()
         };
-        bindings.clear();
+        payload
+            .value
+            .set_path(
+                &ComponentFieldPath::from_fields(["target"]),
+                local("missing"),
+            )
+            .unwrap();
         rejected(base.clone(), overlay.clone());
         overlay.suppressions.clear();
         overlay.components = vec![PrefabComponentIntent::Suppress {
@@ -1915,7 +1926,15 @@ mod expansion {
                             "inner",
                             PrefabEntityOrigin::InstanceAddition(id("only_addition")),
                         ),
-                        direct("nested"),
+                        authored(AuthoredEntityReference {
+                            through: vec![PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                                expected_base: key("outer"),
+                            }],
+                            target: AuthoredReferenceTarget::Entity(
+                                PrefabEntityOrigin::SourceEntity(id("nested")),
+                            ),
+                        }),
                         "bound addition",
                     ));
                 }
@@ -2007,9 +2026,19 @@ mod expansion {
     #[test]
     fn wrong_document_kind_is_preserved_by_wire_and_rejected_at_root_and_nested_hop() {
         let mut overlay = PrefabOverlay::new(key("outer"));
-        overlay
-            .components
-            .push(link(nested("nest_a", "socket"), direct("tail"), "bound"));
+        overlay.components.push(link(
+            nested("nest_a", "socket"),
+            authored(AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                    expected_base: key("outer"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "tail",
+                ))),
+            }),
+            "bound",
+        ));
         let wrong_kind = |name| {
             let crate::SourceDocumentOrigin::Named { universe, .. } = key(name).origin().clone()
             else {
@@ -2039,16 +2068,16 @@ mod expansion {
     }
 
     #[test]
-    fn absent_defaults_bind_only_the_new_payload_and_never_capture_containing_names() {
+    fn absent_defaults_require_record_context_and_never_capture_containing_names() {
         let mut schema = schema();
         schema.fields[0].required = false;
         schema.fields[0].default_value = Some(local("socket"));
         let registry = registry_with([schema]);
-        let base = with_link("kept", ComponentValue::Null);
+        let mut base = with_link("kept", ComponentValue::Null);
         let mut overlay = PrefabOverlay::new(key("outer"));
         overlay
             .components
-            .push(property("target", PrefabPropertyIntent::Absent, vec![]));
+            .push(property("target", PrefabPropertyIntent::Absent));
         let document = scene(overlay.clone(), true);
         assert!(
             document
@@ -2056,13 +2085,26 @@ mod expansion {
                 .candidate
                 .is_none()
         );
-        let PrefabComponentIntent::Properties { claims, .. } = &mut overlay.components[0] else {
-            unreachable!()
-        };
-        claims[0].bindings.push(binding(
-            ComponentFieldPath::empty(),
-            nested("nest_b", "socket"),
-        ));
+        base.entities
+            .iter_mut()
+            .find(|record| record.id == id("socket"))
+            .unwrap()
+            .components
+            .get_mut(&ComponentTypeId::new("game.Link"))
+            .unwrap()
+            .contextual_defaults
+            .insert(
+                ComponentFieldId::new("target"),
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("nest_b")),
+                        expected_base: key("leaf"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "socket",
+                    ))),
+                }),
+            );
         let source = scene(overlay.clone(), true);
         let report = source.expand_prefabs(&registry, &resolver(base.clone()));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
@@ -2097,7 +2139,6 @@ mod expansion {
                 ComponentSchemaVersion::ONE,
                 ComponentValue::map([("note", ComponentValue::String("omitted target".into()))]),
             ),
-            bindings: vec![],
         });
         assert!(
             scene(overlay.clone(), true)
@@ -2105,13 +2146,21 @@ mod expansion {
                 .candidate
                 .is_none()
         );
-        let PrefabComponentIntent::Set { bindings, .. } = &mut overlay.components[0] else {
+        let PrefabComponentIntent::Set { record, .. } = &mut overlay.components[0] else {
             unreachable!()
         };
-        bindings.push(binding(
-            ComponentFieldPath::from_fields(["target"]),
-            direct("socket"),
-        ));
+        record.contextual_defaults.insert(
+            ComponentFieldId::new("target"),
+            authored(AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                    expected_base: key("outer"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "socket",
+                ))),
+            }),
+        );
         let report = scene(overlay, true).expand_prefabs(&registry, &resolver(base));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert_link(&report, direct("tail"), direct("socket"), "omitted target");
@@ -2157,7 +2206,7 @@ mod expansion {
                     ComponentValue::map([] as [(&str, ComponentValue); 0]),
                 )]),
             ] {
-                let base = PrefabDocument::from_ordered_roots([
+                let mut base = PrefabDocument::from_ordered_roots([
                     SceneEntityRecord::new(id("item")).with_component(
                         component.clone(),
                         SceneComponentRecord::new(ComponentSchemaVersion::ONE, original),
@@ -2174,7 +2223,6 @@ mod expansion {
                             "value",
                         )),
                         intent: PrefabPropertyIntent::Absent,
-                        bindings: vec![],
                     }],
                 });
                 if reference {
@@ -2184,14 +2232,12 @@ mod expansion {
                             .candidate
                             .is_none()
                     );
-                    let PrefabComponentIntent::Properties { claims, .. } =
-                        &mut overlay.components[0]
-                    else {
-                        unreachable!()
-                    };
-                    claims[0]
-                        .bindings
-                        .push(binding(ComponentFieldPath::empty(), direct("socket")));
+                    base.entities[0]
+                        .components
+                        .get_mut(&component)
+                        .unwrap()
+                        .contextual_defaults
+                        .insert(ComponentFieldId::new("value"), local("socket"));
                 }
                 let source = scene(overlay, true);
                 let before = (source.clone(), base.clone());
@@ -2242,14 +2288,18 @@ mod expansion {
         let mut addition = PrefabAddition::new(id("socket"));
         addition.components.insert(
             ComponentTypeId::new("game.Link"),
-            link_record("full value", local("socket")),
-        );
-        addition.bindings.insert(
-            ComponentTypeId::new("game.Link"),
-            vec![binding(
-                ComponentFieldPath::from_fields(["target"]),
-                direct("tail"),
-            )],
+            link_record(
+                "full value",
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("host_a")),
+                        expected_base: key("outer"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "tail",
+                    ))),
+                }),
+            ),
         );
         overlay.additions.push(addition);
         overlay.placements.push(place(
@@ -2359,14 +2409,14 @@ mod expansion {
             (
                 exact.with_materialized_value_nodes(ItemLimit::new(3).unwrap()),
                 "materialized-value-nodes",
-                2,
-                1,
+                4,
+                3,
             ),
             (
                 exact.with_materialized_value_bytes(ByteLimit::new(11).unwrap()),
                 "materialized-value-bytes",
-                6,
-                5,
+                12,
+                11,
             ),
         ] {
             let report = source.expand_prefabs_with_options(
@@ -2452,7 +2502,6 @@ mod expansion {
             component,
             mode,
             record,
-            bindings: vec![],
         };
         let mut cases = [ComponentSchemaVersion::ONE, ComponentSchemaVersion(3)]
             .map(|version| {
@@ -2492,7 +2541,6 @@ mod expansion {
                         "retired",
                     )),
                     intent: PrefabPropertyIntent::Set(ComponentValue::String("retained".into())),
-                    bindings: vec![],
                 }],
             },
         ]);
@@ -2610,7 +2658,6 @@ mod expansion {
                 target: direct("socket"),
                 component: component.clone(),
                 record: SceneComponentRecord::new(ComponentSchemaVersion::ONE, value.clone()),
-                bindings: vec![],
             });
             let source = scene(overlay, true);
             let published =

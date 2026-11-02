@@ -30,7 +30,7 @@ fn valid_ron_syntax_with_wrong_field_types_retains_the_decode_stage() {
         let error = SceneDocumentCandidate::decode_ron_bytes(source.as_bytes()).unwrap_err();
 
         assert!(!error.is_syntax_error(), "{error:?}");
-        assert!(error.parser_location().is_some());
+        assert!(error.parser_location().is_some(), "{error:?}");
         assert!(error.shape_error().is_none());
         assert!(
             matches!(

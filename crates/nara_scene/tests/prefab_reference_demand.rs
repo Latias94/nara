@@ -194,13 +194,11 @@ impl Fixture {
         let mut claims = vec![PrefabPropertyClaim {
             path: future_property(),
             intent: PrefabPropertyIntent::Set(asset(SHARED)),
-            bindings: vec![],
         }];
         if restore_default {
             claims.push(PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("fallback")),
                 intent: PrefabPropertyIntent::Absent,
-                bindings: vec![],
             });
         }
         let mut overlay = PrefabOverlay::new(prefab_key());
@@ -213,6 +211,7 @@ impl Fixture {
         let mut anchor = SceneEntityRecord::new(entity("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: prefab_request(),
+            arguments: None,
             overrides: Some(overlay),
         });
         let document = SceneDocument::from_ordered_roots([anchor]);

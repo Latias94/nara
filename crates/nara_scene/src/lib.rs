@@ -114,7 +114,7 @@ pub use prefab::{
     PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
     PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPlacement,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceBinding, PrefabRevert, PrefabSourceResolver, ResolvedPrefabSource,
+    PrefabReferenceArguments, PrefabRevert, PrefabSourceResolver, ResolvedPrefabSource,
 };
 #[cfg(feature = "serde")]
 pub use prefab_copy::{

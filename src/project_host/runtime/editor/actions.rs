@@ -1271,6 +1271,7 @@ mod tests {
     fn ui_domain_guard_checks_nested_expected_and_value_snapshots() {
         let id = SceneEntityId::new("nested").unwrap();
         let instance = |overrides| PrefabInstance {
+            arguments: None,
             source: AssetRef::path("base.prefab.json").unwrap(),
             overrides,
         };
@@ -1294,7 +1295,6 @@ mod tests {
                 intent: PrefabPropertyIntent::Set(ComponentValue::String(
                     "authored text".to_owned(),
                 )),
-                bindings: Vec::new(),
             }],
         });
         for outer_expected in [false, true] {

@@ -3,9 +3,11 @@
 **Status:** Root/placement/inline-reference direction selected after independent comparison.
 The [pure identity ownership prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md).
 The [final reference-demand prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md).
-Lexical payload/input scope is selected below; its new value syntax is not implemented yet.
-No extraction implementation or qualification is claimed; the remaining replacement and complete
-consumer stay in this unit.
+Lexical payload/input scope is selected below. Inline values, contextual defaults, source-only
+copy admission and Native value gates have their
+[qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
+The independent flat compiled representation, root/placement replacement and complete extraction
+consumer remain unfinished. No extraction implementation or qualification is claimed.
 **Parent:** [Foundation R5](2026-10-23-foundation-architecture-rebaseline-plan.md#r5-durable-addressing-prefab-overlays-and-projection-lifetime).
 **Evidence:** [Pinned extraction study](../research/2026-11-02-prefab-extraction-and-occurrence-continuity.md).
 
@@ -38,11 +40,12 @@ Q retains the old anchor and adds Q's root below it. This changes entity count, 
 transform composition. Renaming or ignoring the wrapper in an Editor panel cannot repair that
 meaning.
 
-The current [neutral reference](../../crates/nara_identity/src/types.rs) contains a document-local
-ID or a persistent Runtime reference. [Overlay bindings](../../crates/nara_scene/src/prefab/overlay/references.rs)
-have exact payload coordinates and typed occurrence targets, but direct source records have no
-equivalent binding. Moving a local reference across the cut can make its target unrepresentable.
-A global source-key substitution or preserving terminal ID spelling does not establish its target.
+At this unit's starting baseline, the neutral reference contained a document-local ID or a
+persistent Runtime reference. Overlay sidecars had exact payload coordinates and typed occurrence
+targets, but direct source records had no equivalent binding. Moving a local reference across
+the cut could make its target unrepresentable. The selected inline reference language below
+replaces that asymmetry. A global source-key substitution or preserving terminal ID spelling
+does not establish the target.
 
 The staged compiler retains one declared node scope/origin and one final entity provenance.
 Any root binding must therefore select canonical entity identity and contributor provenance
@@ -184,6 +187,13 @@ binding state and source demand within the existing finite compiler work/storage
 Extraction remaps moved lexical declarations, including dormant values/defaults and arguments;
 equal bytes in a different source do not prove equal reference meaning.
 
+Whole-source copy preserves declared inputs as parameters. Its source-only request proves complete
+source admission and remapping without inventing a separate mount for every supporting Prefab.
+An actual consumer compiles the copied containing source with its real arguments and overrides.
+Qualify P passing Q.u, Q copied alone as a parameterized source, and a source cycle terminated by
+real outer intent. The wrong-base/missing-target/required-input/cycle controls belong to that
+actual use; the copy owner must preserve their constraints without claiming activation eligibility.
+
 Source-dependent reference defaults need explicit version/field-bound contextual declarations in
 the authored record. They remain part of the complete tree even when an explicit value hides them.
 Reset/Absent exposes that declared default; Revert resumes inheritance. Extraction rewrites their
@@ -200,7 +210,7 @@ program-wide binding scan demanded a missing nested source for an overwritten le
 prerequisite corrects these in the existing compiler before adding inline reference variants.
 
 Keep each unpublished normalized value together with a transient path-to-declaration-origin map.
-Exact binding grammar, Schema, selector and key checks remain; target resolution waits until all
+Exact reference grammar, Schema, selector and key checks remain; target resolution waits until all
 property suffixes select the final leaves. Actual Reflect storage coordinates identify changed
 subtrees, and source/default provenance follows the real declaration scope. The path table is
 private compilation state, not durable reference syntax or a second value/selector interpreter.
@@ -234,6 +244,89 @@ proof authority. Preparation failure returns the same captured inputs. A source-
 an effective projection is insufficient authority for a complete-project topology rewrite.
 Do not add a general semantic-equivalence engine or a second overlay interpreter.
 
+## Compiled Output Boundary
+
+Keep `ExpandedSceneDocument` as the authoring projection. Its unavailable records, contextual
+declarations and omissions are source observations, not executable proof. The source-only copy
+owner and selected conversion fragments retain their own existing roles.
+
+Introduce separate owned `CompiledSceneComponent`, `CompiledSceneEntity`,
+`CompiledSceneDocument` and source-bound `CompiledSceneCandidate` storage. A compiled component
+contains only the actual selected Schema owner, current version and effective value. A compiled
+entity contains only its ID, ordered children and component map. The document pairs roots and
+entities with one canonical provenance per final entity, exposed as `canonical_provenance()`.
+These types expose borrowed accessors, not public mutable fields, builders, `Default`, `Clone`,
+serde admission or conversion back into source. The shared `ComponentValue` language stays;
+its complete typed leaves are admitted by the owner before construction.
+
+Compiled owner selection is explicit even when the source omitted its owner claim. A selected
+owner A stays A; a receiving owner B must reject it. A compiled `None` records an actually unowned
+Native definition and matches only an actually unowned receiver. It is not the source format's
+unrestricted omission. Query the real Native/Mixed/Authoring authority and admit owner string
+storage before allocating it. This flat proof remains distinct from Runtime's exact native/data
+definition witness. Native reception requires the current version and the complete explicit
+effective tree under the receiving Schema. It does not migrate compiled values or insert new
+defaults: the source declaration environment has already been lowered away. If a receiving
+definition needs those operations, recompile through the source owner instead. This avoids a
+new SceneLocal default accidentally binding a containing entity whose ID matches a Prefab-local
+name. Ordinary codec preparation still checks the receiving definitions, assets and World.
+
+Canonical entity provenance does not describe every contributing declaration. Root binding can
+map several source entities to one final anchor while retaining multiple instance slots and
+different component/property payload environments. Keep declaration-to-output, instance-slot and
+record/property contributor facts in the authoring compiler owner, under its actual captured
+source/revision/Schema basis. Declaration-to-output correspondence may be many-to-one; canonical
+Runtime identity remains one-to-one. Extraction builds complete old/new correspondence from the
+corpus, including dormant data, rather than reconstructing ownership from flat output. Do not add
+a general contributor graph or an insufficient single component-origin field to Runtime storage.
+
+Strict expansion returns compiled data. Native preparation, replacement and projection consume
+only a source-bound compiled candidate; the processed Runtime candidate retains the same compiled
+storage with its exact definitions witness. Delete the unchecked Native `plain()` constructors.
+An ordinary no-Prefab caller uses the same strict compiler with an empty resolver, including in
+the no-serde configuration. Do not introduce another default evaluator or a generic document
+provider to preserve the old call pattern.
+
+Name that complete public operation `compile`, with `SceneCompilation*` reports, limits and
+working-set observations. Mixed bindings expose `compile_scene`; the concrete lazy Host path
+retains `try_` and its original loader error. Remove the displaced `expand_prefabs` names rather
+than leaving aliases: defaults and reference closure are mandatory even without a Prefab.
+Keep actual Prefab source/declaration types, selected-instance fragments and the authoring
+`ExpandedSceneDocument` observation distinct. A Prefab compiler must pass its declared inputs
+directly to the shared kernel, rather than compile an `instantiate()` copy that omits them.
+
+Seal only at the existing compiler's terminal admission: complete hierarchy and provenance,
+current owner/Schema/version, actual effective values, aggregate limits, declared reference
+closure and the complete Reflect Native reference gate. All components pass before the first
+codec can run. Move the admitted values into the new storage; admit new Vec/map allocations
+before creating them. Native preparation still checks the receiving definitions, assets and
+World. Flat data does not establish language/module execution readiness.
+
+Preserve the compiler's independent reference-work node and byte limits when connecting the
+terminal sealer. Its admission callback must carry traversal work as well as allocation bytes;
+charging only allocations would silently remove the existing reference-work limits. Replace
+the old terminal validation rather than executing both complete validators and charging twice.
+
+Canonical addresses must be unique independently of private output locators and lookup spelling.
+Compare the typed canonical source/entity route and root anchor with the same address meaning
+used by Runtime; two aliases of one Prefab do not create two logical entities. Include the
+borrowed address index in pre-allocation admission. Schema-sized validation scratch also joins
+the owning allowance: an empty value with many optional fields can require a large path/index
+allocation. Use the existing Reflect validation and reference callbacks before that allocation.
+
+The authoring-to-Native preview path first applies its actual basis/registry restrictions and
+typed omissions, then seals the selected complete flat projection. When both an authoring
+observation and Native preview must be retained, charge the actual extra retained data to the
+original working allowance before copying. Do not clone an entire raw document merely to feed
+an obsolete Native interface. A selected conversion fragment with external containing context
+is not a complete compiled Scene.
+
+The processed wire has its own private component claims containing only owner, version and value,
+with unknown fields rejected at every record level. Decode creates claims; consuming admission
+proves explicit effective defaults, flat references, Product identities, canonical IDs and complete
+provenance without codecs, migrations or source reads. Cook starts from compiled data and admits
+its actual independent ownership. Source syntax cannot re-enter through a processed record type.
+
 ## Complete Project Owner
 
 Capture one bounded all-profile corpus and the complete open Workspace. Reuse the existing
@@ -265,6 +358,10 @@ Q/sidecar and recovery conflicts must remain repairable and distinguishable.
    rejection. Preserve their source capabilities and meaningful validation without a fake codec
    or a second interpreter. Native registry, complete Scene preparation, processed admission/cook
    and direct data-component setters each need their real after-defaults admission gate.
+   Give compiled documents, entities and records their own closed representation. A wrapper over
+   the authored document does not remove instance declarations, contextual defaults or unresolved
+   value intent from its storage contract. Source-preserving preview remains a distinct result;
+   successful classification or an unchecked plain wrapper cannot manufacture executable proof.
 3. Implement Scene-owned extraction and complete declaration/occurrence correspondence. Qualify
    root, non-root, nested/repeated, cross-cut reference, dormant and unknown-semantics controls.
 4. Integrate complete inventory, borrowed Review, execution retirement, new-member publication,

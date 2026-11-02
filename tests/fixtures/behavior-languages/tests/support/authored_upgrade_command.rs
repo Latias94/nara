@@ -14,8 +14,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     PrefabComponentIntent, PrefabDocument, PrefabInstance, PrefabPropertyClaim,
-    PrefabPropertyIntent, PrefabReferenceBinding, SceneComponentRecord, SceneDocument,
-    SceneEntityRecord,
+    PrefabPropertyIntent, SceneComponentRecord, SceneDocument, SceneEntityRecord,
 };
 
 pub const OWNER: &str = "trial.enemy-stats";
@@ -32,7 +31,7 @@ pub enum UpgradeError {
     Selector(ComponentPropertyPath),
     RootAbsent(ComponentFieldId),
     DuplicateClaim(ComponentFieldId),
-    Bindings,
+    ContextualDefault(ComponentFieldId),
     CatalogDefinition,
     CatalogGeneration,
 }
@@ -201,18 +200,14 @@ fn affected_record(component: &ComponentTypeId, record: &SceneComponentRecord) -
             .is_none_or(|owner| owner.as_str() == OWNER)
 }
 
-fn no_bindings(bindings: &[PrefabReferenceBinding]) -> Result<(), UpgradeError> {
-    // Both declared fields are I64 and contain no local reference slots. Even a binding
-    // named wire_health is invalid here; unknown components' bindings are never inspected.
-    if bindings.is_empty() {
-        Ok(())
-    } else {
-        Err(UpgradeError::Bindings)
-    }
-}
-
 fn convert_record(record: &mut SceneComponentRecord) -> Result<(), UpgradeError> {
     require_v1(record.version)?;
+    // The exact v1 contract has only required health/armor fields and no defaults. An
+    // explicit scalar cannot legitimize hidden contextual metadata when its version advances.
+    // Unknown owners never enter this conversion, so their complete context stays opaque.
+    if let Some(field) = record.contextual_defaults.keys().next() {
+        return Err(UpgradeError::ContextualDefault(field.clone()));
+    }
     convert_value(&mut record.value)?;
     record.version = V2;
     Ok(())
@@ -246,16 +241,6 @@ fn convert_instance(instance: &mut PrefabInstance) -> Result<(), UpgradeError> {
     // Visit the stored tree, without resolving targets, suppressions or surviving values.
     // Dormant and repeated declarations each keep their own pin and receive one conversion.
     for addition in &mut overlay.additions {
-        for (component, bindings) in &addition.bindings {
-            if component.as_str() == COMPONENT
-                && addition
-                    .components
-                    .get(component)
-                    .is_none_or(|record| affected_record(component, record))
-            {
-                no_bindings(bindings)?;
-            }
-        }
         convert_components(&mut addition.components)?;
         if let Some(nested) = &mut addition.prefab {
             convert_instance(nested)?;
@@ -269,12 +254,8 @@ fn convert_instance(instance: &mut PrefabInstance) -> Result<(), UpgradeError> {
     for intent in &mut overlay.components {
         match intent {
             PrefabComponentIntent::Set {
-                component,
-                record,
-                bindings,
-                ..
+                component, record, ..
             } if affected_record(component, record) => {
-                no_bindings(bindings)?;
                 convert_record(record)?;
             }
             PrefabComponentIntent::Properties {
@@ -309,7 +290,6 @@ fn convert_claims(claims: &mut [PrefabPropertyClaim]) -> Result<(), UpgradeError
             return Err(UpgradeError::DuplicateClaim(claim.path.root.clone()));
         }
         *seen = true;
-        no_bindings(&claim.bindings)?;
         let PrefabPropertyIntent::Set(value) = &mut claim.intent else {
             // Both fields are required without defaults. Mapping health's root absence to
             // a nested milli absence has no supported equivalent declaration.

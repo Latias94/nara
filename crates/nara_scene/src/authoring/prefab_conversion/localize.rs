@@ -402,6 +402,9 @@ fn lower(
                     EntityReference::Persistent { entity } => {
                         work.reserve(entity.namespace.as_str().len())
                     }
+                    EntityReference::Authored { .. } => Err(refused(
+                        "Conversion requires resolved compiled entity references",
+                    )),
                 };
                 // Keep budget refusal outside visit's path-bearing error wrapper.
                 reference_refusal = admitted.err();
@@ -417,6 +420,11 @@ fn lower(
                         entity: identifiers.get(entity).unwrap_or(entity).clone(),
                     },
                     EntityReference::Persistent { .. } => reference.clone(),
+                    EntityReference::Authored { .. } => {
+                        return Err(refused(
+                            "Conversion requires resolved compiled entity references",
+                        ));
+                    }
                 })
             })
             .map_err(reference_error)?;

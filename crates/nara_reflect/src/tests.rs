@@ -1834,6 +1834,32 @@ fn parallel_fork_remap_rewrites_reflected_reference_candidates_atomically() {
             entity: source_persistent,
         }
     );
+
+    let authored = EntityReference::Authored {
+        reference: nara_identity::AuthoredEntityReference::source(
+            SceneEntityId::new("player").unwrap(),
+        ),
+    };
+    let authored_value = ComponentValue::map([
+        ("peer", ComponentValue::EntityReference(authored.clone())),
+        ("persistent", original.get("persistent").unwrap().clone()),
+    ]);
+    assert!(matches!(
+        remap_declared_entity_references(
+            &schema,
+            &authored_value,
+            EntityReferenceTraversalLimits::default(),
+            locator_remap.references(),
+        ),
+        Err(ComponentEntityReferenceRewriteError::Rewrite {
+            error: nara_identity::IdentityRemapError::MissingEntityReferenceSource { reference },
+            ..
+        }) if reference == authored
+    ));
+    assert_eq!(
+        authored_value.field_entity_reference("peer").unwrap(),
+        &authored,
+    );
 }
 
 #[cfg(feature = "serde")]

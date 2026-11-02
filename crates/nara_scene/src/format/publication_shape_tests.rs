@@ -40,7 +40,10 @@ fn borrowed_publication_shape_admits_each_retained_chunk_before_copying() {
     let mut scene = document(ComponentValue::String("x".repeat(4096)), false);
     scene.entities[0].prefab = Some(crate::PrefabInstance {
         source: AssetRef::path("base.prefab.json").unwrap(),
-        overrides: None,
+        arguments: None,
+        overrides: Some(crate::PrefabOverlay::new(
+            crate::tests::named_prefab_source_key("buffer-admission"),
+        )),
     });
     scene.canonicalize();
     let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
@@ -89,7 +92,13 @@ fn certified<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) -> bool 
         .payload()
         .entity_document()
         .is_some_and(|(roots, entities)| {
-            publication_shape::certifies_entity_document(&envelope, roots, entities, limits.shape())
+            publication_shape::certifies_entity_document(
+                &envelope,
+                roots,
+                entities,
+                envelope.payload().reference_inputs(),
+                limits.shape(),
+            )
         })
 }
 
@@ -109,7 +118,7 @@ fn json_format_error_accessors_expose_only_safe_parser_facts() {
         nara_core::ByteLimit::new(64).unwrap(),
     ));
     let shaped = SceneDocumentCandidate::decode_json_bytes_with_limits(
-        br#"{"kind":"scene","format_version":1,"engine_min_version":"0.1.0","generator":{"name":"test","version":"0.1.0"},"payload":{"roots":[],"entities":[],"private-document-sentinel":"xxxxxxxxx"}}"#,
+        br#"{"kind":"scene","format_version":2,"engine_min_version":"0.1.0","generator":{"name":"test","version":"0.1.0"},"payload":{"roots":[],"entities":[],"private-document-sentinel":"xxxxxxxxx"}}"#,
         limits,
     ).unwrap_err();
     assert!(!shaped.is_syntax_error());
@@ -227,6 +236,72 @@ fn publication_shape_certificate_proves_reference_forms_against_the_complete_ora
     }
 }
 
+#[test]
+fn inline_source_key_origins_defaults_and_arguments_match_the_complete_shape_oracle() {
+    use nara_identity::{
+        AssetSourcePath, AuthoredEntityReference, AuthoredReferenceTarget, PrefabEntityOrigin,
+        PrefabInstanceHop, ReferenceInputId, SourceDocumentKey, SourceDocumentKind,
+    };
+
+    let universe = "e3818e8d-e2d8-4f67-a82f-55074d3614b2".parse().unwrap();
+    let keys = [
+        SourceDocumentKey::named(universe, "quoted\" 雪", SourceDocumentKind::Prefab).unwrap(),
+        SourceDocumentKey::project_location(
+            universe,
+            AssetSourcePath::new("Content/Prefabs/base.prefab.json").unwrap(),
+            SourceDocumentKind::Prefab,
+        ),
+        SourceDocumentKey::stable_asset(
+            "00000000-0000-4000-8000-000000000042".parse().unwrap(),
+            SourceDocumentKind::Prefab,
+        ),
+    ];
+    let input = ReferenceInputId::new("target").unwrap();
+    for key in keys {
+        for input_endpoint in [false, true] {
+            let reference = EntityReference::Authored {
+                reference: AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                        expected_base: key.clone(),
+                    }],
+                    target: if input_endpoint {
+                        AuthoredReferenceTarget::Input(input.clone())
+                    } else {
+                        AuthoredReferenceTarget::Entity(PrefabEntityOrigin::InstanceAddition(id(
+                            "added",
+                        )))
+                    },
+                },
+            };
+            let value = ComponentValue::EntityReference(reference.clone());
+            let mut scene = document(value.clone(), true);
+            scene.entities[0]
+                .components
+                .values_mut()
+                .next()
+                .unwrap()
+                .contextual_defaults
+                .insert(nara_reflect::ComponentFieldId::new("reference"), value);
+            scene.entities[0].prefab = Some(PrefabInstance {
+                source: AssetRef::path("base.prefab.json").unwrap(),
+                arguments: Some(crate::PrefabReferenceArguments {
+                    base: key.clone(),
+                    values: BTreeMap::from([(input.clone(), reference)]),
+                }),
+                overrides: None,
+            });
+            let mut prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            prefab.inputs.insert(input.clone());
+
+            assert!(certified(&scene, SceneFileLimits::default()));
+            assert!(certified(&prefab, SceneFileLimits::default()));
+            equivalent(&scene, SceneFileLimits::default());
+            shape_boundaries(&prefab);
+        }
+    }
+}
+
 fn shape_boundaries<T: SceneFilePayload>(payload: &T) {
     let base = SceneFileLimits::default();
     let shape = base.shape();
@@ -288,6 +363,7 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
     let mut embedded = document(ComponentValue::Null, false);
     embedded.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(crate::PrefabOverlay {
             components: vec![crate::PrefabComponentIntent::Properties {
                 target: crate::PrefabEntityTarget::source(id("nested")),
@@ -300,7 +376,6 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
                     intent: crate::PrefabPropertyIntent::Set(ComponentValue::String(
                         "override".into(),
                     )),
-                    bindings: vec![],
                 }],
             }],
             ..crate::PrefabOverlay::new(crate::tests::named_prefab_source_key(

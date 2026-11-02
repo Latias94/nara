@@ -27,6 +27,7 @@ use nara_engine::{
         PreparedEditorSourceToolRelease, open_explicit_product_project_root,
     },
 };
+use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
 use nara_reflect::{
     ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
@@ -34,8 +35,8 @@ use nara_reflect::{
 use nara_scene::{
     AuthoringPropertyEdit, PrefabComponentIntent, PrefabDocument, PrefabDocumentCandidate,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay,
-    PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
-    SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments, SceneComponentRecord,
+    SceneDocument, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
@@ -104,13 +105,25 @@ fn original_keys(stable_input: bool) -> [SourceDocumentKey; 3] {
 }
 
 fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [PrefabDocument; 3] {
-    let child = PrefabDocument::from_ordered_roots([named("child", "Child")]);
+    let input = ReferenceInputId::new("template-target").unwrap();
+    let mut child = PrefabDocument::from_ordered_roots([named("child", "Child")]);
+    child.inputs.insert(input.clone());
     let mut nested = named("nested", "Middle");
     nested.prefab = Some(PrefabInstance {
         source: references[2].clone(),
+        arguments: Some(PrefabReferenceArguments {
+            base: keys[2].clone(),
+            values: BTreeMap::from([(
+                input.clone(),
+                EntityReference::Authored {
+                    reference: AuthoredEntityReference::input(input.clone()),
+                },
+            )]),
+        }),
         overrides: None,
     });
-    let middle = PrefabDocument::from_ordered_roots([nested]);
+    let mut middle = PrefabDocument::from_ordered_roots([nested]);
+    middle.inputs.insert(input.clone());
     let mut overlay = PrefabOverlay::new(keys[1].clone());
     overlay.components.push(PrefabComponentIntent::Properties {
         target: PrefabEntityTarget {
@@ -125,12 +138,35 @@ fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [Pref
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("value")),
             intent: PrefabPropertyIntent::Set(ComponentValue::String("Pinned child".into())),
-            bindings: Vec::new(),
         }],
     });
     let mut entry = named("entry", ORIGINAL_NAME);
     entry.prefab = Some(PrefabInstance {
         source: references[1].clone(),
+        arguments: Some(PrefabReferenceArguments {
+            base: keys[1].clone(),
+            // This unused parameter still belongs to the complete source. Copying must
+            // remap both canonical hops even though Name never demands its target.
+            values: BTreeMap::from([(
+                input,
+                EntityReference::Authored {
+                    reference: PrefabEntityTarget {
+                        through: vec![
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("entry")),
+                                expected_base: keys[1].clone(),
+                            },
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                                expected_base: keys[2].clone(),
+                            },
+                        ],
+                        entity: PrefabEntityOrigin::SourceEntity(id("child")),
+                    }
+                    .into(),
+                },
+            )]),
+        }),
         overrides: Some(overlay),
     });
     [PrefabDocument::from_ordered_roots([entry]), middle, child]
@@ -231,6 +267,7 @@ fn native_release(stable_input: bool) -> PreparedEditorSourceToolRelease {
     let mut external = named("external", "External dependency");
     external.prefab = Some(PrefabInstance {
         source: AssetRef::path("unbound.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     payloads.insert(
@@ -523,7 +560,8 @@ fn review(prepared: &PreparedEditorSourceToolPrefabTemplateImport) -> ReviewedCo
             .unwrap()
             .into_composition_source()
             .unwrap();
-        // Whole-document equality covers local IDs, both lookup forms, base/hop pins and Name intent.
+        // Equality covers local IDs, lookup forms, overlay pins, inputs, arguments and
+        // their authored routes, including canonical hops hidden from live Name values.
         assert_eq!(actual, expected, "Incorrect native copy of {path}");
     }
     ReviewedCopy {

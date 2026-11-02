@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
+use nara_identity::ReferenceInputId;
 use nara_reflect::ComponentTypeId;
 
 use super::*;
@@ -11,6 +12,7 @@ use crate::SceneComponentRecord;
 use crate::prefab::PrefabExpansionWorkingSet;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
+mod inputs;
 mod output;
 mod reference_program;
 mod values;
@@ -108,25 +110,20 @@ struct Compiler<'root, 'context, 'owner, F, E> {
 /// Borrows the actual source topology without changing its nominal document kind.
 #[derive(Clone, Copy)]
 pub(super) struct SourceTopology<'a> {
+    pub(super) inputs: Option<&'a BTreeSet<ReferenceInputId>>,
     pub(super) roots: &'a [SceneEntityId],
     pub(super) entities: &'a [SceneEntityRecord],
 }
 
-pub(super) fn expand<F, E>(
+/// Preserves a standalone Prefab's declared input environment at the source boundary.
+pub(super) fn expand_source<F, E>(
     context: &mut PrefabExpansionContext<'_, F, E>,
-    document: &SceneDocument,
+    source: SourceTopology<'_>,
 ) -> Result<SceneDocument, PrefabExpansionFailure>
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    compile(
-        context,
-        SourceTopology {
-            roots: &document.roots,
-            entities: &document.entities,
-        },
-        None,
-    )
+    compile(context, source, None)
 }
 
 #[cfg(feature = "serde")]
@@ -254,6 +251,24 @@ where
             .and_then(|site| self.instance(site))?
             .overrides
             .as_ref()
+    }
+
+    /// Overlay targets start in the selected base; payloads start at the physical declaration.
+    fn overlay_reference_scope(&self, scope: ScopeId) -> Result<ScopeId, PrefabExpansionFailure> {
+        self.scopes[scope]
+            .site
+            .as_ref()
+            .map(|site| site.source)
+            .ok_or_else(|| PrefabExpansionFailureKind::OwnerAdmission.into())
+    }
+
+    fn record_reference_scope(&self, record: Record) -> Result<ScopeId, PrefabExpansionFailure> {
+        match record {
+            Record::Source { scope, .. } => Ok(scope),
+            Record::Addition { scope, .. } | Record::Set { scope, .. } => {
+                self.overlay_reference_scope(scope)
+            }
+        }
     }
 
     fn components(&self, record: Record) -> &BTreeMap<ComponentTypeId, SceneComponentRecord> {
@@ -514,14 +529,6 @@ where
                     .and_then(|bytes| bytes.checked_add(cost.structural_logical_bytes)),
             )?;
             let overlay = self.overlay(scope).unwrap();
-            if overlay.additions.iter().any(|addition| {
-                addition
-                    .bindings
-                    .keys()
-                    .any(|component| !addition.components.contains_key(component))
-            }) {
-                return Err(PrefabExpansionFailureKind::Reference.into());
-            }
             let mut claimed = BTreeSet::new();
             for claim in &overlay.instances {
                 if !claimed.insert(&claim.target)
@@ -980,6 +987,7 @@ where
         {
             return Err(PrefabExpansionFailureKind::SourceChanged.into());
         }
+        self.admit_input_arguments(site, &source)?;
         self.reserve_occurrence(node, &request, source.key())?;
         let state = self.state(node, &site, source.key())?;
         let mut ancestor = self.nodes[node].scope;

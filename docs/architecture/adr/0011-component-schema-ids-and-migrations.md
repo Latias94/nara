@@ -29,6 +29,14 @@ Rules:
   the immutable `ComponentRegistrySnapshot` used by readers and codec execution under ADR 0081.
 - Migrations are registered per component type and version.
 - Runtime-only components can opt out of serialization/schema.
+- Typed component-value and authored-reference discriminants serialize as literal strings, so
+  nested JSON/RON payloads retain their complete meaning regardless of tag/content field order.
+  Canonical source origins use their explicit `kind` field rather than a buffered native-enum
+  identifier. The pre-release format has one reader; no older wire interpretation is inferred.
+- Logical value cost and reference traversal work retain their distinct units. A Native Persistent
+  UUID contributes 16 logical bytes to values and 36 text bytes to reference traversal. Authored
+  references account for their complete route, canonical keys and endpoint before copying;
+  factoring the accounting cannot silently change an existing exact allowance.
 - A persistent field owns one bounded recursive value shape. Scalar numeric domains, closed
   records, lists, string-key maps, optional values and typed reference leaves share that authority.
   Opaque Map/List leaves explicitly retain manual-codec semantics without declaring nested
@@ -136,8 +144,12 @@ Current construction and admitted-read ownership, refining the original RGF-U1 s
 - `ComponentFieldId` is the durable address used by scene patches. Structured
   `ComponentFieldPath` values locate the field in the current `ComponentValue` layout only;
   display strings remain diagnostic/UI conveniences.
-- `ComponentRegistryBuilder::register_component_migration` composes one-step `ComponentValue` migrations
-  before scene/prefab preflight rejects older schema versions.
+- `ComponentRegistryBuilder::register_component_migration` composes one-step `ComponentValue`
+  migrations during source compilation before source preflight rejects older schema versions.
+  Compiled reception requires current versions and explicit effective values; it never migrates
+  values or supplies newly selected defaults after their declaration environment has been erased.
+  Processed Runtime admission retains its exact definition witness, so Native preparation does
+  not repeat its complete pure admission.
 - A successor catalog is validated only against its exact direct predecessor: generation must be
   `previous + 1`, its predecessor fingerprint must match, and migrations must connect the
   predecessor's component version to the candidate version. RGF-U1 does not store or validate an

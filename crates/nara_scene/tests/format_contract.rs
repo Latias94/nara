@@ -375,6 +375,7 @@ fn canonical_v1_rejects_embedded_operation_patches_without_a_legacy_reader() {
         let mut entity = SceneEntityRecord::new(scene_id("instance"));
         entity.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/source.ron").unwrap(),
+            arguments: None,
             overrides: Some(overlay.clone()),
         });
         entity
@@ -868,6 +869,7 @@ fn nested_prefab_addition_rejects_legacy_parent_payload() {
     });
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/nested.ron").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let mut encoded = serde_json::from_str::<serde_json::Value>(
@@ -1028,8 +1030,10 @@ fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("incoming"))
             .with_component(migrating_text_id(), legacy_text_record("x"))]);
     let encoded = incoming.to_json_string().unwrap();
-    // Complete source cost: component ID, version (4), owner flag (1), map key and string.
-    let baseline_bytes = migrating_text_id().as_str().len() + 4 + 1 + "legacy".len() + 1;
+    // Complete source cost includes the root and entity IDs, component ID, version (4),
+    // owner flag (1), map key and string.
+    let baseline_bytes =
+        2 * "incoming".len() + migrating_text_id().as_str().len() + 4 + 1 + "legacy".len() + 1;
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(baseline_bytes).unwrap());
@@ -1072,9 +1076,9 @@ fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
 #[test]
 fn prefab_and_patch_migration_growth_respects_limits_and_is_failure_atomic() {
     let registry = migrating_text_registry(64);
-    // Direct source records retain their component ID as well as record metadata and value.
+    // Direct sources retain root/entity IDs, component IDs, record metadata and values.
     let record_bytes = 4 + 1 + "legacy".len() + 1;
-    let baseline_bytes = migrating_text_id().as_str().len() + record_bytes;
+    let baseline_bytes = 2 * "incoming".len() + migrating_text_id().as_str().len() + record_bytes;
     let limits = SceneFileLimits::default()
         .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(baseline_bytes).unwrap());
@@ -1513,11 +1517,11 @@ fn prefab_candidate_preserves_version_bound_absence_without_implicit_migration()
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("note")),
             intent: PrefabPropertyIntent::Absent,
-            bindings: Vec::new(),
         }],
     });
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/nested.ron").unwrap(),
+        arguments: None,
         overrides: Some(overlay.clone()),
     });
     let incoming = PrefabDocument::from_ordered_roots([root]);
@@ -1582,11 +1586,11 @@ fn prefab_candidate_migrates_source_components_and_preserves_nested_declarations
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("text")),
             intent: PrefabPropertyIntent::Set(ComponentValue::String("nested-after".to_owned())),
-            bindings: Vec::new(),
         }],
     });
     root.prefab = Some(PrefabInstance {
         source: nested_source,
+        arguments: None,
         overrides: Some(overlay.clone()),
     });
     let encoded = PrefabDocument::from_ordered_roots([root])
@@ -2010,6 +2014,7 @@ fn prefab_anchor(id: &str, source: &str) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(scene_id(id));
     entity.prefab = Some(PrefabInstance {
         source: AssetRef::path(source).unwrap(),
+        arguments: None,
         overrides: None,
     });
     entity

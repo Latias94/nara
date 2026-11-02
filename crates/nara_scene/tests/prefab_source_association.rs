@@ -40,6 +40,7 @@ fn containing_scene(request: AssetRef) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
         source: request,
+        arguments: None,
         overrides: None,
     });
     SceneDocument::from_ordered_roots([anchor])
@@ -81,6 +82,86 @@ fn explicit_source_association_keeps_location_identity_for_all_primary_lookup_fo
         expected_ids = Some(ids);
     }
     assert_eq!(source.key(), &key);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn location_identity_survives_primary_lookup_cook_and_source_free_admission() {
+    use nara_asset::{AssetPathScope, ProjectAssetDatabase};
+    use nara_scene::{
+        RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, SceneComponentBindings,
+    };
+
+    let key = location();
+    let source = ResolvedPrefabSource::bound(document(), key.clone())
+        .with_source_asset(&record())
+        .unwrap();
+    let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+    let bindings = SceneComponentBindings::new(registry, []).unwrap();
+    let containing = SourceDocumentKey::named(
+        "39f9d09d-63e3-5fc4-8e3f-71e84893cb8d".parse().unwrap(),
+        "scenes/containing.scene.json",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap();
+    let database = ProjectAssetDatabase::default();
+    let primary = AssetProductRef::new(source_id(), ImportedProductId::PRIMARY).unwrap();
+    let mut expected_ids = None;
+    for request in [
+        AssetRef::path("leaf.prefab.json").unwrap(),
+        AssetRef::StableId(source_id()),
+        AssetRef::Product(primary),
+    ] {
+        let report = bindings
+            .try_expand_prefabs_with_loader(
+                &containing_scene(request),
+                Default::default(),
+                None,
+                |_, _| Ok::<_, Infallible>(Some(source.clone())),
+            )
+            .unwrap();
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let expanded = report.candidate.unwrap().bind_source(containing.clone());
+        let cooked = RuntimeSceneCandidate::cook(
+            &expanded,
+            &bindings,
+            database.resolver(&AssetPathScope::ROOT),
+            Default::default(),
+        )
+        .unwrap();
+        let ids = cooked
+            .document()
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect::<Vec<_>>();
+        if let Some(expected) = &expected_ids {
+            assert_eq!(
+                &ids, expected,
+                "lookup spelling cannot change canonical Runtime identity"
+            );
+        }
+        expected_ids = Some(ids);
+        let decoded = RuntimeSceneDocumentCandidate::from_json_bytes(
+            &cooked.to_json_bytes().unwrap(),
+            cooked.limits(),
+        )
+        .unwrap()
+        .admit(&containing, &bindings)
+        .unwrap();
+        assert_eq!(decoded.document(), cooked.document());
+        assert_eq!(decoded.provenance(), cooked.provenance());
+        assert!(
+            decoded
+                .provenance()
+                .values()
+                .filter_map(|origin| origin.projection_path())
+                .flat_map(|path| path.steps())
+                .any(|step| matches!(step,
+                nara_scene::PrefabProjectionStep::SourceEntity { canonical_source, .. }
+                    if canonical_source == &key))
+        );
+    }
 }
 
 #[test]

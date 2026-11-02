@@ -1251,11 +1251,8 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
         stack: &mut Vec<ReferenceTraversalFrame<'value>>,
         admission: &mut ReferenceAdmission<'_, E>,
     ) -> Result<(), ReferenceTraversalError<R, E>> {
-        let dynamic_bytes =
-            dynamic_value_bytes(value).ok_or(ComponentEntityReferenceRewriteError::ByteLimit {
-                maximum: self.limits.bytes().get(),
-            })?;
-        admission.charge(1, dynamic_bytes, 0)?;
+        let (nodes, dynamic_bytes) = dynamic_value_work_cost(value);
+        admission.charge(nodes, dynamic_bytes, 0)?;
         if let Some(segment) = segment {
             admission.reserve(&mut self.path, 1)?;
             self.path.push(segment);
@@ -1268,7 +1265,7 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
             }
             .into());
         }
-        self.observed_nodes = self.observed_nodes.checked_add(1).ok_or(
+        self.observed_nodes = self.observed_nodes.checked_add(nodes).ok_or(
             ComponentEntityReferenceRewriteError::NodeLimit {
                 maximum: self.limits.nodes().get(),
             },
@@ -1340,23 +1337,28 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
     }
 }
 
-fn dynamic_value_bytes(value: &ComponentValue) -> Option<usize> {
+// Traversal work retains text-width native UUID accounting independently of logical value cost.
+fn dynamic_value_work_cost(value: &ComponentValue) -> (usize, usize) {
     match value {
-        ComponentValue::String(value) => Some(value.len()),
-        ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
-            Some(entity.as_str().len())
+        ComponentValue::String(value) => (1, value.len()),
+        ComponentValue::EntityReference(EntityReference::Persistent { entity }) => (
+            1,
+            entity
+                .namespace
+                .as_str()
+                .len()
+                .saturating_add(PERSISTENT_RUNTIME_UUID_TEXT_BYTES),
+        ),
+        ComponentValue::EntityReference(reference) => {
+            let cost = reference.cost();
+            (cost.nodes(), cost.logical_bytes())
         }
-        ComponentValue::EntityReference(EntityReference::Persistent { entity }) => entity
-            .namespace
-            .as_str()
-            .len()
-            .checked_add(PERSISTENT_RUNTIME_UUID_TEXT_BYTES),
         ComponentValue::Null
         | ComponentValue::Bool(_)
         | ComponentValue::I64(_)
         | ComponentValue::U64(_)
         | ComponentValue::F64(_)
         | ComponentValue::List(_)
-        | ComponentValue::Map(_) => Some(0),
+        | ComponentValue::Map(_) => (1, 0),
     }
 }

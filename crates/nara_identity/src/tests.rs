@@ -1776,3 +1776,113 @@ fn entity_type_remains_local_to_lookup_results() {
     };
     assert_runtime_entity(resolved);
 }
+
+#[test]
+fn authored_references_require_source_interpretation_even_with_live_scene_context() {
+    use crate::{
+        AuthoredEntityReference, AuthoredReferenceTarget, PrefabEntityOrigin, PrefabInstanceHop,
+        ReferenceInputId, SourceDocumentKey, SourceDocumentKind,
+    };
+
+    let mut world = world_with_domain(8, 2);
+    let token = spawn_token(&mut world);
+    let instance = with_domain(&mut world, |world, domain| {
+        domain
+            .register_new_scene_instance(world, [(scene_id("player"), token)])
+            .unwrap()
+    });
+    let domain = world.resource::<WorldIdentityDomain>();
+    let before = domain.stats();
+    assert_eq!(
+        domain.resolve_entity_reference(
+            &world,
+            &EntityReference::SceneLocal {
+                entity: scene_id("player"),
+            },
+            Some(instance.instance_id()),
+        ),
+        EntityLookup::Resolved(token.entity())
+    );
+
+    let route = vec![PrefabInstanceHop {
+        anchor: PrefabEntityOrigin::SourceEntity(scene_id("player")),
+        expected_base: SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "unloaded-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap(),
+    }];
+    let foreign_world = World::new();
+    for reference in [
+        AuthoredEntityReference::source(scene_id("player")),
+        AuthoredEntityReference::addition(scene_id("player")),
+        AuthoredEntityReference::input(ReferenceInputId::new("player").unwrap()),
+        AuthoredEntityReference::source(scene_id("missing")),
+        AuthoredEntityReference {
+            through: route.clone(),
+            target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(scene_id(
+                "player",
+            ))),
+        },
+        AuthoredEntityReference {
+            through: route,
+            target: AuthoredReferenceTarget::Input(ReferenceInputId::new("player").unwrap()),
+        },
+    ] {
+        let reference = EntityReference::Authored { reference };
+        for context in [
+            None,
+            Some(instance.instance_id()),
+            Some(SceneInstanceId::new(u64::MAX).unwrap()),
+        ] {
+            assert_eq!(
+                domain.resolve_entity_reference(&world, &reference, context),
+                EntityLookup::ContextRequired
+            );
+        }
+        assert_eq!(
+            domain.resolve_entity_reference(&foreign_world, &reference, None),
+            EntityLookup::WrongWorldBinding
+        );
+    }
+    assert_eq!(domain.stats(), before);
+}
+
+#[test]
+fn runtime_remaps_do_not_interpret_authored_entity_or_input_endpoints() {
+    use crate::{AuthoredEntityReference, ReferenceInputId};
+
+    let source = RuntimeEntityReference::scene(
+        SceneInstanceId::new(1).unwrap(),
+        scene_id("player"),
+        RuntimeEntityIncarnation::new(1).unwrap(),
+    );
+    let target = RuntimeEntityReference::scene(
+        SceneInstanceId::new(2).unwrap(),
+        scene_id("remapped-player"),
+        RuntimeEntityIncarnation::new(2).unwrap(),
+    );
+    let remap = EntityReferenceRemap::complete([source.clone()], [(source, target)]).unwrap();
+    assert_eq!(
+        remap
+            .rewrite_entity_reference(&EntityReference::SceneLocal {
+                entity: scene_id("player"),
+            })
+            .unwrap(),
+        EntityReference::SceneLocal {
+            entity: scene_id("remapped-player"),
+        }
+    );
+    for reference in [
+        AuthoredEntityReference::source(scene_id("player")),
+        AuthoredEntityReference::addition(scene_id("player")),
+        AuthoredEntityReference::input(ReferenceInputId::new("player").unwrap()),
+    ] {
+        let reference = EntityReference::Authored { reference };
+        assert_eq!(
+            remap.rewrite_entity_reference(&reference),
+            Err(IdentityRemapError::MissingEntityReferenceSource { reference })
+        );
+    }
+}

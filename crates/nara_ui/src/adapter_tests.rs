@@ -4894,6 +4894,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
         children: Vec::new(),
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
+            arguments: None,
             source,
             overrides: None,
         }),

@@ -1,8 +1,11 @@
 //! Real saved dependencies preserve invalid old targets when a final pin repairs the reference.
 
-use nara_identity::EntityReference;
+use nara_identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin,
+    PrefabInstanceHop,
+};
 use nara_reflect::{ComponentPropertyPath, ComponentValueShape};
-use nara_scene::{PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding};
+use nara_scene::{PrefabPropertyClaim, PrefabPropertyIntent};
 
 use super::*;
 
@@ -63,17 +66,25 @@ fn runtime_content_resolves_repaired_reference_after_property_composition() {
                 version: ComponentSchemaVersion::ONE,
                 claims: vec![PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-                    intent: PrefabPropertyIntent::Set(reference("socket")),
-                    bindings: vec![PrefabReferenceBinding {
-                        slot: ComponentFieldPath::empty(),
-                        expected: id("socket"),
-                        target: PrefabEntityTarget::source(id("socket")),
-                    }],
+                    intent: PrefabPropertyIntent::Set(ComponentValue::EntityReference(
+                        EntityReference::Authored {
+                            reference: AuthoredEntityReference {
+                                through: vec![PrefabInstanceHop {
+                                    anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+                                    expected_base: overlay.base.clone(),
+                                }],
+                                target: AuthoredReferenceTarget::Entity(
+                                    PrefabEntityOrigin::SourceEntity(id("socket")),
+                                ),
+                            },
+                        },
+                    )),
                 }],
             });
         }
         let mut anchor = SceneEntityRecord::new(id("instance"));
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path("p.prefab.json").unwrap(),
             overrides: repair.then_some(overlay),
         });

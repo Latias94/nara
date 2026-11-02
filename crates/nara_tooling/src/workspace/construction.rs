@@ -235,6 +235,7 @@ impl EditorWorkspace {
                 actual.components.get(component).is_none_or(|value| {
                     value.version != desired.version
                         || value.value != desired.value
+                        || value.contextual_defaults != desired.contextual_defaults
                         || desired
                             .owner()
                             .is_some_and(|owner| value.owner() != Some(owner))

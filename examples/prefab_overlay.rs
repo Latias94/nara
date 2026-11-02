@@ -42,11 +42,11 @@ fn main() {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("material.tint.r")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::f64(0.25).unwrap()),
-                bindings: Vec::new(),
             }],
         });
     let declaration = PrefabInstance {
         source: source.clone(),
+        arguments: None,
         overrides: Some(overrides),
     };
     let scene = SceneDocument::from_ordered_roots([SceneEntityRecord {

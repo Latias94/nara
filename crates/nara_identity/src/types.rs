@@ -8,7 +8,7 @@ use nara_ecs::Component;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::IdentityAllocationError;
+use crate::{AuthoredEntityReference, IdentityAllocationError};
 
 pub const MAX_PERSISTENT_RUNTIME_NAMESPACE_BYTES: usize = 256;
 
@@ -341,14 +341,22 @@ impl PersistentRuntimeReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(
     feature = "serde",
     serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)
 )]
 pub enum EntityReference {
-    SceneLocal { entity: SceneEntityId },
-    Persistent { entity: PersistentRuntimeReference },
+    SceneLocal {
+        entity: SceneEntityId,
+    },
+    Persistent {
+        entity: PersistentRuntimeReference,
+    },
+    /// Requires Scene's lexical source interpretation before runtime lookup or activation.
+    Authored {
+        reference: AuthoredEntityReference,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

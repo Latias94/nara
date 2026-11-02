@@ -147,14 +147,18 @@ fn admitted_plan_matches_existing_slots_and_preserves_typed_rewrite_semantics() 
     plan.rewrite_in_place(&mut rewritten, |_, reference| {
         Ok::<_, ()>(match reference {
             EntityReference::SceneLocal { .. } => local("localized"),
-            EntityReference::Persistent { .. } => reference.clone(),
+            EntityReference::Persistent { .. } | EntityReference::Authored { .. } => {
+                reference.clone()
+            }
         })
     })
     .unwrap();
     plan.visit(&value, |path, reference| {
         let expected = match reference {
             EntityReference::SceneLocal { .. } => local("localized"),
-            EntityReference::Persistent { .. } => reference.clone(),
+            EntityReference::Persistent { .. } | EntityReference::Authored { .. } => {
+                reference.clone()
+            }
         };
         assert_eq!(
             rewritten.get_path(path).unwrap().as_entity_reference(),

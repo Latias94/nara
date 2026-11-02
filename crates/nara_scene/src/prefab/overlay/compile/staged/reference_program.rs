@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
+use nara_identity::AuthoredEntityReference;
 use nara_reflect::__private::{DeclaredEntityReferencePlan, plan_declared_entity_references};
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldPath, ComponentFieldPathSegment,
@@ -11,20 +12,21 @@ use nara_reflect::{
     EntityReference,
 };
 
-use super::{Compiler, NodeId, ScopeId, target_clone_bytes};
+use super::inputs::{InputFailure, ReferenceResolution, ResolvedReference, authored_clone_bytes};
+use super::{Compiler, NodeId, ScopeId};
 use crate::prefab::overlay::properties::PropertyReferenceReplacement;
 use crate::prefab::{PrefabExpansionWorkingSet, PrefabReferenceRemapError};
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabEntityTarget, PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabOverlaySlot,
-    ResolvedPrefabSource, SceneEntityId,
+    PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabOverlaySlot, ResolvedPrefabSource,
+    SceneEntityId,
 };
 
 pub(super) struct ScopedReference {
     scope: ScopeId,
-    target: PrefabEntityTarget,
-    slot: Option<PrefabOverlaySlot>,
-    pub(super) resolved: Option<NodeId>,
+    target: AuthoredEntityReference,
+    declaration: Option<(ScopeId, PrefabOverlaySlot)>,
+    pub(super) resolved: Option<ResolvedReference>,
 }
 
 pub(super) type ReferenceOrigins = BTreeMap<ComponentFieldPath, ScopedReference>;
@@ -36,26 +38,21 @@ pub(super) struct ReferenceProgram {
 
 pub(super) type ReferencePrograms = BTreeMap<NodeId, BTreeMap<ComponentTypeId, ReferenceProgram>>;
 
-enum ReferenceResolution {
-    Entered,
-    Invalid(PrefabExpansionFailureKind),
-    Node(NodeId),
-}
-
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
     F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    pub(super) fn source_reference_origins(
+    pub(super) fn record_reference_origins(
         &mut self,
         schema: &ComponentSchema,
         value: &ComponentValue,
         scope: ScopeId,
+        declaration: Option<(ScopeId, PrefabOverlaySlot)>,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
     ) -> Result<ReferenceProgram, PrefabExpansionFailure> {
         let cost = value.cost();
-        let limits = self.value_program_limits(cost)?;
+        let limits = self.value_program_limits();
         self.reserve_value_reference_work(schema, cost, limits)?;
         let plan = plan_declared_entity_references::<PrefabReferenceRemapError>(
             schema,
@@ -65,31 +62,39 @@ where
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
         let mut bytes = Some(0usize);
         plan.visit(value, |path, reference| {
-            if let EntityReference::SceneLocal { entity } = reference {
-                bytes = bytes.and_then(|bytes| {
-                    bytes
-                        .checked_add(origin_entry_bytes(path)?)?
-                        .checked_add(size_of::<PrefabEntityTarget>())?
-                        .checked_add(provenance_string_bytes(entity.as_str())?)
-                });
-            }
+            let target_bytes = match reference {
+                EntityReference::SceneLocal { entity } => provenance_string_bytes(entity.as_str())
+                    .and_then(|bytes| bytes.checked_add(size_of::<AuthoredEntityReference>())),
+                EntityReference::Authored { reference } => authored_clone_bytes(reference),
+                EntityReference::Persistent { .. } => return Ok(()),
+            };
+            bytes = bytes.and_then(|bytes| {
+                bytes
+                    .checked_add(origin_entry_bytes(path)?)?
+                    .checked_add(target_bytes?)
+            });
             Ok(())
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
         self.admit(bytes)?;
         let mut origins = BTreeMap::new();
         plan.visit(value, |path, reference| {
-            if let EntityReference::SceneLocal { entity } = reference {
-                origins.insert(
-                    path.clone(),
-                    ScopedReference {
-                        scope,
-                        target: PrefabEntityTarget::source(entity.clone()),
-                        slot: None,
-                        resolved: None,
-                    },
-                );
-            }
+            let target = match reference {
+                EntityReference::SceneLocal { entity } => {
+                    AuthoredEntityReference::source(entity.clone())
+                }
+                EntityReference::Authored { reference } => reference.clone(),
+                EntityReference::Persistent { .. } => return Ok(()),
+            };
+            origins.insert(
+                path.clone(),
+                ScopedReference {
+                    scope,
+                    target,
+                    declaration,
+                    resolved: None,
+                },
+            );
             Ok(())
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
@@ -99,65 +104,34 @@ where
         })
     }
 
-    pub(super) fn scope_reference_bindings(
-        &mut self,
-        bindings: BTreeMap<ComponentFieldPath, PrefabEntityTarget>,
-        scope: ScopeId,
-        slot: Option<PrefabOverlaySlot>,
-    ) -> Result<ReferenceProgram, PrefabExpansionFailure> {
-        self.admit(
-            bindings
-                .len()
-                .checked_mul(size_of::<ScopedReference>() + 128),
-        )?;
-        let origins = bindings
-            .into_iter()
-            .map(|(path, target)| {
-                (
-                    path,
-                    ScopedReference {
-                        scope,
-                        target,
-                        slot,
-                        resolved: None,
-                    },
-                )
-            })
-            .collect();
-        Ok(ReferenceProgram {
-            origins,
-            plan: None,
-        })
-    }
-
     pub(super) fn replace_reference_origins(
         &mut self,
         origins: &mut ReferenceOrigins,
         replacements: Vec<PropertyReferenceReplacement>,
-        scope: ScopeId,
+        record_scope: ScopeId,
+        claim_scope: ScopeId,
         component_index: usize,
     ) -> Result<(), PrefabExpansionFailure> {
+        let lexical_claim_scope = self.overlay_reference_scope(claim_scope)?;
         for (claim_index, replacement) in replacements.into_iter().enumerate() {
             // The same Reflect operation selected this actual storage prefix. Equality
             // of bare values cannot preserve the old declaration's reference meaning.
             self.admit(
-                origins
+                replacement
+                    .references
                     .keys()
                     .try_fold(0usize, |bytes, path| {
-                        bytes.checked_add(origin_entry_bytes(path)?)
-                    })
-                    .and_then(|bytes| {
-                        replacement
-                            .references
-                            .keys()
-                            .try_fold(bytes, |bytes, path| {
-                                bytes
-                                    .checked_add(origin_entry_bytes(&replacement.path)?)?
-                                    .checked_add(path_storage_bytes(path)?)
-                            })
+                        bytes
+                            .checked_add(origin_entry_bytes(&replacement.path)?)?
+                            .checked_add(path_storage_bytes(path)?)
                     }),
             )?;
             origins.retain(|path, _| !path.segments().starts_with(replacement.path.segments()));
+            let scope = if replacement.inherited_default {
+                record_scope
+            } else {
+                lexical_claim_scope
+            };
             for (path, target) in replacement.references {
                 let path = ComponentFieldPath::new(
                     replacement
@@ -172,10 +146,13 @@ where
                     ScopedReference {
                         scope,
                         target,
-                        slot: Some(PrefabOverlaySlot::Property {
-                            component_index,
-                            claim_index,
-                        }),
+                        declaration: Some((
+                            claim_scope,
+                            PrefabOverlaySlot::Property {
+                                component_index,
+                                claim_index,
+                            },
+                        )),
                         resolved: None,
                     },
                 );
@@ -205,12 +182,12 @@ where
                 .map_err(|error| self.source_value_reference_error(entity, component, &error))?
             }
         };
-        let mut local_count = 0usize;
+        let mut scoped_count = 0usize;
         let mut complete = true;
         plan.visit(value, |path, reference| {
             match reference {
-                EntityReference::SceneLocal { .. } => {
-                    local_count = local_count.saturating_add(1);
+                EntityReference::SceneLocal { .. } | EntityReference::Authored { .. } => {
+                    scoped_count = scoped_count.saturating_add(1);
                     complete &= program.origins.contains_key(path);
                 }
                 EntityReference::Persistent { .. } => {
@@ -220,7 +197,7 @@ where
             Ok(())
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
-        if !complete || local_count != program.origins.len() {
+        if !complete || scoped_count != program.origins.len() {
             return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
         }
         program.plan = Some(plan);
@@ -232,13 +209,6 @@ where
         &mut self,
         programs: &mut ReferencePrograms,
     ) -> Result<bool, PrefabExpansionFailure> {
-        self.admit(programs.values().try_fold(0usize, |bytes, components| {
-            components.values().try_fold(bytes, |bytes, program| {
-                program.origins.values().try_fold(bytes, |bytes, origin| {
-                    bytes.checked_add(target_clone_bytes(&origin.target)?)
-                })
-            })
-        }))?;
         // Do not reject a stale leaf before another surviving leaf has had a chance to
         // open a scope and trigger structural/program recomposition.
         for components in programs.values() {
@@ -256,78 +226,48 @@ where
         for (node, components) in programs {
             for (component, program) in components {
                 for (path, origin) in &mut program.origins {
-                    let target = match self.reference_target(origin.scope, &origin.target)? {
-                        ReferenceResolution::Node(target) => target,
-                        ReferenceResolution::Invalid(reason) => {
-                            return Err(self
-                                .reference_target_failure(*node, component, path, origin, reason));
+                    let (resolved, declaring_scope) =
+                        match self.reference_target(origin.scope, &origin.target)? {
+                            ReferenceResolution::Resolved {
+                                reference,
+                                declaring_scope,
+                            } => (reference, declaring_scope),
+                            ReferenceResolution::Invalid { reason, input } => {
+                                return Err(self.reference_target_failure(
+                                    *node, component, path, origin, reason, input,
+                                ));
+                            }
+                            ReferenceResolution::Entered => {
+                                return Ok(false);
+                            }
+                        };
+                    if let ResolvedReference::Local(target) = &resolved {
+                        if !self.scopes[declaring_scope].output.contains(target) {
+                            return Err(self.reference_target_failure(
+                                *node,
+                                component,
+                                path,
+                                origin,
+                                PrefabExpansionFailureKind::MissingTarget,
+                                None,
+                            ));
                         }
-                        ReferenceResolution::Entered => {
-                            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+                        if !self.scopes[0].output.contains(target) {
+                            return Err(self.reference_target_failure(
+                                *node,
+                                component,
+                                path,
+                                origin,
+                                PrefabExpansionFailureKind::Reference,
+                                None,
+                            ));
                         }
-                    };
-                    if !self.scopes[origin.scope].output.contains(&target) {
-                        return Err(self.reference_target_failure(
-                            *node,
-                            component,
-                            path,
-                            origin,
-                            PrefabExpansionFailureKind::MissingTarget,
-                        ));
                     }
-                    if !self.scopes[0].output.contains(&target) {
-                        return Err(self.reference_target_failure(
-                            *node,
-                            component,
-                            path,
-                            origin,
-                            PrefabExpansionFailureKind::Reference,
-                        ));
-                    }
-                    origin.resolved = Some(target);
+                    origin.resolved = Some(resolved);
                 }
             }
         }
         Ok(true)
-    }
-
-    fn reference_target(
-        &mut self,
-        scope: ScopeId,
-        target: &PrefabEntityTarget,
-    ) -> Result<ReferenceResolution, PrefabExpansionFailure> {
-        let mut current = scope;
-        for hop in &target.through {
-            let Some(&anchor) = self.scopes[current].nodes.get(&hop.anchor) else {
-                return Ok(ReferenceResolution::Invalid(
-                    PrefabExpansionFailureKind::MissingTarget,
-                ));
-            };
-            let previous = self.scopes.len();
-            let entered = self.open_slot(anchor)?;
-            if previous != self.scopes.len() {
-                return Ok(ReferenceResolution::Entered);
-            }
-            let Some(entered) = entered else {
-                return Ok(ReferenceResolution::Invalid(
-                    PrefabExpansionFailureKind::MissingTarget,
-                ));
-            };
-            current = entered;
-            if self.scopes[current]
-                .source
-                .as_ref()
-                .is_none_or(|source| source.key() != &hop.expected_base)
-            {
-                return Ok(ReferenceResolution::Invalid(
-                    PrefabExpansionFailureKind::SourceChanged,
-                ));
-            }
-        }
-        Ok(match self.scopes[current].nodes.get(&target.entity) {
-            Some(&node) => ReferenceResolution::Node(node),
-            None => ReferenceResolution::Invalid(PrefabExpansionFailureKind::MissingTarget),
-        })
     }
 
     fn reference_target_failure(
@@ -337,9 +277,13 @@ where
         path: &ComponentFieldPath,
         origin: &ScopedReference,
         reason: PrefabExpansionFailureKind,
+        input: Option<(ScopeId, InputFailure)>,
     ) -> PrefabExpansionFailure {
-        let failure = if reason == PrefabExpansionFailureKind::Reference
-            || (origin.slot.is_none() && reason == PrefabExpansionFailureKind::MissingTarget)
+        let failure = if let Some((scope, failure)) = input {
+            self.push_input_failure(failure);
+            self.scope_failure(scope, None, reason.into())
+        } else if reason == PrefabExpansionFailureKind::Reference
+            || (origin.declaration.is_none() && reason == PrefabExpansionFailureKind::MissingTarget)
         {
             let bytes = path_storage_bytes(path).and_then(|bytes| {
                 bytes.checked_add(provenance_string_bytes(
@@ -359,8 +303,8 @@ where
         } else {
             reason.into()
         };
-        if origin.slot.is_some() {
-            self.scope_failure(origin.scope, origin.slot, failure)
+        if let Some((scope, slot)) = origin.declaration {
+            self.scope_failure(scope, Some(slot), failure)
         } else {
             failure
         }

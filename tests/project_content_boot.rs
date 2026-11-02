@@ -345,6 +345,7 @@ fn assets_that_complete_the_catalogue_reconcile_already_expanded_prefab_metadata
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     project.write_scene_source(&SceneDocument::from_ordered_roots([
@@ -975,6 +976,7 @@ fn stable_native_identity_rejects_two_prefab_paths_with_one_identity() {
             let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
             anchor.prefab = Some(PrefabInstance {
                 source: AssetRef::path(path).unwrap(),
+                arguments: None,
                 overrides: None,
             });
             anchor
@@ -1054,6 +1056,7 @@ fn later_stable_prefab_reference_retains_metadata_for_an_already_loaded_path() {
     let mut nested = SceneEntityRecord::new(scene_id("nested"));
     nested.prefab = Some(PrefabInstance {
         source: AssetRef::StableId(stable_id),
+        arguments: None,
         overrides: None,
     });
     project.write_prefab(
@@ -1068,6 +1071,7 @@ fn later_stable_prefab_reference_retains_metadata_for_an_already_loaded_path() {
                 let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
                 anchor.prefab = Some(PrefabInstance {
                     source: AssetRef::path(path).unwrap(),
+                    arguments: None,
                     overrides: None,
                 });
                 anchor

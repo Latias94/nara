@@ -2313,6 +2313,7 @@ fn browser_prefab_persistence_round_trips_through_a_fresh_anchored_document() {
             let mut anchor = SceneEntityRecord::new(id("anchor"));
             anchor.prefab = Some(nara::scene::PrefabInstance {
                 source: nara::asset::AssetRef::path("shared.prefab.json").unwrap(),
+                arguments: None,
                 overrides: Default::default(),
             });
             fs::write(

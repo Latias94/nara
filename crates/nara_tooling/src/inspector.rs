@@ -1,4 +1,7 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+};
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
@@ -7,7 +10,6 @@ use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
-    effective_component_value,
 };
 use nara_scene::{
     AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, PrefabAuthoringSession,
@@ -485,6 +487,14 @@ impl SceneInspectorCommand {
         if component.version == schema.version {
             return Ok(patch);
         }
+        if !component.contextual_defaults.is_empty() {
+            return Err(component_migration_diagnostic(
+                entity_id,
+                component_id,
+                component.version,
+                schema.version,
+            ));
+        }
 
         let migrated = registry
             .migrate_component_value(component_id, component.version, &component.value)
@@ -500,7 +510,12 @@ impl SceneInspectorCommand {
         operations.push(ScenePatchOperation::ReplaceComponent {
             entity: entity_id.clone(),
             component: component_id.clone(),
-            value: SceneComponentRecord::new(migrated.version, migrated.value),
+            value: SceneComponentRecord {
+                owner: component.owner.clone(),
+                version: migrated.version,
+                value: migrated.value,
+                contextual_defaults: component.contextual_defaults.clone(),
+            },
         });
         operations.extend(patch.operations);
         Ok(ScenePatchDocument::new(operations))
@@ -798,10 +813,10 @@ fn build_entity_view(
                                     fact,
                                 ));
                             }
-                            let effective = match effective_component_value(
+                            let effective = match inspector_effective_component_value(
                                 schema,
+                                component,
                                 &component.value,
-                                ComponentValueMaterializationLimits::default(),
                             ) {
                                 Ok(effective) => effective,
                                 Err(error) => {
@@ -836,10 +851,10 @@ fn build_entity_view(
                     if !schema.has_capability(ComponentCapability::Inspect) {
                         return None;
                     }
-                    let effective = match effective_component_value(
+                    let effective = match inspector_effective_component_value(
                         schema,
+                        component,
                         &component.value,
-                        ComponentValueMaterializationLimits::default(),
                     ) {
                         Ok(effective) => effective,
                         Err(error) => {
@@ -878,16 +893,25 @@ fn build_entity_view(
             if !schema.has_capability(ComponentCapability::Inspect) {
                 return None;
             }
+            if component.version != schema.version() && !component.contextual_defaults.is_empty() {
+                diagnostics.push(component_migration_diagnostic(
+                    &entity.id,
+                    component_id,
+                    component.version,
+                    schema.version(),
+                ));
+                return None;
+            }
             match registry.migrate_component_value(
                 component_id,
                 component.version,
                 &component.value,
             ) {
                 Ok(migrated) => {
-                    let effective = match effective_component_value(
+                    let effective = match inspector_effective_component_value(
                         schema,
+                        component,
                         &migrated.value,
-                        ComponentValueMaterializationLimits::default(),
                     ) {
                         Ok(effective) => effective,
                         Err(error) => {
@@ -978,7 +1002,12 @@ fn build_component_view(
         schema_version: schema.version,
         access,
         capabilities: schema.capabilities.clone(),
-        fields: build_field_views(schema, raw_value, effective_value),
+        fields: build_field_views(
+            schema,
+            raw_value,
+            effective_value,
+            &component.contextual_defaults,
+        ),
     }
 }
 
@@ -1059,12 +1088,20 @@ fn build_field_views(
     schema: &ComponentSchema,
     raw_value: &ComponentValue,
     effective_value: &ComponentValue,
+    defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
 ) -> Vec<SceneInspectorFieldView> {
     schema
         .fields
         .iter()
         .filter(|field| field.has_capability(ComponentCapability::Inspect))
-        .map(|field| build_field_view(field, raw_value, effective_value))
+        .map(|field| {
+            build_field_view(
+                field,
+                raw_value,
+                effective_value,
+                defaults.get(field.id()).or(field.default_value()),
+            )
+        })
         .collect()
 }
 
@@ -1072,6 +1109,7 @@ fn build_field_view(
     field: &ComponentFieldSchema,
     raw_value: &ComponentValue,
     effective_value: &ComponentValue,
+    default_value: Option<&ComponentValue>,
 ) -> SceneInspectorFieldView {
     match raw_value.get_path(&field.path) {
         Ok(_) => SceneInspectorFieldView {
@@ -1082,7 +1120,7 @@ fn build_field_view(
             shape: field.shape().clone(),
             required: field.required,
             capabilities: field.capabilities.clone(),
-            default_value: field.default_value.clone(),
+            default_value: default_value.cloned(),
             value: effective_value.get_path(&field.path).ok().cloned(),
             state: SceneInspectorFieldState::Present,
         },
@@ -1103,12 +1141,29 @@ fn build_field_view(
                 shape: field.shape().clone(),
                 required: field.required,
                 capabilities: field.capabilities.clone(),
-                default_value: field.default_value.clone(),
+                default_value: default_value.cloned(),
                 value: effective.ok().cloned(),
                 state,
             }
         }
     }
+}
+
+fn inspector_effective_component_value<'value>(
+    schema: &ComponentSchema,
+    record: &SceneComponentRecord,
+    value: &'value ComponentValue,
+) -> Result<Cow<'value, ComponentValue>, nara_reflect::ComponentCodecError> {
+    let limits = ComponentValueMaterializationLimits::default();
+    nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+        schema,
+        value,
+        &record.contextual_defaults,
+        limits.nodes().get(),
+        limits.bytes().get(),
+        limits.depth(),
+    )
+    .map(|(value, _)| value)
 }
 
 fn inspector_effective_value_diagnostic(
@@ -1360,7 +1415,7 @@ mod tests {
     }
 
     #[test]
-    fn source_local_entity_reference_inspector_edit_exposes_shape_and_history() {
+    fn source_entity_reference_inspector_edit_preserves_contextual_defaults_and_history() {
         use nara_reflect::{
             AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldPath,
             ComponentFieldSchema, ComponentSchemaCatalog, PersistentComponentSchemaOwnerId,
@@ -1371,11 +1426,14 @@ mod tests {
         let component = ComponentTypeId::new("studio.Link");
         let schema = ComponentSchema::new(component.clone(), "Link", ComponentSchemaVersion::ONE)
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-            .with_fields([ComponentFieldSchema::required(
+            .with_fields([ComponentFieldSchema::optional_with_default(
                 ComponentFieldId::new("target"),
                 "Target",
                 ComponentFieldPath::from_fields(["target"]),
                 ComponentValueShape::EntityRef,
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: scene_id("schema-template-target"),
+                }),
             )
             .with_capabilities(ComponentCapability::SCENE_AUTHORING)
             .with_capability(ComponentCapability::EntityRef)]);
@@ -1396,6 +1454,9 @@ mod tests {
         let source = scene_id("source");
         let target = scene_id("target");
         let other = scene_id("other");
+        let contextual_default = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: nara_identity::AuthoredEntityReference::source(target.clone()),
+        });
         let document = SceneDocument::from_ordered_roots([
             SceneEntityRecord::new(source.clone()).with_component(
                 component.clone(),
@@ -1408,7 +1469,11 @@ mod tests {
                         }),
                     )]),
                 )
-                .with_owner(owner),
+                .with_owner(owner)
+                .with_contextual_default(
+                    ComponentFieldId::new("target"),
+                    contextual_default.clone(),
+                ),
             ),
             SceneEntityRecord::new(target.clone()),
             SceneEntityRecord::new(other.clone()),
@@ -1436,7 +1501,11 @@ mod tests {
             .find(|candidate| candidate.component == component)
             .unwrap()
             .fields[0];
-        assert_eq!(field.shape, ComponentValueShape::EntityRef);
+        assert_eq!(
+            field.shape,
+            ComponentValueShape::optional(ComponentValueShape::EntityRef)
+        );
+        assert_eq!(field.default_value.as_ref(), Some(&contextual_default));
         assert!(field.capabilities.contains(&ComponentCapability::Edit));
 
         let command = SceneInspectorCommand::SetField {
@@ -1457,6 +1526,24 @@ mod tests {
         assert_eq!(session.document(), &original);
         assert_eq!(session.history_status().redo_depth, 1);
         assert!(session.redo_authoring().applied);
+        let pinned = session.document().clone();
+        let reset = inspector.apply_authoring_command(
+            &mut session,
+            SceneInspectorCommand::RemoveField {
+                entity: source.clone(),
+                component: component.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("target"),
+            },
+        );
+        assert!(reset.applied, "{:#?}", reset.diagnostics);
+        let model = inspector.authoring_model_with_selection(&session, Some(&source));
+        let field = &model.selected_entity_view.as_ref().unwrap().components[0].fields[0];
+        assert_eq!(field.state, SceneInspectorFieldState::Defaulted);
+        assert_eq!(field.value.as_ref(), Some(&contextual_default));
+        assert_eq!(field.default_value.as_ref(), Some(&contextual_default));
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &pinned);
 
         let before = (
             session.document().clone(),

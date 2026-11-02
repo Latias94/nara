@@ -1083,12 +1083,7 @@ impl ExportReferenceTarget<'_> {
 }
 
 fn export_reference_bytes(reference: &EntityReference) -> usize {
-    match reference {
-        EntityReference::SceneLocal { entity } => entity.as_str().len(),
-        EntityReference::Persistent { entity } => {
-            entity.namespace.as_str().len().saturating_add(16)
-        }
-    }
+    reference.cost().logical_bytes()
 }
 
 fn resolve_export_reference<'a>(
@@ -1102,6 +1097,9 @@ fn resolve_export_reference<'a>(
         reference,
         domain.resolve_entity_reference(world, reference, Some(owner_instance)),
     ) {
+        (EntityReference::Authored { .. }, _) => {
+            Err(ExportReferenceResolutionError::InvalidIdentityState)
+        }
         (EntityReference::SceneLocal { .. }, EntityLookup::Resolved(target)) => {
             let locators = domain
                 .locators_for_entity(world, target)

@@ -3,7 +3,9 @@ use super::*;
 use crate::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceBinding,
+};
+use nara_identity::{
+    AuthoredEntityReference, EntityReference, PrefabEntityOrigin, PrefabInstanceHop,
 };
 
 fn scene_input(document: SceneDocument, limits: SceneFileLimits) -> SceneDocumentCandidate {
@@ -16,6 +18,7 @@ fn scene_input(document: SceneDocument, limits: SceneFileLimits) -> SceneDocumen
 
 fn prefab_input(document: SceneDocument, limits: SceneFileLimits) -> PrefabDocumentCandidate {
     let document = PrefabDocument {
+        inputs: Default::default(),
         roots: document.roots,
         entities: document.entities,
     };
@@ -68,7 +71,6 @@ fn dormant_document() -> SceneDocument {
             ComponentValue::String("preserve this dormant future value".into()),
         )
         .with_owner(owner()),
-        bindings: Vec::new(),
     });
     nested.components.push(PrefabComponentIntent::Properties {
         target: target.clone(),
@@ -77,14 +79,24 @@ fn dormant_document() -> SceneDocument {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("retired-property"))
                 .with_steps([ComponentPropertyStep::MapEntry("opaque-key".into())]),
-            intent: PrefabPropertyIntent::Set(ComponentValue::List(vec![ComponentValue::String(
-                "preserve unresolved selector".into(),
-            )])),
-            bindings: vec![PrefabReferenceBinding {
-                slot: ComponentFieldPath::empty(),
-                expected: entity(),
-                target: target.clone(),
-            }],
+            intent: PrefabPropertyIntent::Set(ComponentValue::List(vec![
+                ComponentValue::String("preserve unresolved selector".into()),
+                ComponentValue::EntityReference(EntityReference::Authored {
+                    reference: AuthoredEntityReference {
+                        through: vec![
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(entity()),
+                                expected_base: key(SourceDocumentKind::Prefab),
+                            },
+                            PrefabInstanceHop {
+                                anchor: target.entity.clone(),
+                                expected_base: key(SourceDocumentKind::Prefab),
+                            },
+                        ],
+                        ..AuthoredEntityReference::source(SceneEntityId::new("not-loaded").unwrap())
+                    },
+                }),
+            ])),
         }],
     });
     let mut addition = PrefabAddition::new(SceneEntityId::new("dormant-addition").unwrap());
@@ -101,14 +113,38 @@ fn dormant_document() -> SceneDocument {
         target,
         value: Some(PrefabInstance {
             source: AssetRef::path("prefabs/not-read.prefab.json").unwrap(),
+            arguments: None,
             overrides: Some(nested),
         }),
     });
     document.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/not-present.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(outer),
     });
     document
+}
+
+#[test]
+fn unopened_prefab_admission_preserves_declared_inputs_through_the_scene_projection() {
+    let fixture = Fixture::new();
+    let scene = known_document();
+    let mut document = PrefabDocument::new(scene.roots, scene.entities);
+    document
+        .inputs
+        .insert(nara_identity::ReferenceInputId::new("external-target").unwrap());
+    let candidate =
+        PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap();
+    let source =
+        AuthoringDocumentSource::new(AssetRef::path("prefabs/unopened.prefab.json").unwrap());
+    let mut work = AuthoredSchemaUpgradeWork::default();
+    let (session, retained) =
+        admit_authored_upgrade_prefab_source(candidate, source, &fixture.previous, &mut work)
+            .unwrap();
+
+    assert_eq!(session.document(), &document);
+    assert_eq!(retained.kind, SourceDocumentKind::Prefab);
 }
 
 #[test]

@@ -374,6 +374,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
     let project = independent_project();
     let mut root = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
     root.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
     });
@@ -736,6 +737,7 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
         let project = independent_project();
         let anchor_id = SceneEntityId::new("anchor").unwrap();
         let plain = PrefabInstance {
+            arguments: None,
             source: AssetRef::path("outer.prefab.json").unwrap(),
             overrides: None,
         };
@@ -767,9 +769,9 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
                     ComponentValue::map([("value", value)]),
                 )
                 .with_owner(installed_owner().owner_id().clone()),
-                bindings: Vec::new(),
             });
             PrefabInstance {
+                arguments: None,
                 source: plain.source.clone(),
                 overrides: Some(overlay),
             }
@@ -939,6 +941,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
     let project = independent_project();
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
     });
@@ -969,7 +972,6 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
             )]),
         )
         .with_owner(installed_owner().owner_id().clone()),
-        bindings: Vec::new(),
     });
     anchor.prefab.as_mut().unwrap().overrides = Some(overlay);
     let saved = SceneDocument::from_ordered_roots([anchor]);

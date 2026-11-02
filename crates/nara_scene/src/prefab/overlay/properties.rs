@@ -1,27 +1,26 @@
 //! Schema-relative property pins evaluated against one immutable inherited value.
 
+use nara_identity::AuthoredEntityReference;
 use std::collections::BTreeMap;
 
 use nara_reflect::__private::{
     ComponentPropertyAdmissionError, resolve_component_property_storage_path_with_admission,
 };
 use nara_reflect::{
-    ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema,
-    ComponentPropertyError, ComponentPropertyPath, ComponentPropertyStep, ComponentSchema,
-    ComponentSchemaVersion, ComponentValue, ComponentValueMaterializationLimits,
-    ComponentValueShape, effective_component_value_owned, resolve_component_property_with_limits,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
+    ComponentFieldSchema, ComponentPropertyError, ComponentPropertyPath, ComponentPropertyStep,
+    ComponentSchema, ComponentSchemaVersion, ComponentValue, ComponentValueMaterializationLimits,
+    ComponentValueShape, resolve_component_property_with_limits,
 };
 
 #[cfg(test)]
-use crate::SceneEntityId;
+use crate::{PrefabEntityTarget, SceneEntityId};
 
 use super::components::{
-    check_value_cost, codec_failure, effective_value, reserve_cost, shape_failure, validate_value,
+    check_value_cost, codec_failure, reserve_cost, shape_failure, validate_value,
 };
-use super::references::plan_property_bindings;
-use super::{
-    PrefabEntityTarget, PrefabExpansionFailureKind, PrefabPropertyClaim, PrefabPropertyIntent,
-};
+use super::references::plan_property_references;
+use super::{PrefabExpansionFailureKind, PrefabPropertyClaim, PrefabPropertyIntent};
 
 #[cfg(test)]
 #[path = "properties/owned_candidate_tests.rs"]
@@ -32,7 +31,8 @@ mod owned_candidate_tests;
 #[derive(Debug)]
 pub(super) struct PropertyReferenceReplacement {
     pub(super) path: ComponentFieldPath,
-    pub(super) references: BTreeMap<ComponentFieldPath, PrefabEntityTarget>,
+    pub(super) references: BTreeMap<ComponentFieldPath, AuthoredEntityReference>,
+    pub(super) inherited_default: bool,
 }
 
 #[derive(Debug)]
@@ -48,6 +48,7 @@ pub(super) fn prepare_claims(
     schema: &ComponentSchema,
     version: ComponentSchemaVersion,
     original: &ComponentValue,
+    contextual_defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
     claims: &[PrefabPropertyClaim],
     limits: ComponentValueMaterializationLimits,
     mut admit_path: impl FnMut(usize) -> Result<(), PrefabExpansionFailureKind>,
@@ -73,7 +74,9 @@ pub(super) fn prepare_claims(
         // Reserve introduced payloads before cloning. Actual target-ID growth is admitted
         // after all suffixes select the final references, before their final rewrite.
         if matches!(&claim.intent, PrefabPropertyIntent::Absent)
-            && let Some(default) = field.default_value()
+            && let Some(default) = contextual_defaults
+                .get(field.id())
+                .or(field.default_value())
         {
             let cost = default
                 .cost_up_to(limits.nodes().get(), limits.bytes().get())
@@ -89,7 +92,7 @@ pub(super) fn prepare_claims(
         }
     }
     let base_limits = reserve_cost(limits, nodes, bytes)?;
-    let base = effective_value(schema, original, base_limits)?;
+    let base = effective_value(schema, original, contextual_defaults, base_limits)?;
 
     // Every selector observes the same base. A Set cannot manufacture another claim's target.
     for (claim, field) in claims.iter().zip(&fields) {
@@ -99,9 +102,6 @@ pub(super) fn prepare_claims(
                     || (field.required && field.default_value().is_none())
                 {
                     return Err(PrefabExpansionFailureKind::Component);
-                }
-                if field.default_value().is_none() && !claim.bindings.is_empty() {
-                    return Err(PrefabExpansionFailureKind::Reference);
                 }
                 require_map_parent(original, field, true)?;
             }
@@ -140,19 +140,19 @@ pub(super) fn prepare_claims(
     for (claim, field) in claims.iter().zip(&fields) {
         match &claim.intent {
             PrefabPropertyIntent::Absent => {
-                let references = match field.default_value() {
-                    Some(default) => plan_property_bindings(
-                        field,
-                        field.shape(),
-                        default,
-                        &claim.bindings,
-                        limits,
-                    )?,
+                let references = match contextual_defaults
+                    .get(field.id())
+                    .or(field.default_value())
+                {
+                    Some(default) => {
+                        plan_property_references(field, field.shape(), default, limits)?
+                    }
                     None => BTreeMap::new(),
                 };
                 replacements.push(PropertyReferenceReplacement {
                     path: clone_storage_path(field.path(), &mut admit_path)?,
                     references,
+                    inherited_default: true,
                 });
                 if !root_missing(&candidate, field)? {
                     candidate
@@ -174,8 +174,7 @@ pub(super) fn prepare_claims(
                     .map_err(property_failure)?
                     .shape
                 };
-                let references =
-                    plan_property_bindings(field, shape, value, &claim.bindings, limits)?;
+                let references = plan_property_references(field, shape, value, limits)?;
                 let storage = if claim.path.steps.is_empty() {
                     clone_storage_path(field.path(), &mut admit_path)?
                 } else {
@@ -195,13 +194,15 @@ pub(super) fn prepare_claims(
                 replacements.push(PropertyReferenceReplacement {
                     path: storage,
                     references,
+                    inherited_default: false,
                 });
                 if root_missing(&candidate, field)? {
                     let initial = if claim.path.steps.is_empty() {
                         value
                     } else {
-                        field
-                            .default_value()
+                        contextual_defaults
+                            .get(field.id())
+                            .or(field.default_value())
                             .ok_or(PrefabExpansionFailureKind::Component)?
                     };
                     candidate
@@ -227,7 +228,7 @@ pub(super) fn prepare_claims(
             }
         }
     }
-    let effective = effective_value(schema, &candidate, limits)?;
+    let effective = effective_value(schema, &candidate, contextual_defaults, limits)?;
     for claim in claims {
         preserve_enclosing_keys(schema, version, &base, &effective, &claim.path, limits)?;
     }
@@ -237,9 +238,17 @@ pub(super) fn prepare_claims(
     // waits until subsequent outer pins have finished; inherited leaves retain their scopes.
     for (claim, field) in claims.iter().zip(&fields) {
         if matches!(&claim.intent, PrefabPropertyIntent::Absent)
-            && let Some(default) = field.default_value()
+            && let Some(default) = contextual_defaults
+                .get(field.id())
+                .or(field.default_value())
         {
-            candidate = effective_component_value_owned(schema, candidate, limits)
+            candidate =
+                nara_reflect::__private::effective_component_value_owned_with_default_overrides(
+                    schema,
+                    candidate,
+                    contextual_defaults,
+                    limits,
+                )
                 .map_err(codec_failure)?;
             candidate
                 .set_path(field.path(), default.clone())
@@ -264,12 +273,26 @@ pub(super) fn apply_claims(
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<ComponentValue, PrefabExpansionFailureKind> {
-    let prepared = prepare_claims(schema, version, original, claims, limits, |_| Ok(()))?;
+    let prepared = prepare_claims(
+        schema,
+        version,
+        original,
+        &BTreeMap::new(),
+        claims,
+        limits,
+        |_| Ok(()),
+    )?;
     let mut value = prepared.value;
     for replacement in prepared.replacements {
         for (relative, target) in replacement.references {
+            let nara_identity::AuthoredReferenceTarget::Entity(entity) = target.target else {
+                return Err(PrefabExpansionFailureKind::Reference);
+            };
             let target = targets
-                .get(&target)
+                .get(&PrefabEntityTarget {
+                    through: target.through,
+                    entity,
+                })
                 .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
             let path = ComponentFieldPath::new(
                 replacement
@@ -290,6 +313,26 @@ pub(super) fn apply_claims(
         }
     }
     check_value_cost(&value, limits)?;
+    Ok(value)
+}
+
+fn effective_value<'value>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    contextual_defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<std::borrow::Cow<'value, ComponentValue>, PrefabExpansionFailureKind> {
+    let (value, _) =
+        nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+            schema,
+            value,
+            contextual_defaults,
+            limits.nodes().get(),
+            limits.bytes().get(),
+            limits.depth(),
+        )
+        .map_err(codec_failure)?;
+    validate_value(schema, &value, limits)?;
     Ok(value)
 }
 
@@ -534,12 +577,18 @@ mod failure_mapping_tests {
             effective_value(
                 &schema,
                 &ComponentValue::map([] as [(&str, ComponentValue); 0]),
+                &BTreeMap::new(),
                 limits
             ),
             Err(PrefabExpansionFailureKind::WorkLimit)
         );
         assert_eq!(
-            effective_value(&schema, &ComponentValue::Bool(false), limits),
+            effective_value(
+                &schema,
+                &ComponentValue::Bool(false),
+                &BTreeMap::new(),
+                limits
+            ),
             Err(PrefabExpansionFailureKind::Component)
         );
     }

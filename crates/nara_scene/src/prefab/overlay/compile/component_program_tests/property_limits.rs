@@ -79,7 +79,7 @@ fn large_sources() -> InMemoryPrefabSourceResolver {
         request("base"),
         key("base"),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("host"))
-            .with_component(large_component(), record(large_value()))]),
+            .with_component(large_component(), effective_record(large_value()))]),
     )
 }
 
@@ -92,7 +92,6 @@ fn large_scene(root: &str, value: ComponentValue) -> SceneDocument {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new(root)),
             intent: PrefabPropertyIntent::Set(value),
-            bindings: Vec::new(),
         }],
     });
     scene(overlay)
@@ -215,9 +214,8 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
     let sources = InMemoryPrefabSourceResolver::new().with_prefab(
         request("base"),
         key("base"),
-        PrefabDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("host")).with_component(large_component(), record(value))
-        ]),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("host"))
+            .with_component(large_component(), effective_record(value))]),
     );
     let limits = PrefabExpansionLimits::default()
         .with_working_bytes(ByteLimit::new(40 * 1024 * 1024).unwrap());
@@ -233,7 +231,6 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
                         nara_reflect::ComponentPropertyStep::MapEntry(format!("key_{index}",)),
                     ]),
                     intent: PrefabPropertyIntent::Set(ComponentValue::U64(7)),
-                    bindings: Vec::new(),
                 })
                 .collect(),
         });

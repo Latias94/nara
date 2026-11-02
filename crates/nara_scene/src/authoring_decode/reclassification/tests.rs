@@ -189,6 +189,7 @@ fn tiny_allowance_refuses_before_value_validation_or_source_copy() {
     assert!(result.is_err());
     assert_eq!(stages, ["classification-source"]);
     let prefab = PrefabDocument {
+        inputs: Default::default(),
         roots: document.roots.clone(),
         entities: document.entities.clone(),
     };
@@ -345,6 +346,54 @@ fn scalar_defaults_are_admitted_even_without_asset_facts() {
 }
 
 #[test]
+fn contextual_defaults_admit_omitted_canonical_fallback_before_copying() {
+    let mut schema = schema();
+    schema.fields[0].default_value = Some(ComponentValue::String("x".repeat(64 * 1024)));
+    let peer = ComponentFieldId::new("peer");
+    schema.fields.push(
+        ComponentFieldSchema::optional_with_default(
+            peer.clone(),
+            "Peer",
+            ComponentFieldPath::from_fields(["peer"]),
+            ComponentValueShape::optional(ComponentValueShape::EntityRef),
+            ComponentValue::Null,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_capability(ComponentCapability::EntityRef),
+    );
+    let mut source = document(ComponentValue::Map(BTreeMap::new()));
+    source.entities[0]
+        .components
+        .get_mut(&component())
+        .unwrap()
+        .contextual_defaults
+        .insert(peer, ComponentValue::Null);
+    let original = source.clone();
+    let previous = classify(&source, &empty_basis());
+    let successor = basis(schema);
+    let refusal = structure::authoring_structure_rejection("default copy refused");
+    let mut admitted = 0usize;
+    let mut refused_stage = None;
+    let result = previous.reclassify(
+        &source,
+        &successor,
+        &DeclarationExtension,
+        &mut |stage, bytes| {
+            let next = bytes.and_then(|bytes| admitted.checked_add(bytes));
+            if next.is_none_or(|bytes| bytes > 32 * 1024) {
+                refused_stage = Some(stage);
+                return Err(refusal.clone());
+            }
+            admitted = next.unwrap();
+            Ok(())
+        },
+    );
+    assert_eq!(result.unwrap_err(), refusal);
+    assert_eq!(refused_stage, Some("classification-defaults"));
+    assert_eq!(source, original);
+}
+
+#[test]
 fn fixed_scalar_overlay_claims_charge_schema_scans_and_refuse_in_the_selector_walk() {
     use crate::{
         PrefabComponentIntent, PrefabOverlay, SceneAuthoringSession, SchemaReclassificationLimits,
@@ -369,13 +418,13 @@ fn fixed_scalar_overlay_claims_charge_schema_scans_and_refuse_in_the_selector_wa
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("value")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::String("retained".into())),
-                bindings: Vec::new(),
             }],
         });
     }
     let mut root = SceneEntityRecord::new(id());
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/selector-base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let source = SceneDocument::from_ordered_roots([root]);

@@ -222,10 +222,10 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
             ComponentValue::String("Pinned name".to_owned()),
         )
         .with_owner(owner),
-        bindings: Vec::new(),
     });
     source_entity.prefab = Some(PrefabInstance {
         source: nested_source.clone(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let source_scene = SceneDocument::from_ordered_roots([source_entity.clone()]);
@@ -706,7 +706,6 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("enabled")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::Bool(false)),
-                bindings: Vec::new(),
             }],
         });
     let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord {
@@ -722,6 +721,7 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
         )]),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+            arguments: None,
             overrides: Some(overrides),
         }),
     }]);

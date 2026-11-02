@@ -94,11 +94,30 @@ impl UpgradeSourceValidation<'_, '_> {
     fn record(
         &mut self,
         schema: &ComponentSchema,
-        value: &ComponentValue,
+        record: &SceneComponentRecord,
     ) -> Result<(), ScenePatchReport> {
+        let effective = nara_reflect::__private::effective_component_value_with_default_overrides_with_admission(
+            schema,
+            &record.value,
+            &record.contextual_defaults,
+            self.limits.component_materialization_limits(),
+            |nodes, bytes, allocated| {
+                charge_validation(
+                    self.admit,
+                    "authored-upgrade-record-defaults",
+                    nodes,
+                    bytes,
+                    allocated,
+                )
+            },
+        )
+        .map_err(|error| match error {
+            nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
+            nara_reflect::__private::EffectiveValueAdmissionError::Value(_) => refused(),
+        })?;
         nara_reflect::__private::validate_component_value_with_admission(
             schema,
-            value,
+            effective.as_ref(),
             self.limits.component_materialization_limits(),
             |nodes, bytes, allocated| {
                 charge_validation(
@@ -142,12 +161,20 @@ impl UpgradeSourceValidation<'_, '_> {
             PrefabPropertyIntent::Set(value) => Some(value),
             PrefabPropertyIntent::Absent if claim.path.steps.is_empty() => {
                 let default = selected.field.default_value();
-                if (selected.field.required && default.is_none())
-                    || (default.is_none() && !claim.bindings.is_empty())
-                {
+                if selected.field.required && default.is_none() {
                     return Err(refused());
                 }
-                default
+                // The claim does not own the target record's contextual default environment.
+                // Validate the declaration here; the compiler selects its existing default.
+                if selected
+                    .field
+                    .shape()
+                    .contains_kind(nara_reflect::ComponentValueKind::EntityRef)
+                {
+                    None
+                } else {
+                    default
+                }
             }
             PrefabPropertyIntent::Absent => return Err(refused()),
         };
@@ -365,17 +392,39 @@ impl AuthoredFieldUpgrade {
         if old.owner != next.owner
             || old.version != old_version
             || next.version != next_version
+            // This proof changes one required field with no default. Every contextual
+            // declaration therefore belongs to an unchanged field and must remain exact.
+            || old.contextual_defaults != next.contextual_defaults
             || !preserves_outside(&old.value, &next.value, self.storage_path().segments())
         {
             return Err(refused());
         }
+        for (basis, record) in [(&self.previous, old), (&self.successor, next)] {
+            let schema = basis.schema(&self.component).ok_or_else(refused)?;
+            for (field, value) in &record.contextual_defaults {
+                let cost = value.cost();
+                charge_validation(
+                    validation.admit,
+                    "authored-upgrade-contextual-defaults",
+                    cost.nodes().saturating_add(1),
+                    cost.logical_bytes().saturating_add(field.as_str().len()),
+                    0,
+                )?;
+            }
+            crate::document::validate_contextual_defaults(
+                schema,
+                record,
+                validation.limits.component_materialization_limits(),
+            )
+            .map_err(|_| refused())?;
+        }
         validation.record(
             self.previous.schema(&self.component).ok_or_else(refused)?,
-            &old.value,
+            old,
         )?;
         validation.record(
             self.successor.schema(&self.component).ok_or_else(refused)?,
-            &next.value,
+            next,
         )?;
         Ok(())
     }
@@ -408,7 +457,9 @@ impl AuthoredFieldUpgrade {
     ) -> Result<(), ScenePatchReport> {
         match (old, next) {
             (None, None) => Ok(()),
-            (Some(old), Some(next)) if old.source == next.source => {
+            (Some(old), Some(next))
+                if old.source == next.source && old.arguments == next.arguments =>
+            {
                 match (&old.overrides, &next.overrides) {
                     (None, None) => Ok(()),
                     (Some(old), Some(next)) => self.overlay(old, next, validation),
@@ -435,7 +486,7 @@ impl AuthoredFieldUpgrade {
             return Err(refused());
         }
         for (old, next) in old.additions.iter().zip(&next.additions) {
-            if old.id != next.id || old.bindings != next.bindings {
+            if old.id != next.id {
                 return Err(refused());
             }
             self.components(&old.components, &next.components, validation)?;
@@ -467,20 +518,17 @@ impl AuthoredFieldUpgrade {
                     target,
                     component,
                     record,
-                    bindings,
                 },
                 PrefabComponentIntent::Set {
                     mode: next_mode,
                     target: next_target,
                     component: next_component,
                     record: next_record,
-                    bindings: next_bindings,
                 },
             ) if component == &self.component
                 && component == next_component
                 && mode == next_mode
-                && target == next_target
-                && bindings == next_bindings =>
+                && target == next_target =>
             {
                 self.record(record, next_record, validation)
             }
@@ -511,7 +559,6 @@ impl AuthoredFieldUpgrade {
                             || next.path != self.next_property
                             || !matches!(old.intent, PrefabPropertyIntent::Set(_))
                             || !matches!(next.intent, PrefabPropertyIntent::Set(_))
-                            || old.bindings != next.bindings
                         {
                             return Err(refused());
                         }
@@ -606,7 +653,9 @@ impl AuthoringDocumentState {
         upgrade: &AuthoredFieldUpgrade,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
-        if self.document_kind() != AuthoringDocumentKind::Prefab {
+        if self.document_kind() != AuthoringDocumentKind::Prefab
+            || original.inputs != candidate.inputs
+        {
             return Err(refused());
         }
         self.validate_authored_upgrade(

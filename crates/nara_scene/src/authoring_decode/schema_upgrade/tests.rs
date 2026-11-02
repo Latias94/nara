@@ -163,12 +163,10 @@ fn properties(next: bool, empty: bool) -> PrefabComponentIntent {
                     } else {
                         23
                     })),
-                    bindings: vec![],
                 },
                 PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("armor")),
                     intent: PrefabPropertyIntent::Set(ComponentValue::I64(7)),
-                    bindings: vec![],
                 },
             ]
         },
@@ -180,6 +178,7 @@ fn document(next: bool) -> SceneDocument {
     nested.components = vec![properties(next, false), properties(next, true)];
     let nested = PrefabInstance {
         source: AssetRef::path("nested.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(nested),
     };
     let mut overlay = PrefabOverlay::new(base());
@@ -197,6 +196,7 @@ fn document(next: bool) -> SceneDocument {
         .with_component(ComponentTypeId::new(COMPONENT), record(next));
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("outer.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     SceneDocument::from_ordered_roots([
@@ -228,7 +228,15 @@ fn prepare(
     candidate: &SceneDocument,
     upgrade: &AuthoredFieldUpgrade,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
-    classify(original, &upgrade.previous).prepare_authored_upgrade(
+    let source = SceneDocumentCandidate::decode_json_str(&original.to_json_string().unwrap())
+        .unwrap()
+        .admit_authoring_with_basis(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/upgrade.scene.json").unwrap()),
+            &upgrade.previous,
+        )
+        .map_err(reclassification::publication_report)?
+        .publish();
+    Arc::unwrap_or_clone(source.into_parts().1).prepare_authored_upgrade(
         original,
         candidate,
         upgrade,
@@ -247,6 +255,200 @@ fn direct_nested_and_dormant_declarations_upgrade_together_without_interpreting_
     assert_eq!(next.readiness(), AuthoringDocumentReadiness::Degraded);
     assert_eq!(next.unavailable_manifest().record_count(), 1);
     assert_eq!(original.entities[1], candidate.entities[1]);
+}
+
+#[test]
+fn required_field_upgrade_preserves_and_revalidates_unrelated_hidden_contextual_defaults() {
+    let peer = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("peer"),
+        "Peer",
+        ComponentFieldPath::from_fields(["peer"]),
+        ComponentValueShape::optional(ComponentValueShape::EntityRef),
+        ComponentValue::Null,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_capability(ComponentCapability::EntityRef);
+    let with_peer = |next, peer| {
+        let mut initial = value(next);
+        initial
+            .set_path(
+                &ComponentFieldPath::from_fields(["peer"]),
+                ComponentValue::Null,
+            )
+            .unwrap();
+        schema(next)
+            .with_fields([peer])
+            .with_authoring_initial_value(initial)
+    };
+    let (previous, successor) =
+        bases_with_schemas(with_peer(false, peer.clone()), with_peer(true, peer));
+    let upgrade = upgrade(previous, successor);
+    let document = |next| {
+        let mut record = record(next).with_contextual_default(
+            ComponentFieldId::new("peer"),
+            ComponentValue::EntityReference(nara_identity::EntityReference::Authored {
+                reference: nara_identity::AuthoredEntityReference::source(id("hidden_target")),
+            }),
+        );
+        record
+            .value
+            .set_path(
+                &ComponentFieldPath::from_fields(["peer"]),
+                ComponentValue::Null,
+            )
+            .unwrap();
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("root"))
+            .with_component(ComponentTypeId::new(COMPONENT), record)])
+    };
+    let original = document(false);
+    let candidate = document(true);
+    let admitted = prepare(&original, &candidate, &upgrade).unwrap();
+    assert_eq!(admitted.schema_basis(), upgrade.successor);
+    let mut changed = candidate.clone();
+    changed.entities[0]
+        .components
+        .get_mut(&ComponentTypeId::new(COMPONENT))
+        .unwrap()
+        .contextual_defaults
+        .insert(ComponentFieldId::new("peer"), ComponentValue::Null);
+    assert!(prepare(&original, &changed, &upgrade).is_err());
+    assert_eq!(original, document(false));
+    assert_eq!(candidate, document(true));
+}
+
+fn omitted_peer_fixture() -> (AuthoredFieldUpgrade, SceneDocument, SceneDocument) {
+    let peer = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("peer"),
+        "Peer",
+        ComponentFieldPath::from_fields(["peer"]),
+        ComponentValueShape::list(ComponentValueShape::EntityRef),
+        ComponentValue::List(vec![
+            ComponentValue::EntityReference(
+                EntityReference::SceneLocal { entity: id("root") }
+            );
+            512
+        ]),
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_capability(ComponentCapability::EntityRef);
+    let with_peer = |next, peer| {
+        let mut initial = value(next);
+        initial
+            .set_path(
+                &ComponentFieldPath::from_fields(["peer"]),
+                ComponentValue::List(Vec::new()),
+            )
+            .unwrap();
+        schema(next)
+            .with_fields([peer])
+            .with_authoring_initial_value(initial)
+    };
+    let (previous, successor) =
+        bases_with_schemas(with_peer(false, peer.clone()), with_peer(true, peer));
+    let document = |next| {
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("root")).with_component(
+            ComponentTypeId::new(COMPONENT),
+            record(next).with_contextual_default(
+                ComponentFieldId::new("peer"),
+                ComponentValue::List(Vec::new()),
+            ),
+        )])
+    };
+    (
+        upgrade(previous, successor),
+        document(false),
+        document(true),
+    )
+}
+
+#[test]
+fn required_field_upgrade_uses_omitted_contextual_defaults_with_small_document_limits() {
+    let (upgrade, original, candidate) = omitted_peer_fixture();
+    let before = (original.clone(), candidate.clone());
+    let limits = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(32).unwrap());
+    let published = SceneDocumentCandidate::decode_json_bytes_with_limits(
+        original.to_json_string().unwrap().as_bytes(),
+        limits,
+    )
+    .unwrap()
+    .admit_authoring_with_basis(
+        AuthoringDocumentSource::new(AssetRef::path("scenes/upgrade.scene.json").unwrap()),
+        &upgrade.previous,
+    )
+    .unwrap()
+    .publish();
+    let state = Arc::unwrap_or_clone(published.into_parts().1);
+    let admitted = state
+        .prepare_authored_upgrade(&original, &candidate, &upgrade, &mut |_, bytes| {
+            bytes.map(|_| ()).ok_or_else(refused)
+        })
+        .unwrap();
+    assert_eq!(admitted.schema_basis(), upgrade.successor);
+    assert_eq!(admitted.file_limits(), limits);
+    assert_eq!((original, candidate), before);
+}
+
+#[test]
+fn contextual_record_validation_obeys_value_and_owner_budgets() {
+    let (upgrade, original, candidate) = omitted_peer_fixture();
+    let component = ComponentTypeId::new(COMPONENT);
+    let records = [
+        (
+            upgrade.previous.schema(&component).unwrap(),
+            &original.entities[0].components[&component],
+        ),
+        (
+            upgrade.successor.schema(&component).unwrap(),
+            &candidate.entities[0].components[&component],
+        ),
+    ];
+    let validate = |nodes, admit: &mut reclassification::AdmissionCallback<'_>| {
+        let limits =
+            SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(nodes).unwrap());
+        let mut validation = UpgradeSourceValidation {
+            limits,
+            selectors: ComponentPropertyReadBudget::new(
+                limits.component_value_nodes(),
+                limits.component_value_bytes(),
+            ),
+            admit,
+        };
+        for &(schema, record) in &records {
+            validation.record(schema, record)?;
+        }
+        Ok::<(), ScenePatchReport>(())
+    };
+    // The effective old record owns four nodes; the successor's nested health owns one more.
+    validate(5, &mut |_, _| Ok(())).unwrap();
+    assert_eq!(validate(4, &mut |_, _| Ok(())).unwrap_err(), refused());
+
+    let mut required = 0usize;
+    validate(32, &mut |_, bytes| {
+        required = required
+            .checked_add(bytes.ok_or_else(refused)?)
+            .ok_or_else(refused)?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(required > 0);
+    let owner_refusal = structure::authoring_structure_rejection(
+        "The project owner refused contextual record validation work",
+    );
+    for (allowance, succeeds) in [(required, true), (required - 1, false)] {
+        let mut remaining = allowance;
+        let result = validate(32, &mut |_, bytes| {
+            remaining = bytes
+                .and_then(|bytes| remaining.checked_sub(bytes))
+                .ok_or_else(|| owner_refusal.clone())?;
+            Ok(())
+        });
+        if succeeds {
+            result.unwrap();
+            assert_eq!(remaining, 0);
+        } else {
+            assert_eq!(result.unwrap_err(), owner_refusal);
+        }
+    }
 }
 
 #[test]
@@ -335,7 +537,6 @@ fn replace_intent(record: SceneComponentRecord) -> PrefabComponentIntent {
         target: PrefabEntityTarget::source(id("enemy")),
         component: ComponentTypeId::new(COMPONENT),
         record,
-        bindings: vec![],
     }
 }
 
@@ -440,7 +641,6 @@ fn an_unchanged_unknown_selector_cannot_hide_in_an_upgraded_batch() {
         claims.push(PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("missing")),
             intent: PrefabPropertyIntent::Set(ComponentValue::I64(1)),
-            bindings: vec![],
         });
         overlay_mut(document).components.push(intent);
     }
@@ -487,6 +687,7 @@ fn validation_returns_the_original_owner_admission_refusal() {
     let candidate = document(true);
     let state = classify(&original, &upgrade.previous);
     for refused_stage in [
+        "authored-upgrade-record-defaults",
         "authored-upgrade-record-validation",
         "authored-upgrade-property-paths",
         "authored-upgrade-property-path-index",

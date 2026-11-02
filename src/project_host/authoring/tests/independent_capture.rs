@@ -108,6 +108,7 @@ fn component() -> ComponentTypeId {
 
 fn instance(name: &str) -> PrefabInstance {
     PrefabInstance {
+        arguments: None,
         source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
         overrides: None,
     }

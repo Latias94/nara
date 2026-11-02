@@ -37,11 +37,13 @@ fn document() -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("ordinary")]);
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/relationships.prefab.ron").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let mut unrelated = SceneEntityRecord::new(id("unrelated"));
     unrelated.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/missing.prefab.ron").unwrap(),
+        arguments: None,
         overrides: None,
     });
     SceneDocument::new(

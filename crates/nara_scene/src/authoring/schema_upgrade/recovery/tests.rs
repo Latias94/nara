@@ -147,12 +147,10 @@ fn properties(next: bool, empty: bool) -> PrefabComponentIntent {
                     } else {
                         23
                     })),
-                    bindings: vec![],
                 },
                 PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("armor")),
                     intent: PrefabPropertyIntent::Set(ComponentValue::I64(7)),
-                    bindings: vec![],
                 },
             ]
         },
@@ -164,6 +162,7 @@ fn document(next: bool) -> SceneDocument {
     nested.components = vec![properties(next, false), properties(next, true)];
     let nested = PrefabInstance {
         source: AssetRef::path("missing-nested.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(nested),
     };
     let mut overlay = PrefabOverlay::new(base());
@@ -182,12 +181,12 @@ fn document(next: bool) -> SceneDocument {
         target: PrefabEntityTarget::source(id("enemy")),
         component: ComponentTypeId::new(COMPONENT),
         record: record(next),
-        bindings: vec![],
     });
     let mut root = SceneEntityRecord::new(id("root"))
         .with_component(ComponentTypeId::new(COMPONENT), record(next));
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("missing-outer.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     SceneDocument::from_ordered_roots([

@@ -535,6 +535,7 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
         let mut entity = named(name, name);
         entity.prefab = Some(PrefabInstance {
             source: AssetRef::path(PREFAB).unwrap(),
+            arguments: None,
             overrides: None,
         });
         entity

@@ -102,6 +102,12 @@ root, placement and inline-reference replacement; value relocation alone does no
   intent or refusal; a hidden old default must not reconnect the copy to its original source.
   Lossless Save of unavailable records does not grant the interpretation authority needed for
   copying a reference closure. Unbound external dependencies require explicit bindings or refusal.
+  Declared Prefab inputs remain parameters during whole-source copying. The copy owner admits
+  complete source grammar, structure, declared-reference semantics and the explicit remap; it
+  does not invent independent mounts or arguments for each copied member. A real containing
+  source validates its actual arguments, overrides, routes and termination through the existing
+  shared compiler. Copy success is source admission, not an executable or universally mountable
+  closure. A mapped canonical key alone does not prove its occurrence route matches a real use.
 - Prefab-expanded write-back must explicitly edit the true owning source, change the chosen
   containing instance's override, or convert the selected projection into local data. Each path
   needs its own qualified source transaction. Writing a whole expanded entity back as if it were
@@ -140,10 +146,14 @@ root, placement and inline-reference replacement; value relocation alone does no
   inventory. Its intent slot is present only when the compiler establishes that slot. Budget,
   loading and authority failures must not acquire a fabricated anchor or a guessed repair target.
   Source declaration discovery remains available independently of successful expansion.
-- Property resolution and owned replacement receive the compiler's admitted residual value limits.
-  Reflection's standalone arbitrary-value defaults do not impose a second hidden payload ceiling
-  on a component that the composition owner already admitted. Selector/Schema admission and
-  complete final value/reference validation remain mandatory under ADR 0011.
+- Source normalization, property resolution and default materialization use the compiler's finite
+  working allowance. Authored routes and contextual defaults can exceed the final resolved value;
+  intermediate copies and validation scratch are admitted before allocation. Final materialized
+  node/byte limits count only surviving values with their actual lowered references, once across
+  the complete result. Defaults and explicit pins use the same aggregate limit and diagnostics;
+  prior normalization order does not select another counter. Selector/Schema admission and
+  complete final value/reference validation remain mandatory under ADR 0011. Reflection's
+  standalone defaults do not impose a second hidden payload ceiling on an admitted program.
 - Reverting one claim removes its authored intent rather than writing the current effective value.
   Removing the final property claim removes its empty property-intent container, but preserves an
   explicit empty overlay and its base pin. Explicit overlay removal sets `overrides` to `None`
@@ -207,12 +217,15 @@ flowchart TD
   retain its required registry authority and match the prepared definition; standalone consumers
   may retain the definition without keeping the caller's registry variable alive. Target-bound
   native-retirement custody remains a later stage with its existing explicit cleanup obligation.
-- Expanded materialization input binds the immutable document and its complete provenance in one
-  owner-created candidate. Public spawn/replacement APIs do not accept independently assembled
-  document/map pairs. The candidate also requires the containing `SourceDocumentKey`; a plain-scene
-  constructor explicitly supplies that key and local provenance. Pure document expansion remains
-  independent of runtime placement and yields an immutable expanded document that its source owner
-  binds before materialization. No bare-document or optional-source persistent spawn path remains.
+- Compiled materialization input binds the closed flat document and its complete canonical
+  provenance in one owner-created candidate. Public spawn/replacement APIs do not accept source
+  documents or independently assembled document/map pairs. Strict compilation remains independent
+  of runtime placement; its source owner explicitly binds the containing `SourceDocumentKey`
+  before materialization. Ordinary no-Prefab documents use the same strict compiler with an empty
+  resolver. There is no unchecked plain-scene constructor or optional-source persistent spawn path.
+  Schema-only authoring expansion remains a separate immutable semantic observation. Native preview
+  applies its actual presentation restrictions before sealing a complete compiled projection;
+  binding a source to an authoring observation cannot confer execution authority.
 - First materialization requires an explicit logical occurrence namespace and slot. Runtime source
   records carry both the containing source and that occurrence alongside the existing exact
   activation and document-relative provenance. Exact replacement reuses the predecessor's

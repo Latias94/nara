@@ -34,6 +34,7 @@ fn instance(name: &str, additions: usize) -> PrefabInstance {
     }
     PrefabInstance {
         source: AssetRef::path(format!("prefabs/{name}.prefab.json")).unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -378,25 +379,25 @@ fn complete_snapshot_owner_bytes_have_an_inclusive_history_ceiling() {
             .with_owner(
                 nara_reflect::PersistentComponentSchemaOwnerId::try_new("test.owner").unwrap(),
             ),
-        bindings: Vec::new(),
     });
     let declaration = PrefabInstance {
         source: AssetRef::path("p").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     };
     let mut anchor = SceneEntityRecord::new(id("a"));
     anchor.prefab = Some(declaration.clone());
     let document = SceneDocument::from_ordered_roots([anchor]);
     let patch = ScenePatchDocument::new([set("a", Some(declaration.clone()), Some(declaration))]);
-    // Target "a" plus both snapshots: source wire-value claim (14), Named base (18 + 7),
+    // Target "a" plus both snapshots: source wire-value claim (14), Named base (37 + 7),
     // component intent/mode (2), target "e" with origin (2), component "c" (1),
     // record version/owner flag (5), owner "test.owner" (10). Null has no payload bytes.
-    for bytes in [119, 118] {
+    for bytes in [157, 156] {
         let limits = SceneAuthoringHistoryLimits::new(8, 32, 64, 1024, 16, 64, bytes).unwrap();
         let session = open(&document, limits);
         let revision = session.revision();
         let result = session.prepare_authoring_edit(revision, &patch);
-        if bytes == 119 {
+        if bytes == 157 {
             assert!(result.is_ok());
         } else {
             assert!(result.is_err());

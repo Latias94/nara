@@ -311,7 +311,7 @@ fn processed_scene(
         "kind":"runtime_scene","format_version":1,"engine_min_version":"0.1.0",
         "generator":{"name":"runtime-image-consumer","version":"0.0.0"},
         "payload":{
-            "source_key":{"kind":"scene","origin":{"stable_asset":{"stable_id":"@SCENE@"}}},
+            "source_key":{"kind":"scene","origin":{"kind":"stable_asset","stable_id":"@SCENE@"}},
             "roots":["portrait"],
             "entities":[{"id":"portrait","children":[],"components":{
                 "consumer.runtime-image.Portrait":{"version":1,"value":{

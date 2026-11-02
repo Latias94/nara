@@ -31,6 +31,7 @@ fn anchor(source: AssetRef) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source,
+        arguments: None,
         overrides: None,
     });
     anchor
@@ -354,7 +355,6 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
             intent: PrefabPropertyIntent::Set(ComponentValue::I64(9)),
-            bindings: Vec::new(),
         }],
     });
     document.entities[0].prefab.as_mut().unwrap().overrides = Some(overlay);

@@ -22,6 +22,7 @@ fn source_document() -> SceneDocument {
         .push(PrefabEntityTarget::source(entity_id("inherited")));
     let mut addition = PrefabAddition::new(entity_id("nested"));
     addition.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("prefabs/nested.prefab.json").unwrap(),
         overrides: Some(PrefabOverlay::new(base)),
     });
@@ -32,6 +33,7 @@ fn source_document() -> SceneDocument {
     });
     let mut anchor = SceneEntityRecord::new(entity_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         overrides: Some(overlay),
     });

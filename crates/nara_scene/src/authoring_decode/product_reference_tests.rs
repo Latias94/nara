@@ -248,6 +248,7 @@ fn nested_primary_prefab_conversion_retains_product_inventory_provenance_and_his
     let mut nested = SceneEntityRecord::new(id("nested"));
     nested.prefab = Some(PrefabInstance {
         source: inner_ref.clone(),
+        arguments: None,
         overrides: None,
     });
     let outer = ResolvedPrefabSource::bound_authoring_source(
@@ -258,6 +259,7 @@ fn nested_primary_prefab_conversion_retains_product_inventory_provenance_and_his
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: product(true),
+        arguments: None,
         overrides: None,
     });
     let original = SceneDocument::from_ordered_roots([anchor]);
@@ -328,6 +330,7 @@ fn auxiliary_prefab_sources_refuse_before_loader_and_primary_requires_matching_s
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: product(false),
+        arguments: None,
         overrides: None,
     });
     let auxiliary = SceneDocument::from_ordered_roots([anchor]);

@@ -128,6 +128,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         let mut anchor = SceneEntityRecord::new(local(name));
         anchor.prefab = Some(PrefabInstance {
             source: request,
+            arguments: None,
             overrides: None,
         });
         anchor
@@ -157,6 +158,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
         let mut anchor = SceneEntityRecord::new(local("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: request,
+            arguments: None,
             overrides: None,
         });
         let expanded =
@@ -597,7 +599,11 @@ fn prefab_anchor(
     overrides: Option<PrefabOverlay>,
 ) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(local_id(id));
-    anchor.prefab = Some(PrefabInstance { source, overrides });
+    anchor.prefab = Some(PrefabInstance {
+        source,
+        arguments: None,
+        overrides,
+    });
     anchor
 }
 
@@ -629,7 +635,6 @@ fn replace_roots_with_additions(
             id: entity.id,
             components: entity.components,
             prefab: entity.prefab,
-            bindings: Default::default(),
         });
     }
     overlay

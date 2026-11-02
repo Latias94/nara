@@ -136,12 +136,18 @@ fn lower_with_write_limit<'a>(
         }
     }
 
-    let mut candidates =
-        BTreeMap::<(SceneEntityId, ComponentTypeId), (&ComponentSchema, ComponentValue)>::new();
+    let mut candidates = BTreeMap::<
+        (SceneEntityId, ComponentTypeId),
+        (
+            &ComponentSchema,
+            ComponentValue,
+            Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
+        ),
+    >::new();
     let mut touched = BTreeSet::<(SceneEntityId, ComponentTypeId, ComponentFieldId)>::new();
     for (operation_index, edit) in edits.iter().enumerate() {
         let key = (edit.entity.clone(), edit.component.clone());
-        let (schema, candidate) = match candidates.entry(key) {
+        let (schema, candidate, contextual_defaults) = match candidates.entry(key) {
             std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
             std::collections::btree_map::Entry::Vacant(entry) => {
                 let original = entities
@@ -171,10 +177,14 @@ fn lower_with_write_limit<'a>(
                         operation_index,
                     ));
                 }
-                entry.insert((schema, target.value.clone()))
+                entry.insert((
+                    schema,
+                    target.value.clone(),
+                    original.map(|record| &record.contextual_defaults),
+                ))
             }
         };
-        initialize_missing_root(schema, candidate, edit)
+        initialize_missing_root(schema, candidate, *contextual_defaults, edit)
             .map_err(|error| property_rejection(&error, schema, operation_index))?;
         replace_component_property(
             schema,
@@ -193,7 +203,7 @@ fn lower_with_write_limit<'a>(
 
     let mut operations = Vec::with_capacity(touched.len());
     for (entity, component, root) in touched {
-        let (schema, candidate) = candidates
+        let (schema, candidate, _) = candidates
             .get(&(entity.clone(), component.clone()))
             .ok_or_else(rejected)?;
         let field = schema
@@ -219,6 +229,7 @@ fn lower_with_write_limit<'a>(
 fn initialize_missing_root(
     schema: &ComponentSchema,
     candidate: &mut ComponentValue,
+    contextual_defaults: Option<&BTreeMap<ComponentFieldId, ComponentValue>>,
     edit: &AuthoringPropertyEdit,
 ) -> Result<(), ComponentPropertyError> {
     let Some(field) = schema
@@ -235,7 +246,10 @@ fn initialize_missing_root(
     ) {
         let value = if edit.property.steps.is_empty() {
             &edit.value
-        } else if let Some(default) = field.default_value() {
+        } else if let Some(default) = contextual_defaults
+            .and_then(|defaults| defaults.get(field.id()))
+            .or(field.default_value())
+        {
             default
         } else {
             return Ok(());

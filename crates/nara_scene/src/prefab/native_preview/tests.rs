@@ -379,6 +379,7 @@ fn projected_report(
     let mut anchor = SceneEntityRecord::new(id("prefab-instance"));
     anchor.prefab = Some(PrefabInstance {
         source: source.clone(),
+        arguments: None,
         overrides: None,
     });
     try_expand_authoring_prefabs_with_loader(

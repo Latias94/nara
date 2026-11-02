@@ -1,12 +1,9 @@
 //! Bounded component value helpers shared by property and staged value compilation.
 
-use std::borrow::Cow;
-
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     ComponentCodecError, ComponentSchema, ComponentShapeError, ComponentShapeErrorKind,
-    ComponentValue, ComponentValueMaterializationLimits, effective_component_value,
-    validate_component_value_with_limits,
+    ComponentValue, ComponentValueMaterializationLimits, validate_component_value_with_limits,
 };
 
 use super::PrefabExpansionFailureKind;
@@ -33,17 +30,6 @@ pub(super) fn reserve_cost(
         bytes,
         limits.depth(),
     ))
-}
-
-pub(super) fn effective_value<'value>(
-    schema: &ComponentSchema,
-    value: &'value ComponentValue,
-    limits: ComponentValueMaterializationLimits,
-) -> Result<Cow<'value, ComponentValue>, PrefabExpansionFailureKind> {
-    check_value_cost(value, limits)?;
-    let effective = effective_component_value(schema, value, limits).map_err(codec_failure)?;
-    validate_value(schema, &effective, limits)?;
-    Ok(effective)
 }
 
 pub(super) fn check_value_cost(

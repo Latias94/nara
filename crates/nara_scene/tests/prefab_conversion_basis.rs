@@ -136,6 +136,7 @@ fn anchor(entity: &str, base: &str) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(entity));
     record.prefab = Some(PrefabInstance {
         source: source(base),
+        arguments: None,
         overrides: None,
     });
     record

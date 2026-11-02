@@ -436,6 +436,7 @@ fn committed_terminal_displays_the_actual_public_source_receipt() {
     let mut anchor = SceneEntityRecord::new(id("original-anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: source_ref,
+        arguments: None,
         overrides: None,
     });
     let document = SceneDocument::from_ordered_roots([anchor]);

@@ -45,6 +45,7 @@ fn record() -> SceneComponentRecord {
         ]),
     )
     .with_owner(owner())
+    .with_contextual_default(ComponentFieldId::new("link"), reference("target"))
 }
 
 fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, AuthoringDocumentState) {
@@ -108,6 +109,7 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
         let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(crate::PrefabInstance {
             source: asset("prefabs/base.prefab.json"),
+            arguments: None,
             overrides: Some(crate::PrefabOverlay {
                 components: vec![crate::PrefabComponentIntent::Set {
                     mode: crate::PrefabComponentSetMode::Add,
@@ -117,7 +119,6 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
                         ComponentSchemaVersion(7),
                         ComponentValue::Null,
                     ),
-                    bindings: Vec::new(),
                 }],
                 ..crate::PrefabOverlay::new(
                     crate::SourceDocumentKey::named(
@@ -497,6 +498,7 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
         );
         let (prefab_document, state) = fixture(AuthoringDocumentKind::Prefab, degraded);
         let prefab_document = PrefabDocument {
+            inputs: Default::default(),
             roots: prefab_document.roots,
             entities: prefab_document.entities,
         };
@@ -606,6 +608,7 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
     );
     let (document_prefab, state) = fixture(AuthoringDocumentKind::Prefab, true);
     let document_prefab = PrefabDocument {
+        inputs: Default::default(),
         roots: document_prefab.roots,
         entities: document_prefab.entities,
     };
@@ -686,6 +689,7 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
         for kind in [AuthoringDocumentKind::Scene, AuthoringDocumentKind::Prefab] {
             let (document, mut state) = fixture(kind, true);
             let prefab_document = PrefabDocument {
+                inputs: Default::default(),
                 roots: document.roots.clone(),
                 entities: document.entities.clone(),
             };

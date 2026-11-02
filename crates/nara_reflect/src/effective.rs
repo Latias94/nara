@@ -5,14 +5,16 @@ use std::{borrow::Cow, collections::BTreeMap, convert::Infallible, mem::size_of}
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 
 use crate::{
-    ComponentCodecError, ComponentFieldPathError, ComponentFieldPathSegment, ComponentSchema,
-    ComponentValue, ComponentValueCost, EntityReference, schema::MAX_SHAPE_DEPTH,
+    ComponentCodecError, ComponentFieldId, ComponentFieldPathError, ComponentFieldPathSegment,
+    ComponentFieldSchema, ComponentSchema, ComponentValue, ComponentValueCost, EntityReference,
+    schema::MAX_SHAPE_DEPTH,
 };
 
 /// Bounds one expanded effective value using logical value cost rather than wire size.
 ///
-/// The caller owns admission of the source value. These limits apply when omitted defaults
-/// require materialization; a value needing no insertions is returned without scanning it.
+/// The caller owns admission of the source value. Default materialization applies these limits
+/// to the expanded value and returns no-insertion values without scanning them. Native admission
+/// also uses them for its complete effective-value reference check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentValueMaterializationLimits {
     nodes: ItemLimit,
@@ -69,7 +71,7 @@ pub fn effective_component_value<'value>(
     value: &'value ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<Cow<'value, ComponentValue>, ComponentCodecError> {
-    let Some(plan) = plan_defaults(schema, value)? else {
+    let Some(plan) = plan_defaults(schema, value, DefaultSelection::Canonical)? else {
         return Ok(Cow::Borrowed(value));
     };
     preflight_materialization(&plan, value, limits)?;
@@ -101,9 +103,63 @@ pub fn effective_component_value_with_admission<'value, E>(
     schema: &ComponentSchema,
     value: &'value ComponentValue,
     limits: ComponentValueMaterializationLimits,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Cow<'value, ComponentValue>, EffectiveValueAdmissionError<E>> {
+    effective_component_value_with_admission_impl(
+        schema,
+        value,
+        DefaultSelection::Canonical,
+        limits,
+        admit,
+    )
+}
+
+/// Checks whether every declared default already has an explicit value, without copying values.
+///
+/// The caller admits the raw value graph separately. This reuses the ordinary canonical default
+/// planner, including its bounded path interpretation and admission before scratch allocation.
+/// A missing default returns `false`; it is never materialized just to test completeness.
+pub fn component_defaults_are_explicit_with_admission<E>(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<bool, EffectiveValueAdmissionError<E>> {
+    plan_defaults_with_admission(schema, value, DefaultSelection::Canonical, true, &mut admit)
+        .map(|plan| plan.is_none())
+}
+
+/// Supplies source-selected defaults with admission before every temporary allocation.
+///
+/// The source owner must already have admitted the complete override map, including hidden
+/// declarations, and validated field IDs, versions, shapes and capabilities. The ordinary
+/// planner selects an override or canonical fallback for each missing field. Its scratch and
+/// complete effective-value copy use the same callback and error policy as
+/// [`effective_component_value_with_admission`]. Explicit values remain unchanged.
+pub fn effective_component_value_with_default_overrides_with_admission<'value, E>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<Cow<'value, ComponentValue>, EffectiveValueAdmissionError<E>> {
+    effective_component_value_with_admission_impl(
+        schema,
+        value,
+        DefaultSelection::Overrides(overrides),
+        limits,
+        admit,
+    )
+}
+
+fn effective_component_value_with_admission_impl<'value, E>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    defaults: DefaultSelection<'_>,
+    limits: ComponentValueMaterializationLimits,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<Cow<'value, ComponentValue>, EffectiveValueAdmissionError<E>> {
-    let Some(plan) = plan_defaults_with_admission(schema, value, true, &mut admit)? else {
+    let Some(plan) = plan_defaults_with_admission(schema, value, defaults, true, &mut admit)?
+    else {
         return Ok(Cow::Borrowed(value));
     };
     let mut refusal = None;
@@ -143,10 +199,41 @@ pub fn effective_component_value_with_admission<'value, E>(
 /// [`effective_component_value`]. It consumes the candidate on either success or failure.
 pub fn effective_component_value_owned(
     schema: &ComponentSchema,
-    mut value: ComponentValue,
+    value: ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<ComponentValue, ComponentCodecError> {
-    if let Some(plan) = plan_defaults(schema, &value)? {
+    effective_component_value_owned_impl(schema, value, DefaultSelection::Canonical, limits)
+}
+
+/// Supplies source-selected defaults to an owned candidate through the ordinary materializer.
+///
+/// Overrides are complete values keyed by field ID. Their version, field eligibility, shape and
+/// source capabilities must already be admitted by the source owner. Explicit values, including
+/// Null, hide both override and canonical defaults. The complete effective cost is checked before
+/// cloning any selected default. The caller retains and admits the entire override map separately,
+/// including hidden declarations. The raw candidate needs prior admission, as for
+/// [`effective_component_value_owned`]. This consumes the candidate on either success or failure.
+pub fn effective_component_value_owned_with_default_overrides(
+    schema: &ComponentSchema,
+    value: ComponentValue,
+    overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<ComponentValue, ComponentCodecError> {
+    effective_component_value_owned_impl(
+        schema,
+        value,
+        DefaultSelection::Overrides(overrides),
+        limits,
+    )
+}
+
+fn effective_component_value_owned_impl(
+    schema: &ComponentSchema,
+    mut value: ComponentValue,
+    defaults: DefaultSelection<'_>,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<ComponentValue, ComponentCodecError> {
+    if let Some(plan) = plan_defaults(schema, &value, defaults)? {
         preflight_materialization(&plan, &value, limits)?;
         apply_plan(&plan, &mut value)?;
     }
@@ -164,6 +251,51 @@ pub fn effective_component_value_with_budget<'value>(
     remaining_bytes: usize,
     maximum_depth: DepthLimit,
 ) -> Result<(Cow<'value, ComponentValue>, ComponentValueCost), ComponentCodecError> {
+    effective_component_value_with_budget_impl(
+        schema,
+        value,
+        DefaultSelection::Canonical,
+        remaining_nodes,
+        remaining_bytes,
+        maximum_depth,
+    )
+}
+
+/// Materializes source-selected defaults under the caller's residual effective-value allowance.
+///
+/// For each missing declared field, an override selected by field ID takes precedence over its
+/// canonical schema default. Selection does not validate the override declaration: the source
+/// owner admits field IDs, shapes, versions and source capabilities. Explicit values, including
+/// Null, remain unchanged. The ordinary planner admits the actual selected defaults before any
+/// value clone; an unchanged effective value remains borrowed. Returned cost covers only the
+/// effective tree. The complete retained override map, including hidden values, needs separate
+/// admission by its owner and is neither cloned nor modified here.
+pub fn effective_component_value_with_default_overrides_with_budget<'value>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    overrides: &BTreeMap<ComponentFieldId, ComponentValue>,
+    remaining_nodes: usize,
+    remaining_bytes: usize,
+    maximum_depth: DepthLimit,
+) -> Result<(Cow<'value, ComponentValue>, ComponentValueCost), ComponentCodecError> {
+    effective_component_value_with_budget_impl(
+        schema,
+        value,
+        DefaultSelection::Overrides(overrides),
+        remaining_nodes,
+        remaining_bytes,
+        maximum_depth,
+    )
+}
+
+fn effective_component_value_with_budget_impl<'value>(
+    schema: &ComponentSchema,
+    value: &'value ComponentValue,
+    defaults: DefaultSelection<'_>,
+    remaining_nodes: usize,
+    remaining_bytes: usize,
+    maximum_depth: DepthLimit,
+) -> Result<(Cow<'value, ComponentValue>, ComponentValueCost), ComponentCodecError> {
     let mut budget = MaterializationBudget {
         maximum_nodes: remaining_nodes,
         maximum_bytes: remaining_bytes,
@@ -171,9 +303,10 @@ pub fn effective_component_value_with_budget<'value>(
         nodes: 0,
         bytes: 0,
         admission: None,
+        reference_policy: ReferencePolicy::Source,
     };
     budget.observe_tree(value, 1)?;
-    let plan = plan_defaults(schema, value)?;
+    let plan = plan_defaults(schema, value, defaults)?;
     if let Some(plan) = &plan {
         preflight_plan(plan, Some(value), 1, &mut budget)?;
     }
@@ -188,40 +321,57 @@ pub fn effective_component_value_with_budget<'value>(
     }
 }
 
-#[derive(Default)]
-struct DefaultPlan<'schema> {
-    value: Option<&'schema ComponentValue>,
-    children: BTreeMap<&'schema ComponentFieldPathSegment, Self>,
+#[derive(Clone, Copy)]
+enum DefaultSelection<'defaults> {
+    Canonical,
+    Overrides(&'defaults BTreeMap<ComponentFieldId, ComponentValue>),
 }
 
-fn plan_defaults<'schema>(
-    schema: &'schema ComponentSchema,
+impl<'defaults> DefaultSelection<'defaults> {
+    fn for_field(
+        self,
+        field: &'defaults ComponentFieldSchema,
+    ) -> Option<&'defaults ComponentValue> {
+        match self {
+            Self::Canonical => field.default_value(),
+            Self::Overrides(overrides) => overrides.get(field.id()).or(field.default_value()),
+        }
+    }
+}
+
+#[derive(Default)]
+struct DefaultPlan<'defaults> {
+    value: Option<&'defaults ComponentValue>,
+    children: BTreeMap<&'defaults ComponentFieldPathSegment, Self>,
+}
+
+fn plan_defaults<'defaults>(
+    schema: &'defaults ComponentSchema,
     value: &ComponentValue,
-) -> Result<Option<DefaultPlan<'schema>>, ComponentCodecError> {
-    match plan_defaults_with_admission(
-        schema,
-        value,
-        false,
-        &mut |_, _, _| Ok::<(), Infallible>(()),
-    ) {
+    defaults: DefaultSelection<'defaults>,
+) -> Result<Option<DefaultPlan<'defaults>>, ComponentCodecError> {
+    match plan_defaults_with_admission(schema, value, defaults, false, &mut |_, _, _| {
+        Ok::<(), Infallible>(())
+    }) {
         Ok(plan) => Ok(plan),
         Err(EffectiveValueAdmissionError::Value(error)) => Err(error),
         Err(EffectiveValueAdmissionError::Admission(error)) => match error {},
     }
 }
 
-fn plan_defaults_with_admission<'schema, E>(
-    schema: &'schema ComponentSchema,
+fn plan_defaults_with_admission<'defaults, E>(
+    schema: &'defaults ComponentSchema,
     value: &ComponentValue,
+    defaults: DefaultSelection<'defaults>,
     account: bool,
     admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<Option<DefaultPlan<'schema>>, EffectiveValueAdmissionError<E>> {
+) -> Result<Option<DefaultPlan<'defaults>>, EffectiveValueAdmissionError<E>> {
     let mut missing = Vec::new();
     for field in schema.fields() {
         if account {
             admit(1, 0, 0).map_err(EffectiveValueAdmissionError::Admission)?;
         }
-        let Some(default) = field.default_value() else {
+        let Some(default) = defaults.for_field(field) else {
             continue;
         };
         if field.path().segments().len() > MAX_SHAPE_DEPTH {
@@ -332,6 +482,7 @@ fn preflight_materialization_cost<'admit>(
         nodes: 0,
         bytes: 0,
         admission,
+        reference_policy: ReferencePolicy::Source,
     };
     budget.observe_tree(value, 1)?;
     preflight_plan(plan, Some(value), 1, &mut budget)?;
@@ -472,6 +623,13 @@ fn materialize_branch(plan: &DefaultPlan<'_>) -> Result<ComponentValue, Componen
 type MaterializationAdmission<'a> =
     dyn FnMut(usize, usize, usize) -> Result<(), ComponentCodecError> + 'a;
 
+#[derive(Clone, Copy)]
+enum ReferencePolicy {
+    Source,
+    Native,
+    SourceContext { required: bool },
+}
+
 struct MaterializationBudget<'a> {
     maximum_nodes: usize,
     maximum_bytes: usize,
@@ -479,13 +637,75 @@ struct MaterializationBudget<'a> {
     nodes: usize,
     bytes: usize,
     admission: Option<&'a mut MaterializationAdmission<'a>>,
+    reference_policy: ReferencePolicy,
 }
 
-pub(crate) fn validate_value_materialization_budget(
+#[doc(hidden)]
+pub fn validate_value_materialization_budget(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), ComponentCodecError> {
-    validate_value_materialization_budget_impl(value, limits, None)
+    validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Source)
+}
+
+/// Rejects unresolved authored references throughout an already effective Native value.
+///
+/// Uses the raw materialization walker and its finite limits, including opaque contents and
+/// undeclared fields. Defaults must be supplied by the caller before invoking this check.
+pub fn validate_native_component_value_references_with_limits(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(), ComponentCodecError> {
+    validate_value_materialization_budget_impl(value, limits, None, ReferencePolicy::Native)
+}
+
+/// Checks the same complete Native value while admitting traversal scratch before allocation.
+pub fn validate_native_component_value_references_with_admission<E>(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), EffectiveValueAdmissionError<E>> {
+    validate_value_materialization_budget_with_policy_and_admission(
+        value,
+        limits,
+        ReferencePolicy::Native,
+        admit,
+    )
+}
+
+/// Classifies an admitted canonical default under the Schema's finite default allowance.
+///
+/// Schema admission already owns its shape and reference declarations. The ordinary raw-value
+/// walker only summarizes SceneLocal/Authored leaves, retaining iterator frames by depth rather
+/// than paths per reference. Document limits still govern retained context and effective values.
+pub fn component_field_default_requires_context(
+    field: &ComponentFieldSchema,
+) -> Result<bool, ComponentCodecError> {
+    let Some(default) = field.default_value() else {
+        return Ok(false);
+    };
+    if !field
+        .shape()
+        .contains_kind(crate::ComponentValueKind::EntityRef)
+    {
+        return Ok(false);
+    }
+    let mut budget = MaterializationBudget {
+        maximum_nodes: 16_384,
+        maximum_bytes: crate::schema::MAX_SHAPE_BYTES,
+        maximum_depth: DepthLimit::new(MAX_SHAPE_DEPTH)
+            .expect("schema default depth limit is non-zero"),
+        nodes: 0,
+        bytes: 0,
+        admission: None,
+        reference_policy: ReferencePolicy::SourceContext { required: false },
+    };
+    // Schema default admission starts at depth zero; ordinary document checks start at one.
+    budget.observe_tree(default, 0)?;
+    Ok(matches!(
+        budget.reference_policy,
+        ReferencePolicy::SourceContext { required: true }
+    ))
 }
 
 /// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
@@ -493,6 +713,20 @@ pub(crate) fn validate_value_materialization_budget(
 pub(crate) fn validate_value_materialization_budget_with_admission<E>(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), EffectiveValueAdmissionError<E>> {
+    validate_value_materialization_budget_with_policy_and_admission(
+        value,
+        limits,
+        ReferencePolicy::Source,
+        admit,
+    )
+}
+
+fn validate_value_materialization_budget_with_policy_and_admission<E>(
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+    policy: ReferencePolicy,
     mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<(), EffectiveValueAdmissionError<E>> {
     let mut refusal = None;
@@ -507,7 +741,7 @@ pub(crate) fn validate_value_materialization_budget_with_admission<E>(
                 }
             })
         };
-        validate_value_materialization_budget_impl(value, limits, Some(&mut callback))
+        validate_value_materialization_budget_impl(value, limits, Some(&mut callback), policy)
     };
     match refusal {
         Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
@@ -519,6 +753,7 @@ fn validate_value_materialization_budget_impl<'admit>(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
     admission: Option<&'admit mut MaterializationAdmission<'admit>>,
+    reference_policy: ReferencePolicy,
 ) -> Result<(), ComponentCodecError> {
     MaterializationBudget {
         maximum_nodes: limits.nodes().get(),
@@ -527,6 +762,7 @@ fn validate_value_materialization_budget_impl<'admit>(
         nodes: 0,
         bytes: 0,
         admission,
+        reference_policy,
     }
     .observe_tree(value, 1)
 }
@@ -604,12 +840,26 @@ impl MaterializationBudget<'_> {
                             )?;
                         }
                         ComponentValue::List(_) | ComponentValue::Map(_) => {}
-                        ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
-                            self.observe_bytes(entity.as_str().len())?;
-                        }
-                        ComponentValue::EntityReference(EntityReference::Persistent { entity }) => {
-                            self.observe_bytes(entity.namespace.as_str().len())?;
-                            self.observe_bytes(16)?;
+                        ComponentValue::EntityReference(reference) => {
+                            if matches!(self.reference_policy, ReferencePolicy::Native)
+                                && matches!(reference, EntityReference::Authored { .. })
+                            {
+                                return Err(ComponentCodecError::UnresolvedAuthoredReference);
+                            }
+                            if let ReferencePolicy::SourceContext { required } =
+                                &mut self.reference_policy
+                            {
+                                *required |= matches!(
+                                    reference,
+                                    EntityReference::SceneLocal { .. }
+                                        | EntityReference::Authored { .. }
+                                );
+                            }
+                            let cost = reference.cost();
+                            if cost.nodes() > 1 {
+                                self.observe_nodes(depth, cost.nodes() - 1)?;
+                            }
+                            self.observe_bytes(cost.logical_bytes())?;
                         }
                     }
                 }
@@ -632,8 +882,12 @@ impl MaterializationBudget<'_> {
     }
 
     fn observe_node(&mut self, depth: usize) -> Result<(), ComponentCodecError> {
+        self.observe_nodes(depth, 1)
+    }
+
+    fn observe_nodes(&mut self, depth: usize, nodes: usize) -> Result<(), ComponentCodecError> {
         if let Some(admit) = self.admission.as_deref_mut() {
-            admit(1, 0, 0)?;
+            admit(nodes, 0, 0)?;
         }
         if depth > self.maximum_depth.get() {
             return Err(ComponentCodecError::MaterializationDepthLimit {
@@ -643,7 +897,7 @@ impl MaterializationBudget<'_> {
         }
         self.nodes =
             self.nodes
-                .checked_add(1)
+                .checked_add(nodes)
                 .ok_or(ComponentCodecError::MaterializationNodeLimit {
                     observed: usize::MAX,
                     maximum: self.maximum_nodes,
@@ -804,6 +1058,82 @@ mod budget_tests {
     }
 
     #[test]
+    fn contextual_admission_charges_selected_overrides_and_canonical_fallbacks_before_copy() {
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("test.ContextualAdmission"),
+            "Contextual admission",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields(["value", "other"].map(|name| {
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new(name),
+                name,
+                ComponentFieldPath::from_fields([name]),
+                ComponentValueKind::String,
+                ComponentValue::String("x".repeat(64 * 1024)),
+            )
+        }));
+        let source = ComponentValue::map([] as [(String, ComponentValue); 0]);
+        let mut overrides = BTreeMap::from([(
+            ComponentFieldId::new("value"),
+            ComponentValue::String(String::new()),
+        )]);
+        let result = effective_component_value_with_default_overrides_with_admission(
+            &schema,
+            &source,
+            &overrides,
+            ComponentValueMaterializationLimits::default(),
+            |_, _, allocated| {
+                if allocated >= 32 * 1024 {
+                    Err("canonical fallback copy refused")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert_eq!(
+            result,
+            Err(EffectiveValueAdmissionError::Admission(
+                "canonical fallback copy refused"
+            )),
+        );
+        assert_eq!(
+            source,
+            ComponentValue::map([] as [(String, ComponentValue); 0])
+        );
+
+        overrides.insert(
+            ComponentFieldId::new("other"),
+            ComponentValue::String(String::new()),
+        );
+        let effective = effective_component_value_with_default_overrides_with_admission(
+            &schema,
+            &source,
+            &overrides,
+            ComponentValueMaterializationLimits::new(
+                ItemLimit::new(3).unwrap(),
+                ByteLimit::new("value".len() + "other".len()).unwrap(),
+                DepthLimit::new(2).unwrap(),
+            ),
+            |_, _, allocated| {
+                if allocated >= 32 * 1024 {
+                    Err("unselected default must remain shared")
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            effective.as_ref(),
+            &ComponentValue::map([
+                ("value", ComponentValue::String(String::new())),
+                ("other", ComponentValue::String(String::new())),
+            ]),
+        );
+    }
+
+    #[test]
     fn admission_keeps_no_insertion_borrowed_and_preserves_interpretation() {
         let schema = defaulted(ComponentValue::String("fallback".into()));
         let source = ComponentValue::map([("value", ComponentValue::String("explicit".into()))]);
@@ -830,6 +1160,35 @@ mod budget_tests {
         )
         .unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn explicit_default_check_never_materializes_an_omitted_large_payload() {
+        let schema = defaulted(ComponentValue::String("x".repeat(64 * 1024)));
+        let missing = ComponentValue::map([] as [(String, ComponentValue); 0]);
+        let mut allocated = 0usize;
+        assert!(
+            !component_defaults_are_explicit_with_admission(&schema, &missing, |_, _, bytes| {
+                allocated += bytes;
+                assert!(allocated < 32 * 1024);
+                Ok::<(), Infallible>(())
+            },)
+            .unwrap()
+        );
+        assert!(
+            component_defaults_are_explicit_with_admission(
+                &schema,
+                &ComponentValue::map([("value", ComponentValue::Null)]),
+                |_, _, _| Ok::<(), Infallible>(()),
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            component_defaults_are_explicit_with_admission(&schema, &missing, |_, _, _| {
+                Err("planner refused")
+            }),
+            Err(EffectiveValueAdmissionError::Admission("planner refused")),
+        );
     }
 
     #[test]

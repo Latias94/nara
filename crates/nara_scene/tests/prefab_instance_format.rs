@@ -40,6 +40,7 @@ fn component() -> ComponentTypeId {
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -75,7 +76,6 @@ fn property(
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new(field)),
             intent,
-            bindings: Vec::new(),
         }],
     });
     overlay
@@ -142,6 +142,7 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
     );
     added.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let mut declarations = overlay();
@@ -155,12 +156,14 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
     let patch = ScenePatchDocument::new([replace(Some(snapshot.clone()), Some(snapshot))]);
     // The exact operation retains both complete declaration trees. Each side contains one
     // overlay, one addition, one placement, one component and two instance declarations.
+    // Each snapshot has nine nodes: two instances, overlay/base, addition, record/value,
+    // and placement/target. Both sides therefore retain eighteen nodes.
     // Each source claim retains the AssetRef map keys/kind (13) and path. A Named base
-    // retains kind/origin tags and UUID (18), plus its name. The addition retains its ID,
+    // retains document kind and UUID text (37), plus its name. The addition retains its ID,
     // component ID, record version/owner flag (5), U64 (8), and placement target/tags (3).
     let source_bytes = 13 + "prefabs/base.prefab.json".len();
     let snapshot_bytes = 2 * source_bytes
-        + (18 + "snapshot.base".len())
+        + (37 + "snapshot.base".len())
         + "added".len()
         + ("test.ExactSnapshot".len() + 5 + 8)
         + ("added".len() + 3);
@@ -173,7 +176,7 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
         .with_patch_operations(ItemLimit::ONE)
         .with_overlay_declarations(ItemLimit::new(6).unwrap())
         .with_diagnostic_sources(ItemLimit::new(13).unwrap())
-        .with_component_value_nodes(ItemLimit::new(16).unwrap())
+        .with_component_value_nodes(ItemLimit::new(18).unwrap())
         .with_component_value_bytes(ByteLimit::new(complete_bytes).unwrap());
     for encoding in [Encoding::Json, Encoding::Ron] {
         let bytes = encoding.patch(&patch);
@@ -216,10 +219,10 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
                 12,
             ),
             (
-                inclusive.with_component_value_nodes(ItemLimit::new(15).unwrap()),
+                inclusive.with_component_value_nodes(ItemLimit::new(17).unwrap()),
                 SceneFileBudgetKind::ComponentValueNodes,
-                16,
-                15,
+                18,
+                17,
             ),
             (
                 inclusive.with_component_value_bytes(ByteLimit::new(complete_bytes - 1).unwrap()),
@@ -429,7 +432,6 @@ fn record_snapshot(version: ComponentSchemaVersion, value: ComponentValue) -> Pr
         component: component(),
         record: SceneComponentRecord::new(version, value)
             .with_owner(PersistentComponentSchemaOwnerId::try_new("test.snapshot.owner").unwrap()),
-        bindings: Vec::new(),
     });
     instance(declarations)
 }

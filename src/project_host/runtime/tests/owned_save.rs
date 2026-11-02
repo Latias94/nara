@@ -371,6 +371,7 @@ fn legacy_prefab_source_navigation_is_busy_until_scene_save_returns_its_host() {
     let anchor = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("panel.prefab.json").unwrap(),
         overrides: None,
     });
@@ -442,6 +443,7 @@ fn content_refresh_retry_waits_for_the_held_save_to_return_its_host() {
     let anchor = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(nara_scene::PrefabInstance {
+        arguments: None,
         source: AssetRef::path("panel.prefab.json").unwrap(),
         overrides: None,
     });

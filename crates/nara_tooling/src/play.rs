@@ -738,6 +738,27 @@ fn export_component_change(
             operations: Vec::new(),
         };
     }
+    if document_entity
+        .components
+        .get(component)
+        .is_some_and(|record| {
+            record.version != schema.version() && !record.contextual_defaults.is_empty()
+        })
+    {
+        return ExportedComponentChange {
+            report: rejected_component_report(
+                &document_entity.id,
+                component,
+                component_error(
+                    "tooling.apply-changes-contextual-default-migration-required",
+                    "Apply Changes requires an owner transformation of version-bound contextual defaults",
+                    &document_entity.id,
+                    component,
+                ),
+            ),
+            operations: Vec::new(),
+        };
+    }
 
     let runtime_value =
         match registry.encode_component_with_context(component, world, play_entity, context) {
@@ -769,7 +790,12 @@ fn export_component_change(
             component_record.version,
             &component_record.value,
         ) {
-            Ok(migrated) => Some(SceneComponentRecord::new(migrated.version, migrated.value)),
+            Ok(migrated) => Some(SceneComponentRecord {
+                owner: component_record.owner.clone(),
+                version: migrated.version,
+                value: migrated.value,
+                contextual_defaults: component_record.contextual_defaults.clone(),
+            }),
             Err(error) => {
                 return ExportedComponentChange {
                     report: rejected_component_report(
@@ -791,7 +817,7 @@ fn export_component_change(
         },
         None => None,
     };
-    let operation = match (document_component.as_ref(), runtime_value) {
+    let operation = match (document_component, runtime_value) {
         (None, None) => None,
         (Some(_), None) => Some(ScenePatchOperation::RemoveComponent {
             entity: document_entity.id.clone(),
@@ -802,15 +828,15 @@ fn export_component_change(
             component: component.clone(),
             value: SceneComponentRecord::new(schema.version, value),
         }),
-        (Some(current), Some(value)) => {
-            let replacement = SceneComponentRecord::new(schema.version, value);
-            if current == &replacement {
+        (Some(mut current), Some(value)) => {
+            if current.value == value {
                 None
             } else {
+                current.value = value;
                 Some(ScenePatchOperation::ReplaceComponent {
                     entity: document_entity.id.clone(),
                     component: component.clone(),
-                    value: replacement,
+                    value: current,
                 })
             }
         }
@@ -867,6 +893,11 @@ fn with_codec_error(
     schema: Option<&ComponentSchema>,
 ) -> Diagnostic {
     match error {
+        ComponentCodecError::UnresolvedAuthoredReference => diagnostic::with_public_identifier(
+            entry,
+            "codec-error-kind",
+            "unresolved-authored-reference",
+        ),
         ComponentCodecError::UnknownComponent { .. } => {
             diagnostic::with_public_identifier(entry, "codec-error-kind", "unknown-component")
         }

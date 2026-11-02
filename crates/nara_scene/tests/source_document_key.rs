@@ -26,9 +26,11 @@ fn json_and_ron_roundtrip_every_origin_and_document_kind() {
                 SourceDocumentKey::named(universe(), "base", kind).unwrap(),
                 serde_json::json!({
                     "kind": kind_name,
-                    "origin": {"named": {"universe": UNIVERSE, "name": "base"}}
+                    "origin": {"kind": "named", "universe": UNIVERSE, "name": "base"}
                 }),
-                format!("(kind:{kind_name},origin:named(universe:\"{UNIVERSE}\",name:\"base\"))"),
+                format!(
+                    "(kind:\"{kind_name}\",origin:(kind:\"named\",universe:\"{UNIVERSE}\",name:\"base\"))"
+                ),
             ),
             (
                 SourceDocumentKey::project_location(
@@ -38,22 +40,25 @@ fn json_and_ron_roundtrip_every_origin_and_document_kind() {
                 ),
                 serde_json::json!({
                     "kind": kind_name,
-                    "origin": {"project_location": {
+                    "origin": {
+                        "kind": "project_location",
                         "universe": UNIVERSE,
                         "path": "prefabs/base.prefab.json"
-                    }}
+                    }
                 }),
                 format!(
-                    "(kind:{kind_name},origin:project_location(universe:\"{UNIVERSE}\",path:\"prefabs/base.prefab.json\"))"
+                    "(kind:\"{kind_name}\",origin:(kind:\"project_location\",universe:\"{UNIVERSE}\",path:\"prefabs/base.prefab.json\"))"
                 ),
             ),
             (
                 SourceDocumentKey::stable_asset(stable_id(), kind),
                 serde_json::json!({
                     "kind": kind_name,
-                    "origin": {"stable_asset": {"stable_id": STABLE_ID}}
+                    "origin": {"kind": "stable_asset", "stable_id": STABLE_ID}
                 }),
-                format!("(kind:{kind_name},origin:stable_asset(stable_id:\"{STABLE_ID}\"))"),
+                format!(
+                    "(kind:\"{kind_name}\",origin:(kind:\"stable_asset\",stable_id:\"{STABLE_ID}\"))"
+                ),
             ),
         ];
         for (key, json, ron) in fixtures {
@@ -85,13 +90,14 @@ fn uuid_spelling_aliases_decode_to_the_same_canonical_identity() {
             SourceDocumentKey::named(universe(), "base", kind).unwrap(),
             serde_json::json!({
                 "kind": "prefab",
-                "origin": {"named": {
+                "origin": {
+                    "kind": "named",
                     "universe": UNIVERSE.to_uppercase(),
                     "name": "base"
-                }}
+                }
             }),
             format!(
-                "(kind:prefab,origin:named(universe:\"{}\",name:\"base\"))",
+                "(kind:\"prefab\",origin:(kind:\"named\",universe:\"{}\",name:\"base\"))",
                 UNIVERSE.to_uppercase()
             ),
         ),
@@ -103,13 +109,14 @@ fn uuid_spelling_aliases_decode_to_the_same_canonical_identity() {
             ),
             serde_json::json!({
                 "kind": "prefab",
-                "origin": {"project_location": {
+                "origin": {
+                    "kind": "project_location",
                     "universe": UNIVERSE.replace('-', ""),
                     "path": "base.prefab.json"
-                }}
+                }
             }),
             format!(
-                "(kind:prefab,origin:project_location(universe:\"{}\",path:\"base.prefab.json\"))",
+                "(kind:\"prefab\",origin:(kind:\"project_location\",universe:\"{}\",path:\"base.prefab.json\"))",
                 UNIVERSE.replace('-', "")
             ),
         ),
@@ -117,10 +124,10 @@ fn uuid_spelling_aliases_decode_to_the_same_canonical_identity() {
             SourceDocumentKey::stable_asset(stable_id(), kind),
             serde_json::json!({
                 "kind": "prefab",
-                "origin": {"stable_asset": {"stable_id": STABLE_ID.to_uppercase()}}
+                "origin": {"kind": "stable_asset", "stable_id": STABLE_ID.to_uppercase()}
             }),
             format!(
-                "(kind:prefab,origin:stable_asset(stable_id:\"{}\"))",
+                "(kind:\"prefab\",origin:(kind:\"stable_asset\",stable_id:\"{}\"))",
                 STABLE_ID.to_uppercase()
             ),
         ),
@@ -192,10 +199,10 @@ fn invalid_names_paths_and_uuid_claims_are_rejected_in_both_formats() {
     for name in ["", "bad\0name"] {
         let json = serde_json::json!({
             "kind": "scene",
-            "origin": {"named": {"universe": UNIVERSE, "name": name}}
+            "origin": {"kind": "named", "universe": UNIVERSE, "name": name}
         });
         let ron = format!(
-            "(kind:scene,origin:named(universe:\"{UNIVERSE}\",name:{}))",
+            "(kind:\"scene\",origin:(kind:\"named\",universe:\"{UNIVERSE}\",name:{}))",
             ron::to_string(name).unwrap()
         );
         assert!(serde_json::from_value::<SourceDocumentKey>(json).is_err());
@@ -214,10 +221,10 @@ fn invalid_names_paths_and_uuid_claims_are_rejected_in_both_formats() {
     ] {
         let json = serde_json::json!({
             "kind": "prefab",
-            "origin": {"project_location": {"universe": UNIVERSE, "path": path}}
+            "origin": {"kind": "project_location", "universe": UNIVERSE, "path": path}
         });
         let ron = format!(
-            "(kind:prefab,origin:project_location(universe:\"{UNIVERSE}\",path:{}))",
+            "(kind:\"prefab\",origin:(kind:\"project_location\",universe:\"{UNIVERSE}\",path:{}))",
             ron::to_string(path).unwrap()
         );
         assert!(
@@ -242,10 +249,10 @@ fn assert_invalid_uuid(invalid: &str, is_universe: bool) {
         (
             serde_json::json!({
                 "kind": "scene",
-                "origin": {"named": {"universe": invalid, "name": "base"}}
+                "origin": {"kind": "named", "universe": invalid, "name": "base"}
             }),
             format!(
-                "(kind:scene,origin:named(universe:{},name:\"base\"))",
+                "(kind:\"scene\",origin:(kind:\"named\",universe:{},name:\"base\"))",
                 ron::to_string(invalid).unwrap()
             ),
         )
@@ -253,10 +260,10 @@ fn assert_invalid_uuid(invalid: &str, is_universe: bool) {
         (
             serde_json::json!({
                 "kind": "prefab",
-                "origin": {"stable_asset": {"stable_id": invalid}}
+                "origin": {"kind": "stable_asset", "stable_id": invalid}
             }),
             format!(
-                "(kind:prefab,origin:stable_asset(stable_id:{}))",
+                "(kind:\"prefab\",origin:(kind:\"stable_asset\",stable_id:{}))",
                 ron::to_string(invalid).unwrap()
             ),
         )
@@ -268,12 +275,12 @@ fn assert_invalid_uuid(invalid: &str, is_universe: bool) {
 #[test]
 fn json_rejects_unknown_missing_duplicate_and_legacy_fields_without_fallback() {
     let valid = format!(
-        r#"{{"kind":"prefab","origin":{{"named":{{"universe":"{UNIVERSE}","name":"base"}}}}}}"#
+        r#"{{"kind":"prefab","origin":{{"kind":"named","universe":"{UNIVERSE}","name":"base"}}}}"#
     );
     let invalid = [
         valid.replace(r#""kind":"prefab""#, r#""kind":"future""#),
         valid.replace(r#""kind":"prefab""#, r#""kind":"Prefab""#),
-        valid.replace(r#""named":"#, r#""lookup":"#),
+        valid.replace(r#""kind":"named""#, r#""kind":"lookup""#),
         valid.replace(
             r#""name":"base""#,
             r#""name":"base","lookup":"alias.prefab""#,
@@ -285,10 +292,18 @@ fn json_rejects_unknown_missing_duplicate_and_legacy_fields_without_fallback() {
         valid.replace(r#""kind":"prefab","#, ""),
         valid.replacen('{', r#"{"lookup":"alias.prefab","#, 1),
         format!(
-            r#"{{"kind":"prefab","origin":{{"project_location":{{"universe":"{UNIVERSE}","path":"base.prefab","name":"base"}}}}}}"#
+            r#"{{"kind":"prefab","origin":{{"kind":"project_location","universe":"{UNIVERSE}","path":"base.prefab","name":"base"}}}}"#
         ),
         format!(
-            r#"{{"kind":"prefab","origin":{{"stable_asset":{{"stable_id":"{STABLE_ID}","universe":"{UNIVERSE}"}}}}}}"#
+            r#"{{"kind":"prefab","origin":{{"kind":"stable_asset","stable_id":"{STABLE_ID}","universe":"{UNIVERSE}"}}}}"#
+        ),
+        valid.replace(r#""kind":"named","#, ""),
+        valid.replace(
+            r#""kind":"named""#,
+            r#""kind":"named","kind":"stable_asset""#,
+        ),
+        format!(
+            r#"{{"kind":"prefab","origin":{{"named":{{"universe":"{UNIVERSE}","name":"base"}}}}}}"#
         ),
         format!(r#"{{"kind":"prefab","origin":"named","universe":"{UNIVERSE}","name":"base"}}"#),
         r#""base.prefab.json""#.to_owned(),
@@ -307,25 +322,31 @@ fn json_rejects_unknown_missing_duplicate_and_legacy_fields_without_fallback() {
 
 #[test]
 fn ron_rejects_unknown_missing_duplicate_and_legacy_fields_without_fallback() {
-    let valid = format!("(kind:prefab,origin:named(universe:\"{UNIVERSE}\",name:\"base\"))");
+    let valid =
+        format!("(kind:\"prefab\",origin:(kind:\"named\",universe:\"{UNIVERSE}\",name:\"base\"))");
     let invalid = [
-        valid.replace("kind:prefab", "kind:future"),
-        valid.replace("kind:prefab", "kind:Prefab"),
-        valid.replace("origin:named", "origin:lookup"),
+        valid.replace("kind:\"prefab\"", "kind:\"future\""),
+        valid.replace("kind:\"prefab\"", "kind:\"Prefab\""),
+        valid.replace("kind:\"named\"", "kind:\"lookup\""),
         valid.replace("name:\"base\"", "name:\"base\",lookup:\"alias.prefab\""),
         valid.replace("name:\"base\"", "path:\"base.prefab\""),
         valid.replace("name:\"base\"", "name:None"),
         valid.replace("name:\"base\"", "name:\"base\",name:\"other\""),
-        valid.replace("kind:prefab", "kind:prefab,kind:scene"),
-        valid.replace("kind:prefab,", ""),
+        valid.replace("kind:\"prefab\"", "kind:\"prefab\",kind:\"scene\""),
+        valid.replace("kind:\"prefab\",", ""),
+        valid.replace("kind:\"named\",", ""),
+        valid.replace("kind:\"named\"", "kind:\"named\",kind:\"stable_asset\""),
+        valid.replace("kind:\"prefab\"", "kind:prefab"),
+        valid.replace("kind:\"named\"", "kind:named"),
         valid.replacen('(', "(lookup:\"alias.prefab\",", 1),
         format!(
-            "(kind:prefab,origin:project_location(universe:\"{UNIVERSE}\",path:\"base.prefab\",name:\"base\"))"
+            "(kind:\"prefab\",origin:(kind:\"project_location\",universe:\"{UNIVERSE}\",path:\"base.prefab\",name:\"base\"))"
         ),
         format!(
-            "(kind:prefab,origin:stable_asset(stable_id:\"{STABLE_ID}\",universe:\"{UNIVERSE}\"))"
+            "(kind:\"prefab\",origin:(kind:\"stable_asset\",stable_id:\"{STABLE_ID}\",universe:\"{UNIVERSE}\"))"
         ),
-        format!("(kind:prefab,origin:\"named\",universe:\"{UNIVERSE}\",name:\"base\")"),
+        format!("(kind:\"prefab\",origin:named(universe:\"{UNIVERSE}\",name:\"base\"))"),
+        format!("(kind:\"prefab\",origin:\"named\",universe:\"{UNIVERSE}\",name:\"base\")"),
         "\"base.prefab.json\"".to_owned(),
         "None".to_owned(),
         "()".to_owned(),

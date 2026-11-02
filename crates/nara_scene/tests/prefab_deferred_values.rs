@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use nara_asset::AssetRef;
 use nara_ecs::{Component, World};
-use nara_identity::EntityReference;
+use nara_identity::{AuthoredEntityReference, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion,
@@ -14,9 +14,8 @@ use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionReport, PrefabInstance,
     PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim,
-    PrefabPropertyIntent, PrefabReferenceBinding, PrefabSourceResolver, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey,
-    SourceDocumentKind, spawn_scene,
+    PrefabPropertyIntent, PrefabSourceResolver, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, spawn_scene,
 };
 
 const UNIVERSE: &str = "ec3de96a-21d9-4ab1-a6e2-f07391d6ce48";
@@ -127,6 +126,7 @@ fn instance(entity: &str, base: &str, overrides: Option<PrefabOverlay>) -> Scene
     let mut record = SceneEntityRecord::new(id(entity));
     record.prefab = Some(PrefabInstance {
         source: source(base),
+        arguments: None,
         overrides,
     });
     record
@@ -168,7 +168,6 @@ fn set_amount(
         target,
         component: amount_type(),
         record: amount(value),
-        bindings: Vec::new(),
     }
 }
 
@@ -180,7 +179,6 @@ fn pin_amount(target: PrefabEntityTarget, field: &str, value: i64) -> PrefabComp
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new(field)),
             intent: PrefabPropertyIntent::Set(ComponentValue::I64(value)),
-            bindings: Vec::new(),
         }],
     }
 }
@@ -518,28 +516,24 @@ fn outer_replace_cannot_legalize_an_earlier_invalid_add_or_replace_presence() {
 }
 
 #[test]
-fn superseded_complete_and_property_bindings_do_not_request_a_nested_source() {
+fn superseded_complete_and_property_references_do_not_request_a_nested_source() {
     let registry = registry();
-    for property_binding in [false, true] {
-        let binding = PrefabReferenceBinding {
-            slot: if property_binding {
-                ComponentFieldPath::empty()
-            } else {
-                ComponentFieldPath::from_fields(["target"])
-            },
-            expected: id("inner_spelling"),
-            target: target(&[("unused", "unavailable")], "target"),
-        };
+    for property_reference in [false, true] {
+        let reference = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference::from(target(
+                &[("nested", "leaf"), ("unused", "unavailable")],
+                "target",
+            )),
+        });
         let mut inner = PrefabOverlay::new(key("leaf"));
-        inner.components.push(if property_binding {
+        inner.components.push(if property_reference {
             PrefabComponentIntent::Properties {
                 target: target(&[], "root"),
                 component: link_type(),
                 version: ComponentSchemaVersion::ONE,
                 claims: vec![PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-                    intent: PrefabPropertyIntent::Set(local_reference("inner_spelling")),
-                    bindings: vec![binding],
+                    intent: PrefabPropertyIntent::Set(reference),
                 }],
             }
         } else {
@@ -547,8 +541,10 @@ fn superseded_complete_and_property_bindings_do_not_request_a_nested_source() {
                 mode: PrefabComponentSetMode::Replace,
                 target: target(&[], "root"),
                 component: link_type(),
-                record: link("inner_spelling"),
-                bindings: vec![binding],
+                record: SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("target", reference)]),
+                ),
             }
         });
         let resolver = sources([
@@ -565,7 +561,7 @@ fn superseded_complete_and_property_bindings_do_not_request_a_nested_source() {
             ),
         ]);
         let mut outer = PrefabOverlay::new(key("base"));
-        // The slot has no live structural demand; only a retained binding could request it.
+        // The slot has no live structural demand; only a surviving reference could request it.
         outer
             .suppressions
             .push(target(&[("nested", "leaf")], "unused"));
@@ -573,12 +569,18 @@ fn superseded_complete_and_property_bindings_do_not_request_a_nested_source() {
             mode: PrefabComponentSetMode::Replace,
             target: target(&[("nested", "leaf")], "root"),
             component: link_type(),
-            record: link("outer_spelling"),
-            bindings: vec![PrefabReferenceBinding {
-                slot: ComponentFieldPath::from_fields(["target"]),
-                expected: id("outer_spelling"),
-                target: target(&[("nested", "leaf")], "root"),
-            }],
+            record: SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(EntityReference::Authored {
+                        reference: AuthoredEntityReference::from(target(
+                            &[("instance", "base"), ("nested", "leaf")],
+                            "root",
+                        )),
+                    }),
+                )]),
+            ),
         });
         let document = scene("base", Some(outer));
 

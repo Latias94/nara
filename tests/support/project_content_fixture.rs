@@ -87,6 +87,7 @@ requested = ["runtime-2d"]
         );
         anchor.prefab = Some(PrefabInstance {
             source,
+            arguments: None,
             overrides: None,
         });
         let scene = SceneDocument::from_ordered_roots([anchor]);

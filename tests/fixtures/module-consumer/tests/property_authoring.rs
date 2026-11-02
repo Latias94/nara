@@ -14,7 +14,7 @@ use nara_engine::{
         EditorProjectOpenProgress, EditorProjectSession,
     },
 };
-use nara_identity::EntityReference;
+use nara_identity::{AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentCodecError,
     ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyError,
@@ -30,11 +30,11 @@ use nara_scene::{
     PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
     PrefabOverlaySlot, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding, PrefabRevert,
-    PrefabSourceResolver, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SourceDocumentKey,
-    SourceDocumentKind, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, PrefabSourceResolver,
+    SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
+    UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
@@ -298,12 +298,12 @@ fn instance_declaration(root: ComponentValue) -> PrefabInstance {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("settings")),
             intent: PrefabPropertyIntent::Set(root),
-            bindings: Vec::new(),
         }],
     });
     let mut addition = PrefabAddition::new(id("nested"));
     addition.prefab = Some(PrefabInstance {
         source: source.clone(),
+        arguments: None,
         overrides: None,
     });
     addition.components.insert(
@@ -312,26 +312,25 @@ fn instance_declaration(root: ComponentValue) -> PrefabInstance {
             ComponentSchemaVersion::ONE,
             ComponentValue::map([(
                 "target",
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: id("actor"),
+                ComponentValue::EntityReference(EntityReference::Authored {
+                    reference: PrefabEntityTarget {
+                        through: vec![
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("actor")),
+                                expected_base: resolved.key().clone(),
+                            },
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::InstanceAddition(id("nested")),
+                                expected_base: resolved.key().clone(),
+                            },
+                        ],
+                        entity: PrefabEntityOrigin::SourceEntity(id("actor")),
+                    }
+                    .into(),
                 }),
             )]),
         )
         .with_owner(PersistentComponentSchemaOwnerId::try_new("consumer.property").unwrap()),
-    );
-    addition.bindings.insert(
-        ComponentTypeId::new(LINKS),
-        vec![PrefabReferenceBinding {
-            slot: ComponentFieldPath::from_fields(["target"]),
-            expected: id("actor"),
-            target: PrefabEntityTarget {
-                through: vec![PrefabInstanceHop {
-                    anchor: PrefabEntityOrigin::InstanceAddition(id("nested")),
-                    expected_base: resolved.key().clone(),
-                }],
-                entity: PrefabEntityOrigin::SourceEntity(id("actor")),
-            },
-        }],
     );
     overlay.additions.push(addition);
     overlay.placements.push(PrefabPlacement {
@@ -341,6 +340,7 @@ fn instance_declaration(root: ComponentValue) -> PrefabInstance {
     });
     PrefabInstance {
         source,
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -1153,14 +1153,23 @@ fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and
                     .unwrap()
                     .owner =
                     Some(PersistentComponentSchemaOwnerId::try_new("consumer.other").unwrap());
-                let mut wrong_binding = prior.clone();
-                wrong_binding.overrides.as_mut().unwrap().additions[0]
-                    .bindings
+                let mut wrong_reference = prior.clone();
+                let target = wrong_reference.overrides.as_mut().unwrap().additions[0]
+                    .components
                     .get_mut(&ComponentTypeId::new(LINKS))
-                    .unwrap()[0]
-                    .target
-                    .entity = PrefabEntityOrigin::SourceEntity(id("observer"));
-                for wrong in [wrong_owner, wrong_binding] {
+                    .unwrap()
+                    .value
+                    .get_path_mut(&ComponentFieldPath::from_fields(["target"]))
+                    .unwrap();
+                let ComponentValue::EntityReference(EntityReference::Authored { reference }) =
+                    target
+                else {
+                    panic!("expected an authored nested entity reference");
+                };
+                reference.target = AuthoredReferenceTarget::Entity(
+                    PrefabEntityOrigin::SourceEntity(id("observer")),
+                );
+                for wrong in [wrong_owner, wrong_reference] {
                     let rejection = editor
                         .prepare_authoring_edit(&basis, &instance_patch(Some(wrong), value.clone()))
                         .unwrap_err();
@@ -1308,10 +1317,10 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         target: PrefabEntityTarget::source(id("actor")),
         component: ComponentTypeId::new(UNKNOWN),
         record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
-        bindings: Vec::new(),
     });
     let declaration = PrefabInstance {
         source: source.clone(),
+        arguments: None,
         overrides: Some(overlay),
     };
     local[0].prefab = Some(declaration.clone());
@@ -1481,10 +1490,10 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
             target: PrefabEntityTarget::source(id("actor")),
             component: ComponentTypeId::new(UNKNOWN),
             record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
-            bindings: Vec::new(),
         });
         local[0].prefab = Some(PrefabInstance {
             source: lookup,
+            arguments: None,
             overrides: Some(overlay),
         });
         let mut expected = SceneDocument::from_ordered_roots(local);

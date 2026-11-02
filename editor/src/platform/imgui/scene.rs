@@ -407,6 +407,7 @@ mod binding_tests {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("ordinary-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ordinary.prefab.json").unwrap(),
+            arguments: None,
             overrides: Default::default(),
         });
         scene["payload"]["roots"]

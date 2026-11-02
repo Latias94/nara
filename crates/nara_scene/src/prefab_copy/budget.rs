@@ -3,22 +3,21 @@
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_reflect::{
-    ComponentPropertyReadBudget, ComponentValue, ComponentValueMaterializationLimits,
-    EntityReference, EntityReferenceTraversalLimits,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentPropertyReadBudget, ComponentSchema,
+    ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits, EntityReference,
+    EntityReferenceTraversalLimits,
 };
 
 use super::PrefabCopyError;
-use crate::{PrefabDocument, PrefabExpansionLimits, PrefabExpansionOptions, ScenePatchApplyLimits};
+use crate::{PrefabDocument, SceneFileLimits, ScenePatchApplyLimits};
 
-/// Inclusive whole-request limits, using the Scene compiler's logical ownership model.
+/// Inclusive whole-request limits, using the Scene source owner's logical ownership model.
 ///
 /// Raw nodes bound every borrowed source/declaration walk before copying. Value nodes/bytes
-/// aggregate admitted raw values and normalized payloads, including defaults and compiler output.
+/// aggregate admitted raw values and rewritten payloads. Default materialization and source
+/// classification share the same cumulative work allowance, including discarded scratch.
 /// Work nodes aggregate interpretation/selector/reference visits; work bytes aggregate logical
 /// work and modeled allocation deltas (512 per structural item, 96 per value node, plus content).
-/// The final compiler consumes only the remaining allowances in one complete-closure call.
-/// Its remaining byte allowance is divided between reference traversal and allocations;
-/// traversal is reserved because the production report exposes only modeled allocation cost.
 /// These are conservative work/content bounds, not allocator capacity or process RSS estimates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefabCopyLimits {
@@ -123,16 +122,12 @@ impl CopyBudget {
             .with_validation_value_bytes(bytes(
                 self.limits.value_bytes.saturating_sub(self.value_bytes),
             )?);
-        let cost = crate::patch::bounded_scene_entities_source_cost_with_admission(
-            &document.entities,
-            limits,
-            |amount| self.allocate(amount),
-        )?
-        .ok_or(PrefabCopyError::BudgetExceeded)?;
-        let nodes = cost
-            .operation_count()
-            .saturating_add(document.roots.len())
-            .saturating_add(1);
+        let cost =
+            crate::patch::bounded_prefab_source_cost_with_admission(document, limits, |amount| {
+                self.allocate(amount)
+            })?
+            .ok_or(PrefabCopyError::BudgetExceeded)?;
+        let nodes = cost.operation_count();
         add(&mut self.raw_nodes, nodes, self.limits.raw_nodes)?;
         add(
             &mut self.value_nodes,
@@ -144,17 +139,11 @@ impl CopyBudget {
             cost.value_cost().logical_bytes(),
             self.limits.value_bytes,
         )?;
-        let roots = document.roots.iter().try_fold(0usize, |total, root| {
-            total
-                .checked_add(std::mem::size_of_val(root))?
-                .checked_add(root.as_str().len())
-        });
         let allocated = cost
             .operation_count()
             .checked_mul(512)
             .and_then(|total| total.checked_add(cost.value_cost().nodes().checked_mul(96)?))
-            .and_then(|total| total.checked_add(cost.logical_bytes()))
-            .and_then(|total| total.checked_add(roots?));
+            .and_then(|total| total.checked_add(cost.logical_bytes()));
         self.charge(
             nodes.saturating_add(cost.value_cost().nodes()),
             cost.logical_bytes(),
@@ -163,11 +152,7 @@ impl CopyBudget {
         self.allocate(allocated)
     }
 
-    pub(super) fn value(
-        &mut self,
-        value: &ComponentValue,
-        source: usize,
-    ) -> Result<(), PrefabCopyError> {
+    pub(super) fn value(&mut self, value: &ComponentValue) -> Result<(), PrefabCopyError> {
         let remaining_nodes = self.limits.value_nodes.saturating_sub(self.value_nodes);
         let remaining_bytes = self.limits.value_bytes.saturating_sub(self.value_bytes);
         let cost = value
@@ -181,38 +166,116 @@ impl CopyBudget {
             cost.logical_bytes(),
             self.limits.value_bytes,
         )?;
-        self.charge(cost.nodes(), cost.logical_bytes(), 0)?;
-        self.reject_persistent(value, source, 1)
+        self.charge(cost.nodes(), cost.logical_bytes(), 0)
     }
 
-    fn reject_persistent(
+    pub(super) fn reference(&mut self, reference: &EntityReference) -> Result<(), PrefabCopyError> {
+        let cost = reference.cost();
+        self.charge(cost.nodes(), cost.logical_bytes(), 0)?;
+        let allocated = match reference {
+            EntityReference::Authored { reference } => reference.through.iter().try_fold(
+                std::mem::size_of_val(reference).saturating_add(cost.logical_bytes()),
+                |bytes, hop| {
+                    bytes
+                        .checked_add(std::mem::size_of_val(hop))?
+                        .checked_add(hop.expected_base.checked_retained_bytes()?)
+                },
+            ),
+            _ => std::mem::size_of_val(reference).checked_add(cost.logical_bytes()),
+        };
+        self.allocate(allocated)
+    }
+
+    /// The shared override materializer checks effective nodes/bytes before cloning. Reserve
+    /// its temporary ownership and default-plan scratch before entering that non-callback API.
+    pub(super) fn effective_record(
+        &mut self,
+        schema: &ComponentSchema,
+        record: &crate::SceneComponentRecord,
+    ) -> Result<(), PrefabCopyError> {
+        let cost = self.planning_cost(&record.value)?;
+        self.charge(
+            cost.nodes(),
+            cost.logical_bytes(),
+            cost.nodes()
+                .saturating_mul(96)
+                .saturating_add(cost.logical_bytes()),
+        )?;
+        for field in schema.fields() {
+            self.field_plan(field)?;
+            // Source-default validation plans even canonical templates hidden by explicit
+            // values or overrides. Reserve the same Reflect path storage before that call.
+            if let Some(default) = field.default_value() {
+                self.selected_plan(field, default)?;
+            }
+            if let Some(default) = record
+                .contextual_defaults
+                .get(field.id())
+                .or(field.default_value())
+            {
+                let cost = self.planning_cost(default)?;
+                self.charge(
+                    cost.nodes(),
+                    cost.logical_bytes(),
+                    cost.nodes()
+                        .saturating_mul(96)
+                        .saturating_add(cost.logical_bytes()),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Selected-shape planning uses Reflect's ordinary walker. Admit its path storage using
+    /// the finite traversal depth and the already bounded payload, without interpreting it.
+    pub(super) fn selected_plan(
+        &mut self,
+        field: &ComponentFieldSchema,
+        value: &ComponentValue,
+    ) -> Result<(), PrefabCopyError> {
+        self.field_plan(field)?;
+        let cost = self.planning_cost(value)?;
+        self.charge(
+            cost.nodes(),
+            cost.logical_bytes(),
+            cost.nodes()
+                .saturating_mul(PrefabCopyLimits::MAX_DEPTH.saturating_mul(96))
+                .saturating_add(
+                    cost.logical_bytes()
+                        .saturating_mul(PrefabCopyLimits::MAX_DEPTH),
+                ),
+        )
+    }
+
+    fn planning_cost(
         &mut self,
         value: &ComponentValue,
-        source: usize,
-        depth: usize,
-    ) -> Result<(), PrefabCopyError> {
-        if depth > PrefabCopyLimits::MAX_DEPTH {
-            return Err(PrefabCopyError::BudgetExceeded);
-        }
-        self.charge(1, 0, 0)?;
-        match value {
-            ComponentValue::EntityReference(EntityReference::Persistent { .. }) => {
-                Err(PrefabCopyError::PersistentReference { source })
-            }
-            ComponentValue::List(values) => {
-                for value in values {
-                    self.reject_persistent(value, source, depth + 1)?;
-                }
-                Ok(())
-            }
-            ComponentValue::Map(values) => {
-                for value in values.values() {
-                    self.reject_persistent(value, source, depth + 1)?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
+    ) -> Result<ComponentValueCost, PrefabCopyError> {
+        let nodes = self.limits.work_nodes.saturating_sub(self.work_nodes);
+        let bytes = self.limits.work_bytes.saturating_sub(self.work_bytes);
+        value
+            .cost_up_to_with_admission(nodes, bytes, |amount| self.allocate(amount))?
+            .ok_or(PrefabCopyError::BudgetExceeded)
+    }
+
+    fn field_plan(&mut self, field: &ComponentFieldSchema) -> Result<(), PrefabCopyError> {
+        let path_bytes = field
+            .path()
+            .segments()
+            .iter()
+            .fold(0usize, |bytes, segment| {
+                bytes.saturating_add(96).saturating_add(match segment {
+                    ComponentFieldPathSegment::Field(name) => name.len(),
+                    ComponentFieldPathSegment::Index(_) => 0,
+                })
+            });
+        self.charge(
+            field.path().segments().len().saturating_add(1),
+            field.id().as_str().len().saturating_add(path_bytes),
+            path_bytes
+                .saturating_mul(3)
+                .saturating_add(field.id().as_str().len()),
+        )
     }
 
     pub(super) fn materialization(
@@ -233,39 +296,12 @@ impl CopyBudget {
         ))
     }
 
-    pub(super) fn compiler_options(&self) -> Result<PrefabExpansionOptions, PrefabCopyError> {
-        let remaining_nodes = self.limits.work_nodes.saturating_sub(self.work_nodes);
-        let remaining_bytes = self.limits.work_bytes.saturating_sub(self.work_bytes) / 2;
-        Ok(PrefabExpansionOptions::default()
-            .with_max_depth(PrefabCopyLimits::MAX_DOCUMENTS)
-            .with_limits(
-                PrefabExpansionLimits::default()
-                    .with_materialized_entities(items(
-                        self.limits.raw_nodes.saturating_sub(self.raw_nodes),
-                    )?)
-                    .with_materialized_components(items(
-                        self.limits.raw_nodes.saturating_sub(self.raw_nodes),
-                    )?)
-                    .with_resolved_instances(items(
-                        self.limits.raw_nodes.saturating_sub(self.raw_nodes),
-                    )?)
-                    .with_overlay_declarations(items(
-                        self.limits.raw_nodes.saturating_sub(self.raw_nodes),
-                    )?)
-                    .with_materialized_value_nodes(items(
-                        self.limits.value_nodes.saturating_sub(self.value_nodes),
-                    )?)
-                    .with_materialized_value_bytes(bytes(
-                        self.limits.value_bytes.saturating_sub(self.value_bytes),
-                    )?)
-                    .with_reference_work_nodes(items(remaining_nodes)?)
-                    .with_reference_work_bytes(bytes(remaining_bytes)?)
-                    .with_working_bytes(bytes(remaining_bytes)?),
-            ))
-    }
-
-    pub(super) fn compiler_working_bytes(&self) -> Result<ByteLimit, PrefabCopyError> {
-        bytes(self.limits.work_bytes.saturating_sub(self.work_bytes))
+    pub(super) fn source_limits(&self) -> Result<SceneFileLimits, PrefabCopyError> {
+        // Classification's per-record traversal allowance is independent of prior records.
+        // Its allocation/work deltas still debit this request before each owning operation.
+        Ok(SceneFileLimits::default()
+            .with_component_value_nodes(items(self.limits.value_nodes)?)
+            .with_component_value_bytes(bytes(self.limits.value_bytes)?))
     }
 }
 
@@ -292,4 +328,102 @@ fn items(value: usize) -> Result<ItemLimit, PrefabCopyError> {
 }
 fn bytes(value: usize) -> Result<ByteLimit, PrefabCopyError> {
     ByteLimit::new(value).ok_or(PrefabCopyError::BudgetExceeded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        PrefabInstance, PrefabReferenceArguments, SceneComponentRecord, SceneEntityRecord,
+        SourceDocumentKey, SourceDocumentKind,
+    };
+    use nara_identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
+    use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId};
+
+    fn key() -> SourceDocumentKey {
+        SourceDocumentKey::named(
+            "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+            "leaf",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn input_declarations_and_roots_use_the_preclone_document_allowance() {
+        let mut document = PrefabDocument::default();
+        document.roots.push(SceneEntityId::new("root").unwrap());
+        document.inputs.extend([
+            ReferenceInputId::new("left").unwrap(),
+            ReferenceInputId::new("right").unwrap(),
+        ]);
+        let limits = |raw| PrefabCopyLimits::new(raw, 100, 10_000, 100, 10_000).unwrap();
+        CopyBudget::new(limits(4)).document(&document).unwrap();
+        assert!(matches!(
+            CopyBudget::new(limits(3)).document(&document),
+            Err(PrefabCopyError::BudgetExceeded)
+        ));
+
+        let mut observed = CopyBudget::new(PrefabCopyLimits::default());
+        observed.document(&document).unwrap();
+        let exact = observed.work_bytes;
+        let limits = |work_bytes| PrefabCopyLimits::new(100, 100, 10_000, 100, work_bytes).unwrap();
+        CopyBudget::new(limits(exact)).document(&document).unwrap();
+        assert!(matches!(
+            CopyBudget::new(limits(exact - 1)).document(&document),
+            Err(PrefabCopyError::BudgetExceeded)
+        ));
+    }
+
+    #[test]
+    fn hidden_contextual_default_value_cost_is_admitted_before_document_copy() {
+        let input = ReferenceInputId::new("socket").unwrap();
+        let hidden = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference::input(input),
+        });
+        let entity = SceneEntityRecord::new(SceneEntityId::new("root").unwrap()).with_component(
+            ComponentTypeId::new("test.CopyDefault"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null)
+                .with_contextual_default(ComponentFieldId::new("target"), hidden),
+        );
+        let document = PrefabDocument::from_ordered_roots([entity]);
+        // Null owns one value node; the retained authored input default owns two more.
+        let limits = |nodes| PrefabCopyLimits::new(100, nodes, 10_000, 1_000, 100_000).unwrap();
+        CopyBudget::new(limits(3)).document(&document).unwrap();
+        assert!(matches!(
+            CopyBudget::new(limits(2)).document(&document),
+            Err(PrefabCopyError::BudgetExceeded)
+        ));
+    }
+
+    #[test]
+    fn unused_argument_input_endpoint_participates_in_raw_document_work() {
+        let input = ReferenceInputId::new("socket").unwrap();
+        let mut entity = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
+        entity.prefab = Some(PrefabInstance {
+            source: AssetRef::path("prefabs/leaf.prefab.json").unwrap(),
+            arguments: Some(PrefabReferenceArguments {
+                base: key(),
+                values: [(
+                    input.clone(),
+                    EntityReference::Authored {
+                        reference: AuthoredEntityReference::input(input),
+                    },
+                )]
+                .into(),
+            }),
+            overrides: None,
+        });
+        let document = PrefabDocument::from_ordered_roots([entity]);
+        let mut observed = CopyBudget::new(PrefabCopyLimits::default());
+        observed.document(&document).unwrap();
+        // Root/document/entity/instance/arguments/base/map/entry plus the two-node input.
+        assert_eq!(observed.raw_nodes, 10);
+        let limits = |raw| PrefabCopyLimits::new(raw, 100, 10_000, 1_000, 100_000).unwrap();
+        CopyBudget::new(limits(10)).document(&document).unwrap();
+        assert!(matches!(
+            CopyBudget::new(limits(9)).document(&document),
+            Err(PrefabCopyError::BudgetExceeded)
+        ));
+    }
 }

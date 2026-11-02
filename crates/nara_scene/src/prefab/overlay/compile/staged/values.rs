@@ -4,10 +4,14 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 
 use nara_asset::AssetRef;
+use nara_core::ItemLimit;
+use nara_reflect::__private::{
+    effective_component_value_owned_with_default_overrides, validate_value_materialization_budget,
+};
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
     ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits, effective_component_value_owned,
+    ComponentValueMaterializationLimits,
 };
 
 use super::reference_program::{ReferenceProgram, ReferencePrograms};
@@ -15,15 +19,14 @@ use super::{Compiler, Program, Record, instance_from_inputs};
 use crate::diagnostics::{
     error as diagnostic_error, with_codec_error, with_migration_error, with_public_locator,
 };
-use crate::prefab::overlay::{components, properties, references};
+use crate::prefab::overlay::{components, properties};
 use crate::prefab::{
     PrefabExpansionBudgetKind, PrefabExpansionWorkingSet, PrefabReferenceRemapError,
 };
 use crate::provenance::provenance_string_bytes;
 use crate::{
     PrefabComponentIntent, PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabOverlaySlot,
-    PrefabPropertyIntent, PrefabReferenceBinding, ResolvedPrefabSource, SceneComponentRecord,
-    SceneDocument, SceneEntityId,
+    PrefabPropertyIntent, ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId,
 };
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
@@ -144,53 +147,36 @@ where
             authority.current_schema(component, original)?;
         }
 
-        let limits = self.context.materialization_limits();
-        let mut visited = 0;
-        if let Err((kind, observed, maximum)) =
-            admit_value_depth(&original.value, limits, 1, &mut visited)
-        {
-            self.context
-                .fail_budget(kind, observed, maximum, Some(entity), None);
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
-        }
-        let cost = match original
-            .value
-            .cost_up_to(limits.nodes().get(), limits.bytes().get())
-        {
-            Some(cost) => cost,
-            None => {
-                let (kind, observed, maximum) =
-                    match original.value.cost_up_to(limits.nodes().get(), usize::MAX) {
-                        Some(cost) => (
-                            PrefabExpansionBudgetKind::MaterializedValueBytes,
-                            cost.logical_bytes(),
-                            limits.bytes().get(),
-                        ),
-                        None => (
-                            PrefabExpansionBudgetKind::MaterializedValueNodes,
-                            limits.nodes().get().saturating_add(1),
-                            limits.nodes().get(),
-                        ),
-                    };
-                self.context
-                    .fail_budget(kind, observed, maximum, Some(entity), None);
-                return Err(PrefabExpansionFailureKind::WorkLimit.into());
+        let limits = self.value_program_limits();
+        let admitted = (|| {
+            let cost = bounded_value_cost(&original.value, limits)?;
+            for default in original.contextual_defaults.values() {
+                validate_value_materialization_budget(default, limits)?;
             }
-        };
-        let metadata = provenance_string_bytes(component.as_str())
-            .and_then(|bytes| {
-                bytes.checked_add(
-                    original
-                        .owner()
-                        .map_or(Some(0), |owner| provenance_string_bytes(owner.as_str()))?,
-                )
-            })
-            .and_then(|bytes| bytes.checked_add(size_of::<SceneComponentRecord>()));
+            if !opaque
+                && !original.contextual_defaults.is_empty()
+                && let Some(schema) = authority.schema(component)
+            {
+                crate::document::validate_contextual_defaults(schema, original, limits)?;
+            }
+            let metadata = provenance_string_bytes(component.as_str())
+                .and_then(|bytes| {
+                    bytes.checked_add(
+                        original
+                            .owner()
+                            .map_or(Some(0), |owner| provenance_string_bytes(owner.as_str()))?,
+                    )
+                })
+                .and_then(|bytes| bytes.checked_add(size_of::<SceneComponentRecord>()))
+                .and_then(|bytes| bytes.checked_add(contextual_defaults_work_bytes(original)?));
+            Ok::<_, ComponentCodecError>((cost, metadata))
+        })();
+        let (cost, metadata) =
+            admitted.map_err(|error| self.normalization_failure(&error, entity))?;
         self.admit(metadata)?;
-        // Every attempt pays for this clone before allocation, including attempts whose
-        // materialized counters are later released when reference demand opens a scope.
+        // Every attempt pays for the complete authored clone, including hidden defaults.
+        // Only final lowering charges the materialized value counters.
         self.admit(value_work_bytes(cost))?;
-        self.replace_value_cost(ComponentValueCost::ZERO, cost, entity)?;
         let mut record = self.component(program.record, component).clone();
         if opaque {
             return Ok((
@@ -202,7 +188,8 @@ where
             ));
         }
 
-        let mut references = if let Record::Source { scope, .. } = program.record {
+        let record_scope = self.record_reference_scope(program.record)?;
+        if matches!(program.record, Record::Source { .. }) {
             let previous_version = record.version;
             let value = std::mem::replace(&mut record.value, ComponentValue::Null);
             let migrated = match authority.migrate_owned(component, &record, value) {
@@ -231,42 +218,27 @@ where
             }
             record.version = migrated.version;
             record.value = migrated.value;
-            let migrated_cost = self.bounded_value_cost(&record.value, cost)?;
-            self.replace_value_cost(cost, migrated_cost, entity)?;
-            let schema = authority.current_schema(component, &record)?;
-            self.materialize_defaults(schema, &mut record, entity)?;
-            components::validate_value(
-                schema,
-                &record.value,
-                self.value_program_limits(record.value.cost())?,
-            )?;
-            self.source_reference_origins(schema, &record.value, scope, entity, component)?
-        } else {
-            let (scope, slot) = match program.record {
-                Record::Addition { scope, index } => (scope, PrefabOverlaySlot::Addition { index }),
-                Record::Set { scope, index } => (scope, PrefabOverlaySlot::Component { index }),
-                Record::Source { .. } => unreachable!("source records were handled above"),
-            };
-            let bindings = self.value_bindings(program.record, component);
-            let binding_bytes = binding_work_bytes(bindings);
-            self.admit(binding_bytes)?;
-            let schema = authority.current_schema(component, &record)?;
-            self.materialize_defaults(schema, &mut record, entity)?;
-
-            let old_cost = record.value.cost();
-            let limits = self.value_program_limits(old_cost)?;
-            components::validate_value(schema, &record.value, limits)?;
-            self.reserve_value_reference_work(schema, old_cost, limits)?;
-            let bindings = references::plan_bindings(
-                schema,
-                &record.value,
-                self.value_bindings(program.record, component),
-                limits,
-            )?;
-            self.scope_reference_bindings(bindings, scope, Some(slot))?
-        };
-
+            bounded_value_cost(&record.value, limits)
+                .map_err(|error| self.normalization_failure(&error, entity))?;
+        }
         let schema = authority.current_schema(component, &record)?;
+        self.materialize_defaults(schema, &mut record, entity)?;
+        components::validate_value(schema, &record.value, self.value_program_limits())?;
+        let declaration = match program.record {
+            Record::Source { .. } => None,
+            Record::Addition { scope, index } => {
+                Some((scope, PrefabOverlaySlot::Addition { index }))
+            }
+            Record::Set { scope, index } => Some((scope, PrefabOverlaySlot::Component { index })),
+        };
+        let mut references = self.record_reference_origins(
+            schema,
+            &record.value,
+            record_scope,
+            declaration,
+            entity,
+            component,
+        )?;
         for &(scope, index) in &program.properties {
             let intent = &self
                 .overlay(scope)
@@ -286,49 +258,50 @@ where
                 ));
             }
             let old_cost = record.value.cost();
-            let limits = self.value_program_limits(old_cost)?;
+            let limits = self.value_program_limits();
             let claim_count = claims.len();
-            let claim_work = claims.iter().try_fold(
-                (0usize, ComponentValueCost::ZERO),
-                |(bytes, values), claim| {
-                    let bytes = bytes
-                        .checked_add(128)?
-                        .checked_add(claim.path.logical_bytes().ok()?)?
-                        .checked_add(binding_work_bytes(&claim.bindings)?)?;
-                    match &claim.intent {
+            let claim_work = (|| {
+                let mut bytes = Some(0usize);
+                let mut values = ComponentValueCost::ZERO;
+                for claim in claims {
+                    bytes = bytes.and_then(|bytes| {
+                        bytes
+                            .checked_add(128)?
+                            .checked_add(claim.path.logical_bytes().ok()?)
+                    });
+                    let cost = match &claim.intent {
                         PrefabPropertyIntent::Set(value) => {
-                            let cost =
-                                value.cost_up_to(limits.nodes().get(), limits.bytes().get())?;
-                            Some((
-                                bytes.checked_add(value_work_bytes(cost)?.checked_mul(3)?)?,
-                                values.saturating_add(cost),
-                            ))
+                            let cost = bounded_value_cost(value, limits)?;
+                            bytes = bytes.and_then(|bytes| {
+                                bytes.checked_add(value_work_bytes(cost)?.checked_mul(3)?)
+                            });
+                            cost
                         }
-                        PrefabPropertyIntent::Absent => {
-                            let cost = schema
-                                .fields()
-                                .iter()
-                                .find(|field| field.id() == &claim.path.root)
-                                .and_then(|field| field.default_value())
-                                .map(ComponentValue::cost)
-                                .unwrap_or_default();
-                            Some((bytes, values.saturating_add(cost)))
-                        }
-                    }
-                },
-            );
-            let (claim_bytes, claim_values) =
-                claim_work.ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-            self.admit(Some(claim_bytes))?;
-            // prepare_claims keeps an immutable base and an isolated candidate; its default
-            // and binding plans are separately bounded before copying selected payloads.
-            for _ in 0..2 {
-                if !self
-                    .context
-                    .reserve_component_temporary(schema, old_cost, Some(entity))
-                {
-                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
+                        PrefabPropertyIntent::Absent => record
+                            .contextual_defaults
+                            .get(&claim.path.root)
+                            .or_else(|| {
+                                schema
+                                    .fields()
+                                    .iter()
+                                    .find(|field| field.id() == &claim.path.root)
+                                    .and_then(|field| field.default_value())
+                            })
+                            .map(|value| bounded_value_cost(value, limits))
+                            .transpose()?
+                            .unwrap_or_default(),
+                    };
+                    values = values.saturating_add(cost);
                 }
+                Ok::<_, ComponentCodecError>((bytes, values))
+            })();
+            let (claim_bytes, claim_values) =
+                claim_work.map_err(|error| self.normalization_failure(&error, entity))?;
+            self.admit(claim_bytes)?;
+            // prepare_claims keeps an immutable base and an isolated candidate; its default
+            // and reference plans are separately bounded before copying selected payloads.
+            for _ in 0..2 {
+                self.reserve_program_temporary(schema, &record, old_cost, entity)?;
             }
             self.reserve_value_reference_work(schema, old_cost, limits)?;
             self.reserve_value_reference_work(schema, claim_values, limits)?;
@@ -349,6 +322,7 @@ where
                 schema,
                 *version,
                 &record.value,
+                &record.contextual_defaults,
                 claims,
                 limits,
                 |bytes| {
@@ -371,14 +345,14 @@ where
             self.replace_reference_origins(
                 &mut references.origins,
                 prepared.replacements,
+                record_scope,
                 scope,
                 index,
             )?;
-            self.replace_value_cost(old_cost, prepared.value.cost(), entity)?;
             record.value = prepared.value;
             references.plan = None;
         }
-        let limits = self.value_program_limits(record.value.cost())?;
+        let limits = self.value_program_limits();
         self.validate_reference_program(
             schema,
             &record.value,
@@ -390,73 +364,16 @@ where
         Ok((record, references))
     }
 
-    fn value_bindings(
-        &self,
-        record: Record,
-        component: &ComponentTypeId,
-    ) -> &[PrefabReferenceBinding] {
-        match record {
-            Record::Source { .. } => &[],
-            Record::Addition { scope, index } => self.overlay(scope).unwrap().additions[index]
-                .bindings
-                .get(component)
-                .map_or(&[], Vec::as_slice),
-            Record::Set { scope, index } => match &self.overlay(scope).unwrap().components[index] {
-                PrefabComponentIntent::Set { bindings, .. } => bindings,
-                _ => unreachable!("a Set value program retains its declaration"),
-            },
-        }
-    }
-
-    pub(super) fn value_program_limits(
-        &self,
-        replaced: ComponentValueCost,
-    ) -> Result<ComponentValueMaterializationLimits, PrefabExpansionFailure> {
-        let usage = self.context.usage;
-        let limits = self.context.materialization_limits();
-        Ok(components::reserve_cost(
-            limits,
-            usage
-                .materialized_value_nodes
-                .checked_sub(replaced.nodes())
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
-            usage
-                .materialized_value_bytes
-                .checked_sub(replaced.logical_bytes())
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?,
-        )?)
-    }
-
-    fn bounded_value_cost(
-        &self,
-        value: &ComponentValue,
-        replaced: ComponentValueCost,
-    ) -> Result<ComponentValueCost, PrefabExpansionFailure> {
-        let limits = self.value_program_limits(replaced)?;
-        value
-            .cost_up_to(limits.nodes().get(), limits.bytes().get())
-            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
-    }
-
-    fn replace_value_cost(
-        &mut self,
-        original: ComponentValueCost,
-        replacement: ComponentValueCost,
-        entity: &SceneEntityId,
-    ) -> Result<(), PrefabExpansionFailure> {
-        let (nodes, bytes) = self
-            .context
-            .preflight_materialized_value_cost(
-                original.nodes(),
-                replacement.nodes(),
-                original.logical_bytes(),
-                replacement.logical_bytes(),
-                entity,
-            )
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-        self.context.usage.materialized_value_nodes = nodes;
-        self.context.usage.materialized_value_bytes = bytes;
-        Ok(())
+    pub(super) fn value_program_limits(&self) -> ComponentValueMaterializationLimits {
+        // Authored routes and defaults can exceed the final flat value. Each owned copy
+        // still pays nodes * 96 + logical bytes against the cumulative working allowance.
+        let working = self.context.options.limits.working_bytes();
+        ComponentValueMaterializationLimits::new(
+            ItemLimit::new((working.get() / 96).max(1))
+                .expect("a working allowance produces a non-zero node ceiling"),
+            working,
+            self.context.materialization_limits().depth(),
+        )
     }
 
     fn materialize_defaults(
@@ -466,38 +383,22 @@ where
         entity: &SceneEntityId,
     ) -> Result<(), PrefabExpansionFailure> {
         let old_cost = record.value.cost();
-        let limits = self.value_program_limits(old_cost)?;
-        if !self
-            .context
-            .reserve_component_temporary(schema, old_cost, Some(entity))
-        {
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
-        }
+        let limits = self.value_program_limits();
+        crate::document::validate_contextual_defaults(schema, record, limits)
+            .map_err(|error| self.normalization_failure(&error, entity))?;
+        self.reserve_program_temporary(schema, record, old_cost, entity)?;
         let value = std::mem::replace(&mut record.value, ComponentValue::Null);
-        record.value = match effective_component_value_owned(schema, value, limits) {
+        record.value = match effective_component_value_owned_with_default_overrides(
+            schema,
+            value,
+            &record.contextual_defaults,
+            limits,
+        ) {
             Ok(value) => value,
             Err(error) => {
-                let budget = match &error {
-                    ComponentCodecError::MaterializationNodeLimit { observed, maximum } => Some((
-                        PrefabExpansionBudgetKind::MaterializedValueNodes,
-                        *observed,
-                        *maximum,
-                    )),
-                    ComponentCodecError::MaterializationByteLimit { observed, maximum } => Some((
-                        PrefabExpansionBudgetKind::MaterializedValueBytes,
-                        *observed,
-                        *maximum,
-                    )),
-                    ComponentCodecError::MaterializationDepthLimit { observed, maximum } => Some((
-                        PrefabExpansionBudgetKind::MaterializedValueDepth,
-                        *observed,
-                        *maximum,
-                    )),
-                    _ => None,
-                };
-                if let Some((kind, observed, maximum)) = budget {
-                    self.context
-                        .fail_budget(kind, observed, maximum, Some(entity), None);
+                if self.normalization_failure(&error, entity)
+                    == PrefabExpansionFailureKind::WorkLimit
+                {
                     return Err(PrefabExpansionFailureKind::WorkLimit.into());
                 }
                 self.context.diagnostics.push(with_codec_error(
@@ -519,8 +420,66 @@ where
                 return Err(PrefabExpansionFailureKind::Component.into());
             }
         };
-        let cost = self.bounded_value_cost(&record.value, old_cost)?;
-        self.replace_value_cost(old_cost, cost, entity)
+        Ok(())
+    }
+
+    fn reserve_program_temporary(
+        &mut self,
+        schema: &ComponentSchema,
+        record: &SceneComponentRecord,
+        value: ComponentValueCost,
+        entity: &SceneEntityId,
+    ) -> Result<(), PrefabExpansionFailure> {
+        let limits = self.value_program_limits();
+        let mut bytes = value_work_bytes(value);
+        for field in schema.fields() {
+            if let Some(default) = record
+                .contextual_defaults
+                .get(field.id())
+                .or_else(|| field.default_value())
+            {
+                let cost = bounded_value_cost(default, limits)
+                    .map_err(|error| self.normalization_failure(&error, entity))?;
+                bytes = bytes
+                    .and_then(|bytes| bytes.checked_add(value_work_bytes(cost)?.checked_mul(3)?));
+            }
+        }
+        self.context
+            .reserve_scratch_bytes(bytes, Some(entity), None)
+            .then_some(())
+            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
+    }
+
+    fn normalization_failure(
+        &mut self,
+        error: &ComponentCodecError,
+        entity: &SceneEntityId,
+    ) -> PrefabExpansionFailureKind {
+        let budget = match error {
+            ComponentCodecError::MaterializationNodeLimit { observed, .. } => Some((
+                PrefabExpansionBudgetKind::WorkingBytes,
+                observed.saturating_mul(96),
+                self.context.options.limits.working_bytes().get(),
+            )),
+            ComponentCodecError::MaterializationByteLimit { observed, .. } => Some((
+                PrefabExpansionBudgetKind::WorkingBytes,
+                *observed,
+                self.context.options.limits.working_bytes().get(),
+            )),
+            ComponentCodecError::MaterializationDepthLimit { observed, maximum } => Some((
+                PrefabExpansionBudgetKind::MaterializedValueDepth,
+                *observed,
+                *maximum,
+            )),
+            _ => None,
+        };
+        if let Some((kind, observed, maximum)) = budget {
+            self.context
+                .fail_budget(kind, observed, maximum, Some(entity), None);
+            PrefabExpansionFailureKind::WorkLimit
+        } else {
+            PrefabExpansionFailureKind::Component
+        }
     }
 
     pub(super) fn reserve_value_reference_work(
@@ -578,58 +537,24 @@ fn value_work_bytes(cost: ComponentValueCost) -> Option<usize> {
         .checked_add(cost.logical_bytes())
 }
 
-// Check borrowed input before derived Clone can recurse. The recursion itself is bounded
-// by the admitted depth, and the node ceiling also bounds flat programmatic inputs.
-fn admit_value_depth(
+// Reuse Reflect's complete source-value walker before derived Clone can recurse.
+fn bounded_value_cost(
     value: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-    depth: usize,
-    visited: &mut usize,
-) -> Result<(), (PrefabExpansionBudgetKind, usize, usize)> {
-    if depth > limits.depth().get() {
-        return Err((
-            PrefabExpansionBudgetKind::MaterializedValueDepth,
-            depth,
-            limits.depth().get(),
-        ));
-    }
-    *visited = visited.saturating_add(1);
-    if *visited > limits.nodes().get() {
-        return Err((
-            PrefabExpansionBudgetKind::MaterializedValueNodes,
-            *visited,
-            limits.nodes().get(),
-        ));
-    }
-    match value {
-        ComponentValue::List(values) => {
-            for value in values {
-                admit_value_depth(value, limits, depth + 1, visited)?;
-            }
-        }
-        ComponentValue::Map(values) => {
-            for value in values.values() {
-                admit_value_depth(value, limits, depth + 1, visited)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
+) -> Result<ComponentValueCost, ComponentCodecError> {
+    validate_value_materialization_budget(value, limits)?;
+    Ok(value.cost())
 }
 
-fn binding_work_bytes(bindings: &[PrefabReferenceBinding]) -> Option<usize> {
-    bindings.iter().try_fold(0usize, |bytes, binding| {
-        binding.slot.segments().iter().try_fold(
+fn contextual_defaults_work_bytes(record: &SceneComponentRecord) -> Option<usize> {
+    record
+        .contextual_defaults
+        .iter()
+        .try_fold(0usize, |bytes, (field, value)| {
+            let cost = value.cost();
             bytes
                 .checked_add(128)?
-                .checked_add(binding.expected.as_str().len())?
-                .checked_add(super::target_clone_bytes(&binding.target)?)?,
-            |bytes, segment| {
-                bytes.checked_add(96)?.checked_add(match segment {
-                    ComponentFieldPathSegment::Field(name) => name.len(),
-                    ComponentFieldPathSegment::Index(_) => size_of::<u32>(),
-                })
-            },
-        )
-    })
+                .checked_add(provenance_string_bytes(field.as_str())?)?
+                .checked_add(value_work_bytes(cost)?)
+        })
 }

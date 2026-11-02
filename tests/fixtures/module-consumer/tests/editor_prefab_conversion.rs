@@ -70,6 +70,7 @@ fn original() -> SceneDocument {
     let mut anchor = record(id("anchor"), 10).with_children([id("local")]);
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("base.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     SceneDocument::new([id("anchor")], [anchor, record(id("local"), 20)])

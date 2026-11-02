@@ -532,6 +532,7 @@ mod files {
         );
         root.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/selection.ron").unwrap(),
+            arguments: None,
             overrides: Some(overlay),
         });
         let document = SceneDocument::from_ordered_roots([root]);

@@ -8,7 +8,7 @@ mod reference_paths;
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticValueRef};
-use nara_identity::EntityReference;
+use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, EntityReference};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyPath, ComponentRegistryError, ComponentRegistrySnapshot, ComponentSchema,
@@ -21,9 +21,9 @@ use crate::{
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionLimits,
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstanceHop,
     PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding,
-    PrefabSourceResolver, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SourceDocumentKey, SourceDocumentKind,
+    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 #[derive(nara_ecs::Component)]
@@ -69,7 +69,26 @@ fn empty() -> ComponentValue {
 }
 
 fn record(value: ComponentValue) -> SceneComponentRecord {
+    effective_record(value)
+        .with_contextual_default(ComponentFieldId::new("target"), local(&id("socket")))
+}
+
+fn effective_record(value: ComponentValue) -> SceneComponentRecord {
     SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner())
+}
+
+fn authored(reference: AuthoredEntityReference) -> ComponentValue {
+    ComponentValue::EntityReference(EntityReference::Authored { reference })
+}
+
+fn selected_socket() -> ComponentValue {
+    authored(AuthoredEntityReference {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+            expected_base: key("base"),
+        }],
+        target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id("socket"))),
+    })
 }
 
 fn schema() -> ComponentSchema {
@@ -109,17 +128,10 @@ fn registry(native: bool) -> ComponentRegistrySnapshot {
     registry.freeze().unwrap()
 }
 
-fn binding(slot: ComponentFieldPath) -> PrefabReferenceBinding {
-    PrefabReferenceBinding {
-        slot,
-        expected: id("socket"),
-        target: PrefabEntityTarget::source(id("socket")),
-    }
-}
-
 fn instance(base: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: request(base),
+        arguments: None,
         overrides: overlay,
     }
 }
@@ -157,8 +169,8 @@ fn set(mode: PrefabComponentSetMode, target: PrefabEntityTarget) -> PrefabCompon
         mode,
         target,
         component: component(),
-        record: record(empty()),
-        bindings: vec![binding(ComponentFieldPath::from_fields(["target"]))],
+        record: effective_record(empty())
+            .with_contextual_default(ComponentFieldId::new("target"), selected_socket()),
     }
 }
 
@@ -251,10 +263,10 @@ fn conflict(report: &PrefabExpansionReport, expected: &str) {
 #[test]
 fn addition_defaults_bind_once_and_preserve_owner_and_inherited_values() {
     let mut addition = PrefabAddition::new(id("new"));
-    addition.components.insert(component(), record(empty()));
-    addition.bindings.insert(
+    addition.components.insert(
         component(),
-        vec![binding(ComponentFieldPath::from_fields(["target"]))],
+        effective_record(empty())
+            .with_contextual_default(ComponentFieldId::new("target"), selected_socket()),
     );
     let mut overlay = PrefabOverlay::new(key("base"));
     add(&mut overlay, addition);
@@ -268,11 +280,11 @@ fn addition_defaults_bind_once_and_preserve_owner_and_inherited_values() {
     assert_eq!(expanded(&report).entities.len(), 5);
     assert_eq!(
         stored(&report, "new"),
-        &record(payload(&projected(&report, "socket"))),
+        &effective_record(payload(&projected(&report, "socket"))),
     );
     assert_eq!(
         stored(&report, "host"),
-        &record(payload(&projected(&report, "inherited"))),
+        &effective_record(payload(&projected(&report, "inherited"))),
     );
     assert_eq!(
         report.provenance().unwrap()[&projected(&report, "new")]
@@ -303,21 +315,21 @@ fn full_set_defaults_bind_for_add_and_replace_and_keep_the_declared_owner() {
         assert_eq!(expanded(&report).entities.len(), 4);
         assert_eq!(
             stored(&report, target),
-            &record(payload(&projected(&report, "socket"))),
+            &effective_record(payload(&projected(&report, "socket"))),
         );
         if mode == PrefabComponentSetMode::Add {
             assert_eq!(
                 stored(&report, "host"),
-                &record(payload(&projected(&report, "inherited"))),
+                &effective_record(payload(&projected(&report, "inherited"))),
             );
         }
     }
 }
 
 #[test]
-fn selected_scalar_and_absent_default_use_empty_payload_slots() {
+fn selected_scalar_and_absent_default_resolve_the_selected_source() {
     for intent in [
-        PrefabPropertyIntent::Set(local(&id("socket"))),
+        PrefabPropertyIntent::Set(selected_socket()),
         PrefabPropertyIntent::Absent,
     ] {
         let mut overlay = PrefabOverlay::new(key("base"));
@@ -328,7 +340,6 @@ fn selected_scalar_and_absent_default_use_empty_payload_slots() {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
                 intent,
-                bindings: vec![binding(ComponentFieldPath::empty())],
             }],
         });
         let report = expand(
@@ -339,7 +350,7 @@ fn selected_scalar_and_absent_default_use_empty_payload_slots() {
         );
         assert_eq!(
             stored(&report, "host"),
-            &record(payload(&projected(&report, "socket"))),
+            &effective_record(payload(&projected(&report, "socket"))),
         );
     }
 }
@@ -362,8 +373,7 @@ fn later_property_pin_replaces_an_unresolved_inherited_reference_before_target_l
         version: ComponentSchemaVersion::ONE,
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-            intent: PrefabPropertyIntent::Set(local(&id("socket"))),
-            bindings: vec![binding(ComponentFieldPath::default())],
+            intent: PrefabPropertyIntent::Set(selected_socket()),
         }],
     });
     let report = expand(
@@ -374,7 +384,7 @@ fn later_property_pin_replaces_an_unresolved_inherited_reference_before_target_l
     );
     assert_eq!(
         stored(&report, "host"),
-        &record(payload(&projected(&report, "socket"))),
+        &effective_record(payload(&projected(&report, "socket"))),
     );
     let mut anchor = SceneEntityRecord::new(id("instance"));
     anchor.prefab = Some(instance("base", None));
@@ -400,14 +410,6 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
         }],
         entity: PrefabEntityOrigin::SourceEntity(id(name)),
     };
-    let mut old_claim = binding(ComponentFieldPath::empty());
-    old_claim.target = PrefabEntityTarget {
-        through: vec![PrefabInstanceHop {
-            anchor: PrefabEntityOrigin::SourceEntity(id("discarded")),
-            expected_base: key("missing"),
-        }],
-        entity: PrefabEntityOrigin::SourceEntity(id("socket")),
-    };
     let mut inner = PrefabOverlay::new(key("base"));
     inner.components.push(PrefabComponentIntent::Properties {
         target: PrefabEntityTarget::source(id("host")),
@@ -415,8 +417,21 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
         version: ComponentSchemaVersion::ONE,
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-            intent: PrefabPropertyIntent::Set(local(&id("socket"))),
-            bindings: vec![old_claim],
+            intent: PrefabPropertyIntent::Set(authored(AuthoredEntityReference {
+                through: vec![
+                    PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                        expected_base: key("base"),
+                    },
+                    PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("discarded")),
+                        expected_base: key("missing"),
+                    },
+                ],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                    "socket",
+                ))),
+            })),
         }],
     });
     let mut discarded = SceneEntityRecord::new(id("discarded"));
@@ -443,16 +458,27 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
         let mut outer = PrefabOverlay::new(key("outer"));
         outer.suppressions.push(inner_target("discarded"));
         if replace {
-            let mut current = binding(ComponentFieldPath::empty());
-            current.target = inner_target("socket");
             outer.components.push(PrefabComponentIntent::Properties {
                 target: inner_target("host"),
                 component: component(),
                 version: ComponentSchemaVersion::ONE,
                 claims: vec![PrefabPropertyClaim {
                     path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-                    intent: PrefabPropertyIntent::Set(local(&id("socket"))),
-                    bindings: vec![current],
+                    intent: PrefabPropertyIntent::Set(authored(AuthoredEntityReference {
+                        through: vec![
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("instance")),
+                                expected_base: key("outer"),
+                            },
+                            PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                                expected_base: key("base"),
+                            },
+                        ],
+                        target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(
+                            id("socket"),
+                        )),
+                    })),
                 }],
             });
         }
@@ -477,7 +503,7 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
             assert_eq!(reads, [request("outer"), request("base")]);
             assert_eq!(
                 stored(&report, "host"),
-                &record(payload(&projected(&report, "socket"))),
+                &effective_record(payload(&projected(&report, "socket"))),
             );
         } else {
             assert!(report.candidate.is_none());
@@ -493,7 +519,7 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
 }
 
 #[test]
-fn absent_default_uses_its_claim_scope_while_untouched_references_keep_the_source_scope() {
+fn absent_default_and_untouched_references_keep_the_original_source_scope() {
     #[derive(nara_ecs::Component)]
     struct LinkPair(EntityReference, EntityReference);
 
@@ -549,7 +575,11 @@ fn absent_default_uses_its_claim_scope_while_untouched_references_keep_the_sourc
                     record(ComponentValue::map([
                         ("target", local(&id("socket"))),
                         ("untouched", local(&id("socket"))),
-                    ])),
+                    ]))
+                    .with_contextual_default(
+                        ComponentFieldId::new("untouched"),
+                        local(&id("socket")),
+                    ),
                 ),
                 SceneEntityRecord::new(id("socket")),
             ]),
@@ -573,7 +603,6 @@ fn absent_default_uses_its_claim_scope_while_untouched_references_keep_the_sourc
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
             intent: PrefabPropertyIntent::Absent,
-            bindings: vec![binding(ComponentFieldPath::empty())],
         }],
     });
     let mut anchor = SceneEntityRecord::new(id("instance"));
@@ -603,11 +632,12 @@ fn absent_default_uses_its_claim_scope_while_untouched_references_keep_the_sourc
     };
     assert_eq!(
         stored(&report, "host"),
-        &record(ComponentValue::map([
-            ("target", local(&socket("outer"))),
+        &effective_record(ComponentValue::map([
+            ("target", local(&socket("base"))),
             ("untouched", local(&socket("base"))),
         ])),
     );
+    assert_ne!(socket("base"), socket("outer"));
 }
 
 #[test]
@@ -623,7 +653,22 @@ fn deferred_reference_metadata_does_not_inflate_a_one_byte_final_local_id() {
         .with_materialized_value_bytes(ByteLimit::new(cost.logical_bytes()).unwrap());
     let sources = InMemoryPrefabSourceResolver::new();
     let accepted = expand(&registry(true), &document, &sources, limits);
-    assert_eq!(expanded(&accepted), &document);
+    assert_eq!(
+        expanded(&accepted)
+            .entities
+            .iter()
+            .find(|record| record.id == id("host"))
+            .unwrap()
+            .components[&component()],
+        effective_record(payload(&id("a"))),
+    );
+    assert_eq!(
+        expanded(&accepted)
+            .entities
+            .iter()
+            .find(|record| record.id == id("a")),
+        document.entities.iter().find(|record| record.id == id("a")),
+    );
     let refused = expand(
         &registry(true),
         &document,
@@ -638,25 +683,9 @@ fn deferred_reference_metadata_does_not_inflate_a_one_byte_final_local_id() {
 }
 
 #[test]
-fn orphan_addition_bindings_and_duplicate_component_declarations_refuse() {
-    let mut addition = PrefabAddition::new(id("new"));
-    addition.bindings.insert(component(), Vec::new());
-    let mut overlay = PrefabOverlay::new(key("base"));
-    add(&mut overlay, addition);
-    let report = expand(
-        &registry(true),
-        &scene(overlay),
-        &fixture(),
-        Default::default(),
-    );
-    conflict(&report, "reference");
-
+fn duplicate_component_declarations_refuse() {
     let mut addition = PrefabAddition::new(id("new"));
     addition.components.insert(component(), record(empty()));
-    addition.bindings.insert(
-        component(),
-        vec![binding(ComponentFieldPath::from_fields(["target"]))],
-    );
     let mut overlay = PrefabOverlay::new(key("base"));
     add(&mut overlay, addition);
     overlay.components.push(PrefabComponentIntent::Suppress {
@@ -762,15 +791,15 @@ fn assert_omitted_default_node_budget(
         field(diagnostic, "budget-kind"),
         DiagnosticValueRef::Identifier("materialized-value-nodes"),
     );
-    // The earlier component occupies two nodes. Reflect admits the second effective
-    // component against the remaining one, and reports that exact local boundary.
+    // Each final component occupies two nodes. Defaults and explicit pins share the same
+    // aggregate output allowance after occurrence references have lowered to actual IDs.
     assert_eq!(
         field(diagnostic, "observed"),
-        DiagnosticValueRef::Unsigned(2)
+        DiagnosticValueRef::Unsigned(4)
     );
     assert_eq!(
         field(diagnostic, "maximum"),
-        DiagnosticValueRef::Unsigned(1)
+        DiagnosticValueRef::Unsigned(3)
     );
     let failure = report.failure.as_ref().unwrap();
     assert_eq!(
@@ -834,11 +863,11 @@ fn assert_omitted_default_node_budget(
         );
         assert_eq!(
             field(diagnostic, "observed"),
-            DiagnosticValueRef::Unsigned(2)
+            DiagnosticValueRef::Unsigned(4)
         );
         assert_eq!(
             field(diagnostic, "maximum"),
-            DiagnosticValueRef::Unsigned(1)
+            DiagnosticValueRef::Unsigned(3)
         );
     }
 }
@@ -856,10 +885,10 @@ fn set_omitted_default_aggregate_node_refusal_has_no_repair_location() {
 #[test]
 fn addition_omitted_default_aggregate_node_refusal_has_no_repair_location() {
     let mut addition = PrefabAddition::new(id("new"));
-    addition.components.insert(component(), record(empty()));
-    addition.bindings.insert(
+    addition.components.insert(
         component(),
-        vec![binding(ComponentFieldPath::from_fields(["target"]))],
+        effective_record(empty())
+            .with_contextual_default(ComponentFieldId::new("target"), selected_socket()),
     );
     let mut overlay = PrefabOverlay::new(key("base"));
     add(&mut overlay, addition);
@@ -902,7 +931,7 @@ fn semantic_default_materialization_failure_keeps_its_component_intent_location(
 }
 
 #[test]
-fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowances() {
+fn two_record_defaults_and_inline_references_share_exact_value_and_generated_id_allowances() {
     let registry = registry(true);
     let sources = InMemoryPrefabSourceResolver::new().with_prefab(
         request("base"),
@@ -929,15 +958,12 @@ fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowance
             let mut addition = PrefabAddition::new(id(name));
             addition.components.insert(
                 component(),
-                record(if name == "second" && !second_uses_default {
-                    payload(&id("socket"))
+                effective_record(if name == "second" && !second_uses_default {
+                    ComponentValue::map([("target", selected_socket())])
                 } else {
                     empty()
-                }),
-            );
-            addition.bindings.insert(
-                component(),
-                vec![binding(ComponentFieldPath::from_fields(["target"]))],
+                })
+                .with_contextual_default(ComponentFieldId::new("target"), selected_socket()),
             );
             add(&mut overlay, addition);
         }
@@ -951,7 +977,10 @@ fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowance
         assert_eq!(expanded(&report).entities.len(), 4);
         assert_eq!(projected(&report, "socket"), id("prefab_0"));
         for name in ["first", "second"] {
-            assert_eq!(stored(&report, name), &record(payload(&id("prefab_0"))));
+            assert_eq!(
+                stored(&report, name),
+                &effective_record(payload(&id("prefab_0")))
+            );
         }
 
         for (limited_nodes, limited_bytes) in [(nodes - 1, bytes), (nodes, bytes - 1)] {
@@ -970,22 +999,7 @@ fn two_record_defaults_and_bindings_share_exact_value_and_generated_id_allowance
                     "materialized-value-bytes"
                 }),
             );
-            if limited_nodes < nodes && second_uses_default {
-                // The second default is admitted against the residual node allowance.
-                let default_nodes = payload(&id("socket")).cost().nodes();
-                assert_eq!(
-                    field(diagnostic, "observed"),
-                    DiagnosticValueRef::Unsigned(default_nodes as u64),
-                );
-                assert_eq!(
-                    field(diagnostic, "maximum"),
-                    DiagnosticValueRef::Unsigned((limited_nodes - final_value.nodes()) as u64),
-                );
-                assert_eq!(
-                    field(diagnostic, "entity-id"),
-                    DiagnosticValueRef::Identifier("second")
-                );
-            } else if limited_nodes < nodes {
+            if limited_nodes < nodes {
                 assert_eq!(
                     field(diagnostic, "observed"),
                     DiagnosticValueRef::Unsigned(nodes as u64)
@@ -1106,7 +1120,7 @@ fn inherited_addition_intents_with_a_nonempty_instance_route_remain_legal() {
     assert_eq!(expanded(&report).entities.len(), 5);
     assert_eq!(
         stored(&report, "child"),
-        &record(payload(&projected(&report, "socket"))),
+        &effective_record(payload(&projected(&report, "socket"))),
     );
     assert_eq!(
         report.provenance().unwrap()[&projected(&report, "child")]
@@ -1151,7 +1165,7 @@ fn suppress_frees_selected_materialization_budget_for_a_later_add() {
     assert!(entity(&report, "host").components.is_empty());
     assert_eq!(
         stored(&report, "socket"),
-        &record(payload(&projected(&report, "socket"))),
+        &effective_record(payload(&projected(&report, "socket"))),
     );
 
     overlay.components.remove(0);
@@ -1192,7 +1206,7 @@ fn suppress_frees_selected_materialization_budget_for_a_later_add() {
     );
     assert_eq!(
         field(diagnostic, "observed"),
-        DiagnosticValueRef::Unsigned(3)
+        DiagnosticValueRef::Unsigned((final_value.nodes() * 2) as u64)
     );
     assert_eq!(
         field(diagnostic, "maximum"),
@@ -1211,7 +1225,7 @@ fn suppress_frees_selected_materialization_budget_for_a_later_add() {
     );
     assert_eq!(
         field(diagnostic, "observed"),
-        DiagnosticValueRef::Unsigned(payload(&id("inherited")).cost().logical_bytes() as u64)
+        DiagnosticValueRef::Unsigned((2 * bytes) as u64)
     );
     assert_eq!(
         field(diagnostic, "maximum"),

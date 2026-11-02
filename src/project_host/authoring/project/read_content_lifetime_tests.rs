@@ -24,6 +24,7 @@ fn eighty_fresh_dependencies_and_repeated_validation_fit_the_original_handle_cei
         let mut entity =
             SceneEntityRecord::new(SceneEntityId::new(format!("anchor-{index}")).unwrap());
         entity.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
             overrides: None,
         });

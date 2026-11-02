@@ -3,13 +3,12 @@
 #[cfg(test)]
 use nara_asset::AssetRef;
 use nara_reflect::{
-    ComponentFieldPathSegment, ComponentPropertyKey, ComponentPropertyStep, ComponentValue,
-    ComponentValueCost,
+    ComponentPropertyKey, ComponentPropertyStep, ComponentValue, ComponentValueCost,
 };
 
 use super::{
     PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent, PrefabReferenceBinding,
+    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent,
 };
 use crate::provenance::{CostScratchAdmission, reserve_cost_scratch};
 use crate::{PrefabInstance, SceneComponentRecord, SourceDocumentKey, SourceDocumentOrigin};
@@ -23,7 +22,7 @@ pub(crate) struct PrefabOverlayCost {
     pub(crate) nodes: usize,
     /// Maximum semantic storage depth, including nested values and instance declarations.
     pub(crate) depth: usize,
-    /// Each overlay (including an empty base pin), row, property claim and binding.
+    /// Each overlay, row, property claim, argument block/input and contextual default.
     pub(crate) declarations: usize,
     pub(crate) entities: usize,
     pub(crate) placements: usize,
@@ -170,6 +169,20 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     // Preserve the exact patch owner's AssetRef wire-value convention:
                     // map keys, kind spelling and payload, without formatting/copying it.
                     self.bytes(crate::patch::asset_ref_value_size(&instance.source).1)?;
+                    if let Some(arguments) = &instance.arguments {
+                        self.node(depth.saturating_add(1))?;
+                        self.declarations(1)?;
+                        self.source(&arguments.base, depth.saturating_add(2))?;
+                        self.node(depth.saturating_add(2))?;
+                        self.declarations(arguments.values.len())?;
+                        for (input, reference) in &arguments.values {
+                            self.node(depth.saturating_add(2))?;
+                            self.bytes(input.as_str().len())?;
+                            let cost = reference.cost();
+                            self.nodes(cost.nodes(), depth.saturating_add(3))?;
+                            self.bytes(cost.logical_bytes())?;
+                        }
+                    }
                     if let Some(overlay) = &instance.overrides {
                         self.reserve_scratch(&mut pending, 1)?;
                         pending.push(Frame::Overlay(overlay, depth.saturating_add(1)));
@@ -178,7 +191,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 Frame::Overlay(overlay, depth) => {
                     self.node(depth)?;
                     self.declarations(1)?;
-                    self.source(&overlay.base)?;
+                    self.source(&overlay.base, depth.saturating_add(1))?;
                     self.declarations(overlay.additions.len())?;
                     add(
                         &mut self.cost.entities,
@@ -230,12 +243,6 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                         for (component, record) in &addition.components {
                             self.bytes(component.as_str().len())?;
                             self.record(record, depth.saturating_add(1))?;
-                        }
-                        self.declarations(addition.bindings.len())?;
-                        for (component, bindings) in &addition.bindings {
-                            self.node(depth)?;
-                            self.bytes(component.as_str().len())?;
-                            self.bindings(bindings, depth.saturating_add(1))?;
                         }
                         if let Some(instance) = &addition.prefab {
                             pending.push(Frame::Instance(instance, depth.saturating_add(1)));
@@ -291,13 +298,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 target,
                 component,
                 record,
-                bindings,
                 ..
             } => {
                 self.target(target, depth)?;
                 self.bytes(component.as_str().len().saturating_add(1))?;
                 self.record(record, depth.saturating_add(1))?;
-                self.bindings(bindings, depth.saturating_add(1))?;
             }
             PrefabComponentIntent::Suppress { target, component } => {
                 self.target(target, depth)?;
@@ -335,7 +340,6 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     if let PrefabPropertyIntent::Set(value) = &claim.intent {
                         self.value(value, depth.saturating_add(2))?;
                     }
-                    self.bindings(&claim.bindings, depth.saturating_add(2))?;
                 }
             }
         }
@@ -352,18 +356,23 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         for hop in &target.through {
             self.node(depth.saturating_add(1))?;
             self.bytes(hop.anchor.entity().as_str().len().saturating_add(1))?;
-            self.source(&hop.expected_base)?;
+            self.source(&hop.expected_base, depth.saturating_add(2))?;
         }
         Ok(())
     }
 
-    fn source(&mut self, source: &SourceDocumentKey) -> Result<(), PrefabOverlayCostError> {
+    fn source(
+        &mut self,
+        source: &SourceDocumentKey,
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.node(depth)?;
         self.bytes(match source.origin() {
-            SourceDocumentOrigin::Named { name, .. } => 18_usize.saturating_add(name.len()),
+            SourceDocumentOrigin::Named { name, .. } => 37_usize.saturating_add(name.len()),
             SourceDocumentOrigin::ProjectLocation { path, .. } => {
-                18_usize.saturating_add(path.as_str().len())
+                37_usize.saturating_add(path.as_str().len())
             }
-            SourceDocumentOrigin::StableAsset { .. } => 18,
+            SourceDocumentOrigin::StableAsset { .. } => 37,
         })
     }
 
@@ -374,27 +383,12 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
     ) -> Result<(), PrefabOverlayCostError> {
         self.node(depth)?;
         self.bytes(5_usize.saturating_add(record.owner().map_or(0, |owner| owner.as_str().len())))?;
-        self.value(&record.value, depth.saturating_add(1))
-    }
-
-    fn bindings(
-        &mut self,
-        bindings: &[PrefabReferenceBinding],
-        depth: usize,
-    ) -> Result<(), PrefabOverlayCostError> {
-        self.declarations(bindings.len())?;
-        for binding in bindings {
-            self.node(depth)?;
-            self.bytes(binding.expected.as_str().len())?;
-            for segment in binding.slot.segments() {
-                self.node(depth.saturating_add(1))?;
-                self.bytes(1)?;
-                self.bytes(match segment {
-                    ComponentFieldPathSegment::Field(field) => field.len(),
-                    ComponentFieldPathSegment::Index(_) => 4,
-                })?;
-            }
-            self.target(&binding.target, depth.saturating_add(1))?;
+        self.value(&record.value, depth.saturating_add(1))?;
+        self.declarations(record.contextual_defaults.len())?;
+        for (field, value) in &record.contextual_defaults {
+            self.node(depth.saturating_add(1))?;
+            self.bytes(field.as_str().len())?;
+            self.value(value, depth.saturating_add(2))?;
         }
         Ok(())
     }
@@ -415,9 +409,14 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         let mut bytes = self.cost.value_cost.logical_bytes();
         while let Some((value, depth, key_bytes)) = current {
             self.node(depth)?;
+            let value_nodes = match value {
+                ComponentValue::EntityReference(reference) => reference.cost().nodes(),
+                _ => 1,
+            };
+            self.nodes(value_nodes.saturating_sub(1), depth)?;
             add(
                 &mut nodes,
-                1,
+                value_nodes,
                 self.limits.value_nodes,
                 PrefabOverlayCostKind::ValueNodes,
             )?;
@@ -426,12 +425,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 ComponentValue::Bool(_) => 1,
                 ComponentValue::I64(_) | ComponentValue::U64(_) | ComponentValue::F64(_) => 8,
                 ComponentValue::String(value) => value.len(),
-                ComponentValue::EntityReference(nara_reflect::EntityReference::SceneLocal {
-                    entity,
-                }) => entity.as_str().len(),
-                ComponentValue::EntityReference(nara_reflect::EntityReference::Persistent {
-                    entity,
-                }) => entity.namespace.as_str().len().saturating_add(16),
+                ComponentValue::EntityReference(reference) => reference.cost().logical_bytes(),
             };
             add(
                 &mut bytes,
@@ -486,11 +480,15 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
     }
 
     fn node(&mut self, depth: usize) -> Result<(), PrefabOverlayCostError> {
+        self.nodes(1, depth)
+    }
+
+    fn nodes(&mut self, amount: usize, depth: usize) -> Result<(), PrefabOverlayCostError> {
         require(PrefabOverlayCostKind::Depth, depth, self.limits.depth)?;
         self.cost.depth = self.cost.depth.max(depth);
         add(
             &mut self.cost.nodes,
-            1,
+            amount,
             self.limits.nodes,
             PrefabOverlayCostKind::Nodes,
         )
@@ -557,8 +555,8 @@ fn require(
 mod tests {
     use nara_asset::AssetPath;
     use nara_reflect::{
-        ComponentFieldId, ComponentFieldPath, ComponentPropertyPath, ComponentSchemaVersion,
-        ComponentTypeId, PersistentComponentSchemaOwnerId,
+        ComponentFieldId, ComponentPropertyPath, ComponentSchemaVersion, ComponentTypeId,
+        PersistentComponentSchemaOwnerId,
     };
 
     use super::*;
@@ -579,6 +577,7 @@ mod tests {
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
+            arguments: None,
             overrides: Some(overlay),
         }
     }
@@ -608,13 +607,10 @@ mod tests {
             component: ComponentTypeId::new("test.other"),
             record: SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
-                ComponentValue::Bool(true),
+                ComponentValue::EntityReference(nara_identity::EntityReference::Authored {
+                    reference: target.clone().into(),
+                }),
             ),
-            bindings: vec![PrefabReferenceBinding {
-                slot: ComponentFieldPath::from_fields(["reference"]),
-                expected: SceneEntityId::new("old").unwrap(),
-                target: target.clone(),
-            }],
         });
         overlay.placements.push(PrefabPlacement {
             target: target.clone(),
@@ -637,7 +633,6 @@ mod tests {
                     "text",
                     ComponentValue::String("payload".to_owned()),
                 )])),
-                bindings: Vec::new(),
             }],
         });
         instance(overlay)
@@ -647,8 +642,12 @@ mod tests {
     fn complete_raw_tree_has_inclusive_independent_cost_ceilings() {
         let instance = sample();
         let cost = prefab_instance_cost(&instance, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
-        assert_eq!(cost.value_cost.nodes(), 4);
-        assert_eq!(cost.value_cost.logical_bytes(), 20);
+        assert_eq!(cost.value_cost.nodes(), 7);
+        // U64 + complete authored endpoint/hop/canonical key + selected map payload.
+        assert_eq!(
+            cost.value_cost.logical_bytes(),
+            8 + (6 + 6 + 36 + 6 + 1) + 11
+        );
         assert_eq!(cost.entities, 1);
         assert_eq!(cost.components, 3);
         assert_eq!(cost.placements, 1);

@@ -10,7 +10,7 @@ use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     ComponentDecodeContext, ComponentEntityReferenceRewriteError, ComponentRegistrySnapshot,
-    ComponentValueCost, ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
+    ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
 };
 
 use crate::{
@@ -46,13 +46,17 @@ pub use overlay::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceBinding,
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PrefabDocument {
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")
+    )]
+    pub inputs: std::collections::BTreeSet<nara_identity::ReferenceInputId>,
     pub roots: Vec<SceneEntityId>,
     pub entities: Vec<SceneEntityRecord>,
 }
@@ -66,6 +70,7 @@ impl PrefabDocument {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
         Self {
+            inputs: Default::default(),
             roots: roots.into_iter().collect(),
             entities,
         }
@@ -141,7 +146,7 @@ impl PrefabDocument {
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
     ) -> PrefabExpansionReport {
-        self.instantiate().expand_prefabs(registry, resolver)
+        self.expand_with_resolution(registry, resolver, None)
     }
 
     #[must_use]
@@ -151,11 +156,25 @@ impl PrefabDocument {
         resolver: &R,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> PrefabExpansionReport {
-        self.instantiate().expand_prefabs_with_asset_resolution(
-            registry,
-            resolver,
+        self.expand_with_resolution(registry, resolver, Some(asset_resolution))
+    }
+
+    fn expand_with_resolution<R: PrefabSourceResolver + ?Sized>(
+        &self,
+        registry: &ComponentRegistrySnapshot,
+        resolver: &R,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
+    ) -> PrefabExpansionReport {
+        let mut loader = |source: &AssetRef, _: &mut PrefabExpansionWorkingSet| {
+            Ok::<_, Infallible>(resolver.resolve_prefab(source))
+        };
+        let mut context = PrefabExpansionContext::new(
+            SchemaAuthority::Native(registry),
+            &mut loader,
+            PrefabExpansionOptions::default(),
             asset_resolution,
-        )
+        );
+        context.expand_source_document(&self.roots, &self.entities, Some(&self.inputs))
     }
 }
 
@@ -193,6 +212,11 @@ impl PrefabInstantiationReport {
 pub struct PrefabInstance {
     /// A primary native Prefab source selector. Auxiliary imported products are not sources.
     pub source: AssetRef,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub arguments: Option<PrefabReferenceArguments>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub overrides: Option<PrefabOverlay>,
 }
@@ -208,6 +232,8 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
         struct PrefabInstanceWire {
             source: AssetRef,
             #[serde(default)]
+            arguments: Option<PrefabReferenceArguments>,
+            #[serde(default)]
             overrides: Option<PrefabOverlay>,
         }
 
@@ -219,9 +245,20 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
         }
         Ok(Self {
             source: wire.source,
+            arguments: wire.arguments,
             overrides: wire.overrides,
         })
     }
+}
+
+/// Explicit bindings into a Prefab's declared input environment, evaluated in the containing
+/// lexical occurrence. The source owner checks the actual selected canonical base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct PrefabReferenceArguments {
+    pub base: SourceDocumentKey,
+    pub values: BTreeMap<nara_identity::ReferenceInputId, nara_identity::EntityReference>,
 }
 
 /// Resolves a lookup request to its admitted source identity and immutable document together.
@@ -1413,6 +1450,15 @@ where
     }
 
     fn expand_scene_document(&mut self, document: &SceneDocument) -> PrefabExpansionReport {
+        self.expand_source_document(&document.roots, &document.entities, None)
+    }
+
+    fn expand_source_document(
+        &mut self,
+        roots: &[SceneEntityId],
+        entities: &[SceneEntityRecord],
+        inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
+    ) -> PrefabExpansionReport {
         if !self.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
             None,
@@ -1425,7 +1471,7 @@ where
                 source_upgrade_required: false,
             };
         }
-        let mut expanded = match overlay::compile::expand_document(self, document) {
+        let mut expanded = match overlay::compile::expand_source(self, roots, entities, inputs) {
             Ok(document) => document,
             Err(failure) => {
                 self.push_expansion_failure(&failure);
@@ -1638,39 +1684,6 @@ where
         true
     }
 
-    fn reserve_component_temporary(
-        &mut self,
-        schema: &nara_reflect::ComponentSchema,
-        value: ComponentValueCost,
-        entity: Option<&SceneEntityId>,
-    ) -> bool {
-        // Effective/default and bound values can coexist with their raw source. Pay for the
-        // whole temporary value before the existing Reflect materializer copies defaults.
-        let bytes = value
-            .nodes()
-            .checked_mul(96)
-            .and_then(|bytes| bytes.checked_add(value.logical_bytes()))
-            .and_then(|bytes| {
-                schema
-                    .fields
-                    .iter()
-                    .filter_map(|field| field.default_value.as_ref())
-                    .try_fold(bytes, |bytes, default| {
-                        let cost = default.cost_up_to(
-                            self.options.limits.materialized_value_nodes().get(),
-                            self.options.limits.materialized_value_bytes().get(),
-                        )?;
-                        bytes.checked_add(
-                            cost.nodes()
-                                .checked_mul(96)?
-                                .checked_add(cost.logical_bytes())?
-                                .checked_mul(3)?,
-                        )
-                    })
-            });
-        self.reserve_scratch_bytes(bytes, entity, None)
-    }
-
     fn reserve_raw_clone(
         &mut self,
         cost: crate::patch::ScenePatchCost,
@@ -1874,11 +1887,18 @@ where
     }
 
     fn validate_document(&mut self, document: &SceneDocument) -> DiagnosticReport {
+        // Final values have already paid their materialized counters during lowering. This
+        // guard admits validation's complete temporary copy, including IDs and record metadata,
+        // against working storage rather than imposing value-only ceilings on that metadata.
+        let working = self.options.limits.working_bytes();
         let cost = crate::patch::bounded_scene_entities_source_cost(
             &document.entities,
             crate::ScenePatchApplyLimits::default()
-                .with_validation_value_nodes(self.options.limits.materialized_value_nodes())
-                .with_validation_value_bytes(self.options.limits.materialized_value_bytes()),
+                .with_validation_value_nodes(
+                    ItemLimit::new((working.get() / 96).max(1))
+                        .expect("a working allowance produces a nonzero node ceiling"),
+                )
+                .with_validation_value_bytes(working),
         );
         let Some(cost) = cost else {
             self.fail_budget(
@@ -2093,6 +2113,7 @@ mod resolver_tests {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: request,
+            arguments: None,
             overrides: None,
         });
         let report =
@@ -2120,6 +2141,7 @@ mod resolver_tests {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/missing.ron").unwrap(),
+            arguments: None,
             overrides: None,
         });
         let report = SceneDocument::from_ordered_roots([anchor])

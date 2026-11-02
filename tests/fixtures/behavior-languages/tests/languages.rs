@@ -342,6 +342,7 @@ fn workflow(program: &dyn Language) {
         let mut record = SceneEntityRecord::new(id(anchor));
         record.prefab = Some(PrefabInstance {
             source: nara_asset::AssetRef::path("base.prefab.json").unwrap(),
+            arguments: None,
             overrides: None,
         });
         record

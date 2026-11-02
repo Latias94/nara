@@ -94,15 +94,16 @@ fn release(stable_source: bool) -> PreparedEditorSourceToolRelease {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("amount")),
             intent: PrefabPropertyIntent::Set(ComponentValue::I64(9)),
-            bindings: Vec::new(),
         }],
     });
     outer.prefab = Some(PrefabInstance {
+        arguments: None,
         source: reference(1, stable_source),
         overrides: Some(overlay),
     });
     let mut child = SceneEntityRecord::new(id("nested"));
     child.prefab = Some(PrefabInstance {
+        arguments: None,
         source: reference(2, stable_source),
         overrides: None,
     });

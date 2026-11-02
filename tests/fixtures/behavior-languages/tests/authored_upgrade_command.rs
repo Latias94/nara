@@ -10,6 +10,7 @@ use authored_upgrade_command::{
     successor_catalog, v1_catalog,
 };
 use nara_asset::AssetRef;
+use nara_identity::{AuthoredEntityReference, AuthoredReferenceTarget, ReferenceInputId};
 use nara_reflect::{
     ComponentFieldId, ComponentFieldPath, ComponentPropertyPath, ComponentPropertyStep,
     ComponentSchemaCatalog, ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId,
@@ -20,7 +21,7 @@ use nara_scene::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
     PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
     PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding,
+    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments,
     SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
     SourceDocumentKey, SourceDocumentKind,
 };
@@ -39,6 +40,10 @@ fn component() -> ComponentTypeId {
 
 fn owner(value: &str) -> PersistentComponentSchemaOwnerId {
     PersistentComponentSchemaOwnerId::try_new(value).unwrap()
+}
+
+fn input(value: &str) -> ReferenceInputId {
+    ReferenceInputId::new(value).unwrap()
 }
 
 fn root(field: &str) -> ComponentPropertyPath {
@@ -77,16 +82,35 @@ fn deep_target(name: &str) -> PrefabEntityTarget {
 fn instance(name: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
+        arguments: Some(PrefabReferenceArguments {
+            base: key(name),
+            values: [
+                (input("opaque-input"), authored_reference()),
+                (
+                    input("unused-parameter"),
+                    EntityReference::Authored {
+                        reference: AuthoredEntityReference::input(input("opaque-input")),
+                    },
+                ),
+            ]
+            .into(),
+        }),
         overrides: overlay,
     }
 }
 
-fn binding() -> PrefabReferenceBinding {
-    PrefabReferenceBinding {
-        // An unknown owner's coordinate deliberately resembles the changed wire field.
-        slot: ComponentFieldPath::from_fields(["wire_health", "future-reference"]),
-        expected: id("opaque-reference"),
-        target: deep_target("opaque-target"),
+fn authored_reference() -> EntityReference {
+    EntityReference::Authored {
+        reference: deep_target("opaque-target").into(),
+    }
+}
+
+fn authored_input() -> EntityReference {
+    EntityReference::Authored {
+        reference: AuthoredEntityReference {
+            through: deep_target("unused-endpoint").through,
+            target: AuthoredReferenceTarget::Input(input("opaque-input")),
+        },
     }
 }
 
@@ -109,13 +133,26 @@ fn opaque() -> ComponentValue {
                 ComponentValue::EntityReference(EntityReference::SceneLocal {
                     entity: id("opaque-reference"),
                 }),
+                ComponentValue::EntityReference(authored_reference()),
+                ComponentValue::EntityReference(authored_input()),
             ]),
         ),
     ])
 }
 
 fn unknown_record() -> SceneComponentRecord {
-    SceneComponentRecord::new(ComponentSchemaVersion(91), opaque()).with_owner(owner(FOREIGN))
+    SceneComponentRecord::new(ComponentSchemaVersion(91), opaque())
+        .with_owner(owner(FOREIGN))
+        // Explicit values hide this unavailable owner's reference defaults. Neither the
+        // matching field IDs nor the inline routes authorize the EnemyStats converter.
+        .with_contextual_default(
+            ComponentFieldId::new("health"),
+            ComponentValue::EntityReference(authored_reference()),
+        )
+        .with_contextual_default(
+            ComponentFieldId::new("armor"),
+            ComponentValue::EntityReference(authored_input()),
+        )
 }
 
 fn stats_value(health: ComponentValue, armor: i64) -> ComponentValue {
@@ -146,7 +183,6 @@ fn health_pin(next: bool, whole: i64, milli: i64) -> PrefabPropertyClaim {
             root("health")
         },
         intent: PrefabPropertyIntent::Set(ComponentValue::I64(if next { milli } else { whole })),
-        bindings: Vec::new(),
     }
 }
 
@@ -154,7 +190,6 @@ fn armor_pin(value: i64) -> PrefabPropertyClaim {
     PrefabPropertyClaim {
         path: root("armor"),
         intent: PrefabPropertyIntent::Set(ComponentValue::I64(value)),
-        bindings: Vec::new(),
     }
 }
 
@@ -181,7 +216,6 @@ fn set(
         target,
         component: component(),
         record,
-        bindings: Vec::new(),
     }
 }
 
@@ -224,19 +258,12 @@ fn fixture(next: bool) -> SceneDocument {
     addition
         .components
         .insert(ComponentTypeId::new(UNKNOWN), unknown_record());
-    addition.bindings.insert(component(), Vec::new());
-    addition
-        .bindings
-        .insert(ComponentTypeId::new(UNKNOWN), vec![binding()]);
     addition.prefab = Some(instance("nested", Some(beneath_addition)));
     overlay.additions.push(addition);
     let mut foreign_addition = PrefabAddition::new(id("foreign-added"));
     foreign_addition
         .components
         .insert(component(), unknown_record());
-    foreign_addition
-        .bindings
-        .insert(component(), vec![binding()]);
     overlay.additions.push(foreign_addition);
     overlay.instances = vec![
         PrefabInstanceClaim {
@@ -277,7 +304,6 @@ fn fixture(next: bool) -> SceneDocument {
             target: deep_target("unknown-set"),
             component: ComponentTypeId::new(UNKNOWN),
             record: unknown_record(),
-            bindings: vec![binding()],
         },
         PrefabComponentIntent::Properties {
             target: target("unknown-properties"),
@@ -288,12 +314,10 @@ fn fixture(next: bool) -> SceneDocument {
                     path: root("health")
                         .with_steps([ComponentPropertyStep::MapEntry("unavailable-member".into())]),
                     intent: PrefabPropertyIntent::Set(opaque()),
-                    bindings: vec![binding()],
                 },
                 PrefabPropertyClaim {
                     path: root("future-absence"),
                     intent: PrefabPropertyIntent::Absent,
-                    bindings: Vec::new(),
                 },
             ],
         },
@@ -306,7 +330,6 @@ fn fixture(next: bool) -> SceneDocument {
             target: target("foreign-set"),
             component: component(),
             record: unknown_record(),
-            bindings: vec![binding()],
         },
         set(
             PrefabComponentSetMode::Replace,
@@ -337,6 +360,7 @@ fn fixture(next: bool) -> SceneDocument {
 
 fn prefab(scene: &SceneDocument) -> PrefabDocument {
     PrefabDocument {
+        inputs: [input("opaque-input"), input("unused-parameter")].into(),
         roots: scene.roots.clone(),
         entities: scene.entities.clone(),
     }
@@ -606,6 +630,14 @@ fn catalogs_and_values_use_real_public_schemas_and_the_actual_creation_metadata_
         ComponentSchemaOwnerSnapshot::admit(owner(OWNER), next, Some(previous)).unwrap();
     let old = old_owner.schema(&component()).unwrap();
     let next = next_owner.schema(&component()).unwrap();
+    for schema in [old, next] {
+        assert!(
+            schema
+                .fields
+                .iter()
+                .all(|field| field.required && field.default_value.is_none())
+        );
+    }
     let old_health = old
         .fields
         .iter()
@@ -690,7 +722,7 @@ fn empty_and_armor_only_batches_advance_without_dropping_default_equal_or_dorman
 
 #[test]
 fn record_versions_and_shapes_are_checked_at_every_location_without_touching_the_input() {
-    let cases = vec![
+    let mut cases = vec![
         (ComponentValue::Null, UpgradeError::RecordShape),
         (ComponentValue::List(Vec::new()), UpgradeError::RecordShape),
         (
@@ -732,6 +764,19 @@ fn record_versions_and_shapes_are_checked_at_every_location_without_touching_the
             UpgradeError::HealthOverflow(i64::MIN),
         ),
     ];
+    for reference in [authored_reference(), authored_input()] {
+        cases.push((
+            stats_value(ComponentValue::EntityReference(reference.clone()), 1),
+            UpgradeError::HealthShape,
+        ));
+        cases.push((
+            ComponentValue::map([
+                ("wire_health", ComponentValue::I64(1)),
+                ("wire_armor", ComponentValue::EntityReference(reference)),
+            ]),
+            UpgradeError::ArmorShape,
+        ));
+    }
     for site in RECORD_SITES {
         for version in [ComponentSchemaVersion(0), V2, ComponentSchemaVersion(7)] {
             let mut source = fixture(false);
@@ -759,7 +804,7 @@ fn every_properties_batch_checks_its_version_even_when_no_health_conversion_is_n
 }
 
 #[test]
-fn invalid_selectors_absence_bindings_and_property_values_refuse_including_dormant_claims() {
+fn invalid_selectors_absence_and_inline_property_values_refuse_including_dormant_claims() {
     let mut cases = vec![
         (
             root("health"),
@@ -817,49 +862,81 @@ fn invalid_selectors_absence_bindings_and_property_values_refuse_including_dorma
             *batch_at(&mut source, site).1 = vec![PrefabPropertyClaim {
                 path: path.clone(),
                 intent: intent.clone(),
-                bindings: Vec::new(),
             }];
             assert_refused_unchanged(&source, error.clone());
         }
         for field in ["health", "armor"] {
-            let mut source = fixture(false);
-            let mut pin = if field == "health" {
-                health_pin(false, 100, 100000)
-            } else {
-                armor_pin(10)
-            };
-            pin.bindings.push(binding());
-            *batch_at(&mut source, site).1 = vec![pin];
-            assert_refused_unchanged(&source, UpgradeError::Bindings);
+            for reference in [authored_reference(), authored_input()] {
+                let mut source = fixture(false);
+                *batch_at(&mut source, site).1 = vec![PrefabPropertyClaim {
+                    path: root(field),
+                    intent: PrefabPropertyIntent::Set(ComponentValue::EntityReference(reference)),
+                }];
+                assert_refused_unchanged(
+                    &source,
+                    if field == "health" {
+                        UpgradeError::HealthShape
+                    } else {
+                        UpgradeError::ArmorShape
+                    },
+                );
+            }
         }
     }
 }
 
 #[test]
-fn bindings_on_affected_records_refuse_while_unknown_owner_bindings_remain_exact() {
-    for index in [0, 1] {
-        let mut source = fixture(false);
-        let PrefabComponentIntent::Set { bindings, .. } =
-            &mut overlay_mut(&mut source).components[index]
-        else {
-            unreachable!()
-        };
-        bindings.push(binding());
-        assert_refused_unchanged(&source, UpgradeError::Bindings);
+fn hidden_contextual_defaults_on_required_fields_refuse_at_every_record_location() {
+    for site in RECORD_SITES {
+        for field in ["health", "armor"] {
+            for value in [
+                ComponentValue::I64(7),
+                ComponentValue::Null,
+                ComponentValue::EntityReference(authored_reference()),
+                ComponentValue::EntityReference(authored_input()),
+            ] {
+                let mut source = fixture(false);
+                record_at(&mut source, site)
+                    .contextual_defaults
+                    .insert(ComponentFieldId::new(field), value);
+                assert_refused_unchanged(
+                    &source,
+                    UpgradeError::ContextualDefault(ComponentFieldId::new(field)),
+                );
+            }
+        }
     }
-    let mut source = fixture(false);
-    overlay_mut(&mut source).additions[0]
-        .bindings
-        .insert(component(), vec![binding()]);
-    assert_refused_unchanged(&source, UpgradeError::Bindings);
+}
 
+#[test]
+fn unknown_owners_keep_inline_values_and_hidden_context_even_for_the_affected_type_id() {
     let source = fixture(false);
-    let mut expected = fixture(true);
     let mut converted = plan_scene(&source).unwrap().into_document();
+    let opaque = unknown_record();
+    assert!(!opaque.contextual_defaults.is_empty());
     assert_eq!(
-        overlay_mut(&mut converted).additions[0].bindings,
-        overlay_mut(&mut expected).additions[0].bindings
+        entity_mut(&mut converted, "child").components[&component()],
+        opaque,
     );
+    let overlay = overlay_mut(&mut converted);
+    assert_eq!(overlay.additions[1].components[&component()], opaque);
+    assert_eq!(set_record(overlay, 9), &opaque);
+    assert_eq!(
+        overlay.additions[0].components[&ComponentTypeId::new(UNKNOWN)],
+        opaque,
+    );
+    assert_eq!(set_record(overlay, 6), &opaque);
+}
+
+#[test]
+fn duplicate_scalar_root_claims_refuse_without_publishing_a_partial_conversion() {
+    for site in BATCH_SITES {
+        for claim in [health_pin(false, 100, 100000), armor_pin(10)] {
+            let mut source = fixture(false);
+            *batch_at(&mut source, site).1 = vec![claim.clone(), claim.clone()];
+            assert_refused_unchanged(&source, UpgradeError::DuplicateClaim(claim.path.root));
+        }
+    }
 }
 
 #[test]

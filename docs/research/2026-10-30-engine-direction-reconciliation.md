@@ -293,3 +293,17 @@ creation retire unpublished migration history. CP2 root/reference representation
 finite-graph production rendering, joint motion/executor selection, material generations and the
 editable Nara-drawn Inspector remain separate uncompleted units. This bounded result does not
 promote Proposed ADRs or qualify power-loss durability and untested native platforms.
+
+The [selected CP2 representation](../plans/2026-11-02-prefab-extraction-plan.md) now replaces
+payload-coordinate reference tables with inline lexical values, explicit Prefab inputs/arguments
+and version/field-bound contextual defaults. Concrete extraction counterexamples also select
+explicit root binding beside forest mounting and source-owned typed placements. Source admission,
+parameterized source copying and Native eligibility retain distinct roles. A separate closed flat
+storage records actual selected Schema owners and canonical entity addresses; declaration
+contributors remain with the authoring compiler. These changes are in production integration,
+not complete extraction qualification. The source-preservation, hidden-default, canonical-address
+and pre-allocation corrections are owning-contract work inside the existing plan, without a
+second value interpreter, compatibility reader or additional roadmap. The inline values,
+contextual defaults, source-only copying and Native value gates now have their own
+[qualified prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
+The separate closed compiled activation/storage switch and complete extraction remain open.

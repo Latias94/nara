@@ -201,9 +201,19 @@ Implementation notes as of 2026-07-08:
 - Patch apply is document-first and atomic: operations are applied to a scratch `SceneDocument`,
   validated, canonicalized, then committed only if the full transaction succeeds.
 - Operation-local path, schema, owner, version, capability, topology and work-budget checks apply
-  to each intermediate candidate. Component business invariants and native document preflight
-  apply to the canonical final candidate, allowing coupled field edits whose intermediate values
-  are temporarily inconsistent. A final rejection publishes no document, revision or history.
+  to each intermediate candidate. Complete source checks apply to the canonical final candidate,
+  allowing coupled field edits whose intermediate values are temporarily inconsistent. Resolved
+  Native payloads retain their final business/codec checks. Authored-only references remain source
+  intent until the shared compiler resolves them; source admission cannot send them to a Native
+  codec or claim Native eligibility. Source Schema, declared-reference grammar and preservation
+  protections still apply. Strict Check/Play and materialization compile the complete effective
+  values and perform Native validation before execution. A final source rejection publishes no
+  document, revision or history.
+- A required-field upgrade whose selected field has no default retains complete contextual
+  defaults on unchanged fields and validates them under both exact Schema bases. A different
+  contextual map is outside that proof. Changing a default-bearing field requires an explicit
+  owner transformation of the affected declaration, including hidden defaults; unrelated
+  contextual declarations do not justify refusing an otherwise proven field upgrade.
 - The same validation boundary applies to Scene and Prefab transactions. A private consumption-only
   helper may mutate a disposable unpublished candidate before failure; it is not an alternative
   mutation path for a published document or authoring session.

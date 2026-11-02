@@ -30,6 +30,7 @@ fn key() -> SourceDocumentKey {
 fn instance(overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path("ordinary.prefab.json").unwrap(),
+        arguments: None,
         overrides: overlay,
     }
 }
@@ -360,7 +361,6 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
             ComponentSchemaVersion::ONE,
             ComponentValue::String("opaque value".into()),
         ),
-        bindings: Vec::new(),
     });
     overlay.components.push(PrefabComponentIntent::Properties {
         target: PrefabEntityTarget::source(id("unknown")),
@@ -371,7 +371,6 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
                 "value",
             )),
             intent: nara::scene::PrefabPropertyIntent::Absent,
-            bindings: Vec::new(),
         }],
     });
     overlay.placements.push(nara::scene::PrefabPlacement {
@@ -483,6 +482,7 @@ fn composition_status_distinguishes_foreign_source_and_never_infers_success() {
     let mut anchor = SceneEntityRecord::new(id("containing-anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("outer.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let failure = SceneDocument::from_ordered_roots([anchor])

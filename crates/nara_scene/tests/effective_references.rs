@@ -183,8 +183,18 @@ fn scene_spawn_rejects_missing_local_target_before_world_mutation() {
 fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission() {
     let registry = registry(false);
     let source = AssetRef::path("prefabs/default-link.ron").unwrap();
+    let mut source_entity = linked_source(true);
+    source_entity
+        .components
+        .get_mut(&component_id())
+        .unwrap()
+        .contextual_defaults
+        .insert(
+            ComponentFieldId::new("target"),
+            ComponentValue::EntityReference(local_target()),
+        );
     let prefab = PrefabDocument::from_ordered_roots([
-        linked_source(true),
+        source_entity,
         SceneEntityRecord::new(scene_id("target")),
     ]);
     let original_prefab = prefab.clone();
@@ -197,6 +207,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         let mut entity = SceneEntityRecord::new(scene_id(anchor));
         entity.prefab = Some(PrefabInstance {
             source: source.clone(),
+            arguments: None,
             overrides: None,
         });
         entity
@@ -398,10 +409,21 @@ fn export_scene_with_limits(
 #[test]
 fn scene_file_value_limits_survive_canonical_publish() {
     let registry = registry(false);
-    let document = linked_scene(true);
+    let mut document = linked_scene(true);
+    document.entities[0]
+        .components
+        .get_mut(&component_id())
+        .unwrap()
+        .contextual_defaults
+        .insert(
+            ComponentFieldId::new("target"),
+            ComponentValue::EntityReference(local_target()),
+        );
     let bytes = document.to_json_string().unwrap();
+    // The raw map, contextual entry and its reference consume three nodes; publication must
+    // also admit the reference supplied to the effective map.
     let tight = SceneFileLimits::default()
-        .with_component_value_nodes(ItemLimit::new(1).unwrap())
+        .with_component_value_nodes(ItemLimit::new(3).unwrap())
         .with_component_value_bytes(ByteLimit::new(64).unwrap());
     let candidate = SceneDocumentCandidate::decode_json_bytes_with_limits(bytes.as_bytes(), tight)
         .unwrap()
@@ -410,7 +432,7 @@ fn scene_file_value_limits_survive_canonical_publish() {
     assert!(candidate.publish(&registry).is_err());
 
     let wide = SceneFileLimits::default()
-        .with_component_value_nodes(ItemLimit::new(2).unwrap())
+        .with_component_value_nodes(ItemLimit::new(4).unwrap())
         .with_component_value_bytes(ByteLimit::new(64).unwrap());
     let published = SceneDocumentCandidate::decode_json_bytes_with_limits(bytes.as_bytes(), wide)
         .unwrap()

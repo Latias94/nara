@@ -8,8 +8,8 @@ use nara_reflect::{
 use nara_scene::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabReferenceBinding, SceneComponentRecord, SceneEntityId,
-    SourceDocumentKey, SourceDocumentKind,
+    PrefabPlacementSlot, SceneComponentRecord, SceneEntityId, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 fn overlay_base(name: &str) -> SourceDocumentKey {
@@ -35,9 +35,9 @@ fn instance_retention_counts_record_owner_payloads() {
             target: PrefabEntityTarget::source(SceneEntityId::new("nested").unwrap()),
             component: ComponentTypeId::new("test.Retained"),
             record,
-            bindings: Vec::new(),
         });
         PrefabInstance {
+            arguments: None,
             source: AssetRef::path("retained/base.prefab.json").unwrap(),
             overrides: Some(overlay),
         }
@@ -250,7 +250,11 @@ fn published_unbound_default_assets_charge_both_projection_copies_at_the_budget_
 #[test]
 fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_boundary() {
     use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
-    use nara_scene::{AuthoringDocumentSource, SceneDocumentCandidate};
+    use nara_identity::{
+        AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin,
+        PrefabInstanceHop, ReferenceInputId,
+    };
+    use nara_scene::{AuthoringDocumentSource, PrefabReferenceArguments, SceneDocumentCandidate};
 
     let mut nested = PrefabOverlay::new(overlay_base("nested"));
     nested.instances.push(PrefabInstanceClaim {
@@ -259,17 +263,10 @@ fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_bounda
     });
     let mut addition = PrefabAddition::new(SceneEntityId::new("addition").unwrap());
     addition.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("nested.prefab.json").unwrap(),
         overrides: Some(nested),
     });
-    addition.bindings.insert(
-        ComponentTypeId::new("test.DormantBinding"),
-        vec![PrefabReferenceBinding {
-            slot: ComponentFieldPath::from_fields(["references", "target"]),
-            expected: SceneEntityId::new("preserved-reference").unwrap(),
-            target: PrefabEntityTarget::source(SceneEntityId::new("unresolved").unwrap()),
-        }],
-    );
     let mut overlay = PrefabOverlay::new(overlay_base("structural"));
     overlay.placements.push(PrefabPlacement {
         target: PrefabEntityTarget::addition(addition.id.clone()),
@@ -281,12 +278,33 @@ fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_bounda
         SceneEntityId::new("missing-target".repeat(128)).unwrap(),
     ));
     let instance = PrefabInstance {
+        arguments: None,
         source: AssetRef::path("structural.prefab.json").unwrap(),
         overrides: Some(overlay),
     };
     let document = SceneDocument::from_ordered_roots(["first", "second"].map(|id| {
         let mut entity = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
-        entity.prefab = Some(instance.clone());
+        let mut declaration = instance.clone();
+        let reference = EntityReference::Authored {
+            reference: AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(entity.id.clone()),
+                    expected_base: overlay_base("structural"),
+                }],
+                target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(
+                    SceneEntityId::new("unresolved").unwrap(),
+                )),
+            },
+        };
+        declaration.overrides.as_mut().unwrap().additions[0]
+            .prefab
+            .as_mut()
+            .unwrap()
+            .arguments = Some(PrefabReferenceArguments {
+            base: overlay_base("nested"),
+            values: [(ReferenceInputId::new("target").unwrap(), reference)].into(),
+        });
+        entity.prefab = Some(declaration);
         entity
     }));
     let bundle = AuthoringSchemaBundle::new([]).unwrap();
@@ -305,8 +323,13 @@ fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_bounda
     let manifest = published.unavailable_manifest();
     assert_eq!(manifest.total_count(), 0);
     assert_eq!(manifest.overlay_declarations().count(), 2);
-    for (_, retained) in manifest.overlay_declarations() {
-        assert_eq!(retained, &instance);
+    for (anchor, retained) in manifest.overlay_declarations() {
+        let original = document
+            .entities
+            .iter()
+            .find(|entity| &entity.id == anchor)
+            .unwrap();
+        assert_eq!(Some(retained), original.prefab.as_ref());
     }
     let manifest_bytes = manifest_overlay_declarations_retained_bytes(manifest).unwrap();
     let retained_instance = manifest.overlay_declarations().next().unwrap().1;
@@ -377,13 +400,26 @@ fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_bounda
 #[test]
 fn raw_composition_accounting_retains_one_payload_and_no_publication_projections() {
     use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
+    use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+    use nara_scene::PrefabReferenceArguments;
 
+    let input = ReferenceInputId::new("raw-outward-input").unwrap();
     let mut overlay = PrefabOverlay::new(overlay_base("raw"));
     overlay.suppressions.push(PrefabEntityTarget::source(
         SceneEntityId::new("obsolete-target".repeat(64)).unwrap(),
     ));
     let mut entity = SceneEntityRecord::new(SceneEntityId::new("raw").unwrap());
     entity.prefab = Some(PrefabInstance {
+        arguments: Some(PrefabReferenceArguments {
+            base: overlay_base("raw"),
+            values: [(
+                input.clone(),
+                EntityReference::Authored {
+                    reference: AuthoredEntityReference::input(input.clone()),
+                },
+            )]
+            .into(),
+        }),
         source: AssetRef::path("missing.prefab.json").unwrap(),
         overrides: Some(overlay),
     });
@@ -393,9 +429,16 @@ fn raw_composition_accounting_retains_one_payload_and_no_publication_projections
             ComponentSchemaVersion::ONE,
             ComponentValue::String("uninterpreted payload".repeat(128)),
         )
-        .with_owner(PersistentComponentSchemaOwnerId::try_new("test.raw-owner").unwrap()),
+        .with_owner(PersistentComponentSchemaOwnerId::try_new("test.raw-owner").unwrap())
+        .with_contextual_default(
+            ComponentFieldId::new("target"),
+            ComponentValue::EntityReference(EntityReference::Authored {
+                reference: AuthoredEntityReference::input(input.clone()),
+            }),
+        ),
     );
-    let document = PrefabDocument::from_ordered_roots([entity]);
+    let mut document = PrefabDocument::from_ordered_roots([entity]);
+    document.inputs.insert(input);
     let encoded = document.to_json_string().unwrap();
     let file = FileCapability::from_host_handle(
         std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap(),

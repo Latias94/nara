@@ -17,7 +17,8 @@ use std::{
 
 use nara_asset::AssetRef;
 use nara_identity::{
-    EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
@@ -29,12 +30,12 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
     LocalizedPrefabEntity, PrefabAddition, PrefabAuthoringSession, PrefabConversionError,
     PrefabConversionReceipt, PrefabConversionRequest, PrefabDocument, PrefabDocumentCandidate,
-    PrefabEntityTarget, PrefabExpansionWorkingSet, PrefabInstance, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep, PrefabReferenceBinding,
-    PreparedPrefabConversion, PreparedScenePrefabConversion, ResolvedPrefabSource,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementOwner,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionWorkingSet, PrefabInstance,
+    PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabProjectionStep, PreparedPrefabConversion, PreparedScenePrefabConversion,
+    ResolvedPrefabSource, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementOwner,
     ScenePrefabConversionRequest,
 };
 
@@ -125,6 +126,7 @@ fn link(target: &str) -> SceneComponentRecord {
 fn instance(name: &str) -> PrefabInstance {
     PrefabInstance {
         source: source(name),
+        arguments: None,
         overrides: None,
     }
 }
@@ -145,15 +147,25 @@ fn scene_document() -> SceneDocument {
         );
     let mut overlay = PrefabOverlay::new(prefab_source::key("base"));
     let mut addition = PrefabAddition::new(id("leaf"));
-    addition.components.insert(component(), link("leaf"));
-    addition.bindings.insert(
-        component(),
-        vec![PrefabReferenceBinding {
-            slot: ComponentFieldPath::from_fields(["target"]),
-            expected: id("leaf"),
-            target: PrefabEntityTarget::source(id("root-a")),
-        }],
-    );
+    let mut added_link = link("leaf");
+    added_link.value = ComponentValue::map([
+        (
+            "target",
+            ComponentValue::EntityReference(EntityReference::Authored {
+                reference: AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("A")),
+                        expected_base: prefab_source::key("base"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "root-a",
+                    ))),
+                },
+            }),
+        ),
+        ("amount", ComponentValue::U64(7)),
+    ]);
+    addition.components.insert(component(), added_link);
     overlay.additions.push(addition);
     overlay.placements.push(PrefabPlacement {
         target: PrefabEntityTarget::addition(id("leaf")),

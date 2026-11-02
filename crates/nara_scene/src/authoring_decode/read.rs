@@ -255,7 +255,11 @@ impl<'a> AuthoringComponentView<'a> {
             Err(
                 error @ (ComponentFieldPathError::MissingField { .. }
                 | ComponentFieldPathError::IndexOutOfBounds { .. }),
-            ) => match field.default_value() {
+            ) => match record
+                .contextual_defaults
+                .get(field.id())
+                .or(field.default_value())
+            {
                 Some(value) => (value, true),
                 None if property.steps.is_empty() => return Ok(AuthoringPropertyValue::Missing),
                 None => return Err(ComponentPropertyError::ValueUnavailable(error).into()),

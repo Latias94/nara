@@ -118,10 +118,9 @@
             "base": {
               "kind": "prefab",
               "origin": {
-                "project_location": {
-                  "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
-                  "path": "prefabs/enemy.prefab.json"
-                }
+                "kind": "project_location",
+                "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
+                "path": "prefabs/enemy.prefab.json"
               }
             },
             "additions": [],
@@ -151,8 +150,7 @@
                           "type": "f64",
                           "value": 9.0
                         }
-                      },
-                      "bindings": []
+                      }
                     }
                   ]
                 }
@@ -181,8 +179,7 @@
                           "type": "u64",
                           "value": 5
                         }
-                      },
-                      "bindings": []
+                      }
                     }
                   ]
                 }
@@ -245,10 +242,9 @@
             "base": {
               "kind": "prefab",
               "origin": {
-                "project_location": {
-                  "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
-                  "path": "prefabs/enemy.prefab.json"
-                }
+                "kind": "project_location",
+                "universe": "ee6d3cbc-9b11-5dc8-96fa-94299e28c369",
+                "path": "prefabs/enemy.prefab.json"
               }
             },
             "additions": [],
@@ -278,8 +274,7 @@
                           "type": "f64",
                           "value": 13.0
                         }
-                      },
-                      "bindings": []
+                      }
                     }
                   ]
                 }
@@ -308,8 +303,7 @@
                           "type": "u64",
                           "value": 9
                         }
-                      },
-                      "bindings": []
+                      }
                     }
                   ]
                 }

@@ -20,7 +20,10 @@ use crate::{
     ComponentDomainError, ComponentFieldPath, ComponentFieldPathSegment, ComponentMemberPath,
     ComponentValue, PersistentComponentProvider,
     codec::{ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext},
-    effective::{ComponentValueMaterializationLimits, effective_component_value},
+    effective::{
+        ComponentValueMaterializationLimits, effective_component_value,
+        validate_native_component_value_references_with_limits,
+    },
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     persistent_apply::{
         ErasedPreparedComponentCandidate, PreparedComponent, PreparedComponentCandidate,
@@ -1118,7 +1121,10 @@ impl ComponentRegistrySnapshot {
         ComponentRegistrySnapshotWitness(Arc::downgrade(&self.0))
     }
 
-    /// Decodes and binds one component using this exact frozen definition.
+    /// Decodes and binds one Native component using this exact frozen definition.
+    ///
+    /// Defaults are expanded and unresolved authored references are rejected before its codec
+    /// runs, including within opaque containers. Source admission uses value validation instead.
     pub fn preflight_component(
         &self,
         id: &ComponentTypeId,
@@ -1144,6 +1150,10 @@ impl ComponentRegistrySnapshot {
             .get(id)
             .ok_or_else(missing_schema_path_index_error)?;
         let effective = effective_component_value(schema, value, context.materialization_limits())?;
+        validate_native_component_value_references_with_limits(
+            effective.as_ref(),
+            context.materialization_limits(),
+        )?;
         validate_component_value_coverage(schema, path_index, effective.as_ref())?;
         binding
             .codec
@@ -1152,6 +1162,8 @@ impl ComponentRegistrySnapshot {
     }
 
     /// Encodes the selected component, returning `None` only for entity/component absence.
+    ///
+    /// The effective result, including omitted defaults, must contain only Native references.
     pub fn encode_component(
         &self,
         id: &ComponentTypeId,
@@ -1174,6 +1186,15 @@ impl ComponentRegistrySnapshot {
             .map_err(|error| ComponentCodecError::Message(error.to_string()))?;
         let encoded = binding.codec.encode_with_context(world, entity, context)?;
         if let Some(value) = &encoded {
+            let effective = effective_component_value(
+                schema,
+                value,
+                ComponentValueMaterializationLimits::default(),
+            )?;
+            validate_native_component_value_references_with_limits(
+                effective.as_ref(),
+                ComponentValueMaterializationLimits::default(),
+            )?;
             let path_index = self
                 .0
                 .path_indexes
@@ -2714,7 +2735,8 @@ fn validate_component_field_default(
 
 /// Validates canonical field coverage, required paths, wire kinds and numeric domains.
 ///
-/// Missing defaults use the native materialization policy. This performs no native codec calls
+/// Missing defaults use the shared materialization policy. Authored references remain valid
+/// source values; Native admission is a separate check. This performs no native codec calls
 /// or World operations. The caller owns raw payload admission and aggregate work; persistent
 /// files, Prefab expansion, patches and reference traversal retain their owner budgets.
 pub fn validate_component_value(

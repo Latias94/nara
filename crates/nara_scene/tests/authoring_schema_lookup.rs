@@ -33,10 +33,10 @@ fn authoring_schema_lookup_requires_an_exact_available_direct_record_in_both_kin
         target: PrefabEntityTarget::source(id("overlay-only")),
         component: component(),
         record: record(CURRENT, OWNER),
-        bindings: Vec::new(),
     });
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/nested.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let document = SceneDocument::from_ordered_roots([
@@ -525,12 +525,12 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("value")),
             intent: PrefabPropertyIntent::Set(ComponentValue::U64(7)),
-            bindings: Vec::new(),
         }],
     });
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: request.clone(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let document = SceneDocument::from_ordered_roots([anchor]);
@@ -622,6 +622,7 @@ fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("shared.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let document = SceneDocument::from_ordered_roots([anchor]);

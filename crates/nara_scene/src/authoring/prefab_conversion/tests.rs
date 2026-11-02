@@ -63,6 +63,7 @@ pub(super) fn admit_schema(schema: ComponentSchema) -> AuthoringSchemaBasis {
 pub(super) fn instance(name: &str) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path(format!("prefabs/{name}.prefab.json")).unwrap(),
+        arguments: None,
         overrides: None,
     }
 }

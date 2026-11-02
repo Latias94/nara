@@ -18,6 +18,7 @@ fn browser_prefab_save_and_reopen_keep_the_anchor_source_observation_after_close
         let anchor_id = nara_identity::SceneEntityId::new("anchor").unwrap();
         let mut anchor = SceneEntityRecord::new(anchor_id.clone());
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path("shared.prefab.json").unwrap(),
             overrides: None,
         });
@@ -170,6 +171,7 @@ fn anchored_prefab_open_reuses_the_browser_slot_despite_locator_scope() {
     let anchor_id = nara_identity::SceneEntityId::new("anchor").unwrap();
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("shared.prefab.json").unwrap(),
         overrides: None,
     });
@@ -309,6 +311,7 @@ fn pending_exit_rejects_anchored_prefab_activation_and_new_source_admission() {
             let entity = nara_identity::SceneEntityId::new(format!("{name}-anchor")).unwrap();
             let mut anchor = SceneEntityRecord::new(entity.clone());
             anchor.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
                 overrides: None,
             });
@@ -411,6 +414,7 @@ fn trusted_anchored_prefabs_keep_independent_dirty_sources_and_exact_save_receip
         let entity = nara_identity::SceneEntityId::new(format!("{name}-anchor")).unwrap();
         let mut instance = SceneEntityRecord::new(entity.clone());
         instance.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
             overrides: None,
         });

@@ -1822,6 +1822,7 @@ mod tests {
             }
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
             anchor.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
                 overrides: None,
             });
@@ -1981,11 +1982,11 @@ mod tests {
                 target: PrefabEntityTarget::source(SceneEntityId::new("same-target").unwrap()),
                 component: component.clone(),
                 record: asset_record(name),
-                bindings: Vec::new(),
             });
             overlay
         };
         let declaration = |name: &str, overrides| PrefabInstance {
+            arguments: None,
             source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
             overrides,
         };
@@ -2228,7 +2229,6 @@ mod tests {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new(field)),
                 intent: PrefabPropertyIntent::Set(value),
-                bindings: Vec::new(),
             }],
         };
         let remove_default = || PrefabComponentIntent::Properties {
@@ -2238,7 +2238,6 @@ mod tests {
             claims: vec![PrefabPropertyClaim {
                 path: ComponentPropertyPath::new(ComponentFieldId::new("fallback")),
                 intent: PrefabPropertyIntent::Absent,
-                bindings: Vec::new(),
             }],
         };
         let instance = |name: &str, components, instances| {
@@ -2246,6 +2245,7 @@ mod tests {
             overlay.components = components;
             overlay.instances = instances;
             PrefabInstance {
+                arguments: None,
                 source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
                 overrides: Some(overlay),
             }
@@ -2577,6 +2577,7 @@ mod tests {
         let stable_id = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::StableId(stable_id),
             overrides: None,
         });
@@ -2711,6 +2712,7 @@ mod tests {
                 children: Vec::new(),
                 components: Default::default(),
                 prefab: Some(PrefabInstance {
+                    arguments: None,
                     source: shared_prefab.clone(),
                     overrides: None,
                 }),
@@ -2720,6 +2722,7 @@ mod tests {
                 children: Vec::new(),
                 components: Default::default(),
                 prefab: Some(PrefabInstance {
+                    arguments: None,
                     source: shared_prefab,
                     overrides: None,
                 }),

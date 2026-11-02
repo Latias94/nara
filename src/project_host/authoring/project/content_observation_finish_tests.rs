@@ -95,6 +95,7 @@ fn finish_after_sidecar_replacement(replacement: MetadataReplacement) {
         AssetRef::Product(AssetProductRef::new(outer_id, ImportedProductId::PRIMARY).unwrap());
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: reference.clone(),
         overrides: None,
     });

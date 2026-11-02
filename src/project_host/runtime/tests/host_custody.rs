@@ -386,6 +386,7 @@ fn content_runtime_replacement_transfers_failed_cleanup_and_keeps_original_hosts
     let anchor = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(nara_scene::PrefabInstance {
+        arguments: None,
         source: AssetRef::path("panel.prefab.json").unwrap(),
         overrides: None,
     });

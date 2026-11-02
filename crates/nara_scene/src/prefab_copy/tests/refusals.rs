@@ -144,6 +144,7 @@ fn auxiliary_prefab_source_cannot_be_copied_into_a_primary_alias() {
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: product(old, false),
+        arguments: None,
         overrides: None,
     });
     let request = PrefabCopyRequest::new(vec![
@@ -286,7 +287,7 @@ fn deep_programmatic_values_and_nested_declarations_refuse_before_copy() {
 
 #[test]
 fn preparation_limits_apply_to_the_whole_supplied_closure() {
-    let limits = PrefabCopyLimits::new(10, 100_000, 1_000_000, 100_000, 8 * 1024 * 1024).unwrap();
+    let limits = PrefabCopyLimits::new(8, 100_000, 1_000_000, 100_000, 8 * 1024 * 1024).unwrap();
     let source = |name: &str| {
         mapped_source(
             name,
@@ -302,7 +303,7 @@ fn preparation_limits_apply_to_the_whole_supplied_closure() {
         Err(PrefabCopyError::BudgetExceeded)
     ));
 
-    let limits = PrefabCopyLimits::new(10_000, 20, 1_000_000, 100_000, 8 * 1024 * 1024).unwrap();
+    let limits = PrefabCopyLimits::new(10_000, 10, 1_000_000, 100_000, 8 * 1024 * 1024).unwrap();
     let leaf = || {
         mapped_source(
             "leaf",
@@ -322,12 +323,12 @@ fn preparation_limits_apply_to_the_whole_supplied_closure() {
     );
     assert!(matches!(
         PrefabCopyRequest::new(vec![leaf(), other]).prepare(&basis(), limits),
-        Err(PrefabCopyError::BudgetExceeded) | Err(PrefabCopyError::Compiler { .. })
+        Err(PrefabCopyError::BudgetExceeded)
     ));
 }
 
 #[test]
-fn actual_compiler_failure_is_distinct_after_successful_reference_mapping() {
+fn mapped_wrong_base_is_preserved_by_copy_and_rejected_by_actual_use() {
     let mut request = nested_fixture();
     // This key is admitted and remaps successfully, but does not identify the actual source.
     request.sources[0].document.entities[0]
@@ -338,8 +339,21 @@ fn actual_compiler_failure_is_distinct_after_successful_reference_mapping() {
         .as_mut()
         .unwrap()
         .base = key("leaf");
-    assert!(matches!(
-        prepare_error(&request),
-        PrefabCopyError::Compiler { .. }
-    ));
+    let before = request.sources[0].document.clone();
+    let prepared = request
+        .prepare(&basis(), PrefabCopyLimits::default())
+        .unwrap();
+    assert_eq!(request.sources[0].document, before);
+    let copied = prepared.sources()[0].document.entities[0]
+        .prefab
+        .as_ref()
+        .unwrap();
+    assert_eq!(copied.overrides.as_ref().unwrap().base, key("copied-leaf"));
+    let usage = SceneDocument::from_ordered_roots([anchor("mount", "copied-outer", None)]);
+    let report = compile_use(prepared.sources(), &usage, &basis());
+    assert!(report.candidate().is_none());
+    assert_eq!(
+        report.failure().unwrap().reason,
+        PrefabExpansionFailureKind::SourceChanged
+    );
 }

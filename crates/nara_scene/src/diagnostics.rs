@@ -377,6 +377,11 @@ pub(crate) fn with_codec_error(
             "maximum",
             usize_to_u64(*maximum),
         ),
+        ComponentCodecError::UnresolvedAuthoredReference => with_public_identifier(
+            diagnostic,
+            "codec-error-kind",
+            "unresolved-authored-reference",
+        ),
         ComponentCodecError::EntityMissing => {
             with_public_identifier(diagnostic, "codec-error-kind", "entity-missing")
         }

@@ -269,7 +269,15 @@ impl PrefabCompositionEntityDraft {
             value_nodes = value_nodes.saturating_add(cost.nodes());
             logical_bytes = logical_bytes
                 .saturating_add(component.as_str().len())
+                .saturating_add(record.owner().map_or(0, |owner| owner.as_str().len()))
                 .saturating_add(cost.logical_bytes());
+            for (field, value) in &record.contextual_defaults {
+                let cost = value.cost();
+                value_nodes = value_nodes.saturating_add(1).saturating_add(cost.nodes());
+                logical_bytes = logical_bytes
+                    .saturating_add(field.as_str().len())
+                    .saturating_add(cost.logical_bytes());
+            }
         }
         if value_nodes > MAX_PREFAB_COMPOSITION_VALUE_NODES {
             return Err(PrefabCompositionDraftError::ValueNodeLimitExceeded);

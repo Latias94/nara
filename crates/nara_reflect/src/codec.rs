@@ -52,6 +52,8 @@ pub enum ComponentCodecError {
         observed: usize,
         maximum: usize,
     },
+    /// An authored occurrence or input reference survived Native lowering.
+    UnresolvedAuthoredReference,
     WrongWorld,
     AssetServerChanged,
     EntityMissing,
@@ -150,6 +152,8 @@ impl Display for ComponentCodecError {
                 formatter,
                 "effective component value materialization observed depth {observed}, maximum is {maximum}"
             ),
+            Self::UnresolvedAuthoredReference => formatter
+                .write_str("native component value contains an unresolved authored reference"),
             Self::WrongWorld => formatter.write_str("component batch belongs to a different world"),
             Self::AssetServerChanged => {
                 formatter.write_str("asset server changed after the component batch was created")

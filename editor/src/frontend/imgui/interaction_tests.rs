@@ -148,6 +148,7 @@ impl InteractionProject {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("prefab-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("ordinary.prefab.json").unwrap(),
+            arguments: None,
             overrides: None,
         });
         fs::write(

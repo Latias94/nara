@@ -129,6 +129,7 @@ impl Fixture {
             .unwrap();
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new(path).unwrap());
             anchor.prefab = Some(nara_scene::PrefabInstance {
+                arguments: None,
                 source: nara_asset::AssetRef::path(path).unwrap(),
                 overrides: Default::default(),
             });
@@ -733,6 +734,7 @@ fn indexed_open_rejects_loaded_but_unopened_prefab_and_image_identity_conflicts(
         );
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         anchor.prefab = Some(nara_scene::PrefabInstance {
+            arguments: None,
             source: AssetRef::path("loaded.prefab.json").unwrap(),
             overrides: Default::default(),
         });
@@ -1985,6 +1987,7 @@ fn failed_prefab_publication_restores_the_exact_active_document_and_preview() {
     let anchor_id = SceneEntityId::new("anchor").unwrap();
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(nara_scene::PrefabInstance {
+        arguments: None,
         source: nara_asset::AssetRef::path("rollback.prefab.json").unwrap(),
         overrides: Default::default(),
     });
@@ -2156,6 +2159,7 @@ fn refresh_checks_later_sources_and_supersedes_only_the_same_source_obligation()
     let startup = fs::read(&scene).unwrap();
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("p.json").unwrap());
     anchor.prefab = Some(nara_scene::PrefabInstance {
+        arguments: None,
         source: nara_asset::AssetRef::path("p.json").unwrap(),
         overrides: Default::default(),
     });
@@ -2279,6 +2283,7 @@ fn trusted_anchor_open_uses_its_retained_prefab_directory_after_rename() {
     let anchor_id = SceneEntityId::new("anchor").unwrap();
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(nara_scene::PrefabInstance {
+        arguments: None,
         source: nara_asset::AssetRef::path("retained.prefab.json").unwrap(),
         overrides: Default::default(),
     });

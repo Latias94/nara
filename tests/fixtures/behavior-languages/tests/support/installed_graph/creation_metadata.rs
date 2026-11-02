@@ -61,6 +61,7 @@ impl Fixture {
         let mut anchor = SceneEntityRecord::new(id("instance"));
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("enemy.prefab.json").unwrap(),
+            arguments: None,
             overrides: None,
         });
         scene = SceneDocument::from_ordered_roots(scene.entities.into_iter().chain([anchor]));
@@ -991,6 +992,7 @@ fn csharp_installed_creation_metadata_captures_selected_dirty_prefab_instead_of_
     let prefab = open_source(&mut editor, PREFAB);
     let missing = PrefabInstance {
         source: AssetRef::path("missing-on-disk.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     };
     set_instance(&mut editor, prefab, None, Some(missing.clone()));

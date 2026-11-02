@@ -26,11 +26,13 @@ pub mod identity {
     //! intentionally not reachable through this ordinary facade.
 
     pub use nara_identity::{
-        EntityIdentityAxis, EntityLookup, EntityReference, EntityReferenceRemap,
-        IdentityAllocationError, IdentityDomainError, IdentityDomainStats, IdentityRemapError,
-        IdentityTombstone, IdentityTombstoneSubject, PersistentRetirementDisposition,
-        PersistentRuntimeId, PersistentRuntimeIdError, PersistentRuntimeNamespaceId,
-        PersistentRuntimeNamespaceIdError, PersistentRuntimeReference, RuntimeEntityIncarnation,
+        AuthoredEntityReference, AuthoredReferenceTarget, EntityIdentityAxis, EntityLookup,
+        EntityReference, EntityReferenceCost, EntityReferenceRemap, IdentityAllocationError,
+        IdentityDomainError, IdentityDomainStats, IdentityRemapError, IdentityTombstone,
+        IdentityTombstoneSubject, PersistentRetirementDisposition, PersistentRuntimeId,
+        PersistentRuntimeIdError, PersistentRuntimeNamespaceId, PersistentRuntimeNamespaceIdError,
+        PersistentRuntimeReference, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
+        ReferenceInputId, ReferenceInputIdError, RuntimeEntityIncarnation,
         RuntimeEntityIncarnationError, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
         SceneIdentitySnapshot, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
         WorldEntityLocator, WorldEntityLocatorRemap, WorldEntityLocators, WorldEntityToken,

@@ -12,8 +12,8 @@ use crate::{
     ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     ScenePlacement, ScenePlacementOwner,
     authoring_decode::{
-        AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS, MAX_AUTHORING_FIELD_LOGICAL_BYTES,
-        MAX_AUTHORING_FIELD_VALUE_NODES,
+        AuthoringComponentTemplate, AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS,
+        MAX_AUTHORING_FIELD_LOGICAL_BYTES, MAX_AUTHORING_FIELD_VALUE_NODES,
     },
 };
 
@@ -433,11 +433,6 @@ fn lower(
                 .ok_or_else(rejected)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    admit_template_payloads(
-        definitions.iter().map(|template| template.value),
-        history_limits,
-        ScenePatchApplyLimits::default(),
-    )?;
     let mut entities = ConstructionEntityMap {
         scope: Arc::clone(&draft.scope),
         entities: Vec::with_capacity(draft.entities.len()),
@@ -487,6 +482,17 @@ fn lower(
         let entity = entities.resolve(entity)?;
         templates.push((entity, component.clone(), template));
     }
+    let mut patch = ScenePatchDocument::new(operations);
+    // Admit every retained default and its declaration before property lowering can copy an
+    // initial value, including defaults hidden by that value's explicit Nulls.
+    admit_template_payloads(
+        [&patch],
+        templates
+            .iter()
+            .map(|(entity, _, template)| (entity, *template)),
+        history_limits,
+        ScenePatchApplyLimits::default(),
+    )?;
     let staged = templates
         .iter()
         .map(|(entity, component, template)| {
@@ -527,7 +533,7 @@ fn lower(
             value,
         });
     }
-    let fields = if writes.is_empty() {
+    let fields = ScenePatchDocument::new(if writes.is_empty() {
         Vec::new()
     } else if draft.entities.is_empty() && draft.components.is_empty() {
         // A construction-shaped request with no additive declarations is an ordinary edit.
@@ -535,40 +541,99 @@ fn lower(
         property::lower(original, state, &writes, &staged)?.operations
     } else {
         property::lower_construction(original, state, &writes, &staged)?.operations
-    };
+    });
     drop(staged);
+    // Coalesced writes now have their exact replay cost. Admit the complete transaction before
+    // materializing the records, rather than giving their hidden defaults a separate allowance.
+    admit_template_payloads(
+        [&patch, &fields],
+        templates
+            .iter()
+            .map(|(entity, _, template)| (entity, *template)),
+        history_limits,
+        ScenePatchApplyLimits::default(),
+    )?;
     for (entity, component, template) in templates {
-        operations.push(ScenePatchOperation::AddComponent {
+        patch.operations.push(ScenePatchOperation::AddComponent {
             entity,
             component,
-            value: template.to_record(),
+            value: template.to_record().map_err(|_| rejected())?,
         });
     }
-    operations.extend(fields);
-    Ok((ScenePatchDocument::new(operations), entities))
+    patch.operations.extend(fields.operations);
+    Ok((patch, entities))
 }
 
 fn admit_template_payloads<'a>(
-    templates: impl IntoIterator<Item = &'a ComponentValue>,
+    patches: impl IntoIterator<Item = &'a ScenePatchDocument>,
+    templates: impl IntoIterator<Item = (&'a SceneEntityId, AuthoringComponentTemplate<'a>)>,
     history: SceneAuthoringHistoryLimits,
     replay: ScenePatchApplyLimits,
 ) -> Result<(), ScenePatchReport> {
+    let refused = || {
+        history_error_report(
+            "scene.authoring-construction-template-copy-limit",
+            "Construction template payloads exceed the source's replay or history copy budget",
+        )
+    };
+    let operation_limit = history
+        .max_entry_operations()
+        .min(replay.validation_work().get());
     let node_limit = history
         .max_entry_value_nodes()
         .min(replay.validation_value_nodes().get());
     let byte_limit = history
         .max_entry_logical_bytes()
         .min(replay.validation_value_bytes().get());
+    let mut operations = 0usize;
     let mut nodes = 0usize;
     let mut bytes = 0usize;
-    for value in templates {
-        let cost = value.cost_up_to(node_limit.saturating_sub(nodes), byte_limit.saturating_sub(bytes))
-            .ok_or_else(|| history_error_report(
-                "scene.authoring-construction-template-copy-limit",
-                "Construction template payloads exceed the source's replay or history copy budget",
-            ))?;
-        nodes += cost.nodes();
-        bytes += cost.logical_bytes();
+    for patch in patches {
+        let cost = crate::patch::bounded_scene_patch_cost(patch, replay).ok_or_else(refused)?;
+        operations = operations
+            .checked_add(cost.operation_count())
+            .ok_or_else(refused)?;
+        nodes = nodes
+            .checked_add(cost.value_cost().nodes())
+            .ok_or_else(refused)?;
+        bytes = bytes
+            .checked_add(cost.logical_bytes())
+            .ok_or_else(refused)?;
+        if operations > operation_limit || nodes > node_limit || bytes > byte_limit {
+            return Err(refused());
+        }
+    }
+    for (entity, template) in templates {
+        operations = operations.checked_add(1).ok_or_else(refused)?;
+        bytes = bytes
+            .checked_add(entity.as_str().len())
+            .and_then(|bytes| bytes.checked_add(template.schema.id().as_str().len()))
+            .and_then(|bytes| bytes.checked_add(template.owner.as_str().len()))
+            .ok_or_else(refused)?;
+        let values = std::iter::once(Ok((None, template.value))).chain(
+            template
+                .contextual_defaults()
+                .map(|entry| entry.map(|(field, value)| (Some(field), value))),
+        );
+        for entry in values {
+            let (field, value) = entry.map_err(|_| rejected())?;
+            if let Some(field) = field {
+                // ScenePatchCost::add_patch_record_cost counts each retained contextual
+                // declaration in operation_count, independently of its payload nodes.
+                operations = operations.checked_add(1).ok_or_else(refused)?;
+                bytes = bytes
+                    .checked_add(field.as_str().len())
+                    .ok_or_else(refused)?;
+            }
+            if operations > operation_limit || bytes > byte_limit {
+                return Err(refused());
+            }
+            let cost = value
+                .cost_up_to(node_limit.saturating_sub(nodes), byte_limit - bytes)
+                .ok_or_else(refused)?;
+            nodes += cost.nodes();
+            bytes += cost.logical_bytes();
+        }
     }
     Ok(())
 }
@@ -586,6 +651,9 @@ fn foreign_local() -> ScenePatchReport {
         "Construction local handles require their exact originating draft and declaration",
     )
 }
+
+#[cfg(test)]
+mod contextual_default_tests;
 
 #[cfg(test)]
 mod limit_tests;
@@ -654,27 +722,39 @@ mod tests {
     #[test]
     fn borrowed_template_payload_gate_keeps_exact_independent_history_and_replay_limits() {
         let value = ComponentValue::String("abcd".into());
-        let history = SceneAuthoringHistoryLimits::new(8, 16, 2, 8, 16, 2, 8).unwrap();
+        let schema = nara_reflect::ComponentSchema::new(
+            ComponentTypeId::new("c"),
+            "Component",
+            nara_reflect::ComponentSchemaVersion::ONE,
+        );
+        let owner = nara_reflect::PersistentComponentSchemaOwnerId::try_new("o").unwrap();
+        let entity = SceneEntityId::new("e").unwrap();
+        let template = AuthoringComponentTemplate {
+            schema: &schema,
+            value: &value,
+            owner: &owner,
+        };
+        let copies = [(&entity, template); 2];
+        // Each record retains its entity/component/owner locators plus four payload bytes.
+        let history = SceneAuthoringHistoryLimits::new(8, 16, 2, 14, 16, 2, 14).unwrap();
         let replay = ScenePatchApplyLimits::default()
             .with_validation_value_nodes(ItemLimit::new(2).unwrap())
-            .with_validation_value_bytes(ByteLimit::new(8).unwrap());
-        assert!(admit_template_payloads([&value, &value], history, replay).is_ok());
-        assert!(admit_template_payloads([&value, &value, &value], history, replay).is_err());
+            .with_validation_value_bytes(ByteLimit::new(14).unwrap());
+        assert!(admit_template_payloads([], copies, history, replay).is_ok());
+        assert!(admit_template_payloads([], [(&entity, template); 3], history, replay).is_err());
         let fewer_nodes = replay.with_validation_value_nodes(ItemLimit::new(1).unwrap());
-        assert!(admit_template_payloads([&value, &value], history, fewer_nodes).is_err());
-        let fewer_bytes = replay.with_validation_value_bytes(ByteLimit::new(7).unwrap());
-        assert!(admit_template_payloads([&value, &value], history, fewer_bytes).is_err());
-        let history = SceneAuthoringHistoryLimits::new(8, 16, 2, 7, 16, 2, 7).unwrap();
-        assert!(admit_template_payloads([&value, &value], history, replay).is_err());
-        let history = SceneAuthoringHistoryLimits::new(8, 32, 8, 32, 16, 2, 7).unwrap();
+        assert!(admit_template_payloads([], copies, history, fewer_nodes).is_err());
+        let fewer_bytes = replay.with_validation_value_bytes(ByteLimit::new(13).unwrap());
+        assert!(admit_template_payloads([], copies, history, fewer_bytes).is_err());
+        let history = SceneAuthoringHistoryLimits::new(8, 16, 2, 13, 16, 2, 13).unwrap();
+        assert!(admit_template_payloads([], copies, history, replay).is_err());
+        let history = SceneAuthoringHistoryLimits::new(8, 32, 8, 32, 16, 2, 13).unwrap();
         assert!(
-            admit_template_payloads([&value, &value], history, ScenePatchApplyLimits::default())
-                .is_err()
+            admit_template_payloads([], copies, history, ScenePatchApplyLimits::default()).is_err()
         );
-        let history = SceneAuthoringHistoryLimits::new(8, 32, 8, 32, 16, 1, 8).unwrap();
+        let history = SceneAuthoringHistoryLimits::new(8, 32, 8, 32, 16, 1, 14).unwrap();
         assert!(
-            admit_template_payloads([&value, &value], history, ScenePatchApplyLimits::default())
-                .is_err()
+            admit_template_payloads([], copies, history, ScenePatchApplyLimits::default()).is_err()
         );
     }
 }

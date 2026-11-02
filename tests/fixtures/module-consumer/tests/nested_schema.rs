@@ -112,6 +112,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {
             source: prefab_source.clone(),
+            arguments: None,
             overrides: None,
         });
         anchor

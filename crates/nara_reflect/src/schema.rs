@@ -6,7 +6,10 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use nara_identity::EntityReference;
+use nara_identity::{
+    AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin, SourceDocumentKey,
+    SourceDocumentKind, SourceDocumentOrigin,
+};
 
 use crate::{
     AssetReferenceDemand, ComponentFieldPath, ComponentFieldPathSegment, ComponentNumericInterval,
@@ -775,10 +778,20 @@ impl ShapeBudget {
         bytes: usize,
         path: &[ComponentFieldPathSegment],
     ) -> Result<(), ComponentShapeError> {
+        self.observe_cost(depth, 1, bytes, path)
+    }
+
+    fn observe_cost(
+        &mut self,
+        depth: usize,
+        nodes: usize,
+        bytes: usize,
+        path: &[ComponentFieldPathSegment],
+    ) -> Result<(), ComponentShapeError> {
         if depth > MAX_SHAPE_DEPTH {
             return Err(shape_error(path, ComponentShapeErrorKind::DepthLimit));
         }
-        self.nodes = self.nodes.saturating_add(1);
+        self.nodes = self.nodes.saturating_add(nodes);
         if self.nodes > MAX_SHAPE_NODES {
             return Err(shape_error(path, ComponentShapeErrorKind::NodeLimit));
         }
@@ -1384,17 +1397,15 @@ fn validate_value_budget(
     budget: &mut ShapeBudget,
     path: &mut Vec<ComponentFieldPathSegment>,
 ) -> Result<(), ComponentShapeError> {
-    let bytes = match value {
-        ComponentValue::String(value) => value.len(),
-        ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
-            entity.as_str().len()
+    let (nodes, bytes) = match value {
+        ComponentValue::String(value) => (1, value.len()),
+        ComponentValue::EntityReference(reference) => {
+            let cost = reference.cost();
+            (cost.nodes(), cost.logical_bytes())
         }
-        ComponentValue::EntityReference(EntityReference::Persistent { entity }) => {
-            entity.namespace.as_str().len().saturating_add(16)
-        }
-        _ => 8,
+        _ => (1, 8),
     };
-    budget.observe(depth, bytes, path)?;
+    budget.observe_cost(depth, nodes, bytes, path)?;
     match value {
         ComponentValue::Map(values) => {
             for (name, value) in values {
@@ -2084,7 +2095,62 @@ fn feed_value(hasher: &mut blake3::Hasher, value: &ComponentValue) {
                 feed_str(hasher, entity.namespace.as_str());
                 feed_str(hasher, &entity.entity.to_string());
             }
+            EntityReference::Authored { reference } => {
+                feed_bytes(hasher, &[2]);
+                feed_len(hasher, reference.through.len());
+                for hop in &reference.through {
+                    feed_entity_origin(hasher, &hop.anchor);
+                    feed_source_key(hasher, &hop.expected_base);
+                }
+                match &reference.target {
+                    AuthoredReferenceTarget::Entity(entity) => {
+                        feed_bytes(hasher, &[0]);
+                        feed_entity_origin(hasher, entity);
+                    }
+                    AuthoredReferenceTarget::Input(input) => {
+                        feed_bytes(hasher, &[1]);
+                        feed_str(hasher, input.as_str());
+                    }
+                }
+            }
         },
+    }
+}
+
+fn feed_entity_origin(hasher: &mut blake3::Hasher, origin: &PrefabEntityOrigin) {
+    feed_bytes(
+        hasher,
+        &[match origin {
+            PrefabEntityOrigin::SourceEntity(_) => 0,
+            PrefabEntityOrigin::InstanceAddition(_) => 1,
+        }],
+    );
+    feed_str(hasher, origin.entity().as_str());
+}
+
+fn feed_source_key(hasher: &mut blake3::Hasher, key: &SourceDocumentKey) {
+    feed_bytes(
+        hasher,
+        &[match key.kind() {
+            SourceDocumentKind::Scene => 0,
+            SourceDocumentKind::Prefab => 1,
+        }],
+    );
+    match key.origin() {
+        SourceDocumentOrigin::Named { universe, name } => {
+            feed_bytes(hasher, &[0]);
+            feed_bytes(hasher, universe.as_uuid().as_bytes());
+            feed_str(hasher, name);
+        }
+        SourceDocumentOrigin::ProjectLocation { universe, path } => {
+            feed_bytes(hasher, &[1]);
+            feed_bytes(hasher, universe.as_uuid().as_bytes());
+            feed_str(hasher, path.as_str());
+        }
+        SourceDocumentOrigin::StableAsset { stable_id } => {
+            feed_bytes(hasher, &[2]);
+            feed_bytes(hasher, stable_id.as_uuid().as_bytes());
+        }
     }
 }
 

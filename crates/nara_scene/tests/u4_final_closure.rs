@@ -112,7 +112,8 @@ fn document() -> SceneDocument {
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 reference_value("old", "textures/present.png"),
-            ),
+            )
+            .with_contextual_default(ComponentFieldId::new("links"), links("old")),
         ),
         SceneEntityRecord::new(scene_id("old")),
     ])
@@ -644,6 +645,7 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source,
+        arguments: None,
         overrides: None,
     });
     let mut source_document = document();

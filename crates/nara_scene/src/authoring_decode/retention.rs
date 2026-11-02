@@ -8,8 +8,7 @@ use std::mem::size_of;
 
 use super::*;
 use crate::{
-    PrefabInstanceHop, PrefabReferenceBinding, ScenePlacement, ScenePlacementAnchor,
-    ScenePlacementOwner,
+    PrefabInstanceHop, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
     provenance::{provenance_asset_ref_bytes, provenance_string_bytes},
 };
@@ -258,6 +257,11 @@ fn unavailable_record_dynamic_bytes(
         .checked_add(owner_bytes(&record.owner)?)?
         .checked_add(provenance_string_bytes(record.component.as_str())?)?
         .checked_add(value_bytes_impl(&record.value, limits, admission)?)?
+        .checked_add(contextual_defaults_bytes(
+            &record.contextual_defaults,
+            limits,
+            admission,
+        )?)?
         .checked_add(asset_references_bytes(
             &record.schema_declared_asset_references,
         )?)?;
@@ -275,12 +279,7 @@ fn unavailable_record_dynamic_bytes(
                 bytes = bytes.checked_add(provenance_string_bytes(name)?)?;
             }
         }
-        bytes = bytes.checked_add(match &reference.reference {
-            EntityReference::SceneLocal { entity } => provenance_string_bytes(entity.as_str())?,
-            EntityReference::Persistent { entity } => {
-                provenance_string_bytes(entity.namespace.as_str())?
-            }
-        })?;
+        bytes = bytes.checked_add(entity_reference_dynamic_bytes(&reference.reference)?)?;
     }
     Some(bytes)
 }
@@ -290,20 +289,13 @@ pub(super) fn property_dynamic_bytes_impl(
     limits: SceneFileLimits,
     admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
 ) -> Option<usize> {
-    let mut bytes = provenance_string_bytes(property.path.root.as_str())?
-        .checked_add(
-            property
-                .path
-                .steps
-                .len()
-                .checked_mul(size_of::<ComponentPropertyStep>())?,
-        )?
-        .checked_add(
-            property
-                .bindings
-                .len()
-                .checked_mul(size_of::<PrefabReferenceBinding>())?,
-        )?;
+    let mut bytes = provenance_string_bytes(property.path.root.as_str())?.checked_add(
+        property
+            .path
+            .steps
+            .len()
+            .checked_mul(size_of::<ComponentPropertyStep>())?,
+    )?;
     for step in &property.path.steps {
         bytes = bytes.checked_add(match step {
             ComponentPropertyStep::Member(id) => provenance_string_bytes(id.as_str())?,
@@ -315,16 +307,63 @@ pub(super) fn property_dynamic_bytes_impl(
                 })?,
         })?;
     }
-    for binding in &property.bindings {
-        bytes = bytes
-            .checked_add(field_path_dynamic_bytes(&binding.slot)?)?
-            .checked_add(provenance_string_bytes(binding.expected.as_str())?)?
-            .checked_add(target_dynamic_bytes(&binding.target)?)?;
-    }
     if let PrefabPropertyIntent::Set(value) = &property.intent {
         bytes = bytes.checked_add(value_bytes_impl(value, limits, admission)?)?;
     }
     Some(bytes)
+}
+
+pub(super) fn entity_reference_dynamic_bytes(reference: &EntityReference) -> Option<usize> {
+    match reference {
+        EntityReference::SceneLocal { entity } => provenance_string_bytes(entity.as_str()),
+        EntityReference::Persistent { entity } => {
+            provenance_string_bytes(entity.namespace.as_str())
+        }
+        EntityReference::Authored { reference } => {
+            let bytes = match &reference.target {
+                nara_identity::AuthoredReferenceTarget::Entity(entity) => {
+                    provenance_string_bytes(entity.entity().as_str())?
+                }
+                nara_identity::AuthoredReferenceTarget::Input(input) => {
+                    provenance_string_bytes(input.as_str())?
+                }
+            }
+            .checked_add(
+                reference
+                    .through
+                    .len()
+                    .checked_mul(size_of::<PrefabInstanceHop>())?,
+            )?;
+            reference.through.iter().try_fold(bytes, |bytes, hop| {
+                bytes
+                    .checked_add(provenance_string_bytes(hop.anchor.entity().as_str())?)?
+                    .checked_add(hop.expected_base.checked_retained_bytes()?)
+            })
+        }
+    }
+}
+
+pub(super) fn contextual_defaults_bytes(
+    defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
+    limits: SceneFileLimits,
+    admission: &mut Option<&mut crate::provenance::CostScratchAdmission<'_>>,
+) -> Option<usize> {
+    defaults.iter().try_fold(0usize, |bytes, (field, value)| {
+        bytes
+            .checked_add(TREE_ENTRY_BYTES + size_of::<ComponentFieldId>())?
+            .checked_add(provenance_string_bytes(field.as_str())?)?
+            .checked_add(value_bytes_impl(value, limits, admission)?)
+    })
+}
+
+pub(crate) fn prefab_inputs_bytes(
+    inputs: &BTreeSet<nara_identity::ReferenceInputId>,
+) -> Option<usize> {
+    inputs.iter().try_fold(0usize, |bytes, input| {
+        bytes
+            .checked_add(TREE_ENTRY_BYTES + size_of::<nara_identity::ReferenceInputId>())?
+            .checked_add(provenance_string_bytes(input.as_str())?)
+    })
 }
 
 pub(super) fn value_bytes_impl(

@@ -202,6 +202,29 @@ advance to activation. Every direct Native path also rejects residual authored-o
 after default materialization and before invoking codecs or mutating a World. Pure values, a
 generic codec, or a successful Schema shape check cannot establish that closure.
 
+Compiled components retain the actual selected Schema owner independently of an omitted source
+claim. The receiving authority must match that owner; compiled `None` means an actually unowned
+Native definition, not an unrestricted claim. Owner identity does not replace Runtime's exact
+definition witness or ordinary Native receiver checks. Native reception requires current,
+explicit compiled values; it does not perform source migrations or synthesize missing defaults
+after declaration scope has been erased. An incompatible receiving definition requires source
+recompilation. The entire received batch is checked before codecs. New owner storage and
+representation containers require admission before allocation.
+
+Canonical provenance gives each final entity one Runtime address. It is not complete declaration
+attribution: root-bound source contributors may map many-to-one while their instance slots,
+component records and property environments remain distinct. The authoring compiler owns those
+snapshot-bound correspondence facts. Extraction obtains its complete old/new mapping from the
+actual source corpus, including dormant declarations; it cannot infer write-back ownership from
+flat records or merge those facts into Runtime identity.
+
+Native preparation proves the complete effective value set flat before its first codec runs;
+a later invalid record cannot expose an earlier codec to a partially admitted batch. Source
+publish/patch/classification retain a distinct role: they admit authored intent and declared
+Schema semantics without passing unresolved references to Native codecs or claiming an executable
+result. Existing final Native business checks still apply to resolved Native source payloads.
+Strict Check/Play compiles and validates the complete source result before activation.
+
 Unknown source records retain their complete values and declarations without lowering. Source
 preservation grants no interpretation, extraction or Native execution authority. The compiler's
 authoring observation and its Native projection keep that distinction explicit.

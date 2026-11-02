@@ -112,7 +112,6 @@ fn pin_x(target: PrefabEntityTarget, x: u64) -> PrefabComponentIntent {
             path: ComponentPropertyPath::new(ComponentFieldId::new("position"))
                 .with_steps([ComponentPropertyStep::Member(ComponentFieldId::new("x"))]),
             intent: PrefabPropertyIntent::Set(ComponentValue::U64(x)),
-            bindings: Vec::new(),
         }],
     }
 }
@@ -127,6 +126,7 @@ fn old_instance() -> PrefabInstance {
     });
     PrefabInstance {
         source: source("q"),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -134,6 +134,7 @@ fn old_instance() -> PrefabInstance {
 fn replacement() -> PrefabInstance {
     PrefabInstance {
         source: source("r"),
+        arguments: None,
         overrides: None,
     }
 }
@@ -165,6 +166,7 @@ fn scene(overrides: PrefabOverlay) -> SceneDocument {
     let mut outer = SceneEntityRecord::new(id("outer")).with_children([id("scene_local")]);
     outer.prefab = Some(PrefabInstance {
         source: source("p"),
+        arguments: None,
         overrides: Some(overrides),
     });
     SceneDocument::new(
@@ -489,7 +491,6 @@ fn descendant_claims_bind_the_selected_replacement_base_instead_of_the_old_sourc
                 ComponentSchemaVersion::ONE,
                 ComponentValue::String("Pinned replacement".into()),
             ),
-            bindings: Vec::new(),
         });
         let document = scene(overlay);
         let before = document.clone();

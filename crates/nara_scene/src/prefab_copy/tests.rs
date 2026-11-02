@@ -1,4 +1,7 @@
 use nara_asset::{AssetProductRef, AssetSourcePath, ImportedProductId, StableAssetId};
+use nara_identity::{
+    AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, ReferenceInputId,
+};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
@@ -10,14 +13,64 @@ use nara_reflect::{
 use super::*;
 use crate::{
     __private::AuthoringAdapterReceipt, PrefabAddition, PrefabComponentIntent,
-    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceClaim,
-    PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceBinding, SceneComponentRecord,
-    SourceDocumentOrigin,
+    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionFailureKind,
+    PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,
+    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabReferenceArguments, ResolvedPrefabSource, SceneComponentRecord, SceneDocument,
+    SceneEntityId, SceneEntityRecord, SourceDocumentOrigin,
 };
 
+#[path = "tests/inline.rs"]
+mod inline;
 #[path = "tests/refusals.rs"]
 mod refusals;
+#[path = "tests/source_admission.rs"]
+mod source_admission;
+
+fn compile_use(
+    sources: &[PreparedPrefabCopySource],
+    document: &SceneDocument,
+    basis: &AuthoringSchemaBasis,
+) -> crate::prefab::AuthoringPrefabExpansionReport {
+    crate::prefab::try_expand_authoring_prefabs_with_loader(
+        document,
+        basis,
+        Default::default(),
+        None,
+        |reference, _| {
+            let source = sources.iter().find(|source| {
+                source.destination_reference() == reference
+                    || reference.as_product().is_some_and(|product| {
+                        product.product() == ImportedProductId::PRIMARY
+                            && matches!(
+                                source.destination().origin(),
+                                SourceDocumentOrigin::StableAsset { stable_id }
+                                    if *stable_id == product.source()
+                            )
+                    })
+            });
+            Ok::<_, std::convert::Infallible>(source.map(|source| {
+                ResolvedPrefabSource::bound_authoring_source(
+                    std::sync::Arc::new(source.document().clone()),
+                    basis.clone(),
+                    source.destination().clone(),
+                )
+            }))
+        },
+    )
+    .unwrap()
+}
+
+fn assert_use_succeeds(report: &crate::prefab::AuthoringPrefabExpansionReport) {
+    assert!(report.candidate().is_some(), "{:?}", report.diagnostics());
+    assert!(!report.diagnostics().has_errors());
+    assert!(report.failure().is_none());
+    assert!(!report.budget_exceeded());
+    assert!(report.omissions().iter().all(|omission| matches!(
+        omission.reason,
+        crate::prefab::AuthoringPrefabOmissionReason::NativeBindingUnavailable
+    )));
+}
 
 fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
@@ -61,6 +114,9 @@ fn record(value: ComponentValue) -> SceneComponentRecord {
     SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner())
 }
 fn basis() -> AuthoringSchemaBasis {
+    basis_with([])
+}
+fn basis_with(additional: impl IntoIterator<Item = ComponentSchema>) -> AuthoringSchemaBasis {
     let asset_field = ComponentFieldSchema::optional_with_default(
         ComponentFieldId::new("asset"),
         "Asset",
@@ -110,7 +166,7 @@ fn basis() -> AuthoringSchemaBasis {
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         owner(),
         ComponentSchemaCatalog {
-            components: schemas.into(),
+            components: schemas.into_iter().chain(additional).collect(),
             ..Default::default()
         },
         None,
@@ -142,6 +198,7 @@ fn mapped_source(name: &str, document: PrefabDocument) -> PrefabCopySource {
 fn instance(name: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: reference(name),
+        arguments: None,
         overrides: overlay,
     }
 }
@@ -151,19 +208,42 @@ fn anchor(name: &str, source: &str, overlay: Option<PrefabOverlay>) -> SceneEnti
     entity
 }
 fn assets() -> SceneComponentRecord {
-    // The omitted asset default is semantic data; the same spelling in plain must stay unchanged.
-    record(ComponentValue::map([(
-        "plain",
-        ComponentValue::String("prefabs/leaf.prefab.json".into()),
-    )]))
+    record(ComponentValue::map([
+        ("asset", asset(&reference("leaf"))),
+        (
+            "plain",
+            ComponentValue::String("prefabs/leaf.prefab.json".into()),
+        ),
+    ]))
 }
 fn link(target: &str) -> SceneComponentRecord {
+    reference_record(EntityReference::SceneLocal { entity: id(target) })
+}
+fn reference_record(reference: EntityReference) -> SceneComponentRecord {
     record(ComponentValue::map([(
         "target",
-        ComponentValue::EntityReference(nara_reflect::EntityReference::SceneLocal {
-            entity: id(target),
-        }),
+        ComponentValue::EntityReference(reference),
     )]))
+}
+fn routed_reference(hops: &[(&str, &str)], target: AuthoredReferenceTarget) -> EntityReference {
+    EntityReference::Authored {
+        reference: AuthoredEntityReference {
+            through: hops
+                .iter()
+                .map(|(anchor, source)| PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id(anchor)),
+                    expected_base: key(source),
+                })
+                .collect(),
+            target,
+        },
+    }
+}
+fn outer_link(target: &str) -> SceneComponentRecord {
+    reference_record(routed_reference(
+        &[("host", "middle"), ("nested", "leaf")],
+        AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(target))),
+    ))
 }
 fn number() -> SceneComponentRecord {
     record(ComponentValue::map([("value", ComponentValue::U64(1))]))
@@ -177,13 +257,6 @@ fn through(name: &str) -> PrefabEntityTarget {
         entity: PrefabEntityOrigin::SourceEntity(id(name)),
     }
 }
-fn binding(target: PrefabEntityTarget) -> PrefabReferenceBinding {
-    PrefabReferenceBinding {
-        slot: ComponentFieldPath::from_fields(["target"]),
-        expected: id("b"),
-        target,
-    }
-}
 fn root_placement(target: PrefabEntityTarget) -> PrefabPlacement {
     PrefabPlacement {
         target,
@@ -195,7 +268,6 @@ fn property(name: &str, value: ComponentValue) -> PrefabPropertyClaim {
     PrefabPropertyClaim {
         path: ComponentPropertyPath::new(ComponentFieldId::new(name)),
         intent: PrefabPropertyIntent::Set(value),
-        bindings: Vec::new(),
     }
 }
 
@@ -234,10 +306,9 @@ fn nested_fixture() -> PrefabCopyRequest {
         ))));
     let mut addition = PrefabAddition::new(id("added"));
     addition.prefab = Some(instance("leaf", Some(nested_addition)));
-    addition.components.insert(component("Link"), link("b"));
     addition
-        .bindings
-        .insert(component("Link"), vec![binding(through("b"))]);
+        .components
+        .insert(component("Link"), outer_link("b"));
     overlay.additions.push(addition);
     overlay
         .additions
@@ -260,8 +331,7 @@ fn nested_fixture() -> PrefabCopyRequest {
         target: through("a"),
         component: component("Link"),
         mode: PrefabComponentSetMode::Add,
-        record: link("b"),
-        bindings: vec![binding(through("b"))],
+        record: outer_link("b"),
     });
     overlay.components.push(PrefabComponentIntent::Properties {
         target: through("a"),
@@ -381,15 +451,27 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
             assert_eq!(hop.expected_base, key("copied-leaf"));
         }
     };
-    check(&overlay.additions[0].bindings[&component("Link")][0].target);
+    let check_reference = |record: &SceneComponentRecord| {
+        let Some(ComponentValue::EntityReference(EntityReference::Authored { reference })) =
+            record.value.get("target")
+        else {
+            panic!("inline authored reference");
+        };
+        assert_eq!(reference.through.len(), 2);
+        assert_eq!(reference.through[0].expected_base, key("copied-middle"));
+        assert_eq!(reference.through[1].expected_base, key("copied-leaf"));
+        assert_eq!(
+            reference.target,
+            AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id("b")))
+        );
+    };
+    check_reference(&overlay.additions[0].components[&component("Link")]);
     check(&overlay.instances[0].target);
     for intent in &overlay.components {
         match intent {
-            PrefabComponentIntent::Set {
-                target, bindings, ..
-            } => {
+            PrefabComponentIntent::Set { target, record, .. } => {
                 check(target);
-                check(&bindings[0].target);
+                check_reference(record);
             }
             PrefabComponentIntent::Properties {
                 target,
@@ -449,14 +531,13 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
         .find(|entity| entity.id == id("b"))
         .unwrap();
     assert_eq!(b.components[&component("Link")], link("a"));
-    let mut budget = CopyBudget::new(PrefabCopyLimits::default());
-    // This calls the same actual compiler a second time as an explicit consumability assertion.
-    validate_closure(prepared.sources(), &basis(), &mut budget).unwrap();
+    let usage = SceneDocument::from_ordered_roots([anchor("mount", "copied-outer", None)]);
+    assert_use_succeeds(&compile_use(prepared.sources(), &usage, &basis()));
     assert_eq!(prepared.into_sources().len(), 3);
 }
 
 #[test]
-fn property_payload_bindings_and_multiple_hops_are_rewritten() {
+fn property_payload_inline_references_keep_their_lexical_route() {
     let mut request = nested_fixture();
     // The nested leaf's a needs a base Link for a property pin.
     request.sources[2]
@@ -485,14 +566,10 @@ fn property_payload_bindings_and_multiple_hops_are_rewritten() {
         version: ComponentSchemaVersion::ONE,
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("target")),
-            intent: PrefabPropertyIntent::Set(ComponentValue::EntityReference(
-                nara_reflect::EntityReference::SceneLocal { entity: id("b") },
-            )),
-            bindings: vec![PrefabReferenceBinding {
-                slot: ComponentFieldPath::empty(),
-                expected: id("b"),
-                target: through("b"),
-            }],
+            intent: PrefabPropertyIntent::Set(ComponentValue::EntityReference(routed_reference(
+                &[("host", "middle"), ("nested", "leaf")],
+                AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id("b"))),
+            ))),
         }],
     });
     if let PrefabComponentIntent::Set { mode, .. } = &mut outer.components[0] {
@@ -521,14 +598,11 @@ fn property_payload_bindings_and_multiple_hops_are_rewritten() {
             .all(|hop| hop.expected_base == key("copied-leaf"))
     );
     assert_eq!(
-        claims[0].bindings[0].target.through[0].expected_base,
-        key("copied-leaf")
-    );
-    assert_eq!(
         claims[0].intent,
-        PrefabPropertyIntent::Set(ComponentValue::EntityReference(
-            nara_reflect::EntityReference::SceneLocal { entity: id("b") }
-        ))
+        PrefabPropertyIntent::Set(ComponentValue::EntityReference(routed_reference(
+            &[("host", "copied-middle"), ("nested", "copied-leaf")],
+            AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id("b"))),
+        )))
     );
 }
 
@@ -626,11 +700,11 @@ fn nested_primary_product_source_resolves_both_preferred_destination_spellings()
                 PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))]),
             ),
         ]);
-        // Preparation includes production compilation of the copied nested instance, rather
-        // than only checking the rewritten asset value in an ordinary component field.
         let prepared = request
             .prepare(&basis(), PrefabCopyLimits::default())
             .unwrap();
+        let usage = SceneDocument::from_ordered_roots([anchor("mount", "copied-outer", None)]);
+        assert_use_succeeds(&compile_use(prepared.sources(), &usage, &basis()));
         let nested = prepared.sources()[0].document.entities[0]
             .prefab
             .as_ref()
@@ -721,7 +795,6 @@ fn selected_nested_asset_shape_uses_scalar_payload_relative_paths() {
                 ComponentPropertyStep::Member(ComponentFieldId::new("source-member")),
             ]),
             intent: PrefabPropertyIntent::Set(asset(&reference("middle"))),
-            bindings: vec![],
         }],
     });
     let prepared = request

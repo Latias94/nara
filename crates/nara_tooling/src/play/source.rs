@@ -147,11 +147,11 @@ impl<'a> SourceApplyChanges<'a> {
         };
         let mut template = None;
         let current = if let Some(current) = current {
-            &current.value
+            current
         } else {
             let initial = self
                 .budget
-                .prepare(false, None, || {
+                .prepare(false, schema.authoring_initial_value(), || {
                     self.session.authoring_initial_component(component)
                 })
                 .map_err(budget_error)?
@@ -161,7 +161,7 @@ impl<'a> SourceApplyChanges<'a> {
                         "Apply Changes component creation requires its source-owned complete template",
                     )
                 })?;
-            &template.insert(initial).value
+            template.insert(initial)
         };
         for field in schema.fields().iter().filter(|field| {
             field.has_capability(ComponentCapability::Scene)
@@ -173,9 +173,13 @@ impl<'a> SourceApplyChanges<'a> {
                     "Apply Changes could not read a declared component field",
                 )
             };
-            let previous = field_value(current, field).map_err(path_error)?;
+            let previous = field_value(&current.value, field).map_err(path_error)?;
             let replacement = field_value(&runtime, field).map_err(path_error)?;
-            if previous.or(field.default_value()) == replacement.or(field.default_value()) {
+            let default = current
+                .contextual_defaults
+                .get(field.id())
+                .or(field.default_value());
+            if previous.or(default) == replacement.or(field.default_value()) {
                 continue;
             }
             // No effective component is copied into the source: only changed declared roots.

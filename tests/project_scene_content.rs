@@ -204,6 +204,7 @@ fn custom_source_roots_resolve_same_local_aliases_through_the_complete_loader() 
                     );
                 anchor.prefab = Some(PrefabInstance {
                     source: reference.clone(),
+                    arguments: None,
                     overrides: None,
                 });
                 anchor
@@ -483,6 +484,7 @@ fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup(
     );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("second.prefab.json").unwrap(),
+        arguments: None,
         overrides: Default::default(),
     });
     fs::write(

@@ -198,6 +198,7 @@ impl Fixture {
         let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("local")]);
         anchor.prefab = Some(PrefabInstance {
             source: source_ref(),
+            arguments: None,
             overrides: None,
         });
         let (mut workspace, authority) = EditorWorkspace::new_hosted();

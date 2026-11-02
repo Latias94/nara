@@ -98,11 +98,11 @@ impl ActualDemandProject {
                 intent: PrefabPropertyIntent::Set(ComponentValue::String(
                     "preserve opaque intent".into(),
                 )),
-                bindings: Vec::new(),
             }],
         });
         let mut nested = SceneEntityRecord::new(entity("n"));
         nested.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path("q.prefab.json").unwrap(),
             overrides: Some(stale),
         });
@@ -115,6 +115,7 @@ impl ActualDemandProject {
         outer.instances.push(PrefabInstanceClaim {
             target: PrefabEntityTarget::source(entity("n")),
             value: Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::path("r.prefab.json").unwrap(),
                 overrides: None,
             }),
@@ -126,6 +127,7 @@ impl ActualDemandProject {
         let scene = SceneDocument::from_ordered_roots(["first", "second"].map(|name| {
             let mut anchor = SceneEntityRecord::new(entity(name));
             anchor.prefab = Some(PrefabInstance {
+                arguments: None,
                 source: AssetRef::path("p.prefab.json").unwrap(),
                 overrides: Some(outer.clone()),
             });
@@ -354,7 +356,6 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
                     claims: vec![PrefabPropertyClaim {
                         path: ComponentPropertyPath::new(ComponentFieldId::new("image")),
                         intent: PrefabPropertyIntent::Set(image_value("effective")),
-                        bindings: Vec::new(),
                     }],
                 });
                 selected.overrides = Some(overlay);
@@ -546,7 +547,6 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
                         ComponentValue::map([("flag", ComponentValue::Bool(true))]),
                     )
                     .with_owner(owner()),
-                    bindings: Vec::new(),
                 });
             }
         }

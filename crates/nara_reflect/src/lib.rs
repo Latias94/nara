@@ -128,8 +128,15 @@ pub mod __private {
         collect_declared_value_asset_references_with_admission,
     };
     pub use crate::effective::{
-        EffectiveValueAdmissionError, effective_component_value_with_admission,
-        effective_component_value_with_budget,
+        EffectiveValueAdmissionError, component_defaults_are_explicit_with_admission,
+        component_field_default_requires_context,
+        effective_component_value_owned_with_default_overrides,
+        effective_component_value_with_admission, effective_component_value_with_budget,
+        effective_component_value_with_default_overrides_with_admission,
+        effective_component_value_with_default_overrides_with_budget,
+        validate_native_component_value_references_with_admission,
+        validate_native_component_value_references_with_limits,
+        validate_value_materialization_budget,
     };
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
@@ -224,6 +231,9 @@ pub mod prelude {
     };
     pub use bevy_reflect::prelude::*;
 }
+
+#[cfg(test)]
+mod inline_reference_tests;
 
 #[cfg(test)]
 mod tests;

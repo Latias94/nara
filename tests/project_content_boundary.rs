@@ -50,6 +50,7 @@ fn stable_id_prefab_references_survive_source_rename() {
     let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::StableId(stable_id),
+        arguments: None,
         overrides: None,
     });
     let scene = SceneDocument::from_ordered_roots([anchor]);
@@ -435,6 +436,7 @@ fn cyclic_prefab_closure_rejects_without_requeue_or_partial_publication() {
     let mut cyclic = SceneEntityRecord::new(scene_id("cycle"));
     cyclic.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     project.write_prefab_source(&PrefabDocument::from_ordered_roots([cyclic]));

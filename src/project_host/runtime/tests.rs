@@ -913,11 +913,13 @@ logical_height = 540
     .unwrap();
     let mut anchor = SceneEntityRecord::new(prefab_anchor.clone());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
         overrides: None,
     });
     let mut plain = SceneEntityRecord::new(plain_anchor.clone());
     plain.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("plain.prefab.json").unwrap(),
         overrides: None,
     });
@@ -3054,6 +3056,7 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
             let mut anchor =
                 SceneEntityRecord::new(nara_identity::SceneEntityId::new("prefab-anchor").unwrap());
             anchor.prefab = Some(nara_scene::PrefabInstance {
+                arguments: None,
                 source: AssetRef::path("actor.prefab.json").unwrap(),
                 overrides: None,
             });
@@ -4510,6 +4513,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
     let anchor = nara_identity::SceneEntityId::new("panel-anchor").unwrap();
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::Path(prefab),
         overrides: None,
     });
@@ -4764,6 +4768,7 @@ logical_height = 540
     .unwrap();
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
         overrides: None,
     });
@@ -7653,6 +7658,7 @@ logical_height = 540
         let mut anchor =
             SceneEntityRecord::new(nara_identity::SceneEntityId::new("ui-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path("ui.prefab.json").unwrap(),
             overrides: None,
         });

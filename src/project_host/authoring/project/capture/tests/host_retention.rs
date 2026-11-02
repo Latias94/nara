@@ -9,6 +9,7 @@ fn scene_capture_transfers_host_retention_and_releases_only_finished_worker_inpu
     let project = fixture(&[2], &[], &[], &[]);
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
     });

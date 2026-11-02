@@ -616,6 +616,7 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source: AssetRef::path("prefabs/enemy.ron").unwrap(),
+            arguments: None,
             overrides: None,
         }),
     }]);
@@ -720,7 +721,6 @@ fn prefab_instance_property_pin_applies_before_projection() {
             claims: vec![PrefabPropertyClaim {
                 path: nara_reflect::ComponentPropertyPath::new(ComponentFieldId::new("x")),
                 intent: PrefabPropertyIntent::Set(ComponentValue::I64(11)),
-                bindings: vec![],
             }],
         });
     let document = SceneDocument::from_ordered_roots([prefab_anchor_with_overrides(
@@ -6581,6 +6581,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source,
+            arguments: None,
             overrides: None,
         }),
     }
@@ -6597,6 +6598,7 @@ fn prefab_anchor_with_overrides(
         components: BTreeMap::new(),
         prefab: Some(PrefabInstance {
             source,
+            arguments: None,
             overrides: Some(overrides),
         }),
     }

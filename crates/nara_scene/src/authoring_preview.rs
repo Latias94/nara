@@ -210,6 +210,7 @@ pub fn project_published_authoring_prefab_preview(
     );
     AuthoringPreviewDocument {
         document: PrefabDocument {
+            inputs: published.document().inputs.clone(),
             roots: projection.roots,
             entities: projection.entities,
         },
@@ -232,6 +233,7 @@ pub fn project_authoring_prefab_session_preview(
     );
     Ok(AuthoringPreviewDocument {
         document: PrefabDocument {
+            inputs: session.document().inputs.clone(),
             roots: projection.roots,
             entities: projection.entities,
         },

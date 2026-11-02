@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3eb34fd1a08e6a0025ced8b2a6074c84543f2e00a1f909b782a204b0a0f4c34a"
+source_fingerprint: "57e269e663299fa1d26be39e409e46ead5125b8974b37f7ede2c2158480528be"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "3eb34fd1a08e6a0025ced8b2a6074c84543f2e00a1f909b782a204b0a0f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3eb34fd1a08e6a0025ced8b2a6074c84543f2e00a1f909b782a204b0a0f4c34a`
-- Immutable records: 1219
+- Source fingerprint: `57e269e663299fa1d26be39e409e46ead5125b8974b37f7ede2c2158480528be`
+- Immutable records: 1226
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation rebaseline after final reference demand qualification](registry/2026-11/2026-11-01T231451Z-nara-foundation-rebaseline-codex-main-ebf8e55e901744828174c51ad207175c.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Foundation inline prerequisite qualified and compiled production successor](registry/2026-11/2026-11-02T031637Z-nara-foundation-rebaseline-codex-main-c3bf99ddbbaa42dca8e45d2fe4c2086a.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
@@ -70,6 +70,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Inline authored references and contextual default production qualification](verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md) - Qualified lexical reference values, retained contextual defaults, source-only copying and Native gates; compiled production switching and complete extraction remain open.
+- **Work Progress**: [Inline source integration qualification and closed compiled storage in progress](progress/2026-11/2026-11-02T023446Z-inline-source-integration-qualification-and-closed-compiled-storage-in-progress-2dcf03185a824931ac2932ac3ebee1c1.md) - Independent upgrade, recovery and selected native flows pass; closed flat storage has bounded admission tests while production consumer switching remains open.
+- **Work Progress**: [Inline reference source preservation and final budget integration](progress/2026-11/2026-11-02T011811Z-inline-reference-source-preservation-and-final-budget-integration-91a6671692304eaca626af339016dfe6.md) - Shared contextual-default admission and final flat-value accounting replace source-cost coupling; public and independent integration remain pending.
+- **Work Progress**: [Inline authored reference and contextual default production replacement in progress](progress/2026-11/2026-11-01T234657Z-inline-authored-reference-and-contextual-default-production-replacement-in-progress-b823aeb26f164fcea2842bc51af8f129.md) - Identity and Reflect owners pass focused tests while Scene source, input compiler, native gates and retention are integrating without compatibility tables.
 - **Verification Evidence**: [Final reference demand and preallocated property paths qualification](verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md) - Qualified shared compiler replacement after overwrite and retained-path-budget regressions, with lexical input scope selected for the next CP2 slice.
 - **Work Progress**: [Final reference demand compiler replacement in progress after production overwrite regression](progress/2026-11/2026-11-01T221729Z-final-reference-demand-compiler-replacement-in-progress-after-production-overwrite-regression-a31a71bcf62c4deb8a38131a3a44907e.md) - A production property repair fails eager reference lookup; compiler normalization now preserves transient per-leaf declaration origins before final demand.
 - **Verification Evidence**: [Canonical source identity ownership prerequisite](verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md) - Pure source IDs paths and document keys move to Identity; Asset retains metadata comparison, with owning public independent and portable evidence.
@@ -78,10 +82,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Native DX12 and final construction budget controls pass before full Root Editor test run](progress/2026-11/2026-11-01T202529Z-native-dx12-and-final-construction-budget-controls-pass-before-full-root-editor-test-run-1e968c417b1940b4a9ac61ad5051d20d.md) - Seven native trajectories, owning802 and final budget12 pass; correctness Clippy all-targets succeeds, full Root and Editor all-feature libraries are compiling.
 - **Work Progress**: [Complete Reference UI source workflow passes after construction budget scope correction](progress/2026-11/2026-11-01T201206Z-complete-reference-ui-source-workflow-passes-after-construction-budget-scope-correction-ac4dc7362e464029bb70551fd9d200b4.md) - Actual bundle production and exact UI owner sync pass; complete Reference UI and readiness2 pass after separating full construction from standalone eight-field batches.
 - **Work Progress**: [Source-owned UI construction and actual creation templates pass all owning controls](progress/2026-11/2026-11-01T200006Z-source-owned-ui-construction-and-actual-creation-templates-pass-all-owning-controls-2b5140bf02e3460a9a8e072ae65d3514.md) - Tooling/UI251 pass after canonical source recipe integration; real bundle producer is building before final Reference, feature/lint and native checks.
-- **Work Progress**: [Canonical UI source creation now lowers recipes through actual templates and declared properties](progress/2026-11/2026-11-01T195522Z-canonical-ui-source-creation-now-lowers-recipes-through-actual-templates-and-declared-properties-ccb4164c44af4baaacdf1f9787982ad8.md) - UI baseline tests116 pass; corrected Reference readiness passes but source Create exposes an omitted recipe route, now compiled through the real source construction owner.
-- **Work Progress**: [Reference consumer exposes unreleased UI migration history and source readiness accounting](progress/2026-11/2026-11-01T194254Z-reference-consumer-exposes-unreleased-ui-migration-history-and-source-readiness-accounting-4ade1b7c592d4408842cc351ab494274.md) - Reference157/159 reveals an obsolete Native-open migration assumption and exact readiness-file overlap; canonical first-party UI baseline cleanup is in progress.
-- **Work Progress**: [Fresh-process recovery and independent source consumers pass while product qualification continues](progress/2026-11/2026-11-01T192930Z-fresh-process-recovery-and-independent-source-consumers-pass-while-product-qualification-continues-dfbbb0a8998a433090d17aa6fad56b93.md) - Normal and six subprocess upgrade controls pass22, Root public consumers100 and independent module consumers49; Reference Game159 is running with its actual desktop build.
-- **Work Progress**: [Exact captured predecessors and retained Task inputs pass final Root and Application handoffs](progress/2026-11/2026-11-01T190332Z-exact-captured-predecessors-and-retained-task-inputs-pass-final-root-and-application-handoffs-95571bffbb114d509693a5c6cab03243.md) - The three independent handoff findings are corrected and reviewed; final Root392 and Application35 pass before fresh-process and native qualification.
 
 # Integration Notes
 

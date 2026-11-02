@@ -9,20 +9,16 @@ mod rewrite;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, error::Error, fmt, sync::Arc};
+use std::{collections::HashMap, error::Error, fmt};
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    AssetReferenceRewriteError, ComponentCodecError, ComponentPropertyError,
-    DeclaredAssetReferenceError,
+    AssetReferenceRewriteError, ComponentCodecError, ComponentEntityReferenceRewriteError,
+    ComponentPropertyError, DeclaredAssetReferenceError,
 };
 
-use crate::{
-    AuthoringSchemaBasis, PrefabDocument, PrefabExpansionFailure, PrefabInstance,
-    ResolvedPrefabSource, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-    SourceDocumentKind,
-};
+use crate::{AuthoringSchemaBasis, PrefabDocument, SourceDocumentKey, SourceDocumentKind};
 
 use budget::CopyBudget;
 pub use budget::PrefabCopyLimits;
@@ -74,10 +70,13 @@ impl PrefabCopyRequest {
 
     /// Copies whole declarations while preserving document-local IDs and local references.
     ///
-    /// Defaults are materialized before reference rewriting. Unknown, non-current or conflicting
-    /// Schema records are refused even when a later overlay would hide them. All source data is
-    /// borrowed and bounded before copying; failure never changes this request's originals.
-    /// The final validity gate is one production Schema-only compilation of the entire closure.
+    /// Contextual defaults and input declarations retain their source-owned omission semantics.
+    /// Unknown, non-current or conflicting Schema records are refused even when a later overlay
+    /// would hide them. All source data is borrowed and bounded before copying; failure never
+    /// changes this request's originals.
+    /// Every copied document crosses ordinary source classification without activation. Success
+    /// preserves parameterized and cyclic sources; it does not prove any mount can be expanded.
+    /// Actual arguments, canonical routes and surviving targets require compilation of that use.
     pub fn prepare(
         &self,
         basis: &AuthoringSchemaBasis,
@@ -122,12 +121,14 @@ impl PrefabCopyRequest {
                 document,
             });
         }
-        validate_closure(&sources, basis, &mut budget)?;
+        admit_sources(&sources, basis, &mut budget)?;
         Ok(PreparedPrefabCopy { sources })
     }
 }
 
-/// Copied source declarations, ready for the Host's existing native encoding/admission path.
+/// Source-valid copied declarations, ready for the Host's existing native encoding/admission path.
+///
+/// This result carries no activation context, expanded candidate or runtime admission evidence.
 #[derive(Debug)]
 pub struct PreparedPrefabCopy {
     sources: Vec<PreparedPrefabCopySource>,
@@ -251,13 +252,17 @@ pub enum PrefabCopyError {
         source: usize,
         error: DeclaredAssetReferenceError,
     },
+    EntityReference {
+        source: usize,
+        error: Box<ComponentEntityReferenceRewriteError<PrefabCopyError>>,
+    },
     AssetRewrite {
         source: usize,
         error: Box<AssetReferenceRewriteError<PrefabCopyError, PrefabCopyError>>,
     },
-    /// Production compiler failures remain distinct from copying and reference interpretation.
-    Compiler {
-        failure: Option<PrefabExpansionFailure>,
+    /// Source classification is distinct from effective occurrence compilation.
+    Source {
+        source: usize,
         diagnostics: DiagnosticReport,
     },
 }
@@ -477,99 +482,29 @@ impl<'a> CopyMapping<'a> {
     }
 }
 
-fn validate_closure(
+fn admit_sources(
     sources: &[PreparedPrefabCopySource],
     basis: &AuthoringSchemaBasis,
     budget: &mut CopyBudget,
 ) -> Result<(), PrefabCopyError> {
-    // One compiler request shares all expansion, default and reference limits. Every supplied
-    // member is instantiated, including members that no other member happens to reach.
-    budget.allocate(sources.len().checked_mul(1024))?;
-    let mut resolved = Vec::with_capacity(sources.len());
-    let mut roots = Vec::with_capacity(sources.len());
-    let mut entities = Vec::with_capacity(sources.len());
     for (index, source) in sources.iter().enumerate() {
-        budget.document(&source.document)?;
-        budget.allocate(source.destination.checked_retained_bytes())?;
-        resolved.push(ResolvedPrefabSource::bound_authoring_source(
-            Arc::new(source.document.clone()),
-            basis.clone(),
-            source.destination.clone(),
-        ));
-        // These IDs exist only in disposable compiler input; copied local identities never change.
-        let id = SceneEntityId::new(format!("prefab-copy-{index}"))
-            .map_err(|_| PrefabCopyError::BudgetExceeded)?;
-        roots.push(id.clone());
-        let mut anchor = SceneEntityRecord::new(id);
-        budget.allocate(Some(budget::asset_bytes(&source.destination_reference)))?;
-        anchor.prefab = Some(PrefabInstance {
-            source: source.destination_reference.clone(),
-            overrides: None,
-        });
-        entities.push(anchor);
-    }
-    let document = SceneDocument { roots, entities };
-    let options = budget.compiler_options()?;
-    // The production report exposes allocation cost, not its logical reference-byte counter.
-    // Reserve that finite traversal allowance separately so the two cannot each spend the
-    // whole remaining request budget. All source preparation above charges actual deltas.
-    budget.allocate(Some(options.limits.reference_work_bytes().get()))?;
-    let report = crate::prefab::try_expand_authoring_prefabs_with_loader(
-        &document,
-        basis,
-        options,
-        None,
-        |reference, working| {
-            let index = sources
-                .iter()
-                .position(|source| &source.destination_reference == reference)
-                .or_else(|| {
-                    let product = reference
-                        .as_product()
-                        .filter(|product| product.product() == ImportedProductId::PRIMARY)?;
-                    // Copying preserves explicit PRIMARY selections even when the preferred
-                    // destination spelling is a path or stable ID. Admission makes destination
-                    // keys unique; only their actual stable origin can prove this fallback.
-                    sources.iter().position(|source| {
-                        matches!(
-                            source.destination.origin(),
-                            crate::SourceDocumentOrigin::StableAsset { stable_id }
-                                if *stable_id == product.source()
-                        )
-                    })
-                })
-                .ok_or(PrefabCopyError::UnmappedAssetReference {
-                    source: sources.len(),
-                })?;
-            // Arc handles share the admitted document; project-location keys still own a path.
-            // Debit that key copy before Clone, then tighten the suspended compiler's allowance.
-            budget.allocate(sources[index].destination.checked_retained_bytes())?;
-            let limit = budget.compiler_working_bytes()?;
-            if working
-                .checked_work_bytes()
-                .is_none_or(|bytes| bytes > limit.get())
-            {
-                return Err(PrefabCopyError::BudgetExceeded);
-            }
-            working.restrict_working_bytes(limit);
-            Ok(Some(resolved[index].clone()))
-        },
-    )?;
-    budget.allocate(report.checked_work_bytes())?;
-    if report.candidate().is_none()
-        || report.diagnostics().has_errors()
-        || report.omissions().iter().any(|omission| {
-            matches!(
-                omission.reason,
-                crate::prefab::AuthoringPrefabOmissionReason::RecordUnavailable(_)
+        let limits = budget.source_limits()?;
+        basis
+            .admit_prefab_copy_source(
+                &source.document,
+                &source.destination_reference,
+                limits,
+                |_, bytes| budget.allocate(bytes),
             )
-        })
-    {
-        let parts = report.into_parts();
-        return Err(PrefabCopyError::Compiler {
-            failure: parts.failure,
-            diagnostics: parts.diagnostics,
-        });
+            .map_err(|error| match error {
+                crate::authoring_decode::CopyAdmissionError::Admission(error) => error,
+                crate::authoring_decode::CopyAdmissionError::Source(error) => {
+                    PrefabCopyError::Source {
+                        source: index,
+                        diagnostics: error.into_diagnostics(),
+                    }
+                }
+            })?;
     }
     Ok(())
 }

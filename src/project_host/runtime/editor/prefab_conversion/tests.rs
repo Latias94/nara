@@ -146,6 +146,7 @@ impl Project {
         }
         let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("local")]);
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: if stable {
                 AssetRef::StableId(stable_id())
             } else {

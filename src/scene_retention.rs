@@ -319,13 +319,29 @@ pub(crate) fn scene_provenance_dynamic_bytes(
 pub(crate) fn prefab_retained_bytes(
     document: &PrefabDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
-    document_retained_bytes(
-        size_of::<PrefabDocument>(),
-        &document.roots,
-        document.roots.capacity(),
-        &document.entities,
-        document.entities.capacity(),
-    )
+    checked_sum([
+        document_retained_bytes(
+            size_of::<PrefabDocument>(),
+            &document.roots,
+            document.roots.capacity(),
+            &document.entities,
+            document.entities.capacity(),
+        )?,
+        reference_inputs_retained_bytes(&document.inputs)?,
+    ])
+}
+
+pub(crate) fn reference_inputs_retained_bytes(
+    inputs: &std::collections::BTreeSet<nara_identity::ReferenceInputId>,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_product(
+        inputs.len(),
+        size_of::<nara_identity::ReferenceInputId>() + BTREE_ENTRY_OVERHEAD,
+    )?;
+    for input in inputs {
+        checked_add_to(&mut total, string_retained_bytes(input.as_str())?)?;
+    }
+    Ok(total)
 }
 
 fn document_retained_bytes(
@@ -353,19 +369,7 @@ fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, SceneRetent
         scene_entity_ids_retained_bytes(&entity.children, entity.children.capacity())?,
     )?;
     for (id, record) in &entity.components {
-        checked_add_to(
-            &mut total,
-            checked_sum([
-                size_of_val(id),
-                size_of_val(record),
-                BTREE_ENTRY_OVERHEAD,
-                string_retained_bytes(id.as_str())?,
-                record
-                    .owner()
-                    .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
-                component_value_retained_bytes(&record.value)?,
-            ])?,
-        )?;
+        checked_add_to(&mut total, component_record_retained_bytes(id, record)?)?;
     }
     if let Some(instance) = &entity.prefab {
         checked_add_to(&mut total, prefab_instance_retained_bytes(instance)?)?;
@@ -384,17 +388,41 @@ fn scene_entity_ids_retained_bytes(
     Ok(total)
 }
 
-fn prefab_instance_retained_bytes(
+pub(crate) fn prefab_instance_retained_bytes(
     instance: &PrefabInstance,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let source = asset_ref_retained_bytes(&instance.source)?;
     checked_sum([
-        source,
+        asset_ref_retained_bytes(&instance.source)?,
+        instance
+            .arguments
+            .as_ref()
+            .map_or(Ok(0), reference_arguments_retained_bytes)?,
         instance
             .overrides
             .as_ref()
             .map_or(Ok(0), overlay_retained_bytes)?,
     ])
+}
+
+fn reference_arguments_retained_bytes(
+    arguments: &nara_scene::PrefabReferenceArguments,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = arguments.base.retained_bytes();
+    for (input, reference) in &arguments.values {
+        let cost = reference.cost();
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                size_of_val(input),
+                size_of_val(reference),
+                BTREE_ENTRY_OVERHEAD,
+                string_retained_bytes(input.as_str())?,
+                cost.logical_bytes(),
+                checked_product(cost.nodes(), VALUE_NODE_ALLOCATION_BYTES)?,
+            ])?,
+        )?;
+    }
+    Ok(total)
 }
 
 pub(crate) fn overlay_retained_bytes(
@@ -435,20 +463,11 @@ pub(crate) fn overlay_retained_bytes(
             for (id, record) in &addition.components {
                 checked_add_to(&mut total, component_record_retained_bytes(id, record)?)?;
             }
-            for (id, bindings) in &addition.bindings {
-                checked_add_to(
-                    &mut total,
-                    checked_sum([
-                        size_of_val(id),
-                        size_of_val(bindings),
-                        BTREE_ENTRY_OVERHEAD,
-                        string_retained_bytes(id.as_str())?,
-                        bindings_retained_bytes(bindings)?,
-                    ])?,
-                )?;
-            }
             if let Some(instance) = &addition.prefab {
                 checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                if let Some(arguments) = &instance.arguments {
+                    checked_add_to(&mut total, reference_arguments_retained_bytes(arguments)?)?;
+                }
                 pending.extend(instance.overrides.iter());
             }
         }
@@ -456,6 +475,9 @@ pub(crate) fn overlay_retained_bytes(
             checked_add_to(&mut total, target_retained_bytes(&claim.target)?)?;
             if let Some(instance) = &claim.value {
                 checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                if let Some(arguments) = &instance.arguments {
+                    checked_add_to(&mut total, reference_arguments_retained_bytes(arguments)?)?;
+                }
                 pending.extend(instance.overrides.iter());
             }
         }
@@ -477,9 +499,7 @@ pub(crate) fn overlay_retained_bytes(
                 ])?,
             )?;
             match intent {
-                PrefabComponentIntent::Set {
-                    record, bindings, ..
-                } => {
+                PrefabComponentIntent::Set { record, .. } => {
                     checked_add_to(
                         &mut total,
                         checked_sum([
@@ -487,7 +507,7 @@ pub(crate) fn overlay_retained_bytes(
                                 .owner()
                                 .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
                             component_value_retained_bytes(&record.value)?,
-                            bindings_retained_bytes(bindings)?,
+                            contextual_defaults_retained_bytes(&record.contextual_defaults)?,
                         ])?,
                     )?;
                 }
@@ -501,7 +521,6 @@ pub(crate) fn overlay_retained_bytes(
                     )?;
                     for claim in claims {
                         checked_add_to(&mut total, property_path_retained_bytes(&claim.path)?)?;
-                        checked_add_to(&mut total, bindings_retained_bytes(&claim.bindings)?)?;
                         if let PrefabPropertyIntent::Set(value) = &claim.intent {
                             checked_add_to(&mut total, component_value_retained_bytes(value)?)?;
                         }
@@ -541,6 +560,7 @@ fn component_record_retained_bytes(
             .owner()
             .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
         component_value_retained_bytes(&record.value)?,
+        contextual_defaults_retained_bytes(&record.contextual_defaults)?,
     ])
 }
 
@@ -566,30 +586,24 @@ fn target_retained_bytes(
     Ok(total)
 }
 
-fn bindings_retained_bytes(
-    bindings: &Vec<nara_scene::PrefabReferenceBinding>,
+pub(crate) fn contextual_defaults_retained_bytes(
+    defaults: &std::collections::BTreeMap<
+        nara_reflect::ComponentFieldId,
+        nara_reflect::ComponentValue,
+    >,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let mut total = checked_product(
-        bindings.capacity(),
-        size_of::<nara_scene::PrefabReferenceBinding>(),
-    )?;
-    for binding in bindings {
+    let mut total = 0;
+    for (field, value) in defaults {
         checked_add_to(
             &mut total,
             checked_sum([
-                string_retained_bytes(binding.expected.as_str())?,
-                target_retained_bytes(&binding.target)?,
-                checked_product(
-                    binding.slot.segments().len(),
-                    size_of::<nara_reflect::ComponentFieldPathSegment>(),
-                )?,
+                size_of_val(field),
+                size_of_val(value),
+                BTREE_ENTRY_OVERHEAD,
+                string_retained_bytes(field.as_str())?,
+                component_value_retained_bytes(value)?,
             ])?,
         )?;
-        for segment in binding.slot.segments() {
-            if let nara_reflect::ComponentFieldPathSegment::Field(field) = segment {
-                checked_add_to(&mut total, string_retained_bytes(field)?)?;
-            }
-        }
     }
     Ok(total)
 }
@@ -720,6 +734,7 @@ mod tests {
             overlay.additions.push(addition);
         }
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source,
             overrides: Some(overlay),
         });
@@ -728,6 +743,158 @@ mod tests {
 
     fn string_bytes(value: &str) -> usize {
         value.len() + 2 * size_of::<usize>()
+    }
+
+    #[test]
+    fn retention_charges_hidden_contextual_defaults_in_every_record_carrier() {
+        use nara_identity::{AuthoredEntityReference, EntityReference, ReferenceInputId};
+        use nara_reflect::{
+            ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+        };
+        use nara_scene::{
+            PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
+            PrefabOverlay, SceneComponentRecord,
+        };
+
+        let component = ComponentTypeId::new("retention.Link");
+        let field = ComponentFieldId::new("target");
+        let input = ReferenceInputId::new("hidden-outward-input").unwrap();
+        let default = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference::input(input),
+        });
+        let plain = SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null);
+        let contextual = plain
+            .clone()
+            .with_contextual_default(field.clone(), default.clone());
+        let cost = default.cost();
+        let expected = size_of::<ComponentFieldId>()
+            + size_of::<ComponentValue>()
+            + BTREE_ENTRY_OVERHEAD
+            + string_bytes(field.as_str())
+            + cost.logical_bytes()
+            + cost.nodes() * VALUE_NODE_ALLOCATION_BYTES;
+        let base = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.defaults",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        for carrier in 0..3 {
+            let retained = |record: &SceneComponentRecord| match carrier {
+                0 => scene_retained_bytes(&SceneDocument::from_ordered_roots([
+                    SceneEntityRecord::new(scene_id("host"))
+                        .with_component(component.clone(), record.clone()),
+                ]))
+                .unwrap(),
+                _ => {
+                    let mut overlay = PrefabOverlay::new(base.clone());
+                    if carrier == 1 {
+                        let mut addition = PrefabAddition::new(scene_id("host"));
+                        addition
+                            .components
+                            .insert(component.clone(), record.clone());
+                        overlay.additions.push(addition);
+                    } else {
+                        overlay.components.push(PrefabComponentIntent::Set {
+                            mode: PrefabComponentSetMode::Replace,
+                            target: PrefabEntityTarget::source(scene_id("host")),
+                            component: component.clone(),
+                            record: record.clone(),
+                        });
+                    }
+                    overlay_retained_bytes(&overlay).unwrap()
+                }
+            };
+            assert_eq!(retained(&contextual) - retained(&plain), expected);
+        }
+    }
+
+    #[test]
+    fn retention_charges_argument_base_and_complete_routes_in_nested_declarations() {
+        use nara_identity::{
+            AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PrefabEntityOrigin,
+            PrefabInstanceHop, ReferenceInputId,
+        };
+        use nara_scene::{
+            PrefabAddition, PrefabEntityTarget, PrefabInstanceClaim, PrefabOverlay,
+            PrefabReferenceArguments,
+        };
+
+        let base = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.arguments",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let plain = PrefabInstance {
+            source: AssetRef::path("base.prefab.json").unwrap(),
+            arguments: None,
+            overrides: None,
+        };
+        let mut empty = plain.clone();
+        empty.arguments = Some(PrefabReferenceArguments {
+            base: base.clone(),
+            values: Default::default(),
+        });
+        let input = ReferenceInputId::new("target").unwrap();
+        let reference = EntityReference::Authored {
+            reference: AuthoredEntityReference {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(scene_id("nested")),
+                    expected_base: base.clone(),
+                }],
+                target: AuthoredReferenceTarget::Input(input.clone()),
+            },
+        };
+        let cost = reference.cost();
+        let expected = size_of::<ReferenceInputId>()
+            + size_of::<EntityReference>()
+            + BTREE_ENTRY_OVERHEAD
+            + string_bytes(input.as_str())
+            + cost.logical_bytes()
+            + cost.nodes() * VALUE_NODE_ALLOCATION_BYTES;
+        let mut populated = empty.clone();
+        populated
+            .arguments
+            .as_mut()
+            .unwrap()
+            .values
+            .insert(input, reference);
+        for carrier in 0..3 {
+            let retained = |instance: &PrefabInstance| {
+                if carrier == 0 {
+                    return prefab_instance_retained_bytes(instance).unwrap();
+                }
+                let mut overlay = PrefabOverlay::new(base.clone());
+                if carrier == 1 {
+                    let mut addition = PrefabAddition::new(scene_id("nested"));
+                    addition.prefab = Some(instance.clone());
+                    overlay.additions.push(addition);
+                } else {
+                    overlay.instances.push(PrefabInstanceClaim {
+                        target: PrefabEntityTarget::source(scene_id("nested")),
+                        value: Some(instance.clone()),
+                    });
+                }
+                overlay_retained_bytes(&overlay).unwrap()
+            };
+            assert_eq!(retained(&empty) - retained(&plain), base.retained_bytes());
+            assert_eq!(retained(&populated) - retained(&empty), expected);
+        }
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[test]
+    fn prefab_retention_charges_unused_input_declarations() {
+        use nara_identity::ReferenceInputId;
+
+        let mut document = PrefabDocument::default();
+        let empty = prefab_retained_bytes(&document).unwrap();
+        let input = ReferenceInputId::new("unused-outward-input").unwrap();
+        let expected =
+            size_of::<ReferenceInputId>() + BTREE_ENTRY_OVERHEAD + string_bytes(input.as_str());
+        document.inputs.insert(input);
+        assert_eq!(prefab_retained_bytes(&document).unwrap() - empty, expected);
     }
 
     fn assert_provenance_retention(

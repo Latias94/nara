@@ -343,6 +343,7 @@ mod tests {
         let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: request,
+            arguments: None,
             overrides: None,
         });
         let report =
@@ -474,6 +475,7 @@ mod tests {
             let mut anchor = SceneEntityRecord::new(id("anchor"));
             anchor.prefab = Some(PrefabInstance {
                 source,
+                arguments: None,
                 overrides: None,
             });
             SceneDocument::from_ordered_roots([anchor])

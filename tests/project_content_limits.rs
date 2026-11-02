@@ -393,11 +393,13 @@ fn two_prefabs(project: &TestProject) {
     let mut enemy = SceneEntityRecord::new(scene_id("enemy-anchor"));
     enemy.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let mut bonus = SceneEntityRecord::new(scene_id("bonus-anchor"));
     bonus.prefab = Some(PrefabInstance {
         source: AssetRef::path("bonus.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let shared_image = SceneEntityRecord::new(scene_id("bonus"))
@@ -449,11 +451,13 @@ fn duplicate_prefab_edges(project: &TestProject) {
     let mut left = SceneEntityRecord::new(scene_id("left"));
     left.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let mut right = SceneEntityRecord::new(scene_id("right"));
     right.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     project.write_scene_source(&SceneDocument::from_ordered_roots([left, right]));

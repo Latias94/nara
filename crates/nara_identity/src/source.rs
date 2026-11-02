@@ -606,7 +606,7 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
             serde_json::json!({
                 "kind": "prefab",
-                "origin": {"stable_asset": {"stable_id": STABLE_ID}}
+                "origin": {"kind": "stable_asset", "stable_id": STABLE_ID}
             })
         );
         assert_eq!(
@@ -617,7 +617,7 @@ mod tests {
         assert!(
             serde_json::from_value::<SourceDocumentKey>(serde_json::json!({
                 "kind": "prefab",
-                "origin": {"stable_asset": {"stable_id": STABLE_ID}}
+                "origin": {"kind": "stable_asset", "stable_id": STABLE_ID}
             }))
             .is_ok()
         );

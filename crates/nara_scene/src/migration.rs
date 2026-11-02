@@ -270,10 +270,30 @@ fn validate_exact_component_record(
 ) -> Result<(), SceneFilePublicationError> {
     let schema = require_component_schema(entity, component_id, registry)?;
     require_exact_snapshot_version(entity, component_id, record.version, schema.version)?;
+    validate_record_defaults(schema, record, budget)?;
     budget.observe(&record.value)?;
+    let (effective, _) =
+        nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
+            schema,
+            &record.value,
+            &record.contextual_defaults,
+            budget.limits.component_value_nodes().get(),
+            budget.limits.component_value_bytes().get(),
+            budget.limits.shape().depth(),
+        )
+        .map_err(|error| {
+            publication_error(crate::diagnostics::with_codec_error(
+                diagnostic_error(
+                    "scene.file-exact-snapshot-value-invalid",
+                    "Exact Prefab snapshot defaults exceed their materialization policy",
+                ),
+                &error,
+                Some(schema),
+            ))
+        })?;
     validate_component_value_with_limits(
         schema,
-        &record.value,
+        &effective,
         budget.limits.component_materialization_limits(),
     )
     .map_err(|error| {
@@ -303,7 +323,13 @@ fn migrate_component_record(
     registry: &ComponentRegistrySnapshot,
     budget: &mut PublicationValueBudget,
 ) -> Result<bool, SceneFilePublicationError> {
-    require_component_schema(entity, component_id, registry)?;
+    let schema = require_component_schema(entity, component_id, registry)?;
+    if record.version != schema.version() && !record.contextual_defaults.is_empty() {
+        return Err(publication_error(diagnostic_error(
+            "scene.file-contextual-default-migration-required",
+            "Component version migration requires an explicit owner transformation of every contextual default",
+        )));
+    }
     let migrated = registry
         .migrate_component_value(component_id, record.version, &record.value)
         .map_err(|error| {
@@ -329,7 +355,34 @@ fn migrate_component_record(
         record.version = migrated.version;
         record.value = migrated.value;
     }
+    validate_record_defaults(schema, record, budget)?;
     Ok(changed)
+}
+
+fn validate_record_defaults(
+    schema: &nara_reflect::ComponentSchema,
+    record: &SceneComponentRecord,
+    budget: &mut PublicationValueBudget,
+) -> Result<(), SceneFilePublicationError> {
+    crate::document::validate_contextual_defaults(
+        schema,
+        record,
+        budget.limits.component_materialization_limits(),
+    )
+    .map_err(|error| {
+        publication_error(crate::diagnostics::with_codec_error(
+            diagnostic_error(
+                "scene.file-contextual-default-invalid",
+                "Contextual defaults require their complete current-version field contract",
+            ),
+            &error,
+            Some(schema),
+        ))
+    })?;
+    for value in record.contextual_defaults.values() {
+        budget.observe(value)?;
+    }
+    Ok(())
 }
 
 fn canonicalize_field_target(
@@ -582,6 +635,48 @@ impl PublicationValueBudget {
                         self.limits,
                     )?;
                 }
+                ComponentValue::EntityReference(EntityReference::Authored { reference }) => {
+                    let cost = reference.cost();
+                    shape_nodes = shape_nodes.saturating_add(cost.nodes().saturating_sub(1));
+                    require_shape_limit("nodes", shape_nodes, shape.nodes().get())?;
+                    require_shape_limit(
+                        "container-items",
+                        reference.through.len(),
+                        shape.container_items().get(),
+                    )?;
+                    require_shape_limit("depth", depth.saturating_add(4), shape.depth().get())?;
+                    let endpoint = match &reference.target {
+                        nara_identity::AuthoredReferenceTarget::Entity(entity) => {
+                            entity.entity().as_str()
+                        }
+                        nara_identity::AuthoredReferenceTarget::Input(input) => input.as_str(),
+                    };
+                    observe_string(endpoint, &mut total_string_bytes, self.limits)?;
+                    for hop in &reference.through {
+                        observe_string(
+                            hop.anchor.entity().as_str(),
+                            &mut total_string_bytes,
+                            self.limits,
+                        )?;
+                        let text = match hop.expected_base.origin() {
+                            nara_identity::SourceDocumentOrigin::Named { name, .. } => {
+                                Some(name.as_ref())
+                            }
+                            nara_identity::SourceDocumentOrigin::ProjectLocation {
+                                path, ..
+                            } => Some(path.as_str()),
+                            nara_identity::SourceDocumentOrigin::StableAsset { .. } => None,
+                        };
+                        if let Some(text) = text {
+                            observe_string(text, &mut total_string_bytes, self.limits)?;
+                        }
+                        observe_string(
+                            "00000000-0000-0000-0000-000000000000",
+                            &mut total_string_bytes,
+                            self.limits,
+                        )?;
+                    }
+                }
             }
         }
 
@@ -742,6 +837,7 @@ mod overlay_snapshot_tests {
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
+            arguments: None,
             overrides: Some(overlay),
         }
     }
@@ -787,7 +883,6 @@ mod overlay_snapshot_tests {
             target: PrefabEntityTarget::source(SceneEntityId::new("target").unwrap()),
             component: component(),
             record: old_record(),
-            bindings: Vec::new(),
         });
         let mut through_addition = overlay();
         let mut addition = PrefabAddition::new(SceneEntityId::new("added").unwrap());
@@ -837,7 +932,6 @@ mod overlay_snapshot_tests {
                     intent: PrefabPropertyIntent::Set(ComponentValue::String(
                         "unresolved".to_owned(),
                     )),
-                    bindings: Vec::new(),
                 }],
             });
         let patch = ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
@@ -873,7 +967,6 @@ mod overlay_snapshot_tests {
                 ComponentSchemaVersion(2),
                 ComponentValue::map([("number", ComponentValue::String("invalid".to_owned()))]),
             ),
-            bindings: Vec::new(),
         });
         for (declaration, code) in [
             (old_property, "scene.file-exact-snapshot-version-mismatch"),

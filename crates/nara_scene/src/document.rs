@@ -194,6 +194,13 @@ pub struct SceneComponentRecord {
     pub owner: Option<PersistentComponentSchemaOwnerId>,
     pub version: ComponentSchemaVersion,
     pub value: ComponentValue,
+    /// Source-dependent defaults bound to this record's version and stable root-field IDs.
+    /// Explicit values may hide them without removing their declaration.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "BTreeMap::is_empty")
+    )]
+    pub contextual_defaults: BTreeMap<nara_reflect::ComponentFieldId, ComponentValue>,
 }
 
 impl SceneComponentRecord {
@@ -203,6 +210,7 @@ impl SceneComponentRecord {
             owner: None,
             version,
             value,
+            contextual_defaults: BTreeMap::new(),
         }
     }
 
@@ -216,4 +224,82 @@ impl SceneComponentRecord {
     pub const fn owner(&self) -> Option<&PersistentComponentSchemaOwnerId> {
         self.owner.as_ref()
     }
+
+    #[must_use]
+    pub fn with_contextual_default(
+        mut self,
+        field: nara_reflect::ComponentFieldId,
+        value: ComponentValue,
+    ) -> Self {
+        self.contextual_defaults.insert(field, value);
+        self
+    }
+}
+
+/// Validates source metadata without replacing the canonical Schema or interpreting targets.
+pub(crate) fn validate_contextual_defaults(
+    schema: &nara_reflect::ComponentSchema,
+    record: &SceneComponentRecord,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(), nara_reflect::ComponentCodecError> {
+    use nara_reflect::{ComponentCapability, ComponentCodecError, ComponentValueKind};
+
+    if !record.contextual_defaults.is_empty() && record.version != schema.version() {
+        return Err(ComponentCodecError::invalid_field(
+            "contextual defaults",
+            "current record version",
+        ));
+    }
+    for field in schema.fields() {
+        if nara_reflect::__private::component_field_default_requires_context(field)?
+            && !record.contextual_defaults.contains_key(field.id())
+        {
+            return Err(ComponentCodecError::invalid_field(
+                "contextual defaults",
+                "explicit source-dependent default",
+            ));
+        }
+    }
+    let mut nodes = 0usize;
+    let mut bytes = 0usize;
+    for (id, value) in &record.contextual_defaults {
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.id() == id)
+            .filter(|field| {
+                field.default_value().is_some()
+                    && field.has_capability(ComponentCapability::Scene)
+                    && field.has_capability(ComponentCapability::EntityRef)
+                    && field.shape().contains_kind(ComponentValueKind::EntityRef)
+            })
+            .ok_or_else(|| {
+                ComponentCodecError::invalid_field(
+                    "contextual defaults",
+                    "declared reference default",
+                )
+            })?;
+        nara_reflect::__private::validate_value_materialization_budget(value, limits)?;
+        let cost = value.cost();
+        nodes = nodes.saturating_add(cost.nodes());
+        bytes = bytes
+            .saturating_add(cost.logical_bytes())
+            .saturating_add(id.as_str().len());
+        if nodes > limits.nodes().get() {
+            return Err(ComponentCodecError::MaterializationNodeLimit {
+                observed: nodes,
+                maximum: limits.nodes().get(),
+            });
+        }
+        if bytes > limits.bytes().get() {
+            return Err(ComponentCodecError::MaterializationByteLimit {
+                observed: bytes,
+                maximum: limits.bytes().get(),
+            });
+        }
+        field.shape().validate_value(value).map_err(|_| {
+            ComponentCodecError::invalid_field("contextual defaults", "declared field shape")
+        })?;
+    }
+    Ok(())
 }

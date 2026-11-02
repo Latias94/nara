@@ -14,10 +14,13 @@ use nara_identity::{
     WorldIdentityDomain,
 };
 use nara_reflect::{
-    __private::effective_component_value_with_budget, ComponentCapability, ComponentCodecError,
-    ComponentRegistryAuthorityError, ComponentSchema, ComponentSchemaOwnerSnapshot,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueCost,
-    ComponentValueMaterializationLimits, DeclaredAssetReferenceError,
+    __private::{
+        effective_component_value_with_budget,
+        validate_native_component_value_references_with_limits,
+    },
+    ComponentCapability, ComponentCodecError, ComponentRegistryAuthorityError, ComponentSchema,
+    ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueCost, ComponentValueMaterializationLimits, DeclaredAssetReferenceError,
     collect_declared_asset_references_from_schema_with_limits, component_registry,
     component_registry_is_installed, validate_component_registry_authority,
     validate_component_value_with_limits,
@@ -480,6 +483,12 @@ impl SceneComponentBindings {
                     actual: record.version,
                 });
             }
+            if !record.contextual_defaults.is_empty() {
+                return Err(SceneDataComponentError::InvalidValue {
+                    component: component.clone(),
+                    source: ComponentCodecError::UnresolvedAuthoredReference,
+                });
+            }
             // Stored members were fully materialized at publication. Reject corrupted sparse
             // storage before a default processor could copy it during group validation.
             if schema.fields().iter().any(|field| {
@@ -503,7 +512,7 @@ impl SceneComponentBindings {
                     limits.bytes().get() - retained.logical_bytes(),
                 )
             };
-            let (_, cost) = effective_component_value_with_budget(
+            let (effective, cost) = effective_component_value_with_budget(
                 schema,
                 &record.value,
                 nodes,
@@ -514,6 +523,12 @@ impl SceneComponentBindings {
                 component: component.clone(),
                 source,
             })?;
+            validate_native_component_value_references_with_limits(&effective, admission).map_err(
+                |source| SceneDataComponentError::InvalidValue {
+                    component: component.clone(),
+                    source,
+                },
+            )?;
             if !removed {
                 retained = retained.saturating_add(cost);
             }
@@ -547,6 +562,12 @@ fn validate_data_value(
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), SceneDataComponentError> {
     let component = schema.id();
+    validate_native_component_value_references_with_limits(value, limits).map_err(|source| {
+        SceneDataComponentError::InvalidValue {
+            component: component.clone(),
+            source,
+        }
+    })?;
     validate_component_value_with_limits(schema, value, limits).map_err(|source| {
         SceneDataComponentError::InvalidValue {
             component: component.clone(),
@@ -651,4 +672,163 @@ fn validate_carrier_lifecycle(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use nara_identity::{AuthoredEntityReference, ReferenceInputId, SceneEntityId};
+    use nara_reflect::{
+        ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryBuilder,
+        ComponentSchemaCatalog, ComponentValueKind, PersistentComponentSchemaOwnerId,
+    };
+
+    use super::*;
+    use crate::{
+        ExpandedSceneCandidate, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
+        SourceDocumentKey, SourceDocumentKind,
+    };
+
+    #[test]
+    fn stored_authored_reference_refuses_group_reads_replacement_and_removal() {
+        let component = ComponentTypeId::new("game.Link");
+        let owner_id = PersistentComponentSchemaOwnerId::try_new("game.links").unwrap();
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            owner_id.clone(),
+            ComponentSchemaCatalog {
+                components: vec![
+                    ComponentSchema::new(component.clone(), "Link", ComponentSchemaVersion::ONE)
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                        .with_fields([ComponentFieldSchema::required(
+                            ComponentFieldId::new("target"),
+                            "Target",
+                            ComponentFieldPath::empty(),
+                            ComponentValueKind::EntityRef,
+                        )
+                        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+                        .with_capability(ComponentCapability::EntityRef)]),
+                ],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let bindings =
+            SceneComponentBindings::new(ComponentRegistryBuilder::new().freeze().unwrap(), [owner])
+                .unwrap();
+        let id = SceneEntityId::new("local").unwrap();
+        let flat =
+            ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id.clone() });
+        let candidate = ExpandedSceneCandidate::plain(
+            SourceDocumentKey::named(
+                "ed1f3775-cf52-41dd-a2ed-f3268b5656fd".parse().unwrap(),
+                "links.scene",
+                SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+            Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                id.clone(),
+            )
+            .with_component(
+                component.clone(),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, flat.clone())
+                    .with_owner(owner_id),
+            )])),
+        );
+        let mut world = World::new();
+        let spawned = bindings
+            .prepare_scene(
+                &mut world,
+                &candidate,
+                &SceneOccurrenceKey::new("game.links", "main").unwrap(),
+                None,
+            )
+            .unwrap()
+            .commit(&mut world);
+        assert!(!spawned.diagnostics.has_errors(), "{spawned:?}");
+        let EntityLookup::Resolved(entity) = spawned.instance.unwrap().resolve(&world, &id) else {
+            panic!("the admitted data entity must be live");
+        };
+        let authored = ComponentValue::EntityReference(EntityReference::Authored {
+            reference: AuthoredEntityReference::input(ReferenceInputId::new("target").unwrap()),
+        });
+        world
+            .get_mut::<SceneDataComponents>(entity)
+            .unwrap()
+            .entries
+            .get_mut(&component)
+            .unwrap()
+            .record
+            .value = authored.clone();
+        assert!(matches!(
+            bindings.data_components(&world, entity),
+            Err(SceneDataComponentError::InvalidValue {
+                source: ComponentCodecError::UnresolvedAuthoredReference,
+                ..
+            }),
+        ));
+        assert!(matches!(
+            bindings.data_component(&world, entity, &component),
+            Err(SceneDataComponentError::InvalidValue {
+                source: ComponentCodecError::UnresolvedAuthoredReference,
+                ..
+            }),
+        ));
+        assert!(
+            bindings
+                .set_data_component(
+                    &mut world,
+                    entity,
+                    &component,
+                    flat.clone(),
+                    None,
+                    ComponentValueMaterializationLimits::default(),
+                )
+                .is_err()
+        );
+        assert!(
+            bindings
+                .remove_data_component(&mut world, entity, &component)
+                .is_err()
+        );
+        assert_eq!(
+            world.get::<SceneDataComponents>(entity).unwrap().entries[&component]
+                .record
+                .value,
+            authored,
+        );
+        let before = {
+            let mut group = world.get_mut::<SceneDataComponents>(entity).unwrap();
+            let record = &mut group.entries.get_mut(&component).unwrap().record;
+            record.value = flat.clone();
+            record
+                .contextual_defaults
+                .insert(ComponentFieldId::new("target"), authored);
+            record.clone()
+        };
+        assert!(matches!(
+            bindings.data_component(&world, entity, &component),
+            Err(SceneDataComponentError::InvalidValue {
+                source: ComponentCodecError::UnresolvedAuthoredReference,
+                ..
+            }),
+        ));
+        assert!(
+            bindings
+                .set_data_component(
+                    &mut world,
+                    entity,
+                    &component,
+                    flat,
+                    None,
+                    ComponentValueMaterializationLimits::default(),
+                )
+                .is_err()
+        );
+        assert_eq!(
+            world.get::<SceneDataComponents>(entity).unwrap().entries[&component].record,
+            before,
+        );
+    }
 }

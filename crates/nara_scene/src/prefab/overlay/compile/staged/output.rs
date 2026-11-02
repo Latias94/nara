@@ -1,5 +1,6 @@
 //! Final surviving locators and provenance, after structural and value demand close.
 
+use super::inputs::ResolvedReference;
 use super::reference_program::ReferencePrograms;
 use super::*;
 use crate::prefab::{PrefabReferenceRemapError, accumulate_generated_identifier_bytes};
@@ -108,6 +109,19 @@ where
             }
             for (component, payload) in &mut record.components {
                 if !self.context.authority.can_interpret(component, payload) {
+                    let cost = payload.value.cost();
+                    let (nodes, bytes) = self
+                        .context
+                        .preflight_materialized_value_cost(
+                            0,
+                            cost.nodes(),
+                            0,
+                            cost.logical_bytes(),
+                            self.nodes[node].origin.entity(),
+                        )
+                        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+                    self.context.usage.materialized_value_nodes = nodes;
+                    self.context.usage.materialized_value_bytes = bytes;
                     continue;
                 }
                 let reference_program = references
@@ -119,35 +133,56 @@ where
                     .plan
                     .as_ref()
                     .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+                let mut old_nodes = 0usize;
                 let mut old_bytes = 0usize;
+                let mut new_nodes = 0usize;
                 let mut new_bytes = 0usize;
                 plan.visit(&payload.value, |path, reference| {
-                    if let EntityReference::SceneLocal { entity } = reference {
-                        let target = origins
-                            .get(path)
-                            .and_then(|origin| origin.resolved)
-                            .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
-                        let mapped = identifiers
-                            .get(&self.nodes[target].locator)
-                            .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
-                        if self.nodes[target].scope != 0 {
-                            accumulate_generated_identifier_bytes(
-                                self.context.usage.generated_identifier_bytes,
-                                &mut generated,
-                                mapped.as_str().len(),
-                                limits.single_generated_identifier_bytes().get(),
-                                limits.generated_identifier_bytes().get(),
-                            )?;
-                        }
+                    if matches!(
+                        reference,
+                        EntityReference::SceneLocal { .. } | EntityReference::Authored { .. }
+                    ) {
                         let overflow = || PrefabReferenceRemapError::MaterializedValue {
                             observed: usize::MAX,
                             maximum: limits.materialized_value_bytes().get(),
                         };
+                        let original = reference.cost();
+                        let (replacement_nodes, replacement_bytes) = match origins
+                            .get(path)
+                            .and_then(|origin| origin.resolved.as_ref())
+                            .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?
+                        {
+                            ResolvedReference::Local(target) => {
+                                let mapped = identifiers
+                                    .get(&self.nodes[*target].locator)
+                                    .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
+                                if self.nodes[*target].scope != 0 {
+                                    accumulate_generated_identifier_bytes(
+                                        self.context.usage.generated_identifier_bytes,
+                                        &mut generated,
+                                        mapped.as_str().len(),
+                                        limits.single_generated_identifier_bytes().get(),
+                                        limits.generated_identifier_bytes().get(),
+                                    )?;
+                                }
+                                (1, mapped.as_str().len())
+                            }
+                            ResolvedReference::Persistent(reference) => {
+                                let cost = reference.cost();
+                                (cost.nodes(), cost.logical_bytes())
+                            }
+                        };
+                        old_nodes = old_nodes
+                            .checked_add(original.nodes())
+                            .ok_or_else(overflow)?;
                         old_bytes = old_bytes
-                            .checked_add(entity.as_str().len())
+                            .checked_add(original.logical_bytes())
+                            .ok_or_else(overflow)?;
+                        new_nodes = new_nodes
+                            .checked_add(replacement_nodes)
                             .ok_or_else(overflow)?;
                         new_bytes = new_bytes
-                            .checked_add(mapped.as_str().len())
+                            .checked_add(replacement_bytes)
                             .ok_or_else(overflow)?;
                     }
                     Ok(())
@@ -168,22 +203,33 @@ where
                     PrefabExpansionFailureKind::Reference
                 })?;
                 let cost = payload.value.cost();
+                let nodes = cost
+                    .nodes()
+                    .checked_sub(old_nodes)
+                    .and_then(|nodes| nodes.checked_add(new_nodes))
+                    .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
                 let bytes = cost
                     .logical_bytes()
                     .checked_sub(old_bytes)
                     .and_then(|bytes| bytes.checked_add(new_bytes))
                     .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+                // Admit the selected flat tree against the one aggregate output allowance.
+                // Its cost does not depend on whether a leaf came from a default or a pin.
                 let (nodes, bytes) = self
                     .context
                     .preflight_materialized_value_cost(
-                        cost.nodes(),
-                        cost.nodes(),
-                        cost.logical_bytes(),
+                        0,
+                        nodes,
+                        0,
                         bytes,
-                        id,
+                        self.nodes[node].origin.entity(),
                     )
                     .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
-                self.admit(Some(new_bytes))?;
+                self.admit(
+                    new_nodes
+                        .checked_mul(96)
+                        .and_then(|bytes| bytes.checked_add(new_bytes)),
+                )?;
                 let mut usage = self.context.usage;
                 usage.materialized_value_nodes = nodes;
                 usage.materialized_value_bytes = bytes;
@@ -196,20 +242,29 @@ where
                 }
                 plan.rewrite_in_place(&mut payload.value, |path, reference| {
                     Ok::<_, PrefabReferenceRemapError>(match reference {
-                        EntityReference::SceneLocal { .. } => EntityReference::SceneLocal {
-                            entity: origins
+                        EntityReference::SceneLocal { .. } | EntityReference::Authored { .. } => {
+                            match origins
                                 .get(path)
-                                .and_then(|origin| origin.resolved)
-                                .and_then(|target| identifiers.get(&self.nodes[target].locator))
+                                .and_then(|origin| origin.resolved.as_ref())
                                 .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?
-                                .clone(),
-                        },
+                            {
+                                ResolvedReference::Local(target) => EntityReference::SceneLocal {
+                                    entity: identifiers
+                                        .get(&self.nodes[*target].locator)
+                                        .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?
+                                        .clone(),
+                                },
+                                ResolvedReference::Persistent(reference) => reference.clone(),
+                            }
+                        }
                         EntityReference::Persistent { .. } => reference.clone(),
                     })
                 })
                 .map_err(|_| PrefabExpansionFailureKind::Reference)?;
                 self.context.usage.materialized_value_nodes = nodes;
                 self.context.usage.materialized_value_bytes = bytes;
+                // Contextual declarations have already supplied defaults and property Absent.
+                payload.contextual_defaults.clear();
             }
             let mut usage = self.context.usage;
             usage.generated_identifier_bytes = usage

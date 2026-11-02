@@ -48,7 +48,6 @@ fn a_late_key_collision_drops_all_preceding_owned_replacements() {
         PrefabPropertyClaim {
             path: ComponentPropertyPath::new(id("blob")),
             intent: PrefabPropertyIntent::Set(ComponentValue::String("changed".into())),
-            bindings: Vec::new(),
         },
         PrefabPropertyClaim {
             path: ComponentPropertyPath::new(id("rows")).with_steps([
@@ -59,7 +58,6 @@ fn a_late_key_collision_drops_all_preceding_owned_replacements() {
                 ComponentPropertyStep::Member(id("id")),
             ]),
             intent: PrefabPropertyIntent::Set(ComponentValue::String("b".into())),
-            bindings: Vec::new(),
         },
     ];
     let original_before = original.clone();

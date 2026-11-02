@@ -637,6 +637,7 @@ fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
     );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("second.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     let scene = SceneDocument::from_ordered_roots([anchor]);

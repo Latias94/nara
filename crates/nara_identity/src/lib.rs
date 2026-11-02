@@ -2,6 +2,7 @@
 
 mod allocator;
 mod domain;
+mod reference;
 mod remap;
 mod source;
 mod types;
@@ -14,6 +15,10 @@ pub use domain::{
     WorldIdentityDomain, WorldIdentityDomainSettings, adopt_identity_entity,
     register_persistent_identity, register_scene_instance, resolve_in_world,
     retire_identity_entity, retire_identity_entity_with_disposition, spawn_identity_entity,
+};
+pub use reference::{
+    AuthoredEntityReference, AuthoredReferenceTarget, EntityReferenceCost, PrefabEntityOrigin,
+    PrefabEntityTarget, PrefabInstanceHop, ReferenceInputId, ReferenceInputIdError,
 };
 pub use remap::{EntityReferenceRemap, IdentityRemapError, WorldEntityLocatorRemap};
 pub use source::{

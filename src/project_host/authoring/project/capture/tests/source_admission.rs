@@ -16,6 +16,7 @@ fn whitespace_padded_scene_and_prefab_dependencies_fit_default_admission_in_both
         )]);
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::path(&prefab_path).unwrap(),
             overrides: None,
         });
@@ -128,6 +129,7 @@ fn nested_stable_native_sources_use_the_actual_sidecar_reader_for_scene_and_pref
     .unwrap();
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::StableId(id(5)),
         overrides: None,
     });
@@ -236,6 +238,7 @@ fn nested_stable_native_sources_use_the_actual_sidecar_reader_for_scene_and_pref
                 let mut anchor =
                     SceneEntityRecord::new(SceneEntityId::new(format!("anchor-{index}")).unwrap());
                 anchor.prefab = Some(PrefabInstance {
+                    arguments: None,
                     source,
                     overrides: None,
                 });
@@ -398,6 +401,7 @@ fn borrowed_input_costs_match_captured_owners_and_unavailable_prefab_never_falls
         SceneEntityId::new("anchor").unwrap(),
     )]);
     document.entities[0].prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
     });

@@ -69,10 +69,10 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
         target: PrefabEntityTarget::source(id("source-entity")),
         component: missing,
         record: SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
-        bindings: Vec::new(),
     });
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     let document = SceneDocument::from_ordered_roots([
@@ -280,6 +280,12 @@ fn deletion_rejects_effective_default_inbound_references_without_mutation() {
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 ComponentValue::map([] as [(&str, ComponentValue); 0]),
+            )
+            .with_contextual_default(
+                ComponentFieldId::new("target"),
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("target"),
+                }),
             ),
         ),
         SceneEntityRecord::new(id("target")),
@@ -326,6 +332,7 @@ fn deletion_does_not_guess_unknown_references_or_prefab_namespaces() {
         if prefab {
             blocker.prefab = Some(PrefabInstance {
                 source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+                arguments: None,
                 overrides: None,
             });
         } else {

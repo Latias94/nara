@@ -614,11 +614,11 @@ runtime value work budgets. Direct in-memory validation does not grant file-inge
 admission. Opaque collections retain their native semantics and do not acquire a hidden 16K-item
 limit from the schema description.
 
-Prefab materialized-value limits count the resulting product. Its private reference-work allowance
-also accounts for retained root IDs and paths: at most twice the configured value-node allowance,
-and twice its byte allowance plus a per-node allowance for one root ID, depth-bounded indices,
-and persistent UUID text. Repeated long map-key prefixes can exceed this work ceiling even when
-the product fits; traversal rejects before publishing a remap or invoking rewrite callbacks.
+Prefab materialized-value limits count surviving values after references lower to their actual
+final IDs. Source normalization, contextual defaults, property candidates and reference paths
+use separately bounded working storage, admitted before copying. Cumulative reference work has
+its own node/byte limits. A small final value does not grant unlimited route or selector work;
+long repeated map-key prefixes can exhaust that allowance before a remap is published.
 
 Data-only Add Component creation is an explicit opt-in, separate from decoding existing data.
 Add `authoring_initial` to the component's `#[nara(...)]` declaration and an
@@ -642,6 +642,51 @@ record expectation without retaining the working session or its history. Re-admi
 through the matching Scene/Prefab candidate method and check `preserves_scene` / `preserves_prefab`
 before publication. This validates preservation; it grants no permission to replace a Workspace
 document or mark it saved. Those operations still require the original owner and persistence receipt.
+
+## Authored Entity References And Prefab Inputs
+
+Reference intent is part of `ComponentValue::EntityReference`. Use `EntityReference::SceneLocal`
+for a local entity, or `EntityReference::Authored` with an `AuthoredEntityReference` for an explicit
+occurrence route or declared input. Reference values move with their list/map element and its
+history inverse; there is no persistent payload-coordinate binding table.
+
+Every payload starts in its actual lexical source occurrence. An overlay written in P may target
+an entity inside Q while its new reference value still names P's local b. The operation target
+does not change the value's environment. Nested routes name each source/addition anchor together
+with its actual canonical base; equal terminal IDs in another occurrence do not reconnect it.
+
+A reusable Prefab declares outward dependencies in `PrefabDocument::inputs`. Bind them on the
+actual instance using its resolved canonical base and arguments written in the containing source:
+
+```rust,ignore
+let target = ReferenceInputId::new("target")?;
+prefab.inputs.insert(target.clone());
+let input_value = ComponentValue::EntityReference(EntityReference::Authored {
+    reference: AuthoredEntityReference::input(target.clone()),
+});
+instance.arguments = Some(PrefabReferenceArguments {
+    base: resolved_prefab.key().clone(),
+    values: BTreeMap::from([(target, EntityReference::SceneLocal { entity: local_target })]),
+});
+```
+
+Store `input_value` in the declared EntityRef field. Only surviving input uses demand arguments;
+an overwritten value does not open its old source. A missing required argument, wrong canonical
+base or cycle on the current occurrence/input chain rejects activation. Repeated completed input
+uses remain valid. Whole-source copying preserves parameter declarations and remaps complete
+arguments and routes without inventing a standalone mount for every copied Prefab.
+
+A source-dependent reference default also needs an explicit record declaration, keyed by stable
+field ID under that record's version: `record.with_contextual_default(field, value)`. Keep this
+declaration even when an explicit value or Null hides it. Reset/Absent exposes that declaration
+in its original source environment; Revert removes an instance pin and resumes inheritance.
+Context-free defaults retain the Schema fallback. Source preservation can retain unresolved
+intent; Native codecs and Runtime data setters require fully resolved effective values.
+
+The [public inline-reference consumer](../../crates/nara_scene/tests/inline_authored_references.rs)
+exercises lexical overrides, nested/repeated inputs, dormant defaults, demand and cycle refusal.
+The [complete CP2 plan](../plans/2026-11-02-prefab-extraction-plan.md) separately tracks the
+unfinished flat-storage, root/placement and extraction replacement.
 
 ## Complete Prefab Conversion
 

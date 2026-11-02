@@ -16,6 +16,9 @@ use crate::{
     schema::ComponentValueKind,
 };
 
+#[cfg(feature = "serde")]
+mod wire;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ComponentFloat(f64);
 
@@ -99,16 +102,6 @@ impl ComponentValueCost {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(
-        tag = "type",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )
-)]
 pub enum ComponentValue {
     Null,
     Bool(bool),
@@ -118,7 +111,6 @@ pub enum ComponentValue {
     String(String),
     List(Vec<ComponentValue>),
     Map(BTreeMap<String, ComponentValue>),
-    #[cfg_attr(feature = "serde", serde(rename = "entity_ref"))]
     EntityReference(EntityReference),
 }
 
@@ -198,8 +190,6 @@ impl ComponentValue {
         cost: &mut ComponentValueCost,
         mut admission: Option<&mut dyn FnMut(Option<usize>) -> bool>,
     ) -> bool {
-        const PERSISTENT_RUNTIME_ID_BYTES: usize = 16;
-
         enum Frame<'a> {
             List(std::slice::Iter<'a, ComponentValue>),
             Map(std::collections::btree_map::Iter<'a, String, ComponentValue>),
@@ -214,29 +204,24 @@ impl ComponentValue {
         // Count visited nodes and all known children, including unvisited ancestor siblings.
         let mut minimum_nodes = 1_usize;
         while let Some((key_bytes, value)) = current {
-            cost.nodes = cost.nodes.saturating_add(1);
             cost.logical_bytes = cost.logical_bytes.saturating_add(key_bytes);
-            let (logical_bytes, children) = match value {
-                Self::Null => (0, 0),
-                Self::Bool(_) => (1, 0),
-                Self::I64(_) | Self::U64(_) | Self::F64(_) => (8, 0),
-                Self::String(value) => (value.len(), 0),
-                Self::List(values) => (0, values.len()),
-                Self::Map(values) => (0, values.len()),
-                Self::EntityReference(EntityReference::SceneLocal { entity }) => {
-                    (entity.as_str().len(), 0)
+            let (nodes, logical_bytes, children) = match value {
+                Self::Null => (1, 0, 0),
+                Self::Bool(_) => (1, 1, 0),
+                Self::I64(_) | Self::U64(_) | Self::F64(_) => (1, 8, 0),
+                Self::String(value) => (1, value.len(), 0),
+                Self::List(values) => (1, 0, values.len()),
+                Self::Map(values) => (1, 0, values.len()),
+                Self::EntityReference(reference) => {
+                    let cost = reference.cost();
+                    (cost.nodes(), cost.logical_bytes(), 0)
                 }
-                Self::EntityReference(EntityReference::Persistent { entity }) => (
-                    entity
-                        .namespace
-                        .as_str()
-                        .len()
-                        .saturating_add(PERSISTENT_RUNTIME_ID_BYTES),
-                    0,
-                ),
             };
+            cost.nodes = cost.nodes.saturating_add(nodes);
             cost.logical_bytes = cost.logical_bytes.saturating_add(logical_bytes);
-            minimum_nodes = minimum_nodes.saturating_add(children);
+            minimum_nodes = minimum_nodes
+                .saturating_add(nodes.saturating_sub(1))
+                .saturating_add(children);
             if minimum_nodes > max_nodes || cost.logical_bytes > max_logical_bytes {
                 return false;
             }

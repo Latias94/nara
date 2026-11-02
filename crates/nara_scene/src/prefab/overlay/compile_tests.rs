@@ -11,7 +11,7 @@ use nara_diagnostic::DiagnosticValueRef;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistrySnapshot, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind,
+    ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 
 use super::*;
@@ -39,6 +39,10 @@ fn key(value: &str) -> SourceDocumentKey {
 }
 
 fn registry() -> ComponentRegistrySnapshot {
+    registry_with_value_shape(ComponentValueKind::U64.into())
+}
+
+fn registry_with_value_shape(value_shape: ComponentValueShape) -> ComponentRegistrySnapshot {
     #[derive(nara_ecs::Component)]
     struct C(ComponentValue);
     #[derive(nara_ecs::Component)]
@@ -54,7 +58,7 @@ fn registry() -> ComponentRegistrySnapshot {
             ComponentFieldId::new("value"),
             "Value",
             ComponentFieldPath::from_fields(["value"]),
-            ComponentValueKind::U64,
+            value_shape.clone(),
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
     };
@@ -80,6 +84,7 @@ fn registry() -> ComponentRegistrySnapshot {
 fn instance(source: &str, overrides: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: request(source),
+        arguments: None,
         overrides,
     }
 }
@@ -121,7 +126,6 @@ fn add_component(target: PrefabEntityTarget, component: &str) -> PrefabComponent
             ComponentSchemaVersion::ONE,
             ComponentValue::map([("value", ComponentValue::U64(1))]),
         ),
-        bindings: Vec::new(),
     }
 }
 
@@ -176,6 +180,8 @@ fn finite_same_source_addition_is_not_a_cycle() {
 
 #[test]
 fn borrowed_nested_declarations_do_not_consume_selected_value_allowances() {
+    let registry =
+        registry_with_value_shape(ComponentValueShape::list(ComponentValueKind::U64.into()));
     let mut addition = PrefabAddition::new(id("added"));
     addition.components.insert(
         ComponentTypeId::new("test.CompilerC"),
@@ -217,7 +223,7 @@ fn borrowed_nested_declarations_do_not_consume_selected_value_allowances() {
     let options = PrefabExpansionOptions::default().with_limits(
         PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::ONE),
     );
-    let report = document.expand_prefabs_with_options(&registry(), &sources, options);
+    let report = document.expand_prefabs_with_options(&registry, &sources, options);
     assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
     assert!(
         report
@@ -231,7 +237,7 @@ fn borrowed_nested_declarations_do_not_consume_selected_value_allowances() {
 
     outer.components.clear();
     let rejected =
-        scene("p", Some(outer)).expand_prefabs_with_options(&registry(), &sources, options);
+        scene("p", Some(outer)).expand_prefabs_with_options(&registry, &sources, options);
     assert!(rejected.candidate.is_none());
     assert_eq!(budget_kind(&rejected), Some("materialized-value-nodes"));
 }
@@ -635,6 +641,7 @@ fn a_large_deferred_request_is_admitted_before_clone_and_loader_entry() {
     let mut nested = SceneEntityRecord::new(id("n"));
     nested.prefab = Some(PrefabInstance {
         source: oversized,
+        arguments: None,
         overrides: None,
     });
     let sources = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -688,7 +695,6 @@ fn complete_outer_repair_cannot_erase_inner_duplicate_property_declarations() {
                     .map(|path| PrefabPropertyClaim {
                         path,
                         intent: PrefabPropertyIntent::Set(ComponentValue::U64(1)),
-                        bindings: Vec::new(),
                     })
                     .collect(),
             });
@@ -719,10 +725,7 @@ fn complete_outer_repair_cannot_erase_inner_duplicate_property_declarations() {
                 }
             } else {
                 let PrefabComponentIntent::Set {
-                    component,
-                    record,
-                    bindings,
-                    ..
+                    component, record, ..
                 } = add_component(target.clone(), "test.CompilerC")
                 else {
                     unreachable!()
@@ -732,7 +735,6 @@ fn complete_outer_repair_cannot_erase_inner_duplicate_property_declarations() {
                     target,
                     component,
                     record,
-                    bindings,
                 }
             });
             let report = scene("p", Some(outer)).expand_prefabs(&registry(), &sources);
@@ -959,6 +961,19 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         )
         .unwrap();
     assert!(references.is_empty());
+    // The terminal validation also plans local target closure. Both complete-tree reference
+    // traversals consume the same work allowance even when neither produces reference leaves.
+    nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
+        registry.schema(&component).unwrap(),
+        &value,
+        Default::default(),
+        |nodes, bytes, _| {
+            unit_nodes += nodes;
+            unit_bytes += bytes;
+            Ok(())
+        },
+    )
+    .unwrap();
     assert!(unit_nodes > 0 && unit_bytes > 0);
     let document = SceneDocument::from_ordered_roots(["first", "second"].map(|name| {
         SceneEntityRecord::new(id(name)).with_component(

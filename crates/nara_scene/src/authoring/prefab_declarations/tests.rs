@@ -47,6 +47,7 @@ fn overlay() -> PrefabOverlay {
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -65,7 +66,6 @@ fn unknown_intent(value: &str) -> PrefabComponentIntent {
         target: PrefabEntityTarget::source(id("inherited")),
         component: ComponentTypeId::new("missing.Component"),
         record: opaque(value),
-        bindings: Vec::new(),
     }
 }
 
@@ -77,7 +77,6 @@ fn properties() -> PrefabComponentIntent {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("payload")),
             intent: PrefabPropertyIntent::Set(ComponentValue::String("remove only me".into())),
-            bindings: Vec::new(),
         }],
     }
 }

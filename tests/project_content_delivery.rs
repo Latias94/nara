@@ -678,6 +678,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
     );
     entity.prefab = Some(PrefabInstance {
         source,
+        arguments: None,
         overrides: None,
     });
     entity

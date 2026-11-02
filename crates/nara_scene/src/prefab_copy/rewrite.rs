@@ -1,26 +1,26 @@
 //! Schema interpretation and explicit source-fact substitution for complete Prefab documents.
 
-use std::borrow::Cow;
-
 use nara_reflect::{
     __private::{
         AssetReferenceCollectionError, ComponentPropertyAdmissionError,
-        ComponentValueAdmissionError, EffectiveValueAdmissionError,
+        ComponentValueAdmissionError, EntityReferencePlanError,
         collect_declared_effective_asset_references_with_admission,
         collect_declared_value_asset_references_with_admission,
-        effective_component_value_with_admission,
+        effective_component_value_with_default_overrides_with_budget,
+        plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
         resolve_component_property_schema_claim_with_admission,
         validate_component_value_with_admission,
     },
-    AssetReferenceRewriteError, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, DeclaredAssetReference, rewrite_declared_asset_references_with_admission,
+    AssetReferenceRewriteError, ComponentEntityReferenceRewriteError, ComponentFieldSchema,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
+    DeclaredAssetReference, EntityReference, rewrite_declared_asset_references_with_admission,
 };
 
 use super::{CopyBudget, CopyMapping, PrefabCopyError, PrefabCopySchemaError};
 use crate::{
     AuthoringSchemaBasis, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
     PrefabInstance, PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent,
-    PrefabReferenceBinding, SceneComponentRecord,
+    SceneComponentRecord,
 };
 
 pub(super) fn copy_document(
@@ -80,31 +80,68 @@ fn copy_record(
             reason: PrefabCopySchemaError::OwnerMismatch,
         });
     }
-    // Preserve the current optional owner claim; an explicit claim must match the admitted owner.
+    // Validation uses the actual contextual declarations even when an explicit value hides
+    // them. The effective tree is temporary: copying never turns an omission into a value pin.
     let limits = budget.materialization()?;
-    let effective = effective_component_value_with_admission(
+    budget.effective_record(schema, record)?;
+    crate::document::validate_contextual_defaults(schema, record, limits)
+        .map_err(|error| value_error(source, error))?;
+    let (effective, _) = effective_component_value_with_default_overrides_with_budget(
         schema,
         &record.value,
-        limits,
-        |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
+        &record.contextual_defaults,
+        limits.nodes().get(),
+        limits.bytes().get(),
+        limits.depth(),
     )
-    .map_err(|error| match error {
-        EffectiveValueAdmissionError::Admission(error) => error,
-        EffectiveValueAdmissionError::Value(error) => PrefabCopyError::Value { source, error },
-    })?;
-    if let Cow::Owned(value) = effective {
-        record.value = value;
-    }
+    .map_err(|error| value_error(source, error))?;
     validate_component_value_with_admission(
         schema,
-        &record.value,
+        effective.as_ref(),
         limits,
         |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
     )
     .map_err(|error| match error {
         ComponentValueAdmissionError::Admission(error) => error,
-        ComponentValueAdmissionError::Value(error) => PrefabCopyError::Value { source, error },
+        ComponentValueAdmissionError::Value(error) => value_error(source, error),
     })?;
+    let traversal = budget.traversal()?;
+    let effective_assets = collect_declared_effective_asset_references_with_admission(
+        schema,
+        record.version,
+        effective.as_ref(),
+        traversal,
+        |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
+    )
+    .map_err(|error| collection_error(source, error))?;
+    for reference in &effective_assets {
+        if record.value.get_path(reference.path()).is_err()
+            && !record
+                .contextual_defaults
+                .contains_key(reference.field_id())
+        {
+            // A canonical asset default has no source-owned replacement declaration. Refuse
+            // rather than silently changing omission into an explicit copied asset pin.
+            mapping.asset(reference.asset_ref(), source, budget)?;
+            return Err(PrefabCopyError::ReferenceDefaultAbsent { source });
+        }
+    }
+    drop(effective);
+    let traversal = budget.traversal()?;
+    let plan = plan_declared_entity_references_with_admission::<PrefabCopyError, _>(
+        schema,
+        &record.value,
+        traversal,
+        |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
+    )
+    .map_err(|error| match error {
+        EntityReferencePlanError::Admission(error) => error,
+        EntityReferencePlanError::Reference(error) => reference_error(source, error),
+    })?;
+    plan.rewrite_in_place(&mut record.value, |_, reference| {
+        copy_reference(reference, source, mapping, budget)
+    })
+    .map_err(|error| reference_error(source, error))?;
     let traversal = budget.traversal()?;
     let references = collect_declared_effective_asset_references_with_admission(
         schema,
@@ -115,7 +152,30 @@ fn copy_record(
     )
     .map_err(|error| collection_error(source, error))?;
     rewrite_assets(&mut record.value, &references, source, mapping, budget)?;
-    budget.value(&record.value, source)
+    budget.value(&record.value)?;
+    for (id, value) in &mut record.contextual_defaults {
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.id() == id)
+            .ok_or_else(|| PrefabCopyError::Value {
+                source,
+                error: nara_reflect::ComponentCodecError::invalid_field(
+                    "contextual defaults",
+                    "declared reference default",
+                ),
+            })?;
+        copy_payload(
+            component,
+            field,
+            field.shape(),
+            value,
+            source,
+            mapping,
+            budget,
+        )?;
+    }
+    Ok(())
 }
 
 fn copy_instance(
@@ -129,6 +189,12 @@ fn copy_instance(
         return Err(PrefabCopyError::AuxiliaryPrefabSource { source });
     }
     instance.source = mapping.asset(&instance.source, source, budget)?;
+    if let Some(arguments) = &mut instance.arguments {
+        mapping.key(&mut arguments.base, source, budget)?;
+        for reference in arguments.values.values_mut() {
+            *reference = copy_reference(reference, source, mapping, budget)?;
+        }
+    }
     let Some(overlay) = &mut instance.overrides else {
         return Ok(());
     };
@@ -136,9 +202,6 @@ fn copy_instance(
     for addition in &mut overlay.additions {
         for (component, record) in &mut addition.components {
             copy_record(component, record, source, basis, mapping, budget)?;
-        }
-        for bindings in addition.bindings.values_mut() {
-            copy_bindings(bindings, source, mapping, budget)?;
         }
         if let Some(instance) = &mut addition.prefab {
             copy_instance(instance, source, basis, mapping, budget)?;
@@ -156,12 +219,10 @@ fn copy_instance(
                 target,
                 component,
                 record,
-                bindings,
                 ..
             } => {
                 copy_target(target, source, mapping, budget)?;
                 copy_record(component, record, source, basis, mapping, budget)?;
-                copy_bindings(bindings, source, mapping, budget)?;
             }
             PrefabComponentIntent::Suppress { target, component } => {
                 copy_target(target, source, mapping, budget)?;
@@ -197,21 +258,16 @@ fn copy_instance(
                         PrefabPropertyIntent::Absent => None,
                     };
                     if let Some(value) = payload {
-                        let traversal = budget.traversal()?;
-                        // Scalar properties intentionally yield an empty, payload-relative path.
-                        let references = collect_declared_value_asset_references_with_admission(
+                        copy_payload(
                             component,
                             selected.field,
                             selected.shape,
                             value,
-                            traversal,
-                            |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
-                        )
-                        .map_err(|error| collection_error(source, error))?;
-                        rewrite_assets(value, &references, source, mapping, budget)?;
-                        budget.value(value, source)?;
+                            source,
+                            mapping,
+                            budget,
+                        )?;
                     } else if let Some(default) = selected.field.default_value() {
-                        budget.value(default, source)?;
                         let traversal = budget.traversal()?;
                         let references = collect_declared_value_asset_references_with_admission(
                             component,
@@ -222,13 +278,12 @@ fn copy_instance(
                             |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
                         )
                         .map_err(|error| collection_error(source, error))?;
-                        if !references.is_empty() || contains_local_reference(default, budget)? {
+                        if !references.is_empty() {
                             // Absent resumes the Schema default. Retaining it would reintroduce
                             // original asset identities; pinning needs an explicit later contract.
                             return Err(PrefabCopyError::ReferenceDefaultAbsent { source });
                         }
                     }
-                    copy_bindings(&mut claim.bindings, source, mapping, budget)?;
                 }
             }
         }
@@ -263,16 +318,90 @@ fn copy_target(
     Ok(())
 }
 
-fn copy_bindings(
-    bindings: &mut [PrefabReferenceBinding],
+fn copy_reference(
+    reference: &EntityReference,
+    source: usize,
+    mapping: &CopyMapping<'_>,
+    budget: &mut CopyBudget,
+) -> Result<EntityReference, PrefabCopyError> {
+    if matches!(reference, EntityReference::Persistent { .. }) {
+        return Err(PrefabCopyError::PersistentReference { source });
+    }
+    budget.reference(reference)?;
+    let mut reference = reference.clone();
+    if let EntityReference::Authored { reference } = &mut reference {
+        // Whole-closure copying retains every lexical declaration and entity/input ID.
+        // Only the exact canonical predicates change; origin namespaces never change.
+        for hop in &mut reference.through {
+            mapping.key(&mut hop.expected_base, source, budget)?;
+        }
+    }
+    Ok(reference)
+}
+
+fn copy_payload(
+    component: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &mut ComponentValue,
     source: usize,
     mapping: &CopyMapping<'_>,
     budget: &mut CopyBudget,
 ) -> Result<(), PrefabCopyError> {
-    for binding in bindings {
-        copy_target(&mut binding.target, source, mapping, budget)?;
+    budget.selected_plan(field, value)?;
+    let plan = plan_declared_value_entity_references::<PrefabCopyError>(
+        field,
+        shape,
+        value,
+        budget.traversal()?,
+    )
+    .map_err(|error| reference_error(source, error))?;
+    plan.rewrite_in_place(value, |_, reference| {
+        copy_reference(reference, source, mapping, budget)
+    })
+    .map_err(|error| reference_error(source, error))?;
+    let traversal = budget.traversal()?;
+    let references = collect_declared_value_asset_references_with_admission(
+        component,
+        field,
+        shape,
+        value,
+        traversal,
+        |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
+    )
+    .map_err(|error| collection_error(source, error))?;
+    rewrite_assets(value, &references, source, mapping, budget)?;
+    budget.value(value)
+}
+
+fn value_error(source: usize, error: nara_reflect::ComponentCodecError) -> PrefabCopyError {
+    match error {
+        nara_reflect::ComponentCodecError::MaterializationNodeLimit { .. }
+        | nara_reflect::ComponentCodecError::MaterializationByteLimit { .. }
+        | nara_reflect::ComponentCodecError::MaterializationDepthLimit { .. } => {
+            PrefabCopyError::BudgetExceeded
+        }
+        error => PrefabCopyError::Value { source, error },
     }
-    Ok(())
+}
+
+fn reference_error(
+    source: usize,
+    error: ComponentEntityReferenceRewriteError<PrefabCopyError>,
+) -> PrefabCopyError {
+    match error {
+        ComponentEntityReferenceRewriteError::Rewrite { error, .. } => error,
+        ComponentEntityReferenceRewriteError::NodeLimit { .. }
+        | ComponentEntityReferenceRewriteError::ByteLimit { .. }
+        | ComponentEntityReferenceRewriteError::DepthLimit { .. }
+        | ComponentEntityReferenceRewriteError::PathIndexOverflow => {
+            PrefabCopyError::BudgetExceeded
+        }
+        error => PrefabCopyError::EntityReference {
+            source,
+            error: Box::new(error),
+        },
+    }
 }
 
 fn rewrite_assets(
@@ -319,34 +448,5 @@ fn collection_error(
         AssetReferenceCollectionError::Reference(error) => {
             PrefabCopyError::AssetReference { source, error }
         }
-    }
-}
-
-// Typed entity leaves cannot be ordinary strings. This runs only after borrowed depth/cost
-// admission; it does not discover asset references or infer Schema semantics.
-fn contains_local_reference(
-    value: &ComponentValue,
-    budget: &mut CopyBudget,
-) -> Result<bool, PrefabCopyError> {
-    budget.charge(1, 0, 0)?;
-    match value {
-        ComponentValue::EntityReference(_) => Ok(true),
-        ComponentValue::List(values) => {
-            for value in values {
-                if contains_local_reference(value, budget)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        ComponentValue::Map(values) => {
-            for value in values.values() {
-                if contains_local_reference(value, budget)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
-        _ => Ok(false),
     }
 }

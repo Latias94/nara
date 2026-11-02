@@ -176,6 +176,14 @@ fn prefab(amount: u64) -> PrefabDocument {
                 record(
                     SENSOR,
                     ComponentValue::map([] as [(&str, ComponentValue); 0]),
+                )
+                .with_contextual_default(
+                    ComponentFieldId::new("targets"),
+                    ComponentValue::List(vec![ComponentValue::EntityReference(
+                        EntityReference::SceneLocal {
+                            entity: scene_id("friend"),
+                        },
+                    )]),
                 ),
             ),
         named("friend", "Friend"),
@@ -186,6 +194,7 @@ fn linked(anchor: &str, path: &str) -> SceneEntityRecord {
     let mut entity = named(anchor, anchor);
     entity.prefab = Some(PrefabInstance {
         source: nara::asset::AssetRef::path(path).unwrap(),
+        arguments: None,
         overrides: None,
     });
     entity

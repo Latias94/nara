@@ -645,6 +645,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
                 anchor.prefab = Some(PrefabInstance {
                     source: prefab_source.clone(),
+                    arguments: None,
                     overrides: None,
                 });
                 anchor

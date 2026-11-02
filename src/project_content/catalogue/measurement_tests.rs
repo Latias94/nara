@@ -399,12 +399,14 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
     inactive_overlay.instances.push(PrefabInstanceClaim {
         target: PrefabEntityTarget::source(SceneEntityId::new("inactive-nested").unwrap()),
         value: Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::StableId(stable_id(3)),
             overrides: None,
         }),
     });
     let mut nested = SceneEntityRecord::new(SceneEntityId::new("nested").unwrap());
     nested.prefab = Some(PrefabInstance {
+        arguments: None,
         source: AssetRef::StableId(stable_id(2)),
         overrides: Some(inactive_overlay),
     });
@@ -419,6 +421,7 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
     overlay.instances.push(PrefabInstanceClaim {
         target: PrefabEntityTarget::source(SceneEntityId::new("nested").unwrap()),
         value: Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::StableId(stable_id(1)),
             overrides: None,
         }),
@@ -426,6 +429,7 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
     let roots = ["left", "right"].map(|id| {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {
+            arguments: None,
             source: AssetRef::StableId(stable_id(0)),
             overrides: Some(overlay.clone()),
         });
@@ -596,6 +600,7 @@ requested = ["runtime-2d"]
                     SceneEntityId::new(format!("anchor-{identity}")).unwrap(),
                 );
                 entity.prefab = Some(PrefabInstance {
+                    arguments: None,
                     source: AssetRef::StableId(stable_id(identity)),
                     overrides: None,
                 });

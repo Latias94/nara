@@ -71,10 +71,13 @@ pub(super) fn canonical_ids<'a>(
                         if let Some(reference) = source_document.as_product() {
                             let stable_id = reference.source();
                             if stable_id.as_uuid().is_nil()
-                                || !matches!(canonical_source.origin(), SourceDocumentOrigin::StableAsset { stable_id: key } if *key == stable_id)
+                                || matches!(canonical_source.origin(), SourceDocumentOrigin::StableAsset { stable_id: key } if *key != stable_id)
                             {
                                 return Err(invalid_provenance());
                             }
+                            // Product selection and document identity have separate owners.
+                            // A real source association may bind this Product to a location or
+                            // named document. Lookup evidence cannot require another key kind.
                         }
                     }
                 }

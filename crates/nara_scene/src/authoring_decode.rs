@@ -4,6 +4,7 @@
 mod asset_budget_tests;
 mod complete_value;
 mod conversion;
+mod copy_admission;
 mod field_candidate;
 mod overlay;
 #[cfg(test)]
@@ -17,11 +18,13 @@ mod shared_publication_tests;
 mod structure;
 
 use complete_value::validate_complete_value;
+pub(crate) use copy_admission::CopyAdmissionError;
 pub use read::{
     AuthoringComponentView, AuthoringDirectMembers, AuthoringEntityView, AuthoringPropertyValue,
     AuthoringReadError,
 };
 pub(crate) use retention::asset_references_bytes as retained_asset_references_bytes;
+pub(crate) use retention::prefab_inputs_bytes as retained_prefab_inputs_bytes;
 use structure::authoring_structure_rejection;
 
 use std::{
@@ -41,7 +44,6 @@ use nara_reflect::{
     ComponentFieldPathSegment, ComponentSchema, ComponentSchemaContributionReceipt,
     ComponentSchemaOwnerSnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueShape, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
-    collect_declared_asset_references_from_schema_with_limits, effective_component_value,
 };
 
 use crate::{
@@ -53,9 +55,7 @@ use crate::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
     },
-    validation::{
-        reference_traversal_limits, validate_effective_local_references, validate_scene_structure,
-    },
+    validation::{reference_traversal_limits, validate_effective_local_references},
 };
 
 /// Stable project-relative or stable-asset identity of one persistent authoring document.
@@ -277,7 +277,7 @@ impl PartialEq for AuthoringSchemaBasis {
 impl Eq for AuthoringSchemaBasis {}
 
 /// Schema/Adapter readiness of a persistent record or declarative component/property intent.
-/// Overlay readiness does not admit a target, bindings, base or effective activation.
+/// Overlay readiness does not admit a target, arguments, base or effective activation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthoringRecordReadiness {
     Available,
@@ -705,12 +705,18 @@ pub struct UnavailableRecord {
     component: ComponentTypeId,
     version: ComponentSchemaVersion,
     value: ComponentValue,
+    contextual_defaults: BTreeMap<ComponentFieldId, ComponentValue>,
     entity_references: Vec<UnavailableEntityReference>,
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
     readiness: AuthoringRecordReadiness,
 }
 
 impl UnavailableRecord {
+    #[must_use]
+    pub const fn contextual_defaults(&self) -> &BTreeMap<ComponentFieldId, ComponentValue> {
+        &self.contextual_defaults
+    }
+
     /// Stable parent/root and relative ordering of the source-local owning entity.
     #[must_use]
     pub const fn placement(&self) -> Option<&crate::ScenePlacement> {
@@ -863,13 +869,6 @@ impl UnavailableOverlayTarget {
     #[must_use]
     pub fn property_path(&self) -> Option<&nara_reflect::ComponentPropertyPath> {
         self.property.as_ref().map(|property| &property.path)
-    }
-
-    #[must_use]
-    pub fn bindings(&self) -> &[crate::PrefabReferenceBinding] {
-        self.property
-            .as_ref()
-            .map_or(&[], |property| property.bindings.as_slice())
     }
 
     #[must_use]
@@ -1423,13 +1422,40 @@ pub(crate) struct AuthoringDocumentState {
 pub(crate) struct AuthoringComponentTemplate<'a> {
     pub(crate) schema: &'a ComponentSchema,
     pub(crate) value: &'a ComponentValue,
-    owner: &'a PersistentComponentSchemaOwnerId,
+    pub(crate) owner: &'a PersistentComponentSchemaOwnerId,
 }
 
-impl AuthoringComponentTemplate<'_> {
-    pub(crate) fn to_record(self) -> SceneComponentRecord {
-        SceneComponentRecord::new(self.schema.version(), self.value.clone())
-            .with_owner(self.owner.clone())
+impl<'a> AuthoringComponentTemplate<'a> {
+    pub(crate) fn contextual_defaults(
+        self,
+    ) -> impl Iterator<
+        Item = Result<
+            (&'a ComponentFieldId, &'a ComponentValue),
+            nara_reflect::ComponentCodecError,
+        >,
+    > {
+        self.schema.fields().iter().filter_map(|field| {
+            match nara_reflect::__private::component_field_default_requires_context(field) {
+                Ok(true) => field.default_value().map(|value| Ok((field.id(), value))),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+    }
+
+    pub(crate) fn to_record(
+        self,
+    ) -> Result<SceneComponentRecord, nara_reflect::ComponentCodecError> {
+        // Defaults enter the new record's lexical source scope even when an explicit initial
+        // value hides them. Keep the authored value and its absence/Null distinction intact.
+        let contextual_defaults = self
+            .contextual_defaults()
+            .map(|entry| entry.map(|(field, value)| (field.clone(), value.clone())))
+            .collect::<Result<_, _>>()?;
+        let mut record = SceneComponentRecord::new(self.schema.version(), self.value.clone())
+            .with_owner(self.owner.clone());
+        record.contextual_defaults = contextual_defaults;
+        Ok(record)
     }
 }
 
@@ -1470,7 +1496,7 @@ impl AuthoringDocumentState {
         component: &ComponentTypeId,
     ) -> Option<SceneComponentRecord> {
         self.initial_component_template(component)
-            .map(AuthoringComponentTemplate::to_record)
+            .and_then(|template| template.to_record().ok())
     }
 
     pub(crate) fn initial_component_template(
@@ -1891,12 +1917,46 @@ fn classify_scene_document_impl(
     kind: AuthoringDocumentKind,
     basis: Arc<AuthoringClassificationBasis>,
     limits: SceneFileLimits,
+    admission: Option<&mut reclassification::ClassificationCallback<'_>>,
+) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
+    classify_source_document_impl(
+        AuthoringSourceParts {
+            roots: &document.roots,
+            entities: &document.entities,
+            inputs: None,
+        },
+        source,
+        kind,
+        basis,
+        limits,
+        admission,
+    )
+}
+
+/// Actual source declarations; Prefab inputs remain metadata rather than synthetic bindings.
+struct AuthoringSourceParts<'a> {
+    roots: &'a [SceneEntityId],
+    entities: &'a [SceneEntityRecord],
+    inputs: Option<&'a BTreeSet<nara_identity::ReferenceInputId>>,
+}
+
+fn classify_source_document_impl(
+    document: AuthoringSourceParts<'_>,
+    source: AuthoringDocumentSource,
+    kind: AuthoringDocumentKind,
+    basis: Arc<AuthoringClassificationBasis>,
+    limits: SceneFileLimits,
     mut admission: Option<&mut reclassification::ClassificationCallback<'_>>,
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
+    if let Some(inputs) = document.inputs {
+        reclassification::charge(&mut admission, "classification-inputs", || {
+            retention::prefab_inputs_bytes(inputs)
+        })?;
+    }
     reclassification::charge(&mut admission, "classification-structure", || {
-        reclassification::structure_bytes(document)
+        reclassification::structure_parts_bytes(document.roots, document.entities)
     })?;
-    let structure = validate_scene_structure(document);
+    let structure = crate::validation::validate_source_structure(document.roots, document.entities);
     if structure.has_errors() {
         return Err(AuthoringDocumentPublicationError::new(structure));
     }
@@ -1910,8 +1970,8 @@ fn classify_scene_document_impl(
             overlay_asset_references: BTreeMap::new(),
             manifest: Vec::new(),
             placements: crate::patch::authoring_entity_placements(
-                &document.roots,
-                &document.entities,
+                document.roots,
+                document.entities,
             ),
             namespace: document.entities.iter().map(|entity| &entity.id).collect(),
             limits,
@@ -1923,7 +1983,7 @@ fn classify_scene_document_impl(
             asset_reference_bytes: 0,
             admission: admission.as_deref_mut(),
         };
-        for entity in &document.entities {
+        for entity in document.entities {
             classify_entity_components(entity, &mut context)?;
         }
         (
@@ -1933,7 +1993,7 @@ fn classify_scene_document_impl(
         )
     };
     reclassification::charge_measured(&mut admission, "classification-overlays", |scratch| {
-        reclassification::overlay_copies_bytes(document, limits, scratch)
+        reclassification::overlay_parts_copies_bytes(document.entities, limits, scratch)
     })?;
     let unavailable_manifest = UnavailableRecordManifest::new(
         manifest,
@@ -2144,12 +2204,12 @@ fn classify_complete_record(
                 schema,
                 owner,
                 component,
-                &record.value,
+                record,
                 context.limits,
                 &mut context.admission,
             )?
         } else {
-            validate_complete_value(schema, owner, component, &record.value, context.limits)?
+            validate_complete_value(schema, owner, component, record, context.limits)?
         };
         if matches!(&location, AuthoringRecordLocation::EntityComponent { .. }) {
             if bounded {
@@ -2179,9 +2239,7 @@ fn classify_complete_record(
                 })?;
             }
         }
-        if bounded {
-            admitted_effective = Some(effective);
-        }
+        admitted_effective = Some(effective);
     }
     let schema_declared_asset_references = if classified
         .schema
@@ -2204,37 +2262,27 @@ fn classify_complete_record(
         } else {
             context.limits.component_materialization_limits()
         };
-        if bounded {
-            let effective = match admitted_effective {
-                Some(value) => value,
-                None => reclassification::effective_value(
-                    schema,
-                    &record.value,
-                    context.limits,
-                    &mut context.admission,
-                )?,
-            };
-            reclassification::asset_references(
+        let effective = match admitted_effective {
+            Some(value) => value,
+            None => reclassification::effective_value(
                 schema,
-                record.version,
-                &effective,
-                if has_assets {
-                    nara_reflect::EntityReferenceTraversalLimits::new(
-                        reference_limits.nodes(),
-                        reference_limits.bytes(),
-                        reference_limits.depth(),
-                    )
-                } else {
-                    reference_traversal_limits(reference_limits)
-                },
+                record,
+                context.limits,
                 &mut context.admission,
-            )?
-        } else {
-            collect_declared_asset_references_from_schema_with_limits(
+            )?,
+        };
+        if !classified.readiness.is_available() {
+            reclassification::validate_reference_grammar(
+                schema,
+                &effective,
+                reference_traversal_limits(context.limits.component_materialization_limits()),
+                &mut context.admission,
+            )?;
+        }
+        reclassification::asset_references(
             schema,
             record.version,
-            &record.value,
-            reference_limits,
+            &effective,
             if has_assets {
                 nara_reflect::EntityReferenceTraversalLimits::new(
                     reference_limits.nodes(),
@@ -2244,18 +2292,8 @@ fn classify_complete_record(
             } else {
                 reference_traversal_limits(reference_limits)
             },
-        )
-        .map_err(|_| {
-            rejection(with_public_locator(
-                diagnostic_error(
-                    "scene.authoring-declared-asset-reference-invalid",
-                    "Persistent authoring record has an invalid schema-declared asset reference",
-                ),
-                "component-id",
-                component.as_str(),
-            ))
-            })?
-        }
+            &mut context.admission,
+        )?
     };
     context.reserve_asset_references(&schema_declared_asset_references)?;
     retain_complete_record(
@@ -2355,6 +2393,7 @@ fn retain_complete_record(
                 component: component.clone(),
                 version: record.version,
                 value: record.value.clone(),
+                contextual_defaults: record.contextual_defaults.clone(),
                 entity_references,
                 schema_declared_asset_references,
                 readiness: classified.readiness,
@@ -2394,14 +2433,7 @@ fn collect_entity_references_at<'a>(
                             .checked_add(crate::provenance::provenance_string_bytes(field)?)?;
                     }
                 }
-                bytes.checked_add(match reference {
-                    EntityReference::SceneLocal { entity } => {
-                        crate::provenance::provenance_string_bytes(entity.as_str())?
-                    }
-                    EntityReference::Persistent { entity } => {
-                        crate::provenance::provenance_string_bytes(entity.namespace.as_str())?
-                    }
-                })
+                bytes.checked_add(retention::entity_reference_dynamic_bytes(reference)?)
             })?;
             reclassification::reserve_vec(
                 references,
@@ -2616,7 +2648,15 @@ pub(crate) fn prepare_prefab_conversion_patch_with_admission(
         footprint,
         admit,
     )?;
-    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    admit(
+        "prefab-inputs",
+        retention::prefab_inputs_bytes(&document.inputs),
+    )?;
+    let document = PrefabDocument {
+        inputs: document.inputs.clone(),
+        roots: prepared.document.roots,
+        entities: prepared.document.entities,
+    };
     reclassification::validate_prefab_shape(&document, state.limits, Some(admit))?;
     Ok(PreparedPrefabAuthoringPatch {
         document,
@@ -2658,7 +2698,15 @@ pub(crate) fn prepare_prefab_conversion_patch_with_work(
         footprint,
         work,
     )?;
-    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    work.reserve(
+        "prefab-inputs",
+        retention::prefab_inputs_bytes(&document.inputs),
+    )?;
+    let document = PrefabDocument {
+        inputs: document.inputs.clone(),
+        roots: prepared.document.roots,
+        entities: prepared.document.entities,
+    };
     crate::format::validate_prefab_publication_shape_with_admission(
         &document,
         state.limits,
@@ -2686,7 +2734,11 @@ pub(crate) fn prepare_prefab_conversion_patch(
 ) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
     let prepared =
         structure::prepare_conversion_structure(&document.instantiate(), state, patch, footprint)?;
-    let document = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+    let document = PrefabDocument {
+        inputs: document.inputs.clone(),
+        roots: prepared.document.roots,
+        entities: prepared.document.entities,
+    };
     if crate::format::validate_prefab_publication_shape(&document, state.limits).is_err() {
         return Err(authoring_structure_rejection(
             "Conversion exceeds the persistent Prefab format boundary",
@@ -2751,7 +2803,17 @@ fn prepare_prefab_authoring_patch_impl(
             history,
             admit.as_deref_mut(),
         )?;
-        let candidate = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+        if let Some(admit) = admit.as_deref_mut() {
+            admit(
+                "prefab-inputs",
+                retention::prefab_inputs_bytes(&document.inputs),
+            )?;
+        }
+        let candidate = PrefabDocument {
+            inputs: document.inputs.clone(),
+            roots: prepared.document.roots,
+            entities: prepared.document.entities,
+        };
         reclassification::validate_prefab_shape(&candidate, state.limits, admit.as_deref_mut())?;
         return Ok(PreparedPrefabAuthoringPatch {
             document: candidate,
@@ -2770,15 +2832,17 @@ fn prepare_prefab_authoring_patch_impl(
     let edit = &edits[0];
     let candidate = field_candidate::prepare(document.instantiate(), state, &edits)?;
     let candidate = if let Some(admit) = admit.as_deref_mut() {
-        candidate.validate_prefab_shape_with_admission(admit)?
+        candidate.validate_prefab_shape_with_admission(&document.inputs, admit)?
     } else {
-        candidate.validate_prefab_shape().map_err(|_| {
-            field_edit_rejection(
-                edit,
-                "scene.authoring-field-edit-format-invalid",
-                "Authoring field edit exceeds the persistent Prefab format boundary",
-            )
-        })?
+        candidate
+            .validate_prefab_shape(&document.inputs)
+            .map_err(|_| {
+                field_edit_rejection(
+                    edit,
+                    "scene.authoring-field-edit-format-invalid",
+                    "Authoring field edit exceeds the persistent Prefab format boundary",
+                )
+            })?
     };
     let candidate_state = if let Some(admit) = admit.as_deref_mut() {
         candidate.classify_with_admission(admit)?
@@ -2795,8 +2859,15 @@ fn prepare_prefab_authoring_patch_impl(
         ));
     }
     let (candidate, inverse) = candidate.into_parts();
+    if let Some(admit) = admit.as_deref_mut() {
+        admit(
+            "prefab-inputs",
+            retention::prefab_inputs_bytes(&document.inputs),
+        )?;
+    }
     Ok(PreparedPrefabAuthoringPatch {
         document: PrefabDocument {
+            inputs: document.inputs.clone(),
             roots: candidate.roots,
             entities: candidate.entities,
         },
@@ -3056,7 +3127,11 @@ fn prepare_admitted_field_edit(
             "Authoring field edit targets an unknown component field",
         ));
     };
-    if !authoring_field_change_is_preservation_safe(field, edit.value.as_ref()) {
+    let default = record
+        .contextual_defaults
+        .get(field.id())
+        .or(field.default_value());
+    if !authoring_field_change_is_preservation_safe(field, edit.value.as_ref(), default) {
         return Err(field_edit_rejection(
             edit,
             if field.has_capability(ComponentCapability::EntityRef) {
@@ -3065,7 +3140,7 @@ fn prepare_admitted_field_edit(
                 "scene.authoring-field-edit-not-preservation-safe"
             },
             if field.has_capability(ComponentCapability::EntityRef) {
-                "Entity reference edits require source-local targets in the current document"
+                "Entity reference edits require source targets rather than Persistent runtime references"
             } else {
                 "Authoring field edit is outside the preservation-safe value whitelist"
             },
@@ -3083,12 +3158,12 @@ fn prepare_admitted_field_edit(
         )
     })?;
     if field.has_capability(ComponentCapability::EntityRef)
-        && !authoring_field_change_is_preservation_safe(field, previous.as_ref())
+        && !authoring_field_change_is_preservation_safe(field, previous.as_ref(), default)
     {
         return Err(field_edit_rejection(
             edit,
             "scene.authoring-entity-reference-edit-unavailable",
-            "Entity reference edits require a source-local inverse value",
+            "Entity reference edits require an inverse without Persistent runtime references",
         ));
     }
     let inverse = match previous {
@@ -3112,6 +3187,7 @@ fn prepare_admitted_field_edit(
 fn authoring_field_change_is_preservation_safe(
     field: &nara_reflect::ComponentFieldSchema,
     value: Option<&ComponentValue>,
+    default: Option<&ComponentValue>,
 ) -> bool {
     field.has_capability(ComponentCapability::Edit)
         && supports_data_shape(field.shape())
@@ -3120,15 +3196,12 @@ fn authoring_field_change_is_preservation_safe(
             // value failures there so the shared validator retains its safe code and root field.
             Some(value) => {
                 !field.has_capability(ComponentCapability::EntityRef)
-                    || contains_only_source_local_entity_references(value)
+                    || contains_only_source_entity_references(value)
             }
             None => {
                 (!field.required || field.default_value.is_some())
                     && (!field.has_capability(ComponentCapability::EntityRef)
-                        || field
-                            .default_value
-                            .as_ref()
-                            .is_none_or(contains_only_source_local_entity_references))
+                        || default.is_none_or(contains_only_source_entity_references))
                     && matches!(
                         field.path().segments().last(),
                         Some(ComponentFieldPathSegment::Field(_))
@@ -3137,16 +3210,15 @@ fn authoring_field_change_is_preservation_safe(
         }
 }
 
-fn contains_only_source_local_entity_references(value: &ComponentValue) -> bool {
+fn contains_only_source_entity_references(value: &ComponentValue) -> bool {
     match value {
-        ComponentValue::EntityReference(EntityReference::SceneLocal { .. }) => true,
+        // Authored targets remain source intent; this guard does not grant Native eligibility.
+        ComponentValue::EntityReference(
+            EntityReference::SceneLocal { .. } | EntityReference::Authored { .. },
+        ) => true,
         ComponentValue::EntityReference(EntityReference::Persistent { .. }) => false,
-        ComponentValue::List(values) => values
-            .iter()
-            .all(contains_only_source_local_entity_references),
-        ComponentValue::Map(values) => values
-            .values()
-            .all(contains_only_source_local_entity_references),
+        ComponentValue::List(values) => values.iter().all(contains_only_source_entity_references),
+        ComponentValue::Map(values) => values.values().all(contains_only_source_entity_references),
         ComponentValue::Null
         | ComponentValue::Bool(_)
         | ComponentValue::I64(_)

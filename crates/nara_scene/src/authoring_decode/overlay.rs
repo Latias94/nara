@@ -1,4 +1,4 @@
-//! Inventory of durable declarations. Effective target, binding and version activation belongs
+//! Inventory of durable declarations. Effective target, argument and version activation belongs
 //! to the Prefab compiler, not source admission or Save.
 
 use super::*;
@@ -6,8 +6,6 @@ use crate::{PrefabComponentIntent, PrefabOverlay};
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldPathError, ComponentPropertyError,
     ComponentValueKind, DeclaredAssetReferenceError,
-    collect_declared_field_asset_references_with_limits,
-    collect_declared_value_asset_references_with_limits, resolve_component_property_schema_claim,
 };
 
 pub(super) fn classify_instance(
@@ -208,6 +206,64 @@ fn classify_record(
         .as_ref()
         .filter(|schema| record.version == schema.version())
     {
+        reclassification::charge_measured(
+            &mut context.admission,
+            "overlay-contextual-defaults",
+            |scratch| {
+                retention::contextual_defaults_bytes(
+                    &record.contextual_defaults,
+                    context.limits,
+                    scratch,
+                )
+            },
+        )?;
+        if let Err(error) = complete_value::check_contextual_record(schema, record, context.limits)
+        {
+            preserve_contextual_error(schema, error)?;
+            classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
+            classified.adapter = None;
+        }
+        // Reference fields omitted from a complete record can select canonical or contextual
+        // defaults. Classify that actual value; a raw required-path walk would mark legal
+        // omission as unavailable and lose conversion/preview coverage for the record.
+        let effective = match reclassification::selected_effective_value(
+            schema,
+            record,
+            context.limits,
+            &mut context.admission,
+        ) {
+            Ok(value) => Some(value),
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(report)) => {
+                return Err(report);
+            }
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+                preserve_contextual_error(
+                    schema,
+                    complete_value::ContextualRecordError::Value(error),
+                )?;
+                classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
+                classified.adapter = None;
+                None
+            }
+        };
+        if let Some(effective) = effective {
+            match reclassification::check_reference_grammar(
+                schema,
+                &effective,
+                reference_traversal_limits(context.limits.component_materialization_limits()),
+                &mut context.admission,
+            ) {
+                Ok(()) => {}
+                Err(nara_reflect::__private::EntityReferencePlanError::Admission(report)) => {
+                    return Err(report);
+                }
+                Err(nara_reflect::__private::EntityReferencePlanError::Reference(error)) => {
+                    preserve_traversal_error(&error)?;
+                    classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
+                    classified.adapter = None;
+                }
+            }
+        }
         // Field selection/defaults are already owned by Reflect. Inspect only each declared
         // asset-bearing root; an obsolete sibling cannot erase other understood inventory.
         for field in schema
@@ -220,7 +276,10 @@ fn classify_record(
                 Err(
                     ComponentFieldPathError::MissingField { .. }
                     | ComponentFieldPathError::IndexOutOfBounds { .. },
-                ) => field.default_value(),
+                ) => record
+                    .contextual_defaults
+                    .get(field.id())
+                    .or(field.default_value()),
                 Err(_) => {
                     classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
                     classified.adapter = None;
@@ -235,19 +294,8 @@ fn classify_record(
                 continue;
             };
             let limits = context.asset_reference_limits();
-            let found = if context.admission.is_some() {
-                match nara_reflect::__private::collect_declared_field_asset_references_with_admission(
-                    component, field, payload,
-                    nara_reflect::EntityReferenceTraversalLimits::new(limits.nodes(), limits.bytes(), limits.depth()),
-                    |nodes, bytes, allocated| reclassification::reference_charge(
-                        &mut context.admission, "overlay-field-assets", nodes, bytes, allocated),
-                ) {
-                    Ok(found) => Ok(found),
-                    Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(report)) => return Err(report),
-                    Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(error)) => Err(error),
-                }
-            } else {
-                collect_declared_field_asset_references_with_limits(
+            let found =
+                nara_reflect::__private::collect_declared_field_asset_references_with_admission(
                     component,
                     field,
                     payload,
@@ -256,7 +304,24 @@ fn classify_record(
                         limits.bytes(),
                         limits.depth(),
                     ),
-                )
+                    |nodes, bytes, allocated| {
+                        reclassification::reference_charge(
+                            &mut context.admission,
+                            "overlay-field-assets",
+                            nodes,
+                            bytes,
+                            allocated,
+                        )
+                    },
+                );
+            let found = match found {
+                Ok(found) => Ok(found),
+                Err(nara_reflect::__private::AssetReferenceCollectionError::Admission(report)) => {
+                    return Err(report);
+                }
+                Err(nara_reflect::__private::AssetReferenceCollectionError::Reference(error)) => {
+                    Err(error)
+                }
             };
             match found {
                 Ok(found) => {
@@ -305,8 +370,8 @@ fn classify_property(
             "overlay-property-resolution",
             |scratch| retention::property_dynamic_bytes_impl(claim, context.limits, scratch),
         )?;
-        let selected = if context.admission.is_some() {
-            match nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
+        let selected =
+            nara_reflect::__private::resolve_component_property_schema_claim_with_admission(
                 schema,
                 version,
                 &claim.path,
@@ -320,45 +385,48 @@ fn classify_property(
                         allocated,
                     )
                 },
-            ) {
-                Ok(selected) => Ok(selected),
-                Err(nara_reflect::__private::ComponentPropertyAdmissionError::Admission(
-                    report,
-                )) => return Err(report),
-                Err(nara_reflect::__private::ComponentPropertyAdmissionError::Property(error)) => {
-                    Err(error)
-                }
+            );
+        let selected = match selected {
+            Ok(selected) => Ok(selected),
+            Err(nara_reflect::__private::ComponentPropertyAdmissionError::Admission(report)) => {
+                return Err(report);
             }
-        } else {
-            resolve_component_property_schema_claim(
-                schema,
-                version,
-                &claim.path,
-                &mut context.property_read_budget,
-            )
+            Err(nara_reflect::__private::ComponentPropertyAdmissionError::Property(error)) => {
+                Err(error)
+            }
         };
         match selected {
             Ok(selected) => {
                 let payload = match &claim.intent {
                     PrefabPropertyIntent::Set(value) => Some(value),
+                    // Absence exposes the target record's existing contextual default in
+                    // its declaration occurrence. This claim does not own that environment.
                     PrefabPropertyIntent::Absent if claim.path.steps.is_empty() => {
-                        selected.field.default_value()
+                        if selected
+                            .field
+                            .shape()
+                            .contains_kind(ComponentValueKind::EntityRef)
+                        {
+                            None
+                        } else {
+                            selected.field.default_value()
+                        }
                     }
                     PrefabPropertyIntent::Absent => {
                         readiness = AuthoringRecordReadiness::UnresolvedOverlay;
                         None
                     }
                 };
-                if let Some(payload) = payload
-                    && selected.shape.contains_kind(ComponentValueKind::AssetRef)
-                {
+                if let Some(payload) = payload {
+                    // The shared reference walker also validates scalar shapes and declared
+                    // EntityRef leaves. Keep its typed syntax and admission errors together.
                     let limits = context.asset_reference_limits();
                     let traversal_limits = nara_reflect::EntityReferenceTraversalLimits::new(
                         limits.nodes(),
                         limits.bytes(),
                         limits.depth(),
                     );
-                    let references = if context.admission.is_some() {
+                    let references = {
                         let callback = |nodes, bytes, allocated| {
                             reclassification::reference_charge(
                                 &mut context.admission,
@@ -389,28 +457,9 @@ fn classify_property(
                                 ),
                             ) => Err(error),
                         }
-                    } else {
-                        match &claim.intent {
-                            PrefabPropertyIntent::Set(_) => {
-                                collect_declared_value_asset_references_with_limits(
-                                    component,
-                                    selected.field,
-                                    selected.shape,
-                                    payload,
-                                    traversal_limits,
-                                )
-                            }
-                            PrefabPropertyIntent::Absent => {
-                                collect_declared_field_asset_references_with_limits(
-                                    component,
-                                    selected.field,
-                                    payload,
-                                    traversal_limits,
-                                )
-                            }
-                        }
                     };
                     match references {
+                        Ok(references) if references.is_empty() => {}
                         Ok(references) => {
                             context.reserve_asset_references(&references)?;
                             let AuthoringRecordLocation::OverlayComponent { anchor, .. } =
@@ -558,18 +607,56 @@ fn preserve_reference_error(
 ) -> Result<(), AuthoringDocumentPublicationError> {
     // A traversal budget is an admission limit, not dormant intent. Invalid/unavailable meaning
     // remains in the exact source manifest and is diagnosed without preventing repair or Save.
+    if let DeclaredAssetReferenceError::Traversal { source, .. } = &error {
+        preserve_traversal_error(source)?;
+    }
     if matches!(
         error,
-        DeclaredAssetReferenceError::Traversal {
-            source: ComponentEntityReferenceRewriteError::NodeLimit { .. }
-                | ComponentEntityReferenceRewriteError::ByteLimit { .. }
-                | ComponentEntityReferenceRewriteError::DepthLimit { .. },
+        DeclaredAssetReferenceError::Materialization {
+            source: nara_reflect::ComponentCodecError::MaterializationNodeLimit { .. }
+                | nara_reflect::ComponentCodecError::MaterializationByteLimit { .. }
+                | nara_reflect::ComponentCodecError::MaterializationDepthLimit { .. },
             ..
         }
     ) {
         return Err(asset_reference_budget_rejection());
     }
     Ok(())
+}
+
+fn preserve_traversal_error<E>(
+    error: &ComponentEntityReferenceRewriteError<E>,
+) -> Result<(), AuthoringDocumentPublicationError> {
+    if matches!(
+        error,
+        ComponentEntityReferenceRewriteError::NodeLimit { .. }
+            | ComponentEntityReferenceRewriteError::ByteLimit { .. }
+            | ComponentEntityReferenceRewriteError::DepthLimit { .. }
+    ) {
+        return Err(asset_reference_budget_rejection());
+    }
+    Ok(())
+}
+
+fn preserve_contextual_error(
+    schema: &ComponentSchema,
+    error: complete_value::ContextualRecordError,
+) -> Result<(), AuthoringDocumentPublicationError> {
+    use complete_value::ContextualRecordError;
+    use nara_reflect::ComponentCodecError;
+
+    match error {
+        ContextualRecordError::Reference(error) => preserve_traversal_error(&error),
+        ContextualRecordError::Value(
+            ComponentCodecError::MaterializationNodeLimit { .. }
+            | ComponentCodecError::MaterializationByteLimit { .. }
+            | ComponentCodecError::MaterializationDepthLimit { .. },
+        ) => Err(asset_reference_budget_rejection()),
+        ContextualRecordError::Value(
+            ComponentCodecError::InvalidField { .. } | ComponentCodecError::MissingField { .. },
+        ) => Ok(()),
+        error => Err(complete_value::contextual_record_rejection(schema, error)),
+    }
 }
 
 #[cfg(test)]

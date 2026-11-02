@@ -60,6 +60,7 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
     let mut reused = PrefabAddition::new(id("reused"));
     reused.prefab = Some(PrefabInstance {
         source: inner.clone(),
+        arguments: None,
         overrides: Some(inner_overlay),
     });
     let mut overrides = PrefabOverlay::new(outer_key.clone());
@@ -246,6 +247,7 @@ fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
     entity.prefab = Some(PrefabInstance {
         source,
+        arguments: None,
         overrides: None,
     });
     entity
@@ -548,6 +550,7 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
     ] {
         // Invalid source structure must remain unvisited when the active source cannot fit.
         let mut source = AliasedSource::new(PrefabDocument {
+            inputs: Default::default(),
             roots: vec![id("missing")],
             entities: vec![],
         });

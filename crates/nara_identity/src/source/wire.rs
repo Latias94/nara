@@ -14,16 +14,14 @@ struct KeyWire<Text> {
     origin: OriginWire<Text>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 enum KindWire {
     Scene,
     Prefab,
 }
 
-// Externally tagged variants preserve the discriminant in JSON and native RON enum syntax.
+// Literal string tags compose through serde value buffers, including RON content-first fields.
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum OriginWire<Text> {
     Named {
         universe: SourceUniverseId,
@@ -36,6 +34,26 @@ enum OriginWire<Text> {
     StableAsset {
         stable_id: StableAssetId,
     },
+}
+
+impl Serialize for KindWire {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(match self {
+            Self::Scene => "scene",
+            Self::Prefab => "prefab",
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for KindWire {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let kind = String::deserialize(deserializer)?;
+        match kind.as_str() {
+            "scene" => Ok(Self::Scene),
+            "prefab" => Ok(Self::Prefab),
+            _ => Err(serde::de::Error::custom("unknown source document kind")),
+        }
+    }
 }
 
 impl Serialize for SourceDocumentKey {

@@ -460,6 +460,7 @@ mod tests {
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new("reference-ui").unwrap());
             anchor.prefab = Some(PrefabInstance {
                 source: source_document.clone(),
+                arguments: None,
                 overrides,
             });
             let expansion =

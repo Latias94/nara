@@ -88,7 +88,6 @@ fn field(
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new(name)),
             intent: PrefabPropertyIntent::Set(value),
-            bindings: Vec::new(),
         }],
     }
 }
@@ -101,7 +100,6 @@ fn absent(entity: &str) -> PrefabComponentIntent {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("image")),
             intent: PrefabPropertyIntent::Absent,
-            bindings: Vec::new(),
         }],
     }
 }
@@ -112,6 +110,7 @@ fn document(components: impl IntoIterator<Item = PrefabComponentIntent>) -> Scen
     overlay.components.extend(components);
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("base.prefab.json").unwrap(),
+        arguments: None,
         overrides: Some(overlay),
     });
     SceneDocument::from_ordered_roots([anchor])
@@ -126,6 +125,7 @@ fn field_dependencies_include_nested_declarations_and_exposed_defaults_without_f
             .push(field("image", asset(name), ComponentSchemaVersion::ONE));
         PrefabInstance {
             source: AssetRef::path("nested.prefab.json").unwrap(),
+            arguments: None,
             overrides: Some(overlay),
         }
     };

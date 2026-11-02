@@ -1,8 +1,9 @@
 use super::*;
 use crate::{
     PrefabAddition, PrefabAuthoringSession, PrefabComponentSetMode, PrefabInstanceClaim,
-    PrefabReferenceBinding, SceneAuthoringSession, SourceDocumentKey, SourceDocumentKind,
+    SceneAuthoringSession, SourceDocumentKey, SourceDocumentKind,
 };
+use nara_identity::{AuthoredEntityReference, PrefabEntityOrigin, PrefabInstanceHop};
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath,
     ComponentPropertyStep, ComponentSchemaCatalog, ComponentShapeMember,
@@ -32,6 +33,7 @@ fn component() -> ComponentTypeId {
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
         source: asset("prefabs/base.prefab.json"),
+        arguments: None,
         overrides: Some(overlay),
     }
 }
@@ -46,7 +48,6 @@ fn set(value: ComponentValue) -> PrefabComponentIntent {
         target: PrefabEntityTarget::source(id("inherited")),
         component: component(),
         record: record(value),
-        bindings: Vec::new(),
     }
 }
 
@@ -126,7 +127,7 @@ fn actual_addition_set_and_nested_instance_declarations_have_distinct_locations(
 }
 
 #[test]
-fn equality_guards_complete_source_intent_including_bindings_base_and_owner() {
+fn equality_guards_complete_source_intent_including_contextual_defaults_base_and_owner() {
     let mut overlay = PrefabOverlay::new(key("base"));
     overlay.components.push(set(ComponentValue::Null));
     overlay
@@ -169,14 +170,21 @@ fn equality_guards_complete_source_intent_including_bindings_base_and_owner() {
             }
         },
         |instance| {
-            if let PrefabComponentIntent::Set { bindings, .. } =
+            if let PrefabComponentIntent::Set { record, .. } =
                 &mut instance.overrides.as_mut().unwrap().components[0]
             {
-                bindings.push(PrefabReferenceBinding {
-                    slot: ComponentFieldPath::empty(),
-                    expected: id("spelling"),
-                    target: PrefabEntityTarget::addition(id("other")),
-                });
+                record.contextual_defaults.insert(
+                    ComponentFieldId::new("reference"),
+                    ComponentValue::EntityReference(EntityReference::Authored {
+                        reference: AuthoredEntityReference {
+                            through: vec![PrefabInstanceHop {
+                                anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                                expected_base: key("base"),
+                            }],
+                            ..AuthoredEntityReference::addition(id("other"))
+                        },
+                    }),
+                );
             }
         },
         |instance| {
@@ -274,7 +282,6 @@ fn property(intent: PrefabPropertyIntent) -> PrefabComponentIntent {
         claims: vec![PrefabPropertyClaim {
             path: ComponentPropertyPath::new(ComponentFieldId::new("image")),
             intent,
-            bindings: Vec::new(),
         }],
     }
 }
@@ -466,19 +473,30 @@ fn obsolete_or_invalid_property_declarations_remain_repairable_and_exact() {
     if let PrefabComponentIntent::Properties { version, .. } = &mut obsolete {
         *version = ComponentSchemaVersion(9);
     }
-    let mut nested = property(PrefabPropertyIntent::Set(crate::patch::asset_ref_value(
-        &asset("textures/nested.png"),
-    )));
+    let retained = ComponentValue::map([
+        (
+            "image",
+            crate::patch::asset_ref_value(&asset("textures/nested.png")),
+        ),
+        (
+            "reference",
+            ComponentValue::EntityReference(EntityReference::Authored {
+                reference: AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                        expected_base: key("base"),
+                    }],
+                    ..AuthoredEntityReference::source(id("unresolved"))
+                },
+            }),
+        ),
+    ]);
+    let mut nested = property(PrefabPropertyIntent::Set(retained.clone()));
     if let PrefabComponentIntent::Properties { claims, .. } = &mut nested {
         claims[0].path =
             ComponentPropertyPath::new(ComponentFieldId::new("settings")).with_steps([
                 ComponentPropertyStep::Member(ComponentFieldId::new("retired-image")),
             ]);
-        claims[0].bindings.push(PrefabReferenceBinding {
-            slot: ComponentFieldPath::empty(),
-            expected: id("original"),
-            target: PrefabEntityTarget::source(id("unresolved")),
-        });
     }
     overlay.components.extend([
         obsolete,
@@ -508,16 +526,31 @@ fn obsolete_or_invalid_property_declarations_remain_repairable_and_exact() {
     else {
         panic!("nested property declaration must be retained");
     };
-    assert_eq!(target.property().unwrap().bindings.len(), 1);
-    assert!(matches!(target.value(), Some(ComponentValue::Map(_))));
+    assert_eq!(
+        target.property().unwrap().intent,
+        PrefabPropertyIntent::Set(retained.clone())
+    );
+    assert_eq!(target.value(), Some(&retained));
 }
 
 #[test]
 fn source_readmission_round_trips_unresolved_intent_without_compiling_its_targets() {
     let mut overlay = PrefabOverlay::new(key("not-loaded"));
-    let mut obsolete = property(PrefabPropertyIntent::Set(ComponentValue::String(
-        "preserve".into(),
-    )));
+    let mut obsolete = property(PrefabPropertyIntent::Set(ComponentValue::map([
+        ("retained", ComponentValue::String("preserve".into())),
+        (
+            "reference",
+            ComponentValue::EntityReference(EntityReference::Authored {
+                reference: AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                        expected_base: key("not-loaded"),
+                    }],
+                    ..AuthoredEntityReference::addition(id("missing-addition"))
+                },
+            }),
+        ),
+    ])));
     if let PrefabComponentIntent::Properties {
         version, claims, ..
     } = &mut obsolete
@@ -527,11 +560,6 @@ fn source_readmission_round_trips_unresolved_intent_without_compiling_its_target
             .path
             .steps
             .push(ComponentPropertyStep::MapEntry("old-key".into()));
-        claims[0].bindings.push(PrefabReferenceBinding {
-            slot: ComponentFieldPath::empty(),
-            expected: id("old-spelling"),
-            target: PrefabEntityTarget::addition(id("missing-addition")),
-        });
     }
     overlay.components.push(obsolete);
     let document = document(instance(overlay));
@@ -624,6 +652,7 @@ fn source_transactions_preserve_both_snapshot_sides_through_scene_and_prefab_his
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
         PublishedAuthoringPrefabDocument {
             document: Arc::new(PrefabDocument {
+                inputs: Default::default(),
                 roots: document.roots.clone(),
                 entities: document.entities.clone(),
             }),

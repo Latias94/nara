@@ -315,7 +315,11 @@ fn data(value: ComponentValue) -> SceneComponentRecord {
 
 fn instance(name: &str, source: AssetRef, overrides: Option<PrefabOverlay>) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
-    entity.prefab = Some(PrefabInstance { source, overrides });
+    entity.prefab = Some(PrefabInstance {
+        source,
+        arguments: None,
+        overrides,
+    });
     entity
 }
 

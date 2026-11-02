@@ -785,6 +785,27 @@ pub(super) fn value_label(value: Option<&ComponentValue>) -> String {
             nara::identity::EntityReference::Persistent { entity } => {
                 format!("{}:{}", entity.namespace.as_str(), entity.entity)
             }
+            nara::identity::EntityReference::Authored { reference } => {
+                use nara::identity::{AuthoredReferenceTarget, PrefabEntityOrigin};
+                let origin_label = |origin: &PrefabEntityOrigin| match origin {
+                    PrefabEntityOrigin::SourceEntity(entity) => format!("source:{entity}"),
+                    PrefabEntityOrigin::InstanceAddition(entity) => format!("addition:{entity}"),
+                };
+                let endpoint = match &reference.target {
+                    AuthoredReferenceTarget::Entity(origin) => origin_label(origin),
+                    AuthoredReferenceTarget::Input(input) => format!("input:{input}"),
+                };
+                let route = reference
+                    .through
+                    .iter()
+                    .map(|hop| origin_label(&hop.anchor))
+                    .collect::<Vec<_>>();
+                if route.is_empty() {
+                    endpoint
+                } else {
+                    format!("{} / {endpoint}", route.join(" / "))
+                }
+            }
         },
     }
 }

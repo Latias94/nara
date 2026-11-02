@@ -33,9 +33,11 @@ mod staged;
 #[path = "compile/selected_tests.rs"]
 mod selected_tests;
 
-pub(crate) fn expand_document<F, E>(
+pub(crate) fn expand_source<F, E>(
     context: &mut PrefabExpansionContext<'_, F, E>,
-    document: &SceneDocument,
+    roots: &[SceneEntityId],
+    entities: &[SceneEntityRecord],
+    inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
 ) -> Result<SceneDocument, PrefabExpansionFailure>
 where
     F: FnMut(
@@ -43,7 +45,14 @@ where
         &mut crate::prefab::PrefabExpansionWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    staged::expand(context, document)
+    staged::expand_source(
+        context,
+        staged::SourceTopology {
+            roots,
+            entities,
+            inputs,
+        },
+    )
 }
 
 #[cfg(feature = "serde")]
@@ -58,15 +67,27 @@ where
         &mut crate::prefab::PrefabExpansionWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let (roots, entities) = match source {
-        crate::prefab::SelectedInstanceSource::Scene(document) => {
-            (document.roots.as_slice(), document.entities.as_slice())
-        }
-        crate::prefab::SelectedInstanceSource::Prefab(document) => {
-            (document.roots.as_slice(), document.entities.as_slice())
-        }
+    let (roots, entities, inputs) = match source {
+        crate::prefab::SelectedInstanceSource::Scene(document) => (
+            document.roots.as_slice(),
+            document.entities.as_slice(),
+            None,
+        ),
+        crate::prefab::SelectedInstanceSource::Prefab(document) => (
+            document.roots.as_slice(),
+            document.entities.as_slice(),
+            Some(&document.inputs),
+        ),
     };
-    staged::expand_selected(context, staged::SourceTopology { roots, entities }, anchor)
+    staged::expand_selected(
+        context,
+        staged::SourceTopology {
+            roots,
+            entities,
+            inputs,
+        },
+        anchor,
+    )
 }
 
 impl<'a, F, E> PrefabExpansionContext<'a, F, E>

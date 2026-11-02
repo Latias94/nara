@@ -94,6 +94,7 @@ fn conversion_fixture() -> (SceneDocument, AuthoringSchemaBasis, ResolvedPrefabS
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/asset-budget.prefab.json").unwrap(),
+        arguments: None,
         overrides: None,
     });
     // Fresh IDs have 22 Base64 characters. This existing ID sorts after every possible one.

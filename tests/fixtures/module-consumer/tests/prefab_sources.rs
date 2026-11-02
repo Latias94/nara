@@ -16,6 +16,7 @@ fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(name));
     record.prefab = Some(PrefabInstance {
         source,
+        arguments: None,
         overrides: None,
     });
     record
@@ -155,6 +156,7 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
     let mut nested = PrefabAddition::new(id("nested-added"));
     nested.prefab = Some(PrefabInstance {
         source: inner_request.clone(),
+        arguments: None,
         overrides: Some(inner_overlay),
     });
     let mut outer_overlay = PrefabOverlay::new(
