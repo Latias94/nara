@@ -126,6 +126,16 @@ jobs:
           else
             cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1 --no-fail-fast
           fi
+      - name: Test independent DX12 program and output consumers
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: "${{ github.workspace }}/target"
+          WGPU_BACKEND: dx12
+          NARA_WGPU_FORCE_FALLBACK: "1"
+        run: |
+          cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(invalid_capture_preflight_refuses_before_known_native_resource_budget)' --test-threads=1
+          cargo nextest run --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --locked --test offscreen --run-ignored only -E 'test(retained_pixels_survive_resize_and_a_close_while_b_keeps_submitting)' --test-threads=1
 
   reference-game:
     name: "Reference game (${{ matrix.os }})"
@@ -177,7 +187,7 @@ jobs:
   module-consumer:
     name: "Module consumer (${{ matrix.os }})"
     runs-on: "${{ matrix.os }}"
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       CARGO_TARGET_DIR: "${{ github.workspace }}/target"
     strategy:
@@ -213,6 +223,12 @@ jobs:
         run: cargo check --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --all-targets
       - name: Test UI module consumer
         run: cargo nextest run --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --test-threads=1
+      - name: Test independent render CPU contracts
+        shell: bash
+        run: |
+          for consumer in render-output-consumer render-program-consumer render-policy-consumer render-composition-consumer stock-composition-consumer; do
+            cargo nextest run --manifest-path "tests/fixtures/$consumer/Cargo.toml" --locked --workspace --no-tests warn --test-threads=1 --no-fail-fast
+          done
       - name: Test direct module surfaces
         shell: bash
         run: |

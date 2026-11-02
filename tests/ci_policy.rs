@@ -92,7 +92,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
     for (name, job, timeout) in [
         ("root", root_job, 180),
         ("reference-game", reference_job, 45),
-        ("module-consumer", module_job, 45),
+        ("module-consumer", module_job, 90),
     ] {
         assert_platform_matrix(job, name);
         assert_eq!(integer_field(job, "timeout-minutes"), timeout);
@@ -115,6 +115,8 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo nextest run --workspace --locked --test-threads=1",
             "cargo nextest run --workspace --locked --all-features --test-threads=1",
             "cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1",
+            "cargo nextest run --manifest-path tests/fixtures/render-program-consumer/Cargo.toml --locked --test offscreen --run-ignored only",
+            "cargo nextest run --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --locked --test offscreen --run-ignored only",
             "--features desktop-winit,render-wgpu --example windowed_clear",
             "--features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites",
             "--features presentation-2d,desktop-winit,render-wgpu --example palette_material",
@@ -168,6 +170,8 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo fmt --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --all -- --check",
             "cargo check --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --all-targets",
             "cargo nextest run --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --test-threads=1",
+            "for consumer in render-output-consumer render-program-consumer render-policy-consumer render-composition-consumer stock-composition-consumer; do",
+            "cargo nextest run --manifest-path \"tests/fixtures/$consumer/Cargo.toml\" --locked --workspace --no-tests warn --test-threads=1 --no-fail-fast",
             "cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1",
             "else",
             "cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1",
