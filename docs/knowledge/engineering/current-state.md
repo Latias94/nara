@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "55b643a1270f94842ecb32d4acc646cc3b0a95715a50e8845043f1de6463114c"
+source_fingerprint: "00fa4aa14b807cfde8f3faab2659b0e942f374e6bd5da3aed6fdc5d6db020908"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "55b643a1270f94842ecb32d4acc646cc3b0a95715a50e8845043f1de646
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `55b643a1270f94842ecb32d4acc646cc3b0a95715a50e8845043f1de6463114c`
-- Immutable records: 1239
+- Source fingerprint: `00fa4aa14b807cfde8f3faab2659b0e942f374e6bd5da3aed6fdc5d6db020908`
+- Immutable records: 1240
 - Active lane heads: 2
 
 # Active Registrations
@@ -51,7 +51,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
-- [Foundation independent compiled consumers and infrastructure plan reconciliation](registry/2026-11/2026-11-02T065138Z-nara-foundation-rebaseline-codex-main-d4672b3f445e464f9bdf4d06a6f7cd1f.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
+- [Compiled Scene prerequisite committed and qualified; CP2 topology next](registry/2026-11/2026-11-02T072512Z-nara-foundation-rebaseline-codex-main-243b486aeac64ef2a4ed74de06f06862.md): `active` (nara-foundation-rebaseline-codex-main; producer `codex-foundation-main`)
 - [Ordinary structural authoring qualified](registry/2026-10/2026-10-20T053614Z-ordinary-authoring-codex-root-ac405c79936d43b09f6cfb4197d747ed.md): `completed` (ordinary-authoring-codex-root; producer `codex-root`)
 - [Persistent checkpoint consumer qualified on Windows](registry/2026-10/2026-10-21T032628Z-persistent-two-level-game-codex-root-1ac997abdab142e590af8a6c21f9f443.md): `complete` (persistent-two-level-game-codex-root; producer `codex-root`)
 - [N05 plugin failure facts qualified](registry/2026-10/2026-10-19T172945Z-plugin-error-facts-codex-root-c20974513f104398967edbed73efccaa.md): `completed` (plugin-error-facts-codex-root; producer `codex-root`)
