@@ -6,8 +6,9 @@ The [final reference-demand prerequisite is qualified](../knowledge/engineering/
 Lexical payload/input scope is selected below. Inline values, contextual defaults, source-only
 copy admission and Native value gates have their
 [qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
-The independent flat compiled representation, root/placement replacement and complete extraction
-consumer remain unfinished. No extraction implementation or qualification is claimed.
+The independent flat compiled representation and complete compiler Interface are in production
+integration. Root/placement replacement and the complete extraction consumer remain unfinished.
+No extraction implementation or qualification is claimed.
 **Parent:** [Foundation R5](2026-10-23-foundation-architecture-rebaseline-plan.md#r5-durable-addressing-prefab-overlays-and-projection-lifetime).
 **Evidence:** [Pinned extraction study](../research/2026-11-02-prefab-extraction-and-occurrence-continuity.md).
 
@@ -362,6 +363,13 @@ Q/sidecar and recovery conflicts must remain repairable and distinguishable.
    the authored document does not remove instance declarations, contextual defaults or unresolved
    value intent from its storage contract. Source-preserving preview remains a distinct result;
    successful classification or an unchecked plain wrapper cannot manufacture executable proof.
+   After the compiled prerequisite is qualified, replace source-owned placement and explicit root
+   binding as one production unit, including ordinary construction, structural edits, exact inverse
+   history and root-bound conversion. Prove the `d1, b, d2` mixed-owner order through independent
+   public editing, Undo/Redo, JSON/RON Save/Reopen, compile and ordinary spawn. Include repeated
+   instances, a nested binding chain, unchanged multi-root forest composition, actual Transform
+   and reference targets, invalid aliases/roots and exact/one-short allowances. This qualifies the
+   topology prerequisite only; steps 3-5 still own complete extraction and project recovery.
 3. Implement Scene-owned extraction and complete declaration/occurrence correspondence. Qualify
    root, non-root, nested/repeated, cross-cut reference, dormant and unknown-semantics controls.
 4. Integrate complete inventory, borrowed Review, execution retirement, new-member publication,
@@ -374,6 +382,10 @@ Q/sidecar and recovery conflicts must remain repairable and distinguishable.
 
 The controls must check actual values and reference targets, not only successful expansion:
 
+- The current compiler prerequisite includes the follow-up review's conversion round trip:
+  contextual defaults, including masked/nested references, remain source declarations after
+  conversion while Native-flat values remain declaration-free. Reopen under the same basis and
+  replay exact Undo/Redo; refuse unrepresentable source meaning before publication.
 - No extra materialized root, changed transform, reordered sibling or merged repeated occurrence.
 - Unrelated declarations are equal; all affected bindings/hops/defaults and dormant declarations
   have a complete mapping or a specific semantics refusal.

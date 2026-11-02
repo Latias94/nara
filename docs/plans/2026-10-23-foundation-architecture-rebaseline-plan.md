@@ -23,6 +23,57 @@ remains evidence and is subsumed as explicitly mapped work below, not silently m
 This plan is a decision/execution artifact, not an approval service, a release gate or permission
 to alter concurrent work. Execution automation state remains external to the architecture plan.
 
+## November 2 Follow-up Review
+
+The [follow-up review](../audits/2026-11-02-refactor-follow-up-review.md) examines the committed
+`a2640a1` baseline, before the current closed compiled-storage integration. Its four behavioral
+findings concern existing owner transitions. Correct them through their current modules before
+extending the corresponding authoring, render or build workflow; they do not select a shared
+transaction framework or reopen already qualified units.
+
+| Finding | Owning correction and acceptance |
+| --- | --- |
+| F1: converted source loses contextual defaults | Preserve the selected record's lexical default contract separately from Native-flat values, remap nested/masked defaults at localization, and require ordinary JSON/RON admission plus exact conversion Undo/Redo. Include this in the current CP2 compiler prerequisite. |
+| F2: cancelled recovery blocks an identical retry | Retain durable recovery custody while giving a new publication attempt its own destination. A cancellation after recovery publication but before Pending must allow a new adequate-limit operation to adopt the unchanged proposal. Same-operation retry retains its exact destination and guards. |
+| F3: replaced window retains Runtime picking | One successful same-window presentation replacement revokes the previous Runtime interaction authority through either Host entry. Preserve other windows, immutable image outputs and the incumbent on failure before replacement. |
+| F4: bootstrap hides compiler diagnostics | Preserve bounded diagnostics on child and decoder failure through the existing Cargo owner. A real failing headless bootstrap must expose its distinctive compiler error and never launch an executable. |
+
+The [F4 correction](../knowledge/engineering/verification/2026-11/2026-11-02T051018Z-failed-bootstrap-diagnostics-retained-through-the-real-project-tool-caller-446882fff4584df1a23d3930a6fda2dc.md)
+is qualified independently at349921f. Same-window revocation is committed at d6dccbc and
+cancelled-upgrade retry at080852c; their actual transition controls pass in the
+[focused integration replay](../knowledge/engineering/verification/2026-11/2026-11-02T053411Z-compiled-scene-owners-and-reviewed-transition-corrections-pass-current-public-cohort-e8f7d20e3e2b49d5b086ce2100f1b9b2.md).
+F1 conversion and the current compiled prerequisite retain their separate integration evidence
+and completion gates.
+
+The review's classification-cost observation remains an owner-locality follow-up: Scene should
+describe its own representation cost while Host owns the aggregate ceiling. Add explicit CPU
+execution for the new independent render consumer workspaces to the existing CI matrix, with
+native/GPU cases selected by their actual prerequisites. Do not multiply every feature combination
+or introduce another source-analysis verifier. Historical qualification keeps its original scope;
+full CP2, editable Nara-drawn UI, motion/execution and rebuild/resume remain open.
+
+The review also identifies a test-configuration gap: runtime-2d/serde/tooling tests import a
+project-tooling-only filesystem helper. Give their support code the actual feature ownership
+before qualifying that library-test combination. Do not treat this test build failure as a
+production-library failure or silently enable project-tooling in every ordinary consumer.
+
+Applying F1's ordinary-reopen control also identifies a live-export gap: a successful flattened
+snapshot omitted the new source's contextual declarations. ADR0006 selects effective-field
+snapshots in the already lowered output namespace for that new source. Qualify recompile/reopen
+under the same definitions and count both explicit/default data before copying. Keep this new-
+snapshot policy separate from conversion's preservation of the original hidden default contract.
+
+## November 2 Infrastructure Comparison
+
+The supplied [comparison](../research/2026-11-02-infrastructure-comparison/README.md) and its
+[receiving disposition](../research/2026-11-02-infrastructure-comparison-reconciliation.md)
+retain their snapshot limits. Current closed compiled storage supersedes that study's source-backed
+Native input description. Keep CP2's selected direction; add only the bounded R6 dependency-refresh
+unit, R4c/R9/R10 temporal-history interleaving, R11 buffer/document history transitions, and R12's
+exact restore oracle and observational trace consumer below. These changes extend existing units,
+not the current compiled-unit acceptance or a parallel roadmap. Qualified mechanisms stay closed;
+no performance or whole-platform support claim follows from this comparative source review.
+
 ## Decisions Made In This Round
 
 - Strategy explicitly includes installable tools and optional-language/prebuilt-Host workflows
@@ -441,6 +492,9 @@ this contract before R4c phase/executor interface freeze. Exercise the same trac
 consumption/Capture completes and a later authoritative phase fails; observe Ack, tick-success
 and retained effects independently under the selected rule.
 
+The same motion consumer also supplies R9's discontinuity/captured-history interleaving control;
+select that shared temporal contract before freezing the R4c execution interface.
+
 Acceptance: two independent scopes, independent close, saturation/cancel/late/sub-work,
 uncooperative worker, partial startup, local SDK controller and close cycles/missing dependencies.
 Measure admission-to-start, interactive latency and worker/facility multiplicity; do not repeat
@@ -548,9 +602,10 @@ ownership prerequisite is qualified separately; no extraction qualification foll
 prerequisite, the earlier source study or CP1 result.
 The [qualified final-reference-demand correction](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md)
 removes eager lookup of overwritten property references and admits retained storage paths before
-copying. The next inline-reference replacement uses lexical payload/input scope independently of
-structural target scope; explicit routes select nested inputs. Its implementation and complete
-CP2 extraction remain in the same open unit.
+copying. The [qualified inline-reference replacement](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md)
+uses lexical payload/input scope independently of structural target scope; explicit routes select
+nested inputs. Closed compiled storage is now in production integration. Root/placement replacement
+and complete CP2 extraction remain open.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
@@ -576,7 +631,8 @@ selected-instance complete conversion, not outer-only unpack, cross-source Apply
 
 **Design:** D10, D11, D13. **State:** source/import, compound continuity and bounded Runtime
 codec/base/Host and finite local-build slices qualified; general build scheduling and complete
-packaged delivery remain open.
+packaged delivery remain open. Automatic dependent-resource refresh is a separate unimplemented
+unit, not part of the finite-build qualification.
 **Owners:** asset/domain contracts and project Host.
 
 Build one independent compound importer through typed source, Runtime decode, optional cook and
@@ -608,6 +664,27 @@ local publication/reuse, actual interruption/fresh-process cases and original Ru
 Its Root/Asset1252, final independent57, owner20 and feature/Clippy evidence retain their exact
 scope. This does not qualify general dependency scheduling, target executable selection or a
 packaged Player.
+
+The [November 2 infrastructure comparison](../research/2026-11-02-infrastructure-comparison/README.md#c6--close-the-asset-change-propagation-loop)
+adds a bounded dependent-resource refresh unit after that qualified finite-build outcome. The
+selected project Host owns generation-bound refresh subscriptions derived from actual scoped input
+observations. Successful adoption of a current resource generation replaces its complete published
+dependency set. Artifact-store publication alone cannot publish live content. Warm reuse restores
+the same subscriptions without re-executing the importer. Include present and absent raw paths;
+auxiliary files need no invented asset UUID or metadata. Keep failed-attempt retry observations
+separate from last-good dependencies. Failure, cancellation and superseded completion cannot
+install stale relationships or discard the incumbent generation. Build invalidation, Runtime load
+demand and live refresh remain separate; escaped immutable Runtime bases retain captured content.
+
+Extend the existing independent `TextBundleDomain` through public Host APIs: mutate its required
+suffix and optional `build-suffix.txt`, deliver existing semantic change notifications, and observe
+actual typed text updates without manual graph mutation or an explicit rebuild call. Cover
+create/change/delete, switching dependency A to B, first-load failure followed by input creation,
+warm-reuse subscription restoration and superseded completion. Assert stable Product identities,
+last-good behavior, obsolete-edge removal, unchanged escaped generations and zero unrelated
+importer/decoder calls. Reconcile ADRs 0007/0037/0103 for this concrete ownership contract before
+implementation. This unit adopts neither Proposed0087's general scheduler nor a new watcher
+platform, and can proceed independently of complete CP2 extraction.
 
 The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
 first moves the existing executing source facet below root/Scene/2D while preserving all actual
@@ -781,9 +858,11 @@ Host. Follow its [production design](../architecture/render-program-production-d
 stock adapters, including a whole-candidate Image preflight before any upload/state creation,
 shared native realization and submission-boundary instance accounting. Stock Runtime windows and
 Scene/Canvas/Game/image consumers now use that program transaction, including its final surface
-consumer and producer-local world permissions. Continue typed policy capture installation, actual
-alternate-policy consumers, View/history and custom composition to close the complete R8 outcome.
-The remaining central capture fields and facade family retire with those consumers.
+consumer and producer-local world permissions. The
+[typed policy successor](../knowledge/engineering/verification/2026-10/2026-10-31T192756Z-original-typed-render-policy-capture-and-complete-consumer-qualification-df7f9377f51142b78060b53617c800a1.md)
+qualifies original policy captures and alternate-policy consumers; the central capture fields and
+facade family have retired. Selected View/history and composition successors below retain their
+own scope. Broader View/time facts, durable materials and the editable frontend remain open.
 
 ADR 0121's [identity, wiring and candidate boundaries](../architecture/adr/0121-composable-render-programs-and-host-execution.md#identity-wiring-and-candidate-boundaries)
 close three remaining shared contracts before interface freeze: stable Feature-instance and
@@ -876,10 +955,12 @@ The [native-composition checkpoint](../knowledge/engineering/verification/2026-1
 at `2d9f251` qualifies that handoff, actual Source/Processed retained-capture replay, independent
 two-window/image streams and clipped numeric composition within its recorded Windows/DX12 scope.
 It replaces stack-heavy inline policy tables with bounded heap storage and keeps complete native
-retirement separate from each logical Runtime. The next
+retirement separate from each logical Runtime. The subsequent
 [public stock-composition unit](../architecture/render-program-production-design.md#next-production-unit-public-stock-composition)
-must expose shared world/Canvas/UI lowering and original capture selection to an ordinary external
-Scene-effect package. Full R8/R9, material declarations and the editable Inspector remain open.
+exposes shared world/Canvas/UI lowering and original capture selection to an ordinary external
+Scene-effect package. Its [qualification](../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+covers Runtime, actual native Scene View and offscreen consumers. Full R8/R9, material declarations,
+broader View/time and the editable Inspector remain open.
 
 Acceptance: Runtime/Scene View/offscreen, intermediate textures, independent renderer policy,
 two producer streams/two windows/image target, one-stream close, old packets and device loss.
@@ -949,6 +1030,17 @@ Replaying one capture at a later Host wall time must not advance it. Coordinate-
 must provide an admitted display/input mapping or explicitly disable precise picking. A bounded
 depth/unit tracer follows the 2D seam; general 3D support does not gate the first effect.
 
+Add one joint R4c/R9a/R10 interleaving acceptance using the motion consumer and existing
+temporal-policy and stock-composition fixtures. Bind captured shader time to its original spatial
+sample, clock domain and interpolation state. Select effect-specific history compatibility for
+teleport/correction, camera cuts and material/shader edits independently of View lifetime and
+binding ABI compatibility. Exercise capture A admitted before a discontinuity but first prepared
+afterward, an already-prepared stale candidate, and a post-cut capture B. Specify whether A is
+refused or rendered without advancing current history. Preserve retained output reads, the other
+View's history and original submission custody. Cover zero/multiple fixed ticks, Pause/exact Step
+and delayed offscreen execution while retaining existing pipeline-variant rules. This extends
+acceptance within the current units without a new execution or identity kernel.
+
 Acceptance: second material layout, shared shader-dependency invalidation, compile failure keeping
 same-epoch last-good, pipeline variant accounting, drawing/picking inverse/DPI/mirror tests,
 transparent offscreen composition readback and bounded 3D depth/unit sample. Do not claim 3D support.
@@ -984,6 +1076,7 @@ Use this minimum motion consumer during R4c selection, not after its interface f
 root motion as intent, dynamic pose as solver output and the owner of corrections/writeback;
 Transform continues to own spatial projection. R4c's freeze gate is the joint motion ordering,
 actual borrowed-job join and each admitted executor profile's deferred/fault/NonSend behavior.
+Reuse R9's joint discontinuity/captured-history control rather than inventing another temporal owner.
 The following generated-content and authoring workflow is the separate R10 domain qualification,
 not an additional prerequisite for every R4c comparison. Exercise one authored collision definition that
 generates solver body/collider/debug state. Attribute generated roles to source, occurrence,
@@ -1053,6 +1146,11 @@ selection/hit testing, font fallback and Editor font policy through this slice; 
 projection alone is insufficient. Keep model/property identity, live widget incarnation and saved
 panel identity distinct. Extract toolkit-free draft logic only when actual frontend consumers
 share it, and remove the corresponding Dear path after parity rather than waiting for every panel.
+
+Before expanding the editable-control API, settle active-buffer Undo/Redo versus explicit
+document-history commands, including Escape and focus-loss transitions. Preserve the predecessor's
+explicit Apply and conflict-recovery semantics; typing and composition do not independently
+publish document edits.
 
 Select composition custody and cancellation/retirement admission with the input boundary. A late
 preedit or commit from a retired field or endpoint must not target a same-label replacement.
@@ -1124,6 +1222,23 @@ capture/build/restore failures. Reconcile ADR 0116's current one-READY launch pr
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
 saved-source receipts and exact last-good scope. Unchanged Restart is not recompilation, and
 successful launch is not the correct playable-result endpoint.
+
+Name the game-owned checkpoint DTO and exact restored-state oracle. The current Two Level
+checkpoint reconstructs live position, velocity, input and simulation tick; restoring an authored
+anchor does not qualify restoration of those values. Select the capture-consistency boundary and
+compatibility rule for the new build, Schema and content. Reconcile ADR 0076 where applicable and
+ADR 0116's one-shot READY contract before introducing a finite opt-in capture/restore exchange.
+Exercise stale replies from a replaced generation and restore failure without promoting an
+unqualified candidate. Build success or startup READY alone cannot satisfy that state oracle.
+
+Add one Host-composed diagnostic capture that correlates existing owner work, waits and outcomes
+in a standard trace viewer. Preserve operation lifetimes and the distinct App-frame,
+render-transaction-frame and device-epoch identities. Explain a slow import, rejected edit and
+delayed GPU completion; measure enabled/disabled overhead, retained bytes and dropped observations.
+Collector failure or disabled tracing cannot change operation outcomes or cleanup. Keep
+correlation observational under ADRs 0048/0068; reconcile any extension to the existing tracing-field
+policy. This adds no global subscriber, budget manager or profiler UI and does not gate the current
+compiled unit. App-frame-to-completion observations are not per-pass GPU execution timings.
 
 Add one non-implementing author's bounded external-project task with current public guides:
 persistent property plus semantic tool, edit/Play/Undo/Save/Reopen and the supported Export path.
