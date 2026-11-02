@@ -21,11 +21,7 @@ pub use nara_winit::WinitEventLoop;
 #[doc(hidden)]
 pub mod process_image;
 
-#[cfg(all(
-    feature = "runtime-2d",
-    feature = "serde",
-    any(feature = "tooling", feature = "project-tooling")
-))]
+#[cfg(feature = "serde")]
 mod file_publication;
 
 #[cfg(feature = "project-tooling")]
