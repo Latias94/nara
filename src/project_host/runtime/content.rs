@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use nara_asset::{AssetProductRef, AssetRef, ImportedProductId};
-use nara_scene::{SceneComponentBindings, SceneDocument};
+use nara_scene::{CompiledSceneDocument, SceneComponentBindings};
 
 use crate::{
     project_content::{ProjectContentSnapshot, ProjectDomainAssets},
@@ -27,9 +27,9 @@ impl PreparedSceneContent {
         }
     }
 
-    pub(super) fn document(&self) -> &SceneDocument {
+    pub(super) fn document(&self) -> &CompiledSceneDocument {
         match self {
-            Self::Source(snapshot) => snapshot.expanded_scene(),
+            Self::Source(snapshot) => snapshot.compiled_scene(),
             Self::Processed(content) => content.scene.candidate().document(),
         }
     }
@@ -41,7 +41,10 @@ impl PreparedSceneContent {
         }
     }
 
-    pub(super) fn scene_dependency(&self, product: AssetProductRef) -> Option<&SceneDocument> {
+    pub(super) fn scene_dependency(
+        &self,
+        product: AssetProductRef,
+    ) -> Option<&CompiledSceneDocument> {
         if product.product() != ImportedProductId::PRIMARY {
             return None;
         }
@@ -55,7 +58,7 @@ impl PreparedSceneContent {
                     .scene_dependencies()
                     .iter()
                     .find(|scene| scene.path() == record.path())
-                    .map(|scene| scene.expanded_scene())
+                    .map(|scene| scene.compiled_scene())
             }
             Self::Processed(content) => {
                 let member = content.base().member(product)?;

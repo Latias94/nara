@@ -39,7 +39,7 @@ pub(super) fn installed_owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 pub(super) fn open_project(project: &TestAuthoringProject) -> AuthoringProjectSessionSnapshot {
-    let root = crate::project_tooling::host_fs::writable_directory(&project.root).unwrap();
+    let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
     let schema = AuthoringProjectAdmissionHost::default()
         .prepare(root, None)
         .unwrap()

@@ -24,8 +24,8 @@ use nara_reflect::{
     encode_asset_reference_value,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord,
-    SceneDocument, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
+    SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -462,7 +462,11 @@ impl Fixture {
             )
             .with_owner(owner()),
         )]);
-        let scene = ExpandedSceneCandidate::plain(source.clone(), Arc::new(document));
+        let scene = crate::startup_scene::compile_test_scene(
+            &document,
+            plan.schema_validation().bindings(),
+            source.clone(),
+        );
         let mut database = ProjectAssetDatabase::default();
         for tag in [X, Y, Z, IMAGE] {
             database
@@ -1009,12 +1013,12 @@ fn assert_prepared_once(content: &ProcessedSceneContent) {
             .unwrap();
         assert!(std::ptr::eq(value, acquisition.product()));
     }
-    let record = content.scene.candidate().document().entities[0]
-        .components
+    let record = content.scene.candidate().document().entities()[0]
+        .components()
         .get(&ComponentTypeId::new(COMPONENT))
         .unwrap();
     assert_eq!(
-        record.value.field("future").unwrap(),
+        record.value().field("future").unwrap(),
         &encode_asset_reference_value(&AssetRef::Product(product(X)))
     );
 }

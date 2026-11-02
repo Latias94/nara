@@ -102,20 +102,20 @@ fn runtime_content_resolves_repaired_reference_after_property_composition() {
             assert_eq!(snapshot.prefabs().len(), 1);
             assert_eq!(snapshot.prefabs()[0].document(), &original);
             let socket = snapshot
-                .expanded_scene_provenance()
+                .compiled_scene_provenance()
                 .iter()
                 .find_map(|(entity, origin)| {
                     (origin.local_entity_id() == &id("socket")).then_some(entity)
                 })
                 .unwrap();
             let host = snapshot
-                .expanded_scene()
-                .entities
+                .compiled_scene()
+                .entities()
                 .iter()
-                .find(|entity| entity.components.contains_key(&component))
+                .find(|entity| entity.components().contains_key(&component))
                 .unwrap();
             assert_eq!(
-                host.components[&component].value.get("target"),
+                host.components()[&component].value().get("target"),
                 Some(&ComponentValue::EntityReference(
                     EntityReference::SceneLocal {
                         entity: socket.clone(),

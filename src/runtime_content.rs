@@ -693,16 +693,16 @@ impl RuntimeContentBase {
         let bindings = self.inner.plan.schema_validation().bindings();
         let mut work = self.inner.budget.reserve(0, 0)?;
         let mut dependencies = DependencyInventory::new(self, member)?;
-        for entity in &candidate.document().entities {
-            for (component, record) in &entity.components {
+        for entity in candidate.document().entities() {
+            for (component, record) in entity.components() {
                 // Runtime Scene admission has already proved this exact immutable selection.
                 let schema = bindings
                     .schema(component)
                     .expect("admitted Runtime Scene uses its original definitions");
                 let references = collect_declared_effective_asset_references_with_admission(
                     schema,
-                    record.version,
-                    &record.value,
+                    record.version(),
+                    record.value(),
                     candidate.limits().reference_traversal_limits(),
                     |_, _, allocation| work.admit_work(allocation),
                 )

@@ -1,6 +1,6 @@
 //! Real source admission and processed delivery for the stock capture consumer.
 
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, path::Path};
 
 use nara::{
     ProductRecipe,
@@ -25,7 +25,7 @@ use nara::{
         RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
     scene::{
-        ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings,
+        RuntimeSceneCandidate, RuntimeSceneLimits, SceneCompilationOptions, SceneComponentBindings,
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     },
 };
@@ -359,22 +359,41 @@ fn write_processed_members(
     };
     fs::write(root.join(image_file), &image_bytes).unwrap();
 
-    // These two fixtures have no Prefabs. Cook their actual flat source expansions through the
-    // production owner, including defaults and canonical references; never manufacture the wire.
+    // Compile the captured sources with their selected definitions and asset scope before cooking
+    // the sealed documents. These two fixtures have no Prefab source demand.
     assert!(
         snapshot
-            .expanded_scene()
+            .scene()
             .entities
             .iter()
             .all(|entity| entity.prefab.is_none())
     );
-    let expanded = ExpandedSceneCandidate::plain(
-        snapshot.selected_scene_source_key().clone(),
-        Arc::new(snapshot.expanded_scene().clone()),
+    let compilation = plan
+        .schema_validation()
+        .bindings()
+        .try_compile_scene_with_loader(
+            snapshot.scene(),
+            SceneCompilationOptions::default(),
+            Some(snapshot.asset_resolution()),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
-    assert_eq!(expanded.provenance(), snapshot.expanded_scene_provenance());
+    let compiled = compilation
+        .candidate
+        .expect("the captured stock Scene compiles")
+        .bind_source(snapshot.selected_scene_source_key().clone());
+    assert_eq!(compiled.document(), snapshot.compiled_scene());
+    assert_eq!(
+        compiled.canonical_provenance(),
+        snapshot.compiled_scene_provenance()
+    );
     let admitted = RuntimeSceneCandidate::cook(
-        &expanded,
+        &compiled,
         plan.schema_validation().bindings(),
         snapshot.asset_resolution(),
         RuntimeSceneLimits::default(),

@@ -118,7 +118,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
         anchor
     });
     let scene = SceneDocument::from_ordered_roots(anchors);
-    let expansion = scene.expand_prefabs_with_asset_resolution(
+    let expansion = scene.compile_with_asset_resolution(
         &registry,
         &resolver,
         database.resolver(&AssetPathScope::ROOT),
@@ -131,20 +131,25 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     let expanded = expansion.document().unwrap();
     let mut remapped_targets = BTreeSet::new();
     let component_id = ComponentTypeId::new(COMPONENT_ID);
-    for entity in &expanded.entities {
-        let Some(record) = entity.components.get(&component_id) else {
+    for entity in expanded.entities() {
+        let Some(record) = entity.components().get(&component_id) else {
             continue;
         };
-        let value = Relationships::__decode_persistent_component(&record.value).unwrap();
+        let value = Relationships::__decode_persistent_component(record.value()).unwrap();
         assert_eq!(value.weights, [7, 255]);
         let Some(EntityReference::SceneLocal { entity: target }) = &value.targets["friends"][0]
         else {
             panic!("prefab remap must preserve the local reference kind");
         };
         assert_ne!(target.as_str(), "friend");
-        assert!(expanded.entities.iter().any(|entity| &entity.id == target));
+        assert!(
+            expanded
+                .entities()
+                .iter()
+                .any(|entity| entity.id() == target)
+        );
         assert_eq!(
-            expansion.provenance().unwrap()[&entity.id]
+            expansion.provenance().unwrap()[entity.id()]
                 .projection_path()
                 .unwrap()
                 .root_anchor(),
@@ -164,7 +169,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
             &registry,
             &component_id,
             ComponentSchemaVersion::ONE,
-            &record.value,
+            record.value(),
         )
         .unwrap();
         assert_eq!(assets.len(), 1);

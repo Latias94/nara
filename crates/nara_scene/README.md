@@ -31,10 +31,17 @@ spawns it into a fresh world, and ends the exact instance through the Scene owne
 
 ## Source And Placement
 
-Documents remain local graphs. Bind a plain document to an explicit `SourceDocumentKey` with
-`ExpandedSceneCandidate::plain(source, document)`. Prefab expansion returns a move-only
-`ExpandedSceneDocument`; its source owner consumes `bind_source(source)` to obtain the same
-required materialization input without copying or assembling provenance.
+Source documents retain authored graphs, declarations and reference intent. Compile a source
+with `document.compile(&registry, &resolver)`; even a source without Prefabs uses this complete
+operation, with an empty `InMemoryPrefabSourceResolver`. A successful `SceneCompilationReport`
+owns a move-only `CompiledSceneDocument`. Its source owner consumes `bind_source(source)` to
+obtain the required `CompiledSceneCandidate` without copying or assembling provenance.
+
+Compiled records expose borrowed accessors for the ordered flat hierarchy, actual selected Schema
+owner, current version, effective value and canonical provenance. They have no unchecked source
+constructor or mutable public fields. Native reception checks the complete batch before codecs
+and does not migrate these values or insert defaults. `ExpandedSceneDocument` remains an
+authoring observation; it cannot be passed to materialization.
 
 Materialize with `spawn_scene(world, registry, &candidate, &occurrence, database)`. The occurrence
 is an explicit `SceneOccurrenceKey::new(namespace, slot)` selected by the instantiating consumer.
@@ -108,10 +115,13 @@ than inferring which copy is newer. An unaddressed old key is released after req
 File-backed conflict admission still belongs to Project Content; this author-owned container does
 not replace its duplicate stable-ID refusal.
 
-Expansion detects cycles by canonical source, not lookup spelling, and retains the required key
-on every projection step. Repeated siblings remain independent placements. The separately compiled
+Compilation detects cycles in the effective canonical source and declaration/demand state, not
+lookup spelling, and retains the required key on every projection step. Finite re-entry under a
+different selected declaration remains valid. Repeated siblings remain independent placements. The
+separately compiled
 [`Prefab consumer`](../../tests/fixtures/module-consumer/tests/prefab_sources.rs) exercises alias
 replacement, cycle refusal and successful re-expansion through public interfaces.
 
 Containing Scene binding and runtime occurrence are supplied separately when materializing the
-expanded document. Complete Runtime/Canvas key lowering remains a separate integration obligation.
+compiled document. Runtime identity uses the complete canonical source, occurrence and typed
+entity provenance rather than private compiler locators.

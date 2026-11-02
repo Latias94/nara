@@ -36,7 +36,8 @@ impl Fixture {
         let report = crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key("new/source"),
                 std::sync::Arc::new((source).clone()),
             ),
@@ -55,7 +56,7 @@ impl Fixture {
 
     fn replace(
         &mut self,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         database: nara_asset::AssetReferenceResolver<'_>,
         bindings: SceneAssetBindings,
         configure: impl FnOnce(&mut crate::advanced::SceneProductOverlayWriter<'_>),
@@ -120,8 +121,12 @@ impl Fixture {
     }
 }
 
-fn next_source(reference: AssetRef) -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(
+fn next_source(
+    registry: &ComponentRegistrySnapshot,
+    reference: AssetRef,
+) -> CompiledSceneCandidate {
+    compiled_scene(
+        registry,
         scene_source_key("next_source/candidate"),
         Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
             scene_id("next"),
@@ -181,7 +186,7 @@ fn prebound_asset_identity_is_shared_by_decode_apply_and_the_committed_server() 
         bindings.validate(&fixture.world).unwrap();
 
         let report = fixture.replace(
-            &next_source(reference),
+            &next_source(&fixture.registry, reference),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
             bindings,
             |_| {},
@@ -230,7 +235,8 @@ fn untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation
         .map(|entity| entity.id())
         .collect::<BTreeSet<_>>();
     let stats = fixture.world.resource::<WorldIdentityDomain>().stats();
-    let candidate = ExpandedSceneCandidate::plain(
+    let candidate = compiled_scene(
+        &fixture.registry,
         scene_source_key(
             "untouched_bindings_from_another_world_reject_before_overlay_or_scene_mutation/candidate",
         ),
@@ -287,7 +293,7 @@ fn captured_asset_server_changes_reject_even_when_bindings_are_untouched() {
             Err(ComponentCodecError::AssetServerChanged)
         ));
         let report = fixture.replace(
-            &next_source(AssetRef::StableId(asset_id)),
+            &next_source(&fixture.registry, AssetRef::StableId(asset_id)),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
             bindings,
             |_| {
@@ -324,7 +330,8 @@ fn apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overla
             &AssetSourceKind::Image,
         )
         .unwrap();
-    let candidate = ExpandedSceneCandidate::plain(
+    let candidate = compiled_scene(
+        &fixture.registry,
         scene_source_key(
             "apply_rejection_discards_prebound_catalogue_scratch_entities_and_owned_overlay_values/candidate",
         ),

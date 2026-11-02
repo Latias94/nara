@@ -32,19 +32,21 @@ fn inspect_project_scene_restart(world: &mut World) {
         return;
     }
     let original = world.resource::<CurrentSceneOwner>().receipt().clone();
-    let source_pointer = world.resource::<CurrentSceneOwner>().source() as *const SceneDocument;
+    let source_pointer =
+        world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument;
     let entity_count = world.entities().len();
     let limits =
         SceneProductTransactionLimits::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap());
     let direct = SceneSource::direct(
-        nara_scene::ExpandedSceneCandidate::plain(
+        crate::startup_scene::compile_test_scene(
+            &SceneDocument::default(),
+            nara_scene::scene_component_bindings(world).unwrap(),
             nara_scene::SourceDocumentKey::named(
                 "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
                 "project-scene-restart-fixture",
                 nara_scene::SourceDocumentKind::Scene,
             )
             .unwrap(),
-            Arc::new(SceneDocument::default()),
         ),
         ByteLimit::new(16 * 1024).unwrap(),
     )
@@ -67,7 +69,7 @@ fn inspect_project_scene_restart(world: &mut World) {
     assert_ne!(receipt.instance_id(), original.instance_id());
     assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
     assert_eq!(
-        world.resource::<CurrentSceneOwner>().source() as *const SceneDocument,
+        world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument,
         source_pointer
     );
     assert_eq!(world.entities().len(), entity_count);

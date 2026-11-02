@@ -195,10 +195,23 @@ fn limits() -> SceneProductTransactionLimits {
     SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE)
 }
 
-fn current(world: &mut World) -> (SceneDocument, SpawnedSceneInstance) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SceneObservation {
+    address: usize,
+    roots: Vec<nara_identity::SceneEntityId>,
+}
+
+fn observe(document: &CompiledSceneDocument) -> SceneObservation {
+    SceneObservation {
+        address: std::ptr::from_ref(document) as usize,
+        roots: document.roots().to_vec(),
+    }
+}
+
+fn current(world: &mut World) -> (SceneObservation, SpawnedSceneInstance) {
     let mut access = SystemState::<CurrentScene>::new(world);
     let current = access.get_mut(world).unwrap();
-    (current.source().clone(), current.receipt().clone())
+    (observe(current.source()), current.receipt().clone())
 }
 
 fn assert_zero_budget(loader: &ProjectContentLoader) {
@@ -237,10 +250,10 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
             );
             assert_eq!(prepared.expected_instance(), &original_receipt);
             assert_eq!(
-                prepared.scene().roots,
+                prepared.scene().roots(),
                 [nara_identity::SceneEntityId::new("level-b").unwrap()]
             );
-            prepared.scene().clone()
+            observe(prepared.scene())
         };
         // Ready content remains data until the game explicitly accepts it.
         assert_eq!(current(world), original);
@@ -287,7 +300,7 @@ fn original_host_prepares_inspectable_scene_then_commits_and_acknowledges_b_to_a
                 "startup.scene.json"
             );
             assert_eq!(prepared.expected_instance(), &committed_b);
-            prepared.scene().clone()
+            observe(prepared.scene())
         };
         let report = commit_prepared_project_scene(world, a, limits(), &[], |writer| {
             writer.replace_resource(CommittedLevel::new(2));

@@ -831,7 +831,12 @@ impl Project {
                 SceneComponentRecord::new(
                     ComponentSchemaVersion::ONE,
                     fields.__encode_persistent_component().unwrap(),
-                ),
+                )
+                .with_contextual_default(
+                    ComponentFieldId::new("nested"),
+                    nested_reference("target"),
+                )
+                .with_contextual_default(ComponentFieldId::new("optional"), reference("target")),
             ),
             SceneEntityRecord::new(id("target")),
             SceneEntityRecord::new(id("other")),

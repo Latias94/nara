@@ -10,6 +10,8 @@ use nara::{
 struct AssetServerObserverCanary(u32);
 
 const PLAYER_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
 const TILESET_STABLE_ID: &str = "b73f0f16-09e8-4265-b090-b689b41c197e";
 const UNKNOWN_STABLE_ID: &str = "4bf6d3ff-f6c6-47fb-9a39-4ab27598094f";
 
@@ -34,11 +36,12 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence(
             "sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy/report",
@@ -108,11 +111,12 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "unknown_sprite_stable_asset_id_fails_without_world_mutation/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("unknown_sprite_stable_asset_id_fails_without_world_mutation/report"),
         Some(database.resolver(&AssetPathScope::ROOT)),
@@ -159,11 +163,12 @@ fn sprite_path_asset_ref_still_resolves_without_project_database() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "sprite_path_asset_ref_still_resolves_without_project_database/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("sprite_path_asset_ref_still_resolves_without_project_database/report"),
         None,
@@ -196,9 +201,10 @@ fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key("asset_free_sprite_does_not_claim_or_insert_an_asset_server/document"),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("asset_free_sprite_does_not_claim_or_insert_an_asset_server/report"),
         None,
@@ -249,11 +255,12 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence(
             "unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutation/report",
@@ -311,9 +318,10 @@ fn prefab_stable_asset_id_uses_asset_database_preflight() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::prefab(
+            &registry,
+            &prefab,
             named_prefab_source_key("prefab_stable_asset_id_uses_asset_database_preflight/prefab"),
-            std::sync::Arc::new((prefab).instantiate()),
         ),
         &scene_occurrence("prefab_stable_asset_id_uses_asset_database_preflight/report"),
         Some(database.resolver(&AssetPathScope::ROOT)),
@@ -352,11 +360,12 @@ fn prefab_patch_field_override_preserves_inherited_sprite_data() {
             "{:?}",
             instantiated.diagnostics
         );
-        let candidate = nara::scene::ExpandedSceneCandidate::plain(
+        let candidate = compiled_scene::scene(
+            &registry,
+            &instantiated.document.unwrap(),
             named_prefab_source_key(
                 "prefab_patch_field_override_preserves_inherited_sprite_data/prefab",
             ),
-            std::sync::Arc::new(instantiated.document.unwrap()),
         );
         nara::scene::spawn_scene(
             &mut world,
@@ -464,9 +473,10 @@ fn tilemap_stable_tileset_id_resolves_before_world_spawn() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key("tilemap_stable_tileset_id_resolves_before_world_spawn/document"),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence("tilemap_stable_tileset_id_resolves_before_world_spawn/report"),
         Some(database.resolver(&AssetPathScope::ROOT)),

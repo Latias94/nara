@@ -4,23 +4,28 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_reflect::{
-    __private::{EntityReferencePlanError, plan_declared_entity_references_with_admission},
-    ComponentEntityReferenceRewriteError, ComponentValueMaterializationLimits, EntityReference,
+    __private::{
+        DeclaredEntityReferencePlan, EntityReferencePlanError,
+        plan_declared_entity_references_with_admission,
+        plan_declared_value_entity_references_with_admission,
+    },
+    ComponentEntityReferenceRewriteError, ComponentValue, ComponentValueMaterializationLimits,
+    EntityReference,
 };
 
 use super::work::ConversionWork;
 use super::{LocalizedPrefabEntity, PrefabConversionError, PrefabConversionFootprint};
 use crate::{
-    AuthoringSchemaBasis, PrefabExpansionOptions, PrefabProjectionPath, ResolvedPrefabSource,
-    SceneAuthoringHistoryLimits, SceneEntityId, SceneEntityRecord, SceneFileLimits,
+    AuthoringSchemaBasis, PrefabProjectionPath, ResolvedPrefabSource, SceneAuthoringHistoryLimits,
+    SceneCompilationOptions, SceneEntityId, SceneEntityRecord, SceneFileLimits,
     ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     ScenePlacement, ScenePlacementOwner,
     authoring::{creation::allocate_entity_id, history_error_report},
     patch::bounded_scene_entities_source_cost,
     prefab::{
-        AuthoringPrefabOmissionReason, PrefabExpansionWorkingSet, PrefabOverlayCostLimits,
-        SelectedInstanceCompilation, SelectedInstanceSource, prefab_instance_cost,
-        try_compile_selected_authoring_instance_with_loader,
+        AuthoringSceneCompilationOmissionReason, PrefabOverlayCostLimits,
+        SceneCompilationWorkingSet, SelectedInstanceCompilation, SelectedInstanceSource,
+        prefab_instance_cost, try_compile_selected_authoring_instance_with_loader,
     },
 };
 
@@ -41,12 +46,12 @@ pub(super) fn prepare<F, E>(
     anchor: &SceneEntityId,
     basis: &AuthoringSchemaBasis,
     history: SceneAuthoringHistoryLimits,
-    options: PrefabExpansionOptions,
+    options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<LocalizedConversion, PrefabConversionError<E>>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     let value_nodes = nara_core::ItemLimit::new(
         history
@@ -173,7 +178,7 @@ fn lower(
     if compiled.omissions.iter().any(|omission| {
         matches!(
             omission.reason,
-            AuthoringPrefabOmissionReason::RecordUnavailable(_)
+            AuthoringSceneCompilationOmissionReason::RecordUnavailable(_)
         )
     }) {
         return Err(refused(
@@ -379,55 +384,29 @@ fn lower(
                 EntityReferencePlanError::Reference(error) => reference_error(error),
                 EntityReferencePlanError::Admission(report) => report,
             })?;
-            let mut reference_refusal = None;
-            plan.visit(&payload.value, |_, reference| {
-                if reference_refusal.is_some() {
-                    return Ok::<_, ScenePatchReport>(());
-                }
-                let admitted = match reference {
-                    EntityReference::SceneLocal { entity } => {
-                        let target = identifiers.get(entity).unwrap_or(entity);
-                        if !identifiers.contains_key(entity)
-                            && source
-                                .binary_search_by(|record| record.id.cmp(entity))
-                                .is_err()
-                        {
-                            Err(refused(
-                                "Conversion cannot retain another occurrence's projected locator",
-                            ))
-                        } else {
-                            work.reserve(target.as_str().len())
-                        }
-                    }
-                    EntityReference::Persistent { entity } => {
-                        work.reserve(entity.namespace.as_str().len())
-                    }
-                    EntityReference::Authored { .. } => Err(refused(
-                        "Conversion requires resolved compiled entity references",
-                    )),
-                };
-                // Keep budget refusal outside visit's path-bearing error wrapper.
-                reference_refusal = admitted.err();
-                Ok(())
-            })
-            .map_err(reference_error)?;
-            if let Some(report) = reference_refusal {
-                return Err(report);
+            localize_references(&mut payload.value, &plan, &identifiers, source, &mut work)?;
+            for (id, value) in &mut payload.contextual_defaults {
+                let field = schema
+                    .fields()
+                    .iter()
+                    .find(|field| field.id() == id)
+                    .ok_or_else(|| {
+                        refused("Conversion requires the declared contextual default field")
+                    })?;
+                let plan =
+                    plan_declared_value_entity_references_with_admission::<ScenePatchReport, _>(
+                        field,
+                        field.shape(),
+                        value,
+                        reference_limits,
+                        |_, _, allocation_bytes| work.reserve(allocation_bytes),
+                    )
+                    .map_err(|error| match error {
+                        EntityReferencePlanError::Reference(error) => reference_error(error),
+                        EntityReferencePlanError::Admission(report) => report,
+                    })?;
+                localize_references(value, &plan, &identifiers, source, &mut work)?;
             }
-            plan.rewrite_in_place(&mut payload.value, |_, reference| {
-                Ok::<_, ScenePatchReport>(match reference {
-                    EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
-                        entity: identifiers.get(entity).unwrap_or(entity).clone(),
-                    },
-                    EntityReference::Persistent { .. } => reference.clone(),
-                    EntityReference::Authored { .. } => {
-                        return Err(refused(
-                            "Conversion requires resolved compiled entity references",
-                        ));
-                    }
-                })
-            })
-            .map_err(reference_error)?;
         }
         let children = std::mem::take(&mut record.children);
         record.id = entity.clone();
@@ -454,6 +433,62 @@ fn lower(
         ));
     }
     Ok((ScenePatchDocument::new(operations), footprint, entities))
+}
+
+fn localize_references(
+    value: &mut ComponentValue,
+    plan: &DeclaredEntityReferencePlan,
+    identifiers: &BTreeMap<SceneEntityId, SceneEntityId>,
+    source: &[SceneEntityRecord],
+    work: &mut LocalizationWork<'_>,
+) -> Result<(), ScenePatchReport> {
+    let mut reference_refusal = None;
+    plan.visit(value, |_, reference| {
+        if reference_refusal.is_some() {
+            return Ok::<_, ScenePatchReport>(());
+        }
+        let admitted = match reference {
+            EntityReference::SceneLocal { entity } => {
+                let target = identifiers.get(entity).unwrap_or(entity);
+                if !identifiers.contains_key(entity)
+                    && source
+                        .binary_search_by(|record| record.id.cmp(entity))
+                        .is_err()
+                {
+                    Err(refused(
+                        "Conversion cannot retain another occurrence's projected locator",
+                    ))
+                } else {
+                    work.reserve(target.as_str().len())
+                }
+            }
+            EntityReference::Persistent { entity } => work.reserve(entity.namespace.as_str().len()),
+            EntityReference::Authored { .. } => Err(refused(
+                "Conversion requires resolved compiled entity references",
+            )),
+        };
+        // Keep budget refusal outside visit's path-bearing error wrapper.
+        reference_refusal = admitted.err();
+        Ok(())
+    })
+    .map_err(reference_error)?;
+    if let Some(report) = reference_refusal {
+        return Err(report);
+    }
+    plan.rewrite_in_place(value, |_, reference| {
+        Ok::<_, ScenePatchReport>(match reference {
+            EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
+                entity: identifiers.get(entity).unwrap_or(entity).clone(),
+            },
+            EntityReference::Persistent { .. } => reference.clone(),
+            EntityReference::Authored { .. } => {
+                return Err(refused(
+                    "Conversion requires resolved compiled entity references",
+                ));
+            }
+        })
+    })
+    .map_err(reference_error)
 }
 
 struct LocalizationWork<'a> {

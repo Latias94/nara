@@ -85,7 +85,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
         .with_owner(installed_owner().owner_id().clone()),
     );
     fs::write(&outer_path, outer.to_json_string().unwrap()).unwrap();
-    let root = crate::project_tooling::host_fs::writable_directory(&project.root).unwrap();
+    let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
     let schema = AuthoringProjectAdmissionHost::default()
         .prepare(root, None)
         .unwrap()

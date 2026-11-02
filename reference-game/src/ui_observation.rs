@@ -464,7 +464,7 @@ mod tests {
                 overrides,
             });
             let expansion =
-                SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+                SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
             assert!(!expansion.diagnostics.has_errors(), "{expansion:#?}");
             let candidate = expansion
                 .candidate

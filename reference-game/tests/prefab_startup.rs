@@ -64,18 +64,18 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .collect::<Vec<_>>();
     assert_eq!(prefab_ids, ["enemy"]);
 
-    let expanded = loaded.snapshot.expanded_scene();
-    let provenance = loaded.snapshot.expanded_scene_provenance();
-    assert_eq!(expanded.entities.len(), 24);
-    assert_eq!(provenance.len(), expanded.entities.len());
+    let expanded = loaded.snapshot.compiled_scene();
+    let provenance = loaded.snapshot.compiled_scene_provenance();
+    assert_eq!(expanded.entities().len(), 24);
+    assert_eq!(provenance.len(), expanded.entities().len());
     assert_eq!(
         expanded
-            .entities
+            .entities()
             .iter()
-            .map(|entity| &entity.id)
+            .map(|entity| entity.id())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        expanded.entities.len()
+        expanded.entities().len()
     );
     let enemy_projections = provenance
         .iter()
@@ -117,51 +117,51 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         ["reference-hud", "terminal-overlay"],
     );
     let player = expanded
-        .entities
+        .entities()
         .iter()
         .find(|entity| {
             entity
-                .components
+                .components()
                 .contains_key(&ComponentTypeId::new("reference_game.PlayerRole"))
         })
         .unwrap();
     assert!(
         player
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.PlayerRole")),
     );
     assert!(
         player
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.InitialHealth")),
     );
     assert!(
         player
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.InitialVelocity2d")),
     );
     assert!(
         player
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("nara.transform.Transform2d")),
     );
     let weapon = expanded
-        .entities
+        .entities()
         .iter()
         .find(|entity| {
             entity
-                .components
+                .components()
                 .contains_key(&ComponentTypeId::new("reference_game.Weapon"))
         })
         .unwrap();
-    assert_eq!(player.children.as_slice(), std::slice::from_ref(&weapon.id));
+    assert_eq!(player.children(), std::slice::from_ref(weapon.id()));
     assert!(
         weapon
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.Weapon")),
     );
     let weapon_transform =
-        &weapon.components[&ComponentTypeId::new("nara.transform.Transform2d")].value;
+        weapon.components()[&ComponentTypeId::new("nara.transform.Transform2d")].value();
     assert_eq!(
         weapon_transform
             .field("translation")
@@ -171,51 +171,48 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         f64::from(1.2_f32),
     );
     let enemy = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == enemy_projections["enemy-anchor"])
+        .find(|entity| entity.id() == enemy_projections["enemy-anchor"])
         .unwrap();
     let enemy_anchor = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.id.as_str() == "enemy-anchor")
+        .find(|entity| entity.id().as_str() == "enemy-anchor")
         .unwrap();
-    assert_eq!(
-        enemy_anchor.children.as_slice(),
-        std::slice::from_ref(&enemy.id)
-    );
+    assert_eq!(enemy_anchor.children(), std::slice::from_ref(enemy.id()));
     assert!(
         enemy
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.EnemyRole")),
     );
     assert!(
         enemy
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.InitialHealth")),
     );
     assert!(
         enemy
-            .components
+            .components()
             .contains_key(&ComponentTypeId::new("reference_game.InitialVelocity2d")),
     );
     let second_enemy = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == enemy_projections["enemy-anchor-2"])
+        .find(|entity| entity.id() == enemy_projections["enemy-anchor-2"])
         .unwrap();
     assert_eq!(
         second_enemy
-            .components
+            .components()
             .get(&ComponentTypeId::new("reference_game.WaveSpawn"))
             .unwrap()
-            .value
+            .value()
             .field_u64("tick")
             .unwrap(),
         5,
     );
     let second_transform =
-        &second_enemy.components[&ComponentTypeId::new("nara.transform.Transform2d")].value;
+        second_enemy.components()[&ComponentTypeId::new("nara.transform.Transform2d")].value();
     assert_eq!(
         second_transform
             .field("translation")
@@ -232,19 +229,19 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         let removed_id = ComponentTypeId::new(removed_id);
         assert!(
             expanded
-                .entities
+                .entities()
                 .iter()
-                .all(|entity| !entity.components.contains_key(&removed_id)),
+                .all(|entity| !entity.components().contains_key(&removed_id)),
             "expanded content retained removed aggregate {removed_id}",
         );
     }
     let sprite_id = ComponentTypeId::new("nara.sprite.Sprite");
-    let sprite = enemy.components.get(&sprite_id).unwrap();
+    let sprite = enemy.components().get(&sprite_id).unwrap();
     let references = collect_declared_asset_references(
         loaded.plan.schema_validation().snapshot(),
         &sprite_id,
-        sprite.version,
-        &sprite.value,
+        sprite.version(),
+        sprite.value(),
     )
     .unwrap();
     assert_eq!(references.len(), 1);

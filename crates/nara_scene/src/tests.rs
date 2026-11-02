@@ -620,24 +620,15 @@ fn unsupported_prefab_instance_prevents_world_mutation() {
             overrides: None,
         }),
     }]);
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
-    let report = crate::spawn_scene(
-        &mut world,
-        &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("unsupported_prefab_instance_prevents_world_mutation/document"),
-            std::sync::Arc::new((document).clone()),
-        ),
-        &scene_occurrence("unsupported_prefab_instance_prevents_world_mutation/report"),
-        None,
-    );
+    let report = document.compile(&registry, &InMemoryPrefabSourceResolver::new());
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
     assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.prefab-instance-unsupported"
+        diagnostic.code().as_str() == "scene.prefab-source-missing"
             && diagnostic_has_field_class(diagnostic, "entity-id", DiagnosticFieldClass::Public)
             && diagnostic_has_text_field(diagnostic, "field-path", "prefab.source")
             && diagnostic_has_field_class(
@@ -662,9 +653,9 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", source)]);
     let mut world = World::new();
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
     let report = {
-        let expansion = (document).expand_prefabs(&registry, &resolver);
+        let expansion = (document).compile(&registry, &resolver);
         assert!(
             !expansion.diagnostics.has_errors(),
             "{:?}",
@@ -687,13 +678,13 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     assert!(!expansion.diagnostics.has_errors());
     let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
     let expanded = expansion.document().unwrap();
-    assert_eq!(expanded.entities.len(), 2);
+    assert_eq!(expanded.entities().len(), 2);
     let anchor = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.id == scene_id("enemy"))
+        .find(|entity| entity.id() == &scene_id("enemy"))
         .unwrap();
-    assert_eq!(anchor.children.as_slice(), std::slice::from_ref(visual_id));
+    assert_eq!(anchor.children(), std::slice::from_ref(visual_id));
     assert!(!report.diagnostics.has_errors());
     assert_eq!(spawned_instance(&report).len(), 2);
     let visual = spawned_entity(&world, &report, visual_id);
@@ -727,22 +718,22 @@ fn prefab_instance_property_pin_applies_before_projection() {
         "enemy", source, overrides,
     )]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
     let expanded = expansion.document().unwrap();
     let visual = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == visual_id)
+        .find(|entity| entity.id() == visual_id)
         .unwrap();
     assert_eq!(
         visual
-            .components
+            .components()
             .get(&position_type_id())
             .unwrap()
-            .value
+            .value()
             .field_i64("x")
             .unwrap(),
         11
@@ -796,17 +787,17 @@ fn prefab_instance_override_preserves_ordered_placement_before_projection() {
         "instance", source, overrides,
     )]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let expanded = expansion.document().unwrap();
     let anchor = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.id == scene_id("instance"))
+        .find(|entity| entity.id() == &scene_id("instance"))
         .unwrap();
     assert_eq!(
-        anchor.children.iter().collect::<Vec<_>>(),
+        anchor.children().iter().collect::<Vec<_>>(),
         [
             prefab_projection_id(&expansion, "instance", &["root-b"]),
             prefab_projection_id(&expansion, "instance", &["added"]),
@@ -815,12 +806,12 @@ fn prefab_instance_override_preserves_ordered_placement_before_projection() {
         ]
     );
     let root_a = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == prefab_projection_id(&expansion, "instance", &["root-a"]))
+        .find(|entity| entity.id() == prefab_projection_id(&expansion, "instance", &["root-a"]))
         .unwrap();
     assert_eq!(
-        root_a.children.iter().collect::<Vec<_>>(),
+        root_a.children().iter().collect::<Vec<_>>(),
         [
             prefab_projection_id(&expansion, "instance", &["child-b"]),
             prefab_projection_id(&expansion, "instance", &["child-a"]),
@@ -854,7 +845,7 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     let document =
         SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source.clone())]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let flash_id = prefab_projection_id(&expansion, "enemy", &["weapon", "muzzle", "flash"]);
@@ -882,12 +873,12 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     );
     assert_eq!(projection.steps()[2].entity_id(), &scene_id("flash"));
     let expanded = expansion.document().unwrap();
-    assert_eq!(expanded.entities.len(), 4);
-    assert_eq!(expansion, document.expand_prefabs(&registry, &resolver));
+    assert_eq!(expanded.entities().len(), 4);
+    assert_eq!(expansion, document.compile(&registry, &resolver));
 
     let mut world = World::new();
     let report = {
-        let expansion = (document).expand_prefabs(&registry, &resolver);
+        let expansion = (document).compile(&registry, &resolver);
         assert!(
             !expansion.diagnostics.has_errors(),
             "{:?}",
@@ -937,18 +928,18 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
         prefab_anchor("right", source),
     ]);
 
-    let initial = document.expand_prefabs(&registry, &resolver);
+    let initial = document.compile(&registry, &resolver);
     assert!(!initial.diagnostics.has_errors());
     let authored_id = prefab_projection_id(&initial, "left", &["visual"]).clone();
     document.roots.push(authored_id.clone());
     document
         .entities
         .push(SceneEntityRecord::new(authored_id.clone()));
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let expanded = expansion.document().unwrap();
-    assert_eq!(expanded.entities.len(), 5);
+    assert_eq!(expanded.entities().len(), 5);
     let left = prefab_projection_id(&expansion, "left", &["visual"]);
     let right = prefab_projection_id(&expansion, "right", &["visual"]);
     assert_ne!(left, right);
@@ -983,23 +974,26 @@ fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
         prefab_anchor("left/branch", inner_source),
     ]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let expanded = expansion.document().unwrap();
-    assert_eq!(expanded.roots, [scene_id("left"), scene_id("left/branch")]);
-    assert_eq!(expanded.entities.len(), 5);
+    assert_eq!(
+        expanded.roots(),
+        [scene_id("left"), scene_id("left/branch")]
+    );
+    assert_eq!(expanded.entities().len(), 5);
     assert_eq!(
         expanded
-            .entities
+            .entities()
             .iter()
-            .map(|entity| &entity.id)
+            .map(|entity| entity.id())
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
         5
     );
     assert_eq!(expansion.provenance().unwrap().len(), 5);
-    for root in &expanded.roots {
+    for root in expanded.roots() {
         let provenance = expansion.provenance().unwrap().get(root).unwrap();
         assert_eq!(provenance.local_entity_id(), root);
         assert!(provenance.projection_path().is_none());
@@ -1061,18 +1055,18 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
         ],
     );
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let expanded = expansion.document().unwrap();
-    assert_eq!(expanded.roots.as_slice(), std::slice::from_ref(&anchor));
+    assert_eq!(expanded.roots(), std::slice::from_ref(&anchor));
     let anchor = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.id == anchor)
+        .find(|entity| entity.id() == &anchor)
         .unwrap();
     assert_eq!(
-        anchor.children.iter().collect::<Vec<_>>(),
+        anchor.children().iter().collect::<Vec<_>>(),
         [
             prefab_projection_id(&expansion, "anchor", &["root-b"]),
             prefab_projection_id(&expansion, "anchor", &["root-a"]),
@@ -1081,12 +1075,12 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
         ]
     );
     let root_a = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == prefab_projection_id(&expansion, "anchor", &["root-a"]))
+        .find(|entity| entity.id() == prefab_projection_id(&expansion, "anchor", &["root-a"]))
         .unwrap();
     assert_eq!(
-        root_a.children.iter().collect::<Vec<_>>(),
+        root_a.children().iter().collect::<Vec<_>>(),
         [
             prefab_projection_id(&expansion, "anchor", &["child-b"]),
             prefab_projection_id(&expansion, "anchor", &["child-a"]),
@@ -1125,7 +1119,7 @@ fn repeated_prefab_instances_remap_declared_scene_local_references() {
         prefab_anchor("right", source),
     ]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let expanded = expansion.document().unwrap();
@@ -1134,24 +1128,24 @@ fn repeated_prefab_instances_remap_declared_scene_local_references() {
         let target_id = prefab_projection_id(&expansion, anchor, &[local_target]);
         assert!(target_id.as_str().len() < local_target.len());
         let source = expanded
-            .entities
+            .entities()
             .iter()
-            .find(|entity| &entity.id == source_id)
+            .find(|entity| entity.id() == source_id)
             .unwrap();
         assert_eq!(
-            exported_entity_link(source),
+            compiled_entity_link(source),
             &EntityReference::SceneLocal {
                 entity: target_id.clone(),
             }
         );
 
         let external = expanded
-            .entities
+            .entities()
             .iter()
-            .find(|entity| &entity.id == prefab_projection_id(&expansion, anchor, &["external"]))
+            .find(|entity| entity.id() == prefab_projection_id(&expansion, anchor, &["external"]))
             .unwrap();
         assert_eq!(
-            exported_entity_link(external),
+            compiled_entity_link(external),
             &EntityReference::Persistent {
                 entity: persistent.clone(),
             }
@@ -1196,19 +1190,19 @@ fn nested_prefabs_remap_declared_scene_local_references_through_each_anchor() {
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["nested", "source"]);
     let target_id = prefab_projection_id(&expansion, "root", &["nested", "target"]);
     let expanded = expansion.document().unwrap();
     let source = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == source_id)
+        .find(|entity| entity.id() == source_id)
         .unwrap();
     assert_eq!(
-        exported_entity_link(source),
+        compiled_entity_link(source),
         &EntityReference::SceneLocal {
             entity: target_id.clone(),
         }
@@ -1240,31 +1234,31 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
             PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
-    let baseline = document.expand_prefabs(&registry, &resolver);
+    let baseline = document.compile(&registry, &resolver);
     assert!(!baseline.diagnostics.has_errors());
     let nested = prefab_projection_id(&baseline, "root", &["nested"]);
     let source = prefab_projection_id(&baseline, "root", &["nested", "source"]);
     let target = prefab_projection_id(&baseline, "root", &["nested", "target"]);
     let expected_bytes =
         nested.as_str().len() * 2 + source.as_str().len() * 2 + target.as_str().len() * 3;
-    let exact_limits = PrefabExpansionLimits::default()
+    let exact_limits = SceneCompilationLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes).unwrap());
 
-    let exact = document.expand_prefabs_with_options(
+    let exact = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(exact_limits),
+        SceneCompilationOptions::default().with_limits(exact_limits),
     );
 
     assert!(!exact.diagnostics.has_errors());
     assert!(exact.candidate.is_some());
 
-    let failing_limits = PrefabExpansionLimits::default()
+    let failing_limits = SceneCompilationLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
-    let failing = document.expand_prefabs_with_options(
+    let failing = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(failing_limits),
+        SceneCompilationOptions::default().with_limits(failing_limits),
     );
 
     assert!(failing.candidate.is_none());
@@ -1300,21 +1294,21 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
     let target_id = prefab_projection_id(&expansion, "root", &["target"]);
     let expanded = expansion.document().unwrap();
     let source = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == source_id)
+        .find(|entity| entity.id() == source_id)
         .unwrap();
-    let component = source.components.get(&entity_link_type_id()).unwrap();
-    assert_eq!(component.version, ComponentSchemaVersion(2));
+    let component = source.components().get(&entity_link_type_id()).unwrap();
+    assert_eq!(component.version(), ComponentSchemaVersion(2));
     assert_eq!(
-        component.value.field_entity_reference("target").unwrap(),
+        component.value().field_entity_reference("target").unwrap(),
         &EntityReference::SceneLocal {
             entity: target_id.clone(),
         }
@@ -1345,27 +1339,27 @@ fn prefab_expansion_budgets_mapped_component_references_before_publication() {
         ]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
-    let baseline = document.expand_prefabs(&registry, &resolver);
+    let baseline = document.compile(&registry, &resolver);
     assert!(!baseline.diagnostics.has_errors());
     let source_id = prefab_projection_id(&baseline, "root", &["source"]);
     let target_id = prefab_projection_id(&baseline, "root", &["target"]);
     let expected_bytes = source_id.as_str().len() * 2 + target_id.as_str().len() * 3;
-    let exact_limits = PrefabExpansionLimits::default()
+    let exact_limits = SceneCompilationLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes).unwrap());
-    let exact = document.expand_prefabs_with_options(
+    let exact = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(exact_limits),
+        SceneCompilationOptions::default().with_limits(exact_limits),
     );
     assert!(!exact.diagnostics.has_errors());
     assert!(exact.candidate.is_some());
 
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
-    let expansion = document.expand_prefabs_with_options(
+    let expansion = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(limits),
+        SceneCompilationOptions::default().with_limits(limits),
     );
 
     assert!(expansion.candidate.is_none());
@@ -1399,7 +1393,7 @@ fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(
         !expansion.diagnostics.has_errors(),
@@ -1409,12 +1403,12 @@ fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
     let expanded = expansion.document().unwrap();
     let source = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == source_id)
+        .find(|entity| entity.id() == source_id)
         .unwrap();
-    let component = source.components.get(&large_data_type_id()).unwrap();
-    let ComponentValue::List(values) = component.value.field("values").unwrap() else {
+    let component = source.components().get(&large_data_type_id()).unwrap();
+    let ComponentValue::List(values) = component.value().field("values").unwrap() else {
         panic!("large data values must remain a list");
     };
     assert_eq!(values.len(), 17_000);
@@ -1449,7 +1443,7 @@ fn prefab_reference_remap_rejects_undeclared_references_without_mutating_the_sou
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1479,7 +1473,7 @@ fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source.clone())]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.provenance().is_none());
@@ -1512,28 +1506,28 @@ fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
         ]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
-    let baseline = document.expand_prefabs(&registry, &resolver);
+    let baseline = document.compile(&registry, &resolver);
     assert!(!baseline.diagnostics.has_errors());
     let target_id = prefab_projection_id(&baseline, "root", &["target"]);
     let expected_bytes = "target".len() + target_id.as_str().len();
-    let exact_limits = PrefabExpansionLimits::default()
+    let exact_limits = SceneCompilationLimits::default()
         .with_materialized_value_bytes(ByteLimit::new(expected_bytes).unwrap());
 
-    let exact = document.expand_prefabs_with_options(
+    let exact = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(exact_limits),
+        SceneCompilationOptions::default().with_limits(exact_limits),
     );
 
     assert!(!exact.diagnostics.has_errors());
     assert!(exact.candidate.is_some());
 
-    let failing_limits = PrefabExpansionLimits::default()
+    let failing_limits = SceneCompilationLimits::default()
         .with_materialized_value_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
-    let failing = document.expand_prefabs_with_options(
+    let failing = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(failing_limits),
+        SceneCompilationOptions::default().with_limits(failing_limits),
     );
 
     assert!(failing.candidate.is_none());
@@ -1560,11 +1554,11 @@ fn prefab_reference_identifier_budget_failure_keeps_its_typed_budget_kind() {
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
     // One generated ID fits; copying it into the surviving self-reference crosses the limit.
-    let report = document.expand_prefabs_with_options(
+    let report = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(
-            PrefabExpansionLimits::default()
+        SceneCompilationOptions::default().with_limits(
+            SceneCompilationLimits::default()
                 .with_generated_identifier_bytes(ByteLimit::new(15).unwrap()),
         ),
     );
@@ -1602,26 +1596,26 @@ fn prefab_reference_remap_traversal_accepts_persistent_reference_at_logical_byte
             )]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
         .with_materialized_value_bytes(nara_core::ByteLimit::new(26).unwrap());
 
-    let expansion = document.expand_prefabs_with_options(
+    let expansion = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(limits),
+        SceneCompilationOptions::default().with_limits(limits),
     );
 
     assert!(!expansion.diagnostics.has_errors());
     let source_id = prefab_projection_id(&expansion, "root", &["source"]);
     let expanded = expansion.document().unwrap();
     let source = expanded
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == source_id)
+        .find(|entity| entity.id() == source_id)
         .unwrap();
     assert_eq!(
-        exported_entity_link(source),
+        compiled_entity_link(source),
         &EntityReference::Persistent { entity: persistent }
     );
 }
@@ -1635,8 +1629,8 @@ fn missing_prefab_source_reports_asset_ref_without_expanded_document() {
     let world = World::new();
     let before = world.iter_entities().count();
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
-    let report = (document).expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
+    let report = (document).compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1667,7 +1661,7 @@ fn prefab_source_cycle_reports_typed_edge_without_concatenated_chain() {
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1718,7 +1712,7 @@ fn prefab_source_cycle_reports_middle_cycle_start_for_multi_edge_chain() {
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", a)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1742,10 +1736,10 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("enemy", enemy_source)]);
 
-    let expansion = document.expand_prefabs_with_options(
+    let expansion = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_max_depth(1),
+        SceneCompilationOptions::default().with_max_depth(1),
     );
 
     assert!(expansion.candidate.is_none());
@@ -1770,20 +1764,20 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
-    let exact = PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(4).unwrap()),
+    let exact = SceneCompilationOptions::default().with_limits(
+        SceneCompilationLimits::default().with_materialized_entities(ItemLimit::new(4).unwrap()),
     );
     assert!(
         document
-            .expand_prefabs_with_options(&registry, &resolver, exact)
+            .compile_with_options(&registry, &resolver, exact)
             .candidate
             .is_some()
     );
 
-    let over = PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(3).unwrap()),
+    let over = SceneCompilationOptions::default().with_limits(
+        SceneCompilationLimits::default().with_materialized_entities(ItemLimit::new(3).unwrap()),
     );
-    let expansion = document.expand_prefabs_with_options(&registry, &resolver, over);
+    let expansion = document.compile_with_options(&registry, &resolver, over);
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
@@ -1818,26 +1812,26 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
         prefab_anchor("right", source),
     ]);
 
-    let exact_limits = PrefabExpansionLimits::default()
+    let exact_limits = SceneCompilationLimits::default()
         .with_materialized_value_nodes(ItemLimit::new(2).unwrap())
         .with_materialized_value_bytes(ByteLimit::new(payload_bytes * 2).unwrap());
     assert!(
         document
-            .expand_prefabs_with_options(
+            .compile_with_options(
                 &registry,
                 &resolver,
-                PrefabExpansionOptions::default().with_limits(exact_limits),
+                SceneCompilationOptions::default().with_limits(exact_limits),
             )
             .candidate
             .is_some()
     );
 
     let node_limits =
-        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::ONE);
-    let node_report = document.expand_prefabs_with_options(
+        SceneCompilationLimits::default().with_materialized_value_nodes(ItemLimit::ONE);
+    let node_report = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(node_limits),
+        SceneCompilationOptions::default().with_limits(node_limits),
     );
     assert!(node_report.candidate.is_none());
     assert!(node_report.diagnostics.iter().any(|diagnostic| {
@@ -1846,12 +1840,12 @@ fn prefab_expansion_value_budgets_are_aggregate_across_reused_sources() {
             && diagnostic_has_u64_field(diagnostic, "maximum", 1)
     }));
 
-    let byte_limits = PrefabExpansionLimits::default()
+    let byte_limits = SceneCompilationLimits::default()
         .with_materialized_value_bytes(ByteLimit::new(payload_bytes * 2 - 1).unwrap());
-    let byte_report = document.expand_prefabs_with_options(
+    let byte_report = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(byte_limits),
+        SceneCompilationOptions::default().with_limits(byte_limits),
     );
     assert!(byte_report.candidate.is_none());
     assert!(byte_report.diagnostics.iter().any(|diagnostic| {
@@ -1876,10 +1870,10 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
         ]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source.clone())]);
-    let component_limited = PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
+    let component_limited = SceneCompilationOptions::default().with_limits(
+        SceneCompilationLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
     );
-    let expansion = document.expand_prefabs_with_options(&registry, &resolver, component_limited);
+    let expansion = document.compile_with_options(&registry, &resolver, component_limited);
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-components")
@@ -1890,10 +1884,9 @@ fn prefab_expansion_component_and_instance_budgets_are_independent() {
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
     ]);
-    let instance_limited = PrefabExpansionOptions::default()
-        .with_limits(PrefabExpansionLimits::default().with_resolved_instances(ItemLimit::ONE));
-    let expansion =
-        two_instances.expand_prefabs_with_options(&registry, &resolver, instance_limited);
+    let instance_limited = SceneCompilationOptions::default()
+        .with_limits(SceneCompilationLimits::default().with_resolved_instances(ItemLimit::ONE));
+    let expansion = two_instances.compile_with_options(&registry, &resolver, instance_limited);
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "resolved-instances")
@@ -1918,19 +1911,19 @@ fn prefab_expansion_counts_overlay_declarations_per_instance() {
         prefab_anchor_with_overrides("left", source.clone(), overrides.clone()),
         prefab_anchor_with_overrides("right", source, overrides),
     ]);
-    let options = PrefabExpansionOptions::default()
-        .with_limits(PrefabExpansionLimits::default().with_overlay_declarations(ItemLimit::ONE));
+    let options = SceneCompilationOptions::default()
+        .with_limits(SceneCompilationLimits::default().with_overlay_declarations(ItemLimit::ONE));
 
-    let inclusive = document.expand_prefabs_with_options(
+    let inclusive = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(
-            PrefabExpansionLimits::default().with_overlay_declarations(ItemLimit::new(2).unwrap()),
+        SceneCompilationOptions::default().with_limits(
+            SceneCompilationLimits::default().with_overlay_declarations(ItemLimit::new(2).unwrap()),
         ),
     );
     assert!(inclusive.candidate.is_some(), "{:?}", inclusive.diagnostics);
 
-    let expansion = document.expand_prefabs_with_options(&registry, &resolver, options);
+    let expansion = document.compile_with_options(&registry, &resolver, options);
 
     assert!(expansion.candidate.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
@@ -1950,19 +1943,19 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
-    let baseline = document.expand_prefabs(&registry, &resolver);
+    let baseline = document.compile(&registry, &resolver);
     assert!(!baseline.diagnostics.has_errors());
     let identifier_bytes = prefab_projection_id(&baseline, "root", &["child"])
         .as_str()
         .len();
     let expected_bytes = identifier_bytes * 2;
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
 
-    let expansion = document.expand_prefabs_with_options(
+    let expansion = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(limits),
+        SceneCompilationOptions::default().with_limits(limits),
     );
 
     assert!(expansion.candidate.is_none());
@@ -1972,12 +1965,12 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
             && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
     }));
 
-    let single_limit = PrefabExpansionLimits::default()
+    let single_limit = SceneCompilationLimits::default()
         .with_single_generated_identifier_bytes(ByteLimit::new(identifier_bytes - 1).unwrap());
-    let single = document.expand_prefabs_with_options(
+    let single = document.compile_with_options(
         &registry,
         &resolver,
-        PrefabExpansionOptions::default().with_limits(single_limit),
+        SceneCompilationOptions::default().with_limits(single_limit),
     );
     assert!(single.candidate.is_none());
     assert!(single.diagnostics.iter().any(|diagnostic| {
@@ -2001,23 +1994,14 @@ fn invalid_component_payload_does_not_mutate_world() {
                 ComponentValue::map([("x", ComponentValue::String("not a number".to_string()))]),
             ),
         )]);
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
-    let report = crate::spawn_scene(
-        &mut world,
-        &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("invalid_component_payload_does_not_mutate_world/document"),
-            std::sync::Arc::new((document).clone()),
-        ),
-        &scene_occurrence("invalid_component_payload_does_not_mutate_world/report"),
-        None,
-    );
+    let report = document.compile(&registry, &InMemoryPrefabSourceResolver::new());
 
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.iter_entities().count(), before);
-    assert!(report.instance.is_none());
+    assert!(report.candidate.is_none());
 }
 
 #[test]
@@ -2042,7 +2026,8 @@ fn component_observer_rejects_fresh_scene_before_target_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "component_observer_rejects_fresh_scene_before_target_allocation/document",
             ),
@@ -2095,7 +2080,8 @@ fn deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "deferred_dynamic_hook_rejects_fresh_scene_before_target_allocation/document",
             ),
@@ -2156,7 +2142,8 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "hierarchy_observer_rejects_publication_before_candidate_mutation/document",
             ),
@@ -2202,7 +2189,8 @@ fn component_migration_runs_before_scene_preflight_without_mutating_document() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "component_migration_runs_before_scene_preflight_without_mutating_document/document",
             ),
@@ -2293,7 +2281,8 @@ fn path_asset_ref_resolves_before_scene_spawn_without_database() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "path_asset_ref_resolves_before_scene_spawn_without_database/document",
             ),
@@ -2337,7 +2326,8 @@ fn asset_server_observer_rejects_scene_before_target_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "asset_server_observer_rejects_scene_before_target_allocation/document",
             ),
@@ -2387,7 +2377,8 @@ fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "deferred_asset_prepare_declares_resource_access_before_target_allocation/document",
             ),
@@ -2431,7 +2422,8 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "identity_resource_scope_observer_rejects_scene_before_target_allocation/first_document",
             ),
@@ -2457,7 +2449,8 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "identity_resource_scope_observer_rejects_scene_before_target_allocation/second_document",
             ),
@@ -2495,7 +2488,8 @@ fn scene_instance_allocation_is_world_global_across_explicit_occurrences() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
             ),
@@ -2509,7 +2503,8 @@ fn scene_instance_allocation_is_world_global_across_explicit_occurrences() {
     let second = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
             ),
@@ -2523,7 +2518,8 @@ fn scene_instance_allocation_is_world_global_across_explicit_occurrences() {
     let third = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "scene_instance_allocation_is_world_global_across_explicit_occurrences/document",
             ),
@@ -2569,7 +2565,8 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("empty_scene_spawn_publishes_a_non_reusable_instance_claim/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -2579,7 +2576,8 @@ fn empty_scene_spawn_publishes_a_non_reusable_instance_claim() {
     let second = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("empty_scene_spawn_publishes_a_non_reusable_instance_claim/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -2612,7 +2610,8 @@ fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
     let initial = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("empty_scene_replacement_handles_empty_and_nonempty_candidates/empty"),
             std::sync::Arc::new((empty).clone()),
         ),
@@ -2625,7 +2624,8 @@ fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
     let empty_replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "empty_scene_replacement_handles_empty_and_nonempty_candidates/replacement",
             ),
@@ -2647,7 +2647,8 @@ fn empty_scene_replacement_handles_empty_and_nonempty_candidates() {
     let populated_replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "empty_scene_replacement_handles_empty_and_nonempty_candidates/replacement",
             ),
@@ -2679,7 +2680,8 @@ fn individual_scene_retirement_tombstones_identity_before_despawn() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "individual_scene_retirement_tombstones_identity_before_despawn/document",
             ),
@@ -2720,7 +2722,8 @@ fn individual_scene_retirement_rejects_identity_resource_observers_before_effect
         let report = crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "individual_scene_retirement_rejects_identity_resource_observers_before_effects/document",
                 ),
@@ -2792,7 +2795,8 @@ fn scene_retirement_rejection_keeps_the_target_alive() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("scene_retirement_rejection_keeps_the_target_alive/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -2856,7 +2860,8 @@ fn scene_retirement_rejects_a_source_that_disagrees_with_registered_identity() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "scene_retirement_rejects_a_source_that_disagrees_with_registered_identity/document",
             ),
@@ -2906,7 +2911,8 @@ fn individual_scene_retirement_rejects_parents_and_unlinks_retired_children() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "individual_scene_retirement_rejects_parents_and_unlinks_retired_children/document",
             ),
@@ -2961,7 +2967,8 @@ fn empty_persistent_set_rejects_event_global_observer_before_target_allocation()
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "empty_persistent_set_rejects_event_global_observer_before_target_allocation/document",
             ),
@@ -3019,7 +3026,8 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "identity_claim_failure_preserves_world_assets_ticks_and_allocator/document",
             ),
@@ -3053,7 +3061,8 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
     let empty = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "identity_claim_failure_preserves_world_assets_ticks_and_allocator/SceneDocument-from_ordered_roots",
             ),
@@ -3159,7 +3168,8 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "hierarchy_aware_replacement_retires_exact_scene_membership_only/document",
             ),
@@ -3178,7 +3188,8 @@ fn hierarchy_aware_replacement_retires_exact_scene_membership_only() {
     let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "hierarchy_aware_replacement_retires_exact_scene_membership_only/replacement",
             ),
@@ -3334,7 +3345,8 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "runtime_component_despawn_observer_rejects_scene_replacement_atomically/source",
             ),
@@ -3373,7 +3385,8 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
     let failed = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "runtime_component_despawn_observer_rejects_scene_replacement_atomically/replacement",
             ),
@@ -3435,7 +3448,8 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "hierarchy_remove_observer_rejects_scene_replacement_before_detach/document",
             ),
@@ -3464,7 +3478,8 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     let failed = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "hierarchy_remove_observer_rejects_scene_replacement_before_detach/replacement",
             ),
@@ -3525,7 +3540,8 @@ fn children_add_observer_rejects_fresh_scene_publication() {
     let failed = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("children_add_observer_rejects_fresh_scene_publication/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -3561,7 +3577,8 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("children_add_observer_does_not_reject_a_flat_scene/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -3612,7 +3629,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     let direct = crate::spawn_scene(
         &mut direct_world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("parented_transform_materializes_through_every_entry_point/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -3636,7 +3654,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     let prefab_report = crate::spawn_scene(
         &mut prefab_world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             named_prefab_source_key(
                 "parented_transform_materializes_through_every_entry_point/prefab",
             ),
@@ -3667,7 +3686,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     let current = crate::spawn_scene(
         &mut replacement_world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "parented_transform_materializes_through_every_entry_point/current_document",
             ),
@@ -3682,7 +3702,8 @@ fn parented_transform_materializes_through_every_entry_point() {
     let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut replacement_world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "parented_transform_materializes_through_every_entry_point/replacement",
             ),
@@ -3802,7 +3823,8 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "children_remove_observer_rejects_scene_replacement_before_detach/document",
             ),
@@ -3830,7 +3852,8 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
     let failed = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "children_remove_observer_rejects_scene_replacement_before_detach/replacement",
             ),
@@ -3979,7 +4002,8 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let first = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "replacement_relationship_rejection_precedes_asset_and_binding_publication/current_document",
             ),
@@ -4009,7 +4033,8 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let failed = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "replacement_relationship_rejection_precedes_asset_and_binding_publication/replacement",
             ),
@@ -4059,7 +4084,8 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let alternate = crate::spawn_scene(
         &mut world,
         &alternate_registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "replacement_relationship_rejection_precedes_asset_and_binding_publication/alternate_document",
             ),
@@ -4244,7 +4270,8 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("stable_asset_ref_resolves_with_database_before_scene_spawn/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4281,7 +4308,8 @@ fn product_replacement_preserves_stable_asset_resolution() {
     let initial = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("product_replacement_preserves_stable_asset_resolution/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4294,7 +4322,8 @@ fn product_replacement_preserves_stable_asset_resolution() {
     let replacement = crate::advanced::replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("product_replacement_preserves_stable_asset_resolution/replacement"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4348,7 +4377,8 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation/document",
             ),
@@ -4397,7 +4427,8 @@ fn identity_admission_precedes_native_value_preparation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("identity_admission_precedes_native_value_preparation/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4436,7 +4467,8 @@ fn component_apply_failure_in_multi_component_entity_reports_component_and_rolls
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "component_apply_failure_in_multi_component_entity_reports_component_and_rolls_back/document",
             ),
@@ -4479,7 +4511,8 @@ fn component_apply_failure_removes_scratch_asset_server() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("component_apply_failure_removes_scratch_asset_server/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4514,7 +4547,8 @@ fn component_apply_failure_restores_original_asset_server() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("component_apply_failure_restores_original_asset_server/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4563,7 +4597,8 @@ fn later_component_apply_failure_does_not_publish_prior_asset_resolution() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "later_component_apply_failure_does_not_publish_prior_asset_resolution/document",
             ),
@@ -4612,7 +4647,8 @@ fn scene_spawn_and_export_preserve_ordered_runtime_topology() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("scene_spawn_and_export_preserve_ordered_runtime_topology/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -4668,7 +4704,8 @@ fn multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "multi_root_and_sibling_order_ignore_record_sorting_and_entity_allocation/document",
             ),
@@ -4718,7 +4755,8 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "repeated_scene_spawns_export_with_injective_generated_ids/document"
                 ),
@@ -4734,7 +4772,8 @@ fn repeated_scene_spawns_export_with_injective_generated_ids() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "repeated_scene_spawns_export_with_injective_generated_ids/document"
                 ),
@@ -4778,7 +4817,8 @@ fn generated_export_ids_skip_every_authored_claim() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key("generated_export_ids_skip_every_authored_claim/authored"),
                 std::sync::Arc::new((authored).clone())
             ),
@@ -4792,7 +4832,8 @@ fn generated_export_ids_skip_every_authored_claim() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key("generated_export_ids_skip_every_authored_claim/duplicate"),
                 std::sync::Arc::new((duplicate).clone())
             ),
@@ -4806,7 +4847,8 @@ fn generated_export_ids_skip_every_authored_claim() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key("generated_export_ids_skip_every_authored_claim/duplicate"),
                 std::sync::Arc::new((duplicate).clone())
             ),
@@ -4852,7 +4894,8 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "export_rewrites_scene_local_references_with_owner_instance_context/document"
                 ),
@@ -4870,7 +4913,8 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "export_rewrites_scene_local_references_with_owner_instance_context/document"
                 ),
@@ -4920,30 +4964,35 @@ fn dangling_scene_local_reference_rejects_scene_spawn_before_export() {
             }),
         )]);
     let mut world = World::new();
-    let before_entities = world.iter_entities().count();
-    let spawn = crate::spawn_scene(
-        &mut world,
-        &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "dangling_scene_local_reference_rejects_scene_spawn_before_export/document",
-            ),
-            std::sync::Arc::new((document).clone()),
-        ),
-        &scene_occurrence("dangling_scene_local_reference_rejects_scene_spawn_before_export/spawn"),
-        None,
-    );
+    let sentinel = world.spawn_empty().id();
+    let before_entities = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<Vec<_>>();
+    let spawn = document.compile(&registry, &InMemoryPrefabSourceResolver::new());
     assert!(spawn.diagnostics.has_errors());
-    assert!(spawn.instance.is_none());
-    assert_eq!(world.iter_entities().count(), before_entities);
+    assert!(spawn.candidate.is_none());
+    assert_eq!(
+        spawn.failure.as_ref().unwrap().reason(),
+        &SceneCompilationFailureKind::Reference
+    );
+    assert!(spawn.failure.as_ref().unwrap().location().is_none());
+    assert!(spawn.failure.as_ref().unwrap().slot().is_none());
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<Vec<_>>(),
+        before_entities
+    );
+    assert!(world.get_entity(sentinel).is_ok());
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
 
     assert!(spawn.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.local-reference-invalid"
-            && diagnostic_has_text_field(
-                diagnostic,
-                "rewrite-error-kind",
-                "scene-local-target-missing",
-            )
+        diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(diagnostic, "entity-id", "source")
+            && diagnostic_has_text_field(diagnostic, "component-id", entity_link_type_id().as_str())
+            && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "missing-source-entity")
     }));
 }
 
@@ -4966,7 +5015,8 @@ fn persistent_reference_to_exported_entity_rewrites_to_scene_local() {
     let spawn = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key(
                 "persistent_reference_to_exported_entity_rewrites_to_scene_local/document",
             ),
@@ -5014,7 +5064,8 @@ fn resolved_external_persistent_reference_is_preserved() {
     let spawn = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("resolved_external_persistent_reference_is_preserved/document"),
             std::sync::Arc::new((document).clone()),
         ),
@@ -5049,7 +5100,8 @@ fn missing_persistent_reference_prevents_export_publication() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "missing_persistent_reference_prevents_export_publication/document"
                 ),
@@ -5092,7 +5144,8 @@ fn unloaded_persistent_reference_prevents_export_publication() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "unloaded_persistent_reference_prevents_export_publication/document"
                 ),
@@ -5143,7 +5196,8 @@ fn deleted_persistent_reference_prevents_export_publication() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key(
                     "deleted_persistent_reference_prevents_export_publication/document"
                 ),
@@ -5201,7 +5255,8 @@ fn stale_persistent_reference_prevents_export_publication() {
         !crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
+            &compiled_scene(
+                &registry,
                 scene_source_key("stale_persistent_reference_prevents_export_publication/document"),
                 std::sync::Arc::new((document).clone())
             ),
@@ -5357,7 +5412,8 @@ fn direct_prefab_spawn_applies_patch_field_overrides() {
             "{:?}",
             instantiated.diagnostics
         );
-        let candidate = crate::ExpandedSceneCandidate::plain(
+        let candidate = compiled_scene(
+            &registry,
             named_prefab_source_key("direct_prefab_spawn_applies_patch_field_overrides/prefab"),
             std::sync::Arc::new(instantiated.document.unwrap()),
         );
@@ -5405,7 +5461,8 @@ fn prefab_patch_can_add_and_remove_components() {
             "{:?}",
             instantiated.diagnostics
         );
-        let candidate = crate::ExpandedSceneCandidate::plain(
+        let candidate = compiled_scene(
+            &registry,
             named_prefab_source_key("prefab_patch_can_add_and_remove_components/prefab"),
             std::sync::Arc::new(instantiated.document.unwrap()),
         );
@@ -5720,7 +5777,7 @@ fn failed_nested_prefab_override_does_not_poison_a_sibling_source_expansion() {
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert!(
@@ -5745,7 +5802,8 @@ fn export_rejects_a_scene_entity_owned_by_a_non_scene_parent() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("export_rejects_a_scene_entity_owned_by_a_non_scene_parent/source"),
             std::sync::Arc::new(
                 (SceneDocument::from_ordered_roots([SceneEntityRecord::new(child_id.clone())
@@ -5778,7 +5836,8 @@ fn export_component_encode_failure_is_an_error() {
     let report = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
+        &compiled_scene(
+            &registry,
             scene_source_key("export_component_encode_failure_is_an_error/source"),
             std::sync::Arc::new(
                 (SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("broken"))
@@ -6545,12 +6604,22 @@ fn stable_id(id: &str) -> StableAssetId {
     StableAssetId::parse_str(id).unwrap()
 }
 
+fn compiled_scene(
+    registry: &ComponentRegistrySnapshot,
+    source: SourceDocumentKey,
+    document: std::sync::Arc<SceneDocument>,
+) -> CompiledSceneCandidate {
+    let report = document.compile(registry, &InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    report.candidate.unwrap().bind_source(source)
+}
+
 fn scene_id(id: &str) -> SceneEntityId {
     SceneEntityId::new(id).unwrap()
 }
 
 fn prefab_projection_id<'a>(
-    report: &'a PrefabExpansionReport,
+    report: &'a SceneCompilationReport,
     root_anchor: &str,
     source_entities: &[&str],
 ) -> &'a SceneEntityId {
@@ -6644,6 +6713,13 @@ fn entity_link_record(target: EntityReference) -> SceneComponentRecord {
         ComponentSchemaVersion(1),
         ComponentValue::map([("target", ComponentValue::EntityReference(target))]),
     )
+}
+
+fn compiled_entity_link(record: &CompiledSceneEntity) -> &EntityReference {
+    record.components()[&entity_link_type_id()]
+        .value()
+        .field_entity_reference("target")
+        .unwrap()
 }
 
 fn exported_entity_link(record: &SceneEntityRecord) -> &EntityReference {

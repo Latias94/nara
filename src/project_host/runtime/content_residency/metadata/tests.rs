@@ -9,8 +9,8 @@ use nara_fs::ContentDigest;
 use nara_identity::SceneEntityId;
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument,
-    SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocument, SceneEntityRecord, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 use super::*;
@@ -49,14 +49,15 @@ impl Fixture {
             resolve_runtime_configuration(&configuration.resolve().unwrap(), ProductRecipe::new())
                 .unwrap();
         let source = SourceDocumentKey::stable_asset(product.source(), SourceDocumentKind::Scene);
-        let expanded = ExpandedSceneCandidate::plain(
-            source.clone(),
-            Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        let compiled = crate::startup_scene::compile_test_scene(
+            &SceneDocument::from_ordered_roots([SceneEntityRecord::new(
                 SceneEntityId::new("small-scene").unwrap(),
-            )])),
+            )]),
+            plan.schema_validation().bindings(),
+            source.clone(),
         );
         let scene = RuntimeSceneCandidate::cook(
-            &expanded,
+            &compiled,
             plan.schema_validation().bindings(),
             ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),

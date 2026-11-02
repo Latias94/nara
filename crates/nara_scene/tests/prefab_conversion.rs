@@ -30,10 +30,10 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
     LocalizedPrefabEntity, PrefabAddition, PrefabAuthoringSession, PrefabConversionError,
     PrefabConversionReceipt, PrefabConversionRequest, PrefabDocument, PrefabDocumentCandidate,
-    PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionWorkingSet, PrefabInstance,
-    PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PreparedPrefabConversion, PreparedScenePrefabConversion,
-    ResolvedPrefabSource, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay,
+    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep,
+    PreparedPrefabConversion, PreparedScenePrefabConversion, ResolvedPrefabSource,
+    SceneAuthoringSession, SceneCompilationWorkingSet, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementOwner,
     ScenePrefabConversionRequest,
@@ -278,7 +278,7 @@ impl Sources {
     fn load(
         &mut self,
         request: &AssetRef,
-        _: &mut PrefabExpansionWorkingSet,
+        _: &mut SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, LoadFailure> {
         self.resolve(request)
     }

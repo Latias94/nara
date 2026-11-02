@@ -419,7 +419,7 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
     }
     let preview = first
         .take_preview()
-        .expect("the independent Scene must retain its expanded native preview");
+        .expect("the independent Scene must retain its compiled native preview");
     assert!(first.take_preview().is_none());
     let candidate = &preview.candidate;
     assert_eq!(candidate.source_key(), source.source_key());
@@ -428,27 +428,28 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
         snapshot.startup_native_source().key()
     );
     let anchor_id = SceneEntityId::new("anchor").unwrap();
-    assert_eq!(candidate.document().roots, [anchor_id.clone()]);
-    assert_eq!(candidate.document().entities.len(), 4);
+    assert_eq!(candidate.document().roots(), [anchor_id.clone()]);
+    assert_eq!(candidate.document().entities().len(), 4);
     assert_eq!(
-        candidate.provenance().len(),
-        candidate.document().entities.len()
+        candidate.canonical_provenance().len(),
+        candidate.document().entities().len()
     );
     assert_eq!(
-        candidate.provenance()[&anchor_id].local_entity_id(),
+        candidate.canonical_provenance()[&anchor_id].local_entity_id(),
         &anchor_id,
     );
     assert!(
-        candidate.provenance()[&anchor_id]
+        candidate.canonical_provenance()[&anchor_id]
             .projection_path()
             .is_none()
     );
     assert!(
         candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.prefab.is_none() && entity.components.is_empty())
+            .all(|entity| entity.components().is_empty()
+                && candidate.canonical_provenance().contains_key(entity.id()))
     );
     let outer = first
         .prefabs()
@@ -472,11 +473,14 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
             entity: SceneEntityId::new("leaf").unwrap(),
         },
     ];
-    let mut leaf_projections = candidate.provenance().iter().filter(|(_, provenance)| {
-        provenance
-            .projection_path()
-            .is_some_and(|path| path.root_anchor() == &anchor_id && path.steps() == leaf_steps)
-    });
+    let mut leaf_projections = candidate
+        .canonical_provenance()
+        .iter()
+        .filter(|(_, provenance)| {
+            provenance
+                .projection_path()
+                .is_some_and(|path| path.root_anchor() == &anchor_id && path.steps() == leaf_steps)
+        });
     let (leaf_id, leaf_provenance) = leaf_projections
         .next()
         .expect("the nested leaf must retain its exact typed source ancestry");
@@ -501,14 +505,17 @@ fn indexed_scene_captures_its_nested_files_without_widening_startup_or_accumulat
             panic!("an inherited Image component needs a projected omission");
         };
         assert_eq!(omitted_component, &component());
-        assert_eq!(candidate.provenance().get(entity), Some(provenance));
+        assert_eq!(
+            candidate.canonical_provenance().get(entity),
+            Some(provenance)
+        );
         let retained = candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .find(|record| &record.id == entity)
+            .find(|record| record.id() == entity)
             .expect("a missing native binding must omit the component and retain its entity");
-        assert!(retained.components.is_empty());
+        assert!(retained.components().is_empty());
         assert!(!omitted_entities.contains(entity));
         omitted_entities.push(entity.clone());
     }

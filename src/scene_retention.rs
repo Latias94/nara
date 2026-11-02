@@ -4,8 +4,9 @@ use nara_asset::AssetRef;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_scene::PrefabDocument;
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabInstance, PrefabProjectionPath, PrefabProjectionStep,
-    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, SceneEntityRecord,
+    CompiledSceneCandidate, CompiledSceneDocument, CompiledSceneEntity, PrefabInstance,
+    PrefabProjectionPath, PrefabProjectionStep, SceneDocument, SceneEntityId,
+    SceneEntityProvenanceMap, SceneEntityRecord,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -29,23 +30,22 @@ pub(crate) fn scene_retained_bytes(
 }
 
 pub(crate) fn direct_startup_scene_retained_bytes(
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
 ) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
         startup_scene_retained_bytes(candidate)?,
-        2 * ARC_CONTROL_BLOCK_BYTES,
-        size_of::<std::sync::Arc<SceneDocument>>(),
+        ARC_CONTROL_BLOCK_BYTES,
+        size_of::<std::sync::Arc<CompiledSceneCandidate>>(),
     ])
 }
 
 pub(crate) fn startup_scene_retained_bytes(
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
 ) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
-        size_of::<ExpandedSceneCandidate>(),
+        size_of::<CompiledSceneCandidate>(),
         candidate.source_key().retained_bytes(),
-        scene_retained_bytes(candidate.document())?,
-        scene_provenance_retained_bytes(candidate.provenance())?,
+        compiled_scene_retained_bytes(candidate.document())?,
     ])
 }
 
@@ -69,9 +69,60 @@ pub(crate) fn runtime_startup_scene_retained_bytes(
     checked_sum([
         size_of::<nara_scene::RuntimeSceneCandidate>(),
         candidate.source_key().retained_bytes(),
-        scene_retained_bytes(candidate.document())?,
-        scene_provenance_retained_bytes(candidate.provenance())?,
+        compiled_scene_retained_bytes(candidate.document())?,
         runtime_definition_retained_bytes(candidate.definitions())?,
+    ])
+}
+
+/// Logical ownership of sealed flat storage. Source records and contextual declarations have a
+/// separate model. Roots, entities and child IDs use exact-length Box arrays, so borrowed slice
+/// lengths cover their complete buffers. Map entries, selected owner strings, values and canonical
+/// provenance remain fully charged.
+pub(crate) fn compiled_scene_retained_bytes(
+    document: &CompiledSceneDocument,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_sum([
+        size_of::<CompiledSceneDocument>(),
+        scene_entity_ids_retained_bytes(document.roots(), document.roots().len())?,
+        checked_product(document.entities().len(), size_of::<CompiledSceneEntity>())?,
+        scene_provenance_retained_bytes(document.canonical_provenance())?,
+    ])?;
+    for entity in document.entities() {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                string_retained_bytes(entity.id().as_str())?,
+                scene_entity_ids_retained_bytes(entity.children(), entity.children().len())?,
+            ])?,
+        )?;
+        for (component, record) in entity.components() {
+            checked_add_to(
+                &mut total,
+                checked_sum([
+                    size_of_val(component),
+                    size_of_val(record),
+                    BTREE_ENTRY_OVERHEAD,
+                    string_retained_bytes(component.as_str())?,
+                    record
+                        .schema_owner()
+                        .map_or(Ok(0), |owner| string_retained_bytes(owner.as_str()))?,
+                    component_value_retained_bytes(record.value())?,
+                ])?,
+            )?;
+        }
+    }
+    Ok(total)
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn authoring_scene_observation_retained_bytes(
+    observation: &nara_scene::ExpandedSceneDocument,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        size_of_val(observation),
+        ARC_CONTROL_BLOCK_BYTES,
+        scene_retained_bytes(observation.document())?,
+        scene_provenance_retained_bytes(observation.provenance())?,
     ])
 }
 
@@ -952,14 +1003,14 @@ mod tests {
                 key.clone(),
                 vec![SceneEntityRecord::new(scene_id("added-by-instance"))],
             )]);
-            let expansion = document.expand_prefabs(&registry, &resolver);
+            let expansion = document.compile(&registry, &resolver);
             assert!(
                 !expansion.diagnostics.has_errors(),
                 "{:?}",
                 expansion.diagnostics
             );
             let candidate = expansion.candidate.unwrap();
-            let provenance = candidate.provenance();
+            let provenance = candidate.canonical_provenance();
             for source in provenance.values() {
                 let Some(path) = source.projection_path() else {
                     continue;
@@ -1050,7 +1101,7 @@ mod tests {
                 outer_key.clone(),
                 outer_additions,
             )]);
-            let expansion = document.expand_prefabs(&registry, &resolver);
+            let expansion = document.compile(&registry, &resolver);
             assert!(
                 !expansion.diagnostics.has_errors(),
                 "{:?}",
@@ -1070,7 +1121,7 @@ mod tests {
             };
             let nested_origin = |local_id: &str| {
                 candidate
-                    .provenance()
+                    .canonical_provenance()
                     .values()
                     .find(|source| source.local_entity_id().as_str() == local_id)
                     .unwrap()
@@ -1112,7 +1163,7 @@ mod tests {
                     16 + outer_key.retained_bytes()
                 };
             assert_provenance_retention(
-                candidate.provenance(),
+                candidate.canonical_provenance(),
                 &[
                     ("anchor", 0),
                     (
@@ -1172,15 +1223,18 @@ mod tests {
     #[test]
     fn bound_candidate_retention_charges_the_containing_source_and_envelope() {
         let universe = "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap();
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+        let bindings = nara_scene::SceneComponentBindings::new(registry, []).unwrap();
         let candidate = |name| {
-            ExpandedSceneCandidate::plain(
+            crate::startup_scene::compile_test_scene(
+                &SceneDocument::default(),
+                &bindings,
                 nara_scene::SourceDocumentKey::named(
                     universe,
                     name,
                     nara_scene::SourceDocumentKind::Scene,
                 )
                 .unwrap(),
-                std::sync::Arc::new(SceneDocument::default()),
             )
         };
         let short = candidate("scene");
@@ -1189,7 +1243,7 @@ mod tests {
         let long_bytes = startup_scene_retained_bytes(&long).unwrap();
         assert!(
             short_bytes
-                >= size_of::<ExpandedSceneCandidate>() + short.source_key().retained_bytes()
+                >= size_of::<CompiledSceneCandidate>() + short.source_key().retained_bytes()
         );
         assert_eq!(
             long_bytes - short_bytes,
@@ -1246,8 +1300,10 @@ mod tests {
             )
             .unwrap();
             let bindings = SceneComponentBindings::new(registry.clone(), [owner]).unwrap();
+            let compiled =
+                crate::startup_scene::compile_test_scene(&document, &bindings, key.clone());
             RuntimeSceneCandidate::cook(
-                &ExpandedSceneCandidate::plain(key.clone(), std::sync::Arc::clone(&document)),
+                &compiled,
                 &bindings,
                 nara_asset::ProjectAssetDatabase::default()
                     .resolver(&nara_asset::AssetPathScope::ROOT),
@@ -1261,8 +1317,8 @@ mod tests {
         let initial = "A retained creation template independent of the document";
         let template = cook("Short", initial);
         assert_eq!(short.document(), long.document());
-        assert_eq!(short.provenance(), long.provenance());
-        assert_eq!(short.provenance().len(), 1);
+        assert_eq!(short.canonical_provenance(), long.canonical_provenance());
+        assert_eq!(short.canonical_provenance().len(), 1);
         assert_eq!(
             runtime_startup_scene_retained_bytes(&long).unwrap()
                 - runtime_startup_scene_retained_bytes(&short).unwrap(),

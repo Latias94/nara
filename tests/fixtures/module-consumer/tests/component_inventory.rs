@@ -185,8 +185,8 @@ fn failed_admission_returns_the_candidate_for_repair_and_retains_the_original_sc
     use nara_engine::{
         identity::EntityLookup,
         scene::{
-            ExpandedSceneCandidate, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
-            prepare_scene, retire_and_despawn_scene_instance,
+            InMemoryPrefabSourceResolver, SceneOccurrenceKey, SourceDocumentKey,
+            SourceDocumentKind, prepare_scene, retire_and_despawn_scene_instance,
         },
     };
 
@@ -207,20 +207,24 @@ fn failed_admission_returns_the_candidate_for_repair_and_retains_the_original_sc
     let retained = original.clone();
     assert!(retained.ptr_eq(&original));
     let value = ComponentValue::map([("seconds", ComponentValue::f64(1.25).unwrap())]);
-    let source = ExpandedSceneCandidate::plain(
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(actor())
+        .with_component(
+            id.clone(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value.clone()),
+        )]);
+    let compilation = document.compile(&original, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
+    );
+    let source = compilation.candidate.unwrap().bind_source(
         SourceDocumentKey::named(
             "46044116-21ed-563c-ac41-77db155ac518".parse().unwrap(),
             "consumer.inventory.retained-generation",
             SourceDocumentKind::Scene,
         )
         .unwrap(),
-        std::sync::Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            actor(),
-        )
-        .with_component(
-            id.clone(),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value.clone()),
-        )])),
     );
     let mut world = World::new();
     let pending = prepare_scene(

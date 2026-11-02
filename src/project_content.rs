@@ -41,10 +41,10 @@ use nara_reflect::{
     EntityReferenceTraversalLimits, SchemaCompositionFingerprint,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneComponentBindings, SceneComponentBindingsWitness, SceneDocument,
-    SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
-    SourceDocumentKey, SourceDocumentKind,
+    CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
+    PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, ResolvedPrefabSource,
+    SceneComponentBindings, SceneComponentBindingsWitness, SceneDocument, SceneDocumentCandidate,
+    SceneEntityProvenanceMap, SceneFormatError, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tilemap::{
     TileSetSource, TileSetSourceFileLimits, TilemapMembershipError, tilemap_membership_work_bytes,
@@ -160,7 +160,7 @@ pub struct ProjectSceneContent {
     path: AssetSourcePath,
     source: SourceDocumentKey,
     document: Arc<SceneDocument>,
-    expanded: Arc<ExpandedSceneCandidate>,
+    compiled: Arc<CompiledSceneCandidate>,
 }
 
 impl ProjectSceneContent {
@@ -180,8 +180,8 @@ impl ProjectSceneContent {
     }
 
     #[must_use]
-    pub fn expanded_scene(&self) -> &SceneDocument {
-        self.expanded.document()
+    pub fn compiled_scene(&self) -> &CompiledSceneDocument {
+        self.compiled.document()
     }
 }
 
@@ -415,22 +415,27 @@ impl ProjectContentSnapshot {
     }
 
     /// Returns the captured source document before effective selection and component migration.
-    /// Use [`Self::expanded_scene`] for the admitted runtime data.
+    /// Use [`Self::compiled_scene`] for the admitted runtime data.
     #[must_use]
     pub fn scene(&self) -> &SceneDocument {
         self.inner.sources.scenes.selected.document()
     }
 
-    /// Returns selected, expanded and migrated Scene data admitted for runtime preparation.
+    /// Returns sealed effective Scene data admitted for runtime preparation.
     #[must_use]
-    pub fn expanded_scene(&self) -> &SceneDocument {
-        self.inner.sources.scenes.selected.expanded_scene()
+    pub fn compiled_scene(&self) -> &CompiledSceneDocument {
+        self.inner.sources.scenes.selected.compiled_scene()
     }
 
-    /// Returns the structured source identity paired with the expanded selected document.
+    /// Returns the canonical source identity paired with the compiled selected document.
     #[must_use]
-    pub fn expanded_scene_provenance(&self) -> &SceneEntityProvenanceMap {
-        self.inner.sources.scenes.selected.expanded.provenance()
+    pub fn compiled_scene_provenance(&self) -> &SceneEntityProvenanceMap {
+        self.inner
+            .sources
+            .scenes
+            .selected
+            .compiled
+            .canonical_provenance()
     }
 
     #[must_use]
@@ -472,8 +477,8 @@ impl ProjectContentSnapshot {
             .resolver(&self.inner.sources.prefab_scope)
     }
 
-    pub(crate) fn expanded_candidate(&self) -> &nara_scene::ExpandedSceneCandidate {
-        &self.inner.sources.scenes.selected.expanded
+    pub(crate) fn compiled_candidate(&self) -> &CompiledSceneCandidate {
+        &self.inner.sources.scenes.selected.compiled
     }
 
     pub(crate) fn reserve_consumer_retained(
@@ -493,15 +498,15 @@ impl ProjectContentSnapshot {
             .and_then(|content| content.image.share_retained())
     }
 
-    /// Retains the exact expanded selected source for one runtime materialization.
+    /// Retains the exact compiled selected source for one runtime materialization.
     #[must_use]
     pub fn scene_source(&self) -> SceneSource {
         SceneSource::from_project_content(
-            Arc::clone(&self.inner.sources.scenes.selected.expanded),
+            Arc::clone(&self.inner.sources.scenes.selected.compiled),
             Arc::clone(&self.inner.sources),
             self.inner._runtime_lease.clone(),
             self.inner._generation_lease.clone(),
-            startup_scene_retained_bytes(&self.inner.sources.scenes.selected.expanded)
+            startup_scene_retained_bytes(&self.inner.sources.scenes.selected.compiled)
                 .expect("an admitted Scene already has a valid retained-byte plan"),
             Arc::clone(&self.inner.schema_authority),
         )
@@ -526,28 +531,25 @@ impl ProjectContentSnapshot {
             scope: &self.inner.sources.prefab_scope,
             authoring_basis: None,
         };
-        let expansion = match bindings.try_expand_prefabs_with_loader(
+        let expansion = match bindings.try_compile_scene_with_loader(
             document,
-            nara_scene::PrefabExpansionOptions::default(),
+            nara_scene::SceneCompilationOptions::default(),
             Some(self.asset_resolution()),
             |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
         ) {
             Ok(report) => report,
             Err(error) => match error {},
         };
-        let nara_scene::PrefabExpansionReport {
+        let nara_scene::SceneCompilationReport {
             candidate,
             diagnostics,
             ..
         } = expansion;
-        let expanded_candidate = candidate
-            .ok_or_else(|| {
-                map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
-            })?
-            .bind_source(source_key.clone());
-        let expanded = expanded_candidate.document();
-        let diagnostics = bindings.validate_scene(
-            expanded,
+        let compiled = candidate.ok_or_else(|| {
+            map_scene_diagnostics(ProjectContentErrorKind::SceneCompilation, diagnostics)
+        })?;
+        let diagnostics = bindings.validate_compiled_scene(
+            &compiled,
             Some(self.asset_resolution()),
             ComponentValueMaterializationLimits::default(),
         );
@@ -557,15 +559,16 @@ impl ProjectContentSnapshot {
                 diagnostics,
             ));
         }
-        self.validate_editor_product_selections(expanded, bindings)?;
-        let retained_bytes = editor_startup_scene_retained_bytes(&expanded_candidate)?;
+        self.validate_editor_product_selections(&compiled, bindings)?;
+        let retained_bytes = editor_startup_scene_retained_bytes(&compiled, source_key)?;
         let lease = self
             .inner
             ._runtime_lease
             .reserve_retained(retained_bytes)
             .map_err(ProjectContentError::budget)?;
+        let compiled_candidate = compiled.bind_source(source_key.clone());
         Ok(SceneSource::from_project_content(
-            Arc::new(expanded_candidate),
+            Arc::new(compiled_candidate),
             Arc::clone(&self.inner.sources),
             lease,
             self.inner._generation_lease.clone(),
@@ -576,13 +579,13 @@ impl ProjectContentSnapshot {
 
     fn validate_editor_product_selections(
         &self,
-        document: &SceneDocument,
+        document: &CompiledSceneDocument,
         bindings: &SceneComponentBindings,
     ) -> Result<(), ProjectContentError> {
         let mut budget = self.inner._runtime_lease.budget_ticket();
         let mut required = RequiredAssetProducts::default();
-        for entity in &document.entities {
-            for (component, value) in &entity.components {
+        for entity in document.entities() {
+            for (component, value) in entity.components() {
                 let schema = bindings.schema(component).ok_or_else(|| {
                     ProjectContentError::single(
                         ProjectContentErrorKind::AssetReference,
@@ -677,7 +680,7 @@ impl ProjectContentSnapshot {
         registry: &nara_reflect::ComponentRegistrySnapshot,
     ) -> Result<
         (
-            nara_scene::ExpandedSceneCandidate,
+            CompiledSceneCandidate,
             Vec<nara_scene::__private::AuthoringPreviewOmission>,
         ),
         DiagnosticReport,
@@ -688,10 +691,10 @@ impl ProjectContentSnapshot {
             scope: &self.inner.sources.prefab_scope,
             authoring_basis: Some(basis),
         };
-        let expansion = match nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+        let expansion = match nara_scene::__private::try_compile_authoring_scene_with_loader(
             document,
             basis,
-            nara_scene::PrefabExpansionOptions::default(),
+            nara_scene::SceneCompilationOptions::default(),
             Some(self.asset_resolution()),
             |source, _| Ok::<_, std::convert::Infallible>(resolver.resolve_prefab(source)),
         ) {
@@ -794,7 +797,7 @@ pub enum ProjectContentErrorKind {
     SceneFormat,
     InputDefinition,
     ScenePublication,
-    PrefabExpansion,
+    SceneCompilation,
     AssetReference,
     AssetMeta,
     AssetMetaMismatch,
@@ -972,7 +975,7 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::ScenePublication => {
                 "project scene semantic publication failed"
             }
-            ProjectContentErrorKind::PrefabExpansion => "project prefab expansion failed",
+            ProjectContentErrorKind::SceneCompilation => "project scene compilation failed",
             ProjectContentErrorKind::AssetReference => {
                 "project component asset reference is invalid"
             }
@@ -1760,7 +1763,7 @@ impl<'a> LoadContext<'a> {
 
         let mut loaded_prefabs = BTreeMap::<AssetSourcePath, LoadedPrefabContent>::new();
         let mut prefab_cache_work = 0usize;
-        let expanded_candidate = self.compile_scene(
+        let compiled_candidate = self.compile_scene(
             &scene,
             &selected_scene_source,
             settings,
@@ -1769,8 +1772,8 @@ impl<'a> LoadContext<'a> {
         )?;
         let validation = self.validation;
         let bindings = validation.bindings();
-        let expanded = expanded_candidate.document();
-        let provenance = expanded_candidate.provenance();
+        let compiled = compiled_candidate.document();
+        let provenance = compiled_candidate.canonical_provenance();
 
         if let Some(agreement) = self.runtime_agreement.take() {
             let (path, digest) = agreement.revalidate_and_into_closure_member(&self.loader.root)?;
@@ -1793,7 +1796,7 @@ impl<'a> LoadContext<'a> {
         self.add_budget(ProjectContentBudgetKind::WorkBytes, root_index_work)?;
         sources.scene_index_work_bytes = root_index_work;
         sources.seen_scenes.insert(selected_source_path.clone());
-        self.collect_source_candidates(expanded, &assets, &mut sources)?;
+        self.collect_source_candidates(compiled, &assets, &mut sources)?;
         let mut dependent_scenes = Vec::new();
         while let Some((canonical, request)) = sources.scenes.pop_first() {
             self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
@@ -1826,7 +1829,7 @@ impl<'a> LoadContext<'a> {
             drop((directory, source_root));
             self.subtract_budget(ProjectContentBudgetKind::OpenHandles, 1);
             self.subtract_budget(ProjectContentBudgetKind::WorkBytes, root_work.reserved);
-            self.collect_source_candidates(captured.expanded_scene(), &assets, &mut sources)?;
+            self.collect_source_candidates(captured.compiled_scene(), &assets, &mut sources)?;
             dependent_scenes.push(captured);
             self.commit_work_as_retained(entry_work, entry_work.reserved)?;
             drop((canonical, request));
@@ -1891,10 +1894,10 @@ impl<'a> LoadContext<'a> {
             self.reconcile_native_metadata(&dependency.path, &dependency.source)?;
         }
         self.validate_tileset_image_extents(&tilesets, &images)?;
-        self.validate_tilemap_membership(&expanded, &provenance, &tilesets)?;
+        self.validate_tilemap_membership(compiled, provenance, &tilesets)?;
         self.commit_tileset_identities(&settings.paths.assets, &tilesets)?;
-        let diagnostics = bindings.validate_scene(
-            expanded,
+        let diagnostics = bindings.validate_compiled_scene(
+            compiled,
             Some(self.asset_resolution()),
             ComponentValueMaterializationLimits::default(),
         );
@@ -1906,12 +1909,12 @@ impl<'a> LoadContext<'a> {
         }
         for dependency in &dependent_scenes {
             self.validate_tilemap_membership(
-                dependency.expanded.document(),
-                dependency.expanded.provenance(),
+                dependency.compiled.document(),
+                dependency.compiled.canonical_provenance(),
                 &tilesets,
             )?;
-            let diagnostics = bindings.validate_scene(
-                dependency.expanded_scene(),
+            let diagnostics = bindings.validate_compiled_scene(
+                dependency.compiled_scene(),
                 Some(self.asset_resolution()),
                 ComponentValueMaterializationLimits::default(),
             );
@@ -1986,7 +1989,7 @@ impl<'a> LoadContext<'a> {
             path: selected_source_path,
             source: selected_scene_source,
             document: Arc::new(scene),
-            expanded: Arc::new(expanded_candidate),
+            compiled: Arc::new(compiled_candidate),
         };
         let mut prefab_values = Vec::new();
         prefab_values
@@ -2489,12 +2492,12 @@ impl<'a> LoadContext<'a> {
 
     fn collect_source_candidates(
         &mut self,
-        document: &SceneDocument,
+        document: &CompiledSceneDocument,
         assets: &DirectoryCapability,
         sources: &mut SourceCandidates,
     ) -> Result<(), ProjectContentError> {
-        for entity in &document.entities {
-            for (component, record) in &entity.components {
+        for entity in document.entities() {
+            for (component, record) in entity.components() {
                 let validation = self.validation;
                 let schema = validation.bindings().schema(component).ok_or_else(|| {
                     map_asset_reference_error(DeclaredAssetReferenceError::UnknownComponent {
@@ -2709,21 +2712,21 @@ impl<'a> LoadContext<'a> {
 
     fn validate_tilemap_membership(
         &mut self,
-        document: &SceneDocument,
+        document: &CompiledSceneDocument,
         provenance: &SceneEntityProvenanceMap,
         tilesets: &[ProjectTileSetContent],
     ) -> Result<(), ProjectContentError> {
-        for entity in &document.entities {
+        for entity in document.entities() {
             let Some(record) = entity
-                .components
+                .components()
                 .get(&nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap"))
             else {
                 continue;
             };
-            let work = tilemap_membership_work_bytes(&record.value)
+            let work = tilemap_membership_work_bytes(record.value())
                 .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
             self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
-            let result = validate_persisted_tilemap_membership(&record.value, |reference| {
+            let result = validate_persisted_tilemap_membership(record.value(), |reference| {
                 tilesets
                     .iter()
                     .find(|tileset| match reference {
@@ -3357,14 +3360,14 @@ fn map_scene_diagnostics(
 
 fn collect_effective_asset_references(
     schema: &nara_reflect::ComponentSchema,
-    record: &nara_scene::SceneComponentRecord,
+    record: &CompiledSceneComponent,
     budget: &mut BudgetTicket,
 ) -> Result<(Vec<DeclaredAssetReference>, usize), ProjectContentError> {
     let mut work_bytes = 0usize;
     let references = collect_declared_effective_asset_references_with_admission(
         schema,
-        record.version,
-        &record.value,
+        record.version(),
+        record.value(),
         EntityReferenceTraversalLimits::default(),
         |_, _, allocation| {
             budget
@@ -3437,7 +3440,7 @@ fn unsupported_product_selection(reference: &AssetRef) -> ProjectContentError {
 }
 
 fn tilemap_membership_error(
-    entity: &SceneEntityRecord,
+    entity: &CompiledSceneEntity,
     provenance: &SceneEntityProvenanceMap,
     error: TilemapMembershipError,
 ) -> ProjectContentError {
@@ -3473,12 +3476,12 @@ fn tilemap_membership_error(
         diagnostic,
         DiagnosticField::public_identifier(
             field_key("entity-id"),
-            PublicDiagnosticIdentifier::new(entity.id.as_str()).unwrap_or_else(|_| {
+            PublicDiagnosticIdentifier::new(entity.id().as_str()).unwrap_or_else(|_| {
                 PublicDiagnosticIdentifier::new("invalid-entity-id").expect("literal is valid")
             }),
         ),
     );
-    if let Some(source) = provenance.get(&entity.id) {
+    if let Some(source) = provenance.get(entity.id()) {
         diagnostic = attach_field(
             diagnostic,
             DiagnosticField::public_identifier(
@@ -3630,7 +3633,7 @@ fn scene_decode_work_plan(
 }
 
 fn prefab_expansion_work_plan(
-    limits: nara_scene::PrefabExpansionLimits,
+    limits: nara_scene::SceneCompilationLimits,
 ) -> Result<usize, ProjectContentError> {
     // Scene owns the same allocation model for full admission and suspended callbacks.
     limits
@@ -3639,23 +3642,38 @@ fn prefab_expansion_work_plan(
 }
 
 pub(crate) fn startup_scene_retained_bytes(
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
 ) -> Result<usize, ProjectContentError> {
     crate::scene_retention::startup_scene_retained_bytes(candidate)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn editor_startup_scene_retained_bytes(
-    candidate: &ExpandedSceneCandidate,
+    document: &CompiledSceneDocument,
+    source: &SourceDocumentKey,
 ) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::direct_startup_scene_retained_bytes(candidate)
-        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?
-        .checked_add(SNAPSHOT_LEASE_OVERHEAD)
-        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+    checked_plan_sum(
+        ProjectContentBudgetKind::RetainedBytes,
+        [
+            size_of::<CompiledSceneCandidate>(),
+            source.retained_bytes(),
+            compiled_scene_retained_bytes(document)?,
+            ARC_CONTROL_BLOCK_BYTES,
+            size_of::<Arc<CompiledSceneCandidate>>(),
+            SNAPSHOT_LEASE_OVERHEAD,
+        ],
+    )
 }
 
 fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectContentError> {
     crate::scene_retention::scene_retained_bytes(document)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
+}
+
+fn compiled_scene_retained_bytes(
+    document: &CompiledSceneDocument,
+) -> Result<usize, ProjectContentError> {
+    crate::scene_retention::compiled_scene_retained_bytes(document)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
@@ -4154,10 +4172,10 @@ mod tests {
             &document,
             "the captured root remains authored",
         );
-        assert_eq!(
-            snapshot.expanded_scene().entities[0].components[&data],
-            record
-        );
+        let compiled = &snapshot.compiled_scene().entities()[0].components()[&data];
+        assert_eq!(compiled.schema_owner(), record.owner());
+        assert_eq!(compiled.version(), record.version);
+        assert_eq!(compiled.value(), &record.value);
         assert_eq!(snapshot.images().len(), 1);
         assert!(!snapshot.source_upgrade_required());
         assert!(snapshot.content_closure().members().iter().any(|member| {
@@ -4535,7 +4553,7 @@ mod tests {
             "scenes/dependency.scene.json"
         );
         let raw = Arc::downgrade(&snapshot.inner.sources.scenes.dependencies[0].document);
-        let effective = Arc::downgrade(&snapshot.inner.sources.scenes.dependencies[0].expanded);
+        let effective = Arc::downgrade(&snapshot.inner.sources.scenes.dependencies[0].compiled);
         let source = snapshot.scene_source();
         let exact = loader
             .budget_snapshot()
@@ -4645,7 +4663,7 @@ mod tests {
                 let (candidate, plan, loader) = project.inputs();
                 let startup = loader.load(&candidate, &plan).unwrap();
                 assert_eq!(
-                    startup.expanded_scene().entities[0].id.as_str(),
+                    startup.compiled_scene().entities()[0].id().as_str(),
                     "startup.scene.json"
                 );
                 drop(startup);
@@ -4666,7 +4684,7 @@ mod tests {
                     };
                     assert_eq!(snapshot.selected_scene_path().as_str(), "b.scene.json");
                     assert_eq!(
-                        snapshot.expanded_scene().entities[0].id.as_str(),
+                        snapshot.compiled_scene().entities()[0].id().as_str(),
                         "b.scene.json"
                     );
                     let metadata_observed = by_product || stable_native;
@@ -4886,7 +4904,7 @@ mod tests {
                 plan.schema_validation().bindings(),
             )
             .unwrap();
-        assert_eq!(rebound.document(), snapshot.expanded_scene());
+        assert_eq!(rebound.document(), snapshot.compiled_scene());
         drop((rebound, snapshot));
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     }
@@ -4896,8 +4914,8 @@ mod tests {
         let project = LazyContentProject::new();
         let (candidate, plan, original) = project.inputs();
         let compiler_limit = ByteLimit::new(4096).unwrap();
-        let limits = ProjectContentLimits::default().with_prefab_expansion(
-            nara_scene::PrefabExpansionLimits::default().with_working_bytes(compiler_limit),
+        let limits = ProjectContentLimits::default().with_scene_compilation(
+            nara_scene::SceneCompilationLimits::default().with_working_bytes(compiler_limit),
         );
         let loader = ProjectContentLoader::with_limits(original.project_root(), limits).unwrap();
         let mut context = LoadContext::new(
@@ -4992,14 +5010,14 @@ mod tests {
         );
         assert!(
             snapshot
-                .expanded_scene()
-                .entities
+                .compiled_scene()
+                .entities()
                 .iter()
-                .all(|entity| entity.components.is_empty())
+                .all(|entity| entity.components().is_empty())
         );
         assert_eq!(
             snapshot
-                .expanded_scene_provenance()
+                .compiled_scene_provenance()
                 .iter()
                 .filter(|(_, origin)| origin.local_entity_id().as_str() == "r")
                 .count(),
@@ -5059,8 +5077,8 @@ mod tests {
         let (candidate, plan, default_loader) = project.inputs();
         // Keep the compiler ceiling fixed below the source decoder's peak. The observed
         // boundary then measures the live working set during decoding, not unused capacity.
-        let limits = ProjectContentLimits::default().with_prefab_expansion(
-            nara_scene::PrefabExpansionLimits::default()
+        let limits = ProjectContentLimits::default().with_scene_compilation(
+            nara_scene::SceneCompilationLimits::default()
                 .with_working_bytes(nara_core::ByteLimit::new(1024 * 1024).unwrap()),
         );
         let loader =
@@ -5304,19 +5322,19 @@ mod tests {
                     "composition cannot rewrite the captured source",
                 );
                 let node = snapshot
-                    .expanded_scene()
-                    .entities
+                    .compiled_scene()
+                    .entities()
                     .iter()
-                    .find(|entity| entity.id != id("host"))
+                    .find(|entity| entity.id() != &id("host"))
                     .unwrap();
                 assert_eq!(
-                    node.components.contains_key(&component),
+                    node.components().contains_key(&component),
                     repair == "replace"
                 );
                 if repair == "replace" {
                     assert_eq!(
-                        node.components[&component].value,
-                        ComponentValue::String("Repaired".into())
+                        node.components()[&component].value(),
+                        &ComponentValue::String("Repaired".into())
                     );
                 }
                 drop(snapshot);

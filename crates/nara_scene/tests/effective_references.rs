@@ -1,3 +1,6 @@
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 #[path = "support/prefab_source.rs"]
 mod prefab_source;
 
@@ -83,7 +86,10 @@ fn linked_source(omit_target: bool) -> SceneEntityRecord {
     };
     SceneEntityRecord::new(scene_id("source")).with_component(
         component_id(),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_contextual_default(
+            ComponentFieldId::new("target"),
+            ComponentValue::EntityReference(local_target()),
+        ),
     )
 }
 
@@ -104,11 +110,13 @@ fn scene_spawn_materializes_default_reference_without_rewriting_source() {
     let report = nara_scene::spawn_scene(
         &mut world,
         &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::native(
+            &registry,
+            &std::sync::Arc::new((document).clone()),
             scene_source_key(
                 "scene_spawn_materializes_default_reference_without_rewriting_source/document",
             ),
-            std::sync::Arc::new((document).clone()),
+            None,
         ),
         &scene_occurrence(
             "scene_spawn_materializes_default_reference_without_rewriting_source/report",
@@ -135,7 +143,7 @@ fn scene_spawn_materializes_default_reference_without_rewriting_source() {
 }
 
 #[test]
-fn scene_spawn_rejects_missing_local_target_before_world_mutation() {
+fn scene_compilation_rejects_missing_local_target_before_world_mutation() {
     let registry = registry(false);
     for omit_target in [false, true] {
         let document = SceneDocument::from_ordered_roots([linked_source(omit_target)]);
@@ -144,34 +152,13 @@ fn scene_spawn_rejects_missing_local_target_before_world_mutation() {
         let canary = world.spawn_empty().id();
         let before_entities = world.iter_entities().count();
 
-        let report = nara_scene::spawn_scene(
-            &mut world,
-            &registry,
-            &nara_scene::ExpandedSceneCandidate::plain(
-                scene_source_key(
-                    "scene_spawn_rejects_missing_local_target_before_world_mutation/document",
-                ),
-                std::sync::Arc::new((document).clone()),
-            ),
-            &scene_occurrence(
-                "scene_spawn_rejects_missing_local_target_before_world_mutation/report",
-            ),
-            None,
-        );
+        let report = document.compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
 
         assert!(
             report.diagnostics.has_errors(),
             "missing effective local targets must reject, omission={omit_target}",
         );
-        assert!(report.instance.is_none());
-        eprintln!(
-            "omit={omit_target} diagnostics={:?} entities={:?}",
-            report.diagnostics,
-            world
-                .iter_entities()
-                .map(|entity| entity.id())
-                .collect::<Vec<_>>()
-        );
+        assert!(report.candidate.is_none());
         assert_eq!(world.iter_entities().count(), before_entities);
         assert!(world.get_entity(canary).is_ok());
         assert!(!world.contains_resource::<WorldIdentityDomain>());
@@ -213,7 +200,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         entity
     }));
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(
         !expansion.diagnostics.has_errors(),
@@ -241,13 +228,14 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
         let source_entity = projected("source");
         let target_entity = projected("target");
         let record = expanded
-            .entities
+            .entities()
             .iter()
-            .find(|entity| &entity.id == source_entity)
+            .find(|entity| entity.id() == source_entity)
             .unwrap();
         assert_eq!(
-            record.components[&component_id()]
-                .value
+            record.components()[&component_id()]
+                .value()
+                .clone()
                 .field_entity_reference("target")
                 .unwrap(),
             &EntityReference::SceneLocal {
@@ -289,11 +277,13 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
         let report = nara_scene::spawn_scene(
             &mut world,
             &registry,
-            &nara_scene::ExpandedSceneCandidate::plain(
+            &compiled_scene::native(
+                &registry,
+                &std::sync::Arc::new((document).clone()),
                 scene_source_key(
                     "export_materializes_omitted_default_reference_before_instance_remap/document",
                 ),
-                std::sync::Arc::new((document).clone()),
+                None,
             ),
             &scene_occurrence(slot),
             None,
@@ -322,14 +312,17 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
             .iter()
             .find(|entity| &entity.id == source)
             .unwrap();
+        let component = &source_record.components[&component_id()];
+        let expected = EntityReference::SceneLocal {
+            entity: target.clone(),
+        };
         assert_eq!(
-            source_record.components[&component_id()]
-                .value
-                .field_entity_reference("target")
-                .unwrap(),
-            &EntityReference::SceneLocal {
-                entity: target.clone(),
-            },
+            component.value.field_entity_reference("target").unwrap(),
+            &expected,
+        );
+        assert_eq!(
+            component.contextual_defaults[&ComponentFieldId::new("target")],
+            ComponentValue::EntityReference(expected),
         );
         assert_ne!(source, target);
         assert!(
@@ -342,6 +335,25 @@ fn export_materializes_omitted_default_reference_before_instance_remap() {
         mapped_targets.insert(target.clone());
     }
     assert_eq!(mapped_targets.len(), 2);
+
+    let compiled = output
+        .document
+        .compile(&registry, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compiled.diagnostics.has_errors(),
+        "{:?}",
+        compiled.diagnostics,
+    );
+    assert!(compiled.candidate.is_some());
+    #[cfg(feature = "serde")]
+    for candidate in [
+        SceneDocumentCandidate::decode_json_str(&output.document.to_json_string().unwrap())
+            .unwrap(),
+        SceneDocumentCandidate::decode_ron_str(&output.document.to_ron_string().unwrap()).unwrap(),
+    ] {
+        let published = candidate.publish(&registry).unwrap();
+        assert_eq!(published.document(), &output.document);
+    }
 }
 
 #[test]
@@ -353,11 +365,13 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
         let report = nara_scene::spawn_scene(
             &mut world,
             &registry,
-            &nara_scene::ExpandedSceneCandidate::plain(
+            &compiled_scene::native(
+                &registry,
+                &std::sync::Arc::new((document).clone()),
                 scene_source_key(
                     "export_aggregate_value_budget_has_exact_boundary_and_preserves_world/document",
                 ),
-                std::sync::Arc::new((document).clone()),
+                None,
             ),
             &scene_occurrence(slot),
             None,
@@ -365,29 +379,41 @@ fn export_aggregate_value_budget_has_exact_boundary_and_preserves_world() {
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     }
     let before_entities = world.iter_entities().count();
+    // Two effective maps each retain their field key and one generated entity_N reference.
+    // Two independent contextual maps add a map node, the stable field ID and that reference.
+    // Derive this from the fixture and export ID format, independently of the output's cost.
+    let values = 2;
+    let field_bytes = "target".len();
+    let reference_bytes = "entity_1".len();
+    let nodes = values * 2 + values * (1 + 1);
+    let bytes = values * (field_bytes + reference_bytes) + values * (field_bytes + reference_bytes);
     let exact_limits = nara_reflect::ComponentValueMaterializationLimits::new(
-        ItemLimit::new(4).unwrap(),
-        ByteLimit::new(28).unwrap(),
-        DepthLimit::new(3).unwrap(),
+        ItemLimit::new(nodes).unwrap(),
+        ByteLimit::new(bytes).unwrap(),
+        DepthLimit::new(2).unwrap(),
     );
     let exact = export_scene_with_limits(&world, &registry, exact_limits);
     assert!(!exact.diagnostics.has_errors(), "{:?}", exact.diagnostics);
     assert!(exact.output().is_some());
     assert_eq!(world.iter_entities().count(), before_entities);
 
-    let below_bytes = nara_reflect::ComponentValueMaterializationLimits::new(
-        ItemLimit::new(4).unwrap(),
-        ByteLimit::new(27).unwrap(),
-        DepthLimit::new(3).unwrap(),
-    );
-    let rejected = export_scene_with_limits(&world, &registry, below_bytes);
-    assert!(rejected.output().is_none());
-    assert!(
-        rejected.diagnostics.iter().any(|diagnostic| {
+    for (nodes, bytes, depth) in [
+        (nodes - 1, bytes, 2),
+        (nodes, bytes - 1, 2),
+        (nodes, bytes, 1),
+    ] {
+        let below = nara_reflect::ComponentValueMaterializationLimits::new(
+            ItemLimit::new(nodes).unwrap(),
+            ByteLimit::new(bytes).unwrap(),
+            DepthLimit::new(depth).unwrap(),
+        );
+        let rejected = export_scene_with_limits(&world, &registry, below);
+        assert!(rejected.output().is_none());
+        assert!(rejected.diagnostics.iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.export-value-budget-exceeded"
-        })
-    );
-    assert_eq!(world.iter_entities().count(), before_entities);
+        }));
+        assert_eq!(world.iter_entities().count(), before_entities);
+    }
 }
 
 fn export_scene_with_limits(

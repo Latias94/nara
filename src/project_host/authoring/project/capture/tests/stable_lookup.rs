@@ -150,9 +150,9 @@ fn primary_product_prefab_preserves_location_identity_on_fresh_and_cached_loads(
                 if path.as_str() == "prefabs/outer.prefab.json"
         ));
         let preview = capture.take_preview().unwrap();
-        assert_eq!(preview.candidate.document().entities.len(), 6);
+        assert_eq!(preview.candidate.document().entities().len(), 6);
         let mut projections = 0;
-        for provenance in preview.candidate.provenance().values() {
+        for provenance in preview.candidate.canonical_provenance().values() {
             if let Some(path) = provenance.projection_path() {
                 projections += 1;
                 assert_eq!(path.steps().len(), 1);

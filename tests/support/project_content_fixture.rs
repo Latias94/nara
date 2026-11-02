@@ -174,7 +174,7 @@ requested = ["runtime-2d"]
             .load(&candidate, &plan)
             .unwrap();
         let mut matches = snapshot
-            .expanded_scene_provenance()
+            .compiled_scene_provenance()
             .iter()
             .filter(|(_, provenance)| {
                 provenance.local_entity_id() == source

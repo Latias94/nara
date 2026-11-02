@@ -20,7 +20,7 @@ use super::components::{
     check_value_cost, codec_failure, reserve_cost, shape_failure, validate_value,
 };
 use super::references::plan_property_references;
-use super::{PrefabExpansionFailureKind, PrefabPropertyClaim, PrefabPropertyIntent};
+use super::{PrefabPropertyClaim, PrefabPropertyIntent, SceneCompilationFailureKind};
 
 #[cfg(test)]
 #[path = "properties/owned_candidate_tests.rs"]
@@ -51,23 +51,23 @@ pub(super) fn prepare_claims(
     contextual_defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
     claims: &[PrefabPropertyClaim],
     limits: ComponentValueMaterializationLimits,
-    mut admit_path: impl FnMut(usize) -> Result<(), PrefabExpansionFailureKind>,
-) -> Result<PreparedPropertyClaims, PrefabExpansionFailureKind> {
+    mut admit_path: impl FnMut(usize) -> Result<(), SceneCompilationFailureKind>,
+) -> Result<PreparedPropertyClaims, SceneCompilationFailureKind> {
     if version != schema.version() {
-        return Err(PrefabExpansionFailureKind::Component);
+        return Err(SceneCompilationFailureKind::Component);
     }
     let (mut nodes, mut bytes) = claim_cost(claims, limits)?;
     let fields = claims
         .iter()
         .map(|claim| {
             if schema.field_tombstones().contains(&claim.path.root) {
-                return Err(PrefabExpansionFailureKind::Component);
+                return Err(SceneCompilationFailureKind::Component);
             }
             schema
                 .fields()
                 .iter()
                 .find(|field| field.id() == &claim.path.root)
-                .ok_or(PrefabExpansionFailureKind::Component)
+                .ok_or(SceneCompilationFailureKind::Component)
         })
         .collect::<Result<Vec<_>, _>>()?;
     for (claim, field) in claims.iter().zip(&fields) {
@@ -80,7 +80,7 @@ pub(super) fn prepare_claims(
         {
             let cost = default
                 .cost_up_to(limits.nodes().get(), limits.bytes().get())
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+                .ok_or(SceneCompilationFailureKind::WorkLimit)?;
             nodes = nodes.saturating_add(cost.nodes());
             bytes = bytes.saturating_add(cost.logical_bytes());
         }
@@ -101,7 +101,7 @@ pub(super) fn prepare_claims(
                 if !claim.path.steps.is_empty()
                     || (field.required && field.default_value().is_none())
                 {
-                    return Err(PrefabExpansionFailureKind::Component);
+                    return Err(SceneCompilationFailureKind::Component);
                 }
                 require_map_parent(original, field, true)?;
             }
@@ -110,13 +110,13 @@ pub(super) fn prepare_claims(
                     require_map_parent(original, field, false)?;
                     if claim.path.steps.is_empty() {
                         if field.required && field.default_value().is_none() {
-                            return Err(PrefabExpansionFailureKind::Component);
+                            return Err(SceneCompilationFailureKind::Component);
                         }
                         field.shape().validate_value(value).map_err(shape_failure)?;
                         continue;
                     }
                     if field.default_value().is_none() {
-                        return Err(PrefabExpansionFailureKind::Component);
+                        return Err(SceneCompilationFailureKind::Component);
                     }
                 }
                 let selected = resolve_component_property_with_limits(
@@ -157,7 +157,7 @@ pub(super) fn prepare_claims(
                 if !root_missing(&candidate, field)? {
                     candidate
                         .remove_path(field.path())
-                        .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                        .map_err(|_| SceneCompilationFailureKind::Component)?;
                 }
             }
             PrefabPropertyIntent::Set(value) => {
@@ -203,11 +203,11 @@ pub(super) fn prepare_claims(
                         contextual_defaults
                             .get(field.id())
                             .or(field.default_value())
-                            .ok_or(PrefabExpansionFailureKind::Component)?
+                            .ok_or(SceneCompilationFailureKind::Component)?
                     };
                     candidate
                         .set_path(field.path(), initial.clone())
-                        .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                        .map_err(|_| SceneCompilationFailureKind::Component)?;
                     if claim.path.steps.is_empty() {
                         continue;
                     }
@@ -252,7 +252,7 @@ pub(super) fn prepare_claims(
                 .map_err(codec_failure)?;
             candidate
                 .set_path(field.path(), default.clone())
-                .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                .map_err(|_| SceneCompilationFailureKind::Component)?;
         }
     }
     validate_value(schema, &candidate, limits)?;
@@ -272,7 +272,7 @@ pub(super) fn apply_claims(
     claims: &[PrefabPropertyClaim],
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<ComponentValue, PrefabExpansionFailureKind> {
+) -> Result<ComponentValue, SceneCompilationFailureKind> {
     let prepared = prepare_claims(
         schema,
         version,
@@ -286,14 +286,14 @@ pub(super) fn apply_claims(
     for replacement in prepared.replacements {
         for (relative, target) in replacement.references {
             let nara_identity::AuthoredReferenceTarget::Entity(entity) = target.target else {
-                return Err(PrefabExpansionFailureKind::Reference);
+                return Err(SceneCompilationFailureKind::Reference);
             };
             let target = targets
                 .get(&PrefabEntityTarget {
                     through: target.through,
                     entity,
                 })
-                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+                .ok_or(SceneCompilationFailureKind::MissingTarget)?;
             let path = ComponentFieldPath::new(
                 replacement
                     .path
@@ -309,7 +309,7 @@ pub(super) fn apply_claims(
                         entity: target.clone(),
                     }),
                 )
-                .map_err(|_| PrefabExpansionFailureKind::Reference)?;
+                .map_err(|_| SceneCompilationFailureKind::Reference)?;
         }
     }
     check_value_cost(&value, limits)?;
@@ -321,7 +321,7 @@ fn effective_value<'value>(
     value: &'value ComponentValue,
     contextual_defaults: &BTreeMap<ComponentFieldId, ComponentValue>,
     limits: ComponentValueMaterializationLimits,
-) -> Result<std::borrow::Cow<'value, ComponentValue>, PrefabExpansionFailureKind> {
+) -> Result<std::borrow::Cow<'value, ComponentValue>, SceneCompilationFailureKind> {
     let (value, _) =
         nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
             schema,
@@ -338,8 +338,8 @@ fn effective_value<'value>(
 
 fn clone_storage_path(
     path: &ComponentFieldPath,
-    admit: &mut impl FnMut(usize) -> Result<(), PrefabExpansionFailureKind>,
-) -> Result<ComponentFieldPath, PrefabExpansionFailureKind> {
+    admit: &mut impl FnMut(usize) -> Result<(), SceneCompilationFailureKind>,
+) -> Result<ComponentFieldPath, SceneCompilationFailureKind> {
     let bytes = path
         .segments()
         .iter()
@@ -354,23 +354,23 @@ fn clone_storage_path(
                     })
             },
         )
-        .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+        .ok_or(SceneCompilationFailureKind::WorkLimit)?;
     admit(bytes)?;
     Ok(path.clone())
 }
 
-fn property_failure(error: ComponentPropertyError) -> PrefabExpansionFailureKind {
+fn property_failure(error: ComponentPropertyError) -> SceneCompilationFailureKind {
     match error {
-        ComponentPropertyError::InvalidSchema(_) => PrefabExpansionFailureKind::OwnerAdmission,
+        ComponentPropertyError::InvalidSchema(_) => SceneCompilationFailureKind::OwnerAdmission,
         ComponentPropertyError::ReadBudgetExceeded
         | ComponentPropertyError::PathDepthLimit
         | ComponentPropertyError::PathByteLimit
-        | ComponentPropertyError::StorageIndexOverflow => PrefabExpansionFailureKind::WorkLimit,
+        | ComponentPropertyError::StorageIndexOverflow => SceneCompilationFailureKind::WorkLimit,
         ComponentPropertyError::ValueBudget(error)
         | ComponentPropertyError::InvalidReplacementShape(error) => shape_failure(error),
         ComponentPropertyError::InvalidValue(error)
         | ComponentPropertyError::InvalidReplacement(error) => codec_failure(error),
-        _ => PrefabExpansionFailureKind::Component,
+        _ => SceneCompilationFailureKind::Component,
     }
 }
 
@@ -378,14 +378,14 @@ fn property_failure(error: ComponentPropertyError) -> PrefabExpansionFailureKind
 /// The caller admits this pointer index before allocation.
 pub(crate) fn validate_claim_paths(
     claims: &[PrefabPropertyClaim],
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     let mut paths = claims.iter().map(|claim| &claim.path).collect::<Vec<_>>();
     paths.sort_unstable();
     if paths
         .windows(2)
         .any(|pair| pair[0].root == pair[1].root && pair[1].steps.starts_with(&pair[0].steps))
     {
-        return Err(PrefabExpansionFailureKind::DuplicateIntent);
+        return Err(SceneCompilationFailureKind::DuplicateIntent);
     }
     Ok(())
 }
@@ -393,25 +393,25 @@ pub(crate) fn validate_claim_paths(
 fn claim_cost(
     claims: &[PrefabPropertyClaim],
     limits: ComponentValueMaterializationLimits,
-) -> Result<(usize, usize), PrefabExpansionFailureKind> {
+) -> Result<(usize, usize), SceneCompilationFailureKind> {
     if claims.len() > limits.nodes().get() {
-        return Err(PrefabExpansionFailureKind::WorkLimit);
+        return Err(SceneCompilationFailureKind::WorkLimit);
     }
     let mut nodes = 0usize;
     let mut bytes = 0usize;
     for claim in claims {
         if claim.path.steps.len() > limits.depth().get() {
-            return Err(PrefabExpansionFailureKind::WorkLimit);
+            return Err(SceneCompilationFailureKind::WorkLimit);
         }
         bytes = bytes.saturating_add(claim.path.logical_bytes().map_err(property_failure)?);
         if bytes > limits.bytes().get() {
-            return Err(PrefabExpansionFailureKind::WorkLimit);
+            return Err(SceneCompilationFailureKind::WorkLimit);
         }
         if let PrefabPropertyIntent::Set(value) = &claim.intent {
             check_value_cost(value, limits)?;
             let cost = value
                 .cost_up_to(limits.nodes().get() - nodes, limits.bytes().get() - bytes)
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+                .ok_or(SceneCompilationFailureKind::WorkLimit)?;
             nodes += cost.nodes();
             bytes += cost.logical_bytes();
         }
@@ -423,14 +423,14 @@ fn claim_cost(
 fn root_missing(
     value: &ComponentValue,
     field: &ComponentFieldSchema,
-) -> Result<bool, PrefabExpansionFailureKind> {
+) -> Result<bool, SceneCompilationFailureKind> {
     match value.get_path(field.path()) {
         Ok(_) => Ok(false),
         Err(
             ComponentFieldPathError::MissingField { .. }
             | ComponentFieldPathError::IndexOutOfBounds { .. },
         ) => Ok(true),
-        Err(_) => Err(PrefabExpansionFailureKind::Component),
+        Err(_) => Err(SceneCompilationFailureKind::Component),
     }
 }
 
@@ -438,11 +438,11 @@ fn require_map_parent(
     value: &ComponentValue,
     field: &ComponentFieldSchema,
     allow_absent_parent: bool,
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     let Some((ComponentFieldPathSegment::Field(_), ancestors)) =
         field.path().segments().split_last()
     else {
-        return Err(PrefabExpansionFailureKind::Component);
+        return Err(SceneCompilationFailureKind::Component);
     };
     let parent = ComponentFieldPath::new(ancestors.iter().cloned());
     match value.get_path(&parent) {
@@ -451,7 +451,7 @@ fn require_map_parent(
             ComponentFieldPathError::MissingField { .. }
             | ComponentFieldPathError::IndexOutOfBounds { .. },
         ) if allow_absent_parent => Ok(()),
-        _ => Err(PrefabExpansionFailureKind::Component),
+        _ => Err(SceneCompilationFailureKind::Component),
     }
 }
 
@@ -462,7 +462,7 @@ fn preserve_enclosing_keys(
     candidate: &ComponentValue,
     path: &ComponentPropertyPath,
     limits: ComponentValueMaterializationLimits,
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     for (index, step) in path.steps.iter().enumerate() {
         let ComponentPropertyStep::ListItem { by, .. } = step else {
             continue;
@@ -476,18 +476,18 @@ fn preserve_enclosing_keys(
             resolve_component_property_with_limits(schema, version, candidate, &item, limits)
                 .map_err(property_failure)?;
         let ComponentValueShape::Record { members } = before.shape else {
-            return Err(PrefabExpansionFailureKind::Component);
+            return Err(SceneCompilationFailureKind::Component);
         };
         let member = members
             .iter()
             .find(|member| member.id.as_ref() == Some(by))
-            .ok_or(PrefabExpansionFailureKind::Component)?;
+            .ok_or(SceneCompilationFailureKind::Component)?;
         let key = before
             .value
             .get(&member.name)
-            .ok_or(PrefabExpansionFailureKind::Component)?;
+            .ok_or(SceneCompilationFailureKind::Component)?;
         if after.value.get(&member.name) != Some(key) {
-            return Err(PrefabExpansionFailureKind::Component);
+            return Err(SceneCompilationFailureKind::Component);
         }
     }
     Ok(())
@@ -515,11 +515,11 @@ mod failure_mapping_tests {
             };
             assert_eq!(
                 property_failure(ComponentPropertyError::ValueBudget(error.clone())),
-                PrefabExpansionFailureKind::WorkLimit
+                SceneCompilationFailureKind::WorkLimit
             );
             assert_eq!(
                 property_failure(ComponentPropertyError::InvalidSchema(error)),
-                PrefabExpansionFailureKind::OwnerAdmission
+                SceneCompilationFailureKind::OwnerAdmission
             );
         }
         for error in [
@@ -543,14 +543,14 @@ mod failure_mapping_tests {
         ] {
             assert_eq!(
                 property_failure(error),
-                PrefabExpansionFailureKind::WorkLimit
+                SceneCompilationFailureKind::WorkLimit
             );
         }
         assert_eq!(
             property_failure(ComponentPropertyError::UnknownRoot(ComponentFieldId::new(
                 "missing"
             ))),
-            PrefabExpansionFailureKind::Component
+            SceneCompilationFailureKind::Component
         );
     }
 
@@ -580,7 +580,7 @@ mod failure_mapping_tests {
                 &BTreeMap::new(),
                 limits
             ),
-            Err(PrefabExpansionFailureKind::WorkLimit)
+            Err(SceneCompilationFailureKind::WorkLimit)
         );
         assert_eq!(
             effective_value(
@@ -589,7 +589,7 @@ mod failure_mapping_tests {
                 &BTreeMap::new(),
                 limits
             ),
-            Err(PrefabExpansionFailureKind::Component)
+            Err(SceneCompilationFailureKind::Component)
         );
     }
 }

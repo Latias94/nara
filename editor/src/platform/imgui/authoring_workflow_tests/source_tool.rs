@@ -1252,7 +1252,7 @@ fn assert_saved_rust_data(
     let registry = registry.freeze().map_err(|error| error.to_string())?;
     let bindings = SceneComponentBindings::new(registry, [owner.clone()])
         .map_err(|error| error.to_string())?;
-    let expanded = bindings.expand_prefabs(saved, &InMemoryPrefabSourceResolver::new());
+    let expanded = bindings.compile_scene(saved, &InMemoryPrefabSourceResolver::new());
     if expanded.diagnostics.has_errors() {
         return Err(format!("{:?}", expanded.diagnostics));
     }
@@ -1298,7 +1298,9 @@ fn assert_saved_rust_data(
                 .data_component(&world, entity, &ComponentTypeId::new(STATS))
                 .map_err(|error| error.to_string())?
                 .ok_or("saved Rust Scene has no Stats")?;
-            if record.owner() != Some(owner.owner_id()) || record.value != stats(health, 10) {
+            if record.schema_owner() != Some(owner.owner_id())
+                || record.value() != &stats(health, 10)
+            {
                 return Err(format!(
                     "public Rust Scene bindings read unexpected {id} Stats: {record:?}"
                 ));

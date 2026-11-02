@@ -3,7 +3,7 @@
 use std::convert::Infallible;
 
 use nara_scene::{
-    PrefabAuthoringSession, PrefabEntityTarget, PrefabExpansionOptions, PrefabOverlay,
+    PrefabAuthoringSession, PrefabEntityTarget, PrefabOverlay, SceneCompilationOptions,
     ScenePatchDocument, ScenePatchOperation, SourceDocumentKind,
 };
 
@@ -166,7 +166,7 @@ fn prefab_conversion_acquires_real_prefab_root_and_never_hydrates_effective_imag
         .request_complete_prefab_conversion(
             revision,
             &SceneEntityId::new("nested").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut context = snapshot
@@ -234,7 +234,7 @@ fn selected_scene_conversion_does_not_activate_independent_missing_sources_or_as
         .request_complete_prefab_conversion(
             session.revision(),
             &SceneEntityId::new("anchor").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut context = snapshot
@@ -318,7 +318,7 @@ fn finite_containing_prefab_demand_uses_the_actual_unsaved_root_working_copy() {
         .request_complete_prefab_conversion(
             session.revision(),
             &SceneEntityId::new("nested").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut context = snapshot
@@ -387,7 +387,7 @@ fn selected_conversion_retains_unsaved_working_copy_and_file_participants_separa
         .request_complete_prefab_conversion(
             session.revision(),
             &SceneEntityId::new("anchor").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut context = snapshot
@@ -514,7 +514,7 @@ fn selected_conversion_retains_path_and_stable_aliases_and_rejects_new_lookup_am
         .request_complete_prefab_conversion(
             session.revision(),
             &SceneEntityId::new("anchor").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut context = snapshot

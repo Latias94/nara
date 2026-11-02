@@ -160,7 +160,7 @@ fn mapped_wrong_reference_hop_remains_a_constraint_for_actual_use() {
     assert!(report.candidate().is_none());
     assert_eq!(
         report.failure().unwrap().reason,
-        PrefabExpansionFailureKind::SourceChanged
+        SceneCompilationFailureKind::SourceChanged
     );
 }
 

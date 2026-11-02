@@ -604,8 +604,9 @@ The [qualified final-reference-demand correction](../knowledge/engineering/verif
 removes eager lookup of overwritten property references and admits retained storage paths before
 copying. The [qualified inline-reference replacement](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md)
 uses lexical payload/input scope independently of structural target scope; explicit routes select
-nested inputs. Closed compiled storage is now in production integration. Root/placement replacement
-and complete CP2 extraction remain open.
+nested inputs. Closed compiled storage and its complete public compiler Interface now have their
+[production qualification](../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md).
+Root/placement replacement and complete CP2 extraction remain open.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

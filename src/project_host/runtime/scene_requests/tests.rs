@@ -11,7 +11,7 @@ use nara_fs::{
     CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode,
 };
 use nara_identity::SceneEntityId;
-use nara_scene::SceneEntityRecord;
+use nara_scene::{CompiledSceneDocument, SceneDocument, SceneEntityRecord};
 use nara_tasks::TaskPoolConfig;
 
 #[cfg(target_os = "linux")]
@@ -157,18 +157,18 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
             );
             assert_eq!(prepared.selected_scene_product(), None);
             assert_eq!(prepared.expected_instance(), &expected);
-            prepared.scene().roots.clone()
+            prepared.scene().roots().to_vec()
         });
         assert_eq!(roots, [SceneEntityId::new("second").unwrap()]);
         let current = CurrentScene::get(world).unwrap();
         assert_eq!(current.receipt(), &expected);
         assert_eq!(
-            current.source().roots,
+            current.source().roots(),
             [SceneEntityId::new("startup").unwrap()]
         );
         assert_eq!(
-            source_view.with_document(|source| source as *const SceneDocument),
-            Some(current.source() as *const SceneDocument)
+            source_view.with_document(|source| source as *const CompiledSceneDocument),
+            Some(current.source() as *const CompiledSceneDocument)
         );
 
         let mut access = SystemState::<ProjectScenes>::new(world);
@@ -177,7 +177,7 @@ fn scoped_prepared_inspection_preserves_source_receipt_pair_and_scheduled_stale_
             assert_eq!(scenes.state(request), Some(ProjectSceneRequestState::Ready));
             let prepared = scenes.prepared(request).unwrap();
             assert_eq!(prepared.expected_instance(), &expected);
-            assert_eq!(prepared.scene().roots, roots);
+            assert_eq!(prepared.scene().roots(), roots);
         }
         world
             .resource::<RequestOwner>()
@@ -220,12 +220,12 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
     };
     assert_eq!(target.selected_scene_path(), &selected());
     assert_eq!(
-        target.expanded_scene().roots,
+        target.compiled_scene().roots(),
         [SceneEntityId::new("second").unwrap()]
     );
     assert!(target.shares_component_bindings(plan.schema_validation().bindings()));
     assert_eq!(
-        current.expanded_scene().roots,
+        current.compiled_scene().roots(),
         [SceneEntityId::new("startup").unwrap()]
     );
     assert_eq!(
@@ -255,7 +255,7 @@ fn worker_prepares_selected_scene_and_refunds_rejected_content() {
             .any(|diagnostic| diagnostic.code().as_str() == "project.content.scene-format-invalid")
     );
     assert_eq!(
-        current.expanded_scene().roots,
+        current.compiled_scene().roots(),
         [SceneEntityId::new("startup").unwrap()]
     );
     assert_active_budget(&context, baseline);

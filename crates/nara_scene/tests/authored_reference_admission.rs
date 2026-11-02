@@ -1,5 +1,8 @@
 //! Authored intent stays in Source; every Native entry admits a complete flat value batch.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -17,9 +20,8 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, SceneComponentBindings, SceneComponentRecord, SceneDataComponentError,
-    SceneDocument, SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey,
-    SourceDocumentKind,
+    SceneComponentBindings, SceneComponentRecord, SceneDataComponentError, SceneDocument,
+    SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
 };
 
 #[derive(Component)]
@@ -290,15 +292,22 @@ fn data_setter_rejects_authored_values_and_defaults_without_replacing_prior_memb
     );
     let prior = ComponentValue::map([("target", ComponentValue::Null)]);
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("a"))
-        .with_component(last_id(), record(prior.clone()).with_owner(owner_id()))]);
-    let source = ExpandedSceneCandidate::plain(
+        .with_component(
+            last_id(),
+            record(prior.clone())
+                .with_owner(owner_id())
+                .with_contextual_default(ComponentFieldId::new("target"), ComponentValue::Null),
+        )]);
+    let source = compiled_scene::mixed(
+        &bindings,
+        &Arc::new(document),
         SourceDocumentKey::named(
             "c1c7d65e-6cb3-4e7f-9247-a03e4bb75694".parse().unwrap(),
             "authored-admission.scene",
             SourceDocumentKind::Scene,
         )
         .unwrap(),
-        Arc::new(document),
+        None,
     );
     let mut world = World::new();
     let spawned = bindings
@@ -342,7 +351,8 @@ fn data_setter_rejects_authored_values_and_defaults_without_replacing_prior_memb
                 .data_component(&world, entity, &last_id())
                 .unwrap()
                 .unwrap()
-                .value,
+                .value()
+                .clone(),
             prior,
         );
     }

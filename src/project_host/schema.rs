@@ -167,7 +167,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::project_tooling::host_fs;
+    use crate::test_host_fs as host_fs;
 
     static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
 

@@ -378,18 +378,18 @@ fn inspect_actors(world: &mut World, expected_amount: u64) -> Vec<Entity> {
             .data_component(world, *entity, &component(MOTION))
             .unwrap()
             .unwrap();
-        assert_eq!(motion.owner(), Some(&owner(MOTION)));
+        assert_eq!(motion.schema_owner(), Some(&owner(MOTION)));
         assert_eq!(
-            motion.value.field("amount"),
+            motion.value().field("amount"),
             Ok(&ComponentValue::U64(expected_amount))
         );
-        assert_eq!(motion.value.field("gain"), Ok(&ComponentValue::U64(3)));
+        assert_eq!(motion.value().field("gain"), Ok(&ComponentValue::U64(3)));
         let sensor = bindings
             .data_component(world, *entity, &component(SENSOR))
             .unwrap()
             .unwrap();
-        assert_eq!(sensor.value.field("image"), Ok(&image_reference()));
-        let ComponentValue::List(references) = sensor.value.field("targets").unwrap() else {
+        assert_eq!(sensor.value().field("image"), Ok(&image_reference()));
+        let ComponentValue::List(references) = sensor.value().field("targets").unwrap() else {
             panic!("the default target list must survive runtime materialization");
         };
         let [ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target })] =
@@ -497,7 +497,7 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
     let originals = source_paths.map(|path| fs::read(project.path().join(path)).unwrap());
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    assert_eq!(snapshot.expanded_scene().entities.len(), 6);
+    assert_eq!(snapshot.compiled_scene().entities().len(), 6);
     assert_eq!(snapshot.prefabs().len(), 1);
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(
@@ -529,17 +529,19 @@ fn public_check_capture_startup_and_replacement_preserve_two_data_owners() {
             .is_err()
     );
     for actor in snapshot
-        .expanded_scene()
-        .entities
+        .compiled_scene()
+        .entities()
         .iter()
-        .filter(|entity| entity.components.contains_key(&component(MOTION)))
+        .filter(|entity| entity.components().contains_key(&component(MOTION)))
     {
         assert_eq!(
-            actor.components[&component(MOTION)].value.field("gain"),
+            actor.components()[&component(MOTION)].value().field("gain"),
             Ok(&ComponentValue::U64(3))
         );
         assert_eq!(
-            actor.components[&component(SENSOR)].value.field("image"),
+            actor.components()[&component(SENSOR)]
+                .value()
+                .field("image"),
             Ok(&image_reference())
         );
     }
@@ -694,7 +696,7 @@ fn authoring_bundle_metadata_does_not_activate_unselected_data_owners() {
     let rejected = loader.load(&candidate, &plan).unwrap_err();
     assert_eq!(
         rejected.kind(),
-        nara::project_host::ProjectContentErrorKind::PrefabExpansion
+        nara::project_host::ProjectContentErrorKind::SceneCompilation
     );
     assert!(rejected.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.unknown-component"
@@ -1347,13 +1349,13 @@ fn one_native_contribution_can_own_data_admissions_without_data_codecs() {
         .unwrap();
     assert_eq!(
         snapshot
-            .expanded_scene()
-            .entities
+            .compiled_scene()
+            .entities()
             .iter()
             .filter(|entity| {
                 [NATIVE_VALUE, MOTION, SENSOR]
                     .iter()
-                    .all(|name| entity.components.contains_key(&component(name)))
+                    .all(|name| entity.components().contains_key(&component(name)))
             })
             .count(),
         2

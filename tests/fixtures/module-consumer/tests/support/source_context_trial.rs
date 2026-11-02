@@ -1,6 +1,6 @@
 //! Disposable source/occurrence owner experiment, not an engine API or compatibility adapter.
 
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use nara_asset::{
     AssetMetaIdentityCandidate, AssetPathScope, AssetRef, AssetSourceKind, AssetSourcePath,
@@ -11,8 +11,8 @@ use nara_ecs::{World, bevy_ecs::world::WorldId};
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot};
 use nara_scene::{
-    ExpandedSceneCandidate, SceneDocument, SceneDocumentCandidate, SceneEntityId,
-    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+    CompiledSceneCandidate, InMemoryPrefabSourceResolver, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
     advanced::{SceneProductTransactionLimits, replace_expanded_scene_with_product},
     retire_and_despawn_scene_instance, spawn_scene,
 };
@@ -143,17 +143,29 @@ fn encode_text(bytes: &mut Vec<u8>, text: &str) {
 #[derive(Debug)]
 pub struct BoundScene {
     key: SourceKey,
-    candidate: ExpandedSceneCandidate,
+    candidate: CompiledSceneCandidate,
 }
 
 impl BoundScene {
-    pub fn named(universe: Universe, name: &str, document: SceneDocument) -> Result<Self, Error> {
+    pub fn named(
+        universe: Universe,
+        name: &str,
+        document: SceneDocument,
+        registry: &ComponentRegistrySnapshot,
+    ) -> Result<Self, Error> {
         let key = SourceKey {
             origin: Origin::Named(universe, Atom::new(name)?),
             product: Product::Primary,
         };
+        let compilation = document.compile(registry, &InMemoryPrefabSourceResolver::new());
+        if compilation.diagnostics.has_errors() {
+            return Err(Error::Scene(Box::new(compilation.diagnostics)));
+        }
         Ok(Self {
-            candidate: ExpandedSceneCandidate::plain(key.document_key()?, Arc::new(document)),
+            candidate: compilation
+                .candidate
+                .ok_or(Error::File)?
+                .bind_source(key.document_key()?),
             key,
         })
     }
@@ -319,8 +331,19 @@ impl<'root> FileSources<'root> {
             origin,
             product: Product::Primary,
         };
+        let compilation = document.compile_with_asset_resolution(
+            registry,
+            &InMemoryPrefabSourceResolver::new(),
+            self.database.resolver(&AssetPathScope::ROOT),
+        );
+        if compilation.diagnostics.has_errors() {
+            return Err(Error::Scene(Box::new(compilation.diagnostics)));
+        }
         Ok(BoundScene {
-            candidate: ExpandedSceneCandidate::plain(key.document_key()?, Arc::new(document)),
+            candidate: compilation
+                .candidate
+                .ok_or(Error::File)?
+                .bind_source(key.document_key()?),
             key,
         })
     }

@@ -16,9 +16,9 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabExpansionLimits,
-    PrefabExpansionOptions, PrefabExpansionReport, PrefabInstanceClaim, PrefabPlacement,
-    PrefabSourceResolver, SceneComponentRecord, register_scene_components,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabInstanceClaim,
+    PrefabPlacement, PrefabSourceResolver, SceneCompilationLimits, SceneCompilationOptions,
+    SceneCompilationReport, SceneComponentRecord, register_scene_components,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -129,7 +129,7 @@ fn add_component(target: PrefabEntityTarget, component: &str) -> PrefabComponent
     }
 }
 
-fn projected(report: &PrefabExpansionReport, local: &str) -> SceneEntityId {
+fn projected(report: &SceneCompilationReport, local: &str) -> SceneEntityId {
     report
         .provenance()
         .unwrap()
@@ -142,7 +142,7 @@ fn projected(report: &PrefabExpansionReport, local: &str) -> SceneEntityId {
         .clone()
 }
 
-fn budget_kind(report: &PrefabExpansionReport) -> Option<&str> {
+fn budget_kind(report: &SceneCompilationReport) -> Option<&str> {
     report
         .diagnostics
         .iter()
@@ -173,9 +173,9 @@ fn finite_same_source_addition_is_not_a_cycle() {
         key("p"),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("e"))]),
     );
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources);
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources);
     assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
-    assert_eq!(report.document().unwrap().entities.len(), 4);
+    assert_eq!(report.document().unwrap().entities().len(), 4);
 }
 
 #[test]
@@ -220,24 +220,23 @@ fn borrowed_nested_declarations_do_not_consume_selected_value_allowances() {
         .with_prefab(request("leaf"), key("leaf"), PrefabDocument::default());
     let document = scene("p", Some(outer.clone()));
     let before = document.clone();
-    let options = PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::ONE),
+    let options = SceneCompilationOptions::default().with_limits(
+        SceneCompilationLimits::default().with_materialized_value_nodes(ItemLimit::ONE),
     );
-    let report = document.expand_prefabs_with_options(&registry, &sources, options);
+    let report = document.compile_with_options(&registry, &sources, options);
     assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
     assert!(
         report
             .document()
             .unwrap()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
     assert_eq!(document, before);
 
     outer.components.clear();
-    let rejected =
-        scene("p", Some(outer)).expand_prefabs_with_options(&registry, &sources, options);
+    let rejected = scene("p", Some(outer)).compile_with_options(&registry, &sources, options);
     assert!(rejected.candidate.is_none());
     assert_eq!(budget_kind(&rejected), Some("materialized-value-nodes"));
 }
@@ -254,9 +253,9 @@ fn a_remaining_outer_claim_can_terminate_same_source_recursion() {
         key("p"),
         PrefabDocument::from_ordered_roots([anchor("n", "p", None)]),
     );
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources);
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources);
     assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
-    assert_eq!(report.document().unwrap().entities.len(), 3);
+    assert_eq!(report.document().unwrap().entities().len(), 3);
 }
 
 #[test]
@@ -265,7 +264,7 @@ fn unchanged_cycle_uses_canonical_declarations_even_with_fresh_resolver_allocati
     let q = PrefabDocument::from_ordered_roots([anchor("n", "alias_p", None)]);
     let mut calls = 0;
     let report = scene("p", None)
-        .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |source, _| {
+        .try_compile_with_loader(&registry(), Default::default(), None, |source, _| {
             calls += 1;
             let (document, source_key) = if source == &request("q") {
                 (&q, key("q"))
@@ -355,7 +354,7 @@ fn rescued_descendants_keep_occurrence_bases_after_the_anchor_is_suppressed() {
                     .components
                     .push(add_component(target, "test.CompilerC"));
             }
-            let report = scene("p", Some(outer)).expand_prefabs(&registry(), &sources);
+            let report = scene("p", Some(outer)).compile(&registry(), &sources);
             assert!(
                 report.candidate.is_some(),
                 "addition_only={addition_only}, edit={edit_saved}: {:?}",
@@ -365,11 +364,11 @@ fn rescued_descendants_keep_occurrence_bases_after_the_anchor_is_suppressed() {
             let record = report
                 .document()
                 .unwrap()
-                .entities
+                .entities()
                 .iter()
-                .find(|record| record.id == saved)
+                .find(|record| record.id() == &saved)
                 .unwrap();
-            assert_eq!(record.components.len(), usize::from(edit_saved));
+            assert_eq!(record.components().len(), usize::from(edit_saved));
             assert!(
                 report
                     .provenance()
@@ -405,11 +404,11 @@ fn component_additions_across_layers_share_one_cumulative_count() {
             PrefabDocument::from_ordered_roots([anchor("n", "q", Some(inner))]),
         );
     for limit in [1, 2] {
-        let report = scene("p", Some(outer.clone())).expand_prefabs_with_options(
+        let report = scene("p", Some(outer.clone())).compile_with_options(
             &registry(),
             &sources,
-            PrefabExpansionOptions::default().with_limits(
-                PrefabExpansionLimits::default()
+            SceneCompilationOptions::default().with_limits(
+                SceneCompilationLimits::default()
                     .with_materialized_components(ItemLimit::new(limit).unwrap()),
             ),
         );
@@ -455,7 +454,7 @@ fn ancestor_suppression_skips_unused_sources_but_rescues_keep_demand() {
         }
         let mut requested = Vec::new();
         let report = scene("p", Some(overlay))
-            .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |source, _| {
+            .try_compile_with_loader(&registry(), Default::default(), None, |source, _| {
                 requested.push(source.clone());
                 // The skipped source is unavailable, not merely an empty valid Prefab.
                 Ok::<_, Infallible>(if !rescue && source == &request("q") {
@@ -501,7 +500,7 @@ fn outer_suppression_demand_is_applied_inside_the_reached_source() {
     ));
     let mut requested = Vec::new();
     let report = scene("p", Some(overlay))
-        .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |source, _| {
+        .try_compile_with_loader(&registry(), Default::default(), None, |source, _| {
             requested.push(source.clone());
             Ok::<_, Infallible>(sources.resolve_prefab(source))
         })
@@ -527,25 +526,25 @@ fn working_cap_is_enforced_and_raw_clones_do_not_consume_provenance() {
         key("p"),
         PrefabDocument::default(),
     );
-    let mut loader = |source: &AssetRef, _: &mut crate::prefab::PrefabExpansionWorkingSet| {
+    let mut loader = |source: &AssetRef, _: &mut crate::prefab::SceneCompilationWorkingSet| {
         Ok::<_, Infallible>(sources.resolve_prefab(source))
     };
     let mut context =
-        PrefabExpansionContext::new((&registry).into(), &mut loader, Default::default(), None);
-    let report = context.expand_scene_document(&document);
+        SceneCompilationContext::new((&registry).into(), &mut loader, Default::default(), None);
+    let report = context.compile_scene_document(&document);
     assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
     let exact = context.working_set().checked_work_bytes().unwrap();
     assert!(context.usage.scratch_bytes > context.usage.provenance_bytes);
     let provenance = context.usage.provenance_bytes;
     for bytes in [exact, exact - 1] {
-        let limits = PrefabExpansionLimits::default()
+        let limits = SceneCompilationLimits::default()
             .with_working_bytes(ByteLimit::new(bytes).unwrap())
             .with_provenance_bytes(ByteLimit::new(provenance).unwrap());
         assert_eq!(limits.checked_work_bytes(), Some(bytes));
-        let report = document.expand_prefabs_with_options(
+        let report = document.compile_with_options(
             &registry,
             &sources,
-            PrefabExpansionOptions::default().with_limits(limits),
+            SceneCompilationOptions::default().with_limits(limits),
         );
         if bytes == exact {
             assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
@@ -574,13 +573,13 @@ fn selected_programmatic_values_are_depth_admitted_before_their_first_clone() {
                 SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
             )]);
         let mut loader = |_: &AssetRef,
-                          _: &mut crate::prefab::PrefabExpansionWorkingSet|
+                          _: &mut crate::prefab::SceneCompilationWorkingSet|
          -> Result<Option<ResolvedPrefabSource>, Infallible> {
             panic!("a direct value cannot request a Prefab")
         };
         let mut context =
-            PrefabExpansionContext::new((&registry).into(), &mut loader, Default::default(), None);
-        let report = context.expand_scene_document(&document);
+            SceneCompilationContext::new((&registry).into(), &mut loader, Default::default(), None);
+        let report = context.compile_scene_document(&document);
         assert!(report.candidate.is_none());
         if depth > maximum {
             assert!(context.budget_failed);
@@ -613,11 +612,11 @@ fn loading_snapshot_includes_the_suspended_source_clone_and_derived_indexes() {
         .with_prefab(request("q"), key("q"), PrefabDocument::default());
     let mut snapshots = Vec::new();
     let limits =
-        PrefabExpansionLimits::default().with_working_bytes(ByteLimit::new(1_000_000).unwrap());
+        SceneCompilationLimits::default().with_working_bytes(ByteLimit::new(1_000_000).unwrap());
     let report = scene("p", None)
-        .try_expand_prefabs_with_loader(
+        .try_compile_with_loader(
             &registry(),
-            PrefabExpansionOptions::default().with_limits(limits),
+            SceneCompilationOptions::default().with_limits(limits),
             None,
             |source, working| {
                 snapshots.push(working.checked_work_bytes().unwrap());
@@ -651,10 +650,10 @@ fn a_large_deferred_request_is_admitted_before_clone_and_loader_entry() {
     );
     let mut called = Vec::new();
     let report = scene("p", None)
-        .try_expand_prefabs_with_loader(
+        .try_compile_with_loader(
             &registry(),
-            PrefabExpansionOptions::default().with_limits(
-                PrefabExpansionLimits::default()
+            SceneCompilationOptions::default().with_limits(
+                SceneCompilationLimits::default()
                     .with_working_bytes(ByteLimit::new(64 * 1024).unwrap()),
             ),
             None,
@@ -737,7 +736,7 @@ fn complete_outer_repair_cannot_erase_inner_duplicate_property_declarations() {
                     record,
                 }
             });
-            let report = scene("p", Some(outer)).expand_prefabs(&registry(), &sources);
+            let report = scene("p", Some(outer)).compile(&registry(), &sources);
             assert!(report.candidate.is_none());
             let diagnostic = report
                 .diagnostics
@@ -764,7 +763,7 @@ fn loader_restriction_is_applied_before_source_copy_and_cannot_be_raised_again()
     for (below_live, try_raise) in [(false, false), (true, false), (false, true)] {
         let mut calls = 0;
         let report = scene("p", None)
-            .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |_, working| {
+            .try_compile_with_loader(&registry(), Default::default(), None, |_, working| {
                 calls += 1;
                 let live = working.checked_work_bytes().unwrap();
                 working.restrict_working_bytes(
@@ -801,7 +800,7 @@ fn later_loading_callbacks_can_tighten_the_remaining_compiler_allowance() {
         );
     let mut requested = Vec::new();
     let report = scene("p", None)
-        .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |source, working| {
+        .try_compile_with_loader(&registry(), Default::default(), None, |source, working| {
             requested.push(source.clone());
             if source == &request("q") {
                 working.restrict_working_bytes(
@@ -819,7 +818,7 @@ fn later_loading_callbacks_can_tighten_the_remaining_compiler_allowance() {
 #[test]
 fn loader_failure_is_preserved_even_if_it_also_tightened_the_allowance() {
     let failure = scene("p", None)
-        .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |_, working| {
+        .try_compile_with_loader(&registry(), Default::default(), None, |_, working| {
             working.restrict_working_bytes(ByteLimit::new(1).unwrap());
             Err::<Option<ResolvedPrefabSource>, _>("source-read-failed")
         })
@@ -835,10 +834,10 @@ fn missing_source_and_depth_diagnostics_keep_their_locators_and_limits() {
         PrefabDocument::from_ordered_roots([anchor("n", "missing", None)]),
     );
     for depth in [1, 8] {
-        let report = scene("p", None).expand_prefabs_with_options(
+        let report = scene("p", None).compile_with_options(
             &registry(),
             &sources,
-            PrefabExpansionOptions::default().with_max_depth(depth),
+            SceneCompilationOptions::default().with_max_depth(depth),
         );
         let code = if depth == 1 {
             "scene.prefab-depth-exceeded"
@@ -917,7 +916,7 @@ fn outer_suppression_after_a_cross_instance_move_does_not_request_the_discarded_
         }
         let mut requested = Vec::new();
         let report = scene("t", Some(outer.clone()))
-            .try_expand_prefabs_with_loader(&registry(), Default::default(), None, |source, _| {
+            .try_compile_with_loader(&registry(), Default::default(), None, |source, _| {
                 requested.push(source.clone());
                 Ok::<_, Infallible>(sources.resolve_prefab(source))
             })
@@ -947,31 +946,50 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
     let value = ComponentValue::map([("value", ComponentValue::U64(1))]);
     let mut unit_nodes = 0;
     let mut unit_bytes = 0;
+    let mut admit_unit = |nodes, bytes, _| {
+        unit_nodes += nodes;
+        unit_bytes += bytes;
+        Ok::<_, Infallible>(())
+    };
+    let schema = registry.schema(&component).unwrap();
+    assert!(
+        nara_reflect::__private::component_defaults_are_explicit_with_admission(
+            schema,
+            &value,
+            &mut admit_unit,
+        )
+        .unwrap()
+    );
+    nara_reflect::__private::validate_native_component_value_references_with_admission(
+        &value,
+        Default::default(),
+        &mut admit_unit,
+    )
+    .unwrap();
+    nara_reflect::__private::validate_component_value_with_admission(
+        schema,
+        &value,
+        Default::default(),
+        &mut admit_unit,
+    )
+    .unwrap();
     let references =
         nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
-            registry.schema(&component).unwrap(),
+            schema,
             ComponentSchemaVersion::ONE,
             &value,
             Default::default(),
-            |nodes, bytes, _| {
-                unit_nodes += nodes;
-                unit_bytes += bytes;
-                Ok::<_, Infallible>(())
-            },
+            &mut admit_unit,
         )
         .unwrap();
     assert!(references.is_empty());
-    // The terminal validation also plans local target closure. Both complete-tree reference
-    // traversals consume the same work allowance even when neither produces reference leaves.
+    // The complete flat proof includes defaults, raw Native values, Schema shape and both
+    // reference traversals. They share one allowance even when no reference leaves are produced.
     nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
-        registry.schema(&component).unwrap(),
+        schema,
         &value,
         Default::default(),
-        |nodes, bytes, _| {
-            unit_nodes += nodes;
-            unit_bytes += bytes;
-            Ok(())
-        },
+        &mut admit_unit,
     )
     .unwrap();
     assert!(unit_nodes > 0 && unit_bytes > 0);
@@ -995,13 +1013,13 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
             Some("reference-work-bytes"),
         ),
     ] {
-        let limits = PrefabExpansionLimits::default()
+        let limits = SceneCompilationLimits::default()
             .with_reference_work_nodes(ItemLimit::new(nodes).unwrap())
             .with_reference_work_bytes(ByteLimit::new(bytes).unwrap());
-        let report = document.expand_prefabs_with_options(
+        let report = document.compile_with_options(
             &registry,
             &InMemoryPrefabSourceResolver::new(),
-            PrefabExpansionOptions::default().with_limits(limits),
+            SceneCompilationOptions::default().with_limits(limits),
         );
         assert_eq!(
             report.candidate.is_none(),

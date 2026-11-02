@@ -520,7 +520,7 @@ impl EditorProjectSession {
     pub fn schema_owner_adoption_composition_failure(
         &self,
         document: Option<EditorDocumentId>,
-    ) -> Option<&nara_scene::PrefabExpansionFailure> {
+    ) -> Option<&nara_scene::SceneCompilationFailure> {
         let candidate = self.schema_owner_adoption.candidate.as_ref()?;
         match document {
             None => candidate.project.composition_failure(),

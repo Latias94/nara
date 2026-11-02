@@ -1,5 +1,8 @@
 //! Production expansion selects durable instance intent before resolving nested declarations.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::cell::RefCell;
 
 use nara_asset::AssetRef;
@@ -12,11 +15,12 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
-    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionReport, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabSourceResolver, ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SourceDocumentKey, SourceDocumentKind, register_scene_components,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
+    PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
+    ResolvedPrefabSource, SceneCompilationReport, SceneComponentRecord, SceneDocument,
+    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    register_scene_components,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -32,7 +36,7 @@ fn selected_unknown_component_reports_missing_definition_before_migration() {
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
         )]);
     let resolver = InMemoryPrefabSourceResolver::new();
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
     assert!(report.candidate.is_none());
     assert!(
         report
@@ -222,7 +226,7 @@ fn actual_loader_requests_only_selected_sources_and_preserves_typed_errors() {
     let resolver = resolver();
     let requests = RefCell::new(Vec::new());
     let report = document
-        .try_expand_prefabs_with_loader(&registry, Default::default(), None, |requested, _| {
+        .try_compile_with_loader(&registry, Default::default(), None, |requested, _| {
             requests.borrow_mut().push(requested.clone());
             Ok::<_, LoaderError>(resolver.sources.resolve_prefab(requested))
         })
@@ -232,7 +236,7 @@ fn actual_loader_requests_only_selected_sources_and_preserves_typed_errors() {
 
     let requests = RefCell::new(Vec::new());
     let error = document
-        .try_expand_prefabs_with_loader(&registry, Default::default(), None, |requested, _| {
+        .try_compile_with_loader(&registry, Default::default(), None, |requested, _| {
             requests.borrow_mut().push(requested.clone());
             if requested == &source("r") {
                 Err(LoaderError::Refused(requested.clone()))
@@ -253,7 +257,7 @@ fn inherited(source_name: &str, entity: &str) -> PrefabProjectionStep {
     }
 }
 
-fn projected_id(report: &PrefabExpansionReport, steps: &[PrefabProjectionStep]) -> SceneEntityId {
+fn projected_id(report: &SceneCompilationReport, steps: &[PrefabProjectionStep]) -> SceneEntityId {
     let mut matches = report
         .provenance()
         .unwrap()
@@ -272,15 +276,18 @@ fn projected_id(report: &PrefabExpansionReport, steps: &[PrefabProjectionStep]) 
     materialized.clone()
 }
 
-fn entity<'a>(document: &'a SceneDocument, entity_id: &SceneEntityId) -> &'a SceneEntityRecord {
+fn entity<'a>(
+    document: &'a nara_scene::CompiledSceneDocument,
+    entity_id: &SceneEntityId,
+) -> &'a nara_scene::CompiledSceneEntity {
     document
-        .entities
+        .entities()
         .iter()
-        .find(|entity| &entity.id == entity_id)
+        .find(|entity| entity.id() == entity_id)
         .expect("expected materialized entity")
 }
 
-fn assert_replaced(report: &PrefabExpansionReport) {
+fn assert_replaced(report: &SceneCompilationReport) {
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let expanded = report.document().expect("replacement must expand");
     let p_root = projected_id(report, &[inherited("p", "p_root")]);
@@ -290,39 +297,35 @@ fn assert_replaced(report: &PrefabExpansionReport) {
     let sibling = projected_id(report, &[inherited("p", "p_sibling")]);
     let r_root = projected_id(report, &[inherited("p", "n"), inherited("r", "r_root")]);
 
-    assert_eq!(expanded.roots, [id("outer")]);
-    assert_eq!(expanded.entities.len(), 8);
+    assert_eq!(expanded.roots(), [id("outer")]);
+    assert_eq!(expanded.entities().len(), 8);
     assert_eq!(report.provenance().unwrap().len(), 8);
     assert_eq!(
-        entity(expanded, &id("outer")).children,
+        entity(expanded, &id("outer")).children(),
         [p_root.clone(), id("scene_local")]
     );
     assert_eq!(
-        entity(expanded, &p_root).children,
+        entity(expanded, &p_root).children(),
         [nested.clone(), sibling]
     );
-    assert_eq!(entity(expanded, &nested).children, [r_root, first, last]);
+    assert_eq!(entity(expanded, &nested).children(), [r_root, first, last]);
     let original = outer_prefab();
-    assert_eq!(
-        entity(expanded, &nested).components,
-        original
+    compiled_scene::assert_components(
+        entity(expanded, &nested).components(),
+        &(original
             .entities
             .iter()
             .find(|record| record.id == id("n"))
             .unwrap()
-            .components
+            .components),
+        &registry(),
     );
     for local in ["outer", "scene_local"] {
         let provenance = &report.provenance().unwrap()[&id(local)];
         assert_eq!(provenance.local_entity_id(), &id(local));
         assert!(provenance.projection_path().is_none());
     }
-    assert!(
-        expanded
-            .entities
-            .iter()
-            .all(|entity| entity.prefab.is_none())
-    );
+    // Compiled records structurally exclude Prefab declarations.
 }
 
 #[test]
@@ -333,7 +336,7 @@ fn outer_instance_replaces_nested_missing_source_before_resolving_it() {
     let before_document = document.clone();
     let before_sources = resolver.sources.clone();
 
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
 
     assert_replaced(&report);
     assert_eq!(*resolver.requests.borrow(), [source("p"), source("r")]);
@@ -358,7 +361,7 @@ fn nested_replacement_never_requests_registered_source_with_invalid_topology() {
     let before_document = document.clone();
     let before_sources = resolver.sources.clone();
 
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
 
     assert_replaced(&report);
     assert_eq!(*resolver.requests.borrow(), [source("p"), source("r")]);
@@ -374,7 +377,7 @@ fn outer_instance_detaches_nested_missing_source_and_retains_its_local_children(
     let before_document = document.clone();
     let before_sources = resolver.sources.clone();
 
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
 
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let expanded = report.document().expect("explicit detach must expand");
@@ -383,28 +386,29 @@ fn outer_instance_detaches_nested_missing_source_and_retains_its_local_children(
     let first = projected_id(&report, &[inherited("p", "p_local_first")]);
     let last = projected_id(&report, &[inherited("p", "p_local_last")]);
     let sibling = projected_id(&report, &[inherited("p", "p_sibling")]);
-    assert_eq!(expanded.roots, [id("outer")]);
-    assert_eq!(expanded.entities.len(), 7);
+    assert_eq!(expanded.roots(), [id("outer")]);
+    assert_eq!(expanded.entities().len(), 7);
     assert_eq!(report.provenance().unwrap().len(), 7);
     assert_eq!(
-        entity(expanded, &id("outer")).children,
+        entity(expanded, &id("outer")).children(),
         [p_root.clone(), id("scene_local")]
     );
     assert_eq!(
-        entity(expanded, &p_root).children,
+        entity(expanded, &p_root).children(),
         [nested.clone(), sibling]
     );
-    assert_eq!(entity(expanded, &nested).children, [first, last]);
-    assert!(entity(expanded, &nested).prefab.is_none());
+    assert_eq!(entity(expanded, &nested).children(), [first, last]);
+    // Compiled entity records structurally exclude Prefab declarations.
     let original = outer_prefab();
-    assert_eq!(
-        entity(expanded, &nested).components,
-        original
+    compiled_scene::assert_components(
+        entity(expanded, &nested).components(),
+        &(original
             .entities
             .iter()
             .find(|record| record.id == id("n"))
             .unwrap()
-            .components
+            .components),
+        &registry,
     );
     assert_eq!(*resolver.requests.borrow(), [source("p")]);
     assert_eq!(document, before_document);
@@ -423,20 +427,20 @@ fn outer_instance_suppresses_complete_nested_subtree_without_resolving_missing_s
     let before_document = document.clone();
     let before_sources = resolver.sources.clone();
 
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
 
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let expanded = report.document().expect("complete suppression must expand");
     let p_root = projected_id(&report, &[inherited("p", "p_root")]);
     let sibling = projected_id(&report, &[inherited("p", "p_sibling")]);
-    assert_eq!(expanded.roots, [id("outer")]);
-    assert_eq!(expanded.entities.len(), 4);
+    assert_eq!(expanded.roots(), [id("outer")]);
+    assert_eq!(expanded.entities().len(), 4);
     assert_eq!(report.provenance().unwrap().len(), 4);
     assert_eq!(
-        entity(expanded, &id("outer")).children,
+        entity(expanded, &id("outer")).children(),
         [p_root.clone(), id("scene_local")]
     );
-    assert_eq!(entity(expanded, &p_root).children, [sibling]);
+    assert_eq!(entity(expanded, &p_root).children(), [sibling]);
     assert!(report.provenance().unwrap().values().all(|provenance| {
         !["n", "p_local_first", "p_local_last", "q_overlay", "r_root"]
             .contains(&provenance.local_entity_id().as_str())
@@ -463,7 +467,7 @@ fn durable_nested_replacement_survives_changes_to_the_discarded_declaration() {
     let before_document = document.clone();
     let before_sources = resolver.sources.clone();
 
-    let report = document.expand_prefabs(&registry, &resolver);
+    let report = document.compile(&registry, &resolver);
 
     assert_replaced(&report);
     assert_eq!(*resolver.requests.borrow(), [source("p"), source("r")]);
@@ -494,14 +498,15 @@ fn descendant_claims_bind_the_selected_replacement_base_instead_of_the_old_sourc
         });
         let document = scene(overlay);
         let before = document.clone();
-        let report = document.expand_prefabs(&registry, &resolver);
+        let report = document.compile(&registry, &resolver);
         if expected == "r" {
             let materialized =
                 projected_id(&report, &[inherited("p", "n"), inherited("r", "r_root")]);
             assert_eq!(
-                entity(report.document().unwrap(), &materialized).components
+                entity(report.document().unwrap(), &materialized).components()
                     [&ComponentTypeId::new("nara.scene.Name")]
-                    .value,
+                    .value()
+                    .clone(),
                 ComponentValue::String("Pinned replacement".into())
             );
         } else {
@@ -552,7 +557,7 @@ fn explicit_equal_leaf_pin_through_an_added_instance_inherits_rebased_siblings()
                 PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("r_root"))
                     .with_component(position_component(), position(x, y))]),
             );
-        let report = document.expand_prefabs(&registry, &resolver);
+        let report = document.compile(&registry, &resolver);
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let materialized = projected_id(
             &report,
@@ -563,9 +568,12 @@ fn explicit_equal_leaf_pin_through_an_added_instance_inherits_rebased_siblings()
                 inherited("r", "r_root"),
             ],
         );
-        assert_eq!(
-            entity(report.document().unwrap(), &materialized).components[&position_component()],
-            position(1, y)
+        compiled_scene::assert_record(
+            &(entity(report.document().unwrap(), &materialized).components()
+                [&position_component()]),
+            &(position(1, y)),
+            &position_component(),
+            &registry,
         );
         assert_eq!(document, before);
     }

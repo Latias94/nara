@@ -9,7 +9,7 @@
             id: "opaque/shared",
             children: [],
             components: {
-                "nara.scene.Name": (version: 1, value: (type: string, value: "Shared")),
+                "nara.scene.Name": (version: 1, value: (type: "string", value: "Shared")),
             },
         )],
     ),

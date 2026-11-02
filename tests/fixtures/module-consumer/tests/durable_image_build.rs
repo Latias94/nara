@@ -50,8 +50,7 @@ use nara_image::{
 };
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
 use nara_scene::{
-    RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneComponentRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
 
 const SOURCE: &str = "d6210000-0000-4000-8000-000000000001";
@@ -965,7 +964,12 @@ impl Delivery {
             "payload": {
                 "source_key": scene_key, "roots": ["stripe"],
                 "entities": [{"id": "stripe", "children": [], "components": {
-                    "nara.sprite.Sprite": SceneComponentRecord::new(sprite.version(), value)
+                    "nara.sprite.Sprite": {
+                        "owner": bindings.native_snapshot()
+                            .component_schema_owner(sprite.id()).unwrap().as_str(),
+                        "version": sprite.version(),
+                        "value": value,
+                    }
                 }}],
                 "provenance": [{"entity": "stripe", "local_entity": "stripe", "origin": {"kind": "local"}}]
             }

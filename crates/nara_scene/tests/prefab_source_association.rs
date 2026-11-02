@@ -63,7 +63,7 @@ fn explicit_source_association_keeps_location_identity_for_all_primary_lookup_fo
     ] {
         let scene = containing_scene(request);
         let report = scene
-            .try_expand_prefabs_with_loader(&registry, Default::default(), None, |_, _| {
+            .try_compile_with_loader(&registry, Default::default(), None, |_, _| {
                 Ok::<_, Infallible>(Some(source.clone()))
             })
             .unwrap();
@@ -71,9 +71,9 @@ fn explicit_source_association_keeps_location_identity_for_all_primary_lookup_fo
         let ids = report
             .document()
             .unwrap()
-            .entities
+            .entities()
             .iter()
-            .map(|entity| entity.id.clone())
+            .map(|entity| entity.id().clone())
             .collect::<Vec<_>>();
         assert_eq!(ids.len(), 2);
         if let Some(expected) = &expected_ids {
@@ -113,7 +113,7 @@ fn location_identity_survives_primary_lookup_cook_and_source_free_admission() {
         AssetRef::Product(primary),
     ] {
         let report = bindings
-            .try_expand_prefabs_with_loader(
+            .try_compile_scene_with_loader(
                 &containing_scene(request),
                 Default::default(),
                 None,
@@ -131,9 +131,9 @@ fn location_identity_survives_primary_lookup_cook_and_source_free_admission() {
         .unwrap();
         let ids = cooked
             .document()
-            .entities
+            .entities()
             .iter()
-            .map(|entity| entity.id.clone())
+            .map(|entity| entity.id().clone())
             .collect::<Vec<_>>();
         if let Some(expected) = &expected_ids {
             assert_eq!(
@@ -150,10 +150,13 @@ fn location_identity_survives_primary_lookup_cook_and_source_free_admission() {
         .admit(&containing, &bindings)
         .unwrap();
         assert_eq!(decoded.document(), cooked.document());
-        assert_eq!(decoded.provenance(), cooked.provenance());
+        assert_eq!(
+            decoded.canonical_provenance(),
+            cooked.canonical_provenance()
+        );
         assert!(
             decoded
-                .provenance()
+                .canonical_provenance()
                 .values()
                 .filter_map(|origin| origin.projection_path())
                 .flat_map(|path| path.steps())
@@ -182,7 +185,7 @@ fn product_lookup_needs_the_actual_association_and_rejects_another_source() {
             AssetProductRef::new(selected, ImportedProductId::PRIMARY).unwrap(),
         ));
         let report = scene
-            .try_expand_prefabs_with_loader(&registry, Default::default(), None, |_, _| {
+            .try_compile_with_loader(&registry, Default::default(), None, |_, _| {
                 Ok::<_, Infallible>(Some(resolved.clone()))
             })
             .unwrap();

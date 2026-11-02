@@ -468,7 +468,7 @@ fn lazy_loader_measures_selected_prefabs_and_reuses_the_catalogue_for_repeated_e
             .map(|index| AssetSourcePath::new(format!("prefabs/{}", prefab_path(index))).unwrap())
             .collect::<Vec<_>>()
     );
-    assert_eq!(snapshot.expanded_scene().entities.len(), 6);
+    assert_eq!(snapshot.compiled_scene().entities().len(), 6);
     let budget = loader.budget_snapshot();
     // Two occurrences each request the selected outer and nested source; only unique sources
     // are decoded and revalidated. There is no runtime dependency on exact-edit snapshots.

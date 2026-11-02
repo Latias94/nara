@@ -36,7 +36,7 @@ fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
     let mut world = World::new();
 
     let spawned = {
-        let expansion = (scene).expand_prefabs_with_asset_resolution(
+        let expansion = (scene).compile_with_asset_resolution(
             &registry,
             &resolver,
             database.resolver(&AssetPathScope::ROOT),
@@ -111,7 +111,7 @@ fn disposable_projection_keeps_repeated_prefab_provenance_in_bounded_epochs() {
     world.insert_resource(domain);
     let occurrence = scene_occurrence("durable-identity/disposable-projection");
     let mut projection = nara_scene::SceneProjection::new(occurrence.clone());
-    let expansion = scene.expand_prefabs_with_asset_resolution(
+    let expansion = scene.compile_with_asset_resolution(
         &registry,
         &resolver,
         database.resolver(&AssetPathScope::ROOT),
@@ -238,7 +238,7 @@ fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
         );
     let mut world = World::new();
     let spawned = {
-        let expansion = (copied.scene).expand_prefabs_with_asset_resolution(
+        let expansion = (copied.scene).compile_with_asset_resolution(
             &registry,
             &resolver,
             copied.database.resolver(&AssetPathScope::ROOT),
@@ -523,16 +523,20 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 .publish(&registry)
                 .unwrap();
             assert_eq!(published.document(), &document);
+            let compilation = document.compile(&registry, &InMemoryPrefabSourceResolver::new());
+            assert!(
+                !compilation.diagnostics.has_errors(),
+                "{:?}",
+                compilation.diagnostics
+            );
+            let candidate = compilation.candidate.unwrap().bind_source(scene_source_key(
+                "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
+            ));
             let mut world = World::new();
             let spawned = nara_scene::spawn_scene(
                 &mut world,
                 &registry,
-                &nara_scene::ExpandedSceneCandidate::plain(
-                    scene_source_key(
-                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
-                    ),
-                    std::sync::Arc::new((document).clone()),
-                ),
+                &candidate,
                 &scene_occurrence(
                     "nested_durable_references_preserve_values_across_residency_and_default_matrix/spawned",
                 ),
@@ -609,12 +613,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             let unloaded_spawn = nara_scene::spawn_scene(
                 &mut world,
                 &registry,
-                &nara_scene::ExpandedSceneCandidate::plain(
-                    scene_source_key(
-                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
-                    ),
-                    std::sync::Arc::new((document).clone()),
-                ),
+                &candidate,
                 &scene_occurrence(
                     "nested_durable_references_preserve_values_across_residency_and_default_matrix/unloaded_spawn",
                 ),
@@ -651,7 +650,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
                 anchor
             });
             let expansion =
-                SceneDocument::from_ordered_roots(anchors).expand_prefabs(&registry, &resolver);
+                SceneDocument::from_ordered_roots(anchors).compile(&registry, &resolver);
             assert!(
                 !expansion.diagnostics.has_errors(),
                 "{:?}",
@@ -659,14 +658,14 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             );
             let expanded = expansion.document().unwrap();
             let linked = expanded
-                .entities
+                .entities()
                 .iter()
-                .filter_map(|entity| entity.components.get(&component))
+                .filter_map(|entity| entity.components().get(&component))
                 .collect::<Vec<_>>();
             assert_eq!(linked.len(), 2);
             for record in linked {
                 assert_eq!(
-                    record.value.field("links").unwrap(),
+                    record.value().field("links").unwrap(),
                     &durable_links_value(&reference)
                 );
             }
@@ -739,12 +738,7 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             let deleted_spawn = nara_scene::spawn_scene(
                 &mut world,
                 &registry,
-                &nara_scene::ExpandedSceneCandidate::plain(
-                    scene_source_key(
-                        "nested_durable_references_preserve_values_across_residency_and_default_matrix/document",
-                    ),
-                    std::sync::Arc::new((document).clone()),
-                ),
+                &candidate,
                 &scene_occurrence(
                     "nested_durable_references_preserve_values_across_residency_and_default_matrix/deleted_spawn",
                 ),
@@ -796,7 +790,7 @@ fn spawn_owned_instance(
     occurrence: &nara_scene::SceneOccurrenceKey,
 ) -> SpawnedSceneInstance {
     let report = {
-        let expansion = (scene).expand_prefabs_with_asset_resolution(
+        let expansion = (scene).compile_with_asset_resolution(
             registry,
             resolver,
             database.resolver(&AssetPathScope::ROOT),

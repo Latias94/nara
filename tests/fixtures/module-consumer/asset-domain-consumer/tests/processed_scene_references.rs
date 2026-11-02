@@ -53,8 +53,8 @@ use nara::{
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
     scene::{
-        RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
-        SceneEntityId, SceneEntitySource, SourceDocumentKey, SourceDocumentKind,
+        CompiledSceneDocument, RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneEntityId,
+        SceneEntitySource, SourceDocumentKey, SourceDocumentKind,
         advanced::SceneProductTransactionLimits,
     },
 };
@@ -327,12 +327,12 @@ fn live_door(world: &mut World, scene: u64) -> (Entity, AssetProductRef, Spawned
     (entity, target, receipt)
 }
 
-fn document_target(document: &SceneDocument, scene: u64) -> AssetProductRef {
-    assert_eq!(document.roots, [door_id(scene)]);
-    assert_eq!(document.entities.len(), 1);
-    let record = &document.entities[0].components[&ComponentTypeId::new(DOOR)];
-    assert_eq!(record.version, ComponentSchemaVersion::ONE);
-    let door = DoorTarget::__decode_persistent_component(&record.value).unwrap();
+fn document_target(document: &CompiledSceneDocument, scene: u64) -> AssetProductRef {
+    assert_eq!(document.roots(), [door_id(scene)]);
+    assert_eq!(document.entities().len(), 1);
+    let record = &document.entities()[0].components()[&ComponentTypeId::new(DOOR)];
+    assert_eq!(record.version(), ComponentSchemaVersion::ONE);
+    let door = DoorTarget::__decode_persistent_component(record.value()).unwrap();
     let target = door.target.as_product().unwrap();
     assert_eq!(target, product(if scene == A { B } else { A }));
     target
@@ -675,14 +675,16 @@ impl Drop for Fixture {
 fn scene_bytes(plan: &RuntimeConfigurationPlan, scene: u64, target: u64) -> Vec<u8> {
     let components = BTreeMap::from([(
         ComponentTypeId::new(DOOR),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            DoorTarget {
+        serde_json::json!({
+            "owner": plan.schema_validation().snapshot()
+                .component_schema_owner(&ComponentTypeId::new(DOOR)).unwrap().as_str(),
+            "version": ComponentSchemaVersion::ONE,
+            "value": DoorTarget {
                 target: AssetRef::Product(product(target)),
             }
             .__encode_persistent_component()
             .unwrap(),
-        ),
+        }),
     )]);
     let id = door_id(scene);
     let source = source_key(scene);
@@ -1193,7 +1195,12 @@ fn demand_scene_bytes(
     let source = demand_source_key(configuration, scene);
     let components = BTreeMap::from([(
         ComponentTypeId::new(component),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+        serde_json::json!({
+            "owner": plan.schema_validation().snapshot()
+                .component_schema_owner(&ComponentTypeId::new(component)).unwrap().as_str(),
+            "version": ComponentSchemaVersion::ONE,
+            "value": value,
+        }),
     )]);
     let wire = serde_json::json!({
         "kind": "runtime_scene", "format_version": 1, "engine_min_version": "0.1.0",
@@ -1358,7 +1365,7 @@ fn live_demand_door(
             );
         })
         .unwrap();
-    assert_eq!(current.source().roots, [door_id(scene)]);
+    assert_eq!(current.source().roots(), [door_id(scene)]);
     let EntityLookup::Resolved(entity) = receipt.resolve(world, &door_id(scene)) else {
         panic!("the Deferred Door must resolve through the current receipt")
     };
@@ -1412,13 +1419,13 @@ fn inspect_demand_prepared(
     );
     assert_eq!(view.selected_scene_path(), None);
     assert_eq!(view.expected_instance(), expected);
-    assert_eq!(view.scene().roots, [door_id(scene)]);
+    assert_eq!(view.scene().roots(), [door_id(scene)]);
     let rules = if scene == A {
         let document = view.scene_dependency(configuration.product(D)).unwrap();
-        assert_eq!(document.roots, [door_id(D)]);
-        assert_eq!(document.entities.len(), 1);
-        let record = &document.entities[0].components[&ComponentTypeId::new(RULES)];
-        let owned = EncounterRules::__decode_persistent_component(&record.value).unwrap();
+        assert_eq!(document.roots(), [door_id(D)]);
+        assert_eq!(document.entities().len(), 1);
+        let record = &document.entities()[0].components()[&ComponentTypeId::new(RULES)];
+        let owned = EncounterRules::__decode_persistent_component(record.value()).unwrap();
         assert_eq!(owned.spawn_count, 17);
         Some(owned.spawn_count)
     } else {

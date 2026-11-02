@@ -9,7 +9,7 @@ use nara_reflect::{
     ComponentValueMaterializationLimits, ComponentValueShape,
 };
 
-use super::PrefabExpansionFailureKind;
+use super::SceneCompilationFailureKind;
 
 /// Collects lexical reference intent without looking up a target or an input argument.
 /// The compiler admits complete planner/path/target storage before calling this helper.
@@ -18,8 +18,8 @@ pub(super) fn plan_property_references(
     shape: &ComponentValueShape,
     payload: &ComponentValue,
     limits: ComponentValueMaterializationLimits,
-) -> Result<BTreeMap<ComponentFieldPath, AuthoredEntityReference>, PrefabExpansionFailureKind> {
-    let plan = plan_declared_value_entity_references::<PrefabExpansionFailureKind>(
+) -> Result<BTreeMap<ComponentFieldPath, AuthoredEntityReference>, SceneCompilationFailureKind> {
+    let plan = plan_declared_value_entity_references::<SceneCompilationFailureKind>(
         field,
         shape,
         payload,
@@ -43,16 +43,16 @@ pub(super) fn plan_property_references(
 }
 
 fn reference_error(
-    error: ComponentEntityReferenceRewriteError<PrefabExpansionFailureKind>,
-) -> PrefabExpansionFailureKind {
+    error: ComponentEntityReferenceRewriteError<SceneCompilationFailureKind>,
+) -> SceneCompilationFailureKind {
     match error {
         ComponentEntityReferenceRewriteError::NodeLimit { .. }
         | ComponentEntityReferenceRewriteError::ByteLimit { .. }
         | ComponentEntityReferenceRewriteError::DepthLimit { .. }
         | ComponentEntityReferenceRewriteError::PathIndexOverflow => {
-            PrefabExpansionFailureKind::WorkLimit
+            SceneCompilationFailureKind::WorkLimit
         }
         ComponentEntityReferenceRewriteError::Rewrite { error, .. } => error,
-        _ => PrefabExpansionFailureKind::Reference,
+        _ => SceneCompilationFailureKind::Reference,
     }
 }

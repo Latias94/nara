@@ -178,17 +178,16 @@ impl AuthoringSceneSessionSnapshot {
     }
 }
 
-/// Immutable data custody. Dependencies retain the complete production compiler result;
-/// the selected root separately retains effective data before native presentation filtering.
+/// Immutable source custody. Dependency observations retain their complete authoring expansion;
+/// their actual containing identity remains in the separately admitted native source fact.
 pub(crate) struct AuthoringSceneSource {
     native_source: AdmittedNativeDocumentSource,
     source: Arc<AuthoringSourceFact>,
     document: Arc<SceneDocument>,
-    compiled: Option<nara_scene::ExpandedSceneCandidate>,
-    root_effective: Option<Arc<SceneDocument>>,
+    expansion: Option<nara_scene::ExpandedSceneDocument>,
     revision: Option<nara_scene::SceneAuthoringRevision>,
     diagnostics: DiagnosticReport,
-    failure: Option<nara_scene::PrefabExpansionFailure>,
+    failure: Option<nara_scene::SceneCompilationFailure>,
 }
 
 impl AuthoringSceneSource {
@@ -201,11 +200,8 @@ impl AuthoringSceneSource {
     pub(crate) fn document(&self) -> &SceneDocument {
         &self.document
     }
-    pub(crate) fn effective_document(&self) -> Option<&SceneDocument> {
-        self.compiled
-            .as_ref()
-            .map(|candidate| candidate.document())
-            .or(self.root_effective.as_deref())
+    pub(crate) fn expansion(&self) -> Option<&nara_scene::ExpandedSceneDocument> {
+        self.expansion.as_ref()
     }
     pub(crate) fn session_revision(&self) -> Option<nara_scene::SceneAuthoringRevision> {
         self.revision
@@ -588,13 +584,13 @@ pub(crate) struct AuthoringDocumentCapture {
     pub(super) usage: AuthoringProjectAdmissionUsage,
     pub(super) host_retained_bytes: usize,
     pub(super) preview: Option<CapturedAuthoringPreview>,
-    pub(super) composition_failure: Option<nara_scene::PrefabExpansionFailure>,
+    pub(super) composition_failure: Option<nara_scene::SceneCompilationFailure>,
     pub(super) root_revision: Option<nara_scene::SceneAuthoringRevision>,
     pub(super) authority: Arc<AuthoringSchemaReceipt>,
 }
 
 pub(crate) struct CapturedAuthoringPreview {
-    pub(crate) candidate: nara_scene::ExpandedSceneCandidate,
+    pub(crate) candidate: nara_scene::CompiledSceneCandidate,
     pub(crate) omissions: Vec<nara_scene::__private::AuthoringPreviewOmission>,
 }
 
@@ -969,7 +965,7 @@ impl AuthoringDocumentCapture {
         self.preview.take()
     }
 
-    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::PrefabExpansionFailure> {
+    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::SceneCompilationFailure> {
         self.composition_failure.as_ref()
     }
 
@@ -1238,9 +1234,9 @@ pub(super) fn capture_scene(
 }
 
 fn composition_failure_retained_bytes(
-    failure: &nara_scene::PrefabExpansionFailure,
+    failure: &nara_scene::SceneCompilationFailure,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    let mut bytes = size_of::<nara_scene::PrefabExpansionFailure>();
+    let mut bytes = size_of::<nara_scene::SceneCompilationFailure>();
     if let Some(location) = failure.location() {
         checked_add_to(
             &mut bytes,

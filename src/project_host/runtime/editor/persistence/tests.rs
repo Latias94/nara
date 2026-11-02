@@ -1932,7 +1932,7 @@ fn trusted_play_divergence_follows_its_source_while_inspecting_a_prefab() {
         let current = crate::startup_scene::CurrentScene::get(runtime.world()).unwrap();
         current
             .source_view()
-            .with_expanded_scene(|candidate, _| {
+            .with_compiled_scene(|candidate, _| {
                 assert_eq!(candidate.source_key(), &expected_source_key);
             })
             .unwrap();

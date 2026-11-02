@@ -62,8 +62,10 @@ evidence for the earlier checkpoint or completed shared UI adoption.
 
 ### Required Scene Binding And Active Occurrence Implementation
 
-Pure expansion owns an `ExpandedSceneDocument`; its source owner consumes `bind_source` to form
-the required `ExpandedSceneCandidate`. Plain construction likewise requires a source. The sole
+Strict compilation owns a closed `CompiledSceneDocument`; its source owner consumes `bind_source`
+to form the required `CompiledSceneCandidate`. A source without Prefabs uses the same compiler
+with an empty resolver. `ExpandedSceneDocument` is an authoring observation and carries no Native
+input authority. The sole
 ordinary spawn function accepts the bound candidate and explicit occurrence namespace/slot;
 identity-free spawn convenience variants and public `SceneSpawner` are removed. Bare documents
 remain useful for editing and validation without acquiring a runtime occurrence.
@@ -408,7 +410,7 @@ preflight contract and evidence; this proposal does not silently claim one.
 The independent owner review selects the following dependency-ordered replacement, rather than
 extending the prototype's product-side claim table:
 
-1. Make the containing source mandatory in `ExpandedSceneCandidate`, require canonical Prefab
+1. Make the containing source mandatory in `CompiledSceneCandidate`, require canonical Prefab
    bindings, and replace source-less persistent spawn/replacement inputs. Scene owns a private,
    World-bound active occurrence association keyed by explicit namespace/slot. It records source
    and exact activation as values, covers empty instances, and participates in publication,
@@ -536,10 +538,10 @@ an explicitly supplied occurrence across publish/clear. Neither is an inferred d
 placement remains explicit and deleting the final entity still does not end it. Reconcile the
 owning ADRs when selecting those signatures, rather than introducing both alternatives publicly.
 
-The implemented owning changes include required `ExpandedSceneCandidate::plain`, the sole direct
-`spawn_scene`, candidate-based replacement, required Prefab resolution, `SceneSource::direct`,
+The implemented owning changes include source-bound `CompiledSceneCandidate`, the sole direct
+`spawn_scene`, compiled-candidate replacement, required Prefab resolution, `SceneSource::direct`,
 startup/current-Scene replacement, `SceneProjection::new`/`publish`, and exact-receipt
-Scene-instance end. The duplicate `direct_expanded` constructor is removed. Bare documents remain useful
+Scene-instance end. Unchecked candidate constructors are removed. Bare documents remain useful
 for editing, validation and serialization; they must not remain an identity-free persistent-spawn
 shortcut. Do not add a transient fallback without a concrete consumer and explicit semantics.
 

@@ -135,10 +135,10 @@ fn shared_root_input_must_fit_the_retained_budget_even_when_its_preview_is_small
     assert_eq!(unrestricted.root_revision(), Some(revision));
     let preview = unrestricted.take_preview().unwrap();
     assert_eq!(preview.omissions.len(), 1);
-    assert_eq!(preview.candidate.document().entities.len(), 1);
+    assert_eq!(preview.candidate.document().entities().len(), 1);
     assert!(
-        preview.candidate.document().entities[0]
-            .components
+        preview.candidate.document().entities()[0]
+            .components()
             .is_empty()
     );
 
@@ -326,9 +326,9 @@ fn preview_omissions_retain_vector_capacity_and_both_owned_strings_per_record() 
         preview
             .candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
     omissions.reserve(count);
     assert!(omissions.capacity() > omissions.len());

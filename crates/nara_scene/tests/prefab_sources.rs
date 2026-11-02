@@ -1,3 +1,6 @@
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::{mem::size_of, sync::Arc};
 
 use nara_asset::{AssetRef, AssetSourcePath, StableAssetId};
@@ -8,10 +11,10 @@ use nara_hierarchy::HierarchyRoots;
 use nara_identity::WorldIdentityDomain;
 use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
-    PrefabAddition, PrefabDocument, PrefabEntityTarget, PrefabExpansionBudgetKind,
-    PrefabExpansionLimits, PrefabExpansionOptions, PrefabInstance, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneDocument, SceneEntityId, SceneEntityProvenance,
+    PrefabAddition, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep,
+    PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind, SceneCompilationLimits,
+    SceneCompilationOptions, SceneDocument, SceneEntityId, SceneEntityProvenance,
     SceneEntityProvenanceMap, SceneEntityRecord, SceneEntitySource, SourceDocumentKey,
     SourceDocumentKind, SourceDocumentOrigin,
 };
@@ -109,7 +112,7 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
         host.prefab.as_mut().unwrap().overrides = Some(overrides.clone());
         host
     }));
-    let report = scene.expand_prefabs(&registry, &resolver);
+    let report = scene.compile(&registry, &resolver);
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let candidate = report.candidate.unwrap().bind_source(
         SourceDocumentKey::named(universe(), "containing", SourceDocumentKind::Scene).unwrap(),
@@ -152,7 +155,7 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
     for host in ["host_a", "host_b"] {
         for (local, steps) in &expected {
             let matches = candidate
-                .provenance()
+                .canonical_provenance()
                 .values()
                 .filter(|source| {
                     source.local_entity_id() == &id(local)
@@ -174,7 +177,7 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
     );
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let instance = report.instance.unwrap();
-    for (materialized, provenance) in candidate.provenance() {
+    for (materialized, provenance) in candidate.canonical_provenance() {
         let nara_identity::EntityLookup::Resolved(entity) = instance.resolve(&world, materialized)
         else {
             panic!("missing materialized entity");
@@ -210,11 +213,8 @@ fn addition_origin_typed_path_and_source_stack_are_admitted_before_copying() {
     let before_path = size_of::<SceneEntityProvenanceMap>()
         + entry_bytes("host", "host")
         + source_binding_bytes(&source, &key);
-    let rejected = scene.expand_prefabs_with_options(
-        &registry,
-        &resolver,
-        provenance_options(before_path - 1),
-    );
+    let rejected =
+        scene.compile_with_options(&registry, &resolver, provenance_options(before_path - 1));
     assert!(rejected.candidate.is_none());
     assert_eq!(
         assert_provenance_budget(&rejected.diagnostics, before_path - 1),
@@ -226,16 +226,14 @@ fn addition_origin_typed_path_and_source_stack_are_admitted_before_copying() {
         + string_bytes("host")
         + size_of::<PrefabProjectionStep>()
         + string_bytes("local");
-    let accepted =
-        scene.expand_prefabs_with_options(&registry, &resolver, provenance_options(full));
+    let accepted = scene.compile_with_options(&registry, &resolver, provenance_options(full));
     assert!(
         !accepted.diagnostics.has_errors(),
         "{:?}",
         accepted.diagnostics
     );
     assert!(accepted.candidate.is_some());
-    let rejected =
-        scene.expand_prefabs_with_options(&registry, &resolver, provenance_options(full - 1));
+    let rejected = scene.compile_with_options(&registry, &resolver, provenance_options(full - 1));
     assert!(rejected.candidate.is_none());
     assert_eq!(
         assert_provenance_budget(&rejected.diagnostics, full - 1),
@@ -315,9 +313,9 @@ fn rejected_file_publication_preserves_all_aliases_and_canonical_documents() {
     }
 }
 
-fn provenance_options(bytes: usize) -> PrefabExpansionOptions {
-    PrefabExpansionOptions::default().with_limits(
-        PrefabExpansionLimits::default().with_provenance_bytes(ByteLimit::new(bytes).unwrap()),
+fn provenance_options(bytes: usize) -> SceneCompilationOptions {
+    SceneCompilationOptions::default().with_limits(
+        SceneCompilationLimits::default().with_provenance_bytes(ByteLimit::new(bytes).unwrap()),
     )
 }
 
@@ -430,10 +428,10 @@ fn aliases_compare_canonical_ancestry_before_the_next_source_is_expanded() {
         source.stable.clone(),
     )]));
     let scene = SceneDocument::from_ordered_roots([anchor("outer", source.path.clone())]);
-    let report = scene.expand_prefabs_with_options(
+    let report = scene.compile_with_options(
         &registry(),
         &source,
-        PrefabExpansionOptions::default().with_max_depth(2),
+        SceneCompilationOptions::default().with_max_depth(2),
     );
     assert!(report.candidate.is_none());
     assert!(
@@ -472,7 +470,7 @@ fn sibling_aliases_share_a_source_but_keep_distinct_authored_placements() {
         + step_bytes(&source.stable, &source.key, "local")
         + entry_bytes("prefab_0", "local")
         + entry_bytes("prefab_1", "local");
-    let report = scene.expand_prefabs_with_options(&registry(), &source, provenance_options(exact));
+    let report = scene.compile_with_options(&registry(), &source, provenance_options(exact));
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     let provenance = report.provenance().unwrap();
     let projections = provenance
@@ -486,8 +484,7 @@ fn sibling_aliases_share_a_source_but_keep_distinct_authored_placements() {
         assert_eq!(inherited_key(&path.steps()[0]), &source.key);
         assert_eq!(path.steps()[0].entity_id(), &id("local"));
     }
-    let rejected =
-        scene.expand_prefabs_with_options(&registry(), &source, provenance_options(exact - 1));
+    let rejected = scene.compile_with_options(&registry(), &source, provenance_options(exact - 1));
     assert!(rejected.candidate.is_none());
     assert_eq!(
         assert_provenance_budget(&rejected.diagnostics, exact - 1),
@@ -505,7 +502,7 @@ fn prefab_resolution_rejects_a_scene_key_instead_of_publishing_wrong_kind_proven
     };
     source.key = SourceDocumentKey::stable_asset(stable_id, SourceDocumentKind::Scene);
     let scene = SceneDocument::from_ordered_roots([anchor("outer", source.path.clone())]);
-    let report = scene.expand_prefabs(&registry(), &source);
+    let report = scene.compile(&registry(), &source);
     assert!(report.candidate.is_none());
     assert!(
         report
@@ -518,19 +515,19 @@ fn prefab_resolution_rejects_a_scene_key_instead_of_publishing_wrong_kind_proven
 #[test]
 fn provenance_limit_defaults_to_64_mib_and_has_a_public_budget_kind() {
     assert_eq!(
-        PrefabExpansionLimits::default().provenance_bytes().get(),
+        SceneCompilationLimits::default().provenance_bytes().get(),
         64 * 1024 * 1024,
     );
     assert_eq!(
-        PrefabExpansionBudgetKind::ProvenanceBytes.to_string(),
+        SceneCompilationBudgetKind::ProvenanceBytes.to_string(),
         "provenance-bytes",
     );
     assert_eq!(
-        PrefabExpansionBudgetKind::OverlayDeclarations.to_string(),
+        SceneCompilationBudgetKind::OverlayDeclarations.to_string(),
         "overlay-declarations",
     );
     assert_eq!(
-        PrefabExpansionLimits::default()
+        SceneCompilationLimits::default()
             .with_overlay_declarations(nara_core::ItemLimit::ONE)
             .overlay_declarations(),
         nara_core::ItemLimit::ONE,
@@ -560,7 +557,7 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
         let stack_admission = size_of::<SceneEntityProvenanceMap>()
             + entry_bytes("outer", "outer")
             + source_binding_bytes(&source.path, &source.key);
-        let rejected = scene.expand_prefabs_with_options(
+        let rejected = scene.compile_with_options(
             &registry(),
             &source,
             provenance_options(stack_admission - 1),
@@ -571,11 +568,8 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
             stack_admission,
         );
         assert_eq!(rejected.diagnostics.iter().count(), 1);
-        let structure_report = scene.expand_prefabs_with_options(
-            &registry(),
-            &source,
-            provenance_options(stack_admission),
-        );
+        let structure_report =
+            scene.compile_with_options(&registry(), &source, provenance_options(stack_admission));
         assert!(structure_report.candidate.is_none());
         assert!(structure_report.diagnostics.has_errors());
         assert!(structure_report.diagnostics.iter().all(|diagnostic| {
@@ -590,11 +584,10 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
             + string_bytes("outer")
             + step_bytes(&source.path, &source.key, &leaf)
             + entry_bytes("prefab_0", &leaf);
-        let admitted =
-            scene.expand_prefabs_with_options(&registry(), &source, provenance_options(exact));
+        let admitted = scene.compile_with_options(&registry(), &source, provenance_options(exact));
         assert!(admitted.candidate.is_some(), "{:?}", admitted.diagnostics);
         let rejected =
-            scene.expand_prefabs_with_options(&registry(), &source, provenance_options(exact - 1));
+            scene.compile_with_options(&registry(), &source, provenance_options(exact - 1));
         assert!(rejected.candidate.is_none());
         assert_eq!(
             assert_provenance_budget(&rejected.diagnostics, exact - 1),
@@ -672,8 +665,7 @@ fn nested_projection_budget_counts_the_full_parent_key_for_every_leaf() {
         + parent_step
         + step_bytes(inner_request, inner_key, "leaf_1")
         + entry_bytes("prefab_2", "leaf_1");
-    let admitted =
-        scene.expand_prefabs_with_options(&registry(), &sources, provenance_options(exact));
+    let admitted = scene.compile_with_options(&registry(), &sources, provenance_options(exact));
     assert!(admitted.candidate.is_some(), "{:?}", admitted.diagnostics);
     let provenance = admitted.provenance().unwrap();
     for leaf in ["leaf_0", "leaf_1"] {
@@ -688,8 +680,7 @@ fn nested_projection_budget_counts_the_full_parent_key_for_every_leaf() {
         assert_eq!(inherited_key(&path.steps()[0]), outer_key);
         assert_eq!(inherited_key(&path.steps()[1]), inner_key);
     }
-    let rejected =
-        scene.expand_prefabs_with_options(&registry(), &sources, provenance_options(exact - 1));
+    let rejected = scene.compile_with_options(&registry(), &sources, provenance_options(exact - 1));
     assert!(rejected.candidate.is_none());
     assert_eq!(
         assert_provenance_budget(&rejected.diagnostics, exact - 1),
@@ -705,11 +696,13 @@ fn default_provenance_rejection_before_source_binding_preserves_world_and_identi
     let existing_spawn = nara_scene::spawn_scene(
         &mut world,
         &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::native(
+            &registry,
+            &std::sync::Arc::new((existing).clone()),
             scene_source_key(
                 "default_provenance_rejection_through_public_spawn_preserves_world_and_identity/existing",
             ),
-            std::sync::Arc::new((existing).clone()),
+            None,
         ),
         &scene_occurrence(
             "default_provenance_rejection_through_public_spawn_preserves_world_and_identity/existing_spawn",
@@ -749,7 +742,7 @@ fn default_provenance_rejection_before_source_binding_preserves_world_and_identi
     // The default depth/entity/value/identifier budgets all permit this finite source tree.
     let sources = SourceChain::new(30, 1_200);
     let scene = SceneDocument::from_ordered_roots([anchor("outer", sources.0[0].0.clone())]);
-    let rejected = (scene).expand_prefabs(&registry, &sources);
+    let rejected = (scene).compile(&registry, &sources);
     assert!(rejected.candidate.is_none());
     assert_provenance_budget(&rejected.diagnostics, 64 * 1024 * 1024);
     assert_eq!(

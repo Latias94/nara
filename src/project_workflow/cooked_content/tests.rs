@@ -181,7 +181,7 @@ fn database() -> ProjectAssetDatabase {
     database
 }
 
-fn scene(tag: u8, immediate: Option<&[AssetProductRef]>) -> ExpandedSceneCandidate {
+fn scene(tag: u8, immediate: Option<&[AssetProductRef]>) -> CompiledSceneCandidate {
     let mut entity = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
     if let Some(references) = immediate {
         entity = entity.with_component(
@@ -203,9 +203,12 @@ fn scene(tag: u8, immediate: Option<&[AssetProductRef]>) -> ExpandedSceneCandida
             .with_owner(owner()),
         );
     }
-    ExpandedSceneCandidate::plain(
+    let configuration = request().configuration.resolve().unwrap();
+    let plan = resolve_runtime_configuration(&configuration, recipe()).unwrap();
+    crate::startup_scene::compile_test_scene(
+        &SceneDocument::from_ordered_roots([entity]),
+        plan.schema_validation().bindings(),
         SourceDocumentKey::stable_asset(product(tag).source(), SourceDocumentKind::Scene),
-        Arc::new(SceneDocument::from_ordered_roots([entity])),
     )
 }
 
@@ -525,22 +528,71 @@ fn failed_scene_cook_preserves_the_source_and_prior_builder_members() {
     )
     .with_component(
         ComponentTypeId::new("nara.test.UnselectedComponent"),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true))
+            .with_owner(PersistentComponentSchemaOwnerId::try_new("nara.test.unselected").unwrap()),
     )]);
     let before = document.clone();
-    let expanded = ExpandedSceneCandidate::plain(
+    let refused = builder
+        .plan
+        .schema_validation()
+        .bindings()
+        .compile_scene(&document, &nara_scene::InMemoryPrefabSourceResolver::new());
+    assert!(refused.candidate.is_none());
+    assert!(refused.diagnostics.has_errors());
+    let foreign_owner = ComponentSchemaOwnerSnapshot::admit(
+        PersistentComponentSchemaOwnerId::try_new("nara.test.unselected").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![
+                ComponentSchema::new(
+                    ComponentTypeId::new("nara.test.UnselectedComponent"),
+                    "Unselected",
+                    ComponentSchemaVersion::ONE,
+                )
+                .with_capabilities([ComponentCapability::Scene])
+                .with_fields([ComponentFieldSchema::required(
+                    ComponentFieldId::new("value"),
+                    "Value",
+                    ComponentFieldPath::empty(),
+                    nara_reflect::ComponentValueKind::Bool,
+                )
+                .with_capabilities([ComponentCapability::Scene])]),
+            ],
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
+    let foreign = nara_scene::SceneComponentBindings::new(
+        builder
+            .plan
+            .schema_validation()
+            .bindings()
+            .native_snapshot()
+            .clone(),
+        [foreign_owner],
+    )
+    .unwrap();
+    let compiled = crate::startup_scene::compile_test_scene(
+        &document,
+        &foreign,
         SourceDocumentKey::stable_asset(product(2).source(), SourceDocumentKind::Scene),
-        Arc::new(document),
     );
     assert!(matches!(
         builder.add_scene(
             product(2),
-            &expanded,
+            &compiled,
             database().resolver(&AssetPathScope::ROOT),
         ),
         Err(CookedContentError::Runtime(RuntimeContentError::Scene(_)))
     ));
-    assert_eq!(expanded.document(), &before);
+    assert_eq!(document, before);
+    assert_eq!(compiled.document().roots(), document.roots.as_slice());
+    assert_eq!(
+        compiled.document().entities()[0].components()
+            [&ComponentTypeId::new("nara.test.UnselectedComponent")]
+            .value(),
+        &ComponentValue::Bool(true),
+    );
     assert_eq!(builder.retained_bytes, retained);
     assert_eq!(builder.members.len(), 1);
     add_scene(&mut builder, 2, None);

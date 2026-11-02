@@ -805,13 +805,18 @@ fn mixed_scene_and_demanded_dirty_prefabs_adopt_one_basis_without_replacing_hist
                 "working-3".into(),
             ] {
                 assert!(
-                    preview.candidate.document().entities.iter().any(|entity| {
-                        entity
-                            .components
-                            .get(&name_component())
-                            .and_then(|record| record.value.as_str())
-                            == Some(expected.as_str())
-                    }),
+                    preview
+                        .candidate
+                        .document()
+                        .entities()
+                        .iter()
+                        .any(|entity| {
+                            entity
+                                .components()
+                                .get(&name_component())
+                                .and_then(|record| record.value().as_str())
+                                == Some(expected.as_str())
+                        }),
                     "the compiled Scene must use dirty participant {expected}"
                 );
             }

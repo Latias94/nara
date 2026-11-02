@@ -21,10 +21,10 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    ExpandedSceneDocument, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
-    PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabProjectionPath, PrefabProjectionStep, SceneComponentRecord,
-    SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
+    InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
+    PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabProjectionPath, PrefabProjectionStep, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityProvenance, SceneEntityRecord,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -186,11 +186,42 @@ fn record(value: ComponentValue) -> SceneComponentRecord {
     SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner_id())
 }
 
-fn plain(document: SceneDocument) -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(containing(), Arc::new(document))
+fn compile(bindings: &SceneComponentBindings, document: SceneDocument) -> CompiledSceneCandidate {
+    let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    report.candidate.unwrap().bind_source(containing())
 }
 
-fn fixture(bindings: &SceneComponentBindings, alias: &str) -> ExpandedSceneCandidate {
+fn copy_claims(candidate: &CompiledSceneCandidate) -> FlatSceneClaims {
+    cook::clone_claims(
+        candidate,
+        &mut budget::WorkBudget::new(RuntimeSceneLimits::default()),
+    )
+    .unwrap()
+}
+
+fn seal_claims(
+    claims: FlatSceneClaims,
+    bindings: &SceneComponentBindings,
+) -> CompiledSceneCandidate {
+    crate::compiled::admit_claims(
+        claims,
+        SchemaAuthority::Mixed(bindings),
+        RuntimeSceneLimits::default().value_limits(),
+        None,
+        false,
+        |_, _, _| Ok::<_, RuntimeSceneError>(()),
+    )
+    .unwrap()
+    .bind_source(containing())
+}
+
+fn assert_payload_eq(left: &CompiledSceneDocument, right: &CompiledSceneDocument) {
+    assert_eq!(left.roots(), right.roots());
+    assert_eq!(left.entities(), right.entities());
+}
+
+fn fixture(bindings: &SceneComponentBindings, alias: &str) -> CompiledSceneCandidate {
     let nested_request = AssetRef::path(format!("prefabs/{alias}/nested.ron")).unwrap();
     let outer_request = AssetRef::path(format!("prefabs/{alias}/outer.ron")).unwrap();
     let mut nested = SceneEntityRecord::new(id("nested"));
@@ -233,13 +264,16 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> ExpandedSceneCandi
             prefab_key("canonical.nested"),
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("leaf"))]),
         );
-    let mut anchor = SceneEntityRecord::new(id("anchor"));
+    let mut anchor = SceneEntityRecord::new(id("anchor")).with_component(
+        component("game.Text"),
+        record(ComponentValue::String("anchor".into())),
+    );
     anchor.prefab = Some(PrefabInstance {
         source: outer_request,
         arguments: None,
         overrides: Some(overlay),
     });
-    let report = bindings.expand_prefabs(
+    let report = bindings.compile_scene(
         &SceneDocument::from_ordered_roots([anchor, SceneEntityRecord::new(id("local"))]),
         &resolver,
     );
@@ -273,8 +307,8 @@ fn admit_json(
 fn linked_nested_and_addition_cook_is_deterministic_and_round_trips_complete_provenance() {
     let bindings = bindings();
     let expanded = fixture(&bindings, "first");
-    let before = expanded.document().clone();
-    let origins_before = expanded.provenance().clone();
+    let before = format!("{:?}", expanded.document());
+    let origins_before = expanded.canonical_provenance().clone();
     let first = RuntimeSceneCandidate::cook(
         &expanded,
         &bindings,
@@ -298,48 +332,38 @@ fn linked_nested_and_addition_cook_is_deterministic_and_round_trips_complete_pro
     assert!(
         first
             .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.prefab.is_none())
+            .any(|entity| entity.id() == &id("local"))
     );
-    assert!(
-        first
-            .document()
-            .entities
-            .iter()
-            .any(|entity| entity.id == id("local"))
-    );
-    assert!(
-        first
-            .provenance()
-            .values()
-            .any(
-                |origin| origin.projection_path().is_some_and(|path| matches!(
-                    path.steps(),
-                    [
-                        PrefabProjectionStep::InstanceAddition { .. },
-                        PrefabProjectionStep::SourceEntity { .. }
-                    ]
-                ))
+    assert!(first.canonical_provenance().values().any(|origin| {
+        origin.projection_path().is_some_and(|path| {
+            matches!(
+                path.steps(),
+                [
+                    PrefabProjectionStep::InstanceAddition { .. },
+                    PrefabProjectionStep::SourceEntity { .. }
+                ]
             )
-    );
+        })
+    }));
     let linked = first
         .document()
-        .entities
+        .entities()
         .iter()
-        .find_map(|entity| entity.components.get(&component("game.Link")))
+        .find_map(|entity| entity.components().get(&component("game.Link")))
         .unwrap();
     let EntityReference::SceneLocal { entity: target } =
-        linked.value.as_entity_reference().unwrap()
+        linked.value().as_entity_reference().unwrap()
     else {
         panic!("expected local reference")
     };
     assert!(
         first
             .document()
-            .entities
+            .entities()
             .iter()
-            .any(|entity| &entity.id == target)
+            .any(|entity| entity.id() == target)
     );
     let bytes = first.to_json_bytes().unwrap();
     let admitted = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, first.limits())
@@ -347,10 +371,13 @@ fn linked_nested_and_addition_cook_is_deterministic_and_round_trips_complete_pro
         .admit(&containing(), &bindings)
         .unwrap();
     assert_eq!(admitted.document(), first.document());
-    assert_eq!(admitted.provenance(), first.provenance());
+    assert_eq!(
+        admitted.canonical_provenance(),
+        first.canonical_provenance()
+    );
     assert_eq!(admitted.to_json_bytes().unwrap(), bytes);
-    assert_eq!(expanded.document(), &before);
-    assert_eq!(expanded.provenance(), &origins_before);
+    assert_eq!(format!("{:?}", expanded.document()), before);
+    assert_eq!(expanded.canonical_provenance(), &origins_before);
 }
 
 #[test]
@@ -370,8 +397,8 @@ fn lookup_alias_spelling_does_not_select_runtime_ids_but_evidence_is_retained() 
         RuntimeSceneLimits::default(),
     )
     .unwrap();
-    assert_eq!(first.document(), second.document());
-    assert_ne!(first.provenance(), second.provenance());
+    assert_payload_eq(first.document(), second.document());
+    assert_ne!(first.canonical_provenance(), second.canonical_provenance());
     for candidate in [&first, &second] {
         let bytes = candidate.to_json_bytes().unwrap();
         assert!(
@@ -394,26 +421,34 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
         RuntimeSceneLimits::default(),
     )
     .unwrap();
-    let renames = original
-        .provenance()
+    let projected_ids = first
+        .canonical_provenance()
         .iter()
-        .enumerate()
-        .map(|(index, (entity, origin))| {
+        .filter(|(_, origin)| origin.projection_path().is_some())
+        .map(|(entity, _)| entity.clone())
+        .collect::<Vec<_>>();
+    let mut renamed_projected = projected_ids.iter().cycle().skip(1);
+    let renames = original
+        .canonical_provenance()
+        .iter()
+        .map(|(entity, origin)| {
             (
                 entity.clone(),
                 if origin.projection_path().is_some() {
-                    id(&format!("different_compiler_id_{index}"))
+                    // An actual old ID may already spell another entity's final canonical ID.
+                    // Remapping must always consult the unchanged complete old-ID map.
+                    renamed_projected.next().unwrap().clone()
                 } else {
                     entity.clone()
                 },
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let mut document = original.document().clone();
-    for root in &mut document.roots {
+    let mut claims = copy_claims(&original);
+    for root in &mut claims.roots {
         *root = renames[root].clone();
     }
-    for entity in &mut document.entities {
+    for entity in &mut claims.entities {
         entity.id = renames[&entity.id].clone();
         for child in &mut entity.children {
             *child = renames[child].clone();
@@ -426,14 +461,12 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
             }
         }
     }
-    let provenance = original
-        .provenance()
+    claims.canonical_provenance = original
+        .canonical_provenance()
         .iter()
         .map(|(entity, origin)| (renames[entity].clone(), origin.clone()))
         .collect();
-    let renamed = ExpandedSceneDocument::from_expansion(document, provenance)
-        .unwrap()
-        .bind_source(containing());
+    let renamed = seal_claims(claims, &bindings);
     let second = RuntimeSceneCandidate::cook(
         &renamed,
         &bindings,
@@ -442,7 +475,7 @@ fn generated_expansion_ids_never_select_persisted_identity_or_reference_targets(
     )
     .unwrap();
     assert_eq!(first.document(), second.document());
-    assert_eq!(first.provenance(), second.provenance());
+    assert_eq!(first.canonical_provenance(), second.canonical_provenance());
     assert_eq!(
         first.to_json_bytes().unwrap(),
         second.to_json_bytes().unwrap()
@@ -454,7 +487,7 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
     let bindings = bindings();
     let original = fixture(&bindings, "first");
     let (old_target, target_origin) = original
-        .provenance()
+        .canonical_provenance()
         .iter()
         .find(|(_, origin)| origin.projection_path().is_some())
         .unwrap();
@@ -465,35 +498,41 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
                 .unwrap(),
         ),
     };
-    let mut document = original.document().clone();
-    let anchor = document
+    let mut claims = copy_claims(&original);
+    let anchor = claims
         .entities
         .iter_mut()
         .find(|entity| entity.id == id("anchor"))
         .unwrap();
     anchor.components.insert(
         component("game.Links"),
-        record(ComponentValue::List(vec![ComponentValue::map([
-            (
-                "local",
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: old_target.clone(),
-                }),
-            ),
-            (
-                "persistent",
-                ComponentValue::EntityReference(persistent.clone()),
-            ),
-            ("empty", ComponentValue::Null),
-        ])])),
+        crate::compiled::claims::FlatSceneComponentClaim {
+            schema_owner: Some(owner_id()),
+            version: ComponentSchemaVersion::ONE,
+            value: ComponentValue::List(vec![ComponentValue::map([
+                (
+                    "local",
+                    ComponentValue::EntityReference(EntityReference::SceneLocal {
+                        entity: old_target.clone(),
+                    }),
+                ),
+                (
+                    "persistent",
+                    ComponentValue::EntityReference(persistent.clone()),
+                ),
+                ("empty", ComponentValue::Null),
+            ])]),
+        },
     );
     anchor.components.insert(
         component("game.Text"),
-        record(ComponentValue::String(old_target.as_str().to_owned())),
+        crate::compiled::claims::FlatSceneComponentClaim {
+            schema_owner: Some(owner_id()),
+            version: ComponentSchemaVersion::ONE,
+            value: ComponentValue::String(old_target.as_str().to_owned()),
+        },
     );
-    let input = ExpandedSceneDocument::from_expansion(document, original.provenance().clone())
-        .unwrap()
-        .bind_source(containing());
+    let input = seal_claims(claims, &bindings);
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -502,18 +541,18 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
     )
     .unwrap();
     let target = cooked
-        .provenance()
+        .canonical_provenance()
         .iter()
         .find(|(_, origin)| *origin == target_origin)
         .unwrap()
         .0;
     let anchor = cooked
         .document()
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.id == id("anchor"))
+        .find(|entity| entity.id() == &id("anchor"))
         .unwrap();
-    let ComponentValue::List(items) = &anchor.components[&component("game.Links")].value else {
+    let ComponentValue::List(items) = anchor.components()[&component("game.Links")].value() else {
         panic!("expected list")
     };
     assert_eq!(
@@ -528,7 +567,9 @@ fn nested_entity_references_remap_through_the_declared_plan_and_keep_persistent_
     );
     assert_eq!(items[0].get("empty"), Some(&ComponentValue::Null));
     assert_eq!(
-        anchor.components[&component("game.Text")].value.as_str(),
+        anchor.components()[&component("game.Text")]
+            .value()
+            .as_str(),
         Some(old_target.as_str())
     );
     let bytes = cooked.to_json_bytes().unwrap();
@@ -552,22 +593,26 @@ fn complete_logical_identity_is_injective_and_refuses_preserved_local_collision(
     )
     .unwrap();
     let collision = first
-        .provenance()
+        .canonical_provenance()
         .iter()
         .find(|(_, origin)| origin.projection_path().is_some())
         .unwrap()
         .0
         .clone();
-    let mut document = original.document().clone();
-    document
+    let mut claims = copy_claims(&original);
+    claims
         .entities
-        .push(SceneEntityRecord::new(collision.clone()));
-    document.roots.push(collision.clone());
-    let mut provenance = original.provenance().clone();
-    provenance.insert(collision.clone(), SceneEntityProvenance::local(collision));
-    let input = ExpandedSceneDocument::from_expansion(document, provenance)
-        .unwrap()
-        .bind_source(containing());
+        .push(crate::compiled::claims::FlatSceneEntityClaim {
+            id: collision.clone(),
+            children: Vec::new(),
+            components: BTreeMap::new(),
+        });
+    claims.roots.push(collision.clone());
+    claims
+        .canonical_provenance
+        .insert(collision.clone(), SceneEntityProvenance::local(collision));
+    let input = seal_claims(claims, &bindings);
+    let before = format!("{input:?}");
     let error = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -581,36 +626,39 @@ fn complete_logical_identity_is_injective_and_refuses_preserved_local_collision(
             .iter()
             .any(|diagnostic| diagnostic.code().as_str() == "scene.runtime-entity-id-collision")
     );
+    assert_eq!(format!("{input:?}"), before);
 
-    // Typed source/addition transitions, canonical keys and the containing source remain axes.
-    let mut document = original.document().clone();
-    let mut provenance = original.provenance().clone();
-    let existing = provenance
-        .values()
-        .find(|origin| origin.projection_path().is_some())
+    // A second final ID cannot claim an already admitted complete logical address.
+    let mut invalid: serde_json::Value =
+        serde_json::from_slice(&first.to_json_bytes().unwrap()).unwrap();
+    let mut existing = invalid["payload"]["provenance"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["origin"]["kind"] == "projected")
         .unwrap()
         .clone();
-    document
-        .entities
-        .push(SceneEntityRecord::new(id("duplicate-logical")));
-    document.roots.push(id("duplicate-logical"));
-    provenance.insert(id("duplicate-logical"), existing);
-    let input = ExpandedSceneDocument::from_expansion(document, provenance)
+    existing["entity"] = serde_json::json!("duplicate-logical");
+    invalid["payload"]["provenance"]
+        .as_array_mut()
         .unwrap()
-        .bind_source(containing());
-    assert!(
-        RuntimeSceneCandidate::cook(
-            &input,
-            &bindings,
-            database().resolver(&nara_asset::AssetPathScope::ROOT),
-            RuntimeSceneLimits::default()
-        )
-        .is_err()
-    );
+        .push(existing);
+    invalid["payload"]["entities"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "id": "duplicate-logical", "children": [], "components": {}
+        }));
+    invalid["payload"]["roots"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!("duplicate-logical"));
+    assert!(admit_json(&invalid, &bindings).is_err());
 }
 
 #[test]
-fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_strings() {
+fn cook_preserves_explicit_compiled_defaults_and_rewrites_declared_assets_without_touching_strings()
+{
     let bindings = bindings();
     let subproduct = AssetRef::Product(
         AssetProductRef::new(
@@ -638,25 +686,32 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
             ])
         })
         .collect();
-    let input = plain(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id("local"),
-    )
-    .with_component(
-        component("game.Assets"),
-        record(ComponentValue::map([(
-            "items",
-            ComponentValue::List(items),
-        )])),
-    )
-    .with_component(
-        component("game.AssetDefault"),
-        record(ComponentValue::Map(BTreeMap::new())),
-    )
-    .with_component(
-        component("game.Text"),
-        record(ComponentValue::String("images/shared.png".into())),
-    )]));
-    let before = input.document().clone();
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))
+            .with_component(
+                component("game.Assets"),
+                record(ComponentValue::map([(
+                    "items",
+                    ComponentValue::List(items),
+                )])),
+            )
+            .with_component(
+                component("game.AssetDefault"),
+                record(ComponentValue::Map(BTreeMap::new())),
+            )
+            .with_component(
+                component("game.Text"),
+                record(ComponentValue::String("images/shared.png".into())),
+            )]),
+    );
+    let before = format!("{:?}", input.document());
+    assert!(
+        input.document().entities()[0].components()[&component("game.AssetDefault")]
+            .value()
+            .get("image")
+            .is_some()
+    );
     let output = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -664,12 +719,12 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
         RuntimeSceneLimits::default(),
     )
     .unwrap();
-    let components = &output.document().entities[0].components;
+    let components = output.document().entities()[0].components();
     let schema = bindings.schema(&component("game.Assets")).unwrap();
     let references = nara_reflect::collect_declared_asset_references_from_schema(
         schema,
         ComponentSchemaVersion::ONE,
-        &components[&component("game.Assets")].value,
+        components[&component("game.Assets")].value(),
     )
     .unwrap();
     assert_eq!(
@@ -681,15 +736,15 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
     );
     assert_eq!(
         components[&component("game.AssetDefault")]
-            .value
+            .value()
             .get("image"),
         Some(&encode_asset_reference_value(&primary()))
     );
     assert_eq!(
-        components[&component("game.Text")].value,
-        ComponentValue::String("images/shared.png".into())
+        components[&component("game.Text")].value(),
+        &ComponentValue::String("images/shared.png".into())
     );
-    assert_eq!(input.document(), &before);
+    assert_eq!(format!("{:?}", input.document()), before);
     assert!(
         RuntimeSceneCandidate::cook(
             &input,
@@ -699,7 +754,7 @@ fn cook_normalizes_defaults_and_all_declared_nested_assets_without_touching_stri
         )
         .is_err()
     );
-    assert_eq!(input.document(), &before);
+    assert_eq!(format!("{:?}", input.document()), before);
 }
 
 #[test]
@@ -713,13 +768,14 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
         ),
     ] {
         let reference = AssetRef::Product(AssetProductRef::new(asset_id(), product).unwrap());
-        let input = plain(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            id("local"),
-        )
-        .with_component(
-            component("game.Image"),
-            record(encode_asset_reference_value(&reference)),
-        )]));
+        let input = compile(
+            &bindings,
+            SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))
+                .with_component(
+                    component("game.Image"),
+                    record(encode_asset_reference_value(&reference)),
+                )]),
+        );
         let limits = RuntimeSceneLimits::default();
         let limits = limits.with_base(
             limits
@@ -770,10 +826,11 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
         ),
     )]);
     let nodes = value.cost().nodes();
-    let input = plain(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id("local"),
-    )
-    .with_component(component("game.Assets"), record(value))]));
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))
+            .with_component(component("game.Assets"), record(value))]),
+    );
     let limits = RuntimeSceneLimits::default();
     let limits = limits.with_base(
         limits
@@ -794,20 +851,53 @@ fn canonical_primary_and_subproduct_cook_at_the_exact_value_node_limit() {
 fn strict_wire_refuses_source_fields_even_null_or_empty_and_missing_or_duplicate_fields() {
     let bindings = bindings();
     let original = cooked_json(&bindings);
-    for field in ["prefab", "overlay", "patch", "overrides"] {
+    for field in [
+        "prefab",
+        "overlay",
+        "patch",
+        "overrides",
+        "contextual_defaults",
+        "arguments",
+    ] {
         for value in [
             serde_json::Value::Null,
             serde_json::json!({}),
             serde_json::json!([]),
         ] {
-            for location in ["payload", "entity", "origin"] {
+            for location in [
+                "payload",
+                "entity",
+                "component",
+                "provenance",
+                "origin",
+                "step",
+                "source_key",
+                "source_origin",
+            ] {
                 let mut invalid = original.clone();
                 let object = match location {
                     "payload" => invalid["payload"].as_object_mut().unwrap(),
                     "entity" => invalid["payload"]["entities"][0].as_object_mut().unwrap(),
-                    _ => invalid["payload"]["provenance"][0]["origin"]
+                    "component" => invalid["payload"]["entities"][0]["components"]["game.Text"]
                         .as_object_mut()
                         .unwrap(),
+                    "provenance" => invalid["payload"]["provenance"][0].as_object_mut().unwrap(),
+                    "source_key" => invalid["payload"]["source_key"].as_object_mut().unwrap(),
+                    "source_origin" => invalid["payload"]["source_key"]["origin"]
+                        .as_object_mut()
+                        .unwrap(),
+                    "origin" => invalid["payload"]["provenance"][0]["origin"]
+                        .as_object_mut()
+                        .unwrap(),
+                    _ => {
+                        let entry = invalid["payload"]["provenance"]
+                            .as_array_mut()
+                            .unwrap()
+                            .iter_mut()
+                            .find(|entry| entry["origin"]["kind"] == "projected")
+                            .unwrap();
+                        entry["origin"]["steps"][0].as_object_mut().unwrap()
+                    }
                 };
                 object.insert(field.into(), value.clone());
                 assert!(
@@ -824,6 +914,14 @@ fn strict_wire_refuses_source_fields_even_null_or_empty_and_missing_or_duplicate
     for field in ["source_key", "provenance", "roots", "entities"] {
         let mut invalid = original.clone();
         invalid["payload"].as_object_mut().unwrap().remove(field);
+        assert!(admit_json(&invalid, &bindings).is_err());
+    }
+    for field in ["version", "value"] {
+        let mut invalid = original.clone();
+        invalid["payload"]["entities"][0]["components"]["game.Text"]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
         assert!(admit_json(&invalid, &bindings).is_err());
     }
     let bytes = serde_json::to_string(&original).unwrap();
@@ -925,24 +1023,27 @@ fn admission_rejects_wrong_source_and_incomplete_malformed_or_rekeyed_provenance
 #[test]
 fn admission_refuses_current_schema_owner_shape_defaults_and_surviving_reference_failures() {
     let bindings = bindings();
-    let input = plain(SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(id("a"))
-            .with_component(
-                component("game.Link"),
-                record(ComponentValue::EntityReference(
-                    EntityReference::SceneLocal { entity: id("b") },
-                )),
-            )
-            .with_component(
-                component("game.Defaults"),
-                record(ComponentValue::Map(BTreeMap::new())),
-            )
-            .with_component(
-                component("game.Image"),
-                record(encode_asset_reference_value(&primary())),
-            ),
-        SceneEntityRecord::new(id("b")),
-    ]));
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("a"))
+                .with_component(
+                    component("game.Link"),
+                    record(ComponentValue::EntityReference(
+                        EntityReference::SceneLocal { entity: id("b") },
+                    )),
+                )
+                .with_component(
+                    component("game.Defaults"),
+                    record(ComponentValue::Map(BTreeMap::new())),
+                )
+                .with_component(
+                    component("game.Image"),
+                    record(encode_asset_reference_value(&primary())),
+                ),
+            SceneEntityRecord::new(id("b")),
+        ]),
+    );
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -998,6 +1099,54 @@ fn admission_refuses_current_schema_owner_shape_defaults_and_surviving_reference
 }
 
 #[test]
+fn consistent_flat_rekeying_is_rejected_before_a_runtime_candidate_escapes() {
+    let bindings = bindings();
+    let mut invalid = cooked_json(&bindings);
+    let provenance = invalid["payload"]["provenance"].as_array_mut().unwrap();
+    let entry = provenance
+        .iter_mut()
+        .find(|entry| entry["origin"]["kind"] == "projected")
+        .unwrap();
+    let old = entry["entity"].as_str().unwrap().to_owned();
+    let replacement = serde_json::json!("processed-id-with-wrong-address");
+    entry["entity"] = replacement.clone();
+    for root in invalid["payload"]["roots"].as_array_mut().unwrap() {
+        if root.as_str() == Some(old.as_str()) {
+            *root = replacement.clone();
+        }
+    }
+    for entity in invalid["payload"]["entities"].as_array_mut().unwrap() {
+        if entity["id"].as_str() == Some(old.as_str()) {
+            entity["id"] = replacement.clone();
+        }
+        for child in entity["children"].as_array_mut().unwrap() {
+            if child.as_str() == Some(old.as_str()) {
+                *child = replacement.clone();
+            }
+        }
+        if let Some(record) = entity["components"]
+            .as_object_mut()
+            .unwrap()
+            .get_mut("game.Link")
+        {
+            let mut value: ComponentValue =
+                serde_json::from_value(record["value"].clone()).unwrap();
+            if let ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) =
+                &mut value
+                && entity.as_str() == old
+            {
+                *entity = id(replacement.as_str().unwrap());
+            }
+            record["value"] = serde_json::to_value(value).unwrap();
+        }
+    }
+    let error = admit_json(&invalid, &bindings).unwrap_err();
+    assert!(error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.runtime-noncanonical-entity-id"
+    }));
+}
+
+#[test]
 fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets() {
     let bindings = bindings();
     let candidate = RuntimeSceneCandidate::cook(
@@ -1034,8 +1183,12 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
             accepted
         );
     }
-    let provenance =
-        budget::provenance_cost(candidate.source_key(), candidate.provenance(), default).unwrap();
+    let provenance = budget::provenance_cost(
+        candidate.source_key(),
+        candidate.canonical_provenance(),
+        default,
+    )
+    .unwrap();
     for (maximum, accepted) in [(provenance, true), (provenance - 1, false)] {
         assert_eq!(
             RuntimeSceneDocumentCandidate::from_json_bytes(
@@ -1047,7 +1200,7 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
         );
     }
     let nodes = 1 + candidate
-        .provenance()
+        .canonical_provenance()
         .values()
         .map(|origin| {
             1 + origin
@@ -1066,7 +1219,7 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
         );
     }
     let depth = candidate
-        .provenance()
+        .canonical_provenance()
         .values()
         .filter_map(|origin| origin.projection_path())
         .map(|path| path.steps().len())
@@ -1083,8 +1236,8 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
         );
     }
     for (maximum, accepted) in [
-        (candidate.document().entities.len(), true),
-        (candidate.document().entities.len() - 1, false),
+        (candidate.document().entities().len(), true),
+        (candidate.document().entities().len() - 1, false),
     ] {
         assert_eq!(
             RuntimeSceneDocumentCandidate::from_json_bytes(
@@ -1099,14 +1252,15 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
             accepted
         );
     }
-    let input = plain(SceneDocument::from_ordered_roots(["a", "b"].map(
-        |entity| {
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots(["a", "b"].map(|entity| {
             SceneEntityRecord::new(id(entity)).with_component(
                 component("game.Defaults"),
                 record(ComponentValue::Map(BTreeMap::new())),
             )
-        },
-    )));
+        })),
+    );
     // Each normalized value is two nodes and fourteen logical bytes. Each record retains
     // its version/owner metadata and component ID; each one-byte local ID appears in both
     // its root placement and entity record. Cook preserves these local IDs.
@@ -1139,14 +1293,15 @@ fn exact_and_one_short_encoded_working_provenance_count_depth_and_value_budgets(
 #[test]
 fn final_asset_collection_and_aggregate_inventory_join_runtime_working_admission() {
     let bindings = bindings();
-    let input = plain(SceneDocument::from_ordered_roots(["a", "b"].map(
-        |entity| {
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots(["a", "b"].map(|entity| {
             SceneEntityRecord::new(id(entity)).with_component(
                 component("game.Image"),
                 record(encode_asset_reference_value(&primary())),
             )
-        },
-    )));
+        })),
+    );
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -1155,13 +1310,16 @@ fn final_asset_collection_and_aggregate_inventory_join_runtime_working_admission
     )
     .unwrap();
     let default = RuntimeSceneLimits::default();
+    let bytes = cooked.to_json_bytes().unwrap();
+    let decoded = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, default).unwrap();
     let mut measured = budget::WorkBudget::new(default);
-    validate_values(cooked.document(), &bindings, &mut measured).unwrap();
+    admit_flat_claims(decoded.claims, &bindings, &mut measured).unwrap();
     assert!(measured.used() > 1);
     for (maximum, accepted) in [(measured.used(), true), (measured.used() - 1, false)] {
         let mut work =
             budget::WorkBudget::new(default.with_working_bytes(ByteLimit::new(maximum).unwrap()));
-        let result = validate_values(cooked.document(), &bindings, &mut work);
+        let decoded = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, default).unwrap();
+        let result = admit_flat_claims(decoded.claims, &bindings, &mut work);
         assert_eq!(result.is_ok(), accepted);
         if let Err(error) = result {
             assert!(
@@ -1238,18 +1396,18 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
         .unwrap();
     let registry = registry.freeze().unwrap();
     let bindings = SceneComponentBindings::new(registry.clone(), []).unwrap();
-    let input = plain(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id("local"),
-    )
-    .with_component(
-        component("game.Native"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion::ONE,
-            ComponentValue::EntityReference(EntityReference::SceneLocal {
-                entity: id("local"),
-            }),
-        ),
-    )]));
+    let input = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local")).with_component(
+            component("game.Native"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("local"),
+                }),
+            ),
+        )]),
+    );
     let cooked = RuntimeSceneCandidate::cook(
         &input,
         &bindings,
@@ -1285,28 +1443,321 @@ fn raw_decode_and_admission_never_invoke_native_codecs() {
             } else {
                 component["value"] = authored;
             }
-            let candidate = RuntimeSceneDocumentCandidate::from_json_bytes(
+            let decoded = RuntimeSceneDocumentCandidate::from_json_bytes(
                 &serde_json::to_vec(&malicious).unwrap(),
                 cooked.limits(),
-            )
-            .unwrap();
-            let error = candidate.admit(&containing(), &bindings).unwrap_err();
-            assert!(error.diagnostics().iter().any(|diagnostic| {
-                diagnostic.fields().iter().any(|field| {
-                    field.key().as_str() == "codec-error-kind"
-                        && field.value()
-                            == nara_diagnostic::DiagnosticValueRef::Identifier(
-                                "unresolved-authored-reference",
-                            )
-                })
-            }));
+            );
+            if metadata {
+                assert!(decoded.is_err());
+            } else {
+                let error = decoded
+                    .unwrap()
+                    .admit(&containing(), &bindings)
+                    .unwrap_err();
+                assert!(error.diagnostics().iter().any(|diagnostic| {
+                    diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == "codec-error-kind"
+                            && field.value()
+                                == nara_diagnostic::DiagnosticValueRef::Identifier(
+                                    "unresolved-authored-reference",
+                                )
+                    })
+                }));
+            }
             assert_eq!(calls.load(Ordering::SeqCst), 0);
         }
     }
 }
 
 #[test]
+fn native_owner_claims_remain_exact_across_owned_and_unowned_receiving_definitions() {
+    #[derive(nara_ecs::Component)]
+    struct Native;
+
+    let make_bindings = |owner: Option<&'static str>| {
+        let mut registry = match owner {
+            None => ComponentRegistryBuilder::new(),
+            Some(owner) => ComponentRegistryBuilder::from_owner_catalog_candidate(
+                nara_reflect::ComponentSchemaOwnerId::new(owner),
+                ComponentSchemaCatalog::default(),
+                None,
+            )
+            .unwrap(),
+        };
+        registry
+            .register_persistent_component_with_codec::<Native, _, _>(
+                root_schema("game.Native", ComponentValueShape::EntityRef),
+                |_| Ok(Native),
+                |_| {
+                    Ok(ComponentValue::EntityReference(
+                        EntityReference::SceneLocal {
+                            entity: id("local"),
+                        },
+                    ))
+                },
+            )
+            .unwrap();
+        SceneComponentBindings::new(registry.freeze().unwrap(), []).unwrap()
+    };
+    let owned = make_bindings(Some("game.native"));
+    let foreign = make_bindings(Some("game.foreign"));
+    let unowned = make_bindings(None);
+    let source = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))
+        .with_component(
+            component("game.Native"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("local"),
+                }),
+            ),
+        )]);
+    let database = ProjectAssetDatabase::default();
+    for (sender, owner) in [(&owned, Some("game.native")), (&unowned, None)] {
+        let input = compile(sender, source.clone());
+        let record = &input.document().entities()[0].components()[&component("game.Native")];
+        assert_eq!(record.schema_owner().map(|owner| owner.as_str()), owner);
+        let cooked = RuntimeSceneCandidate::cook(
+            &input,
+            sender,
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+            RuntimeSceneLimits::default(),
+        )
+        .unwrap();
+        let original: serde_json::Value =
+            serde_json::from_slice(&cooked.to_json_bytes().unwrap()).unwrap();
+        assert!(admit_json(&original, sender).is_ok());
+        assert!(admit_json(&original, &foreign).is_err());
+        let receiver = if owner.is_some() { &unowned } else { &owned };
+        assert!(admit_json(&original, receiver).is_err());
+        assert!(
+            RuntimeSceneCandidate::cook(
+                &input,
+                receiver,
+                database.resolver(&nara_asset::AssetPathScope::ROOT),
+                RuntimeSceneLimits::default(),
+            )
+            .is_err()
+        );
+        let mut invalid = original;
+        let record = invalid["payload"]["entities"][0]["components"]["game.Native"]
+            .as_object_mut()
+            .unwrap();
+        if owner.is_some() {
+            record.remove("owner");
+        } else {
+            record.insert("owner".into(), serde_json::json!("game.native"));
+        }
+        assert!(admit_json(&invalid, sender).is_err());
+    }
+}
+
+#[test]
+fn cook_does_not_synthesize_defaults_from_a_different_receiving_schema() {
+    let make_bindings = |extra| {
+        let mut fields = vec![
+            ComponentFieldSchema::optional_with_default(
+                ComponentFieldId::new("amount"),
+                "Amount",
+                ComponentFieldPath::from_fields(["amount"]),
+                ComponentValueKind::U64,
+                ComponentValue::U64(7),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ];
+        if extra {
+            fields.push(
+                ComponentFieldSchema::optional_with_default(
+                    ComponentFieldId::new("extra"),
+                    "Extra",
+                    ComponentFieldPath::from_fields(["extra"]),
+                    ComponentValueKind::Bool,
+                    ComponentValue::Bool(false),
+                )
+                .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+            );
+        }
+        let schema = ComponentSchema::new(
+            component("game.Defaults"),
+            "Defaults",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields(fields);
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            owner_id(),
+            ComponentSchemaCatalog {
+                components: vec![schema],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        SceneComponentBindings::new(ComponentRegistryBuilder::new().freeze().unwrap(), [owner])
+            .unwrap()
+    };
+    let original = make_bindings(false);
+    let changed = make_bindings(true);
+    let input = compile(
+        &original,
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local")).with_component(
+            component("game.Defaults"),
+            record(ComponentValue::Map(BTreeMap::new())),
+        )]),
+    );
+    let before = format!("{input:?}");
+    assert!(
+        RuntimeSceneCandidate::cook(
+            &input,
+            &changed,
+            ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
+            RuntimeSceneLimits::default(),
+        )
+        .is_err()
+    );
+    assert_eq!(format!("{input:?}"), before);
+}
+
+#[test]
+fn cook_checks_complete_output_encoding_and_derived_id_strings_without_changing_input() {
+    let bindings = bindings();
+    let input = fixture(&bindings, "first");
+    let before = format!("{input:?}");
+    let default = RuntimeSceneLimits::default();
+    let cooked = RuntimeSceneCandidate::cook(
+        &input,
+        &bindings,
+        database().resolver(&nara_asset::AssetPathScope::ROOT),
+        default,
+    )
+    .unwrap();
+    let encoded = cooked.to_json_bytes().unwrap().len();
+    let longest_id = cooked
+        .document()
+        .entities()
+        .iter()
+        .map(|entity| entity.id().as_str().len())
+        .max()
+        .unwrap();
+    for (maximum, accepted) in [(encoded, true), (encoded - 1, false)] {
+        let limits = default.with_base(
+            default
+                .base()
+                .with_encoded_bytes(ByteLimit::new(maximum).unwrap()),
+        );
+        let result = RuntimeSceneCandidate::cook(
+            &input,
+            &bindings,
+            database().resolver(&nara_asset::AssetPathScope::ROOT),
+            limits,
+        );
+        assert_eq!(result.is_ok(), accepted);
+    }
+    for (maximum, accepted) in [(longest_id, true), (longest_id - 1, false)] {
+        let shape = default.base().shape();
+        let shape = SerdeShapeLimits::new(
+            shape.depth(),
+            shape.nodes(),
+            shape.container_items(),
+            ByteLimit::new(maximum).unwrap(),
+            shape.total_string_bytes(),
+        );
+        let limits = default.with_base(default.base().with_shape(shape));
+        let result = RuntimeSceneCandidate::cook(
+            &input,
+            &bindings,
+            database().resolver(&nara_asset::AssetPathScope::ROOT),
+            limits,
+        );
+        assert_eq!(result.is_ok(), accepted);
+    }
+    assert_eq!(format!("{input:?}"), before);
+}
+
+#[test]
+fn product_lookup_evidence_preserves_named_and_project_location_canonical_identity() {
+    let bindings = bindings();
+    let base = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("anchor")),
+            SceneEntityRecord::new(id("generated")),
+        ]),
+    );
+    let location = SourceDocumentKey::project_location(
+        "72011426-37e2-48ba-bc06-78841468889a".parse().unwrap(),
+        AssetSourcePath::new("prefabs/canonical.ron").unwrap(),
+        SourceDocumentKind::Prefab,
+    );
+    let keys = [
+        prefab_key("canonical.prefab"),
+        location,
+        SourceDocumentKey::stable_asset(asset_id(), SourceDocumentKind::Prefab),
+    ];
+    let mut ids = std::collections::BTreeSet::new();
+    for canonical in keys {
+        let mut claims = copy_claims(&base);
+        claims.canonical_provenance.insert(
+            id("generated"),
+            SceneEntityProvenance::projected(
+                id("leaf"),
+                PrefabProjectionPath::from_resolved_steps(
+                    id("anchor"),
+                    vec![PrefabProjectionStep::SourceEntity {
+                        source_document: primary(),
+                        canonical_source: canonical.clone(),
+                        entity: id("leaf"),
+                    }],
+                ),
+            ),
+        );
+        let input = seal_claims(claims, &bindings);
+        let cooked = RuntimeSceneCandidate::cook(
+            &input,
+            &bindings,
+            ProjectAssetDatabase::default().resolver(&nara_asset::AssetPathScope::ROOT),
+            RuntimeSceneLimits::default(),
+        )
+        .unwrap();
+        let bytes = cooked.to_json_bytes().unwrap();
+        let admitted = RuntimeSceneDocumentCandidate::from_json_bytes(&bytes, cooked.limits())
+            .unwrap()
+            .admit(&containing(), &bindings)
+            .unwrap();
+        assert_eq!(admitted.document(), cooked.document());
+        let mut invalid: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let projected = invalid["payload"]["provenance"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| entry["origin"]["kind"] == "projected")
+            .unwrap();
+        projected["origin"]["steps"][0]["source_document"] =
+            serde_json::to_value(AssetRef::Product(
+                AssetProductRef::new(
+                    asset_id(),
+                    ImportedProductId::parse_subproduct("00000000-0000-4000-8000-000000000042")
+                        .unwrap(),
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        assert!(admit_json(&invalid, &bindings).is_err());
+        let (entity, origin) = cooked
+            .canonical_provenance()
+            .iter()
+            .find(|(_, origin)| origin.projection_path().is_some())
+            .unwrap();
+        assert!(ids.insert(entity.clone()));
+        assert!(matches!(&origin.projection_path().unwrap().steps()[0],
+            PrefabProjectionStep::SourceEntity { source_document, canonical_source, .. }
+                if source_document == &primary() && canonical_source == &canonical));
+    }
+}
+
+#[test]
 fn identity_framing_keeps_origin_kind_steps_root_and_containing_namespace_distinct() {
+    let bindings = bindings();
     let source = containing();
     let projected = |steps| {
         SceneEntityProvenance::projected(
@@ -1327,23 +1778,27 @@ fn identity_framing_keeps_origin_kind_steps_root_and_containing_namespace_distin
         projected(vec![addition.clone()]),
         projected(vec![source_step, addition]),
     ];
-    let document = SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(id("anchor")),
-        SceneEntityRecord::new(id("generated")),
-    ]);
+    let compiled = compile(
+        &bindings,
+        SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("anchor")),
+            SceneEntityRecord::new(id("generated")),
+        ]),
+    );
     let mut outputs = std::collections::BTreeSet::new();
     for origin in origins {
-        let provenance = [
+        let mut claims = copy_claims(&compiled);
+        claims.canonical_provenance = [
             (id("anchor"), SceneEntityProvenance::local(id("anchor"))),
             (id("generated"), origin),
         ]
         .into_iter()
         .collect();
+        let document = seal_claims(claims, &bindings);
         for source in [&source, &key("other.scene", SourceDocumentKind::Scene)] {
             let ids = identity::canonical_ids(
                 source,
-                &document,
-                &provenance,
+                document.document(),
                 false,
                 &mut budget::WorkBudget::new(RuntimeSceneLimits::default()),
             )

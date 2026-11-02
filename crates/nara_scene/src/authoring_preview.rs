@@ -57,8 +57,8 @@ pub struct AuthoringPreviewOmission {
 }
 
 impl AuthoringPreviewOmission {
-    pub(crate) fn from_expansion(
-        fact: &crate::prefab::AuthoringPrefabOmission,
+    pub(crate) fn from_compilation(
+        fact: &crate::prefab::AuthoringSceneCompilationOmission,
         expanded: &crate::ExpandedSceneDocument,
     ) -> Self {
         let provenance = &expanded.provenance()[&fact.entity];
@@ -75,10 +75,10 @@ impl AuthoringPreviewOmission {
             }
         };
         let reason = match fact.reason {
-            crate::prefab::AuthoringPrefabOmissionReason::RecordUnavailable(reason) => {
+            crate::prefab::AuthoringSceneCompilationOmissionReason::RecordUnavailable(reason) => {
                 AuthoringPreviewOmissionReason::RecordUnavailable(reason)
             }
-            crate::prefab::AuthoringPrefabOmissionReason::NativeBindingUnavailable => {
+            crate::prefab::AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable => {
                 AuthoringPreviewOmissionReason::NativeBindingUnavailable
             }
         };

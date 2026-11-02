@@ -302,6 +302,41 @@ pub fn plan_declared_value_entity_references<E>(
     })
 }
 
+/// Plans the same payload-relative references with admission before traversal allocations.
+/// The supplied field and selected shape belong to an already admitted Schema.
+pub fn plan_declared_value_entity_references_with_admission<R, E>(
+    field: &ComponentFieldSchema,
+    shape: &ComponentValueShape,
+    value: &ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<DeclaredEntityReferencePlan, EntityReferencePlanError<R, E>> {
+    let leaves = collect_present_value_reference_leaves_with_admission::<R, E>(
+        field,
+        shape,
+        value,
+        limits,
+        ComponentValueKind::EntityRef,
+        true,
+        &mut admit,
+    )?;
+    let mut admission = ReferenceAdmission {
+        callback: &mut admit,
+        maximum_bytes: limits.bytes().get(),
+    };
+    let mut references = Vec::new();
+    admission.reserve(&mut references, leaves.len())?;
+    for leaf in leaves {
+        admission.allocation(Some(leaf.field.id().as_str().len()))?;
+        references.push(PlannedEntityReference {
+            field_id: leaf.field.id().clone(),
+            path: leaf.path,
+            required: leaf.required,
+        });
+    }
+    Ok(DeclaredEntityReferencePlan { references })
+}
+
 /// Rewrites structurally declared entity-reference leaves without changing the input value.
 ///
 /// This validates the `EntityRef` structural marker. Callers remain responsible for checking the

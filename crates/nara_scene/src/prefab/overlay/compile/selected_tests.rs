@@ -23,16 +23,16 @@ use nara_reflect::{
 use crate::{
     __private::AuthoringAdapterReceipt,
     AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabAddition, PrefabComponentIntent,
-    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionFailureKind,
-    PrefabExpansionLimits, PrefabExpansionOptions, PrefabInstance, PrefabInstanceHop,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
     PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
     PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
+    SceneCompilationFailureKind, SceneCompilationLimits, SceneCompilationOptions,
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
     SourceDocumentKind,
     prefab::{
-        AuthoringPrefabOmissionReason, SelectedInstanceCompilation, SelectedInstanceSource,
+        AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
+        SelectedInstanceSource, try_compile_authoring_scene_with_loader,
         try_compile_selected_authoring_instance_with_loader,
-        try_expand_authoring_prefabs_with_loader,
     },
 };
 
@@ -360,14 +360,14 @@ impl Fixture {
     fn selected(
         &self,
         basis: &AuthoringSchemaBasis,
-        limits: PrefabExpansionLimits,
+        limits: SceneCompilationLimits,
     ) -> (SelectedInstanceCompilation, Vec<AssetRef>) {
         let mut reads = Vec::new();
         let report = try_compile_selected_authoring_instance_with_loader(
             SelectedInstanceSource::Scene(&self.scene),
             &id("A"),
             basis,
-            PrefabExpansionOptions::default().with_limits(limits),
+            SceneCompilationOptions::default().with_limits(limits),
             None,
             |reference, _| {
                 reads.push(reference.clone());
@@ -440,10 +440,10 @@ fn selected_demand_does_not_read_missing_or_conflicted_siblings_or_local_child_i
             4
         );
         assert!(selected.omissions.iter().all(|fact| {
-            fact.reason == AuthoringPrefabOmissionReason::NativeBindingUnavailable
+            fact.reason == AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable
         }));
         assert_eq!(fixture.scene, before);
-        let full = try_expand_authoring_prefabs_with_loader(
+        let full = try_compile_authoring_scene_with_loader(
             &fixture.scene,
             &basis,
             Default::default(),
@@ -455,9 +455,9 @@ fn selected_demand_does_not_read_missing_or_conflicted_siblings_or_local_child_i
         assert_eq!(
             full.failure().unwrap().reason(),
             if conflicted {
-                &PrefabExpansionFailureKind::SourceChanged
+                &SceneCompilationFailureKind::SourceChanged
             } else {
-                &PrefabExpansionFailureKind::OwnerAdmission
+                &SceneCompilationFailureKind::OwnerAdmission
             },
         );
     }
@@ -470,7 +470,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     let (selected, _) = fixture.selected(&basis, Default::default());
     assert_success(&selected);
     let fragment = selected.fragment.as_ref().unwrap();
-    let full = try_expand_authoring_prefabs_with_loader(
+    let full = try_compile_authoring_scene_with_loader(
         &fixture.scene,
         &basis,
         Default::default(),
@@ -548,7 +548,18 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
             })
             .unwrap();
         }
-        assert_eq!(&expected, selected_entity);
+        let mut actual = selected_entity.clone();
+        for payload in actual.components.values_mut() {
+            assert!(
+                payload
+                    .contextual_defaults
+                    .contains_key(&ComponentFieldId::new("target"))
+            );
+            // Selected source conversion retains separately proven default snapshots.
+            // This comparison covers its effective values and ordered projection.
+            payload.contextual_defaults.clear();
+        }
+        assert_eq!(expected, actual);
         assert!(
             origin
                 .projection_path()
@@ -609,10 +620,9 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     let preview = full.into_native_preview().unwrap().candidate;
     assert!(
         preview
-            .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
 }
 
@@ -691,7 +701,7 @@ fn selected_unavailable_survivor_keeps_an_omission_with_its_typed_owner() {
     for fact in facts {
         assert_eq!(
             fact.reason,
-            AuthoringPrefabOmissionReason::RecordUnavailable(
+            AuthoringSceneCompilationOmissionReason::RecordUnavailable(
                 AuthoringRecordReadiness::UnknownSchema
             ),
         );
@@ -743,7 +753,7 @@ fn every_opened_selected_scope_requires_the_exact_shared_basis() {
         assert!(report.fragment.is_none(), "{report:?}");
         assert_eq!(
             report.failure.unwrap().reason(),
-            &PrefabExpansionFailureKind::OwnerAdmission
+            &SceneCompilationFailureKind::OwnerAdmission
         );
     }
 }
@@ -767,7 +777,7 @@ fn selection_rejects_non_instance_or_projected_locators_without_loading() {
         assert!(report.fragment.is_none());
         assert_eq!(
             report.failure.unwrap().reason(),
-            &PrefabExpansionFailureKind::MissingTarget
+            &SceneCompilationFailureKind::MissingTarget
         );
     }
 }
@@ -777,27 +787,27 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     let fixture = Fixture::new();
     let basis = basis();
     for limits in [
-        PrefabExpansionLimits::default().with_materialized_entities(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_materialized_value_bytes(ByteLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_resolved_instances(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_overlay_declarations(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default()
+        SceneCompilationLimits::default().with_materialized_entities(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_materialized_components(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_materialized_value_nodes(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_materialized_value_bytes(ByteLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_resolved_instances(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_overlay_declarations(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default()
             .with_generated_identifier_bytes(ByteLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default()
+        SceneCompilationLimits::default()
             .with_single_generated_identifier_bytes(ByteLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_provenance_bytes(ByteLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_working_bytes(ByteLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_reference_work_nodes(ItemLimit::new(1).unwrap()),
-        PrefabExpansionLimits::default().with_reference_work_bytes(ByteLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_provenance_bytes(ByteLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_working_bytes(ByteLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_reference_work_nodes(ItemLimit::new(1).unwrap()),
+        SceneCompilationLimits::default().with_reference_work_bytes(ByteLimit::new(1).unwrap()),
     ] {
         let (report, _) = fixture.selected(&basis, limits);
         assert!(report.fragment.is_none(), "{report:?}");
         assert!(report.budget_failed);
         assert_eq!(
             report.failure.unwrap().reason(),
-            &PrefabExpansionFailureKind::WorkLimit
+            &SceneCompilationFailureKind::WorkLimit
         );
     }
     let report = try_compile_selected_authoring_instance_with_loader(
@@ -858,7 +868,19 @@ fn only_retained_selected_references_open_a_structurally_suppressed_dependency()
                         "socket",
                     ))),
                 }),
-            )])),
+            )]))
+            .with_contextual_default(
+                ComponentFieldId::new("target"),
+                authored(AuthoredEntityReference {
+                    through: vec![PrefabInstanceHop {
+                        anchor: PrefabEntityOrigin::SourceEntity(id("inner")),
+                        expected_base: key("branch"),
+                    }],
+                    target: AuthoredReferenceTarget::Entity(PrefabEntityOrigin::SourceEntity(id(
+                        "host",
+                    ))),
+                }),
+            ),
         });
         fixture.sources.insert(
             request("branch"),
@@ -1062,7 +1084,7 @@ fn containing_shells_count_against_the_existing_entity_cap_without_copying_raw_v
     }
     let before = fixture.scene.clone();
     for allowed in [5, 6] {
-        let limits = PrefabExpansionLimits::default()
+        let limits = SceneCompilationLimits::default()
             .with_materialized_entities(ItemLimit::new(allowed).unwrap())
             .with_materialized_components(ItemLimit::new(1).unwrap())
             .with_materialized_value_nodes(ItemLimit::new(1).unwrap())

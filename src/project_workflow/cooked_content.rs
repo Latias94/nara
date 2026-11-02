@@ -22,7 +22,7 @@ use nara_project::RuntimeConfiguration;
 use nara_reflect::__private::{
     AssetReferenceCollectionError, collect_declared_effective_asset_references_with_admission,
 };
-use nara_scene::{ExpandedSceneCandidate, RuntimeSceneCandidate};
+use nara_scene::{CompiledSceneCandidate, RuntimeSceneCandidate};
 use nara_tilemap::{TileSetDescriptor, TileSetDomain, TileSetRuntimeCodec};
 
 use crate::{
@@ -264,7 +264,7 @@ impl CookedContentBuilder {
     pub fn add_scene(
         &mut self,
         product: AssetProductRef,
-        expanded: &ExpandedSceneCandidate,
+        compiled: &CompiledSceneCandidate,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<(), CookedContentError> {
         self.require_new_product(product)?;
@@ -272,7 +272,7 @@ impl CookedContentBuilder {
         let scene_limits = self.limits.runtime.scene();
         self.admit_work(scene_limits.working_bytes().get())?;
         let candidate = RuntimeSceneCandidate::cook(
-            expanded,
+            compiled,
             self.plan.schema_validation().bindings(),
             asset_resolution,
             scene_limits,
@@ -290,9 +290,9 @@ impl CookedContentBuilder {
         let fixed = add(candidate_bytes, bytes.len())?;
         let components = candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .try_fold(0, |total, entity| add(total, entity.components.len()))?;
+            .try_fold(0, |total, entity| add(total, entity.components().len()))?;
         let mut work = add(
             fixed,
             mul(
@@ -303,8 +303,8 @@ impl CookedContentBuilder {
         self.admit_work(work)?;
         let mut inventories = Vec::with_capacity(components);
         let mut references_count = 0;
-        for entity in &candidate.document().entities {
-            for (component, record) in &entity.components {
+        for entity in candidate.document().entities() {
+            for (component, record) in entity.components() {
                 let schema = self
                     .plan
                     .schema_validation()
@@ -313,8 +313,8 @@ impl CookedContentBuilder {
                     .expect("cooked Scene uses this builder's original admitted definitions");
                 let references = collect_declared_effective_asset_references_with_admission(
                     schema,
-                    record.version,
-                    &record.value,
+                    record.version(),
+                    record.value(),
                     scene_limits.reference_traversal_limits(),
                     |_, _, allocation| {
                         work = add(work, allocation)?;

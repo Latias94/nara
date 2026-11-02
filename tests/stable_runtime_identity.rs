@@ -1,4 +1,6 @@
 use nara::ecs::World;
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
 use nara::{
     core::ItemLimit,
     gameplay::GameplayCommandTarget,
@@ -22,11 +24,12 @@ fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
     let first_report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "scene_commands_and_tooling_share_one_world_scoped_identity_contract/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence(
             "scene_commands_and_tooling_share_one_world_scoped_identity_contract/first_report",
@@ -40,11 +43,12 @@ fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
     let second_report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &document,
             scene_source_key(
                 "scene_commands_and_tooling_share_one_world_scoped_identity_contract/document",
             ),
-            std::sync::Arc::new((document).clone()),
         ),
         &scene_occurrence(
             "scene_commands_and_tooling_share_one_world_scoped_identity_contract/second_report",

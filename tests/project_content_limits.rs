@@ -13,8 +13,8 @@ use nara::{
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId},
     scene::{
-        PrefabDocument, PrefabExpansionLimits, PrefabInstance, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord,
+        PrefabDocument, PrefabInstance, SceneCompilationLimits, SceneComponentRecord,
+        SceneDocument, SceneEntityRecord,
     },
 };
 use project_content_fixture::{TestProject, image_meta, scene_id, sprite_value, valid_png_bytes};
@@ -330,8 +330,8 @@ fn fixture_limits() -> ProjectContentLimits {
     // The compiler can lower its spare work reservation to the shared Host's remaining capacity.
     // Keep this small fixture's expansion allowance below its fixed decode peak, so exact
     // high-water/one-byte-short assertions exercise required work rather than spare capacity.
-    ProjectContentLimits::default().with_prefab_expansion(
-        PrefabExpansionLimits::default().with_working_bytes(ByteLimit::new(1024 * 1024).unwrap()),
+    ProjectContentLimits::default().with_scene_compilation(
+        SceneCompilationLimits::default().with_working_bytes(ByteLimit::new(1024 * 1024).unwrap()),
     )
 }
 

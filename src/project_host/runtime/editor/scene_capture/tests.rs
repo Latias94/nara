@@ -385,18 +385,18 @@ fn assert_native_leaf(fixture: &Fixture, editor: &EditorProjectSession, rotation
     let candidate = editor
         .authoring_runtime
         .test_preview_candidate()
-        .expect("the accepted Authoring preview retains its actual expanded candidate");
+        .expect("the accepted Authoring preview retains its actual compiled candidate");
     assert_eq!(candidate.source_key(), &expected_source);
-    assert_eq!(candidate.document().entities.len(), 3);
+    assert_eq!(candidate.document().entities().len(), 3);
     assert!(
         candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .all(|record| record.prefab.is_none())
+            .all(|record| candidate.canonical_provenance().contains_key(record.id()))
     );
     assert_eq!(
-        candidate.provenance().get(&source.entity_id),
+        candidate.canonical_provenance().get(&source.entity_id),
         Some(source.provenance()),
     );
 }

@@ -9,7 +9,7 @@ use nara_reflect::{
 pub use nara_identity::{PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop};
 
 use crate::{
-    PrefabExpansionFailureKind, PrefabInstance, SceneComponentRecord, SceneEntityId,
+    PrefabInstance, SceneCompilationFailureKind, SceneComponentRecord, SceneEntityId,
     SourceDocumentKey,
 };
 

@@ -111,6 +111,29 @@ impl SceneDocument {
 }
 
 impl SceneComponentBindings {
+    /// Checks a complete compiled batch against these receiving definitions before any codec.
+    /// This neither migrates source values nor supplies defaults from a different definition.
+    #[must_use]
+    pub fn validate_compiled_scene(
+        &self,
+        document: &crate::CompiledSceneDocument,
+        asset_resolution: Option<AssetReferenceResolver<'_>>,
+        limits: ComponentValueMaterializationLimits,
+    ) -> DiagnosticReport {
+        let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
+        if let Some(resolver) = asset_resolution {
+            context = context.with_asset_resolution(resolver);
+        }
+        crate::validation::preflight_compiled_scene_with_context(
+            document,
+            self.native_snapshot(),
+            Some(self),
+            &mut context,
+            false,
+        )
+        .diagnostics
+    }
+
     /// Validates a complete expanded Scene through the shared native/data preflight.
     ///
     /// Native records use the selected real codecs and migrations; data records require their

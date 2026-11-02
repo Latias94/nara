@@ -180,7 +180,7 @@ fn scene_product_source_check_and_both_export_policies_preserve_complete_selecti
     let bindings = SceneComponentBindings::new(registry.clone(), [snapshot]).unwrap();
     let document = document();
     let candidate = bindings
-        .expand_prefabs(&document, &InMemoryPrefabSourceResolver::new())
+        .compile_scene(&document, &InMemoryPrefabSourceResolver::new())
         .candidate
         .unwrap()
         .bind_source(crate::tests::scene_source_key("products/source"));
@@ -335,7 +335,7 @@ fn auxiliary_prefab_sources_refuse_before_loader_and_primary_requires_matching_s
     });
     let auxiliary = SceneDocument::from_ordered_roots([anchor]);
     let report = auxiliary
-        .try_expand_prefabs_with_loader(
+        .try_compile_with_loader(
             &registry,
             Default::default(),
             None,
@@ -371,7 +371,7 @@ fn auxiliary_prefab_sources_refuse_before_loader_and_primary_requires_matching_s
     ] {
         let source = ResolvedPrefabSource::bound(Arc::clone(&body), key);
         let report = primary
-            .try_expand_prefabs_with_loader(&registry, Default::default(), None, |_, _| {
+            .try_compile_with_loader(&registry, Default::default(), None, |_, _| {
                 Ok::<_, Infallible>(Some(source.clone()))
             })
             .unwrap();

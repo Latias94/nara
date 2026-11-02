@@ -677,7 +677,7 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
         assert_eq!(native.is_err(), dangling);
         let mut world = World::new();
         let before_entities = world.iter_entities().count();
-        let expansion = (candidate_document).expand_prefabs(&registry, &resolver);
+        let expansion = (candidate_document).compile(&registry, &resolver);
         assert_eq!(
             expansion.diagnostics.has_errors(),
             dangling,

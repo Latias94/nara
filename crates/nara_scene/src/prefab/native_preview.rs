@@ -8,15 +8,16 @@ use nara_reflect::ComponentTypeId;
 #[cfg(test)]
 mod tests;
 
-impl AuthoringPrefabExpansionReport {
-    /// Consumes schema-only compilation using its already admitted Native Adapter coverage.
-    pub fn into_native_preview(self) -> Result<AuthoringNativePreview, DiagnosticReport> {
+impl AuthoringSceneCompilationReport {
+    /// Filters and seals schema-only compilation using its admitted Native Adapter coverage.
+    pub fn into_native_preview(mut self) -> Result<AuthoringNativePreview, DiagnosticReport> {
         self.finish_native_preview(None)
     }
 
-    /// Complete modeled work after restricting to this registry, without allocating omissions.
+    /// Modeled work through registry restriction, before terminal sealing or omission allocation.
     ///
     /// This includes the original compilation and both representations of every new omission.
+    /// Terminal sealing admits its own additional work against the same original allowance.
     /// Overflow or a missing compilation candidate returns `None`. The consuming operation still
     /// enforces the original working cap; this observation does not enlarge that allowance.
     pub fn checked_native_preview_work_bytes_for(
@@ -35,25 +36,25 @@ impl AuthoringPrefabExpansionReport {
     /// Schema basis retained by this compilation can establish source evidence. The report's
     /// borrowed observations cannot replace its candidate, omissions or working allowance.
     pub fn into_native_preview_for(
-        self,
+        mut self,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<AuthoringNativePreview, DiagnosticReport> {
         self.finish_native_preview(Some(registry))
     }
 
     fn finish_native_preview(
-        mut self,
+        &mut self,
         registry: Option<&ComponentRegistrySnapshot>,
     ) -> Result<AuthoringNativePreview, DiagnosticReport> {
         let Some(candidate) = self.candidate.take() else {
-            return Err(self.diagnostics);
+            return Err(std::mem::take(&mut self.diagnostics));
         };
         if let Some(registry) = registry {
             let Some((count, usage)) = self.native_preview_restriction(&candidate, registry) else {
                 return Err(self.preview_budget_failure(usize::MAX));
             };
             let work = usage.checked_work_bytes();
-            if work.is_none_or(|work| work > self.working_limit.get()) {
+            if work.is_none_or(|work| work > self.limits.working_bytes().get()) {
                 return Err(self.preview_budget_failure(work.unwrap_or(usize::MAX)));
             }
 
@@ -69,36 +70,78 @@ impl AuthoringPrefabExpansionReport {
                     {
                         // Available Native records are disjoint from the compiler's original
                         // Data/unavailable omissions. No duplicate index or repeated search is needed.
-                        self.omissions.push(AuthoringPrefabOmission {
+                        self.omissions.push(AuthoringSceneCompilationOmission {
                             entity: entity.id.clone(),
                             component: component.clone(),
-                            reason: AuthoringPrefabOmissionReason::NativeBindingUnavailable,
+                            reason:
+                                AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable,
                         });
                     }
                 }
             }
         }
-        if self.checked_work_bytes().is_none() {
-            return Err(self.preview_budget_failure(usize::MAX));
+        let work = self.checked_work_bytes();
+        if work.is_none_or(|work| work > self.limits.working_bytes().get()) {
+            return Err(self.preview_budget_failure(work.unwrap_or(usize::MAX)));
         }
         let candidate = candidate.remove_compiler_components(
             self.omissions
                 .iter()
                 .filter(|fact| {
-                    fact.reason == AuthoringPrefabOmissionReason::NativeBindingUnavailable
+                    fact.reason == AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable
                 })
                 .map(|fact| (&fact.entity, &fact.component)),
         );
         let omissions = self
             .omissions
             .iter()
-            .map(|fact| AuthoringPreviewOmission::from_expansion(fact, &candidate))
+            .map(|fact| AuthoringPreviewOmission::from_compilation(fact, &candidate))
             .collect();
+        let (document, provenance) = candidate.into_compiler_parts();
+        let mut usage = self.usage;
+        let mut reference_work = self.reference_work;
+        let limits = self.limits;
+        let result = crate::compiled::admit_draft(
+            document,
+            provenance,
+            SchemaAuthority::Authoring(&self.basis),
+            limits.materialization_limits(),
+            None,
+            |nodes, bytes, allocation| {
+                admit_prefab_terminal_work(
+                    limits,
+                    &mut usage,
+                    &mut reference_work,
+                    nodes,
+                    bytes,
+                    allocation,
+                )
+            },
+        );
+        self.usage = usage;
+        self.reference_work = reference_work;
+        let candidate = match result {
+            Ok(candidate) => candidate,
+            Err(CompiledSceneAdmissionError::Admission((kind, observed, maximum))) => {
+                if !self.budget_failed {
+                    self.budget_failed = true;
+                    self.diagnostics.push(prefab_expansion_budget_diagnostic(
+                        kind, observed, maximum, None, None,
+                    ));
+                }
+                return Err(std::mem::take(&mut self.diagnostics));
+            }
+            Err(CompiledSceneAdmissionError::Diagnostics(diagnostics)) => {
+                self.diagnostics.extend(diagnostics);
+                return Err(std::mem::take(&mut self.diagnostics));
+            }
+        };
         Ok(AuthoringNativePreview {
             candidate,
             omissions,
-            diagnostics: self.diagnostics,
-            failure: self.failure,
+            diagnostics: std::mem::take(&mut self.diagnostics),
+            failure: self.failure.take(),
+            work_bytes: self.usage.checked_work_bytes(),
         })
     }
 
@@ -106,7 +149,7 @@ impl AuthoringPrefabExpansionReport {
         &self,
         candidate: &ExpandedSceneDocument,
         registry: &ComponentRegistrySnapshot,
-    ) -> Option<(usize, PrefabExpansionUsage)> {
+    ) -> Option<(usize, SceneCompilationUsage)> {
         let (count, bytes) = candidate.document().entities.iter().try_fold(
             (0_usize, 0_usize),
             |(count, bytes), entity| {
@@ -137,17 +180,18 @@ impl AuthoringPrefabExpansionReport {
         Some((count, usage))
     }
 
-    fn preview_budget_failure(mut self, observed: usize) -> DiagnosticReport {
+    fn preview_budget_failure(&mut self, observed: usize) -> DiagnosticReport {
         if !self.budget_failed {
+            self.budget_failed = true;
             self.diagnostics.push(prefab_expansion_budget_diagnostic(
-                PrefabExpansionBudgetKind::WorkingBytes,
+                SceneCompilationBudgetKind::WorkingBytes,
                 observed,
-                self.working_limit.get(),
+                self.limits.working_bytes().get(),
                 None,
                 None,
             ));
         }
-        self.diagnostics
+        std::mem::take(&mut self.diagnostics)
     }
 }
 
@@ -162,7 +206,7 @@ pub(super) fn omission_work_bytes(
         .checked_add(provenance_string_bytes(component.as_str())?)?
         .checked_mul(2)?
         .checked_add(
-            std::mem::size_of::<AuthoringPrefabOmission>()
+            std::mem::size_of::<AuthoringSceneCompilationOmission>()
                 + std::mem::size_of::<AuthoringPreviewOmission>(),
         )?;
     let origin = origin?;

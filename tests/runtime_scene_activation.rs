@@ -29,11 +29,10 @@ use nara::{
         ComponentValueKind, PersistentComponentSchemaOwnerId,
     },
     scene::{
-        ExpandedSceneCandidate, Name, RuntimeSceneCandidate, RuntimeSceneDocumentCandidate,
-        RuntimeSceneLimits, SceneComponentBindings, SceneComponentBindingsPlugin,
-        SceneComponentRecord, SceneComponentsPlugin, SceneDocument, SceneEntityId,
-        SceneEntityRecord, SceneEntitySource, SceneSpawnReport, SourceDocumentKey,
-        SourceDocumentKind, Visibility,
+        Name, RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneLimits,
+        SceneComponentBindings, SceneComponentBindingsPlugin, SceneComponentRecord,
+        SceneComponentsPlugin, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+        SceneSpawnReport, SourceDocumentKey, SourceDocumentKind, Visibility,
         advanced::{SceneProductResource, SceneProductTransactionLimits},
         scene_component_bindings,
     },
@@ -146,13 +145,15 @@ fn runtime_source(
 ) -> SceneSource {
     let key = source_key(name);
     let bytes = {
-        let expanded = ExpandedSceneCandidate::plain(
-            key.clone(),
-            Arc::new(document(name, enabled, visibility)),
+        let report = bindings.compile_scene(
+            &document(name, enabled, visibility),
+            &nara::scene::InMemoryPrefabSourceResolver::new(),
         );
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let compiled = report.candidate.unwrap().bind_source(key.clone());
         let database = ProjectAssetDatabase::default();
         RuntimeSceneCandidate::cook(
-            &expanded,
+            &compiled,
             bindings,
             database.resolver(&AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),
@@ -258,7 +259,7 @@ fn with_current_runtime_scene(
     for view in views {
         assert_eq!(view.with_document(|_| ()), None);
         assert_eq!(view.with_runtime_scene(|_| ()), None);
-        assert_eq!(view.with_expanded_scene(|_, _| ()), None);
+        assert_eq!(view.with_compiled_scene(|_, _| ()), None);
     }
 }
 
@@ -276,7 +277,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
             .clone();
         assert_eq!(world.get::<Name>(actor).unwrap().as_str(), "startup");
         assert_eq!(world.get::<Visibility>(actor), Some(&Visibility::Visible));
-        assert_eq!(initial_view.with_expanded_scene(|_, _| ()), None);
+        assert_eq!(initial_view.with_compiled_scene(|_, _| ()), None);
         assert_eq!(
             initial_view.with_runtime_scene(|candidate| {
                 assert_eq!(candidate.document(), current.source());
@@ -312,8 +313,8 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
                 )
                 .unwrap()
                 .unwrap()
-                .value,
-            ComponentValue::map([("enabled", ComponentValue::Bool(false))])
+                .value(),
+            &ComponentValue::map([("enabled", ComponentValue::Bool(false))])
         );
         assert_eq!(CurrentScene::get(world).unwrap().receipt(), &second);
         assert_eq!(initial_view.with_document(|_| ()), None);
@@ -340,14 +341,16 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         ));
         assert_eq!(world.resource::<RunValue>().0, 3);
 
-        let expanded = ExpandedSceneCandidate::plain(
-            source_key("source"),
-            Arc::new(document("source", true, "visible")),
+        let report = bindings.compile_scene(
+            &document("source", true, "visible"),
+            &nara::scene::InMemoryPrefabSourceResolver::new(),
         );
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        let compiled = report.candidate.unwrap().bind_source(source_key("source"));
         let report = replace_current_scene_with_product(
             world,
             &restarted,
-            SceneSource::direct(expanded, ByteLimit::new(64 * 1024).unwrap()).unwrap(),
+            SceneSource::direct(compiled, ByteLimit::new(64 * 1024).unwrap()).unwrap(),
             limits(),
             &[],
             |_| {},
@@ -357,7 +360,7 @@ fn runtime_startup_replacement_restart_and_source_transition_share_one_owner() {
         let expanded_view = CurrentScene::get(world).unwrap().source_view();
         assert_eq!(expanded_view.with_runtime_scene(|_| ()), None);
         assert_eq!(
-            expanded_view.with_expanded_scene(|_, resolution| resolution.is_none()),
+            expanded_view.with_compiled_scene(|_, resolution| resolution.is_none()),
             Some(true)
         );
         assert_eq!(second_view.with_document(|_| ()), None);
@@ -419,7 +422,7 @@ fn failed_runtime_replacement_preserves_last_good_views_products_and_native_life
         assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
         assert_eq!(world.entities().len(), entity_count);
         assert_eq!(
-            view.with_document(|document| document.roots.clone()),
+            view.with_document(|document| document.roots().to_vec()),
             Some(vec![id("startup")])
         );
         assert_eq!(
@@ -538,7 +541,7 @@ fn runtime_startup_rejects_foreign_definitions_without_consuming_activation() {
     assert!(observations.get().unwrap().is_ok());
     let runtime = candidate.complete_startup().unwrap().promote();
     let current = CurrentScene::get(runtime.world()).unwrap();
-    assert_eq!(current.source().roots, [id("accepted")]);
+    assert_eq!(current.source().roots(), [id("accepted")]);
     let view = current.source_view();
     assert_eq!(
         view.with_runtime_scene(|candidate| candidate.source_key().clone()),

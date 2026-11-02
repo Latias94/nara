@@ -29,7 +29,7 @@ use nara_reflect::{
     decode_asset_reference_value, encode_asset_reference_value,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, InMemoryPrefabSourceResolver, Name, PrefabAddition, PrefabDocument,
+    CompiledSceneCandidate, InMemoryPrefabSourceResolver, Name, PrefabAddition, PrefabDocument,
     PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement,
     PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep, RuntimeSceneCandidate,
     RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneComponentBindings,
@@ -252,9 +252,9 @@ impl Definition {
             .unwrap()
             .into_composition_source()
             .unwrap();
-        let report = self.bindings.expand_prefabs(&document, &resolver);
+        let report = self.bindings.compile_scene(&document, &resolver);
         assert!(!report.diagnostics.has_errors(), "{report:?}");
-        let expanded: ExpandedSceneCandidate = report
+        let expanded: CompiledSceneCandidate = report
             .candidate
             .unwrap()
             .bind_source(source(name, SourceDocumentKind::Scene));
@@ -354,9 +354,7 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
     let runtime_path = directory.path().join("startup.runtime.json");
     fs::write(&runtime_path, &bytes).unwrap();
     let source_key = cooked.source_key().clone();
-    let provenance = cooked.provenance().clone();
-    let expected = cooked.document().clone();
-    drop(cooked);
+    let provenance = cooked.canonical_provenance().clone();
     let candidate = RuntimeSceneDocumentCandidate::from_json_bytes(
         &fs::read(runtime_path).unwrap(),
         RuntimeSceneLimits::default(),
@@ -365,15 +363,10 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
     .admit(&source_key, &definition.bindings)
     .unwrap();
     assert_eq!(definition.calls.load(Ordering::SeqCst), 0);
-    assert_eq!(candidate.provenance(), &provenance);
+    assert_eq!(candidate.canonical_provenance(), &provenance);
+    assert_eq!(candidate.document(), cooked.document());
     assert_eq!(candidate.to_json_bytes().unwrap(), bytes);
-    assert!(
-        candidate
-            .document()
-            .entities
-            .iter()
-            .all(|entity| entity.prefab.is_none())
-    );
+    drop(cooked);
     let mut world = World::new();
     let prepared = definition
         .bindings
@@ -388,13 +381,13 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
     assert_eq!(definition.calls.load(Ordering::SeqCst), decoded);
     let mut nested_roots = Vec::new();
     let mut additions = 0;
-    for record in &expected.entities {
-        let entity = resolve(&world, &receipt, &record.id);
+    for record in candidate.document().entities() {
+        let entity = resolve(&world, &receipt, record.id());
         let actual = world.get::<SceneEntitySource>(entity).unwrap();
         assert_eq!(actual.containing_source(), &source_key);
         assert_eq!(actual.occurrence(), &occurrence());
-        assert_eq!(actual.provenance(), &provenance[&record.id]);
-        for child in &record.children {
+        assert_eq!(actual.provenance(), &provenance[record.id()]);
+        for child in record.children() {
             let child = resolve(&world, &receipt, child);
             assert_eq!(world.get::<Parent>(child).unwrap().parent(), entity);
         }
@@ -416,7 +409,7 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
             .unwrap()
         {
             let ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target }) =
-                &link.value
+                link.value()
             else {
                 panic!("expected a remapped local reference")
             };
@@ -429,7 +422,7 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
             .data_component(&world, entity, &component(ASSETS))
             .unwrap()
         {
-            let ComponentValue::List(images) = assets.value.get("images").unwrap() else {
+            let ComponentValue::List(images) = assets.value().get("images").unwrap() else {
                 panic!("expected asset list")
             };
             assert_eq!(
@@ -447,7 +440,7 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
             .unwrap()
         {
             assert_eq!(
-                defaults.value.get("label").unwrap(),
+                defaults.value().get("label").unwrap(),
                 &ComponentValue::String("prefabs/ordinary-text.ron".into())
             );
         }
@@ -457,7 +450,7 @@ fn processed_file_runs_native_data_hierarchy_and_typed_provenance_after_source_r
     assert_eq!(additions, 1);
     assert_eq!(
         retire_and_despawn_scene_instance(&mut world, &receipt).unwrap(),
-        expected.entities.len()
+        candidate.document().entities().len()
     );
     assert_eq!(definition.drops.load(Ordering::SeqCst), decoded);
 }
@@ -658,11 +651,7 @@ fn processed_candidates_require_expected_source_exact_definitions_and_cancellabl
 
 fn exercise_managed_runtime_scene(world: &mut World) {
     let selected = scene_component_bindings(world).unwrap().clone();
-    let input = ExpandedSceneCandidate::plain(
-        source("managed", SourceDocumentKind::Scene),
-        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            id("managed"),
-        )
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("managed"))
         .with_component(
             component("nara.scene.Name"),
             SceneComponentRecord::new(
@@ -673,8 +662,17 @@ fn exercise_managed_runtime_scene(world: &mut World) {
         .with_component(
             component(DEFAULTS),
             data(ComponentValue::map([] as [(&str, ComponentValue); 0])),
-        )])),
+        )]);
+    let compilation = selected.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
+    let input = compilation
+        .candidate
+        .unwrap()
+        .bind_source(source("managed", SourceDocumentKind::Scene));
     let candidate = RuntimeSceneCandidate::cook(
         &input,
         &selected,
@@ -696,7 +694,7 @@ fn exercise_managed_runtime_scene(world: &mut World) {
             .data_component(world, entity, &component(DEFAULTS))
             .unwrap()
             .unwrap()
-            .value
+            .value()
             .get("label"),
         Some(&ComponentValue::String("prefabs/ordinary-text.ron".into()))
     );

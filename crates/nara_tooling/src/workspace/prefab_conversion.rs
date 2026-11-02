@@ -6,8 +6,8 @@ use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_core::ByteLimit;
 use nara_scene::{
     LocalizedPrefabEntity, PrefabConversionError, PrefabConversionRequest, PrefabDocument,
-    PrefabExpansionOptions, PrefabExpansionWorkingSet, PreparedPrefabConversion,
-    PreparedScenePrefabConversion, ResolvedPrefabSource, SceneAuthoringRevision, SceneDocument,
+    PreparedPrefabConversion, PreparedScenePrefabConversion, ResolvedPrefabSource,
+    SceneAuthoringRevision, SceneCompilationOptions, SceneCompilationWorkingSet, SceneDocument,
     SceneEntityId, ScenePrefabConversionRequest,
 };
 
@@ -70,7 +70,7 @@ impl EditorPrefabConversionRequest {
     where
         F: FnMut(
             &AssetRef,
-            &mut PrefabExpansionWorkingSet,
+            &mut SceneCompilationWorkingSet,
         ) -> Result<Option<ResolvedPrefabSource>, E>,
     {
         let source = match self.source {
@@ -228,7 +228,7 @@ impl EditorWorkspace {
         &self,
         basis: &EditorDocumentQueryBasis,
         anchor: &SceneEntityId,
-        options: PrefabExpansionOptions,
+        options: SceneCompilationOptions,
     ) -> Result<EditorPrefabConversionRequest, EditorWorkspaceCommandReport> {
         self.validate_document_query_basis(basis)
             .map_err(|error| rejected_basis_report(self, basis, error))?;

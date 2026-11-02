@@ -8,7 +8,7 @@ use std::{
 
 use nara_core::{ByteLimit, ItemLimit};
 use nara_image::ImageImportLimits;
-use nara_scene::{PrefabExpansionLimits, SceneFileLimits};
+use nara_scene::{SceneCompilationLimits, SceneFileLimits};
 
 use super::ProjectContentRevision;
 
@@ -87,7 +87,7 @@ pub struct ProjectContentLimits {
     values: [usize; TRACKED_KIND_COUNT],
     aggregate_bytes: usize,
     scene_file: SceneFileLimits,
-    prefab_expansion: PrefabExpansionLimits,
+    scene_compilation: SceneCompilationLimits,
     image_import: ImageImportLimits,
     input_file: nara_input::ActionMapFileLimits,
 }
@@ -113,7 +113,7 @@ impl Default for ProjectContentLimits {
             ],
             aggregate_bytes: bytes(1024 * 1024 * 1024).get(),
             scene_file: SceneFileLimits::default(),
-            prefab_expansion: PrefabExpansionLimits::default(),
+            scene_compilation: SceneCompilationLimits::default(),
             image_import: ImageImportLimits::default(),
             input_file: nara_input::ActionMapFileLimits::default(),
         }
@@ -146,8 +146,8 @@ impl ProjectContentLimits {
     }
 
     #[must_use]
-    pub const fn prefab_expansion(self) -> PrefabExpansionLimits {
-        self.prefab_expansion
+    pub const fn scene_compilation(self) -> SceneCompilationLimits {
+        self.scene_compilation
     }
 
     #[must_use]
@@ -178,8 +178,8 @@ impl ProjectContentLimits {
     }
 
     #[must_use]
-    pub const fn with_prefab_expansion(mut self, limits: PrefabExpansionLimits) -> Self {
-        self.prefab_expansion = limits;
+    pub const fn with_scene_compilation(mut self, limits: SceneCompilationLimits) -> Self {
+        self.scene_compilation = limits;
         self
     }
 

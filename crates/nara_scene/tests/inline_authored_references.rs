@@ -143,18 +143,21 @@ fn payload_scope_is_lexical_while_explicit_routes_select_nested_input_environmen
         }
         let document = SceneDocument::from_ordered_roots(records);
         let before = document.clone();
-        let report = document.expand_prefabs(&registry, &sources);
+        let report = document.compile(&registry, &sources);
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         let origins = report.provenance().unwrap();
-        let candidate = report.candidate.as_ref().unwrap().document();
+        let candidate = report.candidate.as_ref().unwrap();
         let mut targets = Vec::new();
         for host in candidate
-            .entities
+            .entities()
             .iter()
-            .filter(|entity| entity.components.contains_key(&component()))
+            .filter(|entity| entity.components().contains_key(&component()))
         {
             let ComponentValue::EntityReference(EntityReference::SceneLocal { entity: target }) =
-                host.components[&component()].value.get("target").unwrap()
+                host.components()[&component()]
+                    .value()
+                    .get("target")
+                    .unwrap()
             else {
                 panic!("expected lowered reference")
             };
@@ -163,7 +166,7 @@ fn payload_scope_is_lexical_while_explicit_routes_select_nested_input_environmen
             } else {
                 assert_eq!(origins[target].local_entity_id(), &id("b"));
                 assert_eq!(
-                    origins[&host.id].projection_path().unwrap().root_anchor(),
+                    origins[host.id()].projection_path().unwrap().root_anchor(),
                     origins[target].projection_path().unwrap().root_anchor()
                 );
             }
@@ -215,7 +218,7 @@ fn self_routed_argument_refuses_a_cycle_but_overwritten_input_needs_no_argument(
         anchor.prefab = Some(instance("q", argument, Some(overlay)));
         let report =
             SceneDocument::from_ordered_roots([anchor, SceneEntityRecord::new(id("socket"))])
-                .expand_prefabs(&registry, &sources);
+                .compile(&registry, &sources);
         if cycle {
             assert!(report.candidate.is_none());
             assert!(
@@ -230,13 +233,12 @@ fn self_routed_argument_refuses_a_cycle_but_overwritten_input_needs_no_argument(
                 .as_ref()
                 .unwrap_or_else(|| panic!("{:?}", report.diagnostics));
             let host = candidate
-                .document()
-                .entities
+                .entities()
                 .iter()
-                .find(|entity| entity.components.contains_key(&component()))
+                .find(|entity| entity.components().contains_key(&component()))
                 .unwrap();
             assert_eq!(
-                host.components[&component()].value.get("target"),
+                host.components()[&component()].value().get("target"),
                 Some(&ComponentValue::EntityReference(local("socket")))
             );
         }
@@ -277,26 +279,25 @@ fn hidden_contextual_default_is_retained_and_absent_uses_its_original_input_envi
         ));
         let report =
             SceneDocument::from_ordered_roots([anchor, SceneEntityRecord::new(id("socket"))])
-                .expand_prefabs(&registry, &sources);
+                .compile(&registry, &sources);
         let candidate = report
             .candidate
             .as_ref()
             .unwrap_or_else(|| panic!("{:?}", report.diagnostics));
         let host = candidate
-            .document()
-            .entities
+            .entities()
             .iter()
-            .find(|entity| entity.components.contains_key(&component()))
+            .find(|entity| entity.components().contains_key(&component()))
             .unwrap();
         assert_eq!(
-            host.components[&component()].value.get("target"),
+            host.components()[&component()].value().get("target"),
             Some(&if expose {
                 ComponentValue::EntityReference(local("socket"))
             } else {
                 ComponentValue::Null
             })
         );
-        assert!(host.components[&component()].contextual_defaults.is_empty());
+        // Compiled records structurally exclude contextual defaults.
         let retained =
             nara_scene::PrefabSourceResolver::resolve_prefab(&sources, &source("q")).unwrap();
         assert_eq!(retained.document(), &before);

@@ -189,7 +189,7 @@ fn travel_after_red_presentation(world: &mut World) {
 fn world_mode(world: &World) -> ContentMode {
     let view = CurrentScene::get(world).unwrap().source_view();
     if view
-        .with_expanded_scene(|_, resolver| {
+        .with_compiled_scene(|_, resolver| {
             assert!(
                 resolver.is_some(),
                 "Source must retain its actual admitted resolver"
@@ -223,7 +223,7 @@ fn retain_stock_capture(
     }
     let source_view = current.source_view();
     let (mode, source, provenance) = if let Some(facts) =
-        source_view.with_expanded_scene(|scene, resolver| {
+        source_view.with_compiled_scene(|scene, resolver| {
             assert!(
                 resolver.is_some(),
                 "Source capture must retain its actual source resolver"
@@ -231,7 +231,7 @@ fn retain_stock_capture(
             (
                 ContentMode::Source,
                 scene.source_key().clone(),
-                scene.provenance().clone(),
+                scene.canonical_provenance().clone(),
             )
         }) {
         facts
@@ -241,7 +241,7 @@ fn retain_stock_capture(
                 (
                     ContentMode::Processed,
                     scene.source_key().clone(),
-                    scene.provenance().clone(),
+                    scene.canonical_provenance().clone(),
                 )
             })
             .expect("Processed capture must come from the actual cooked Scene owner")
@@ -513,16 +513,16 @@ fn observe_presented(
     let source = current.source_view();
     match mode {
         ContentMode::Source => source
-            .with_expanded_scene(|scene, resolver| {
+            .with_compiled_scene(|scene, resolver| {
                 assert!(resolver.is_some());
                 assert_eq!(scene.source_key(), &frame.source);
-                assert_eq!(scene.provenance(), &frame.provenance);
+                assert_eq!(scene.canonical_provenance(), &frame.provenance);
             })
             .expect("the exact presented Source frame keeps its admitted source owner"),
         ContentMode::Processed => source
             .with_runtime_scene(|scene| {
                 assert_eq!(scene.source_key(), &frame.source);
-                assert_eq!(scene.provenance(), &frame.provenance);
+                assert_eq!(scene.canonical_provenance(), &frame.provenance);
             })
             .expect("the exact presented Processed frame keeps its admitted cooked Scene owner"),
     }

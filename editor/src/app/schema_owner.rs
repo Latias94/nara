@@ -10,7 +10,7 @@ use nara::{
         EditorSchemaOwnerAdoptionId, EditorSchemaOwnerAdoptionView,
     },
     reflect::ComponentSchemaOwnerChange,
-    scene::PrefabExpansionFailure,
+    scene::SceneCompilationFailure,
     tooling::EditorDocumentId,
 };
 
@@ -120,7 +120,7 @@ impl EditorApplication {
     pub fn schema_owner_adoption_composition_failure(
         &self,
         document: Option<EditorDocumentId>,
-    ) -> Option<&PrefabExpansionFailure> {
+    ) -> Option<&SceneCompilationFailure> {
         self.authoring_edit_session()
             .ok()?
             .schema_owner_adoption_composition_failure(document)

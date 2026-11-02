@@ -237,7 +237,8 @@ fn retained_domain_owner_keeps_its_generation_and_budget_alive() {
         loader
             .budget_snapshot()
             .high_water(ProjectContentBudgetKind::Files),
-        5
+        6,
+        "readiness manifest, two Scenes, metadata, caption and suffix are actual reads"
     );
     let retained = snapshot.domain_assets().clone();
     drop(snapshot);

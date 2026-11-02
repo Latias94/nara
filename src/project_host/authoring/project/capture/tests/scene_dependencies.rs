@@ -121,7 +121,11 @@ fn scene_cycles_self_edges_and_diamonds_retain_one_raw_and_effective_source_per_
     assert!(capture.prefabs().is_empty());
     assert!(capture.assets().is_empty());
     for scene in capture.scenes() {
-        assert!(scene.effective_document().is_some());
+        assert_eq!(
+            scene.expansion().is_some(),
+            scene.native_source().key() != source.source_key(),
+            "only dependencies retain authoring expansion observations",
+        );
         assert_eq!(
             capture
                 .source_facts()
@@ -147,14 +151,14 @@ fn scene_cycles_self_edges_and_diamonds_retain_one_raw_and_effective_source_per_
     );
     // Dependency entities stay data; only the selected root reaches native presentation.
     let preview = capture.take_preview().unwrap();
-    assert_eq!(preview.candidate.document().entities.len(), 3);
+    assert_eq!(preview.candidate.document().entities().len(), 3);
     assert!(
         preview
             .candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
     capture.source_validation().validate().unwrap();
     let unrelated = project.root.join("assets/unused.png.meta");

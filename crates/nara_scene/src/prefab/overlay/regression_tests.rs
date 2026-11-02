@@ -7,8 +7,8 @@ use nara_reflect::{
 
 use super::*;
 use super::{
-    PrefabExpansionFailureKind as Conflict, PrefabPropertyClaim as PropertyClaim,
-    PrefabPropertyIntent as PropertyIntent,
+    PrefabPropertyClaim as PropertyClaim, PrefabPropertyIntent as PropertyIntent,
+    SceneCompilationFailureKind as Conflict,
 };
 
 fn id(value: &str) -> ComponentFieldId {
@@ -792,7 +792,7 @@ mod expansion {
     use super::super::*;
     use crate::{
         AuthoringDocumentSource, InMemoryPrefabSourceResolver, PrefabDocument,
-        PrefabExpansionReport, PrefabProjectionStep, SceneAuthoringSession, SceneDocument,
+        PrefabProjectionStep, SceneAuthoringSession, SceneCompilationReport, SceneDocument,
         SceneDocumentCandidate, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
         ScenePlacement, ScenePlacementOwner,
     };
@@ -941,23 +941,23 @@ mod expansion {
         ])
     }
 
-    fn expand(base: PrefabDocument, overlay: PrefabOverlay) -> PrefabExpansionReport {
+    fn expand(base: PrefabDocument, overlay: PrefabOverlay) -> SceneCompilationReport {
         let document = scene(overlay, true);
         let resolver = resolver(base);
         let before = (document.clone(), resolver.clone());
-        let report = document.expand_prefabs(&registry(), &resolver);
+        let report = document.compile(&registry(), &resolver);
         assert_eq!((document, resolver), before);
         report
     }
 
-    fn accepted(base: PrefabDocument, overlay: PrefabOverlay) -> PrefabExpansionReport {
+    fn accepted(base: PrefabDocument, overlay: PrefabOverlay) -> SceneCompilationReport {
         let report = expand(base, overlay);
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         report
     }
 
-    fn rejected(base: PrefabDocument, overlay: PrefabOverlay) -> PrefabExpansionReport {
+    fn rejected(base: PrefabDocument, overlay: PrefabOverlay) -> SceneCompilationReport {
         let report = expand(base, overlay);
         assert!(report.candidate.is_none());
         assert!(report.provenance().is_none());
@@ -967,7 +967,7 @@ mod expansion {
 
     // This observes published provenance only; production alone interprets authored targets.
     fn projected(
-        report: &PrefabExpansionReport,
+        report: &SceneCompilationReport,
         root: &str,
         target: &PrefabEntityTarget,
     ) -> SceneEntityId {
@@ -1002,20 +1002,20 @@ mod expansion {
     }
 
     fn record<'a>(
-        report: &'a PrefabExpansionReport,
+        report: &'a SceneCompilationReport,
         entity: &SceneEntityId,
-    ) -> &'a SceneEntityRecord {
+    ) -> &'a crate::CompiledSceneEntity {
         report
             .document()
             .unwrap()
-            .entities
+            .entities()
             .iter()
-            .find(|record| &record.id == entity)
+            .find(|record| record.id() == entity)
             .unwrap()
     }
 
-    fn children(report: &PrefabExpansionReport, parent: &SceneEntityId) -> Vec<SceneEntityId> {
-        record(report, parent).children.clone()
+    fn children(report: &SceneCompilationReport, parent: &SceneEntityId) -> Vec<SceneEntityId> {
+        record(report, parent).children().to_vec()
     }
 
     fn place(
@@ -1062,21 +1062,22 @@ mod expansion {
     }
 
     fn assert_link(
-        report: &PrefabExpansionReport,
+        report: &SceneCompilationReport,
         from: PrefabEntityTarget,
         to: PrefabEntityTarget,
         note: &str,
     ) {
-        assert_eq!(
-            record(report, &projected(report, "host_a", &from)).components
-                [&ComponentTypeId::new("game.Link")],
-            link_record(
-                note,
-                ComponentValue::EntityReference(EntityReference::SceneLocal {
-                    entity: projected(report, "host_a", &to),
-                })
-            )
+        let actual = &record(report, &projected(report, "host_a", &from)).components()
+            [&ComponentTypeId::new("game.Link")];
+        let expected = link_record(
+            note,
+            ComponentValue::EntityReference(EntityReference::SceneLocal {
+                entity: projected(report, "host_a", &to),
+            }),
         );
+        assert_eq!(actual.schema_owner(), expected.owner());
+        assert_eq!(actual.version(), expected.version);
+        assert_eq!(actual.value(), &expected.value);
     }
 
     fn with_link(note: &str, target: ComponentValue) -> PrefabDocument {
@@ -1241,7 +1242,7 @@ mod expansion {
         )));
         assert!(
             record(&report, &projected(&report, "host_b", &direct("nest_a")))
-                .children
+                .children()
                 .len()
                 == 2
         );
@@ -1346,7 +1347,7 @@ mod expansion {
             .into_source_document()
             .0;
         assert_eq!(source, reopened);
-        let report = reopened.expand_prefabs(&registry(), &resolver(outer(&["tail", "socket"])));
+        let report = reopened.compile(&registry(), &resolver(outer(&["tail", "socket"])));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert_eq!(
             children(&report, &id("host_a")),
@@ -1393,8 +1394,7 @@ mod expansion {
                 SceneEntityRecord::new(id("local_b")),
             ]);
             let before = document.clone();
-            let report =
-                document.expand_prefabs(&registry(), &resolver(outer(&["socket", "tail"])));
+            let report = document.compile(&registry(), &resolver(outer(&["socket", "tail"])));
             assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
             let mut expected = vec![
                 projected(&report, "host_a", &direct("socket")),
@@ -1407,14 +1407,21 @@ mod expansion {
             expected.extend([id("local_a"), id("local_b")]);
             assert_eq!(children(&report, &id("host_a")), expected);
             for name in ["local_a", "local_b", "socket"] {
-                assert_eq!(
-                    record(&report, &id(name)),
-                    document
-                        .entities
-                        .iter()
-                        .find(|record| record.id == id(name))
-                        .unwrap()
-                );
+                let actual = record(&report, &id(name));
+                let expected = document
+                    .entities
+                    .iter()
+                    .find(|record| record.id == id(name))
+                    .unwrap();
+                assert_eq!(actual.id(), &expected.id);
+                assert_eq!(actual.children(), expected.children);
+                assert_eq!(actual.components().len(), expected.components.len());
+                for (component, expected) in &expected.components {
+                    let actual = &actual.components()[component];
+                    assert_eq!(actual.schema_owner(), expected.owner());
+                    assert_eq!(actual.version(), expected.version);
+                    assert_eq!(actual.value(), &expected.value);
+                }
             }
             assert_eq!(
                 document
@@ -1571,10 +1578,9 @@ mod expansion {
                     .iter()
                     .find(|(_, value)| *value == origin)
                     .unwrap();
-                let mut expected = record(&untouched, entity).clone();
-                expected.id = actual.clone();
-                expected.children = expected
-                    .children
+                let expected = record(&untouched, entity);
+                let expected_children = expected
+                    .children()
                     .iter()
                     .map(|child| {
                         let origin = &untouched.provenance().unwrap()[child];
@@ -1587,8 +1593,11 @@ mod expansion {
                             .0
                             .clone()
                     })
-                    .collect();
-                assert_eq!(record(&report, actual), &expected);
+                    .collect::<Vec<_>>();
+                let actual_record = record(&report, actual);
+                assert_eq!(actual_record.id(), actual);
+                assert_eq!(actual_record.children(), expected_children);
+                assert_eq!(actual_record.components(), expected.components());
             }
         }
     }
@@ -1812,9 +1821,7 @@ mod expansion {
             session.revision(),
             session.history_status(),
         );
-        let report = session
-            .document()
-            .expand_prefabs(&registry(), &resolver(base));
+        let report = session.document().compile(&registry(), &resolver(base));
         assert!(report.candidate.is_none());
         assert!(report.provenance().is_none());
         assert_eq!(
@@ -1875,7 +1882,7 @@ mod expansion {
         let report = accepted(base, overlay);
         assert!(
             record(&report, &projected(&report, "host_a", &direct("socket")))
-                .components
+                .components()
                 .is_empty()
         );
     }
@@ -1949,19 +1956,14 @@ mod expansion {
                 let (scene, resolver) = make("outer", "inner", alias);
                 let mut requested_keys = Vec::new();
                 let report = scene
-                    .try_expand_prefabs_with_loader(
-                        &registry(),
-                        Default::default(),
-                        None,
-                        |request, _| {
-                            let resolved =
-                                crate::PrefabSourceResolver::resolve_prefab(&resolver, request);
-                            if let Some(resolved) = &resolved {
-                                requested_keys.push(resolved.key().clone());
-                            }
-                            Ok::<_, std::convert::Infallible>(resolved)
-                        },
-                    )
+                    .try_compile_with_loader(&registry(), Default::default(), None, |request, _| {
+                        let resolved =
+                            crate::PrefabSourceResolver::resolve_prefab(&resolver, request);
+                        if let Some(resolved) = &resolved {
+                            requested_keys.push(resolved.key().clone());
+                        }
+                        Ok::<_, std::convert::Infallible>(resolved)
+                    })
                     .unwrap();
                 assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
                 assert_eq!(
@@ -1985,26 +1987,16 @@ mod expansion {
                     report
                         .document()
                         .unwrap()
-                        .entities
+                        .entities()
                         .iter()
-                        .any(|record| record.id == projected(&report, "host_a", &target))
+                        .any(|record| record.id() == &projected(&report, "host_a", &target))
                 );
             }
             let (scene, resolver) = make("replacement_root", "inner", true);
-            assert!(
-                scene
-                    .expand_prefabs(&registry(), &resolver)
-                    .candidate
-                    .is_none()
-            );
+            assert!(scene.compile(&registry(), &resolver).candidate.is_none());
             if nested_layer {
                 let (mut scene, resolver) = make("outer", "replacement_inner", true);
-                assert!(
-                    scene
-                        .expand_prefabs(&registry(), &resolver)
-                        .candidate
-                        .is_none()
-                );
+                assert!(scene.compile(&registry(), &resolver).candidate.is_none());
                 let PrefabComponentIntent::Set { target, .. } = &mut scene.entities[0]
                     .prefab
                     .as_mut()
@@ -2017,7 +2009,7 @@ mod expansion {
                     unreachable!()
                 };
                 target.through[0].expected_base = key("replacement_inner");
-                let repaired = scene.expand_prefabs(&registry(), &resolver);
+                let repaired = scene.compile(&registry(), &resolver);
                 assert!(repaired.candidate.is_some(), "{:?}", repaired.diagnostics);
             }
         }
@@ -2081,7 +2073,7 @@ mod expansion {
         let document = scene(overlay.clone(), true);
         assert!(
             document
-                .expand_prefabs(&registry, &resolver(base.clone()))
+                .compile(&registry, &resolver(base.clone()))
                 .candidate
                 .is_none()
         );
@@ -2106,7 +2098,7 @@ mod expansion {
                 }),
             );
         let source = scene(overlay.clone(), true);
-        let report = source.expand_prefabs(&registry, &resolver(base.clone()));
+        let report = source.compile(&registry, &resolver(base.clone()));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert_link(
             &report,
@@ -2125,7 +2117,7 @@ mod expansion {
         overlay.suppressions.push(nested("nest_b", "socket"));
         assert!(
             scene(overlay, true)
-                .expand_prefabs(&registry, &resolver(base.clone()))
+                .compile(&registry, &resolver(base.clone()))
                 .candidate
                 .is_none()
         );
@@ -2142,7 +2134,7 @@ mod expansion {
         });
         assert!(
             scene(overlay.clone(), true)
-                .expand_prefabs(&registry, &resolver(base.clone()))
+                .compile(&registry, &resolver(base.clone()))
                 .candidate
                 .is_none()
         );
@@ -2161,7 +2153,7 @@ mod expansion {
                 ))),
             }),
         );
-        let report = scene(overlay, true).expand_prefabs(&registry, &resolver(base));
+        let report = scene(overlay, true).compile(&registry, &resolver(base));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert_link(&report, direct("tail"), direct("socket"), "omitted target");
     }
@@ -2228,7 +2220,7 @@ mod expansion {
                 if reference {
                     assert!(
                         scene(overlay.clone(), true)
-                            .expand_prefabs(&registry, &resolver(base.clone()))
+                            .compile(&registry, &resolver(base.clone()))
                             .candidate
                             .is_none()
                     );
@@ -2241,13 +2233,13 @@ mod expansion {
                 }
                 let source = scene(overlay, true);
                 let before = (source.clone(), base.clone());
-                let report = source.expand_prefabs(&registry, &resolver(base.clone()));
+                let report = source.compile(&registry, &resolver(base.clone()));
                 assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
                 assert_eq!(
-                    record(&report, &projected(&report, "host_a", &direct("item"))).components
+                    record(&report, &projected(&report, "host_a", &direct("item"))).components()
                         [&component]
-                        .value,
-                    ComponentValue::map([(
+                        .value(),
+                    &ComponentValue::map([(
                         "settings",
                         ComponentValue::map([(
                             "wire_value",
@@ -2324,7 +2316,7 @@ mod expansion {
         );
         let report = session
             .document()
-            .expand_prefabs(&registry, &resolver(outer(&["socket", "tail"])));
+            .compile(&registry, &resolver(outer(&["socket", "tail"])));
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert_link(&report, added("socket"), direct("tail"), "full value");
         let entity = projected(&report, "host_a", &added("socket"));
@@ -2387,22 +2379,22 @@ mod expansion {
         let before = (source.clone(), resolver.clone());
         // The two effective maps contain four value nodes and twelve logical value bytes.
         // File admission keeps its separate default allowance for structural source bytes.
-        let exact = crate::PrefabExpansionLimits::default()
+        let exact = crate::SceneCompilationLimits::default()
             .with_materialized_value_nodes(ItemLimit::new(4).unwrap())
             .with_materialized_value_bytes(ByteLimit::new(12).unwrap());
-        let report = source.expand_prefabs_with_options(
+        let report = source.compile_with_options(
             &registry,
             &resolver,
-            crate::PrefabExpansionOptions::default().with_limits(exact),
+            crate::SceneCompilationOptions::default().with_limits(exact),
         );
         assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
         assert!(!report.diagnostics.has_errors());
         for name in ["first", "last"] {
             assert_eq!(
-                record(&report, &projected(&report, "host_a", &direct(name))).components
+                record(&report, &projected(&report, "host_a", &direct(name))).components()
                     [&component]
-                    .value,
-                ComponentValue::map([("note", ComponentValue::String("hi".into()))]),
+                    .value(),
+                &ComponentValue::map([("note", ComponentValue::String("hi".into()))]),
             );
         }
         for (limits, kind, observed, maximum) in [
@@ -2419,10 +2411,10 @@ mod expansion {
                 11,
             ),
         ] {
-            let report = source.expand_prefabs_with_options(
+            let report = source.compile_with_options(
                 &registry,
                 &resolver,
-                crate::PrefabExpansionOptions::default().with_limits(limits),
+                crate::SceneCompilationOptions::default().with_limits(limits),
             );
             assert!(report.candidate.is_none());
             assert!(report.provenance().is_none());
@@ -2449,7 +2441,7 @@ mod expansion {
             let failure = report.failure.as_ref().unwrap();
             assert_eq!(
                 failure.reason(),
-                &crate::PrefabExpansionFailureKind::WorkLimit,
+                &crate::SceneCompilationFailureKind::WorkLimit,
             );
             assert!(failure.location().is_none());
             assert!(failure.slot().is_none());
@@ -2574,7 +2566,7 @@ mod expansion {
             );
             let report = session
                 .document()
-                .expand_prefabs(&registry, &resolver(base.clone()));
+                .compile(&registry, &resolver(base.clone()));
             assert!(report.candidate.is_none(), "{:?}", overlay);
             assert!(report.provenance().is_none());
             assert!(report.diagnostics.has_errors());
@@ -2682,11 +2674,11 @@ mod expansion {
             );
             let report = session
                 .document()
-                .expand_prefabs(&registry, &resolver(outer(&["socket"])));
+                .compile(&registry, &resolver(outer(&["socket"])));
             assert!(report.candidate.is_some(), "{:?}", report.diagnostics);
-            let actual = &record(&report, &projected(&report, "host_a", &direct("socket")))
-                .components[&component]
-                .value;
+            let actual = record(&report, &projected(&report, "host_a", &direct("socket")))
+                .components()[&component]
+                .value();
             assert_eq!(actual, &value);
             effective_values.push(actual.clone());
             assert_eq!(

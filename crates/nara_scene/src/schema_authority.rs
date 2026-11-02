@@ -5,7 +5,7 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, MigratedComponentValue,
 };
 
-use crate::{PrefabExpansionFailureKind, SceneComponentBindings, SceneComponentRecord};
+use crate::{SceneCompilationFailureKind, SceneComponentBindings, SceneComponentRecord};
 
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaAuthority<'a> {
@@ -34,17 +34,54 @@ impl<'a> SchemaAuthority<'a> {
         }
     }
 
+    /// The actual selected owner, independent of an omitted authored claim.
+    /// Callers first require the component Schema; `None` then means an unowned definition.
+    pub(crate) fn selected_owner_name(self, component: &ComponentTypeId) -> Option<&'a str> {
+        match self {
+            Self::Native(registry) => registry
+                .component_schema_owner(component)
+                .map(|owner| owner.as_str()),
+            Self::Mixed(bindings) => bindings.data_owner(component).map_or_else(
+                || {
+                    bindings
+                        .native_snapshot()
+                        .component_schema_owner(component)
+                        .map(|owner| owner.as_str())
+                },
+                |owner| Some(owner.owner_id().as_str()),
+            ),
+            #[cfg(feature = "serde")]
+            Self::Authoring(basis) => basis
+                .component_schema_owner(component)
+                .map(|owner| owner.as_str()),
+        }
+    }
+
     pub(crate) fn owner_matches(
         self,
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
     ) -> bool {
+        self.owner_claim_matches(component, record.owner(), false)
+    }
+
+    /// Compiled absence identifies an actually unowned definition; source absence may omit a
+    /// native owner claim. Neither policy can omit the selected owner of a data component.
+    pub(crate) fn owner_claim_matches(
+        self,
+        component: &ComponentTypeId,
+        declared: Option<&nara_reflect::PersistentComponentSchemaOwnerId>,
+        exact: bool,
+    ) -> bool {
+        if exact {
+            return declared.map(|owner| owner.as_str()) == self.selected_owner_name(component);
+        }
         if let Self::Mixed(bindings) = self
             && let Some(owner) = bindings.data_owner(component)
         {
-            return record.owner() == Some(owner.owner_id());
+            return declared == Some(owner.owner_id());
         }
-        let Some(declared) = record.owner() else {
+        let Some(declared) = declared else {
             return true;
         };
         match self {
@@ -84,37 +121,71 @@ impl<'a> SchemaAuthority<'a> {
         self,
         component: &ComponentTypeId,
         record: &SceneComponentRecord,
-    ) -> Result<&'a ComponentSchema, PrefabExpansionFailureKind> {
+    ) -> Result<&'a ComponentSchema, SceneCompilationFailureKind> {
         let schema = self
             .schema(component)
-            .ok_or(PrefabExpansionFailureKind::Component)?;
+            .ok_or(SceneCompilationFailureKind::Component)?;
         if !self.owner_matches(component, record) {
-            return Err(PrefabExpansionFailureKind::OwnerAdmission);
+            return Err(SceneCompilationFailureKind::OwnerAdmission);
         }
         if !self.can_interpret(component, record) {
-            return Err(PrefabExpansionFailureKind::Component);
+            return Err(SceneCompilationFailureKind::Component);
         }
+        self.validate_current_schema_capabilities(component, schema)?;
+        Ok(schema)
+    }
+
+    pub(crate) fn current_flat_schema(
+        self,
+        component: &ComponentTypeId,
+        declared: Option<&nara_reflect::PersistentComponentSchemaOwnerId>,
+        version: nara_reflect::ComponentSchemaVersion,
+    ) -> Result<&'a ComponentSchema, SceneCompilationFailureKind> {
+        let schema = self
+            .schema(component)
+            .ok_or(SceneCompilationFailureKind::Component)?;
+        if !self.owner_claim_matches(component, declared, true) {
+            return Err(SceneCompilationFailureKind::OwnerAdmission);
+        }
+        if schema.version() != version {
+            return Err(SceneCompilationFailureKind::Component);
+        }
+        #[cfg(feature = "serde")]
+        if let Self::Authoring(basis) = self
+            && !basis.has_authoring_adapter(component)
+        {
+            return Err(SceneCompilationFailureKind::Component);
+        }
+        self.validate_current_schema_capabilities(component, schema)?;
+        Ok(schema)
+    }
+
+    fn validate_current_schema_capabilities(
+        self,
+        component: &ComponentTypeId,
+        schema: &ComponentSchema,
+    ) -> Result<(), SceneCompilationFailureKind> {
         match self {
             Self::Native(registry) => {
                 if registry.native_rust_type_path(component).is_none() {
-                    return Err(PrefabExpansionFailureKind::Component);
+                    return Err(SceneCompilationFailureKind::Component);
                 }
                 registry
                     .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
-                    .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                    .map_err(|_| SceneCompilationFailureKind::Component)?;
             }
             Self::Mixed(bindings) => {
                 if bindings.data_owner(component).is_none() {
                     bindings
                         .native_snapshot()
                         .validate_whole_value_capabilities(component, [ComponentCapability::Scene])
-                        .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                        .map_err(|_| SceneCompilationFailureKind::Component)?;
                 } else {
                     nara_reflect::__private::validate_schema_capabilities(
                         schema,
                         [ComponentCapability::Scene],
                     )
-                    .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                    .map_err(|_| SceneCompilationFailureKind::Component)?;
                 }
             }
             #[cfg(feature = "serde")]
@@ -123,10 +194,10 @@ impl<'a> SchemaAuthority<'a> {
                     schema,
                     [ComponentCapability::Scene],
                 )
-                .map_err(|_| PrefabExpansionFailureKind::Component)?;
+                .map_err(|_| SceneCompilationFailureKind::Component)?;
             }
         }
-        Ok(schema)
+        Ok(())
     }
 
     pub(crate) fn migrate_owned(

@@ -26,8 +26,8 @@ use nara_reflect::{
 };
 
 use crate::{
-    SceneComponentBindings, SceneComponentRecord, SceneDataComponents, SceneDocument,
-    SceneEntityId, SceneEntityRecord,
+    CompiledSceneComponent, SceneComponentBindings, SceneComponentRecord, SceneDataComponents,
+    SceneDocument, SceneEntityId, SceneEntityRecord,
     component_binding_plugin::{
         SceneComponentBindingsAuthorityError, scene_component_bindings,
         validate_scene_component_bindings_authority,
@@ -102,7 +102,7 @@ impl SceneExportReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneExportOptions {
     pub asset_ref_export_policy: AssetRefExportPolicy,
-    /// Bounds the aggregate logical value retained by one export and each value's depth.
+    /// Bounds explicit values and contextual default snapshots together, and each value's depth.
     pub value_limits: ComponentValueMaterializationLimits,
 }
 
@@ -504,14 +504,16 @@ fn export_scene_selected(
                         retained_nodes: exported_value_nodes,
                         retained_bytes: exported_value_bytes,
                     };
-                    match context.lower_references(schema, &mut value, cost.logical_bytes(), &id) {
-                        Ok(output_bytes) => {
-                            exported_value_nodes += cost.nodes();
-                            exported_value_bytes += output_bytes;
-                            components.insert(
-                                schema.id.clone(),
-                                SceneComponentRecord::new(schema.version, value),
-                            );
+                    let exported = context
+                        .lower_references(schema, &mut value, cost.logical_bytes(), &id)
+                        .and_then(|output_bytes| {
+                            context.source_record(schema, value, cost.nodes(), output_bytes, &id)
+                        });
+                    match exported {
+                        Ok((record, nodes, bytes)) => {
+                            exported_value_nodes += nodes;
+                            exported_value_bytes += bytes;
+                            components.insert(schema.id.clone(), record);
                         }
                         Err(diagnostic) => {
                             diagnostics.push(diagnostic);
@@ -579,7 +581,7 @@ fn export_scene_selected(
                     continue;
                 };
                 let record = entry.record();
-                if !owner.ptr_eq(entry.owner()) || record.owner() != Some(owner.owner_id()) {
+                if !owner.ptr_eq(entry.owner()) || record.schema_owner() != Some(owner.owner_id()) {
                     diagnostics.push(locate(diagnostic_error(
                         "scene.export-data-owner-mismatch",
                         "Scene data component does not match the exact selected owner admission",
@@ -593,7 +595,7 @@ fn export_scene_selected(
                     )));
                     continue;
                 };
-                if record.version != schema.version() {
+                if record.version() != schema.version() {
                     diagnostics.push(locate(diagnostic_error(
                         "scene.export-data-version-mismatch",
                         "Scene data export requires the current selected Schema version",
@@ -623,14 +625,12 @@ fn export_scene_selected(
                     retained_bytes: exported_value_bytes,
                 };
                 match context.export_data_value(schema, record, &id) {
-                    Ok(value) => {
-                        let cost = value.cost();
-                        exported_value_nodes += cost.nodes();
-                        exported_value_bytes += cost.logical_bytes();
+                    Ok((record, nodes, bytes)) => {
+                        exported_value_nodes += nodes;
+                        exported_value_bytes += bytes;
                         components.insert(
                             component.clone(),
-                            SceneComponentRecord::new(record.version, value)
-                                .with_owner(owner.owner_id().clone()),
+                            record.with_owner(owner.owner_id().clone()),
                         );
                     }
                     Err(diagnostic) => {
@@ -678,12 +678,90 @@ struct ExportValueContext<'a> {
 }
 
 impl ExportValueContext<'_> {
+    fn source_record(
+        &self,
+        schema: &ComponentSchema,
+        value: ComponentValue,
+        mut nodes: usize,
+        mut bytes: usize,
+        entity: &SceneEntityId,
+    ) -> Result<(SceneComponentRecord, usize, usize), Diagnostic> {
+        let limits = self.options.value_limits;
+        let locate = |diagnostic| {
+            with_public_locator(
+                with_public_locator(diagnostic, "entity-id", entity.as_str()),
+                "component-id",
+                schema.id().as_str(),
+            )
+        };
+        let mut record = SceneComponentRecord::new(schema.version(), value);
+        for field in schema.fields() {
+            let invalid = || {
+                with_public_locator(
+                    locate(diagnostic_error(
+                        "scene.export-contextual-default-unavailable",
+                        "Scene export requires a selected effective field for its new source context",
+                    )),
+                    "field-id",
+                    field.id().as_str(),
+                )
+            };
+            if !nara_reflect::__private::component_field_default_requires_context(field)
+                .map_err(|error| with_codec_error(invalid(), &error, Some(schema)))?
+            {
+                continue;
+            }
+            // A live export establishes new Source context from the already admitted,
+            // lowered effective value. It cannot recover hidden lexical defaults.
+            let selected = record.value.get_path(field.path()).map_err(|_| invalid())?;
+            let cost = selected
+                .cost_up_to(limits.nodes().get(), limits.bytes().get())
+                .ok_or_else(|| {
+                    locate(diagnostic_error(
+                        "scene.export-value-budget-exceeded",
+                        "Scene export contextual default exceeded its admitted value allowance",
+                    ))
+                })?;
+            // Match Source retention: one nonempty map node, stable field-ID bytes and
+            // each selected subtree. The metadata map does not increase value depth.
+            nodes = nodes
+                .saturating_add(usize::from(record.contextual_defaults.is_empty()))
+                .saturating_add(cost.nodes());
+            bytes = bytes
+                .saturating_add(field.id().as_str().len())
+                .saturating_add(cost.logical_bytes());
+            for (observed, maximum) in [
+                (
+                    self.retained_nodes.saturating_add(nodes),
+                    limits.nodes().get(),
+                ),
+                (
+                    self.retained_bytes.saturating_add(bytes),
+                    limits.bytes().get(),
+                ),
+            ] {
+                if observed > maximum {
+                    return Err(export_value_budget_diagnostic(
+                        observed,
+                        maximum,
+                        entity.as_str(),
+                        schema.id().as_str(),
+                    ));
+                }
+            }
+            record
+                .contextual_defaults
+                .insert(field.id().clone(), selected.clone());
+        }
+        Ok((record, nodes, bytes))
+    }
+
     fn export_data_value(
         &self,
         schema: &ComponentSchema,
-        record: &SceneComponentRecord,
+        record: &CompiledSceneComponent,
         entity: &SceneEntityId,
-    ) -> Result<ComponentValue, Diagnostic> {
+    ) -> Result<(SceneComponentRecord, usize, usize), Diagnostic> {
         let locate = |diagnostic| {
             with_public_locator(
                 with_public_locator(diagnostic, "entity-id", entity.as_str()),
@@ -698,7 +776,7 @@ impl ExportValueContext<'_> {
         // default containers and keys before any owning materialization or output copy.
         let (effective, cost) = effective_component_value_with_budget(
             schema,
-            &record.value,
+            record.value(),
             nodes,
             bytes,
             limits.depth(),
@@ -729,7 +807,8 @@ impl ExportValueContext<'_> {
         )?;
         let mut value = effective.into_owned();
         self.lower_references(schema, &mut value, cost.logical_bytes(), entity)?;
-        Ok(value)
+        let cost = value.cost();
+        self.source_record(schema, value, cost.nodes(), cost.logical_bytes(), entity)
     }
 
     fn lower_references(

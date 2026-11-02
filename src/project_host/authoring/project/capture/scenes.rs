@@ -11,7 +11,7 @@ pub(super) struct CompiledScene {
     pub(super) source: AuthoringSceneSource,
     pub(super) preview: Option<CapturedAuthoringPreview>,
     pub(super) diagnostics: DiagnosticReport,
-    pub(super) failure: Option<nara_scene::PrefabExpansionFailure>,
+    pub(super) failure: Option<nara_scene::SceneCompilationFailure>,
 }
 
 pub(crate) fn open_scene_inputs_retained_bytes(
@@ -59,8 +59,7 @@ pub(super) fn compile_root(
             native_source: native_source.clone(),
             source: Arc::clone(source),
             document: Arc::new(document.clone()),
-            compiled: None,
-            root_effective: None,
+            expansion: None,
             revision: None,
             diagnostics: DiagnosticReport::default(),
             failure: None,
@@ -90,20 +89,20 @@ fn compile(
     acquisition.compiler_limit = remaining_compiler_work(
         acquisition.budget,
         acquisition.compiler_reservation,
-        nara_scene::PrefabExpansionLimits::default().working_bytes(),
+        nara_scene::SceneCompilationLimits::default().working_bytes(),
     )?;
     resize_compiler_work(
         acquisition.budget,
         &mut acquisition.compiler_reservation,
         acquisition.compiler_limit.get(),
     )?;
-    let options = nara_scene::PrefabExpansionOptions::default()
+    let options = nara_scene::SceneCompilationOptions::default()
         .with_max_depth(acquisition.budget.limits.traversal_depth().get())
         .with_limits(
-            nara_scene::PrefabExpansionLimits::default()
+            nara_scene::SceneCompilationLimits::default()
                 .with_working_bytes(acquisition.compiler_limit),
         );
-    let compiled = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+    let mut compiled = nara_scene::__private::try_compile_authoring_scene_with_loader(
         &source.document,
         acquisition.basis,
         options,
@@ -200,11 +199,6 @@ fn compile(
         if matches!(preview, Some(AuthoringCapturePreview::Prepare))
             && compiled.candidate().is_some()
         {
-            let effective = compiled.candidate().expect("checked candidate").document();
-            acquisition
-                .budget
-                .charge_source_bytes(0, 0, 0, effective.retained_bytes()?)?;
-            source.root_effective = Some(Arc::new(effective.clone()));
             acquisition.budget.charge_source_bytes(
                 0,
                 0,
@@ -215,14 +209,36 @@ fn compile(
             acquisition
                 .budget
                 .charge_source_bytes(0, 0, 0, omission_reservation)?;
+            // Resource discovery and retained source facts consumed part of the original Host
+            // allowance. Tighten the report before admitting its complete remaining seal promise.
+            acquisition.compiler_limit = remaining_compiler_work(
+                acquisition.budget,
+                acquisition.compiler_reservation,
+                acquisition.compiler_limit,
+            )?;
+            compiled.restrict_working_bytes(acquisition.compiler_limit);
+            resize_compiler_work(
+                acquisition.budget,
+                &mut acquisition.compiler_reservation,
+                acquisition.compiler_limit.get(),
+            )?;
+            let native_preview = compiled
+                .into_native_preview()
+                .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
+            resize_compiler_work(
+                acquisition.budget,
+                &mut acquisition.compiler_reservation,
+                native_preview
+                    .checked_work_bytes()
+                    .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+            )?;
             let nara_scene::__private::AuthoringNativePreview {
                 candidate,
                 omissions,
                 diagnostics,
                 failure,
-            } = compiled
-                .into_native_preview()
-                .map_err(AuthoringProjectSourceAdmissionError::CompilationBudget)?;
+                ..
+            } = native_preview;
             let candidate = candidate.bind_source(source.native_source.key().clone());
             let omission_retained = preview_omissions_retained_bytes(&omissions)
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
@@ -246,22 +262,13 @@ fn compile(
             )
         } else {
             let parts = compiled.into_parts();
-            if let Some(candidate) = parts.candidate {
-                acquisition.budget.charge_source_bytes(
-                    0,
-                    0,
-                    0,
-                    source.native_source.key().retained_bytes(),
-                )?;
-                let candidate = candidate.bind_source(source.native_source.key().clone());
+            if let Some(expansion) = parts.candidate {
                 result_retained = checked_sum([
                     result_retained,
-                    crate::scene_retention::direct_startup_scene_retained_bytes(&candidate)
-                        .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?
-                        .checked_sub(source.native_source.key().retained_bytes())
-                        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
+                    crate::scene_retention::authoring_scene_observation_retained_bytes(&expansion)
+                        .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
                 ])?;
-                source.compiled = Some(candidate);
+                source.expansion = Some(expansion);
             }
             (None, parts.diagnostics, parts.failure)
         };
@@ -295,7 +302,7 @@ pub(super) fn retain_compiler_result(
 }
 
 fn preview_omission_copy_retained_bytes(
-    compiled: &nara_scene::__private::AuthoringPrefabExpansionReport,
+    compiled: &nara_scene::__private::AuthoringSceneCompilationReport,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     let candidate = compiled
         .candidate()
@@ -583,8 +590,7 @@ pub(super) fn load_resource(
         native_source: native,
         source,
         document,
-        compiled: None,
-        root_effective: None,
+        expansion: None,
         revision,
         diagnostics: DiagnosticReport::default(),
         failure: None,

@@ -1,5 +1,8 @@
 //! Component presence is checked by layer; only surviving value programs are interpreted.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::convert::Infallible;
 
 use nara_asset::AssetRef;
@@ -12,10 +15,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
-    PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionReport, PrefabInstance,
-    PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim,
-    PrefabPropertyIntent, PrefabSourceResolver, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, spawn_scene,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay,
+    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
+    SceneCompilationReport, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, spawn_scene,
 };
 
 const UNIVERSE: &str = "ec3de96a-21d9-4ab1-a6e2-f07391d6ce48";
@@ -188,12 +191,12 @@ fn expand(
     document: &SceneDocument,
     resolver: &InMemoryPrefabSourceResolver,
     expected_sources: &[&str],
-) -> PrefabExpansionReport {
+) -> SceneCompilationReport {
     let before_document = document.clone();
     let before_sources = resolver.clone();
     let mut requested = Vec::new();
     let report = document
-        .try_expand_prefabs_with_loader(registry, Default::default(), None, |request, _| {
+        .try_compile_with_loader(registry, Default::default(), None, |request, _| {
             requested.push(request.clone());
             Ok::<_, Infallible>(resolver.resolve_prefab(request))
         })
@@ -218,19 +221,19 @@ fn expand(
     report
 }
 
-fn expanded(report: &PrefabExpansionReport) -> &SceneDocument {
+fn expanded(report: &SceneCompilationReport) -> &nara_scene::CompiledSceneDocument {
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     report.document().expect("effective values must expand")
 }
 
-fn assert_rejected(report: &PrefabExpansionReport) {
+fn assert_rejected(report: &SceneCompilationReport) {
     assert!(report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert!(report.candidate.is_none());
     assert!(report.document().is_none());
     assert!(report.provenance().is_none());
 }
 
-fn projected_id(report: &PrefabExpansionReport, path: &[(&str, &str)]) -> SceneEntityId {
+fn projected_id(report: &SceneCompilationReport, path: &[(&str, &str)]) -> SceneEntityId {
     expanded(report);
     let steps = path
         .iter()
@@ -259,15 +262,18 @@ fn projected_id(report: &PrefabExpansionReport, path: &[(&str, &str)]) -> SceneE
     entity.clone()
 }
 
-fn entity<'a>(report: &'a PrefabExpansionReport, entity: &SceneEntityId) -> &'a SceneEntityRecord {
+fn entity<'a>(
+    report: &'a SceneCompilationReport,
+    entity: &SceneEntityId,
+) -> &'a nara_scene::CompiledSceneEntity {
     expanded(report)
-        .entities
+        .entities()
         .iter()
-        .find(|record| &record.id == entity)
+        .find(|record| record.id() == entity)
         .expect("expected materialized entity")
 }
 
-fn materialize(registry: &ComponentRegistrySnapshot, report: PrefabExpansionReport) -> World {
+fn materialize(registry: &ComponentRegistrySnapshot, report: SceneCompilationReport) -> World {
     expanded(&report);
     let containing_source = SourceDocumentKey::named(
         UNIVERSE.parse().unwrap(),
@@ -291,7 +297,7 @@ fn materialize(registry: &ComponentRegistrySnapshot, report: PrefabExpansionRepo
 
 fn assert_native_amount(
     registry: &ComponentRegistrySnapshot,
-    report: PrefabExpansionReport,
+    report: SceneCompilationReport,
     value: i64,
 ) {
     let world = materialize(registry, report);
@@ -325,9 +331,11 @@ fn complete_replace_discards_invalid_or_unsupported_inherited_payload() {
         let report = expand(&registry, &document, &resolver, &["base"]);
 
         let root = projected_id(&report, &[("base", "root")]);
-        assert_eq!(
-            entity(&report, &root).components[&amount_type()],
-            amount(42)
+        compiled_scene::assert_record(
+            &(entity(&report, &root).components()[&amount_type()]),
+            &(amount(42)),
+            &amount_type(),
+            &registry,
         );
         assert_native_amount(&registry, report, 42);
     }
@@ -361,7 +369,7 @@ fn complete_suppress_discards_invalid_and_unknown_inherited_payloads() {
     let report = expand(&registry, &document, &resolver, &["base"]);
 
     let root = projected_id(&report, &[("base", "root")]);
-    assert!(entity(&report, &root).components.is_empty());
+    assert!(entity(&report, &root).components().is_empty());
     let world = materialize(&registry, report);
     assert_eq!(
         world
@@ -411,9 +419,11 @@ fn outer_replace_discards_a_stale_inner_property_program() {
     let report = expand(&registry, &document, &resolver, &["base", "leaf"]);
 
     let root = projected_id(&report, &[("base", "nested"), ("leaf", "root")]);
-    assert_eq!(
-        entity(&report, &root).components[&amount_type()],
-        amount(42)
+    compiled_scene::assert_record(
+        &(entity(&report, &root).components()[&amount_type()]),
+        &(amount(42)),
+        &amount_type(),
+        &registry,
     );
     assert_native_amount(&registry, report, 42);
 }
@@ -482,9 +492,11 @@ fn outer_replace_cannot_legalize_an_earlier_invalid_add_or_replace_presence() {
                 ("leaf", "root"),
             ],
         );
-        assert_eq!(
-            entity(&control, &root).components[&amount_type()],
-            amount(42)
+        compiled_scene::assert_record(
+            &(entity(&control, &root).components()[&amount_type()]),
+            &(amount(42)),
+            &amount_type(),
+            &registry,
         );
         assert_native_amount(&registry, control, 42);
         resolver.insert(
@@ -591,13 +603,14 @@ fn superseded_complete_and_property_references_do_not_request_a_nested_source() 
             entity: root.clone(),
         };
         assert_eq!(
-            entity(&report, &root).components[&link_type()]
-                .value
+            entity(&report, &root).components()[&link_type()]
+                .value()
+                .clone()
                 .field_entity_reference("target")
                 .unwrap(),
             &expected
         );
-        assert_eq!(expanded(&report).entities.len(), 3);
+        assert_eq!(expanded(&report).entities().len(), 3);
         let world = materialize(&registry, report);
         let links = world
             .iter_entities()
@@ -623,9 +636,11 @@ fn retained_properties_require_an_interpretable_base_even_when_pinning_the_bad_f
     )]);
     let control = expand(&registry, &document, &resolver, &["base"]);
     let root = projected_id(&control, &[("base", "root")]);
-    assert_eq!(
-        entity(&control, &root).components[&amount_type()],
-        amount(42)
+    compiled_scene::assert_record(
+        &(entity(&control, &root).components()[&amount_type()]),
+        &(amount(42)),
+        &amount_type(),
+        &registry,
     );
     assert_native_amount(&registry, control, 42);
     resolver.insert(

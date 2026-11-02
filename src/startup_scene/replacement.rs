@@ -120,7 +120,7 @@ where
         }
         let assets = SceneAssetBindings::from_world(world);
         let prepared = match &source.candidate {
-            RetainedSceneCandidate::Expanded(candidate) => bindings
+            RetainedSceneCandidate::Compiled(candidate) => bindings
                 .prepare_scene_replacement_with_claims(
                     world,
                     candidate,

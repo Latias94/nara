@@ -1,5 +1,8 @@
 //! Independent consumers export actual live native and data components through one Scene remap.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::{collections::BTreeSet, sync::Arc};
 
 use nara_app::{App, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId};
@@ -10,9 +13,10 @@ use nara_asset::{
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_ecs::{Component, Entity, World};
 use nara_identity::{
-    EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-    PersistentRuntimeReference, SpawnedSceneInstance, WorldIdentityDomain, adopt_identity_entity,
-    register_persistent_identity, spawn_identity_entity,
+    AuthoredEntityReference, EntityLookup, EntityReference, PersistentRuntimeId,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference, SpawnedSceneInstance,
+    WorldIdentityDomain, adopt_identity_entity, register_persistent_identity,
+    spawn_identity_entity,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -23,11 +27,11 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, PreparedComponentCandidate,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, Name, SceneComponentBindings, SceneComponentBindingsPlugin,
-    SceneComponentRecord, SceneComponentsPlugin, SceneDataComponents, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneExportOptions, SceneExportOutput, SceneExportReport,
-    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, export_scene,
-    export_scene_with_options, retire_and_despawn_scene_entity, scene_component_bindings,
+    Name, SceneComponentBindings, SceneComponentBindingsPlugin, SceneComponentRecord,
+    SceneComponentsPlugin, SceneDataComponents, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneExportOptions, SceneExportOutput, SceneExportReport, SceneOccurrenceKey,
+    SourceDocumentKey, SourceDocumentKind, export_scene, export_scene_with_options,
+    retire_and_despawn_scene_entity, scene_component_bindings,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -216,7 +220,8 @@ fn spawn(
     slot: &str,
     database: Option<nara_asset::AssetReferenceResolver<'_>>,
 ) -> SpawnedSceneInstance {
-    let candidate = ExpandedSceneCandidate::plain(source_key(slot), Arc::new(document));
+    let candidate =
+        compiled_scene::mixed(&bindings, &Arc::new(document), source_key(slot), database);
     let occurrence = SceneOccurrenceKey::new("game.export-tests", slot).unwrap();
     let report = bindings
         .prepare_scene(world, &candidate, &occurrence, database)
@@ -420,6 +425,122 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
             .as_str(),
         Some("live native name"),
     );
+}
+
+#[test]
+fn data_export_establishes_selected_context_and_reopens_with_the_same_bindings() {
+    for default in [
+        EntityReference::SceneLocal {
+            entity: id("hidden"),
+        },
+        EntityReference::Authored {
+            reference: AuthoredEntityReference::source(id("hidden")),
+        },
+    ] {
+        let mut target = field("target", ComponentValueShape::EntityRef)
+            .with_capability(ComponentCapability::EntityRef);
+        target.default_value = Some(ComponentValue::EntityReference(default));
+        let owner = ComponentSchemaOwnerSnapshot::admit(
+            owner_id(),
+            ComponentSchemaCatalog {
+                components: vec![schema("game.ContextualLink", target)],
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        let bindings = SceneComponentBindings::new(empty_registry(), [owner]).unwrap();
+        let document = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("source")).with_component(
+                component("game.ContextualLink"),
+                data_record(ComponentValue::map([(
+                    "target",
+                    ComponentValue::EntityReference(EntityReference::SceneLocal {
+                        entity: id("target"),
+                    }),
+                )]))
+                .with_contextual_default(
+                    ComponentFieldId::new("target"),
+                    ComponentValue::EntityReference(EntityReference::SceneLocal {
+                        entity: id("hidden"),
+                    }),
+                ),
+            ),
+            SceneEntityRecord::new(id("target")),
+            SceneEntityRecord::new(id("hidden")),
+        ]);
+        let mut world = World::new();
+        let instances = ["first", "second"]
+            .map(|slot| spawn(&bindings, &mut world, document.clone(), slot, None));
+        // Two current map/reference values plus two contextual map/reference snapshots.
+        // Field keys and stable field IDs are separate retained strings in each record.
+        let nodes = 2 * 2 + 2 * (1 + 1);
+        let bytes =
+            2 * ("target".len() + "entity_1".len()) + 2 * ("target".len() + "entity_1".len());
+        let export_options = SceneExportOptions {
+            value_limits: limits(nodes, bytes, 2),
+            ..Default::default()
+        };
+        let result = output(bindings.export_scene_with_options(&world, export_options, None));
+        let mut mapped_targets = BTreeSet::new();
+        for instance in &instances {
+            let source = exported(&result, instance, "source");
+            let target = exported(&result, instance, "target");
+            let hidden = exported(&result, instance, "hidden");
+            let record = &source.components[&component("game.ContextualLink")];
+            let expected = EntityReference::SceneLocal {
+                entity: target.id.clone(),
+            };
+            assert_eq!(record.owner(), Some(&owner_id()));
+            assert_eq!(
+                record.value.field_entity_reference("target").unwrap(),
+                &expected,
+            );
+            assert_eq!(
+                record.contextual_defaults[&ComponentFieldId::new("target")],
+                ComponentValue::EntityReference(expected),
+            );
+            assert_ne!(target.id, hidden.id);
+            mapped_targets.insert(target.id.clone());
+        }
+        assert_eq!(mapped_targets.len(), 2);
+        for below in [limits(nodes - 1, bytes, 2), limits(nodes, bytes - 1, 2)] {
+            rejected(
+                bindings.export_scene_with_options(
+                    &world,
+                    SceneExportOptions {
+                        value_limits: below,
+                        ..export_options
+                    },
+                    None,
+                ),
+                "scene.export-value-budget-exceeded",
+            );
+        }
+        let mut reopened_world = World::new();
+        spawn(
+            &bindings,
+            &mut reopened_world,
+            result.document.clone(),
+            "reopened",
+            None,
+        );
+        #[cfg(feature = "serde")]
+        for candidate in [
+            nara_scene::SceneDocumentCandidate::decode_json_str(
+                &result.document.to_json_string().unwrap(),
+            )
+            .unwrap(),
+            nara_scene::SceneDocumentCandidate::decode_ron_str(
+                &result.document.to_ron_string().unwrap(),
+            )
+            .unwrap(),
+        ] {
+            let reopened = candidate.into_composition_source().unwrap();
+            assert_eq!(reopened, result.document);
+            compiled_scene::mixed(&bindings, &reopened, source_key("reopened-file"), None);
+        }
+    }
 }
 
 #[test]
@@ -802,7 +923,12 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
     let resolver = database.resolver(&assets);
     let diagnostics = bindings.validate_scene(&document, Some(resolver), Default::default());
     assert!(!diagnostics.has_errors(), "{diagnostics:?}");
-    let candidate = ExpandedSceneCandidate::plain(source_key("scoped"), Arc::new(document.clone()));
+    let candidate = compiled_scene::mixed(
+        &bindings,
+        &Arc::new(document.clone()),
+        source_key("scoped"),
+        Some(resolver),
+    );
     let cooked = RuntimeSceneCandidate::cook(
         &candidate,
         &bindings,
@@ -811,7 +937,7 @@ fn scoped_scene_prepare_cook_and_export_preserve_identity_without_canonical_pref
     )
     .unwrap();
     let cooked_native =
-        &cooked.document().entities[0].components[&component("game.NativeImage")].value;
+        cooked.document().entities()[0].components()[&component("game.NativeImage")].value();
     assert_eq!(
         cooked_native
             .field("nested")
@@ -956,7 +1082,7 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
     let document = SceneDocument::from_ordered_roots([anchor]);
     let expand = |lookup: &dyn PrefabSourceResolver| {
         bindings
-            .try_expand_prefabs_with_loader(
+            .try_compile_scene_with_loader(
                 &document,
                 Default::default(),
                 Some(database.resolver(&assets)),
@@ -974,8 +1100,8 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
     );
     assert_eq!(direct.document(), snapshot.document());
     assert_eq!(
-        direct.candidate.unwrap().provenance(),
-        snapshot.candidate.unwrap().provenance()
+        direct.candidate.unwrap().canonical_provenance(),
+        snapshot.candidate.unwrap().canonical_provenance()
     );
 }
 
@@ -1405,9 +1531,9 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
         .unwrap();
     app.add_systems(nara_app::StartupStage::Scene, |world: &mut World| {
         let native = nara_reflect::component_registry(world).unwrap().clone();
-        let candidate = ExpandedSceneCandidate::plain(
-            source_key("managed-native"),
-            Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        let candidate = compiled_scene::native(
+            &native,
+            &Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
                 id("entity"),
             )
             .with_component(
@@ -1417,6 +1543,8 @@ fn native_managed_export_refuses_same_type_foreign_admission_before_callback() {
                     ComponentValue::String("live".into()),
                 ),
             )])),
+            source_key("managed-native"),
+            None,
         );
         let report = nara_scene::prepare_scene(
             world,

@@ -1031,7 +1031,7 @@ impl EditorApplication {
         &self,
         basis: &nara::tooling::EditorDocumentQueryBasis,
     ) -> Result<
-        Option<&nara::scene::PrefabExpansionFailure>,
+        Option<&nara::scene::SceneCompilationFailure>,
         nara::tooling::EditorDocumentQueryRejection,
     > {
         self.authoring_query_session()?

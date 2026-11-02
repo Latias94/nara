@@ -145,9 +145,9 @@ mod tests {
     use super::*;
     use crate::{
         AuthoringDocumentSource, AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument,
-        PrefabDocumentCandidate, PrefabEntityTarget, PrefabExpansionWorkingSet, PrefabInstance,
-        PrefabInstanceClaim, PrefabOverlay, PreparedScenePrefabConversion, ResolvedPrefabSource,
-        SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+        PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
+        PrefabOverlay, PreparedScenePrefabConversion, ResolvedPrefabSource, SceneAuthoringSession,
+        SceneCompilationWorkingSet, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
         ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
         authoring::prefab_conversion::tests::{
             admit_schema, basis, component, id, instance, schema_owner,
@@ -400,7 +400,7 @@ mod tests {
                     Default::default(),
                 )
                 .unwrap()
-                .prepare_with_loader(None, |_: &AssetRef, _: &mut PrefabExpansionWorkingSet| {
+                .prepare_with_loader(None, |_: &AssetRef, _: &mut SceneCompilationWorkingSet| {
                     Ok::<_, Infallible>(Some(resolved.clone()))
                 })
                 .unwrap()

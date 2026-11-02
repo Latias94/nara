@@ -658,10 +658,11 @@ mod tests {
             nara_app::StartupStage::Scene,
             move |world: &mut nara_ecs::World| {
                 let registry = nara_reflect::component_registry(world).unwrap().clone();
-                let bound = nara_scene::ExpandedSceneCandidate::plain(
-                    source.clone(),
-                    Arc::new(prefab.instantiate()),
-                );
+                let bound = prefab
+                    .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new())
+                    .candidate
+                    .unwrap()
+                    .bind_source(source.clone());
                 let report = nara_scene::spawn_scene(world, &registry, &bound, &occurrence, None);
                 assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
             },

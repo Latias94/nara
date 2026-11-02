@@ -10,8 +10,7 @@ use nara_input::{
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey,
-    SourceDocumentKind,
+    RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
 
 use super::*;
@@ -86,11 +85,12 @@ impl InputFixture {
             .unwrap();
         let source =
             SourceDocumentKey::stable_asset(startup_product().source(), SourceDocumentKind::Scene);
-        let scene = ExpandedSceneCandidate::plain(
-            source.clone(),
-            Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        let scene = crate::startup_scene::compile_test_scene(
+            &SceneDocument::from_ordered_roots([SceneEntityRecord::new(
                 SceneEntityId::new("startup").unwrap(),
-            )])),
+            )]),
+            plan.schema_validation().bindings(),
+            source.clone(),
         );
         let scene = RuntimeSceneCandidate::cook(
             &scene,

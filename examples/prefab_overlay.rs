@@ -6,7 +6,7 @@ use nara::{
     prelude::*,
     reflect::ComponentPropertyPath,
     scene::{
-        ExpandedSceneCandidate, InMemoryPrefabSourceResolver, PrefabComponentIntent,
+        CompiledSceneCandidate, InMemoryPrefabSourceResolver, PrefabComponentIntent,
         PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPropertyClaim,
         PrefabPropertyIntent, PrefabSourceResolver, SceneAuthoringSession, SourceDocumentKey,
         SourceDocumentKind, register_scene_components,
@@ -59,9 +59,9 @@ fn main() {
     let mut owner = SceneAuthoringSession::new(scene);
     let candidate = expand(owner.document(), &registry, &resolver);
     let expanded = candidate.document();
-    assert_eq!(expanded.entities.len(), 2);
+    assert_eq!(expanded.entities().len(), 2);
     let visual_id = candidate
-        .provenance()
+        .canonical_provenance()
         .iter()
         .find_map(|(id, source)| {
             (source.local_entity_id() == &scene_id("visual") && source.projection_path().is_some())
@@ -127,8 +127,8 @@ fn expand(
     scene: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     resolver: &InMemoryPrefabSourceResolver,
-) -> ExpandedSceneCandidate {
-    let expansion = scene.expand_prefabs(registry, resolver);
+) -> CompiledSceneCandidate {
+    let expansion = scene.compile(registry, resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -140,15 +140,15 @@ fn expand(
         .bind_source(scene_source_key("main/source"))
 }
 
-fn assert_tint(candidate: &ExpandedSceneCandidate, red: f64, green: f64) {
+fn assert_tint(candidate: &CompiledSceneCandidate, red: f64, green: f64) {
     let visual = candidate
         .document()
-        .entities
+        .entities()
         .iter()
-        .find(|entity| entity.components.contains_key(&sprite_id()))
+        .find(|entity| entity.components().contains_key(&sprite_id()))
         .unwrap();
-    let tint = visual.components[&sprite_id()]
-        .value
+    let tint = visual.components()[&sprite_id()]
+        .value()
         .field("material")
         .unwrap()
         .field("tint")

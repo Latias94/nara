@@ -1,13 +1,8 @@
-use std::sync::Arc;
-
 use nara_asset::{
     AssetPathScope, AssetProductRef, ImportedProductId, ProjectAssetDatabase, StableAssetId,
 };
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
-use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneLimits, SceneDocument, SourceDocumentKey,
-    SourceDocumentKind,
-};
+use nara_scene::{RuntimeSceneLimits, SceneDocument, SourceDocumentKey, SourceDocumentKind};
 
 use super::*;
 use crate::{
@@ -37,6 +32,11 @@ fn content() -> PreparedRuntimeContent {
         scenes: vec![product],
         addressable_roots: Vec::new(),
     };
+    let plan = crate::project_host::resolve_runtime_configuration(
+        &request.configuration.resolve().unwrap(),
+        ProductRecipe::new(),
+    )
+    .unwrap();
     let mut builder = CookedContentBuilder::new(
         request,
         ProductRecipe::new(),
@@ -52,14 +52,15 @@ fn content() -> PreparedRuntimeContent {
         },
     )
     .unwrap();
-    let expanded = ExpandedSceneCandidate::plain(
+    let compiled = crate::startup_scene::compile_test_scene(
+        &SceneDocument::default(),
+        plan.schema_validation().bindings(),
         SourceDocumentKey::stable_asset(product.source(), SourceDocumentKind::Scene),
-        Arc::new(SceneDocument::default()),
     );
     builder
         .add_scene(
             product,
-            &expanded,
+            &compiled,
             ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
         )
         .unwrap();

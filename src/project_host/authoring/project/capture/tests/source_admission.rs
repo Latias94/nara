@@ -269,7 +269,7 @@ fn nested_stable_native_sources_use_the_actual_sidecar_reader_for_scene_and_pref
             .find(|scene| scene.source().project_path().as_str() == "data/prefabs/b.scene.json")
             .unwrap();
         assert_eq!(scene.document(), &dependency);
-        assert_eq!(scene.effective_document().unwrap().entities.len(), 4);
+        assert_eq!(scene.expansion().unwrap().document().entities.len(), 4);
         capture.source_validation().validate().unwrap();
     }
 }
@@ -339,7 +339,7 @@ fn path_self_edge_reads_its_metadata_without_indexing_unrelated_sources_or_redec
 fn real_compiler_output_transfers_its_exact_reservation_without_a_second_candidate_allowance() {
     let project = fixture(&[], &[], &[], &[]);
     let (snapshot, source, session) = open_second_scene(&project);
-    let report = nara_scene::__private::try_expand_authoring_prefabs_with_loader(
+    let report = nara_scene::__private::try_compile_authoring_scene_with_loader(
         session.document(),
         &session.authoring_schema_basis().unwrap(),
         Default::default(),
@@ -347,12 +347,9 @@ fn real_compiler_output_transfers_its_exact_reservation_without_a_second_candida
         |_, _| Ok::<_, AuthoringProjectSourceAdmissionError>(None),
     )
     .unwrap();
-    let working = report.checked_work_bytes().unwrap();
-    let candidate = report
-        .into_parts()
-        .candidate
-        .unwrap()
-        .bind_source(source.source_key().clone());
+    let preview = report.into_native_preview().unwrap();
+    let working = preview.checked_work_bytes().unwrap();
+    let candidate = preview.candidate.bind_source(source.source_key().clone());
     let retained = crate::scene_retention::direct_startup_scene_retained_bytes(&candidate).unwrap();
     let mut reservation = working.max(retained);
     let baseline = snapshot.schema.budget.retained_candidate_bytes;

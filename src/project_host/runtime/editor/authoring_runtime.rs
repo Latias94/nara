@@ -487,7 +487,7 @@ impl EditorAuthoringRuntime {
     }
 
     #[cfg(all(test, feature = "presentation-2d"))]
-    pub(super) fn test_preview_candidate(&self) -> Option<&nara_scene::ExpandedSceneCandidate> {
+    pub(super) fn test_preview_candidate(&self) -> Option<&nara_scene::CompiledSceneCandidate> {
         self.preview
             .test_accepted_authoring_candidate(self.runtime.world())
     }
@@ -1267,7 +1267,7 @@ mod preview_content_tests {
     use nara_asset::{AssetPathScope, AssetSourcePath, ProjectAssetDatabase, StableAssetId};
     use nara_image::ImageBytesImportRequest;
     use nara_render::Extent2d;
-    use nara_scene::{ExpandedSceneCandidate, SceneAuthoringSession, SceneDocument};
+    use nara_scene::{CompiledSceneCandidate, SceneAuthoringSession, SceneDocument};
 
     use super::*;
     use crate::project_host::runtime::editor::{
@@ -1283,6 +1283,24 @@ mod preview_content_tests {
             panic!("the authoring fixture requires its admitted asset scope");
         };
         Arc::clone(scope)
+    }
+
+    fn compile_preview_scene(
+        document: &SceneDocument,
+        source: nara_scene::SourceDocumentKey,
+    ) -> Result<CompiledSceneCandidate, DiagnosticReport> {
+        let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
+            crate::project_host::composition::built_in_schema_providers(),
+        )
+        .unwrap();
+        let report = document.compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
+        match report.candidate {
+            Some(candidate) => Ok(candidate.bind_source(source)),
+            None => {
+                assert!(report.diagnostics.has_errors());
+                Err(report.diagnostics)
+            }
+        }
     }
 
     fn preview_source_key() -> nara_scene::SourceDocumentKey {
@@ -1323,10 +1341,7 @@ mod preview_content_tests {
                         revision,
                         dependencies: EditorPreviewDependencies::empty(),
                         projection: Some(EditorPreviewProjection::authoring(
-                            ExpandedSceneCandidate::plain(
-                                key.clone(),
-                                Arc::new(source.document().clone()),
-                            ),
+                            compile_preview_scene(source.document(), key.clone()).unwrap(),
                             EditorAuthoringPreviewOmissions::empty(document, revision),
                             preview_database(&runtime),
                             preview_scope(&runtime),
@@ -1458,10 +1473,7 @@ mod preview_content_tests {
             .preview_requires_source_projection(document, revision, dependencies)
             .then(|| {
                 EditorPreviewProjection::authoring(
-                    ExpandedSceneCandidate::plain(
-                        preview_source_key(),
-                        Arc::new(source.document().clone()),
-                    ),
+                    compile_preview_scene(source.document(), preview_source_key()).unwrap(),
                     EditorAuthoringPreviewOmissions::empty(document, revision),
                     preview_database(&runtime),
                     preview_scope(&runtime),

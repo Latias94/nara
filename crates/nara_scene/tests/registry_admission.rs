@@ -1,5 +1,8 @@
 //! Owner presence is distinct from admitted native execution authority.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::sync::{Arc, OnceLock};
 
 use nara_app::App;
@@ -17,7 +20,7 @@ use nara_reflect::{
     validate_component_registry_authority,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
+    CompiledSceneCandidate, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
     SceneComponentBindingsPlugin, SceneComponentRecord, SceneComponentsPlugin,
     SceneDataComponentError, SceneDocument, SceneEntityId, SceneEntityRecord, SceneOccurrenceKey,
     SourceDocumentKey, SourceDocumentKind, export_scene, prepare_scene, scene_component_bindings,
@@ -31,25 +34,28 @@ fn registry() -> ComponentRegistrySnapshot {
     builder.freeze().unwrap()
 }
 
-fn candidate() -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(
-        SourceDocumentKey::named(
-            "d75f3f5d-23a8-4a51-a85c-1d2314a7db6f".parse().unwrap(),
-            "registry-admission",
-            SourceDocumentKind::Scene,
-        )
-        .unwrap(),
-        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            SceneEntityId::new("root").unwrap(),
-        )
+fn source_key() -> SourceDocumentKey {
+    SourceDocumentKey::named(
+        "d75f3f5d-23a8-4a51-a85c-1d2314a7db6f".parse().unwrap(),
+        "registry-admission",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn document() -> SceneDocument {
+    SceneDocument::from_ordered_roots([SceneEntityRecord::new(SceneEntityId::new("root").unwrap())
         .with_component(
             ComponentTypeId::new("nara.scene.Name"),
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 ComponentValue::String("retained".into()),
             ),
-        )])),
-    )
+        )])
+}
+
+fn candidate(registry: &ComponentRegistrySnapshot) -> CompiledSceneCandidate {
+    compiled_scene::native(registry, &document(), source_key(), None)
 }
 
 fn occurrence() -> SceneOccurrenceKey {
@@ -99,10 +105,11 @@ fn installed_unadmitted_owners_reject_native_and_mixed_preparation_and_export() 
         world.insert_resource(assets.clone());
         let entities = world.entities().len();
 
-        let report = prepare_scene(world, &caller, &candidate(), &occurrence(), None).unwrap_err();
+        let report =
+            prepare_scene(world, &caller, &candidate(&caller), &occurrence(), None).unwrap_err();
         assert_code(&report.diagnostics, "scene.prepared-definition-changed");
         let report = bindings
-            .prepare_scene(world, &candidate(), &occurrence(), None)
+            .prepare_scene(world, &candidate(&caller), &occurrence(), None)
             .unwrap_err();
         assert_code(&report.diagnostics, "scene.prepared-definition-changed");
 
@@ -133,12 +140,17 @@ fn installing_an_unadmitted_owner_rejects_existing_standalone_preparation() {
             let assets = AssetServer::new();
             app.insert_resource(assets.clone()).unwrap();
             let prepared = if mixed {
-                bindings.prepare_scene(app.world_mut().unwrap(), &candidate(), &occurrence(), None)
+                bindings.prepare_scene(
+                    app.world_mut().unwrap(),
+                    &candidate(&caller),
+                    &occurrence(),
+                    None,
+                )
             } else {
                 prepare_scene(
                     app.world_mut().unwrap(),
                     &caller,
-                    &candidate(),
+                    &candidate(&caller),
                     &occurrence(),
                     None,
                 )
@@ -164,7 +176,7 @@ fn owner_free_worlds_keep_explicit_standalone_execution() {
     for mixed in [false, true] {
         let registry = registry();
         let bindings = SceneComponentBindings::new(registry.clone(), []).unwrap();
-        let candidate = candidate();
+        let candidate = candidate(&registry);
         let mut world = World::new();
         assert!(!component_registry_is_installed(&world));
         let prepared = if mixed {
@@ -180,7 +192,7 @@ fn owner_free_worlds_keep_explicit_standalone_execution() {
         } else {
             export_scene(&world, &registry)
         };
-        assert_eq!(&report.output().unwrap().document, candidate.document());
+        assert_eq!(report.output().unwrap().document, document());
     }
 }
 
@@ -207,17 +219,16 @@ fn unfinished_owner_rejects_actual_data_access_and_preserves_records_through_adm
         None,
     )
     .unwrap();
-    let plain = candidate();
-    let mut document = plain.document().clone();
+    let mut document = document();
     document.entities[0].components.insert(
         component.clone(),
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7))
             .with_owner(owner_id),
     );
-    let source = ExpandedSceneCandidate::plain(plain.source_key().clone(), Arc::new(document));
     for preloaded in [false, true] {
         let registry = registry();
         let bindings = SceneComponentBindings::new(registry.clone(), [owner.clone()]).unwrap();
+        let source = compiled_scene::mixed(&bindings, &document, source_key(), None);
         let mut app = App::new();
         let instance = bindings
             .prepare_scene(app.world_mut().unwrap(), &source, &occurrence(), None)
@@ -235,7 +246,8 @@ fn unfinished_owner_rejects_actual_data_access_and_preserves_records_through_adm
                 .data_component(app.world(), entity, &component)
                 .unwrap()
                 .unwrap()
-                .value,
+                .value()
+                .clone(),
             ComponentValue::U64(7)
         );
         install_unfinished_owner(&mut app, preloaded, &registry);
@@ -280,7 +292,8 @@ fn unfinished_owner_rejects_actual_data_access_and_preserves_records_through_adm
                 .data_component(app.world(), entity, &component)
                 .unwrap()
                 .unwrap()
-                .value,
+                .value()
+                .clone(),
             ComponentValue::U64(7)
         );
     }

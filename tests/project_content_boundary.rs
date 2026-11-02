@@ -308,7 +308,7 @@ fn escaping_component_asset_paths_reject_before_source_access() {
     let error = loader.load(&candidate, &plan).unwrap_err();
 
     // The shared compiler validates surviving root and Prefab values before asset capture.
-    assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
+    assert_eq!(error.kind(), ProjectContentErrorKind::SceneCompilation);
     assert!(
         error.diagnostics().iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.prefab-compilation-failed"
@@ -335,7 +335,7 @@ fn document_catalog_mismatch_rejects_without_partial_publication() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
+    assert_eq!(error.kind(), ProjectContentErrorKind::SceneCompilation);
     assert!(
         error.diagnostics().iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.unknown-component"
@@ -444,7 +444,7 @@ fn cyclic_prefab_closure_rejects_without_requeue_or_partial_publication() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_eq!(error.kind(), ProjectContentErrorKind::PrefabExpansion);
+    assert_eq!(error.kind(), ProjectContentErrorKind::SceneCompilation);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
@@ -722,19 +722,19 @@ fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
         .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let expanded = snapshot.expanded_scene();
-    let parent = expanded
-        .entities
+    let compiled = snapshot.compiled_scene();
+    let parent = compiled
+        .entities()
         .iter()
-        .find(|entity| entity.id == scene_id("parent"))
+        .find(|entity| entity.id() == &scene_id("parent"))
         .unwrap();
-    let child = expanded
-        .entities
+    let child = compiled
+        .entities()
         .iter()
-        .find(|entity| entity.id == scene_id("child"))
+        .find(|entity| entity.id() == &scene_id("child"))
         .unwrap();
-    assert_eq!(parent.children, [scene_id("child")]);
-    assert!(child.components.contains_key(&transform_id));
+    assert_eq!(parent.children(), [scene_id("child")]);
+    assert!(child.components().contains_key(&transform_id));
     drop(snapshot);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 

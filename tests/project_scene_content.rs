@@ -316,10 +316,10 @@ fn custom_source_roots_resolve_same_local_aliases_through_the_complete_loader() 
         assert_eq!(image.image().pixels().len(), 4);
         assert_eq!(
             snapshot
-                .expanded_scene()
-                .entities
+                .compiled_scene()
+                .entities()
                 .iter()
-                .filter(|entity| entity.components.contains_key(&sprite_type))
+                .filter(|entity| entity.components().contains_key(&sprite_type))
                 .count(),
             9,
         );
@@ -504,9 +504,9 @@ fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup(
     assert_eq!(second.lineage(), startup.lineage());
     assert_eq!(second.schema_fingerprint(), startup.schema_fingerprint());
     assert_eq!(second.scene().roots, [scene_id("second-anchor")]);
-    assert_eq!(second.expanded_scene().entities.len(), 2);
-    assert_eq!(second.expanded_scene_provenance().len(), 2);
-    assert!(second.expanded_scene_provenance().values().any(|source| {
+    assert_eq!(second.compiled_scene().entities().len(), 2);
+    assert_eq!(second.compiled_scene_provenance().len(), 2);
+    assert!(second.compiled_scene_provenance().values().any(|source| {
         source.local_entity_id() == &scene_id("second-enemy")
             && source
                 .projection_path()

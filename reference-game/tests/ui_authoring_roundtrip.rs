@@ -91,7 +91,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
     );
     let retry_id = reloaded
         .snapshot
-        .expanded_scene_provenance()
+        .compiled_scene_provenance()
         .iter()
         .find_map(|(id, source)| {
             (source.local_entity_id().as_str() == RETRY_BUTTON
@@ -102,10 +102,21 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
         })
         .expect("the reloaded retry projection must retain its source identity");
     assert_eq!(
-        retry_width(
-            &reloaded.snapshot.expanded_scene().entities,
-            retry_id.as_str(),
-        ),
+        reloaded
+            .snapshot
+            .compiled_scene()
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == retry_id)
+            .and_then(|entity| entity.components().get(&ComponentTypeId::new(UI_NODE)))
+            .expect("compiled retry UiNode must exist")
+            .value()
+            .get_path(&ComponentFieldPath::from_fields([
+                "style", "width", "value"
+            ]))
+            .expect("compiled retry width must exist")
+            .as_f64()
+            .expect("compiled retry width must be a finite float"),
         EDITED_RETRY_WIDTH
     );
     drop(reloaded);

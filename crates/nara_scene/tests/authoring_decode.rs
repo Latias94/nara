@@ -769,7 +769,7 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
 }
 
 #[test]
-fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
+fn strict_compilation_rejects_degraded_scene_and_prefab_before_world_mutation() {
     let unknown = component_id("nara.project.MissingBehavior");
     let owner = persistent_owner("nara.project.behavior");
     let entity = SceneEntityRecord::new(scene_id("root")).with_component(
@@ -804,43 +804,21 @@ fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
         nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
     nara_reflect::__private::register_resolved_schema_provider(&mut registry, provider).unwrap();
     let registry = registry.freeze().unwrap();
-    let mut world = World::new();
+    let world = World::new();
     let before = world.iter_entities().count();
 
-    let scene_report = nara_scene::spawn_scene(
-        &mut world,
-        &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/scene-document",
-            ),
-            std::sync::Arc::new((scene.document()).clone()),
-        ),
-        &scene_occurrence(
-            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/scene_report",
-        ),
-        None,
-    );
+    let scene_report = scene
+        .document()
+        .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
     assert!(scene_report.diagnostics.has_errors());
-    assert!(scene_report.instance.is_none());
+    assert!(scene_report.candidate.is_none());
     assert_eq!(world.iter_entities().count(), before);
 
-    let prefab_report = nara_scene::spawn_scene(
-        &mut world,
-        &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
-            named_prefab_source_key(
-                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/prefab",
-            ),
-            std::sync::Arc::new((prefab.document()).instantiate()),
-        ),
-        &scene_occurrence(
-            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/prefab_report",
-        ),
-        None,
-    );
+    let prefab_report = prefab
+        .document()
+        .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
     assert!(prefab_report.diagnostics.has_errors());
-    assert!(prefab_report.instance.is_none());
+    assert!(prefab_report.candidate.is_none());
     assert_eq!(world.iter_entities().count(), before);
 
     let mismatched_owner =
@@ -853,21 +831,9 @@ fn strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation() {
                 )
                 .with_owner(persistent_owner("nara.project.spoofed-scene-owner")),
             )]);
-    let owner_report = nara_scene::spawn_scene(
-        &mut world,
-        &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/mismatched_owner",
-            ),
-            std::sync::Arc::new((mismatched_owner).clone()),
-        ),
-        &scene_occurrence(
-            "strict_runtime_rejects_degraded_scene_and_prefab_before_world_mutation/owner_report",
-        ),
-        None,
-    );
-    assert!(owner_report.instance.is_none());
+    let owner_report =
+        mismatched_owner.compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
+    assert!(owner_report.candidate.is_none());
     assert!(
         owner_report
             .diagnostics
@@ -1140,13 +1106,4 @@ fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {
 
 fn scene_occurrence(slot: &str) -> nara_scene::SceneOccurrenceKey {
     nara_scene::SceneOccurrenceKey::new("nara.scene.tests", slot).unwrap()
-}
-
-fn named_prefab_source_key(name: &str) -> nara_scene::SourceDocumentKey {
-    nara_scene::SourceDocumentKey::named(
-        "ae9c4204-2585-4d22-9da7-6400ebd89664".parse().unwrap(),
-        name,
-        nara_scene::SourceDocumentKind::Prefab,
-    )
-    .unwrap()
 }

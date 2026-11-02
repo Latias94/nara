@@ -7,7 +7,7 @@ use std::{
     fs,
     num::NonZeroU32,
     path::{Path, PathBuf},
-    sync::{Arc, OnceLock},
+    sync::OnceLock,
 };
 
 use aurora_game as game;
@@ -33,6 +33,7 @@ use engine::{
         ActionMapFileCandidate, ActionMapLimits,
     },
     project::{ProductCapability, RuntimeConfiguration, RuntimePreset},
+    project_host::resolve_runtime_configuration,
     project_tooling::{
         cargo_build::{
             CapturedCargoExecutable, CargoBuildFailure, CargoBuildLimits, CargoBuildPoint,
@@ -53,7 +54,7 @@ use engine::{
     },
     runtime_content::{RuntimeContentDependencyRole, RuntimeContentTarget},
     scene::{
-        ExpandedSceneCandidate, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
+        SceneCompilationOptions, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     },
     tilemap::{TileAtlasLayout, TileSetDescriptor, TileSetSource, TileSetSourceFileLimits},
 };
@@ -768,6 +769,9 @@ fn assemble(inputs: &ContentInputs, triple: &str, profile: &str) -> PreparedRunt
     configuration.tasks.compute.workers = 1;
     configuration.tasks.async_compute.workers = 1;
     configuration.input.action_map = Some(game::product(game::INPUT));
+    let recipe = game::recipe();
+    let plan =
+        resolve_runtime_configuration(&configuration.resolve().unwrap(), recipe.clone()).unwrap();
     let mut builder = CookedContentBuilder::new(
         CookedContentRequest {
             target: RuntimeContentTarget::new(triple, profile).unwrap(),
@@ -776,7 +780,7 @@ fn assemble(inputs: &ContentInputs, triple: &str, profile: &str) -> PreparedRunt
             scenes: vec![game::product(1), game::product(2), game::product(3)],
             addressable_roots: vec![],
         },
-        game::recipe(),
+        recipe,
         CookedContentLimits::default(),
     )
     .unwrap();
@@ -834,15 +838,30 @@ fn assemble(inputs: &ContentInputs, triple: &str, profile: &str) -> PreparedRunt
         .unwrap()
         .into_composition_source()
         .unwrap();
-        let expanded = ExpandedSceneCandidate::plain(
-            SourceDocumentKey::stable_asset(
+        let compilation = plan
+            .schema_validation()
+            .bindings()
+            .try_compile_scene_with_loader(
+                &document,
+                SceneCompilationOptions::default(),
+                Some(database.resolver(&scope)),
+                |_, _| Ok::<_, std::convert::Infallible>(None),
+            )
+            .unwrap();
+        assert!(
+            !compilation.diagnostics.has_errors(),
+            "{:?}",
+            compilation.diagnostics
+        );
+        let compiled = compilation
+            .candidate
+            .expect("the saved game Scene compiles")
+            .bind_source(SourceDocumentKey::stable_asset(
                 game::product(scene).source(),
                 SourceDocumentKind::Scene,
-            ),
-            Arc::new(document),
-        );
+            ));
         builder
-            .add_scene(game::product(scene), &expanded, database.resolver(&scope))
+            .add_scene(game::product(scene), &compiled, database.resolver(&scope))
             .unwrap();
     }
     let prepared = builder.finish().unwrap();

@@ -167,6 +167,14 @@ root, placement and inline-reference replacement; value relocation alone does no
   same canonical anchor and rewrite its contributor references/defaults; do not create a second
   root. Preserve actual mixed sibling order. Forest mounts retain their initial projected order
   unless explicit placement intent interleaves the children.
+- Source-producing conversion also preserves contextual defaults hidden by explicit values.
+  The compiler proves their actual lexical references separately from the effective Native value,
+  then localization remaps those snapshots into the new source namespace. Ordinary activation
+  keeps hidden defaults dormant. Conversion may require additional source demand or specifically
+  refuse a default that cannot be represented; it cannot report successful source preparation by
+  dropping that contract or replacing a hidden default with the current explicit value. Native-flat
+  output remains free of contextual declarations. Fresh ordinary source admission and exact
+  Undo/Redo must agree with the prepared conversion.
 - New local IDs come from the source owner's allocation policy, never expanded locator spelling
   or a terminal inherited ID. A read-only remap retains each original typed provenance beside its
   new ID. Declared local references translate through that complete mapping; actual untouched

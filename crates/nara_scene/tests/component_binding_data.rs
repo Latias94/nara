@@ -1,5 +1,8 @@
 //! Backend-free Rust consumers of guarded complete data groups and scheduled runtime mutation.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::{
     sync::{
         Arc,
@@ -27,7 +30,7 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId, component_registry,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, Name, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
+    CompiledSceneCandidate, Name, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
     SceneComponentBindingsPlugin, SceneComponentRecord, SceneComponentsPlugin, SceneDataComponents,
     SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey,
     SourceDocumentKey, SourceDocumentKind, retire_and_despawn_scene_entity,
@@ -138,22 +141,27 @@ fn document() -> Arc<SceneDocument> {
     ]))
 }
 
-fn candidate(document: Arc<SceneDocument>) -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(
+fn candidate(
+    bindings: &SceneComponentBindings,
+    document: Arc<SceneDocument>,
+) -> CompiledSceneCandidate {
+    compiled_scene::mixed(
+        &bindings,
+        &document,
         SourceDocumentKey::named(
             "a4519cc6-e3a1-43bf-803b-4d667af48628".parse().unwrap(),
             "guarded.scene",
             SourceDocumentKind::Scene,
         )
         .unwrap(),
-        document,
+        None,
     )
 }
 
 fn spawn(
     bindings: &SceneComponentBindings,
     world: &mut World,
-    source: &ExpandedSceneCandidate,
+    source: &CompiledSceneCandidate,
 ) -> SpawnedSceneInstance {
     let report = bindings
         .prepare_scene(
@@ -188,7 +196,7 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
     let bindings = bindings();
     let source_document = document();
     let before = source_document.as_ref().clone();
-    let source = candidate(Arc::clone(&source_document));
+    let source = candidate(&bindings, Arc::clone(&source_document));
     let mut world = World::new();
     let instance = spawn(&bindings, &mut world, &source);
     let entity = resolve(&world, &instance, "root");
@@ -199,7 +207,8 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
             .data_component(&world, entity, &score)
             .unwrap()
             .unwrap()
-            .value,
+            .value()
+            .clone(),
         ComponentValue::U64(7)
     );
     assert!(
@@ -227,7 +236,8 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
             .data_component(&world, entity, &component("game.Enabled"))
             .unwrap()
             .unwrap()
-            .value,
+            .value()
+            .clone(),
         ComponentValue::Bool(true)
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
@@ -265,7 +275,10 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
         )
         .unwrap();
     assert_eq!(bindings.data_components(&world, entity).unwrap().count(), 1);
-    assert_eq!(source.document(), &before);
+    assert_eq!(
+        source.document().entities()[0].components()[&score].value(),
+        &ComponentValue::U64(7)
+    );
     assert_eq!(source_document.as_ref(), &before);
 }
 
@@ -273,7 +286,7 @@ fn read_enumerate_replace_remove_preserve_siblings_and_immutable_source() {
 fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes() {
     let bindings = bindings();
     let mut world = World::new();
-    let instance = spawn(&bindings, &mut world, &candidate(document()));
+    let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
     let defaults = component("game.Defaults");
     let before = bindings.export_scene(&world).into_output().unwrap();
@@ -322,7 +335,8 @@ fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes(
             .data_component(&world, entity, &defaults)
             .unwrap()
             .unwrap()
-            .value,
+            .value()
+            .clone(),
         ComponentValue::map([("text", ComponentValue::String("abc".into()))])
     );
 }
@@ -331,7 +345,7 @@ fn exact_aggregate_nodes_bytes_defaults_and_zero_residual_reject_without_writes(
 fn invalid_payload_and_declared_references_leave_the_complete_group_unchanged() {
     let bindings = bindings();
     let mut world = World::new();
-    let instance = spawn(&bindings, &mut world, &candidate(document()));
+    let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
     let before = bindings.export_scene(&world).into_output().unwrap();
     for (name, value) in [
@@ -402,7 +416,11 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
         .components
         .insert(component("game.Link"), link.clone());
     let mut world = World::new();
-    let instance = spawn(&bindings, &mut world, &candidate(Arc::new(source)));
+    let instance = spawn(
+        &bindings,
+        &mut world,
+        &candidate(&bindings, Arc::new(source)),
+    );
     let entity = resolve(&world, &instance, "root");
     let target = resolve(&world, &instance, "target");
     retire_and_despawn_scene_entity(&mut world, target).unwrap();
@@ -424,17 +442,34 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
         Err(nara_scene::SceneDataComponentError::LocalReferenceInvalid { component: rejected })
             if rejected == component("game.Link")
     ));
+    let stored_link = bindings
+        .data_component(&world, entity, &component("game.Link"))
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        bindings
-            .data_component(&world, entity, &component("game.Link"))
-            .unwrap(),
-        Some(&link)
+        (
+            stored_link.schema_owner(),
+            stored_link.version(),
+            stored_link.value()
+        ),
+        (link.owner(), link.version, &link.value),
     );
+    let stored_score = bindings
+        .data_component(&world, entity, &component("game.Score"))
+        .unwrap()
+        .unwrap();
+    let expected_score = record(ComponentValue::U64(7));
     assert_eq!(
-        bindings
-            .data_component(&world, entity, &component("game.Score"))
-            .unwrap(),
-        Some(&record(ComponentValue::U64(7)))
+        (
+            stored_score.schema_owner(),
+            stored_score.version(),
+            stored_score.value()
+        ),
+        (
+            expected_score.owner(),
+            expected_score.version,
+            &expected_score.value
+        ),
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("native")));
     assert_eq!(bindings.export_scene(&world).into_output().unwrap(), before);
@@ -444,7 +479,7 @@ fn replacing_a_valid_link_with_a_retired_target_preserves_the_complete_group() {
 fn declared_asset_metadata_is_checked_without_native_handles() {
     let bindings = bindings();
     let mut world = World::new();
-    let instance = spawn(&bindings, &mut world, &candidate(document()));
+    let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
     let value = ComponentValue::map([
         ("kind", ComponentValue::String("path".into())),
@@ -498,7 +533,8 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
             .data_component(&world, entity, &component("game.Score"))
             .unwrap()
             .unwrap()
-            .value,
+            .value()
+            .clone(),
         ComponentValue::U64(7)
     );
 }
@@ -507,7 +543,7 @@ fn declared_asset_metadata_is_checked_without_native_handles() {
 fn foreign_owner_admissions_unowned_entities_and_moved_carriers_reject() {
     let bindings = bindings();
     let mut world = World::new();
-    let instance = spawn(&bindings, &mut world, &candidate(document()));
+    let instance = spawn(&bindings, &mut world, &candidate(&bindings, document()));
     let entity = resolve(&world, &instance, "root");
     let target = resolve(&world, &instance, "target");
     let foreign =
@@ -561,7 +597,7 @@ fn foreign_owner_admissions_unowned_entities_and_moved_carriers_reject() {
 #[test]
 fn carrier_world_and_entity_generation_witnesses_survive_raw_ecs_moves() {
     let bindings = bindings();
-    let source = candidate(document());
+    let source = candidate(&bindings, document());
     let mut first = World::new();
     let mut second = World::new();
     let first_instance = spawn(&bindings, &mut first, &source);
@@ -611,9 +647,12 @@ fn late_carrier_hooks_requirements_and_observers_reject_without_running() {
     for mode in 0..5 {
         let bindings = bindings();
         let mut world = World::new();
-        let empty_source = candidate(Arc::new(SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("root")),
-        ])));
+        let empty_source = candidate(
+            &bindings,
+            Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+                id("root"),
+            )])),
+        );
         let instance = spawn(&bindings, &mut world, &empty_source);
         let entity = resolve(&world, &instance, "root");
         let calls = Arc::new(AtomicUsize::new(0));
@@ -672,7 +711,7 @@ fn late_carrier_hooks_requirements_and_observers_reject_without_running() {
 
 #[derive(Resource)]
 struct ScheduledConsumer {
-    source: ExpandedSceneCandidate,
+    source: CompiledSceneCandidate,
     retained_source: Arc<SceneDocument>,
     instance: Option<SpawnedSceneInstance>,
     entity: Option<Entity>,
@@ -698,7 +737,8 @@ fn update(world: &mut World) {
                     .data_component(world, entity, &component("game.Score"))
                     .unwrap()
                     .unwrap()
-                    .value,
+                    .value()
+                    .clone(),
                 ComponentValue::U64(7)
             );
             bindings
@@ -716,7 +756,8 @@ fn update(world: &mut World) {
                     .data_component(world, entity, &component("game.Enabled"))
                     .unwrap()
                     .unwrap()
-                    .value,
+                    .value()
+                    .clone(),
                 ComponentValue::Bool(true)
             );
             assert_eq!(bindings.data_components(world, entity).unwrap().count(), 2);
@@ -775,19 +816,19 @@ fn update(world: &mut World) {
                     .data_component(world, current, &component("game.Score"))
                     .unwrap()
                     .unwrap()
-                    .value,
+                    .value()
+                    .clone(),
                 ComponentValue::U64(7)
             );
             consumer.entity = Some(current);
             consumer.instance = Some(instance);
         }
         // Guarded runtime edits never mutate the source candidate or its retained history basis.
+        assert_eq!(consumer.retained_source.as_ref(), document().as_ref());
         assert_eq!(
-            consumer.source.document(),
-            consumer.retained_source.as_ref()
-        );
-        assert_eq!(
-            consumer.source.document().entities[0].components[&component("game.Score")].value,
+            consumer.source.document().entities()[0].components()[&component("game.Score")]
+                .value()
+                .clone(),
             ComponentValue::U64(7)
         );
         consumer.updates += 1;
@@ -805,7 +846,7 @@ fn actual_app_startup_and_update_use_guarded_data_without_changing_source_histor
     ))
     .unwrap();
     app.insert_resource(ScheduledConsumer {
-        source: candidate(Arc::clone(&retained_source)),
+        source: candidate(&bindings(), Arc::clone(&retained_source)),
         retained_source,
         instance: None,
         entity: None,

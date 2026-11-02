@@ -20,14 +20,17 @@ use nara::{
         Commands, Component, ComponentSchema, ComponentTypeId, FixedTime,
         PersistentComponentProvider, Query, Res, ResMut, SceneEntityId, Transform2d, Vec2, World,
     },
-    scene::{SceneDocument, SceneEntityRecord, SceneEntitySource, retire_and_despawn_scene_entity},
+    scene::{
+        CompiledSceneDocument, CompiledSceneEntity, SceneEntitySource,
+        retire_and_despawn_scene_entity,
+    },
     transform::{FixedSpatialSnapshot2d, HistoricalSpatialSnapshot2d, fixed_spatial_snapshot},
 };
 
 use crate::{
     EnemyRole, Health, InitialHealth, InitialVelocity2d, PlayerRole, ProjectileDamage,
     ProjectileLifetime, ProjectileRole, ReferenceProjectSnapshot, RuntimeOnlyTag, Velocity2d,
-    WaveSpawn, Weapon, WeaponCooldown, migrate_weapon_v1_to_v2,
+    WaveSpawn, Weapon, WeaponCooldown,
     resources::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
         MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
@@ -169,11 +172,11 @@ fn resolve_published_entities(
 }
 
 fn prepare_reference_run(
-    source: &SceneDocument,
+    source: &CompiledSceneDocument,
     generation: WaveRunGeneration,
     publication: RunPublication,
 ) -> Result<PreparedReferenceRun, ReferenceSimulationError> {
-    if source.entities.len() > MAX_WAVE_SCENE_ENTITIES {
+    if source.entities().len() > MAX_WAVE_SCENE_ENTITIES {
         return Err(ReferenceSimulationError::TooManySceneEntities);
     }
 
@@ -190,7 +193,7 @@ fn prepare_reference_run(
     let transform_type = ComponentTypeId::new("nara.transform.Transform2d");
     let sprite_type = ComponentTypeId::new("nara.sprite.Sprite");
     let mut player_children = None;
-    for entity in &source.entities {
+    for entity in source.entities() {
         let player = decode_current_component::<PlayerRole>(entity, &player_role_schema)?;
         let enemy = decode_current_component::<EnemyRole>(entity, &enemy_role_schema)?;
         let initial_health =
@@ -198,9 +201,9 @@ fn prepare_reference_run(
         let initial_velocity =
             decode_current_component::<InitialVelocity2d>(entity, &initial_velocity_schema)?;
         let wave_spawn = decode_current_component::<WaveSpawn>(entity, &wave_spawn_schema)?;
-        let weapon_config = decode_weapon(entity, &weapon_schema)?;
-        let has_transform = entity.components.contains_key(&transform_type);
-        let has_sprite = entity.components.contains_key(&sprite_type);
+        let weapon_config = decode_current_component::<Weapon>(entity, &weapon_schema)?;
+        let has_transform = entity.components().contains_key(&transform_type);
+        let has_sprite = entity.components().contains_key(&sprite_type);
 
         if player.is_some() && enemy.is_some() {
             return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
@@ -220,7 +223,7 @@ fn prepare_reference_run(
                 player_count = player_count
                     .checked_add(1)
                     .ok_or(ReferenceSimulationError::TooManySceneEntities)?;
-                player_children = Some(&entity.children);
+                player_children = Some(entity.children());
                 if wave_spawn.is_some() {
                     return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
                 }
@@ -233,7 +236,7 @@ fn prepare_reference_run(
                 }
             }
             actors.push(PreparedActorRuntime {
-                id: entity.id.clone(),
+                id: entity.id().clone(),
                 health: Health {
                     current: initial_health.hit_points,
                 },
@@ -253,7 +256,7 @@ fn prepare_reference_run(
                 return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
             }
             weapon = Some(PreparedWeaponRuntime {
-                id: entity.id.clone(),
+                id: entity.id().clone(),
                 cooldown: WeaponCooldown {
                     remaining_ticks: config.cooldown_ticks,
                 },
@@ -297,42 +300,21 @@ fn prepare_reference_run(
 }
 
 fn decode_current_component<T>(
-    entity: &SceneEntityRecord,
+    entity: &CompiledSceneEntity,
     schema: &ComponentSchema,
 ) -> Result<Option<T>, ReferenceSimulationError>
 where
     T: PersistentComponentProvider,
 {
-    let Some(record) = entity.components.get(schema.id()) else {
+    let Some(record) = entity.components().get(schema.id()) else {
         return Ok(None);
     };
-    if record.version != schema.version() {
+    if record.version() != schema.version() {
         return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
     }
-    T::__decode_persistent_component(&record.value)
+    T::__decode_persistent_component(record.value())
         .map(Some)
         .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
-}
-
-fn decode_weapon(
-    entity: &SceneEntityRecord,
-    schema: &ComponentSchema,
-) -> Result<Option<Weapon>, ReferenceSimulationError> {
-    let Some(record) = entity.components.get(schema.id()) else {
-        return Ok(None);
-    };
-    let decoded = match record.version.get() {
-        1 => migrate_weapon_v1_to_v2(record.value.clone())
-            .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
-            .and_then(|value| {
-                Weapon::__decode_persistent_component(&value)
-                    .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration)
-            }),
-        2 => Weapon::__decode_persistent_component(&record.value)
-            .map_err(|_| ReferenceSimulationError::InvalidAuthoredConfiguration),
-        _ => return Err(ReferenceSimulationError::InvalidAuthoredConfiguration),
-    };
-    decoded.map(Some)
 }
 
 #[allow(

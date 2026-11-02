@@ -14,20 +14,23 @@ use nara_core::{
     PersistentFileHeader, SerdeShapeError, SerdeShapePreflightError,
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
-use nara_reflect::ComponentTypeId;
+use nara_reflect::{
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+};
 use serde::{
     Deserialize, Serialize, Serializer,
     de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor},
-    ser::SerializeSeq,
+    ser::{SerializeMap, SerializeSeq},
 };
 
 use super::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
-    budget::{ProvenanceBudget, WorkBudget, check, scene_budget_error},
+    budget::{ProvenanceBudget, WorkBudget, check},
 };
 use crate::{
-    PrefabProjectionPath, PrefabProjectionStep, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityProvenance, SceneEntityRecord, SourceDocumentKey,
+    CompiledSceneComponent, CompiledSceneEntity, PrefabProjectionPath, PrefabProjectionStep,
+    SceneEntityId, SceneEntityProvenance, SourceDocumentKey,
+    compiled::claims::{FlatSceneClaims, FlatSceneComponentClaim, FlatSceneEntityClaim},
     provenance::{provenance_entry_bytes, provenance_string_bytes},
 };
 
@@ -47,7 +50,16 @@ struct PayloadWire {
 struct EntityWire {
     id: SceneEntityId,
     children: Vec<SceneEntityId>,
-    components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
+    components: BTreeMap<ComponentTypeId, ComponentWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ComponentWire {
+    #[serde(rename = "owner")]
+    schema_owner: Option<PersistentComponentSchemaOwnerId>,
+    version: ComponentSchemaVersion,
+    value: ComponentValue,
 }
 
 #[derive(Deserialize)]
@@ -155,13 +167,18 @@ pub(super) fn decode(
             }
         }
     }
-    // Conversion moves every payload and identity; only the entity Vec and provenance tree
-    // need new allocations. Charge their complete requests before constructing either.
+    // Conversion moves every payload and identity. The entity Vec, component maps and
+    // provenance tree have new containers; admit their requests before constructing them.
     work.reserve(
         raw.entities
             .len()
-            .checked_mul(size_of::<SceneEntityRecord>()),
+            .checked_mul(size_of::<FlatSceneEntityClaim>()),
     )?;
+    for entity in &raw.entities {
+        work.reserve(entity.components.len().checked_mul(
+            size_of::<(ComponentTypeId, FlatSceneComponentClaim)>() + 6 * size_of::<usize>(),
+        ))?;
+    }
     work.reserve(raw.provenance.len().checked_mul(
         size_of::<SceneEntityId>() + size_of::<SceneEntityProvenance>() + 6 * size_of::<usize>(),
     ))?;
@@ -201,28 +218,36 @@ pub(super) fn decode(
             ));
         }
     }
-    let mut document = SceneDocument {
+    let claims = FlatSceneClaims {
         roots: raw.roots,
         entities: raw
             .entities
             .into_iter()
-            .map(|entity| SceneEntityRecord {
+            .map(|entity| FlatSceneEntityClaim {
                 id: entity.id,
                 children: entity.children,
-                components: entity.components,
-                prefab: None,
+                components: entity
+                    .components
+                    .into_iter()
+                    .map(|(component, record)| {
+                        (
+                            component,
+                            FlatSceneComponentClaim {
+                                schema_owner: record.schema_owner,
+                                version: record.version,
+                                value: record.value,
+                            },
+                        )
+                    })
+                    .collect(),
             })
             .collect(),
+        canonical_provenance: provenance,
     };
-    document
-        .entities
-        .sort_unstable_by(|left, right| left.id.cmp(&right.id));
-    crate::format::validate_scene_value_budget(&document, limits.base())
-        .map_err(scene_budget_error)?;
+    work.claims(&claims)?;
     Ok(RuntimeSceneDocumentCandidate {
         source_key: raw.source_key,
-        document,
-        provenance,
+        claims,
         work,
     })
 }
@@ -237,7 +262,7 @@ struct PayloadRef<'a> {
     provenance: ProvenanceRef<'a>,
 }
 
-struct EntitiesRef<'a>(&'a [SceneEntityRecord]);
+struct EntitiesRef<'a>(&'a [CompiledSceneEntity]);
 
 impl Serialize for EntitiesRef<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -245,17 +270,43 @@ impl Serialize for EntitiesRef<'_> {
         struct EntityRef<'a> {
             id: &'a SceneEntityId,
             children: &'a [SceneEntityId],
-            components: &'a BTreeMap<ComponentTypeId, SceneComponentRecord>,
+            components: ComponentsRef<'a>,
         }
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for entity in self.0 {
             sequence.serialize_element(&EntityRef {
-                id: &entity.id,
-                children: &entity.children,
-                components: &entity.components,
+                id: entity.id(),
+                children: entity.children(),
+                components: ComponentsRef(entity.components()),
             })?;
         }
         sequence.end()
+    }
+}
+
+struct ComponentsRef<'a>(&'a BTreeMap<ComponentTypeId, CompiledSceneComponent>);
+
+impl Serialize for ComponentsRef<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct ComponentRef<'a> {
+            #[serde(rename = "owner", skip_serializing_if = "Option::is_none")]
+            schema_owner: Option<&'a PersistentComponentSchemaOwnerId>,
+            version: ComponentSchemaVersion,
+            value: &'a ComponentValue,
+        }
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (component, record) in self.0 {
+            map.serialize_entry(
+                component,
+                &ComponentRef {
+                    schema_owner: record.schema_owner(),
+                    version: record.version(),
+                    value: record.value(),
+                },
+            )?;
+        }
+        map.end()
     }
 }
 
@@ -341,9 +392,9 @@ pub(super) fn encode(
 ) -> Result<Vec<u8>, RuntimeSceneError> {
     let payload = PayloadRef {
         source_key: candidate.source_key(),
-        roots: &candidate.document().roots,
-        entities: EntitiesRef(&candidate.document().entities),
-        provenance: ProvenanceRef(candidate.provenance()),
+        roots: candidate.document().roots(),
+        entities: EntitiesRef(candidate.document().entities()),
+        provenance: ProvenanceRef(candidate.canonical_provenance()),
     };
     let envelope = PersistentFileEnvelope::canonical_v1(
         kind()?,

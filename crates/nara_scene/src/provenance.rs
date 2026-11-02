@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, mem::size_of};
+use std::{cmp::Ordering, collections::BTreeMap, mem::size_of};
 
 use nara_asset::AssetRef;
 use nara_identity::SceneEntityId;
@@ -34,6 +34,67 @@ pub(crate) fn reserve_cost_scratch<T>(
 
 /// Stable provenance for every entity in one expanded scene document.
 pub type SceneEntityProvenanceMap = BTreeMap<SceneEntityId, SceneEntityProvenance>;
+
+/// Borrows one logical entity address within a containing source, without lookup evidence.
+///
+/// Local and projected addresses occupy separate namespaces. Projected addresses compare the
+/// root anchor, typed steps with exact canonical source keys, then the terminal local ID.
+/// Comparison neither allocates nor depends on a processed entity ID or containing source key.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CanonicalSceneEntityAddress<'a>(&'a SceneEntityProvenance);
+
+impl<'a> CanonicalSceneEntityAddress<'a> {
+    pub(crate) const fn new(provenance: &'a SceneEntityProvenance) -> Self {
+        Self(provenance)
+    }
+}
+
+impl PartialEq for CanonicalSceneEntityAddress<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for CanonicalSceneEntityAddress<'_> {}
+
+impl PartialOrd for CanonicalSceneEntityAddress<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CanonicalSceneEntityAddress<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self.0.projection_path(), other.0.projection_path()) {
+            (None, None) => self.0.local_entity_id().cmp(other.0.local_entity_id()),
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some(left), Some(right)) => left
+                .root_anchor()
+                .cmp(right.root_anchor())
+                .then_with(|| {
+                    left.steps()
+                        .iter()
+                        .map(canonical_projection_step)
+                        .cmp(right.steps().iter().map(canonical_projection_step))
+                })
+                .then_with(|| self.0.local_entity_id().cmp(other.0.local_entity_id())),
+        }
+    }
+}
+
+fn canonical_projection_step(
+    step: &PrefabProjectionStep,
+) -> (Option<&SourceDocumentKey>, &SceneEntityId) {
+    match step {
+        PrefabProjectionStep::SourceEntity {
+            canonical_source,
+            entity,
+            ..
+        } => (Some(canonical_source), entity),
+        PrefabProjectionStep::InstanceAddition { entity } => (None, entity),
+    }
+}
 
 // Logical ownership costs, including conservative per-string and tree-entry overhead. These
 // match Scene retention's model; they do not describe allocator capacity or resident memory.

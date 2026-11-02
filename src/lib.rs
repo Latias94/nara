@@ -114,6 +114,13 @@ pub mod asset_build;
 #[cfg(feature = "project-tooling")]
 pub mod project_tooling;
 
+#[cfg(all(test, feature = "runtime-core", not(feature = "project-tooling")))]
+#[path = "project_tooling/host_fs.rs"]
+mod test_host_fs;
+
+#[cfg(all(test, feature = "runtime-core", feature = "project-tooling"))]
+use project_tooling::host_fs as test_host_fs;
+
 #[cfg(feature = "runtime-core")]
 mod project_diagnostic_ids;
 
@@ -226,11 +233,11 @@ pub mod prelude {
         ComponentValueShape, PersistentComponent, PersistentComponentProvider,
     };
     pub use nara_scene::{
-        ExpandedSceneCandidate, ExpandedSceneDocument, Name, PrefabDocument, PreparedScene,
-        SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneEntityRecord,
-        SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
-        SourceDocumentKind, Visibility, export_scene, prepare_scene, prepare_scene_replacement,
-        spawn_scene,
+        CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
+        ExpandedSceneDocument, Name, PrefabDocument, PreparedScene, SceneAuthoringSession,
+        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
+        ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, Visibility,
+        export_scene, prepare_scene, prepare_scene_replacement, spawn_scene,
     };
     pub use nara_transform::{
         FixedSpatialSnapshot2d, GlobalTransform2d, HistoricalSpatialSnapshot2d,

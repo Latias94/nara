@@ -13,10 +13,10 @@ use nara_reflect::{
 use super::*;
 use crate::{
     __private::AuthoringAdapterReceipt, PrefabAddition, PrefabComponentIntent,
-    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionFailureKind,
-    PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceArguments, ResolvedPrefabSource, SceneComponentRecord, SceneDocument,
+    PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
+    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
+    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments,
+    ResolvedPrefabSource, SceneCompilationFailureKind, SceneComponentRecord, SceneDocument,
     SceneEntityId, SceneEntityRecord, SourceDocumentOrigin,
 };
 
@@ -31,8 +31,8 @@ fn compile_use(
     sources: &[PreparedPrefabCopySource],
     document: &SceneDocument,
     basis: &AuthoringSchemaBasis,
-) -> crate::prefab::AuthoringPrefabExpansionReport {
-    crate::prefab::try_expand_authoring_prefabs_with_loader(
+) -> crate::prefab::AuthoringSceneCompilationReport {
+    crate::prefab::try_compile_authoring_scene_with_loader(
         document,
         basis,
         Default::default(),
@@ -61,14 +61,14 @@ fn compile_use(
     .unwrap()
 }
 
-fn assert_use_succeeds(report: &crate::prefab::AuthoringPrefabExpansionReport) {
+fn assert_use_succeeds(report: &crate::prefab::AuthoringSceneCompilationReport) {
     assert!(report.candidate().is_some(), "{:?}", report.diagnostics());
     assert!(!report.diagnostics().has_errors());
     assert!(report.failure().is_none());
     assert!(!report.budget_exceeded());
     assert!(report.omissions().iter().all(|omission| matches!(
         omission.reason,
-        crate::prefab::AuthoringPrefabOmissionReason::NativeBindingUnavailable
+        crate::prefab::AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable
     )));
 }
 

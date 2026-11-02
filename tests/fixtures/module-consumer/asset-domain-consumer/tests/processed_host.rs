@@ -49,8 +49,8 @@ use nara::{
         RuntimeContentLimits, RuntimeContentMember, RuntimeContentMemberKind, RuntimeContentTarget,
     },
     scene::{
-        ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord,
-        SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
+        SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
         advanced::{SceneProductResource, SceneProductTransactionLimits},
     },
 };
@@ -419,7 +419,7 @@ fn assert_source_free(world: &World) {
 
 fn inspect_live(world: &World, later: bool) -> (SpawnedSceneInstance, [usize; 2]) {
     let current = CurrentScene::get(world).unwrap();
-    assert_eq!(current.source().roots, [entity("caption")]);
+    assert_eq!(current.source().roots(), [entity("caption")]);
     let EntityLookup::Resolved(target) = current.receipt().resolve(world, &entity("caption"))
     else {
         panic!("the committed Caption must resolve through its actual Scene receipt")
@@ -449,7 +449,7 @@ fn inspect_prepared(world: &mut World, request: ProjectSceneRequestId) -> [usize
         assert_eq!(view.selected_scene_path(), None);
         assert_eq!(view.selected_scene_product(), Some(primary(LATER)));
         assert_eq!(view.expected_instance(), &expected);
-        assert_eq!(view.scene().roots, [entity("caption")]);
+        assert_eq!(view.scene().roots(), [entity("caption")]);
         inspect_collections(view.domain_assets(), true)
     })
 }
@@ -997,10 +997,28 @@ fn scene_bytes(
         "authoring/startup.scene.json"
     };
     fs::write(root.join(path), document.to_json_string().unwrap()).unwrap();
-    let expanded = ExpandedSceneCandidate::plain(
-        SourceDocumentKey::stable_asset(reference.source(), SourceDocumentKind::Scene),
-        Arc::new(document),
+    let compilation = plan
+        .schema_validation()
+        .bindings()
+        .try_compile_scene_with_loader(
+            &document,
+            Default::default(),
+            Some(database.resolver(&nara::asset::AssetPathScope::ROOT)),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
+    let expanded = compilation
+        .candidate
+        .unwrap()
+        .bind_source(SourceDocumentKey::stable_asset(
+            reference.source(),
+            SourceDocumentKind::Scene,
+        ));
     RuntimeSceneCandidate::cook(
         &expanded,
         plan.schema_validation().bindings(),

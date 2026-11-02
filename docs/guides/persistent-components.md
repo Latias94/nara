@@ -117,7 +117,7 @@ claims reject, including predecessor declarations. `new_with_limits` bounds the 
 declaration indexes. Data records need a matching owner and the current version; a missing native
 binding never chooses this family implicitly.
 
-Use the selection's `expand_prefabs` or `try_expand_prefabs_with_loader` for the same production
+Use the selection's `compile_scene` or `try_compile_scene_with_loader` for the same production
 compiler with data Schemas. Defaults, references, declarative overlays, source demand and bounded
 work retain their existing semantics. See the [public compiler
 tests](../../crates/nara_scene/tests/component_bindings.rs).
@@ -171,6 +171,13 @@ native-only caller, including assets supplied by defaults after encoding. Manage
 uses the installed native definition. The independent preview publication exception does not
 transfer managed export authority. Source Save remains the authoring document owner's operation.
 
+A live export is a new source snapshot. For each Schema default that needs a source environment,
+it records the already resolved effective field as that new record's contextual default. Both
+the explicit value and this snapshot count toward `SceneExportOptions::value_limits` before
+copying. The result can be compiled again under the same definitions; failure to establish a
+valid new context rejects the complete export. Use source Save or complete source conversion
+when the original hidden defaults and inheritance must be preserved.
+
 The default export policy requests Path spelling. Converting a Schema-declared StableId into a
 Path requires the actual scoped resolver, even when the native component stores `AssetRef`
 directly. Choose `StableIdWhenKnown` explicitly to retain those stable selectors without a
@@ -186,13 +193,13 @@ remain separate from this storage family.
 
 ## Processed Runtime Scenes
 
-With the `nara_scene/serde` feature, the Scene owner can cook a complete source-bound expansion
+With the `nara_scene/serde` feature, the Scene owner can cook a complete source-bound compilation
 into a separate `runtime_scene` version 1 JSON artifact. This is the processed Scene format;
 it does not load a Runtime catalog, select products or prove asset residency.
 
 ```rust,ignore
 let cooked = RuntimeSceneCandidate::cook(
-    &expanded,
+    &compiled,
     &bindings,
     project_assets.resolver(asset_scope),
     RuntimeSceneLimits::default(),
@@ -206,9 +213,9 @@ let prepared = bindings.prepare_runtime_scene(world, &candidate, &occurrence)?;
 let report = prepared.commit(world);
 ```
 
-Cook materializes defaults, remaps hierarchy and declared Scene-local references, and converts
-declared `Path`/`StableId` asset leaves to complete primary Product references through the real
-catalogue and its explicitly bound alias scope. Existing Product references preserve their
+Cook consumes explicit effective values, remaps hierarchy and declared Scene-local references,
+and converts declared `Path`/`StableId` asset leaves to complete primary Product references through
+the real catalogue and its explicitly bound alias scope. Existing Product references preserve their
 subproduct selection and require their enclosing source in that catalogue. Identity rewriting
 preserves every leaf's Immediate/Deferred demand, including defaults and overlay-effective values.
 Ordinary strings do not become references. Product existence and receiving-World resources still
@@ -272,7 +279,21 @@ let report = replacement.commit(world);
 ```
 
 Both operations are exported from `nara::prelude` and `nara_scene`. The required
-`ExpandedSceneCandidate` binds its containing source to immutable expanded content and provenance.
+`CompiledSceneCandidate` binds its containing source to a closed flat document and canonical
+provenance. Compile a source with `SceneDocument::compile` and an actual Prefab resolver, then
+consume the successful `SceneCompilationReport::candidate` with `bind_source`. Use an empty
+`InMemoryPrefabSourceResolver` for a source without Prefabs. Compilation still resolves defaults
+and proves the complete hierarchy and reference closure in that case.
+
+`CompiledSceneDocument`, its entities and its components expose borrowed accessors. They contain
+only the ordered flat hierarchy, actual selected Schema owners, current versions, explicit
+effective values and canonical provenance. They have no public builder, `Clone`, `Default` or
+source conversion. `ExpandedSceneDocument` remains an authoring observation; it cannot be bound
+as Native input. An authoring report can produce a Native preview only through its consuming
+basis restriction and compilation. Native reception checks the complete receiving Schema before
+the first codec and neither migrates compiled values nor inserts missing defaults. Recompile
+the original source when the receiving definitions require either operation.
+
 First placement declares a World-local `SceneOccurrenceKey`; replacement obtains that slot from
 its exact predecessor. A receipt is not permission to replace a later activation of the same slot.
 
@@ -702,7 +723,7 @@ it does not require a creation template, Edit capability or native component cod
 let request = session.request_complete_prefab_conversion(
     session.revision(),
     &anchor,
-    PrefabExpansionOptions::default(),
+    SceneCompilationOptions::default(),
 )?;
 // The owned request can move to an existing background task.
 let prepared = request.prepare_with_loader(None, |reference, working| {

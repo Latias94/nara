@@ -5,10 +5,9 @@ use std::fmt::{self, Write};
 use dear_imgui_rs::Ui;
 use nara::{
     scene::{
-        PrefabComponentIntent, PrefabDeclarationLimits, PrefabDeclarationSource,
-        PrefabExpansionFailure, PrefabInstance, PrefabInstanceObservation, PrefabInstancePath,
-        PrefabInstancePathSegment, PrefabOverlay, PrefabOverlaySlot, PrefabRevert,
-        ScenePatchOperation,
+        PrefabComponentIntent, PrefabDeclarationLimits, PrefabDeclarationSource, PrefabInstance,
+        PrefabInstanceObservation, PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlay,
+        PrefabOverlaySlot, PrefabRevert, SceneCompilationFailure, ScenePatchOperation,
     },
     tooling::{
         EditorDocumentQueryBasis, EditorEntityPage, EditorEntityQuery, EditorEntityQueryLimits,
@@ -582,11 +581,11 @@ impl ImguiPrefabIntent {
 }
 
 fn composition_status(
-    failure: Option<&PrefabExpansionFailure>,
+    failure: Option<&SceneCompilationFailure>,
     path: Option<&PrefabInstancePath>,
     slot: Option<PrefabOverlaySlot>,
 ) -> (&'static str, bool) {
-    if let Some(location) = failure.and_then(PrefabExpansionFailure::location) {
+    if let Some(location) = failure.and_then(SceneCompilationFailure::location) {
         if matches!(location.source(), PrefabDeclarationSource::Prefab(_)) {
             return (
                 "Resolution not checked for this stored intent. The first reported failure belongs to another Prefab source.",
@@ -594,13 +593,13 @@ fn composition_status(
             );
         }
         if Some(location.path()) == path {
-            if failure.and_then(PrefabExpansionFailure::slot) == slot && slot.is_some() {
+            if failure.and_then(SceneCompilationFailure::slot) == slot && slot.is_some() {
                 return (
                     "This stored intent is the first reported composition failure.",
                     false,
                 );
             }
-            if failure.and_then(PrefabExpansionFailure::slot).is_none() {
+            if failure.and_then(SceneCompilationFailure::slot).is_none() {
                 return (
                     "This instance declaration owns the first reported failure. Resolution of individual intents is not checked.",
                     false,

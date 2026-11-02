@@ -1,6 +1,6 @@
 use nara_scene::{
-    PrefabDeclarationSource, PrefabEntityTarget, PrefabExpansionFailureKind, PrefabOverlay,
-    PrefabOverlaySlot,
+    PrefabDeclarationSource, PrefabEntityTarget, PrefabOverlay, PrefabOverlaySlot,
+    SceneCompilationFailureKind,
 };
 
 use super::*;
@@ -57,7 +57,10 @@ fn rejected_composition_is_inspectable_only_for_its_current_scene_without_a_nati
         editor.configure_editor_preview(Extent2d::new(320, 180));
         wait_failure(editor, &basis);
         let failure = editor.prefab_composition_failure(&basis).unwrap().unwrap();
-        assert_eq!(failure.reason(), &PrefabExpansionFailureKind::MissingTarget);
+        assert_eq!(
+            failure.reason(),
+            &SceneCompilationFailureKind::MissingTarget
+        );
         let location = failure.location().unwrap();
         assert_eq!(location.source(), &PrefabDeclarationSource::Containing);
         assert_eq!(location.path().anchor.as_str(), "anchor");

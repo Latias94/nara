@@ -11,7 +11,7 @@
             components: {
                 "nara.scene.Name": (
                     version: 1,
-                    value: (type: string, value: "source-a/actor.prefab.ron"),
+                    value: (type: "string", value: "source-a/actor.prefab.ron"),
                 ),
             },
             prefab: Some((

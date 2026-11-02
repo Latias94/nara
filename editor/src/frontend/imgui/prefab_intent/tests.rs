@@ -5,7 +5,7 @@ use nara::{
     reflect::{ComponentRegistryBuilder, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
-        PrefabEntityTarget, PrefabExpansionFailureKind, PrefabInstanceClaim, SceneComponentRecord,
+        PrefabEntityTarget, PrefabInstanceClaim, SceneCompilationFailureKind, SceneComponentRecord,
         SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePlacement,
         ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind,
     },
@@ -450,9 +450,12 @@ fn composition_status_distinguishes_foreign_source_and_never_infers_success() {
     );
     let report =
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("unrelated")), bad.clone()])
-            .expand_prefabs(&registry, &resolver);
+            .compile(&registry, &resolver);
     let failure = report.failure.unwrap();
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::MissingTarget);
+    assert_eq!(
+        failure.reason(),
+        &SceneCompilationFailureKind::MissingTarget
+    );
     let path = PrefabInstancePath::new(id("bad-anchor"));
     assert_eq!(
         composition_status(
@@ -486,7 +489,7 @@ fn composition_status_distinguishes_foreign_source_and_never_infers_success() {
         overrides: None,
     });
     let failure = SceneDocument::from_ordered_roots([anchor])
-        .expand_prefabs(&registry, &resolver)
+        .compile(&registry, &resolver)
         .failure
         .unwrap();
     assert!(

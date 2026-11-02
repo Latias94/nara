@@ -21,6 +21,8 @@ use nara::{
 };
 
 const PERSISTENT_ID: &str = "nara.test.CompositionProbe";
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
 
 #[derive(Component, PersistentComponent, Clone, Debug, PartialEq)]
 #[nara(
@@ -165,11 +167,12 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     let scene_report = nara::scene::spawn_scene(
         &mut scene_world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key(
                 "every_public_authoring_route_materializes_only_the_explicit_persistent_set/scene",
             ),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence(
             "every_public_authoring_route_materializes_only_the_explicit_persistent_set/scene_report",
@@ -207,11 +210,12 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     let prefab_report = nara::scene::spawn_scene(
         &mut prefab_world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::prefab(
+            &registry,
+            &prefab,
             named_prefab_source_key(
                 "every_public_authoring_route_materializes_only_the_explicit_persistent_set/prefab",
             ),
-            std::sync::Arc::new((prefab).instantiate()),
         ),
         &scene_occurrence(
             "every_public_authoring_route_materializes_only_the_explicit_persistent_set/prefab_report",
@@ -305,11 +309,12 @@ fn fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key(
                 "fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation/scene",
             ),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence(
             "fresh_scene_apply_flushes_and_rejects_dynamic_hooks_before_allocation/report",
@@ -354,11 +359,12 @@ fn late_required_component_metadata_rejects_public_apply_before_persistent_mutat
     let report = nara::scene::spawn_scene(
         &mut scene_world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key(
                 "late_required_component_metadata_rejects_public_apply_before_persistent_mutation/scene",
             ),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence(
             "late_required_component_metadata_rejects_public_apply_before_persistent_mutation/report",
@@ -419,11 +425,12 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key(
                 "post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply/scene",
             ),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence(
             "post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply/report",
@@ -489,11 +496,12 @@ fn component_global_observer_rejects_a_fresh_scene_without_running() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key(
                 "component_global_observer_rejects_a_fresh_scene_without_running/scene",
             ),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence("component_global_observer_rejects_a_fresh_scene_without_running/report"),
         None,
@@ -536,9 +544,10 @@ fn identity_resource_observer_rejects_before_scene_allocation() {
     let report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
+        &compiled_scene::scene(
+            &registry,
+            &scene,
             scene_source_key("identity_resource_observer_rejects_before_scene_allocation/scene"),
-            std::sync::Arc::new((scene).clone()),
         ),
         &scene_occurrence("identity_resource_observer_rejects_before_scene_allocation/report"),
         None,

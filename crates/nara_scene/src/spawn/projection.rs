@@ -40,7 +40,7 @@ impl SceneProjection {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> SceneSpawnReport {
         let report = SceneSpawner::new().spawn_with_asset_context_and_product(

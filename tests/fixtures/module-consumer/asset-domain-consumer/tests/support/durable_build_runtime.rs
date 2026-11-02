@@ -35,8 +35,8 @@ use nara::{
         RuntimeContentMemberKind, RuntimeContentScene, RuntimeContentTarget,
     },
     scene::{
-        ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord,
-        SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentRecord, SceneDocument,
+        SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
         advanced::SceneProductTransactionLimits, scene_component_bindings,
     },
 };
@@ -166,13 +166,6 @@ impl Delivery {
                     caption.__encode_persistent_component().unwrap(),
                 ),
             )]);
-        let expanded = ExpandedSceneCandidate::plain(
-            SourceDocumentKey::stable_asset(
-                StableAssetId::parse_str(source).unwrap(),
-                SourceDocumentKind::Scene,
-            ),
-            Arc::new(document),
-        );
         let mut database = ProjectAssetDatabase::default();
         database
             .insert(AssetRecord::new(
@@ -181,6 +174,29 @@ impl Delivery {
                 AssetSourceKind::Other(TextBundleDomain::SOURCE_KIND.into()),
             ))
             .unwrap();
+        let compilation = self
+            .plan
+            .schema_validation()
+            .bindings()
+            .try_compile_scene_with_loader(
+                &document,
+                Default::default(),
+                Some(database.resolver(&AssetPathScope::ROOT)),
+                |_, _| Ok::<_, std::convert::Infallible>(None),
+            )
+            .unwrap();
+        assert!(
+            !compilation.diagnostics.has_errors(),
+            "{:?}",
+            compilation.diagnostics
+        );
+        let expanded = compilation
+            .candidate
+            .unwrap()
+            .bind_source(SourceDocumentKey::stable_asset(
+                StableAssetId::parse_str(source).unwrap(),
+                SourceDocumentKind::Scene,
+            ));
         RuntimeSceneCandidate::cook(
             &expanded,
             self.plan.schema_validation().bindings(),

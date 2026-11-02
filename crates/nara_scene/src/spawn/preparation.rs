@@ -6,6 +6,9 @@ use nara_reflect::{
 
 use super::*;
 
+#[cfg(test)]
+mod compiled_receiver_tests;
+
 pub(super) enum ScenePublicationTarget {
     Register,
     Replace(SpawnedSceneInstance),
@@ -221,16 +224,17 @@ impl fmt::Debug for PreparedScene {
     }
 }
 
-/// Prepares a source-bound Scene for its explicitly declared first logical placement.
+/// Prepares a source-bound compiled Scene for its explicitly declared first logical placement.
+/// Receiving definitions must accept the complete explicit values before any codec runs.
 ///
 /// Construction candidates cannot authorize Scene execution:
 ///
 /// ```compile_fail
 /// use nara_ecs::World;
 /// use nara_reflect::ComponentRegistryBuilder;
-/// use nara_scene::{ExpandedSceneCandidate, SceneOccurrenceKey, prepare_scene};
+/// use nara_scene::{CompiledSceneCandidate, SceneOccurrenceKey, prepare_scene};
 ///
-/// fn prepare(world: &mut World, scene: &ExpandedSceneCandidate, occurrence: &SceneOccurrenceKey) {
+/// fn prepare(world: &mut World, scene: &CompiledSceneCandidate, occurrence: &SceneOccurrenceKey) {
 ///     let builder = ComponentRegistryBuilder::new();
 ///     prepare_scene(world, &builder, scene, occurrence, None);
 /// }
@@ -238,7 +242,7 @@ impl fmt::Debug for PreparedScene {
 pub fn prepare_scene(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> Result<PreparedScene, SceneSpawnReport> {
@@ -256,7 +260,7 @@ pub fn prepare_scene(
 pub fn prepare_scene_replacement(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     current: &SpawnedSceneInstance,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> Result<PreparedScene, SceneSpawnReport> {
@@ -276,7 +280,7 @@ pub fn prepare_scene_replacement(
 pub(super) fn prepare_ordinary_scene(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     target: SceneIdentityCommit<'_>,
@@ -288,7 +292,7 @@ pub(super) fn prepare_ordinary_scene(
         world,
         registry,
         definition,
-        SceneMaterializationInput::Expanded(candidate),
+        SceneMaterializationInput::Compiled(candidate),
         occurrence,
         asset_resolution,
         target,
@@ -307,7 +311,7 @@ impl SceneComponentBindings {
     pub fn prepare_scene(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PreparedScene, SceneSpawnReport> {
@@ -324,14 +328,14 @@ impl SceneComponentBindings {
     pub fn prepare_scene_with_limits(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
     ) -> Result<PreparedScene, SceneSpawnReport> {
         self.prepare_selected_scene(
             world,
-            SceneMaterializationInput::Expanded(candidate),
+            SceneMaterializationInput::Compiled(candidate),
             occurrence,
             asset_resolution,
             SceneIdentityCommit::Register,
@@ -343,7 +347,7 @@ impl SceneComponentBindings {
     pub fn prepare_scene_replacement(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         current: &SpawnedSceneInstance,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> Result<PreparedScene, SceneSpawnReport> {
@@ -360,7 +364,7 @@ impl SceneComponentBindings {
     pub fn prepare_scene_replacement_with_limits(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         current: &SpawnedSceneInstance,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         limits: ComponentValueMaterializationLimits,
@@ -370,7 +374,7 @@ impl SceneComponentBindings {
             .clone();
         self.prepare_selected_scene(
             world,
-            SceneMaterializationInput::Expanded(candidate),
+            SceneMaterializationInput::Compiled(candidate),
             &occurrence,
             asset_resolution,
             SceneIdentityCommit::Replace(current),
@@ -1074,15 +1078,18 @@ mod tests {
         let definition = ScenePreparationDefinition::capture(&world, &original).unwrap();
         assert!(definition.matches_registry(&retained));
         drop(original);
-        let candidate = ExpandedSceneCandidate::plain(
-            SourceDocumentKey::named(
-                "4be07aef-1441-4fcb-9d89-2157bb2796b1".parse().unwrap(),
-                "definition-identity",
-                crate::SourceDocumentKind::Scene,
-            )
-            .unwrap(),
-            Arc::new(crate::SceneDocument::default()),
-        );
+        let candidate = crate::SceneDocument::default()
+            .compile(&retained, &crate::InMemoryPrefabSourceResolver::new())
+            .candidate
+            .expect("the empty source must compile")
+            .bind_source(
+                SourceDocumentKey::named(
+                    "4be07aef-1441-4fcb-9d89-2157bb2796b1".parse().unwrap(),
+                    "definition-identity",
+                    crate::SourceDocumentKind::Scene,
+                )
+                .unwrap(),
+            );
         let occurrence = SceneOccurrenceKey::new("scene.tests", "definition-identity").unwrap();
         let bindings = SceneAssetBindings::from_world(&world);
         let report = SceneSpawner::new()
@@ -1090,7 +1097,7 @@ mod tests {
                 &mut world,
                 &replacement,
                 definition,
-                SceneMaterializationInput::Expanded(&candidate),
+                SceneMaterializationInput::Compiled(&candidate),
                 &occurrence,
                 None,
                 SceneIdentityCommit::Register,
@@ -1120,12 +1127,13 @@ mod tests {
             crate::SourceDocumentKind::Scene,
         )
         .unwrap();
-        let candidate = ExpandedSceneCandidate::plain(
-            source,
-            Arc::new(crate::SceneDocument::from_ordered_roots([
-                crate::SceneEntityRecord::new(SceneEntityId::new("root").unwrap()),
-            ])),
-        );
+        let candidate = crate::SceneDocument::from_ordered_roots([crate::SceneEntityRecord::new(
+            SceneEntityId::new("root").unwrap(),
+        )])
+        .compile(&registry, &crate::InMemoryPrefabSourceResolver::new())
+        .candidate
+        .expect("the source must compile")
+        .bind_source(source);
         let occurrence = SceneOccurrenceKey::new("scene.tests", "completion").unwrap();
         let mut server = AssetServer::new();
         server.reserve::<u32>("textures/retained.png").unwrap();

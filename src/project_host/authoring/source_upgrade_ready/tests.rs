@@ -23,7 +23,7 @@ use crate::{
             SourceUpgradeRecoveryMemberInput, SourceUpgradeRecoveryRootInput,
         },
     },
-    project_tooling::host_fs,
+    test_host_fs as host_fs,
 };
 
 static NEXT_PROJECT: AtomicU64 = AtomicU64::new(1);

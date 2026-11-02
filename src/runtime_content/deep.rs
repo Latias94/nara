@@ -135,17 +135,17 @@ impl NativeFacts {
         scene: &RuntimeContentScene,
     ) -> Result<(), RuntimeContentError> {
         let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
-        for entity in &scene.candidate().document().entities {
-            let Some(record) = entity.components.get(&tilemap) else {
+        for entity in scene.candidate().document().entities() {
+            let Some(record) = entity.components().get(&tilemap) else {
                 continue;
             };
-            let scratch = tilemap_membership_work_bytes(&record.value).ok_or(
+            let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
                 RuntimeContentError::BudgetOverflow {
                     kind: RuntimeContentBudgetKind::WorkBytes,
                 },
             )?;
             let _parser_work = base.inner.budget.reserve(0, scratch)?;
-            if let Some(requirement) = prepare_persisted_tilemap_membership(&record.value)
+            if let Some(requirement) = prepare_persisted_tilemap_membership(record.value())
                 .map_err(RuntimeContentError::Tilemap)?
             {
                 self.requirements.push(&base.inner.budget, requirement)?;

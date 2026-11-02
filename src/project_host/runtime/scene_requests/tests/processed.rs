@@ -3,8 +3,7 @@ use nara_core::ByteLimit;
 use nara_fs::ContentDigest;
 use nara_project::{ProductCapability, RuntimeConfiguration, RuntimePreset};
 use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey,
-    SourceDocumentKind,
+    RuntimeSceneCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
 
 use super::*;
@@ -46,7 +45,7 @@ fn processed_graph_work_overlaps_the_scene_promise_and_refusal_returns_its_capac
             .acquire_startup_scene()
             .expect("the Scene promise fits the exact shared work cap");
         assert_eq!(scene.product(), startup_product());
-        assert_eq!(scene.candidate().document().roots, [entity("startup")]);
+        assert_eq!(scene.candidate().document().roots(), [entity("startup")]);
         drop(scene);
     }
 }
@@ -77,7 +76,7 @@ fn processed_worker_uses_captured_bytes_and_original_definitions_without_source_
             .matches(base.plan().schema_validation().bindings())
     );
     assert_eq!(
-        content.scene.candidate().document().roots,
+        content.scene.candidate().document().roots(),
         [entity("later")]
     );
     assert_eq!(
@@ -127,7 +126,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                 assert_eq!(view.selected_scene_path(), None);
                 assert_eq!(view.selected_scene_product(), Some(later_product()));
                 assert_eq!(view.expected_instance(), &expected);
-                assert_eq!(view.scene().roots, [entity("later")]);
+                assert_eq!(view.scene().roots(), [entity("later")]);
             });
             let owner = world.resource::<RequestOwner>();
             let Some(Slot::Ready { admission, content }) = owner.slot.as_ref() else {
@@ -151,10 +150,10 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
             assert!(!api::content_matches_admission(content, &wrong_mode));
             let current = CurrentScene::get(world).unwrap();
             assert_eq!(current.receipt(), &expected);
-            assert_eq!(current.source().roots, [entity("startup")]);
+            assert_eq!(current.source().roots(), [entity("startup")]);
             assert_eq!(
-                source_view.with_document(|document| document as *const SceneDocument),
-                Some(current.source() as *const SceneDocument),
+                source_view.with_document(|document| document as *const CompiledSceneDocument),
+                Some(current.source() as *const CompiledSceneDocument),
             );
             ProjectScenes::scope(world, |scenes| {
                 assert!(scenes.cancel(request));
@@ -277,7 +276,7 @@ fn processed_managed_travel_publishes_content_and_retains_request_authority() {
             });
             let current = world.resource::<CurrentSceneOwner>();
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
-            assert_eq!(current.source().roots, [entity("later")]);
+            assert_eq!(current.source().roots(), [entity("later")]);
             assert!(current.is_content_managed());
             assert!(!current.is_project_backed());
             assert!(current.hosted_runtime_base().unwrap().same_base(&base));
@@ -430,14 +429,13 @@ impl ProcessedFixture {
         ] {
             let source =
                 SourceDocumentKey::stable_asset(reference.source(), SourceDocumentKind::Scene);
-            let expanded = ExpandedSceneCandidate::plain(
+            let compiled = crate::startup_scene::compile_test_scene(
+                &SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity(name))]),
+                plan.schema_validation().bindings(),
                 source.clone(),
-                Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-                    entity(name),
-                )])),
             );
             let encoded = RuntimeSceneCandidate::cook(
-                &expanded,
+                &compiled,
                 plan.schema_validation().bindings(),
                 ProjectAssetDatabase::default().resolver(&AssetPathScope::ROOT),
                 RuntimeSceneLimits::default(),

@@ -2,19 +2,19 @@
 
 use super::{
     PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabExpansionFailureKind, PrefabInstanceHop, PrefabOverlay, PrefabPlacementParent,
-    PrefabPlacementSlot, layout,
+    PrefabInstanceHop, PrefabOverlay, PrefabPlacementParent, PrefabPlacementSlot,
+    SceneCompilationFailureKind, layout,
 };
 use crate::{
-    PrefabDeclarationSource, PrefabExpansionFailure, PrefabInstance, PrefabInstanceLocation,
-    PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlaySlot, PrefabProjectionPath,
-    PrefabProjectionStep, ResolvedPrefabSource, SceneDocument, SceneEntityId,
+    PrefabDeclarationSource, PrefabInstance, PrefabInstanceLocation, PrefabInstancePath,
+    PrefabInstancePathSegment, PrefabOverlaySlot, PrefabProjectionPath, PrefabProjectionStep,
+    ResolvedPrefabSource, SceneCompilationFailure, SceneDocument, SceneEntityId,
     SceneEntityProvenance, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_public_locator,
         with_public_u64,
     },
-    prefab::{PrefabExpansionBudgetKind, PrefabExpansionContext},
+    prefab::{SceneCompilationBudgetKind, SceneCompilationContext},
     provenance::provenance_entry_bytes,
     validation::validate_scene_structure,
 };
@@ -29,20 +29,34 @@ mod component_program_tests;
 
 mod staged;
 
+/// Flat values and source-only default snapshots have different consumers. Only selected
+/// source conversion requests the latter; Native admission never receives these declarations.
+pub(crate) struct StagedSceneOutput {
+    pub(crate) document: SceneDocument,
+    pub(crate) source_defaults: Vec<MaterializedSourceDefaults>,
+}
+
+pub(crate) struct MaterializedSourceDefaults {
+    pub(crate) entity: SceneEntityId,
+    pub(crate) component: nara_reflect::ComponentTypeId,
+    pub(crate) values:
+        std::collections::BTreeMap<nara_reflect::ComponentFieldId, nara_reflect::ComponentValue>,
+}
+
 #[cfg(all(test, feature = "serde"))]
 #[path = "compile/selected_tests.rs"]
 mod selected_tests;
 
 pub(crate) fn expand_source<F, E>(
-    context: &mut PrefabExpansionContext<'_, F, E>,
+    context: &mut SceneCompilationContext<'_, F, E>,
     roots: &[SceneEntityId],
     entities: &[SceneEntityRecord],
     inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
-) -> Result<SceneDocument, PrefabExpansionFailure>
+) -> Result<SceneDocument, SceneCompilationFailure>
 where
     F: FnMut(
         &nara_asset::AssetRef,
-        &mut crate::prefab::PrefabExpansionWorkingSet,
+        &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     staged::expand_source(
@@ -57,14 +71,14 @@ where
 
 #[cfg(feature = "serde")]
 pub(crate) fn expand_selected_instance<F, E>(
-    context: &mut PrefabExpansionContext<'_, F, E>,
+    context: &mut SceneCompilationContext<'_, F, E>,
     source: crate::prefab::SelectedInstanceSource<'_>,
     anchor: &SceneEntityId,
-) -> Result<SceneDocument, PrefabExpansionFailure>
+) -> Result<StagedSceneOutput, SceneCompilationFailure>
 where
     F: FnMut(
         &nara_asset::AssetRef,
-        &mut crate::prefab::PrefabExpansionWorkingSet,
+        &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     let (roots, entities, inputs) = match source {
@@ -90,15 +104,15 @@ where
     )
 }
 
-impl<'a, F, E> PrefabExpansionContext<'a, F, E>
+impl<'a, F, E> SceneCompilationContext<'a, F, E>
 where
     F: FnMut(
         &nara_asset::AssetRef,
-        &mut crate::prefab::PrefabExpansionWorkingSet,
+        &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    pub(crate) fn push_expansion_failure(&mut self, failure: &PrefabExpansionFailure) {
-        if failure.reason == PrefabExpansionFailureKind::WorkLimit {
+    pub(crate) fn push_expansion_failure(&mut self, failure: &SceneCompilationFailure) {
+        if failure.reason == SceneCompilationFailureKind::WorkLimit {
             self.budget_failed = true;
         }
         // Source declarations remain untouched. Diagnostics describe a rejected projection;
@@ -113,14 +127,14 @@ where
             ),
             "failure-kind",
             match failure.reason {
-                PrefabExpansionFailureKind::SourceChanged => "source-changed",
-                PrefabExpansionFailureKind::MissingTarget => "missing-target",
-                PrefabExpansionFailureKind::DuplicateIntent => "duplicate-intent",
-                PrefabExpansionFailureKind::Placement => "placement",
-                PrefabExpansionFailureKind::Component => "component",
-                PrefabExpansionFailureKind::Reference => "reference",
-                PrefabExpansionFailureKind::OwnerAdmission => "owner-admission",
-                PrefabExpansionFailureKind::WorkLimit => "work-limit",
+                SceneCompilationFailureKind::SourceChanged => "source-changed",
+                SceneCompilationFailureKind::MissingTarget => "missing-target",
+                SceneCompilationFailureKind::DuplicateIntent => "duplicate-intent",
+                SceneCompilationFailureKind::Placement => "placement",
+                SceneCompilationFailureKind::Component => "component",
+                SceneCompilationFailureKind::Reference => "reference",
+                SceneCompilationFailureKind::OwnerAdmission => "owner-admission",
+                SceneCompilationFailureKind::WorkLimit => "work-limit",
             },
         );
         if let Some(location) = &failure.location {

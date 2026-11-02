@@ -72,7 +72,10 @@ fn source_product_prepares_after_admission_and_exposes_actual_path_and_original_
             );
             assert_eq!(view.selected_scene_product(), Some(primary(2)));
             assert_eq!(view.selected_scene_path(), Some(&selected()));
-            assert_eq!(view.scene().roots, [SceneEntityId::new("second").unwrap()]);
+            assert_eq!(
+                view.scene().roots(),
+                [SceneEntityId::new("second").unwrap()]
+            );
             assert_eq!(view.expected_instance(), &expected);
             assert!(scenes.cancel(request));
             assert!(scenes.acknowledge(request));
@@ -170,7 +173,7 @@ fn source_product_dependency_membership_does_not_authorize_travel() {
             });
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots,
+                CurrentScene::get(world).unwrap().source().roots(),
                 [SceneEntityId::new("startup").unwrap()]
             );
         },
@@ -262,7 +265,7 @@ fn source_product_missing_auxiliary_wrong_kind_and_ambiguity_reject_in_preparati
             });
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots,
+                CurrentScene::get(world).unwrap().source().roots(),
                 [SceneEntityId::new("startup").unwrap()]
             );
             assert_active_budget(&context, baseline);
@@ -317,7 +320,10 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
                     let view = scenes.prepared(request).unwrap();
                     assert_eq!(view.selected_scene_product(), Some(primary(2)));
                     assert_eq!(view.selected_scene_path(), Some(&selected()));
-                    assert_eq!(view.scene().roots, [SceneEntityId::new("second").unwrap()]);
+                    assert_eq!(
+                        view.scene().roots(),
+                        [SceneEntityId::new("second").unwrap()]
+                    );
                 });
                 let report = commit_prepared_project_scene(world, request, limits(), &[], |_| {});
                 assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
@@ -333,7 +339,7 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
             let current = CurrentScene::get(world).unwrap();
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
             assert_eq!(
-                current.source().roots,
+                current.source().roots(),
                 [SceneEntityId::new("second").unwrap()]
             );
             assert_eq!(
@@ -509,7 +515,7 @@ fn source_product_stale_context_and_current_receipt_preserve_last_good() {
             assert!(report.instance.is_none());
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
             assert_eq!(
-                CurrentScene::get(world).unwrap().source().roots,
+                CurrentScene::get(world).unwrap().source().roots(),
                 [SceneEntityId::new("startup").unwrap()]
             );
             ProjectScenes::scope(world, |scenes| assert!(scenes.acknowledge(request)));

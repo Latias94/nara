@@ -17,7 +17,7 @@ fn sources() -> InMemoryPrefabSourceResolver {
 }
 
 fn assert_location(
-    report: &PrefabExpansionReport,
+    report: &SceneCompilationReport,
     source: PrefabDeclarationSource,
     anchor: &str,
     steps: Vec<PrefabInstancePathSegment>,
@@ -43,10 +43,10 @@ fn an_unrelated_first_root_is_never_used_as_the_failure_anchor() {
         SceneEntityRecord::new(id("unrelated")),
         anchor("actual", "p", Some(PrefabOverlay::new(key("retired")))),
     ]);
-    let report = document.expand_prefabs(&registry(), &sources());
+    let report = document.compile(&registry(), &sources());
     assert_eq!(
         report.failure.as_ref().unwrap().reason(),
-        &PrefabExpansionFailureKind::SourceChanged,
+        &SceneCompilationFailureKind::SourceChanged,
     );
     assert_location(
         &report,
@@ -68,7 +68,7 @@ fn a_resolved_prefab_declaration_keeps_its_own_canonical_owner() {
             Some(PrefabOverlay::new(key("retired"))),
         )]),
     );
-    let report = scene("p", None).expand_prefabs(&registry(), &sources);
+    let report = scene("p", None).compile(&registry(), &sources);
     assert_location(
         &report,
         PrefabDeclarationSource::Prefab(key("p")),
@@ -87,7 +87,7 @@ fn nested_additions_retain_source_array_selectors() {
     overlay
         .placements
         .push(root(PrefabEntityTarget::addition(id("nested"))));
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources());
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources());
     assert_location(
         &report,
         PrefabDeclarationSource::Containing,
@@ -104,7 +104,7 @@ fn a_selected_instance_claim_is_located_in_its_declaring_snapshot() {
         target: PrefabEntityTarget::source(id("n")),
         value: Some(instance("q", Some(PrefabOverlay::new(key("retired"))))),
     });
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources());
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources());
     assert_location(
         &report,
         PrefabDeclarationSource::Containing,
@@ -121,10 +121,10 @@ fn a_missing_component_target_keeps_the_actual_intent_slot() {
         target: PrefabEntityTarget::source(id("missing")),
         component: ComponentTypeId::new("test.CompilerC"),
     });
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources());
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources());
     assert_eq!(
         report.failure.as_ref().unwrap().reason(),
-        &PrefabExpansionFailureKind::MissingTarget,
+        &SceneCompilationFailureKind::MissingTarget,
     );
     assert_location(
         &report,
@@ -142,10 +142,10 @@ fn an_invalid_component_operation_keeps_the_actual_intent_slot() {
         target: PrefabEntityTarget::source(id("n")),
         component: ComponentTypeId::new("test.CompilerC"),
     });
-    let report = scene("p", Some(overlay)).expand_prefabs(&registry(), &sources());
+    let report = scene("p", Some(overlay)).compile(&registry(), &sources());
     assert_eq!(
         report.failure.as_ref().unwrap().reason(),
-        &PrefabExpansionFailureKind::Component,
+        &SceneCompilationFailureKind::Component,
     );
     assert_location(
         &report,
@@ -158,14 +158,14 @@ fn an_invalid_component_operation_keeps_the_actual_intent_slot() {
 
 #[test]
 fn a_global_budget_refusal_has_no_fabricated_declaration_or_intent() {
-    let report = scene("p", None).expand_prefabs_with_options(
+    let report = scene("p", None).compile_with_options(
         &registry(),
         &sources(),
-        PrefabExpansionOptions::default()
-            .with_limits(PrefabExpansionLimits::default().with_working_bytes(ByteLimit::ONE)),
+        SceneCompilationOptions::default()
+            .with_limits(SceneCompilationLimits::default().with_working_bytes(ByteLimit::ONE)),
     );
     let failure = report.failure.as_ref().expect("typed budget refusal");
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::WorkLimit);
+    assert_eq!(failure.reason(), &SceneCompilationFailureKind::WorkLimit);
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
     assert!(report.diagnostics.has_errors());
@@ -186,10 +186,9 @@ fn an_inherited_component_error_is_not_attributed_to_the_containing_overlay() {
         key("p"),
         PrefabDocument::from_ordered_roots([source]),
     );
-    let report =
-        scene("p", Some(PrefabOverlay::new(key("p")))).expand_prefabs(&registry(), &sources);
+    let report = scene("p", Some(PrefabOverlay::new(key("p")))).compile(&registry(), &sources);
     let failure = report.failure.as_ref().expect("typed component refusal");
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::Component);
+    assert_eq!(failure.reason(), &SceneCompilationFailureKind::Component);
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
 }
@@ -203,11 +202,11 @@ fn invalid_loaded_source_structure_has_no_instance_repair_location() {
             SceneEntityRecord::new(id("n")).with_children([id("missing")])
         ]),
     );
-    let report = scene("p", None).expand_prefabs(&registry(), &sources);
+    let report = scene("p", None).compile(&registry(), &sources);
     let failure = report.failure.as_ref().expect("typed source refusal");
     assert_eq!(
         failure.reason(),
-        &PrefabExpansionFailureKind::OwnerAdmission
+        &SceneCompilationFailureKind::OwnerAdmission
     );
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
@@ -228,11 +227,11 @@ fn a_loaded_scene_key_cannot_be_reported_as_an_instance_base_repair() {
         wrong_kind,
         PrefabDocument::default(),
     );
-    let report = scene("p", None).expand_prefabs(&registry(), &sources);
+    let report = scene("p", None).compile(&registry(), &sources);
     let failure = report.failure.as_ref().expect("typed source-kind refusal");
     assert_eq!(
         failure.reason(),
-        &PrefabExpansionFailureKind::OwnerAdmission
+        &SceneCompilationFailureKind::OwnerAdmission
     );
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
@@ -263,7 +262,7 @@ fn a_different_authoring_admission_is_not_a_repairable_base_change() {
         foreign_basis,
         key("p"),
     );
-    let report = crate::__private::try_expand_authoring_prefabs_with_loader(
+    let report = crate::__private::try_compile_authoring_scene_with_loader(
         &document,
         &basis,
         Default::default(),
@@ -274,7 +273,7 @@ fn a_different_authoring_admission_is_not_a_repairable_base_change() {
     let failure = report.failure().expect("typed admission refusal");
     assert_eq!(
         failure.reason(),
-        &PrefabExpansionFailureKind::OwnerAdmission
+        &SceneCompilationFailureKind::OwnerAdmission
     );
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());

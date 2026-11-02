@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use crate::{SceneDocument, SceneEntityId};
 
 use super::{
-    PrefabComponentIntent, PrefabEntityTarget, PrefabExpansionFailureKind, PrefabOverlay,
-    PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay, PrefabPlacementParent,
+    PrefabPlacementSlot, SceneCompilationFailureKind,
 };
 
 /// The fragment's roots have no physical outer anchor here. Under a nested anchor,
@@ -55,16 +55,16 @@ pub(super) fn apply_layout(
     targets: &mut BTreeMap<PrefabEntityTarget, SceneEntityId>,
     overlay: &PrefabOverlay,
     nested_roots: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     let mut index = EntityIndex::new();
     for (ordinal, record) in document.entities.iter().enumerate() {
         if index.insert(record.id.clone(), ordinal).is_some() {
-            return Err(PrefabExpansionFailureKind::Placement);
+            return Err(SceneCompilationFailureKind::Placement);
         }
     }
     for entity in targets.values() {
         if !index.contains_key(entity) {
-            return Err(PrefabExpansionFailureKind::MissingTarget);
+            return Err(SceneCompilationFailureKind::MissingTarget);
         }
     }
     let (mut sequences, base_order) = read_sequences(document, nested_roots, &index)?;
@@ -73,7 +73,7 @@ pub(super) fn apply_layout(
     for placement in &overlay.placements {
         let entity = resolve(&placement.target, targets, &index)?;
         if std::mem::replace(&mut claimed[entity], true) {
-            return Err(PrefabExpansionFailureKind::DuplicateIntent);
+            return Err(SceneCompilationFailureKind::DuplicateIntent);
         }
         let sequence = match &placement.parent {
             PrefabPlacementParent::Root => Sequence::Root,
@@ -109,10 +109,10 @@ pub(super) fn apply_layout(
             &index,
         )?;
         if std::mem::replace(&mut added[entity], true) {
-            return Err(PrefabExpansionFailureKind::DuplicateIntent);
+            return Err(SceneCompilationFailureKind::DuplicateIntent);
         }
         if !claimed[entity] {
-            return Err(PrefabExpansionFailureKind::Placement);
+            return Err(SceneCompilationFailureKind::Placement);
         }
     }
 
@@ -163,19 +163,19 @@ fn resolve(
     target: &PrefabEntityTarget,
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     index: &EntityIndex,
-) -> Result<usize, PrefabExpansionFailureKind> {
+) -> Result<usize, SceneCompilationFailureKind> {
     targets
         .get(target)
         .and_then(|entity| index.get(entity))
         .copied()
-        .ok_or(PrefabExpansionFailureKind::MissingTarget)
+        .ok_or(SceneCompilationFailureKind::MissingTarget)
 }
 
 fn read_sequences(
     document: &SceneDocument,
     nested_roots: &BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
     index: &EntityIndex,
-) -> Result<(Vec<Sequence>, Sequences), PrefabExpansionFailureKind> {
+) -> Result<(Vec<Sequence>, Sequences), SceneCompilationFailureKind> {
     let mut membership = vec![None; document.entities.len()];
     let mut ordered = Sequences::new();
     record_sequence(
@@ -190,7 +190,7 @@ fn read_sequences(
         let prefix = roots.map_or(0, Vec::len);
         if let Some(roots) = roots {
             if !record.children.starts_with(roots) {
-                return Err(PrefabExpansionFailureKind::Placement);
+                return Err(SceneCompilationFailureKind::Placement);
             }
             record_sequence(
                 Sequence::NestedRoots(entity),
@@ -211,7 +211,7 @@ fn read_sequences(
     let membership = membership
         .into_iter()
         .collect::<Option<Vec<_>>>()
-        .ok_or(PrefabExpansionFailureKind::Placement)?;
+        .ok_or(SceneCompilationFailureKind::Placement)?;
     Ok((membership, ordered))
 }
 
@@ -221,14 +221,14 @@ fn record_sequence(
     index: &EntityIndex,
     membership: &mut [Option<Sequence>],
     ordered: &mut Sequences,
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     let mut members = Vec::with_capacity(entities.len());
     for entity in entities {
         let entity = *index
             .get(entity)
-            .ok_or(PrefabExpansionFailureKind::Placement)?;
+            .ok_or(SceneCompilationFailureKind::Placement)?;
         if membership[entity].replace(sequence).is_some() {
-            return Err(PrefabExpansionFailureKind::Placement);
+            return Err(SceneCompilationFailureKind::Placement);
         }
         members.push(entity);
     }
@@ -241,7 +241,7 @@ fn order_sequences(
     base_order: Sequences,
     placements: &[Placement],
     claimed: &[bool],
-) -> Result<Sequences, PrefabExpansionFailureKind> {
+) -> Result<Sequences, SceneCompilationFailureKind> {
     let mut seeds = Sequences::new();
     let mut before = vec![Vec::new(); sequences.len()];
     let mut after = vec![Vec::new(); sequences.len()];
@@ -256,7 +256,7 @@ fn order_sequences(
             Slot::Last => {}
             Slot::Before(anchor) | Slot::After(anchor) => {
                 if sequences[anchor] != placement.sequence {
-                    return Err(PrefabExpansionFailureKind::Placement);
+                    return Err(SceneCompilationFailureKind::Placement);
                 }
                 let relations = match placement.slot {
                     Slot::Before(_) => &mut before,
@@ -297,7 +297,7 @@ fn order_sequences(
                 match step {
                     Step::Visit(entity) => {
                         if std::mem::replace(&mut entered[entity], true) {
-                            return Err(PrefabExpansionFailureKind::Placement);
+                            return Err(SceneCompilationFailureKind::Placement);
                         }
                         pending.extend(after[entity].iter().rev().copied().map(Step::Visit));
                         pending.push(Step::Emit(entity));
@@ -313,7 +313,7 @@ fn order_sequences(
     }
     // A relative-attachment cycle has no seed. It must reject rather than disappear.
     if emitted != sequences.len() {
-        return Err(PrefabExpansionFailureKind::Placement);
+        return Err(SceneCompilationFailureKind::Placement);
     }
     Ok(ordered)
 }
@@ -324,12 +324,12 @@ fn suppression_mask(
     overlay: &PrefabOverlay,
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     index: &EntityIndex,
-) -> Result<Vec<bool>, PrefabExpansionFailureKind> {
+) -> Result<Vec<bool>, SceneCompilationFailureKind> {
     let mut suppressed = vec![false; sequences.len()];
     for target in &overlay.suppressions {
         let entity = resolve(target, targets, index)?;
         if std::mem::replace(&mut suppressed[entity], true) {
-            return Err(PrefabExpansionFailureKind::DuplicateIntent);
+            return Err(SceneCompilationFailureKind::DuplicateIntent);
         }
     }
     let mut entered = vec![false; sequences.len()];
@@ -337,7 +337,7 @@ fn suppression_mask(
     let mut pending = ordered.get(&Sequence::Root).cloned().unwrap_or_default();
     while let Some(entity) = pending.pop() {
         if std::mem::replace(&mut entered[entity], true) {
-            return Err(PrefabExpansionFailureKind::Placement);
+            return Err(SceneCompilationFailureKind::Placement);
         }
         if let Some(parent) = sequences[entity].parent()
             && suppressed[parent]
@@ -345,7 +345,7 @@ fn suppression_mask(
             // All explicit suppressions were marked before traversal, so ancestor overlap
             // rejects in either declaration order. Traversal visits parents before children.
             if suppressed[entity] {
-                return Err(PrefabExpansionFailureKind::DuplicateIntent);
+                return Err(SceneCompilationFailureKind::DuplicateIntent);
             }
             suppressed[entity] = true;
         }
@@ -359,7 +359,7 @@ fn suppression_mask(
     // Every entity has exactly one owner. Any unreachable remainder is a parent cycle,
     // including a cycle that an explicit suppression would otherwise hide.
     if visited != sequences.len() {
-        return Err(PrefabExpansionFailureKind::Placement);
+        return Err(SceneCompilationFailureKind::Placement);
     }
     Ok(suppressed)
 }
@@ -369,11 +369,11 @@ fn check_surviving_intents(
     targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     index: &EntityIndex,
     suppressed: &[bool],
-) -> Result<(), PrefabExpansionFailureKind> {
+) -> Result<(), SceneCompilationFailureKind> {
     let check = |target: &PrefabEntityTarget| {
         let entity = resolve(target, targets, index)?;
         if suppressed[entity] {
-            return Err(PrefabExpansionFailureKind::Placement);
+            return Err(SceneCompilationFailureKind::Placement);
         }
         Ok(())
     };

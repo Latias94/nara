@@ -17,9 +17,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::{
-        AuthoringAdapterReceipt, AuthoringPrefabExpansionParts, AuthoringPrefabExpansionReport,
-        AuthoringPrefabOmission, AuthoringPrefabOmissionReason, AuthoringPreviewOmissionLocation,
-        AuthoringPreviewOmissionReason, try_expand_authoring_prefabs_with_loader,
+        AuthoringAdapterReceipt, AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
+        AuthoringSceneCompilationOmission, AuthoringSceneCompilationOmissionReason,
+        AuthoringSceneCompilationParts, AuthoringSceneCompilationReport,
+        try_compile_authoring_scene_with_loader,
     },
     AuthoringDocumentSource, AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneDocument,
     PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabProjectionStep,
@@ -159,8 +160,8 @@ fn compile(
     basis: &AuthoringSchemaBasis,
     published: &Arc<PublishedAuthoringPrefabDocument>,
     requested: &mut Vec<AssetRef>,
-) -> AuthoringPrefabExpansionReport {
-    try_expand_authoring_prefabs_with_loader(
+) -> AuthoringSceneCompilationReport {
+    try_compile_authoring_scene_with_loader(
         document,
         basis,
         Default::default(),
@@ -259,10 +260,10 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     );
     assert_eq!(
         report.omissions(),
-        &[AuthoringPrefabOmission {
+        &[AuthoringSceneCompilationOmission {
             entity: root.clone(),
             component: component(),
-            reason: AuthoringPrefabOmissionReason::NativeBindingUnavailable,
+            reason: AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable,
         }]
     );
     let provenance = candidate.provenance().clone();
@@ -273,8 +274,16 @@ fn native_preview_loses_available_component_data_and_declared_references() {
         ..
     } = report.into_native_preview().unwrap();
 
-    assert_eq!(preview.provenance(), &provenance);
-    assert!(entity(preview.document(), &root).components.is_empty());
+    assert_eq!(preview.canonical_provenance(), &provenance);
+    assert!(
+        preview
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == &root)
+            .unwrap()
+            .components()
+            .is_empty()
+    );
     assert_eq!(omissions.len(), 1);
     assert_eq!(
         omissions[0].reason(),
@@ -315,7 +324,7 @@ fn consuming_semantic_parts_preserves_data_omissions_and_effective_asset_referen
     let failure = report.failure().cloned();
     assert_eq!(report.effective_asset_references().len(), 1);
 
-    let parts: AuthoringPrefabExpansionParts = report.into_parts();
+    let parts: AuthoringSceneCompilationParts = report.into_parts();
 
     let candidate = parts
         .candidate
@@ -375,10 +384,10 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
     assert!(report.effective_asset_references().is_empty());
     assert_eq!(
         report.omissions(),
-        &[AuthoringPrefabOmission {
+        &[AuthoringSceneCompilationOmission {
             entity: root.clone(),
             component: component(),
-            reason: AuthoringPrefabOmissionReason::RecordUnavailable(
+            reason: AuthoringSceneCompilationOmissionReason::RecordUnavailable(
                 AuthoringRecordReadiness::FutureSchema,
             ),
         }]
@@ -391,8 +400,16 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
         ..
     } = report.into_native_preview().unwrap();
 
-    assert_eq!(preview.provenance(), &provenance);
-    assert!(entity(preview.document(), &root).components.is_empty());
+    assert_eq!(preview.canonical_provenance(), &provenance);
+    assert!(
+        preview
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == &root)
+            .unwrap()
+            .components()
+            .is_empty()
+    );
     assert_eq!(omissions.len(), 1);
     assert_eq!(
         omissions[0].reason(),

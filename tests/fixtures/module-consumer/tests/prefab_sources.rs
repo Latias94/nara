@@ -43,7 +43,7 @@ fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
         anchor("right", stable.clone()),
     ]);
     let before = resolver.clone();
-    let rejected = scene.expand_prefabs(&registry, &resolver);
+    let rejected = scene.compile(&registry, &resolver);
     assert!(rejected.candidate.is_none());
     assert!(
         rejected
@@ -77,16 +77,16 @@ fn canonical_aliases_share_one_document_and_recover_after_cycle_refusal() {
         stable_source.document()
     ));
 
-    let expansion = scene.expand_prefabs(&registry, &resolver);
+    let expansion = scene.compile(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
         expansion.diagnostics
     );
     let candidate = expansion.candidate.unwrap();
-    assert_eq!(candidate.document().entities.len(), 4);
+    assert_eq!(candidate.entities().len(), 4);
     let projected = candidate
-        .provenance()
+        .canonical_provenance()
         .values()
         .filter_map(|source| source.projection_path())
         .collect::<Vec<_>>();
@@ -179,7 +179,7 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
     });
     let scene = SceneDocument::from_ordered_roots(anchors);
     let original = scene.clone();
-    let expansion = scene.expand_prefabs(&registry, &resolver);
+    let expansion = scene.compile(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -222,7 +222,7 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
         ),
     ] {
         let provenances = candidate
-            .provenance()
+            .canonical_provenance()
             .values()
             .filter(|source| source.local_entity_id().as_str() == local)
             .collect::<Vec<_>>();
@@ -244,7 +244,7 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
         }
     }
 
-    let expected_provenance = candidate.provenance().clone();
+    let expected_provenance = candidate.canonical_provenance().clone();
     let source =
         SourceDocumentKey::named(universe, "consumer.scene", SourceDocumentKind::Scene).unwrap();
     let occurrence = SceneOccurrenceKey::new("consumer", "nested-additions").unwrap();

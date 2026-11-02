@@ -232,7 +232,7 @@ fn strict_content_rejects_cells_outside_the_admitted_tileset() {
             tileset, tile,
         )]));
         let snapshot = loader.load(&candidate, &plan).unwrap();
-        assert_eq!(snapshot.expanded_scene().entities.len(), 1);
+        assert_eq!(snapshot.compiled_scene().entities().len(), 1);
     }
 }
 
@@ -834,7 +834,7 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.images()[0].image().extent().width, 1);
     assert_eq!(snapshot.images()[0].image().extent().height, 1);
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
-    assert!(snapshot.expanded_scene_provenance().values().any(|source| {
+    assert!(snapshot.compiled_scene_provenance().values().any(|source| {
         source.local_entity_id() == &scene_id("enemy")
             && source.projection_path().is_some_and(|path| {
                 path.root_anchor() == &scene_id("enemy-anchor")

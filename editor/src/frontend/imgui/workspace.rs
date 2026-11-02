@@ -4,7 +4,7 @@ use dear_imgui_rs::Ui;
 use nara::project_host::{EditorEditPreparationError, EditorProjectSession};
 use nara::scene::{
     AuthoringConstructionDraft, AuthoringPropertyEdit, PrefabDeclarationLimits,
-    PrefabExpansionFailure, PrefabInstanceObservation, PrefabInstancePath, PrefabRevert,
+    PrefabInstanceObservation, PrefabInstancePath, PrefabRevert, SceneCompilationFailure,
     ScenePatchDocument,
 };
 use nara::tooling::{
@@ -92,7 +92,7 @@ impl ImguiEditorPanelContext<'_, '_> {
     pub fn prefab_composition_failure(
         &self,
         basis: &EditorDocumentQueryBasis,
-    ) -> Result<Option<&PrefabExpansionFailure>, nara::tooling::EditorDocumentQueryRejection> {
+    ) -> Result<Option<&SceneCompilationFailure>, nara::tooling::EditorDocumentQueryRejection> {
         self.query_preparation()?.prefab_composition_failure(basis)
     }
 

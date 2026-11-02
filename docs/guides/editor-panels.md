@@ -354,8 +354,8 @@ location and slot only where established. `None` is not proof that every declara
 A failure owned by another canonical Prefab requires that Prefab's own open-session basis.
 Budget/loading/authority refusals cannot authorize a guessed repair target. Preserved source can
 still Save/Reopen when composition rejects, and a rejected analysis supplies no native input stamp.
-Expansion reports expose `PrefabExpansionFailure`; its `reason()` returns
-`PrefabExpansionFailureKind`, covering source admission and work limits as well as invalid intent.
+Compilation reports expose `SceneCompilationFailure`; its `reason()` returns
+`SceneCompilationFailureKind`, covering source admission and work limits as well as invalid intent.
 The optional location describes an established source declaration, not mutation authority.
 
 ### Convert A Complete Instance

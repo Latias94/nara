@@ -6,8 +6,9 @@ The [final reference-demand prerequisite is qualified](../knowledge/engineering/
 Lexical payload/input scope is selected below. Inline values, contextual defaults, source-only
 copy admission and Native value gates have their
 [qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
-The independent flat compiled representation and complete compiler Interface are in production
-integration. Root/placement replacement and the complete extraction consumer remain unfinished.
+The independent flat compiled representation and complete compiler Interface have their
+[qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md).
+Root/placement replacement and the complete extraction consumer remain unfinished.
 No extraction implementation or qualification is claimed.
 **Parent:** [Foundation R5](2026-10-23-foundation-architecture-rebaseline-plan.md#r5-durable-addressing-prefab-overlays-and-projection-lifetime).
 **Evidence:** [Pinned extraction study](../research/2026-11-02-prefab-extraction-and-occurrence-continuity.md).

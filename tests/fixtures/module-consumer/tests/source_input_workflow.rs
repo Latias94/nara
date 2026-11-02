@@ -41,7 +41,7 @@ use nara_engine::{
         open_explicit_product_project_root, resolve_product_recipe,
     },
     scene::{
-        SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+        CompiledSceneDocument, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
         advanced::SceneProductTransactionLimits,
     },
 };
@@ -217,6 +217,16 @@ fn marker(scene: u8) -> SceneEntityId {
 
 fn document(scene: u8) -> SceneDocument {
     SceneDocument::from_ordered_roots([SceneEntityRecord::new(marker(scene))])
+}
+
+fn assert_compiled_scene(document: &CompiledSceneDocument, scene: u8) {
+    assert_eq!(document.roots(), [marker(scene)]);
+    let [entity] = document.entities() else {
+        panic!("the compiled input fixture must contain exactly one marker")
+    };
+    assert_eq!(entity.id(), &marker(scene));
+    assert!(entity.children().is_empty());
+    assert!(entity.components().is_empty());
 }
 
 fn scene_product(scene: u8) -> AssetProductRef {
@@ -407,7 +417,7 @@ fn inspect_first_startup(world: &mut World) {
 
 fn live_scene(world: &World, scene: u8) -> SpawnedSceneInstance {
     let current = CurrentScene::get(world).unwrap();
-    assert_eq!(current.source(), &document(scene));
+    assert_compiled_scene(current.source(), scene);
     let receipt = current.receipt().clone();
     let EntityLookup::Resolved(entity) = receipt.resolve(world, &marker(scene)) else {
         panic!("the current Scene must resolve its authored entity")
@@ -720,7 +730,7 @@ fn travel(world: &mut World, phase: Phase, case: Case) {
                     Some(scene_product(target))
                 );
                 assert_eq!(prepared.expected_instance(), &receipt);
-                assert_eq!(prepared.scene(), &document(target));
+                assert_compiled_scene(prepared.scene(), target);
             });
             let mut outcome = world.resource_mut::<Outcome>();
             outcome.ready_boundaries += 1;

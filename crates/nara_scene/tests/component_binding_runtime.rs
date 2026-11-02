@@ -1,5 +1,8 @@
 //! Public, backend-free consumers of atomic native/data Scene publication.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -23,7 +26,7 @@ use nara_reflect::{
     ComponentValueKind, ComponentValueMaterializationLimits, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, Name, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
+    CompiledSceneCandidate, Name, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings,
     SceneComponentBindingsPlugin, SceneComponentRecord, SceneComponentsPlugin, SceneDataComponents,
     SceneDocument, SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, SceneSpawnReport,
     SourceDocumentKey, SourceDocumentKind, retire_and_despawn_scene_instance,
@@ -77,20 +80,20 @@ fn bindings() -> SceneComponentBindings {
     SceneComponentBindings::new(registry.clone(), [data_owner()]).unwrap()
 }
 
-fn candidate(score: ComponentValue) -> ExpandedSceneCandidate {
+fn source_key() -> SourceDocumentKey {
+    SourceDocumentKey::named(
+        "8bfe5e0f-ecc0-4dd8-af51-aed9317735bb".parse().unwrap(),
+        "runtime.scene",
+        SourceDocumentKind::Scene,
+    )
+    .unwrap()
+}
+
+fn document(score: ComponentValue) -> SceneDocument {
     let data = |value| {
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, value).with_owner(owner_id())
     };
-    ExpandedSceneCandidate::plain(
-        SourceDocumentKey::named(
-            "8bfe5e0f-ecc0-4dd8-af51-aed9317735bb".parse().unwrap(),
-            "runtime.scene",
-            SourceDocumentKind::Scene,
-        )
-        .unwrap(),
-        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            id("entity"),
-        )
+    SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("entity"))
         .with_component(component("game.Score"), data(score))
         .with_component(component("game.Visible"), data(ComponentValue::Bool(true)))
         .with_component(
@@ -99,8 +102,11 @@ fn candidate(score: ComponentValue) -> ExpandedSceneCandidate {
                 ComponentSchemaVersion::ONE,
                 ComponentValue::String("root".into()),
             ),
-        )])),
-    )
+        )])
+}
+
+fn candidate(bindings: &SceneComponentBindings, score: ComponentValue) -> CompiledSceneCandidate {
+    compiled_scene::mixed(bindings, &document(score), source_key(), None)
 }
 
 fn occurrence(name: &str) -> SceneOccurrenceKey {
@@ -135,7 +141,7 @@ fn preparation_is_private_and_commit_publishes_the_complete_group() {
     let prepared = bindings
         .prepare_scene(
             &mut world,
-            &candidate(ComponentValue::U64(7)),
+            &candidate(&bindings, ComponentValue::U64(7)),
             &occurrence("first"),
             None,
         )
@@ -165,9 +171,9 @@ fn preparation_is_private_and_commit_publishes_the_complete_group() {
 }
 
 #[test]
-fn invalid_final_data_record_does_not_publish_or_consume_target_entities() {
+fn invalid_final_source_data_record_is_rejected_before_activation() {
     let bindings = bindings();
-    let mut document = candidate(ComponentValue::U64(7)).document().clone();
+    let mut document = document(ComponentValue::U64(7));
     // Make the invalid record sort after the native Name, so decoding a preceding native record
     // cannot accidentally publish it before the complete data group has passed preflight.
     let owner = ComponentSchemaOwnerSnapshot::admit(
@@ -199,16 +205,12 @@ fn invalid_final_data_record_does_not_publish_or_consume_target_entities() {
     );
     let bindings =
         SceneComponentBindings::new(bindings.native_snapshot().clone(), [owner]).unwrap();
-    let candidate = ExpandedSceneCandidate::plain(
-        candidate(ComponentValue::U64(7)).source_key().clone(),
-        Arc::new(document),
-    );
     let mut world = World::new();
     let mut control = World::new();
     let before = world.entities().len();
-    let report = bindings
-        .prepare_scene(&mut world, &candidate, &occurrence("invalid"), None)
-        .unwrap_err();
+    let report =
+        bindings.compile_scene(&document, &nara_scene::InMemoryPrefabSourceResolver::new());
+    assert!(report.candidate.is_none());
     assert!(report.diagnostics.has_errors());
     assert_eq!(world.entities().len(), before);
     assert!(!world.contains_resource::<WorldIdentityDomain>());
@@ -216,14 +218,14 @@ fn invalid_final_data_record_does_not_publish_or_consume_target_entities() {
 }
 
 #[test]
-fn invalid_replacement_preserves_the_last_good_activation_and_data() {
+fn invalid_source_recompilation_preserves_the_last_good_activation_and_data() {
     let bindings = bindings();
     let mut world = World::new();
     let current = succeeded(
         bindings
             .prepare_scene(
                 &mut world,
-                &candidate(ComponentValue::U64(7)),
+                &candidate(&bindings, ComponentValue::U64(7)),
                 &occurrence("active"),
                 None,
             )
@@ -232,16 +234,12 @@ fn invalid_replacement_preserves_the_last_good_activation_and_data() {
     );
     let old_entity = resolve(&world, &current);
     let old_stats = world.resource::<WorldIdentityDomain>().stats();
-    assert!(
-        bindings
-            .prepare_scene_replacement(
-                &mut world,
-                &candidate(ComponentValue::String("invalid".into())),
-                &current,
-                None,
-            )
-            .is_err()
+    let rejected = bindings.compile_scene(
+        &document(ComponentValue::String("invalid".into())),
+        &nara_scene::InMemoryPrefabSourceResolver::new(),
     );
+    assert!(rejected.candidate.is_none());
+    assert!(rejected.diagnostics.has_errors());
     assert_eq!(resolve(&world, &current), old_entity);
     assert_eq!(world.resource::<WorldIdentityDomain>().stats(), old_stats);
     let output = bindings.export_scene(&world).into_output().unwrap();
@@ -253,7 +251,7 @@ fn invalid_replacement_preserves_the_last_good_activation_and_data() {
         bindings
             .prepare_scene_replacement(
                 &mut world,
-                &candidate(ComponentValue::U64(19)),
+                &candidate(&bindings, ComponentValue::U64(19)),
                 &current,
                 None,
             )
@@ -274,7 +272,7 @@ fn native_and_data_preparation_share_one_exact_value_allowance() {
             bindings
                 .prepare_scene_with_limits(
                     &mut world,
-                    &candidate(ComponentValue::U64(7)),
+                    &candidate(&bindings, ComponentValue::U64(7)),
                     &occurrence("too-small"),
                     None,
                     allowance,
@@ -287,7 +285,7 @@ fn native_and_data_preparation_share_one_exact_value_allowance() {
     let prepared = bindings
         .prepare_scene_with_limits(
             &mut world,
-            &candidate(ComponentValue::U64(7)),
+            &candidate(&bindings, ComponentValue::U64(7)),
             &occurrence("exact"),
             None,
             limits(3, 13),
@@ -303,7 +301,7 @@ fn late_carrier_observer_rejects_before_binding_and_never_runs() {
     let prepared = bindings
         .prepare_scene(
             &mut world,
-            &candidate(ComponentValue::U64(7)),
+            &candidate(&bindings, ComponentValue::U64(7)),
             &occurrence("late-observer"),
             None,
         )
@@ -329,7 +327,7 @@ fn wrong_world_commit_cannot_publish_even_when_entity_generations_match() {
     let prepared = bindings
         .prepare_scene(
             &mut origin,
-            &candidate(ComponentValue::U64(7)),
+            &candidate(&bindings, ComponentValue::U64(7)),
             &occurrence("wrong-world"),
             None,
         )
@@ -354,7 +352,7 @@ fn exercise_managed_preparation(world: &mut World) {
     let prepared = same
         .prepare_scene(
             world,
-            &candidate(ComponentValue::U64(7)),
+            &candidate(&selected, ComponentValue::U64(7)),
             &occurrence("managed"),
             None,
         )
@@ -366,7 +364,12 @@ fn exercise_managed_preparation(world: &mut World) {
     let before = world.entities().len();
     assert!(
         foreign
-            .prepare_scene_replacement(world, &candidate(ComponentValue::U64(9)), &current, None,)
+            .prepare_scene_replacement(
+                world,
+                &candidate(&selected, ComponentValue::U64(9)),
+                &current,
+                None,
+            )
             .is_err()
     );
     assert_eq!(world.entities().len(), before);
@@ -379,9 +382,11 @@ fn exercise_managed_preparation(world: &mut World) {
         .register_into(&mut foreign_native)
         .unwrap();
     let foreign_native = foreign_native.freeze().unwrap();
-    let empty = ExpandedSceneCandidate::plain(
-        candidate(ComponentValue::U64(7)).source_key().clone(),
-        Arc::new(SceneDocument::default()),
+    let empty = compiled_scene::mixed(
+        &selected,
+        &Arc::new(SceneDocument::default()),
+        source_key(),
+        None,
     );
     let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
     let result = nara_scene::advanced::prepare_expanded_scene_replacement_with_claims(
@@ -436,7 +441,7 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
         bindings
             .prepare_scene(
                 &mut world,
-                &candidate(ComponentValue::U64(7)),
+                &candidate(&bindings, ComponentValue::U64(7)),
                 &occurrence("native-owner"),
                 None,
             )
@@ -452,7 +457,7 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
     let prepared = bindings
         .prepare_scene_replacement_with_claims(
             &mut world,
-            &candidate(ComponentValue::U64(19)),
+            &candidate(&bindings, ComponentValue::U64(19)),
             None,
             &current,
             assets,
@@ -481,7 +486,8 @@ fn mixed_claimed_replacement_retains_candidate_until_native_owner_finishes() {
             .data_component(&world, entity, &component("game.Score"))
             .unwrap()
             .unwrap()
-            .value,
+            .value()
+            .clone(),
         ComponentValue::U64(19)
     );
     assert_eq!(world.resource::<NativeRetirements>().0, 1);
@@ -495,7 +501,7 @@ fn native_codec_cannot_claim_the_scene_owned_carrier_type() {
         selected
             .prepare_scene(
                 &mut donor,
-                &candidate(ComponentValue::U64(7)),
+                &candidate(&selected, ComponentValue::U64(7)),
                 &occurrence("donor"),
                 None,
             )
@@ -534,9 +540,9 @@ fn native_codec_cannot_claim_the_scene_owned_carrier_type() {
         SceneComponentBindings::new(native.clone(), []),
         Err(nara_scene::SceneComponentBindingError::ReservedNativeComponent { .. }),
     ));
-    let input = ExpandedSceneCandidate::plain(
-        candidate(ComponentValue::U64(7)).source_key().clone(),
-        Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+    let input = compiled_scene::native(
+        &native,
+        &Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
             id("forged"),
         )
         .with_component(
@@ -546,6 +552,8 @@ fn native_codec_cannot_claim_the_scene_owned_carrier_type() {
                 ComponentValue::map([] as [(String, ComponentValue); 0]),
             ),
         )])),
+        source_key(),
+        None,
     );
     let mut world = World::new();
     let before = world.entities().len();

@@ -184,25 +184,25 @@ fn consume_stats(world: &mut World) {
     };
     let armor = ComponentPropertyPath::new(ComponentFieldId::new("armor"));
     let mut samples = Vec::new();
-    for source in &current.source().entities {
-        let EntityLookup::Resolved(entity) = current.receipt().resolve(world, &source.id) else {
-            panic!("the activated source entity must be live: {}", source.id);
+    for source in current.source().entities() {
+        let EntityLookup::Resolved(entity) = current.receipt().resolve(world, source.id()) else {
+            panic!("the activated source entity must be live: {}", source.id());
         };
         let Some(record) = bindings.data_component(world, entity, &component).unwrap() else {
             continue;
         };
-        assert_eq!(record.version, version);
-        assert_eq!(record.owner().unwrap().as_str(), OWNER);
+        assert_eq!(record.version(), version);
+        assert_eq!(record.schema_owner().unwrap().as_str(), OWNER);
         let origin = world.get::<SceneEntitySource>(entity).unwrap().provenance();
         samples.push(EnemyStatsSample {
             source_entity: origin.local_entity_id().as_str().to_owned(),
             projected: origin.projection_path().is_some(),
-            health: resolve_component_property(schema, version, &record.value, &health)
+            health: resolve_component_property(schema, version, record.value(), &health)
                 .unwrap()
                 .value
                 .as_i64()
                 .unwrap(),
-            armor: resolve_component_property(schema, version, &record.value, &armor)
+            armor: resolve_component_property(schema, version, record.value(), &armor)
                 .unwrap()
                 .value
                 .as_i64()

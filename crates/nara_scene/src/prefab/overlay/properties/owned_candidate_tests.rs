@@ -72,7 +72,7 @@ fn a_late_key_collision_drops_all_preceding_owned_replacements() {
             &BTreeMap::new(),
             ComponentValueMaterializationLimits::default(),
         ),
-        Err(PrefabExpansionFailureKind::Component),
+        Err(SceneCompilationFailureKind::Component),
     );
     assert_eq!(original, original_before);
     assert_eq!(claims, claims_before);

@@ -165,7 +165,7 @@ fn startup(world: &mut World) {
 
 fn live(world: &World, scene: u8) -> SpawnedSceneInstance {
     let current = CurrentScene::get(world).unwrap();
-    assert_eq!(current.source(), &super::document(scene));
+    assert_compiled_scene(current.source(), scene);
     let receipt = current.receipt().clone();
     let EntityLookup::Resolved(entity) = receipt.resolve(world, &super::marker(scene)) else {
         panic!("live Scene marker")
@@ -211,6 +211,30 @@ fn live(world: &World, scene: u8) -> SpawnedSceneInstance {
         "Hello cooked world"
     );
     receipt
+}
+
+fn assert_compiled_scene(document: &engine::scene::CompiledSceneDocument, scene: u8) {
+    let expected = super::document(scene);
+    assert_eq!(document.roots(), expected.roots);
+    assert_eq!(document.entities().len(), expected.entities.len());
+    assert_eq!(document.canonical_provenance().len(), expected.entities.len());
+    for (entity, source) in document.entities().iter().zip(&expected.entities) {
+        assert_eq!(entity.id(), &source.id);
+        assert_eq!(entity.children(), source.children);
+        assert_eq!(entity.components().len(), source.components.len());
+        for (component, record) in entity.components() {
+            let source = &source.components[component];
+            assert_eq!(record.version(), source.version);
+            assert_eq!(record.value(), &source.value);
+            assert_eq!(
+                record.schema_owner().map(|owner| owner.as_str()),
+                Some("consumer.cooked-player"),
+            );
+        }
+        let origin = &document.canonical_provenance()[&source.id];
+        assert_eq!(origin.local_entity_id(), &source.id);
+        assert!(origin.projection_path().is_none());
+    }
 }
 
 fn activated(world: &mut World) {
@@ -472,7 +496,7 @@ fn travel(world: &mut World, phase: Phase) {
                 );
                 assert!(prepared.selected_scene_path().is_none());
                 assert_eq!(prepared.expected_instance(), &receipt);
-                assert_eq!(prepared.scene(), &super::document(target));
+                assert_compiled_scene(prepared.scene(), target);
             });
             let mut outcome = world.resource_mut::<Outcome>();
             outcome.ready += 1;

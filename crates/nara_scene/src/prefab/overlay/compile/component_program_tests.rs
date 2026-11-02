@@ -17,13 +17,13 @@ use nara_reflect::{
 };
 
 use crate::{
+    CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
-    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionLimits,
-    PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstanceHop,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
     PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
     PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    SceneCompilationLimits, SceneCompilationOptions, SceneCompilationReport, SceneComponentRecord,
+    SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
 };
 
 #[derive(nara_ecs::Component)]
@@ -178,14 +178,14 @@ fn expand(
     registry: &ComponentRegistrySnapshot,
     document: &SceneDocument,
     sources: &InMemoryPrefabSourceResolver,
-    limits: PrefabExpansionLimits,
-) -> PrefabExpansionReport {
+    limits: SceneCompilationLimits,
+) -> SceneCompilationReport {
     let before_document = document.clone();
     let before_sources = sources.clone();
-    let report = document.expand_prefabs_with_options(
+    let report = document.compile_with_options(
         registry,
         sources,
-        PrefabExpansionOptions::default().with_limits(limits),
+        SceneCompilationOptions::default().with_limits(limits),
     );
     assert_eq!(
         document, &before_document,
@@ -195,14 +195,14 @@ fn expand(
     report
 }
 
-fn expanded(report: &PrefabExpansionReport) -> &SceneDocument {
+fn expanded(report: &SceneCompilationReport) -> &CompiledSceneDocument {
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     report
         .document()
         .expect("expected a complete public candidate")
 }
 
-fn projected(report: &PrefabExpansionReport, name: &str) -> SceneEntityId {
+fn projected(report: &SceneCompilationReport, name: &str) -> SceneEntityId {
     expanded(report);
     let mut matches = report.provenance().unwrap().iter().filter(|(_, origin)| {
         origin.local_entity_id() == &id(name) && origin.projection_path().is_some()
@@ -216,17 +216,23 @@ fn projected(report: &PrefabExpansionReport, name: &str) -> SceneEntityId {
     entity.clone()
 }
 
-fn entity<'a>(report: &'a PrefabExpansionReport, name: &str) -> &'a SceneEntityRecord {
+fn entity<'a>(report: &'a SceneCompilationReport, name: &str) -> &'a CompiledSceneEntity {
     let entity = projected(report, name);
     expanded(report)
-        .entities
+        .entities()
         .iter()
-        .find(|record| record.id == entity)
+        .find(|record| record.id() == &entity)
         .unwrap()
 }
 
-fn stored<'a>(report: &'a PrefabExpansionReport, name: &str) -> &'a SceneComponentRecord {
-    &entity(report, name).components[&component()]
+fn stored<'a>(report: &'a SceneCompilationReport, name: &str) -> &'a CompiledSceneComponent {
+    &entity(report, name).components()[&component()]
+}
+
+fn assert_record(actual: &CompiledSceneComponent, expected: &SceneComponentRecord) {
+    assert_eq!(actual.schema_owner(), expected.owner());
+    assert_eq!(actual.version(), expected.version);
+    assert_eq!(actual.value(), &expected.value);
 }
 
 fn field<'a>(diagnostic: &'a Diagnostic, name: &str) -> DiagnosticValueRef<'a> {
@@ -238,7 +244,7 @@ fn field<'a>(diagnostic: &'a Diagnostic, name: &str) -> DiagnosticValueRef<'a> {
         .value()
 }
 
-fn rejected<'a>(report: &'a PrefabExpansionReport, code: &str) -> &'a Diagnostic {
+fn rejected<'a>(report: &'a SceneCompilationReport, code: &str) -> &'a Diagnostic {
     assert!(report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     assert!(report.candidate.is_none());
     assert!(report.document().is_none());
@@ -250,7 +256,7 @@ fn rejected<'a>(report: &'a PrefabExpansionReport, code: &str) -> &'a Diagnostic
     diagnostic
 }
 
-fn conflict(report: &PrefabExpansionReport, expected: &str) {
+fn conflict(report: &SceneCompilationReport, expected: &str) {
     assert_eq!(
         field(
             rejected(report, "scene.prefab-compilation-failed"),
@@ -277,12 +283,12 @@ fn addition_defaults_bind_once_and_preserve_owner_and_inherited_values() {
         Default::default(),
     );
 
-    assert_eq!(expanded(&report).entities.len(), 5);
-    assert_eq!(
+    assert_eq!(expanded(&report).entities().len(), 5);
+    assert_record(
         stored(&report, "new"),
         &effective_record(payload(&projected(&report, "socket"))),
     );
-    assert_eq!(
+    assert_record(
         stored(&report, "host"),
         &effective_record(payload(&projected(&report, "inherited"))),
     );
@@ -312,13 +318,13 @@ fn full_set_defaults_bind_for_add_and_replace_and_keep_the_declared_owner() {
             Default::default(),
         );
 
-        assert_eq!(expanded(&report).entities.len(), 4);
-        assert_eq!(
+        assert_eq!(expanded(&report).entities().len(), 4);
+        assert_record(
             stored(&report, target),
             &effective_record(payload(&projected(&report, "socket"))),
         );
         if mode == PrefabComponentSetMode::Add {
-            assert_eq!(
+            assert_record(
                 stored(&report, "host"),
                 &effective_record(payload(&projected(&report, "inherited"))),
             );
@@ -348,7 +354,7 @@ fn selected_scalar_and_absent_default_resolve_the_selected_source() {
             &fixture(),
             Default::default(),
         );
-        assert_eq!(
+        assert_record(
             stored(&report, "host"),
             &effective_record(payload(&projected(&report, "socket"))),
         );
@@ -382,7 +388,7 @@ fn later_property_pin_replaces_an_unresolved_inherited_reference_before_target_l
         &sources,
         Default::default(),
     );
-    assert_eq!(
+    assert_record(
         stored(&report, "host"),
         &effective_record(payload(&projected(&report, "socket"))),
     );
@@ -397,7 +403,7 @@ fn later_property_pin_replaces_an_unresolved_inherited_reference_before_target_l
     assert!(uncorrected.candidate.is_none());
     assert_eq!(
         uncorrected.failure.as_ref().unwrap().reason(),
-        &crate::PrefabExpansionFailureKind::Reference,
+        &crate::SceneCompilationFailureKind::Reference,
     );
 }
 
@@ -488,9 +494,9 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
         let before = document.clone();
         let mut reads = Vec::new();
         let report = document
-            .try_expand_prefabs_with_loader(
+            .try_compile_with_loader(
                 &registry(true),
-                PrefabExpansionOptions::default(),
+                SceneCompilationOptions::default(),
                 None,
                 |reference, _| {
                     reads.push(reference.clone());
@@ -501,7 +507,7 @@ fn overwritten_property_reference_does_not_read_its_missing_nested_source() {
         assert_eq!(document, before);
         if replace {
             assert_eq!(reads, [request("outer"), request("base")]);
-            assert_eq!(
+            assert_record(
                 stored(&report, "host"),
                 &effective_record(payload(&projected(&report, "socket"))),
             );
@@ -630,7 +636,7 @@ fn absent_default_and_untouched_references_keep_the_original_source_scope() {
             })
             .unwrap()
     };
-    assert_eq!(
+    assert_record(
         stored(&report, "host"),
         &effective_record(ComponentValue::map([
             ("target", local(&socket("base"))),
@@ -648,27 +654,34 @@ fn deferred_reference_metadata_does_not_inflate_a_one_byte_final_local_id() {
     ]);
     let cost = payload(&id("a")).cost();
     assert_eq!(cost.logical_bytes(), 7);
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_materialized_value_nodes(ItemLimit::new(cost.nodes()).unwrap())
         .with_materialized_value_bytes(ByteLimit::new(cost.logical_bytes()).unwrap());
     let sources = InMemoryPrefabSourceResolver::new();
     let accepted = expand(&registry(true), &document, &sources, limits);
-    assert_eq!(
-        expanded(&accepted)
-            .entities
+    assert_record(
+        &expanded(&accepted)
+            .entities()
             .iter()
-            .find(|record| record.id == id("host"))
+            .find(|record| record.id() == &id("host"))
             .unwrap()
-            .components[&component()],
-        effective_record(payload(&id("a"))),
+            .components()[&component()],
+        &effective_record(payload(&id("a"))),
     );
-    assert_eq!(
-        expanded(&accepted)
-            .entities
-            .iter()
-            .find(|record| record.id == id("a")),
-        document.entities.iter().find(|record| record.id == id("a")),
-    );
+    let compiled = expanded(&accepted)
+        .entities()
+        .iter()
+        .find(|record| record.id() == &id("a"))
+        .unwrap();
+    let source = document
+        .entities
+        .iter()
+        .find(|record| record.id == id("a"))
+        .unwrap();
+    assert_eq!(compiled.id(), &source.id);
+    assert_eq!(compiled.children(), source.children.as_slice());
+    assert!(compiled.components().is_empty());
+    assert!(source.components.is_empty());
     let refused = expand(
         &registry(true),
         &document,
@@ -678,7 +691,7 @@ fn deferred_reference_metadata_does_not_inflate_a_one_byte_final_local_id() {
     assert!(refused.candidate.is_none());
     assert_eq!(
         refused.failure.as_ref().unwrap().reason(),
-        &crate::PrefabExpansionFailureKind::WorkLimit,
+        &crate::SceneCompilationFailureKind::WorkLimit,
     );
 }
 
@@ -766,7 +779,17 @@ fn missing_native_noncurrent_and_foreign_owner_records_refuse_activation() {
             );
             assert_eq!(
                 report.failure.as_ref().unwrap().reason(),
-                &crate::PrefabExpansionFailureKind::Component,
+                &crate::SceneCompilationFailureKind::Component,
+            );
+        } else if expected == "owner-admission" {
+            let diagnostic = rejected(&report, "scene.component-owner-mismatch");
+            assert_eq!(
+                field(diagnostic, "component-id"),
+                DiagnosticValueRef::Identifier(component().as_str())
+            );
+            assert_eq!(
+                report.failure.as_ref().unwrap().reason(),
+                &crate::SceneCompilationFailureKind::OwnerAdmission
             );
         } else {
             conflict(&report, expected);
@@ -780,11 +803,11 @@ fn assert_omitted_default_node_budget(
 ) {
     let registry = registry(true);
     let exact =
-        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::new(4).unwrap());
+        SceneCompilationLimits::default().with_materialized_value_nodes(ItemLimit::new(4).unwrap());
     let report = expand(&registry, document, sources, exact);
-    assert!(!expanded(&report).entities.is_empty());
+    assert!(!expanded(&report).entities().is_empty());
     let limits =
-        PrefabExpansionLimits::default().with_materialized_value_nodes(ItemLimit::new(3).unwrap());
+        SceneCompilationLimits::default().with_materialized_value_nodes(ItemLimit::new(3).unwrap());
     let report = expand(&registry, document, sources, limits);
     let diagnostic = rejected(&report, "scene.prefab-expansion-budget-exceeded");
     assert_eq!(
@@ -804,7 +827,7 @@ fn assert_omitted_default_node_budget(
     let failure = report.failure.as_ref().unwrap();
     assert_eq!(
         failure.reason(),
-        &crate::PrefabExpansionFailureKind::WorkLimit
+        &crate::SceneCompilationFailureKind::WorkLimit
     );
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
@@ -812,7 +835,7 @@ fn assert_omitted_default_node_budget(
     #[cfg(feature = "serde")]
     {
         use crate::{
-            __private::{AuthoringAdapterReceipt, try_expand_authoring_prefabs_with_loader},
+            __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
             AuthoringSchemaBasis, PrefabSourceResolver, ResolvedPrefabSource,
         };
         use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
@@ -831,10 +854,10 @@ fn assert_omitted_default_node_budget(
             AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
                 .unwrap();
         let basis = AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
-        let report = try_expand_authoring_prefabs_with_loader(
+        let report = try_compile_authoring_scene_with_loader(
             document,
             &basis,
-            PrefabExpansionOptions::default().with_limits(limits),
+            SceneCompilationOptions::default().with_limits(limits),
             None,
             |reference, _| {
                 Ok::<_, Infallible>(sources.resolve_prefab(reference).map(|source| {
@@ -852,7 +875,7 @@ fn assert_omitted_default_node_budget(
         let failure = report.failure().unwrap();
         assert_eq!(
             failure.reason(),
-            &crate::PrefabExpansionFailureKind::WorkLimit
+            &crate::SceneCompilationFailureKind::WorkLimit
         );
         assert!(failure.location().is_none());
         assert!(failure.slot().is_none());
@@ -921,7 +944,7 @@ fn semantic_default_materialization_failure_keeps_its_component_intent_location(
     let failure = report.failure.as_ref().unwrap();
     assert_eq!(
         failure.reason(),
-        &crate::PrefabExpansionFailureKind::Component
+        &crate::SceneCompilationFailureKind::Component
     );
     assert_eq!(failure.location().unwrap().path().anchor, id("instance"));
     assert_eq!(
@@ -945,7 +968,7 @@ fn two_record_defaults_and_inline_references_share_exact_value_and_generated_id_
     let generated = (3 + 3 + 2) * id("prefab_0").as_str().len();
     assert_eq!((nodes, bytes, generated), (4, 28, 64));
     let limits = |nodes, bytes, generated| {
-        PrefabExpansionLimits::default()
+        SceneCompilationLimits::default()
             .with_materialized_components(ItemLimit::new(2).unwrap())
             .with_materialized_value_nodes(ItemLimit::new(nodes).unwrap())
             .with_materialized_value_bytes(ByteLimit::new(bytes).unwrap())
@@ -974,12 +997,12 @@ fn two_record_defaults_and_inline_references_share_exact_value_and_generated_id_
             &sources,
             limits(nodes, bytes, generated),
         );
-        assert_eq!(expanded(&report).entities.len(), 4);
+        assert_eq!(expanded(&report).entities().len(), 4);
         assert_eq!(projected(&report, "socket"), id("prefab_0"));
         for name in ["first", "second"] {
-            assert_eq!(
+            assert_record(
                 stored(&report, name),
-                &effective_record(payload(&id("prefab_0")))
+                &effective_record(payload(&id("prefab_0"))),
             );
         }
 
@@ -1022,7 +1045,7 @@ fn two_record_defaults_and_inline_references_share_exact_value_and_generated_id_
             let failure = report.failure.as_ref().unwrap();
             assert_eq!(
                 failure.reason(),
-                &crate::PrefabExpansionFailureKind::WorkLimit
+                &crate::SceneCompilationFailureKind::WorkLimit
             );
             assert!(failure.location().is_none());
             assert!(failure.slot().is_none());
@@ -1117,8 +1140,8 @@ fn inherited_addition_intents_with_a_nonempty_instance_route_remain_legal() {
         },
     ));
     let report = expand(&registry(true), &scene(outer), &sources, Default::default());
-    assert_eq!(expanded(&report).entities.len(), 5);
-    assert_eq!(
+    assert_eq!(expanded(&report).entities().len(), 5);
+    assert_record(
         stored(&report, "child"),
         &effective_record(payload(&projected(&report, "socket"))),
     );
@@ -1156,14 +1179,14 @@ fn suppress_frees_selected_materialization_budget_for_a_later_add() {
     let bytes = final_value.logical_bytes();
     let generated = (3 + 3 + 1) * id("prefab_2").as_str().len();
     assert_eq!((final_value.nodes(), bytes, generated), (2, 14, 56));
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_materialized_components(ItemLimit::new(1).unwrap())
         .with_materialized_value_nodes(ItemLimit::new(final_value.nodes()).unwrap())
         .with_materialized_value_bytes(ByteLimit::new(bytes).unwrap())
         .with_generated_identifier_bytes(ByteLimit::new(generated).unwrap());
     let report = expand(&registry, &scene(overlay.clone()), &fixture(), limits);
-    assert!(entity(&report, "host").components.is_empty());
-    assert_eq!(
+    assert!(entity(&report, "host").components().is_empty());
+    assert_record(
         stored(&report, "socket"),
         &effective_record(payload(&projected(&report, "socket"))),
     );

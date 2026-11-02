@@ -9,11 +9,12 @@ use super::{
     retention,
 };
 use crate::{
-    PrefabAuthoringSession, PrefabDocument, PrefabExpansionOptions, PrefabExpansionWorkingSet,
-    PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit, ResolvedPrefabSource,
-    SceneAuthoringHistoryLimits, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
-    SceneEntityId, SceneEntityProvenance, ScenePatchReport, authoring::prepared::stale_basis,
-    authoring_decode::AuthoringDocumentState, prefab::SelectedInstanceSource,
+    PrefabAuthoringSession, PrefabDocument, PreparedPrefabAuthoringEdit,
+    PreparedSceneAuthoringEdit, ResolvedPrefabSource, SceneAuthoringHistoryLimits,
+    SceneAuthoringRevision, SceneAuthoringSession, SceneCompilationOptions,
+    SceneCompilationWorkingSet, SceneDocument, SceneEntityId, SceneEntityProvenance,
+    ScenePatchReport, authoring::prepared::stale_basis, authoring_decode::AuthoringDocumentState,
+    prefab::SelectedInstanceSource,
 };
 
 /// Atomic source refusal or the dependency provider's original acquisition error.
@@ -103,7 +104,7 @@ macro_rules! conversion_owner {
             state: Arc<AuthoringDocumentState>,
             history: SceneAuthoringHistoryLimits,
             anchor: SceneEntityId,
-            options: PrefabExpansionOptions,
+            options: SceneCompilationOptions,
         }
 
         impl $request {
@@ -162,7 +163,7 @@ macro_rules! conversion_owner {
             where
                 F: FnMut(
                     &AssetRef,
-                    &mut PrefabExpansionWorkingSet,
+                    &mut SceneCompilationWorkingSet,
                 ) -> Result<Option<ResolvedPrefabSource>, E>,
             {
                 let basis = self.state.schema_basis();
@@ -277,7 +278,7 @@ macro_rules! conversion_owner {
                 &self,
                 revision: SceneAuthoringRevision,
                 anchor: &SceneEntityId,
-                options: PrefabExpansionOptions,
+                options: SceneCompilationOptions,
             ) -> Result<$request, ScenePatchReport> {
                 if revision != self.revision() {
                     return Err(stale_basis());

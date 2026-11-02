@@ -551,18 +551,21 @@ fn image_brush_preserves_complete_products_without_source_database() {
             component_id.clone(),
             nara_scene::SceneComponentRecord::new(ComponentSchemaVersion::ONE, encoded),
         )]);
-    let expanded = nara_scene::ExpandedSceneDocument::plain(Arc::new(document))
-        .bind_source(scene_source_key("processed-ui-image"));
     let bindings = nara_scene::SceneComponentBindings::new(snapshot.clone(), []).unwrap();
+    let compiled = bindings
+        .compile_scene(&document, &nara_scene::InMemoryPrefabSourceResolver::new())
+        .candidate
+        .unwrap()
+        .bind_source(scene_source_key("processed-ui-image"));
     let cooked = nara_scene::RuntimeSceneCandidate::cook(
-        &expanded,
+        &compiled,
         &bindings,
         database.resolver(&scope),
         nara_scene::RuntimeSceneLimits::default(),
     )
     .unwrap();
-    let encoded = cooked.document().entities[0].components[&component_id]
-        .value
+    let encoded = cooked.document().entities()[0].components()[&component_id]
+        .value()
         .clone();
     assert_eq!(
         encoded.field("background").unwrap().field("image").unwrap(),
@@ -4923,7 +4926,7 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     app.configuration()
         .add_systems(nara_app::StartupStage::Scene, move |world: &mut World| {
             let registry = nara_reflect::component_registry(world).unwrap().clone();
-            let expansion = document.expand_prefabs(&registry, &resolver);
+            let expansion = document.compile(&registry, &resolver);
             assert!(
                 !expansion.diagnostics.has_errors(),
                 "{:?}",
@@ -5076,10 +5079,11 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
                         SceneEntityRecord::new(scene_id("retry")),
                     ],
                 );
-                let candidate = nara_scene::ExpandedSceneCandidate::plain(
-                    scene_source_key(source),
-                    Arc::new(document),
-                );
+                let candidate = document
+                    .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new())
+                    .candidate
+                    .unwrap()
+                    .bind_source(scene_source_key(source));
                 let report = nara_scene::spawn_scene(
                     world,
                     &registry,
@@ -5315,16 +5319,18 @@ fn persistent_rebuild_keeps_keys_but_not_runtime_or_unpresented_behavior_authori
                 return;
             }
             let registry = nara_reflect::component_registry(world).unwrap().clone();
-            let candidate = nara_scene::ExpandedSceneCandidate::plain(
-                scene_source_key(if step == 2 { "other" } else { "panel" }),
-                Arc::new(SceneDocument::new(
-                    [scene_id("root")],
-                    [
-                        SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
-                        SceneEntityRecord::new(scene_id("retry")),
-                    ],
-                )),
+            let document = SceneDocument::new(
+                [scene_id("root")],
+                [
+                    SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
+                    SceneEntityRecord::new(scene_id("retry")),
+                ],
             );
+            let candidate = document
+                .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new())
+                .candidate
+                .unwrap()
+                .bind_source(scene_source_key(if step == 2 { "other" } else { "panel" }));
             let prepared = match &current {
                 Some(current) => nara_scene::prepare_scene_replacement(
                     world, &registry, &candidate, current, None,

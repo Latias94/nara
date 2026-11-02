@@ -1094,13 +1094,13 @@ fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
         for (entity, health) in [(id("enemy"), 125), (prepared_id, 150)] {
             let target = runtime.target(&entity);
             let record = runtime.read(&target, &kind(STATS)).unwrap().unwrap();
-            assert_eq!(record.owner(), Some(definition.owner.owner_id()));
+            assert_eq!(record.schema_owner(), Some(definition.owner.owner_id()));
             assert_eq!(
-                record.value.field("wire_health").unwrap(),
+                record.value().field("wire_health").unwrap(),
                 &ComponentValue::I64(health)
             );
             assert_eq!(
-                record.value.field("wire_armor").unwrap(),
+                record.value().field("wire_armor").unwrap(),
                 &ComponentValue::I64(10)
             );
         }

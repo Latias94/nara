@@ -1,3 +1,6 @@
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use nara_ecs::{Component, Entity, Resource, World};
 use nara_identity::{EntityLookup, SpawnedSceneInstance, WorldIdentityDomain};
 use nara_reflect::ComponentRegistryBuilder;
@@ -25,7 +28,12 @@ fn spawn(
     let report = nara_scene::spawn_scene(
         world,
         &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(source, std::sync::Arc::new((document).clone())),
+        &compiled_scene::native(
+            &registry,
+            &std::sync::Arc::new((document).clone()),
+            source,
+            None,
+        ),
         occurrence,
         None,
     );

@@ -64,7 +64,7 @@ impl PreparedProjectSceneReplacement {
             PreparedSceneContent::Source(snapshot) => component_bindings
                 .prepare_scene_replacement_with_claims(
                     world,
-                    snapshot.expanded_candidate(),
+                    snapshot.compiled_candidate(),
                     Some(snapshot.asset_resolution()),
                     expected,
                     bindings,

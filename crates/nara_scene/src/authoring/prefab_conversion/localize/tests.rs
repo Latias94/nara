@@ -115,7 +115,7 @@ impl Sources {
     fn load(
         &mut self,
         request: &AssetRef,
-        _: &mut PrefabExpansionWorkingSet,
+        _: &mut SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, Infallible> {
         self.reload(request)
     }
@@ -684,6 +684,125 @@ fn materialized_persistent_default_keeps_its_namespace_and_identity() {
     assert_eq!(sources.documents[&instance("base").source].1.as_ref(), &raw);
 }
 
+#[test]
+fn contextual_defaults_survive_nested_conversion_reopen_and_exact_history() {
+    let local = |name: &str| {
+        ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id(name) })
+    };
+    let field = ComponentFieldSchema::optional_with_default(
+        ComponentFieldId::new("target"),
+        "Target",
+        ComponentFieldPath::from_fields(["target"]),
+        ComponentValueKind::EntityRef,
+        local("root"),
+    )
+    .with_capabilities([
+        ComponentCapability::Scene,
+        ComponentCapability::Inspect,
+        ComponentCapability::EntityRef,
+    ]);
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Contextual", ComponentSchemaVersion::ONE)
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+            .with_fields([field]),
+    );
+    for masked in [false, true] {
+        let payload = SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            if masked {
+                ComponentValue::map([("target", local("leaf"))])
+            } else {
+                ComponentValue::Map(Default::default())
+            },
+        )
+        .with_owner(schema_owner())
+        .with_contextual_default(ComponentFieldId::new("target"), local("root"));
+        let mut bridge = crate::SceneEntityRecord::new(id("bridge"));
+        bridge.prefab = Some(instance("nested"));
+        let base = PrefabDocument::new(
+            [id("root")],
+            [
+                crate::SceneEntityRecord::new(id("root"))
+                    .with_children([id("leaf"), id("bridge")])
+                    .with_component(component(), payload.clone()),
+                crate::SceneEntityRecord::new(id("leaf")),
+                bridge,
+            ],
+        );
+        let nested = PrefabDocument::new(
+            [id("root")],
+            [
+                crate::SceneEntityRecord::new(id("root"))
+                    .with_children([id("leaf")])
+                    .with_component(component(), payload),
+                crate::SceneEntityRecord::new(id("leaf")),
+            ],
+        );
+        let mut sources = Sources::new(basis.clone());
+        sources.documents = [
+            (instance("base").source, (key("base"), Arc::new(base))),
+            (instance("nested").source, (key("nested"), Arc::new(nested))),
+        ]
+        .into();
+        let mut document = original();
+        document.roots.push(id("root"));
+        document
+            .entities
+            .push(crate::SceneEntityRecord::new(id("root")));
+        document.canonicalize();
+        let mut session = open_scene(&document, &basis, Default::default());
+        let prepared = session
+            .request_complete_prefab_conversion(
+                session.revision(),
+                &id("anchor"),
+                Default::default(),
+            )
+            .unwrap()
+            .prepare_with_loader(None, |request, work| sources.load(request, work))
+            .unwrap();
+        for depth in [1, 2] {
+            let root = mapped(prepared.entities(), "root", depth, false);
+            let leaf = mapped(prepared.entities(), "leaf", depth, false);
+            let record = prepared
+                .document()
+                .entities
+                .iter()
+                .find(|record| &record.id == root)
+                .unwrap();
+            let payload = &record.components[&component()];
+            assert_eq!(
+                payload.contextual_defaults[&ComponentFieldId::new("target")],
+                local(root.as_str())
+            );
+            assert_eq!(
+                target(prepared.document(), root),
+                if masked { leaf.clone() } else { root.clone() }
+            );
+        }
+        let reviewed = prepared.document().clone();
+        let rebuilt = open_scene(&reviewed, &basis, Default::default());
+        session
+            .commit_complete_prefab_conversion_with_loader(prepared, |request| {
+                sources.reload(request)
+            })
+            .unwrap();
+        assert_classification_matches(&session, &rebuilt);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &document);
+        assert!(session.redo_authoring().applied);
+        assert_eq!(session.document(), &reviewed);
+        let reopened = SceneDocumentCandidate::decode_ron_str(&reviewed.to_ron_string().unwrap())
+            .unwrap()
+            .admit_authoring_with_basis(
+                AuthoringDocumentSource::new(AssetRef::path("scenes/localize.scene.ron").unwrap()),
+                &basis,
+            )
+            .unwrap()
+            .publish();
+        assert_eq!(reopened.document(), &reviewed);
+    }
+}
+
 fn copy_stage(report: &ScenePatchReport, stage: &str) -> bool {
     report.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.authoring-prefab-conversion-copy-limit"
@@ -1094,4 +1213,335 @@ fn classification_reuse_removes_only_selected_overlay_inventory_and_preserves_de
     assert!(references.contains(&default));
     assert!(references.contains(&AssetRef::path("textures/converted.png").unwrap()));
     assert!(references.contains(&AssetRef::path("textures/unrelated.png").unwrap()));
+}
+
+#[test]
+fn routed_contextual_default_survives_unselected_sibling_property_intent() {
+    use nara_identity::ReferenceInputId;
+    use nara_reflect::ComponentPropertyPath;
+
+    use crate::{
+        PrefabComponentIntent, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments,
+    };
+
+    let u = ReferenceInputId::new("u").unwrap();
+    let v = ReferenceInputId::new("v").unwrap();
+    let field = ComponentFieldId::new("target");
+    let input_default = ComponentValue::EntityReference(EntityReference::Authored {
+        reference: AuthoredEntityReference::input(u.clone()),
+    });
+    let socket = ComponentValue::EntityReference(EntityReference::SceneLocal {
+        entity: id("socket"),
+    });
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Routed default", ComponentSchemaVersion::ONE)
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+            .with_fields([ComponentFieldSchema::optional_with_default(
+                field.clone(),
+                "Target",
+                ComponentFieldPath::from_fields(["target"]),
+                ComponentValueShape::optional(ComponentValueShape::EntityRef),
+                input_default.clone(),
+            )
+            .with_capabilities([
+                ComponentCapability::Scene,
+                ComponentCapability::Inspect,
+                ComponentCapability::EntityRef,
+            ])]),
+    );
+    let mut q = PrefabDocument::from_ordered_roots([crate::SceneEntityRecord::new(id("q-root"))
+        .with_component(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("target", ComponentValue::Null)]),
+            )
+            .with_owner(schema_owner())
+            .with_contextual_default(field.clone(), input_default),
+        )]);
+    q.inputs.insert(u.clone());
+    let mut r = PrefabDocument::from_ordered_roots([crate::SceneEntityRecord::new(id("r-root"))
+        .with_component(
+            component(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::map([("target", ComponentValue::Null)]),
+            )
+            .with_owner(schema_owner())
+            .with_contextual_default(
+                field.clone(),
+                ComponentValue::EntityReference(EntityReference::Authored {
+                    reference: AuthoredEntityReference::input(v.clone()),
+                }),
+            ),
+        )]);
+    r.inputs.insert(v.clone());
+    let q = Arc::new(q);
+    let r = Arc::new(r);
+
+    for properties in [false, true] {
+        let mut a = crate::SceneEntityRecord::new(id("a"));
+        let mut selected = instance("q");
+        selected.arguments = Some(PrefabReferenceArguments {
+            base: key("q"),
+            values: [(
+                u.clone(),
+                EntityReference::Authored {
+                    reference: AuthoredEntityReference {
+                        through: vec![PrefabInstanceHop {
+                            anchor: PrefabEntityOrigin::SourceEntity(id("b")),
+                            expected_base: key("r"),
+                        }],
+                        target: AuthoredReferenceTarget::Input(v.clone()),
+                    },
+                },
+            )]
+            .into(),
+        });
+        a.prefab = Some(selected);
+        let mut b = crate::SceneEntityRecord::new(id("b"));
+        let mut sibling = instance("r");
+        sibling.arguments = Some(PrefabReferenceArguments {
+            base: key("r"),
+            values: [(
+                v.clone(),
+                EntityReference::SceneLocal {
+                    entity: id("socket"),
+                },
+            )]
+            .into(),
+        });
+        if properties {
+            let mut overlay = PrefabOverlay::new(key("r"));
+            overlay.components.push(PrefabComponentIntent::Properties {
+                target: PrefabEntityTarget::source(id("r-root")),
+                component: component(),
+                version: ComponentSchemaVersion::ONE,
+                claims: vec![PrefabPropertyClaim {
+                    path: ComponentPropertyPath::new(field.clone()),
+                    intent: PrefabPropertyIntent::Set(socket.clone()),
+                }],
+            });
+            sibling.overrides = Some(overlay);
+        }
+        b.prefab = Some(sibling);
+        let document = SceneDocument::from_ordered_roots([
+            a,
+            b.clone(),
+            crate::SceneEntityRecord::new(id("socket")),
+        ]);
+        let mut sources = Sources::new(basis.clone());
+        sources.documents = [
+            (instance("q").source, (key("q"), Arc::clone(&q))),
+            (instance("r").source, (key("r"), Arc::clone(&r))),
+        ]
+        .into();
+        let mut session = open_scene(&document, &basis, Default::default());
+        let prepared = session
+            .request_complete_prefab_conversion(session.revision(), &id("a"), Default::default())
+            .unwrap()
+            .prepare_with_loader(None, |request, work| sources.load(request, work))
+            .unwrap();
+        assert_eq!(
+            prepared.entities().len(),
+            1,
+            "R contributes no selected values"
+        );
+        let localized = &prepared.entities()[0];
+        assert_eq!(localized.provenance().local_entity_id(), &id("q-root"));
+        let record = prepared
+            .document()
+            .entities
+            .iter()
+            .find(|record| &record.id == localized.entity())
+            .unwrap();
+        let payload = &record.components[&component()];
+        assert_eq!(payload.value.get("target"), Some(&ComponentValue::Null));
+        assert_eq!(payload.contextual_defaults.len(), 1);
+        assert_eq!(payload.contextual_defaults[&field], socket);
+        let reviewed = prepared.document().clone();
+        assert_eq!(
+            reviewed.entities.iter().find(|record| record.id == id("b")),
+            Some(&b)
+        );
+        let rebuilt = open_scene(&reviewed, &basis, Default::default());
+        let committed = session
+            .commit_complete_prefab_conversion_with_loader(prepared, |request| {
+                sources.reload(request)
+            })
+            .unwrap();
+        assert!(
+            committed.report().applied,
+            "{:?}",
+            committed.report().diagnostics
+        );
+        assert_eq!(session.document(), &reviewed);
+        assert_classification_matches(&session, &rebuilt);
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &document);
+        assert!(session.redo_authoring().applied);
+        assert_eq!(session.document(), &reviewed);
+        assert_classification_matches(&session, &rebuilt);
+    }
+}
+
+#[test]
+fn mixed_contextual_default_updates_inventory_and_mapped_target_after_ordinary_reset() {
+    use nara_core::{ByteLimit, ItemLimit};
+    use nara_reflect::{ComponentPropertyPath, ComponentPropertyReadBudget, ComponentShapeMember};
+
+    use crate::AuthoringPropertyValue;
+
+    let hidden = AssetRef::path("textures/hidden.png").unwrap();
+    let visible = AssetRef::path("textures/visible.png").unwrap();
+    let field = ComponentFieldId::new("link");
+    let mixed = |entity: &SceneEntityId, image: &AssetRef| {
+        ComponentValue::map([
+            (
+                "target",
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: entity.clone(),
+                }),
+            ),
+            ("image", crate::patch::asset_ref_value(image)),
+        ])
+    };
+    let hidden_default = mixed(&id("root"), &hidden);
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Mixed default", ComponentSchemaVersion::ONE)
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_fields([ComponentFieldSchema::optional_with_default(
+                field.clone(),
+                "Link",
+                ComponentFieldPath::from_fields(["link"]),
+                ComponentValueShape::record_members([
+                    ComponentShapeMember::new("target", ComponentValueShape::EntityRef)
+                        .with_id(ComponentFieldId::new("target")),
+                    ComponentShapeMember::new("image", ComponentValueKind::AssetRef)
+                        .with_id(ComponentFieldId::new("image")),
+                ]),
+                hidden_default.clone(),
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_capability(ComponentCapability::EntityRef)
+            .with_capability(ComponentCapability::AssetRef)]),
+    );
+    let base = PrefabDocument::new(
+        [id("root")],
+        [
+            crate::SceneEntityRecord::new(id("root"))
+                .with_children([id("leaf")])
+                .with_component(
+                    component(),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([("link", mixed(&id("leaf"), &visible))]),
+                    )
+                    .with_owner(schema_owner())
+                    .with_contextual_default(field.clone(), hidden_default),
+                ),
+            crate::SceneEntityRecord::new(id("leaf")),
+        ],
+    );
+    let mut sources = Sources::new(basis.clone());
+    sources.documents = [(instance("base").source, (key("base"), Arc::new(base)))].into();
+    let mut anchor = crate::SceneEntityRecord::new(id("anchor"));
+    anchor.prefab = Some(instance("base"));
+    let document = SceneDocument::from_ordered_roots([
+        anchor,
+        crate::SceneEntityRecord::new(id("root")),
+        crate::SceneEntityRecord::new(id("leaf")),
+    ]);
+    let mut session = open_scene(&document, &basis, Default::default());
+    let prepared = session
+        .request_complete_prefab_conversion(session.revision(), &id("anchor"), Default::default())
+        .unwrap()
+        .prepare_with_loader(None, |request, work| sources.load(request, work))
+        .unwrap();
+    let root = mapped(prepared.entities(), "root", 1, false).clone();
+    let leaf = mapped(prepared.entities(), "leaf", 1, false).clone();
+    assert_ne!(root, id("root"));
+    assert_ne!(leaf, id("leaf"));
+    let expected_default = mixed(&root, &hidden);
+    let reviewed = prepared.document().clone();
+    let payload = &reviewed
+        .entities
+        .iter()
+        .find(|record| record.id == root)
+        .unwrap()
+        .components[&component()];
+    assert_eq!(payload.value.get("link"), Some(&mixed(&leaf, &visible)));
+    assert_eq!(payload.contextual_defaults[&field], expected_default);
+    let rebuilt = open_scene(&reviewed, &basis, Default::default());
+    let committed = session
+        .commit_complete_prefab_conversion_with_loader(prepared, |request| sources.reload(request))
+        .unwrap();
+    assert!(
+        committed.report().applied,
+        "{:?}",
+        committed.report().diagnostics
+    );
+    assert_eq!(session.document(), &reviewed);
+    assert_classification_matches(&session, &rebuilt);
+    let inventory = |session: &SceneAuthoringSession| {
+        session
+            .authority
+            .published()
+            .unwrap()
+            .schema_declared_asset_references()
+            .map(|reference| reference.asset_ref().clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(inventory(&session), [visible.clone()]);
+
+    let reset = ScenePatchDocument::new([ScenePatchOperation::RemoveField {
+        entity: root.clone(),
+        component: component(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: field.clone(),
+    }]);
+    let report = session.apply_authoring_patch(&reset);
+    assert!(report.applied, "{:?}", report.diagnostics);
+    let absent = session.document().clone();
+    let payload = &absent
+        .entities
+        .iter()
+        .find(|record| record.id == root)
+        .unwrap()
+        .components[&component()];
+    assert!(payload.value.get("link").is_none());
+    assert_eq!(payload.contextual_defaults[&field], expected_default);
+    assert_eq!(
+        session
+            .authoring_entity_view(&root)
+            .unwrap()
+            .component(&component())
+            .unwrap()
+            .property_value(
+                &ComponentPropertyPath::new(field),
+                &mut ComponentPropertyReadBudget::new(
+                    ItemLimit::new(64).unwrap(),
+                    ByteLimit::new(1024).unwrap(),
+                ),
+            )
+            .unwrap(),
+        AuthoringPropertyValue::Defaulted(&expected_default),
+    );
+    assert_eq!(inventory(&session), [hidden.clone()]);
+    let reset_rebuilt = open_scene(&absent, &basis, Default::default());
+    assert_classification_matches(&session, &reset_rebuilt);
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &reviewed);
+    assert_eq!(inventory(&session), [visible.clone()]);
+    assert_classification_matches(&session, &rebuilt);
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &document);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &reviewed);
+    assert_eq!(inventory(&session), [visible]);
+    assert_classification_matches(&session, &rebuilt);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &absent);
+    assert_eq!(inventory(&session), [hidden]);
+    assert_classification_matches(&session, &reset_rebuilt);
 }

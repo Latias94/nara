@@ -971,7 +971,7 @@ impl EditorProjectSession {
     pub fn prefab_composition_failure(
         &self,
         basis: &EditorDocumentQueryBasis,
-    ) -> Result<Option<&nara_scene::PrefabExpansionFailure>, EditorDocumentQueryRejection> {
+    ) -> Result<Option<&nara_scene::SceneCompilationFailure>, EditorDocumentQueryRejection> {
         if !self.accepts_new_work() || self.pending_workspace_intent.is_some() {
             return Err(EditorDocumentQueryRejection::Closing);
         }

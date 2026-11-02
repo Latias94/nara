@@ -499,7 +499,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
     use nara_scene::{
         __private::{
             AuthoringPreviewOmissionLocation, AuthoringPreviewOmissionReason,
-            try_expand_authoring_prefabs_with_loader,
+            try_compile_authoring_scene_with_loader,
         },
         PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
     };
@@ -536,7 +536,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
     let document = SceneDocument::from_ordered_roots([anchor]);
     let before = document.clone();
     let mut observed = Vec::new();
-    let report = try_expand_authoring_prefabs_with_loader(
+    let report = try_compile_authoring_scene_with_loader(
         &document,
         &basis,
         Default::default(),
@@ -583,13 +583,12 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
         omissions,
         ..
     } = report.into_native_preview().unwrap();
-    assert_eq!(native_preview.provenance(), &expected);
+    assert_eq!(native_preview.canonical_provenance(), &expected);
     assert!(
         native_preview
-            .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
     assert_eq!(omissions.len(), 1);
     assert_eq!(
@@ -605,7 +604,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
 
 #[test]
 fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
-    use nara_scene::{__private::try_expand_authoring_prefabs_with_loader, ResolvedPrefabSource};
+    use nara_scene::{__private::try_compile_authoring_scene_with_loader, ResolvedPrefabSource};
     use std::{convert::Infallible, sync::Arc};
 
     let (bundle, adapters) = catalog();
@@ -626,7 +625,7 @@ fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
         overrides: None,
     });
     let document = SceneDocument::from_ordered_roots([anchor]);
-    let report = try_expand_authoring_prefabs_with_loader(
+    let report = try_compile_authoring_scene_with_loader(
         &document,
         &basis,
         Default::default(),

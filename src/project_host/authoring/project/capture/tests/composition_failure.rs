@@ -1,6 +1,6 @@
 use nara_scene::{
-    PrefabDeclarationSource, PrefabEntityTarget, PrefabExpansionFailureKind, PrefabOverlay,
-    PrefabOverlaySlot, ScenePatchDocument, ScenePatchOperation,
+    PrefabDeclarationSource, PrefabEntityTarget, PrefabOverlay, PrefabOverlaySlot,
+    SceneCompilationFailureKind, ScenePatchDocument, ScenePatchOperation,
 };
 
 use super::*;
@@ -47,7 +47,10 @@ fn actual_source_capture_retains_typed_failure_and_fences_its_schema_and_prefab_
     assert!(!capture.requires_recapture());
     assert!(capture.diagnostics().has_errors());
     let failure = capture.composition_failure().unwrap();
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::MissingTarget);
+    assert_eq!(
+        failure.reason(),
+        &SceneCompilationFailureKind::MissingTarget
+    );
     let location = failure.location().unwrap();
     assert_eq!(location.source(), &PrefabDeclarationSource::Containing);
     assert_eq!(location.path().anchor.as_str(), "anchor");
@@ -58,7 +61,7 @@ fn actual_source_capture_retains_typed_failure_and_fences_its_schema_and_prefab_
     let retained = composition_failure_retained_bytes(failure).unwrap();
     assert_eq!(
         retained,
-        size_of::<nara_scene::PrefabExpansionFailure>()
+        size_of::<nara_scene::SceneCompilationFailure>()
             + crate::scene_retention::string_retained_bytes("anchor").unwrap(),
     );
     assert!(capture.usage().retained_candidate_bytes() >= retained);

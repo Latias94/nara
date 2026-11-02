@@ -6,7 +6,7 @@ use crate::{SceneEntityId, SourceDocumentKey};
 ///
 /// Source admission and work limits do not establish a conflicting or removable source intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrefabExpansionFailureKind {
+pub enum SceneCompilationFailureKind {
     SourceChanged,
     MissingTarget,
     DuplicateIntent,
@@ -113,15 +113,15 @@ impl PrefabInstanceLocation {
 /// Failure is not an exhaustive inventory of conflicting intent. Budget, loading and authority
 /// errors may have no declaration location; callers must not invent a replacement anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrefabExpansionFailure {
-    pub(crate) reason: PrefabExpansionFailureKind,
+pub struct SceneCompilationFailure {
+    pub(crate) reason: SceneCompilationFailureKind,
     pub(crate) location: Option<PrefabInstanceLocation>,
     pub(crate) slot: Option<PrefabOverlaySlot>,
 }
 
-impl PrefabExpansionFailure {
+impl SceneCompilationFailure {
     #[must_use]
-    pub const fn reason(&self) -> &PrefabExpansionFailureKind {
+    pub const fn reason(&self) -> &SceneCompilationFailureKind {
         &self.reason
     }
 
@@ -136,8 +136,8 @@ impl PrefabExpansionFailure {
     }
 }
 
-impl From<PrefabExpansionFailureKind> for PrefabExpansionFailure {
-    fn from(reason: PrefabExpansionFailureKind) -> Self {
+impl From<SceneCompilationFailureKind> for SceneCompilationFailure {
+    fn from(reason: SceneCompilationFailureKind) -> Self {
         Self {
             reason,
             location: None,

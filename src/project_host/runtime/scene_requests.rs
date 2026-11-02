@@ -28,7 +28,7 @@ use nara_ecs::{Res, ResMut, Resource, World, system::SystemParam};
 use nara_identity::{SpawnedSceneInstance, WorldEntityToken};
 use nara_project::ProjectPath;
 use nara_scene::{
-    SceneDocument, SceneSpawnReport,
+    CompiledSceneDocument, SceneSpawnReport,
     advanced::{SceneProductOverlayWriter, SceneProductTransactionLimits},
 };
 use nara_tasks::TaskPools;

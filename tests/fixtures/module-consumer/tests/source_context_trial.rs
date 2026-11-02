@@ -78,7 +78,7 @@ fn direct_and_location_sources_share_one_intent_replace_end_workflow() {
     let original_scene = fs::read(project.root.join(SOURCE_PATH)).unwrap();
     let request = AssetRef::path(SOURCE_PATH).unwrap();
     let mut host = TrialHost::new();
-    let direct = BoundScene::named(universe(), "hud", document()).unwrap();
+    let direct = BoundScene::named(universe(), "hud", document(), host.registry()).unwrap();
     let mut loader = FileSources::open(&project.root).unwrap();
     let file = loader.load(&request, host.registry()).unwrap();
     let left = Occurrence::new(universe(), "left").unwrap();
@@ -152,7 +152,13 @@ fn direct_and_location_sources_share_one_intent_replace_end_workflow() {
 #[test]
 fn empty_occurrences_are_exclusive_and_scene_rejection_keeps_the_predecessor() {
     let mut host = TrialHost::new();
-    let empty = BoundScene::named(universe(), "empty", SceneDocument::default()).unwrap();
+    let empty = BoundScene::named(
+        universe(),
+        "empty",
+        SceneDocument::default(),
+        host.registry(),
+    )
+    .unwrap();
     let slot = Occurrence::new(universe(), "empty-slot").unwrap();
     let foreign_intent = host.intent(&empty, &slot, None).unwrap();
     assert!(matches!(
@@ -176,11 +182,13 @@ fn empty_occurrences_are_exclusive_and_scene_rejection_keeps_the_predecessor() {
     );
     assert!(matches!(host.end(&active), Err(Error::Stale)));
 
-    let invalid =
-        BoundScene::named(universe(), "invalid", SceneDocument::new([local()], [])).unwrap();
-    let error = host
-        .commit(host.intent(&invalid, &slot, Some(&replacement)).unwrap())
-        .unwrap_err();
+    let error = BoundScene::named(
+        universe(),
+        "invalid",
+        SceneDocument::new([local()], []),
+        host.registry(),
+    )
+    .unwrap_err();
     let Error::Scene(diagnostics) = error else {
         panic!("expected Scene admission failure")
     };
@@ -330,7 +338,8 @@ fn stable_path_admission_outside_the_scanned_root_keeps_owner_proven_aliases() {
 #[test]
 fn ui_payload_budget_failure_does_not_claim_to_undo_scene_publication() {
     let mut host = TrialHost::new();
-    let source = BoundScene::named(universe(), &"x".repeat(230), document()).unwrap();
+    let source =
+        BoundScene::named(universe(), &"x".repeat(230), document(), host.registry()).unwrap();
     let slot = Occurrence::new(universe(), "slot").unwrap();
     let active = host
         .commit(host.intent(&source, &slot, None).unwrap())
@@ -352,7 +361,7 @@ fn measure_trial_intent_and_replace_costs() {
     use std::time::Instant;
 
     let mut host = TrialHost::new();
-    let source = BoundScene::named(universe(), "hud", document()).unwrap();
+    let source = BoundScene::named(universe(), "hud", document(), host.registry()).unwrap();
     let slot = Occurrence::new(universe(), "slot").unwrap();
     let mut active = host
         .commit(host.intent(&source, &slot, None).unwrap())

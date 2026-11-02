@@ -81,7 +81,7 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
         let missing = ProjectAssetDatabase::default();
         for (database, expected_success) in [(&complete, true), (&missing, false)] {
             let report = bindings
-                .try_expand_prefabs_with_loader(
+                .try_compile_scene_with_loader(
                     &document,
                     Default::default(),
                     Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
@@ -98,7 +98,9 @@ fn data_defaults_close_nested_asset_references_over_the_selected_metadata_withou
             if expected_success {
                 let result = report.document().unwrap();
                 assert_eq!(
-                    result.entities[0].components[&component].value.get("icons"),
+                    result.entities()[0].components()[&component]
+                        .value()
+                        .get("icons"),
                     Some(&references)
                 );
             } else {

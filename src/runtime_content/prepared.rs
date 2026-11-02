@@ -211,18 +211,18 @@ impl RuntimeContentBase {
         let tilemap = nara_reflect::ComponentTypeId::new("nara.tilemap.Tilemap");
         for entity in std::iter::once(&scene)
             .chain(dependencies.iter())
-            .flat_map(|scene| &scene.candidate().document().entities)
+            .flat_map(|scene| scene.candidate().document().entities())
         {
-            let Some(record) = entity.components.get(&tilemap) else {
+            let Some(record) = entity.components().get(&tilemap) else {
                 continue;
             };
-            let scratch = tilemap_membership_work_bytes(&record.value).ok_or(
+            let scratch = tilemap_membership_work_bytes(record.value()).ok_or(
                 RuntimeContentError::BudgetOverflow {
                     kind: RuntimeContentBudgetKind::WorkBytes,
                 },
             )?;
             let _work = self.inner.budget.reserve(0, scratch)?;
-            validate_persisted_tilemap_membership(&record.value, |reference| {
+            validate_persisted_tilemap_membership(record.value(), |reference| {
                 let AssetRef::Product(product) = reference else {
                     return None;
                 };

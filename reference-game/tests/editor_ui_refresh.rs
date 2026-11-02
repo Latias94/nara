@@ -102,7 +102,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     );
     let projected_id = loaded_content
         .snapshot
-        .expanded_scene_provenance()
+        .compiled_scene_provenance()
         .iter()
         .find_map(|(id, source)| {
             (source.local_entity_id().as_str() == "modal-dim"
@@ -117,18 +117,18 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .expect("the modal must retain its exact source in effective compilation");
     let projected_visual = loaded_content
         .snapshot
-        .expanded_scene()
-        .entities
+        .compiled_scene()
+        .entities()
         .iter()
-        .find(|entity| &entity.id == projected_id)
+        .find(|entity| entity.id() == projected_id)
         .and_then(|entity| {
             entity
-                .components
+                .components()
                 .get(&ComponentTypeId::new("nara.ui.UiVisual"))
         })
         .expect("effective compilation must include the canonical modal visual");
-    assert_eq!(projected_visual.version, ComponentSchemaVersion::ONE);
-    let background = projected_visual.value.get("background").unwrap();
+    assert_eq!(projected_visual.version(), ComponentSchemaVersion::ONE);
+    let background = projected_visual.value().get("background").unwrap();
     assert!(background.get("reference").is_none());
     assert_eq!(
         nara::reflect::decode_asset_reference_value(background.get("image").unwrap()).unwrap(),

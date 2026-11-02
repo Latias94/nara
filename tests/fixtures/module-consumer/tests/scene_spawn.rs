@@ -24,12 +24,45 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
     let mut world = World::new();
     let source_key = scene_source_key("module-consumer/basic-scene");
     let occurrence = scene_occurrence("module-consumer/basic-scene");
-    let candidate = nara_scene::ExpandedSceneCandidate::plain(
-        source_key.clone(),
-        std::sync::Arc::new(published.document().clone()),
+    let compilation = published
+        .document()
+        .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
+    let candidate = compilation
+        .candidate
+        .unwrap()
+        .bind_source(source_key.clone());
     assert_eq!(candidate.source_key(), &source_key);
-    assert_eq!(candidate.document(), published.document());
+    assert_eq!(candidate.document().roots(), published.document().roots);
+    assert_eq!(
+        candidate.document().entities().len(),
+        published.document().entities.len()
+    );
+    for (entity, authored) in candidate
+        .document()
+        .entities()
+        .iter()
+        .zip(&published.document().entities)
+    {
+        assert_eq!(entity.id(), &authored.id);
+        assert_eq!(entity.children(), authored.children);
+        assert_eq!(entity.components().len(), authored.components.len());
+        for (component, record) in entity.components() {
+            let authored = &authored.components[component];
+            assert_eq!(record.version(), authored.version);
+            assert_eq!(record.value(), &authored.value);
+            assert_eq!(
+                record.schema_owner().map(|owner| owner.as_str()),
+                registry
+                    .component_schema_owner(component)
+                    .map(|owner| owner.as_str()),
+            );
+        }
+    }
     let spawn = nara_scene::spawn_scene(&mut world, &registry, &candidate, &occurrence, None);
     assert!(!spawn.diagnostics.has_errors(), "{:#?}", spawn.diagnostics);
     let instance = spawn

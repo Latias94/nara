@@ -171,7 +171,7 @@ impl PreparedSchemaOwnerProject {
         self.startup.capture.diagnostics()
     }
 
-    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::PrefabExpansionFailure> {
+    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::SceneCompilationFailure> {
         self.startup.capture.composition_failure()
     }
 

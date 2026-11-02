@@ -5,7 +5,7 @@ use nara_asset::AssetRef;
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use nara_reflect::{ComponentRegistryBuilder, ComponentRegistryPlugin, component_registry};
 use nara_scene::{
-    ExpandedSceneCandidate, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
+    CompiledSceneCandidate, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
     PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
     PrefabPlacementSlot, PrefabProjectionStep, PrefabSourceResolver, SceneDocument, SceneEntityId,
     SceneEntityRecord, SceneEntitySource, SourceDocumentKey,
@@ -39,14 +39,15 @@ fn source_and_occurrence_keep_equal_document_local_ui_roots_independent() {
                 let report = nara_scene::spawn_scene(
                     world,
                     &registry,
-                    &nara_scene::ExpandedSceneCandidate::plain(
-                        scene_source_key(if marker == "first-document" {
+                    &document
+                        .compile(&registry, &InMemoryPrefabSourceResolver::new())
+                        .candidate
+                        .unwrap()
+                        .bind_source(scene_source_key(if marker == "first-document" {
                             marker
                         } else {
                             second_source
-                        }),
-                        std::sync::Arc::new((document).clone()),
-                    ),
+                        })),
                     &scene_occurrence(marker),
                     None,
                 );
@@ -161,8 +162,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
             arguments: None,
             overrides: None,
         });
-        let expanded =
-            SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+        let expanded = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
         assert!(!expanded.diagnostics.has_errors());
         expanded
             .candidate
@@ -469,7 +469,7 @@ struct SourceIdentityObservation {
 }
 
 fn observe_shared_ui_roots(
-    candidates: Vec<ExpandedSceneCandidate>,
+    candidates: Vec<CompiledSceneCandidate>,
 ) -> Vec<SourceIdentityObservation> {
     let (mut app, surface) = source_identity_app();
     let count = candidates.len();
@@ -643,10 +643,10 @@ fn replace_roots_with_additions(
 fn expand_ui_scene(
     document: SceneDocument,
     resolver: &InMemoryPrefabSourceResolver,
-) -> ExpandedSceneCandidate {
+) -> CompiledSceneCandidate {
     let registry = ComponentRegistryBuilder::new();
     let registry = registry.freeze().unwrap();
-    let expansion = document.expand_prefabs(&registry, resolver);
+    let expansion = document.compile(&registry, resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",

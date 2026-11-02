@@ -16,18 +16,21 @@ use nara_diagnostic::DiagnosticReport;
 use nara_reflect::ComponentValueMaterializationLimits;
 
 use crate::{
-    ExpandedSceneCandidate, SceneComponentBindings, SceneComponentBindingsWitness, SceneDocument,
-    SceneEntityProvenanceMap, SceneFileLimits, SourceDocumentKey, SourceDocumentKind,
+    CompiledSceneCandidate, CompiledSceneDocument, SceneComponentBindings,
+    SceneComponentBindingsWitness, SceneEntityProvenanceMap, SceneFileLimits, SourceDocumentKey,
+    SourceDocumentKind,
+    compiled::{CompiledSceneAdmissionError, claims::FlatSceneClaims},
     diagnostics::{error, with_public_identifier, with_public_u64},
+    schema_authority::SchemaAuthority,
 };
 
 /// Concrete bounds for the processed Scene owner, in addition to ordinary Scene file limits.
 ///
 /// Working bytes are cumulative modeled allocation requests, without refunds for discarded
 /// scratch. They are not allocator capacity or resident memory. The shared final Schema gate's
-/// Schema/value/reference scratch and aggregate asset inventory join this ledger. Existing hierarchy,
-/// default-validation and local-reference scratch, core shape-preflight scratch and allocations
-/// internal to the JSON syntax adapter retain their existing base limits; they do not join it.
+/// hierarchy/Schema/value/reference scratch and aggregate asset inventory join this ledger.
+/// Core shape-preflight scratch and allocations internal to the JSON syntax adapter retain their
+/// existing base limits; they do not join it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeSceneLimits {
     base: SceneFileLimits,
@@ -128,8 +131,7 @@ impl RuntimeSceneLimits {
 #[derive(Debug)]
 pub struct RuntimeSceneDocumentCandidate {
     source_key: SourceDocumentKey,
-    document: SceneDocument,
-    provenance: SceneEntityProvenanceMap,
+    claims: FlatSceneClaims,
     work: budget::WorkBudget,
 }
 
@@ -156,19 +158,11 @@ impl RuntimeSceneDocumentCandidate {
                 "Runtime Scene containing identity does not match the expected source",
             ));
         }
-        identity::canonical_ids(
-            &self.source_key,
-            &self.document,
-            &self.provenance,
-            true,
-            &mut self.work,
-        )?;
-        validate_values(&self.document, bindings, &mut self.work)?;
+        let document = admit_flat_claims(self.claims, bindings, &mut self.work)?;
+        identity::canonical_ids(&self.source_key, &document, true, &mut self.work)?;
         self.work.witness(bindings)?;
         Ok(RuntimeSceneCandidate {
-            source_key: self.source_key,
-            document: self.document,
-            provenance: self.provenance,
+            compiled: document.bind_source(self.source_key),
             definitions: bindings.witness(),
             limits: self.work.limits(),
         })
@@ -177,41 +171,39 @@ impl RuntimeSceneDocumentCandidate {
 
 /// Immutable, move-only processed Scene admitted against the exact selected definitions.
 ///
-/// Storage is shared with the ordinary Scene model; its flat wire and authority are distinct
-/// from source files and expanded source candidates. No source receipt is manufactured.
+/// Its compiled storage carries no source declarations. The exact selected definitions witness
+/// and processed-value contract remain distinct from source compilation and native admission.
 #[derive(Debug)]
 pub struct RuntimeSceneCandidate {
-    source_key: SourceDocumentKey,
-    document: SceneDocument,
-    provenance: SceneEntityProvenanceMap,
+    compiled: CompiledSceneCandidate,
     definitions: SceneComponentBindingsWitness,
     limits: RuntimeSceneLimits,
 }
 
 impl RuntimeSceneCandidate {
-    /// Cooks an already complete source/overlay expansion without changing it on failure.
+    /// Cooks a complete flat compilation without changing it on failure.
     pub fn cook(
-        expanded: &ExpandedSceneCandidate,
+        compiled: &CompiledSceneCandidate,
         bindings: &SceneComponentBindings,
         asset_resolution: AssetReferenceResolver<'_>,
         limits: RuntimeSceneLimits,
     ) -> Result<Self, RuntimeSceneError> {
-        cook::cook(expanded, bindings, asset_resolution, limits)
+        cook::cook(compiled, bindings, asset_resolution, limits)
     }
 
     #[must_use]
     pub const fn source_key(&self) -> &SourceDocumentKey {
-        &self.source_key
+        self.compiled.source_key()
     }
 
     #[must_use]
-    pub const fn document(&self) -> &SceneDocument {
-        &self.document
+    pub const fn document(&self) -> &CompiledSceneDocument {
+        self.compiled.document()
     }
 
     #[must_use]
-    pub const fn provenance(&self) -> &SceneEntityProvenanceMap {
-        &self.provenance
+    pub fn canonical_provenance(&self) -> &SceneEntityProvenanceMap {
+        self.compiled.canonical_provenance()
     }
 
     #[must_use]
@@ -288,20 +280,22 @@ fn require_scene_source(source: &SourceDocumentKey) -> Result<(), RuntimeSceneEr
     Ok(())
 }
 
-fn validate_values(
-    document: &SceneDocument,
+fn admit_flat_claims(
+    claims: FlatSceneClaims,
     bindings: &SceneComponentBindings,
     work: &mut budget::WorkBudget,
-) -> Result<(), RuntimeSceneError> {
+) -> Result<CompiledSceneDocument, RuntimeSceneError> {
     let limits = work.limits().value_limits();
-    let diagnostics = crate::validation::validate_runtime_values_with_admission(
-        document,
-        bindings,
+    crate::compiled::admit_claims(
+        claims,
+        SchemaAuthority::Mixed(bindings),
         limits,
+        None,
+        true,
         |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
-    )?;
-    if diagnostics.has_errors() {
-        return Err(RuntimeSceneError { diagnostics });
-    }
-    Ok(())
+    )
+    .map_err(|failure| match failure {
+        CompiledSceneAdmissionError::Admission(error) => error,
+        CompiledSceneAdmissionError::Diagnostics(diagnostics) => RuntimeSceneError { diagnostics },
+    })
 }

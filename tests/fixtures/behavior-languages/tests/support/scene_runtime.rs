@@ -10,8 +10,8 @@ use nara_reflect::{
     ComponentTypeId, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, InMemoryPrefabSourceResolver, Name, PrefabDocument,
-    SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings, SceneComponentRecord, SceneDocument,
+    CompiledSceneCandidate, CompiledSceneComponent, InMemoryPrefabSourceResolver, Name,
+    PrefabDocument, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings, SceneDocument,
     SceneEntityId, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, SpawnedSceneInstance,
     retire_and_despawn_scene_instance,
 };
@@ -69,7 +69,7 @@ pub fn compile(
     document: &SceneDocument,
     definition: &Definition,
     prefab: Option<&PrefabDocument>,
-) -> Result<ExpandedSceneCandidate, String> {
+) -> Result<CompiledSceneCandidate, String> {
     let mut resolver = InMemoryPrefabSourceResolver::new();
     if let Some(prefab) = prefab {
         resolver.insert(
@@ -78,7 +78,7 @@ pub fn compile(
             prefab.clone(),
         );
     }
-    let report = definition.bindings.expand_prefabs(document, &resolver);
+    let report = definition.bindings.compile_scene(document, &resolver);
     if report.diagnostics.has_errors() {
         return Err(format!("{:?}", report.diagnostics));
     }
@@ -174,7 +174,7 @@ impl Runtime {
         &self,
         target: &Target,
         component: &ComponentTypeId,
-    ) -> Result<Option<&SceneComponentRecord>, String> {
+    ) -> Result<Option<&CompiledSceneComponent>, String> {
         self.definition
             .bindings
             .data_component(&self.world, self.entity(target)?, component)

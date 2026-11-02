@@ -90,14 +90,24 @@ fn main() {
     );
 
     let mut world = World::new();
-
+    let compilation = from_json.document().compile_with_asset_resolution(
+        &registry,
+        &nara::scene::InMemoryPrefabSourceResolver::new(),
+        asset_database.resolver(&AssetPathScope::ROOT),
+    );
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
+    );
+    let candidate = compilation
+        .candidate
+        .unwrap()
+        .bind_source(scene_source_key("main/from_json-document"));
     let spawn_report = nara::scene::spawn_scene(
         &mut world,
         &registry,
-        &nara::scene::ExpandedSceneCandidate::plain(
-            scene_source_key("main/from_json-document"),
-            std::sync::Arc::new((from_json.document()).clone()),
-        ),
+        &candidate,
         &scene_occurrence("main/spawn_report"),
         Some(asset_database.resolver(&AssetPathScope::ROOT)),
     );

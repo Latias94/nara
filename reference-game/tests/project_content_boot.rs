@@ -100,8 +100,8 @@ fn assert_committed_content() {
     assert_eq!(loaded.loader.budget_snapshot(), before_clone);
     assert!(std::ptr::eq(snapshot.scene(), cloned.scene(),));
     assert!(std::ptr::eq(
-        snapshot.expanded_scene(),
-        cloned.expanded_scene(),
+        snapshot.compiled_scene(),
+        cloned.compiled_scene(),
     ));
     assert!(
         snapshot

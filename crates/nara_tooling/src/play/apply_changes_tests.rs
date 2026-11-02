@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 use nara_asset::AssetRef;
 use nara_ecs::Component;
@@ -330,15 +330,18 @@ fn runtime(registry: &ComponentRegistrySnapshot, settings: &RuntimeSettings) -> 
     let report = nara_scene::spawn_scene(
         &mut world,
         registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
-            SourceDocumentKey::named(
-                "47c4e2a0-b8d6-4d0b-94c3-b264a3695e73".parse().unwrap(),
-                "apply-changes-tests",
-                SourceDocumentKind::Scene,
-            )
-            .unwrap(),
-            Arc::new(source),
-        ),
+        &source
+            .compile(registry, &nara_scene::InMemoryPrefabSourceResolver::new())
+            .candidate
+            .unwrap()
+            .bind_source(
+                SourceDocumentKey::named(
+                    "47c4e2a0-b8d6-4d0b-94c3-b264a3695e73".parse().unwrap(),
+                    "apply-changes-tests",
+                    SourceDocumentKind::Scene,
+                )
+                .unwrap(),
+            ),
         &SceneOccurrenceKey::new("play.tests", "runtime").unwrap(),
         None,
     );

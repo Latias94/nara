@@ -1,5 +1,8 @@
 //! Code-authored data and native records share the public production Prefab compiler.
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 #[path = "support/prefab_source.rs"]
 mod prefab_source;
 
@@ -17,12 +20,12 @@ use nara_reflect::{
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
-    PrefabEntityOrigin, PrefabEntityTarget, PrefabExpansionReport, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
-    SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindingError,
-    SceneComponentBindingLimits, SceneComponentBindings, SceneComponentRecord, SceneDocument,
-    SceneEntityId, SceneEntityRecord, SourceDocumentKey,
+    PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
+    PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabSourceResolver, SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    SceneCompilationReport, SceneComponentBindingError, SceneComponentBindingLimits,
+    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SourceDocumentKey,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -249,14 +252,14 @@ fn mixed_scene() -> SceneDocument {
     ])
 }
 
-fn expanded(report: &PrefabExpansionReport) -> &SceneDocument {
+fn expanded(report: &SceneCompilationReport) -> &nara_scene::CompiledSceneDocument {
     assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
     report
         .document()
         .expect("expected a complete production candidate")
 }
 
-fn rejected(report: &PrefabExpansionReport) {
+fn rejected(report: &SceneCompilationReport) {
     assert!(report.diagnostics.has_errors(), "{report:?}");
     assert!(
         report.candidate.is_none(),
@@ -266,7 +269,7 @@ fn rejected(report: &PrefabExpansionReport) {
     assert!(report.provenance().is_none());
 }
 
-fn projected(report: &PrefabExpansionReport, root: &str, steps: &[(&str, &str)]) -> SceneEntityId {
+fn projected(report: &SceneCompilationReport, root: &str, steps: &[(&str, &str)]) -> SceneEntityId {
     let steps: Vec<_> = steps
         .iter()
         .map(|(prefab, entity)| PrefabProjectionStep::SourceEntity {
@@ -286,11 +289,14 @@ fn projected(report: &PrefabExpansionReport, root: &str, steps: &[(&str, &str)])
     entity.clone()
 }
 
-fn entity<'a>(document: &'a SceneDocument, entity: &SceneEntityId) -> &'a SceneEntityRecord {
+fn entity<'a>(
+    document: &'a nara_scene::CompiledSceneDocument,
+    entity: &SceneEntityId,
+) -> &'a nara_scene::CompiledSceneEntity {
     document
-        .entities
+        .entities()
         .iter()
-        .find(|record| &record.id == entity)
+        .find(|record| record.id() == entity)
         .unwrap()
 }
 
@@ -330,17 +336,17 @@ fn empty_frozen_native_registry_allows_code_authored_data_and_defaults() {
     node.components.remove(&component("nara.scene.Name"));
     let document = SceneDocument::from_ordered_roots([node, SceneEntityRecord::new(id("socket"))]);
     let before = document.clone();
-    let report = bindings.expand_prefabs(&document, &InMemoryPrefabSourceResolver::new());
+    let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
     let node = entity(expanded(&report), &id("node"));
     assert_eq!(
-        node.components[&component("game.Mover")].value,
+        node.components()[&component("game.Mover")].value().clone(),
         ComponentValue::map([
             ("target", local("socket")),
             ("speed", ComponentValue::U64(7))
         ])
     );
     assert_eq!(
-        node.components[&component("game.Sensor")].value,
+        node.components()[&component("game.Sensor")].value().clone(),
         ComponentValue::map([
             ("target", local("socket")),
             ("enabled", ComponentValue::Bool(true))
@@ -357,11 +363,14 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
     let sources = sources();
     let before_document = document.clone();
     let before_sources = sources.clone();
-    let report = bindings.expand_prefabs(&document, &sources);
+    let report = bindings.compile_scene(&document, &sources);
     let expanded = expanded(&report);
-    assert_eq!(expanded.entities.len(), 13);
-    assert_eq!(expanded.roots, [id("left"), id("right"), id("socket")]);
-    assert_eq!(report.provenance().unwrap().len(), expanded.entities.len());
+    assert_eq!(expanded.entities().len(), 13);
+    assert_eq!(expanded.roots(), [id("left"), id("right"), id("socket")]);
+    assert_eq!(
+        report.provenance().unwrap().len(),
+        expanded.entities().len()
+    );
     let mut distinct_sockets = BTreeSet::from([id("socket")]);
     for root in ["left", "right"] {
         let outer_node = projected(&report, root, &[("outer", "node")]);
@@ -370,15 +379,15 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
         let leaf_node = projected(&report, root, &[("outer", "nested"), ("leaf", "node")]);
         let leaf_socket = projected(&report, root, &[("outer", "nested"), ("leaf", "socket")]);
         assert_eq!(
-            entity(expanded, &id(root)).children.as_slice(),
+            entity(expanded, &id(root)).children(),
             std::slice::from_ref(&outer_node)
         );
         assert_eq!(
-            entity(expanded, &outer_node).children,
+            entity(expanded, &outer_node).children(),
             [outer_socket.clone(), nested.clone()]
         );
         assert_eq!(
-            entity(expanded, &nested).children,
+            entity(expanded, &nested).children(),
             [leaf_node.clone(), leaf_socket.clone()]
         );
         for (node, socket, speed, target) in [
@@ -394,28 +403,30 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
             ),
             (&leaf_node, &leaf_socket, 7, &leaf_socket),
         ] {
-            let records = &entity(expanded, node).components;
-            assert_eq!(
-                records[&component("game.Mover")],
-                SceneComponentRecord::new(
+            let records = &entity(expanded, node).components();
+            compiled_scene::assert_record(
+                &(records[&component("game.Mover")]),
+                &(SceneComponentRecord::new(
                     ComponentSchemaVersion::ONE,
                     ComponentValue::map([
                         (
                             "target",
                             ComponentValue::EntityReference(EntityReference::SceneLocal {
-                                entity: target.clone()
-                            })
+                                entity: target.clone(),
+                            }),
                         ),
                         ("speed", ComponentValue::U64(speed)),
                     ]),
                 )
-                .with_owner(owner_id("game.motion"))
+                .with_owner(owner_id("game.motion"))),
+                &component("game.Mover"),
+                bindings.native_snapshot(),
             );
             let sensor = &records[&component("game.Sensor")];
-            assert_eq!(sensor.owner(), Some(&owner_id("game.sensing")));
-            assert_eq!(sensor.version, ComponentSchemaVersion::ONE);
+            assert_eq!(sensor.schema_owner(), Some(&owner_id("game.sensing")));
+            assert_eq!(sensor.version(), ComponentSchemaVersion::ONE);
             assert_eq!(
-                sensor.value,
+                sensor.value().clone(),
                 ComponentValue::map([
                     (
                         "target",
@@ -427,21 +438,21 @@ fn repeated_nested_prefabs_share_compilation_but_not_source_reference_namespaces
                 ])
             );
             assert_eq!(
-                records[&component("nara.scene.Name")].value,
+                records[&component("nara.scene.Name")].value().clone(),
                 ComponentValue::String("native node".into())
             );
-            assert!(records[&component("nara.scene.Name")].owner().is_none());
+            assert_eq!(
+                records[&component("nara.scene.Name")]
+                    .schema_owner()
+                    .map(|owner| owner.as_str()),
+                Some(SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str())
+            );
         }
         assert!(distinct_sockets.insert(outer_socket));
         assert!(distinct_sockets.insert(leaf_socket));
     }
     assert_eq!(distinct_sockets.len(), 5);
-    assert!(
-        expanded
-            .entities
-            .iter()
-            .all(|entity| entity.prefab.is_none())
-    );
+    // Compiled records structurally exclude Prefab declarations.
     assert!(
         report.provenance().unwrap()[&id("socket")]
             .projection_path()
@@ -457,11 +468,11 @@ fn public_loader_returns_the_same_complete_mixed_candidate_as_the_resolver() {
     let bindings = bindings();
     let document = mixed_scene();
     let sources = sources();
-    let expected = bindings.expand_prefabs(&document, &sources);
+    let expected = bindings.compile_scene(&document, &sources);
     expanded(&expected);
     let mut requests = Vec::new();
     let actual = bindings
-        .try_expand_prefabs_with_loader(&document, Default::default(), None, |request, _| {
+        .try_compile_scene_with_loader(&document, Default::default(), None, |request, _| {
             requests.push(request.clone());
             Ok::<_, Infallible>(sources.resolve_prefab(request))
         })
@@ -502,12 +513,12 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
     let before_sources = sources.clone();
     let mut requests = Vec::new();
     let report = bindings
-        .try_expand_prefabs_with_loader(&document, Default::default(), None, |request, _| {
+        .try_compile_scene_with_loader(&document, Default::default(), None, |request, _| {
             requests.push(request.clone());
             Ok::<_, LoadError>(sources.resolve_prefab(request))
         })
         .unwrap();
-    assert_eq!(expanded(&report).entities.len(), 6);
+    assert_eq!(expanded(&report).entities().len(), 6);
     let node = projected(
         &report,
         "instance",
@@ -519,8 +530,9 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
         &[("outer", "nested"), ("replacement", "socket")],
     );
     assert_eq!(
-        entity(expanded(&report), &node).components[&component("game.Mover")]
-            .value
+        entity(expanded(&report), &node).components()[&component("game.Mover")]
+            .value()
+            .clone()
             .field_entity_reference("target")
             .unwrap(),
         &EntityReference::SceneLocal { entity: socket }
@@ -529,7 +541,7 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
 
     requests.clear();
     let error = bindings
-        .try_expand_prefabs_with_loader(&document, Default::default(), None, |request, _| {
+        .try_compile_scene_with_loader(&document, Default::default(), None, |request, _| {
             requests.push(request.clone());
             if request == &source("replacement") {
                 Err(LoadError::Refused(request.clone()))
@@ -572,7 +584,7 @@ fn invalid_local_and_prefab_records_refuse_without_publishing_valid_siblings() {
         ];
         let local = SceneDocument::from_ordered_roots(records.clone());
         let before = local.clone();
-        rejected(&bindings.expand_prefabs(&local, &InMemoryPrefabSourceResolver::new()));
+        rejected(&bindings.compile_scene(&local, &InMemoryPrefabSourceResolver::new()));
         assert_eq!(local, before);
 
         let sources = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -582,7 +594,7 @@ fn invalid_local_and_prefab_records_refuse_without_publishing_valid_siblings() {
         );
         let before_sources = sources.clone();
         let document = SceneDocument::from_ordered_roots([anchor("instance", "invalid", None)]);
-        rejected(&bindings.expand_prefabs(&document, &sources));
+        rejected(&bindings.compile_scene(&document, &sources));
         assert_eq!(sources, before_sources);
     }
 }
@@ -623,7 +635,7 @@ fn invalid_overlay_sets_do_not_degrade_into_a_native_preview_candidate() {
         let document =
             SceneDocument::from_ordered_roots([anchor("instance", "outer", Some(overlay))]);
         let before = document.clone();
-        rejected(&bindings.expand_prefabs(&document, &sources));
+        rejected(&bindings.compile_scene(&document, &sources));
         assert_eq!(document, before);
     }
 }
@@ -647,10 +659,11 @@ fn predecessor_data_versions_require_explicit_migration_instead_of_native_conven
             SceneEntityRecord::new(id("node")).with_component(component("game.Mover"), record),
             SceneEntityRecord::new(id("socket")),
         ]);
-        let report = bindings.expand_prefabs(&document, &InMemoryPrefabSourceResolver::new());
+        let report = bindings.compile_scene(&document, &InMemoryPrefabSourceResolver::new());
         if version == 2 {
             assert_eq!(
-                entity(expanded(&report), &id("node")).components[&component("game.Mover")].version,
+                entity(expanded(&report), &id("node")).components()[&component("game.Mover")]
+                    .version(),
                 ComponentSchemaVersion::new(2).unwrap()
             );
             assert!(!report.source_upgrade_required());
@@ -665,8 +678,8 @@ fn native_only_entry_point_rejects_data_instead_of_implicitly_selecting_storage(
     let native = native_registry();
     let document = mixed_scene();
     let sources = sources();
-    expanded(&bindings().expand_prefabs(&document, &sources));
-    rejected(&document.expand_prefabs(&native, &sources));
+    expanded(&bindings().compile_scene(&document, &sources));
+    rejected(&document.compile(&native, &sources));
 }
 
 #[test]
@@ -682,9 +695,9 @@ fn mixed_entry_point_retains_ownerless_native_name_convenience() {
             ),
         )]);
     let sources = InMemoryPrefabSourceResolver::new();
-    let expected = document.expand_prefabs(&native, &sources);
+    let expected = document.compile(&native, &sources);
     expanded(&expected);
-    assert_eq!(bindings.expand_prefabs(&document, &sources), expected);
+    assert_eq!(bindings.compile_scene(&document, &sources), expected);
 }
 
 #[test]

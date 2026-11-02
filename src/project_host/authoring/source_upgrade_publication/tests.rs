@@ -32,7 +32,7 @@ use crate::{
             RecoveryPendingPublication, RecoveryStorageHost, RecoveryStoragePublication,
         },
     },
-    project_tooling::host_fs,
+    test_host_fs as host_fs,
 };
 
 const UNIVERSE: &str = "421112bd-693a-4e6b-85bc-318d567b2f21";

@@ -53,7 +53,7 @@ use crate::{
         },
         file_publication::{FilePublicationHost, FilePublicationOutcome},
     },
-    project_tooling::host_fs,
+    test_host_fs as host_fs,
 };
 
 const UNIVERSE: &str = "42b4f318-eef4-49f0-a8a4-a3790ce8fbd1";

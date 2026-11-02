@@ -1,6 +1,6 @@
 //! Ordinary source-bound Scene materialization and public stock collection.
 
-use std::{fs, path::Path, sync::Arc, time::Duration};
+use std::{fs, path::Path, time::Duration};
 
 use nara::{
     app::{
@@ -16,7 +16,7 @@ use nara::{
     },
     render::{RenderComponentsPlugin, RenderPlugin, WorldCanvas},
     scene::{
-        ExpandedSceneCandidate, SceneComponentRecord, SceneComponentsPlugin, SceneDocument,
+        InMemoryPrefabSourceResolver, SceneComponentRecord, SceneComponentsPlugin, SceneDocument,
         SceneEntityId, SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey,
         SourceDocumentKind, SpawnedSceneInstance, spawn_scene,
     },
@@ -93,19 +93,28 @@ fn spawn_document(world: &mut World) {
     let registry = component_registry(world)
         .expect("the actual admitted Runtime registry")
         .clone();
-    let candidate = ExpandedSceneCandidate::plain(
-        SourceDocumentKey::named(
-            "5e42bc45-cbbc-4e44-a4c4-cc12dc635047".parse().unwrap(),
-            if transparent {
-                "stock-composition/translucent-sprite"
-            } else {
-                "stock-composition/ordinary-sprites"
-            },
-            SourceDocumentKind::Scene,
-        )
-        .unwrap(),
-        Arc::new(document_with_alpha(&registry, transparent)),
+    let compilation = document_with_alpha(&registry, transparent)
+        .compile(&registry, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
+    let candidate = compilation
+        .candidate
+        .expect("the ordinary Sprite Scene compiles")
+        .bind_source(
+            SourceDocumentKey::named(
+                "5e42bc45-cbbc-4e44-a4c4-cc12dc635047".parse().unwrap(),
+                if transparent {
+                    "stock-composition/translucent-sprite"
+                } else {
+                    "stock-composition/ordinary-sprites"
+                },
+                SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+        );
     let report = spawn_scene(
         world,
         &registry,

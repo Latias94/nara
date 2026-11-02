@@ -1,7 +1,7 @@
 //! Reference path and declaration-scope regressions through public Scene expansion.
 
 use super::*;
-use crate::PrefabExpansionFailureKind;
+use crate::SceneCompilationFailureKind;
 use nara_identity::{
     PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
 };
@@ -19,7 +19,7 @@ fn source_step(source: &str, entity: &str) -> PrefabProjectionStep {
 }
 
 // Observe exact published provenance; production alone resolves authored targets.
-fn at_path(report: &PrefabExpansionReport, steps: &[PrefabProjectionStep]) -> SceneEntityId {
+fn at_path(report: &SceneCompilationReport, steps: &[PrefabProjectionStep]) -> SceneEntityId {
     expanded(report);
     let mut matches = report.provenance().unwrap().iter().filter(|(_, origin)| {
         origin
@@ -52,12 +52,12 @@ fn surviving_inline_reference_checks_the_actual_nested_canonical_source_and_term
         (
             "replacement-leaf",
             "socket",
-            Some(PrefabExpansionFailureKind::SourceChanged),
+            Some(SceneCompilationFailureKind::SourceChanged),
         ),
         (
             "leaf",
             "missing",
-            Some(PrefabExpansionFailureKind::MissingTarget),
+            Some(SceneCompilationFailureKind::MissingTarget),
         ),
     ] {
         // The replacement keeps the same request and entity spelling, changing only its key.
@@ -105,9 +105,9 @@ fn surviving_inline_reference_checks_the_actual_nested_canonical_source_and_term
                 nested_socket,
                 at_path(&report, &[source_step("base", "socket")])
             );
-            assert_eq!(
+            assert_record(
                 stored(&report, "host"),
-                &effective_record(payload(&nested_socket))
+                &effective_record(payload(&nested_socket)),
             );
         }
     }
@@ -315,8 +315,8 @@ fn keyed_container_reorder_preserves_literal_map_keys_and_untouched_leaf_origins
             } else {
                 vec![expected_first, second.clone()]
             };
-            let stored = &entity(&report, "host").components[&component];
-            assert_eq!(
+            let stored = &entity(&report, "host").components()[&component];
+            assert_record(
                 stored,
                 &effective_record(ComponentValue::map([(
                     "wire_links",
@@ -326,7 +326,7 @@ fn keyed_container_reorder_preserves_literal_map_keys_and_untouched_leaf_origins
             let assets = collect_declared_asset_references_from_schema(
                 &schema,
                 schema.version(),
-                &stored.value,
+                stored.value(),
             )
             .unwrap();
             assert_eq!(assets.len(), 2);

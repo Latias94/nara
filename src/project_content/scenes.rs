@@ -247,16 +247,16 @@ impl LoadContext<'_> {
         settings: &nara_project::EffectiveProjectSettings,
         loaded_prefabs: &mut BTreeMap<AssetSourcePath, LoadedPrefabContent>,
         prefab_cache_work: &mut usize,
-    ) -> Result<ExpandedSceneCandidate, ProjectContentError> {
+    ) -> Result<CompiledSceneCandidate, ProjectContentError> {
         let mut compiler_work_limit = self
-            .remaining_expansion_work(0, self.loader.limits.prefab_expansion().working_bytes())?;
+            .remaining_expansion_work(0, self.loader.limits.scene_compilation().working_bytes())?;
         let expansion_limits = self
             .loader
             .limits
-            .prefab_expansion()
+            .scene_compilation()
             .with_working_bytes(compiler_work_limit);
         let mut work = self.reserve_work(prefab_expansion_work_plan(expansion_limits)?)?;
-        let options = nara_scene::PrefabExpansionOptions::default();
+        let options = nara_scene::SceneCompilationOptions::default();
         let options = options.with_limits(expansion_limits).with_max_depth(
             options.max_depth.min(
                 self.loader
@@ -265,7 +265,7 @@ impl LoadContext<'_> {
             ),
         );
         let validation = self.validation;
-        let expansion = validation.bindings().try_expand_prefabs_with_loader(
+        let expansion = validation.bindings().try_compile_scene_with_loader(
             scene,
             options,
             None,
@@ -355,27 +355,25 @@ impl LoadContext<'_> {
             },
         )?;
         self.source_upgrade_required |= expansion.source_upgrade_required();
-        let expanded = expansion.candidate.ok_or_else(|| {
+        let compiled = expansion.candidate.ok_or_else(|| {
             map_scene_diagnostics(
-                ProjectContentErrorKind::PrefabExpansion,
+                ProjectContentErrorKind::SceneCompilation,
                 expansion.diagnostics,
             )
         })?;
         let retained_data = checked_plan_sum(
             ProjectContentBudgetKind::RetainedBytes,
             [
-                size_of::<ExpandedSceneCandidate>(),
-                scene_retained_bytes(expanded.document())?,
-                crate::scene_retention::scene_provenance_retained_bytes(expanded.provenance())
-                    .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?,
+                size_of::<CompiledSceneCandidate>(),
+                compiled_scene_retained_bytes(&compiled)?,
             ],
         )?;
         self.resize_work(&mut work, retained_data)?;
         self.commit_work_as_retained(work, retained_data)?;
         // Containing identity belongs to the Host, independently of the reusable compiler cap.
         let identity_work = self.reserve_work(source.retained_bytes())?;
-        let candidate = expanded.bind_source(source.clone());
-        for (_, origin) in candidate.provenance().iter() {
+        let candidate = compiled.bind_source(source.clone());
+        for (_, origin) in candidate.canonical_provenance().iter() {
             if let Some(path) = origin.projection_path() {
                 self.observe_depth(path.steps().len())?;
             }
@@ -472,7 +470,7 @@ impl LoadContext<'_> {
                 settings.project.source_universe,
             )?;
             let document = self.decode_scene(path.as_str(), &bytes)?;
-            let expanded = self.compile_scene(
+            let compiled = self.compile_scene(
                 &document,
                 &source,
                 settings,
@@ -497,7 +495,7 @@ impl LoadContext<'_> {
                 path: canonical,
                 source,
                 document: Arc::new(document),
-                expanded: Arc::new(expanded),
+                compiled: Arc::new(compiled),
             })
         })();
         self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);

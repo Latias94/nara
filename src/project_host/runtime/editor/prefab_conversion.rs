@@ -8,7 +8,7 @@ use std::{
 
 use nara_diagnostic::DiagnosticReport;
 use nara_scene::{
-    PrefabConversionError, PrefabExpansionOptions, SceneEntityId, SourceDocumentKind,
+    PrefabConversionError, SceneCompilationOptions, SceneEntityId, SourceDocumentKind,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
@@ -293,7 +293,7 @@ impl EditorProjectSession {
         let mut request = match self.workspace.request_complete_prefab_conversion(
             &basis,
             &anchor,
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         ) {
             Ok(request) => request,
             Err(report) => {

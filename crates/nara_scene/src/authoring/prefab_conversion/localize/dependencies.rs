@@ -13,7 +13,7 @@ use crate::{
     AuthoringSchemaBasis, PrefabDocument, ResolvedPrefabSource, SceneEntityId,
     ScenePatchApplyLimits, ScenePatchReport, SourceDocumentKey, SourceDocumentKind,
     authoring::history_error_report, patch::bounded_scene_entities_source_cost,
-    prefab::PrefabExpansionWorkingSet, provenance::provenance_asset_ref_bytes,
+    prefab::SceneCompilationWorkingSet, provenance::provenance_asset_ref_bytes,
     schema_authority::SchemaAuthority,
 };
 
@@ -53,7 +53,7 @@ impl CapturedPrefabSources {
         request: &AssetRef,
         source: &ResolvedPrefabSource,
         basis: &AuthoringSchemaBasis,
-        working: &mut PrefabExpansionWorkingSet,
+        working: &mut SceneCompilationWorkingSet,
     ) -> Result<(), ScenePatchReport> {
         if source.key().kind() != SourceDocumentKind::Prefab
             || !source.matches_authority(SchemaAuthority::Authoring(basis))
@@ -248,7 +248,7 @@ mod tests {
     use super::*;
     use crate::{
         __private::AuthoringAdapterReceipt,
-        PrefabExpansionOptions, PrefabInstance, SceneComponentRecord, SceneDocument,
+        PrefabInstance, SceneCompilationOptions, SceneComponentRecord, SceneDocument,
         SceneEntityRecord,
         prefab::{SelectedInstanceSource, try_compile_selected_authoring_instance_with_loader},
         provenance::provenance_string_bytes,
@@ -317,7 +317,7 @@ mod tests {
         ResolvedPrefabSource::bound_authoring_source(Arc::clone(document), basis.clone(), key(name))
     }
 
-    fn working(basis: &AuthoringSchemaBasis) -> PrefabExpansionWorkingSet {
+    fn working(basis: &AuthoringSchemaBasis) -> SceneCompilationWorkingSet {
         // Obtain a real suspended authoring compiler model without exposing its fields.
         let anchor = SceneEntityId::new("anchor").unwrap();
         let mut record = SceneEntityRecord::new(anchor.clone());
@@ -332,7 +332,7 @@ mod tests {
             SelectedInstanceSource::Scene(&scene),
             &anchor,
             basis,
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
             None,
             |_, working| {
                 captured = Some(*working);

@@ -354,6 +354,6 @@ fn mapped_wrong_base_is_preserved_by_copy_and_rejected_by_actual_use() {
     assert!(report.candidate().is_none());
     assert_eq!(
         report.failure().unwrap().reason,
-        PrefabExpansionFailureKind::SourceChanged
+        SceneCompilationFailureKind::SourceChanged
     );
 }

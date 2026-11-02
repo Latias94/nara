@@ -4,15 +4,15 @@ use std::convert::Infallible;
 
 use nara_scene::{
     __private::{
-        AuthoringAdapterReceipt, AuthoringPrefabExpansionReport, AuthoringPrefabOmissionReason,
-        try_expand_authoring_prefabs_with_loader,
+        AuthoringAdapterReceipt, AuthoringSceneCompilationOmissionReason,
+        AuthoringSceneCompilationReport, try_compile_authoring_scene_with_loader,
     },
     AuthoringRecordReadiness, UnavailableRecordManifestEntry,
 };
 
 use super::*;
 
-fn compile_snapshot(snapshot: &AuthoringProjectSnapshot) -> AuthoringPrefabExpansionReport {
+fn compile_snapshot(snapshot: &AuthoringProjectSnapshot) -> AuthoringSceneCompilationReport {
     let sources = snapshot
         .prefabs()
         .iter()
@@ -23,7 +23,7 @@ fn compile_snapshot(snapshot: &AuthoringProjectSnapshot) -> AuthoringPrefabExpan
             )
         })
         .collect::<Vec<_>>();
-    try_expand_authoring_prefabs_with_loader(
+    try_compile_authoring_scene_with_loader(
         snapshot.startup_scene().document(),
         &snapshot.startup_scene().schema_basis(),
         Default::default(),
@@ -451,7 +451,8 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
         assert_eq!(compiled.omissions().len(), 2);
         assert!(compiled.omissions().iter().all(|omission| {
             omission.component == component()
-                && omission.reason == AuthoringPrefabOmissionReason::NativeBindingUnavailable
+                && omission.reason
+                    == AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable
         }));
         let nara_scene::__private::AuthoringNativePreview {
             candidate: native_preview,
@@ -461,10 +462,9 @@ fn effective_and_default_assets_are_captured_with_data_adapters_without_native_a
         assert_eq!(omissions.len(), 2);
         assert!(
             native_preview
-                .document()
-                .entities
+                .entities()
                 .iter()
-                .all(|record| record.components.is_empty())
+                .all(|record| record.components().is_empty())
         );
         let preview =
             nara_scene::__private::project_published_authoring_prefab_preview(&published_r);

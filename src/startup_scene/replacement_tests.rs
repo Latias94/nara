@@ -14,7 +14,7 @@ use nara_reflect::{
     component_registry,
 };
 use nara_scene::{
-    SceneComponentRecord, SceneEntityRecord, SceneSpawnReport,
+    SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneSpawnReport,
     advanced::{SceneProductResource, SceneProductTransactionLimits},
 };
 
@@ -51,15 +51,23 @@ fn source(name: &str) -> SceneSource {
     .unwrap()
 }
 
-fn candidate(document: Arc<SceneDocument>) -> ExpandedSceneCandidate {
-    ExpandedSceneCandidate::plain(
+fn candidate(document: Arc<SceneDocument>) -> CompiledSceneCandidate {
+    let mut registry = nara_reflect::ComponentRegistryBuilder::new();
+    let provider = nara_reflect::__private::resolve_schema_provider(
+        nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    )
+    .unwrap();
+    nara_reflect::__private::register_resolved_schema_provider(&mut registry, provider).unwrap();
+    let bindings = SceneComponentBindings::new(registry.freeze().unwrap(), [data_owner()]).unwrap();
+    compile_test_scene(
+        &document,
+        &bindings,
         nara_scene::SourceDocumentKey::named(
             "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
             "current-scene-replacement-fixture",
             nara_scene::SourceDocumentKind::Scene,
         )
         .unwrap(),
-        document,
     )
 }
 
@@ -217,8 +225,8 @@ fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
                 .data_component(world, entity, &ComponentTypeId::new("test.data.Flag"))
                 .unwrap()
                 .unwrap()
-                .value,
-            ComponentValue::map([("enabled", ComponentValue::Bool(true))])
+                .value(),
+            &ComponentValue::map([("enabled", ComponentValue::Bool(true))])
         );
 
         let replaced = replace_current_scene_with_product(
@@ -253,8 +261,8 @@ fn mixed_startup_replacement_and_restart_preserve_selected_data_definitions() {
                 .data_component(world, entity, &ComponentTypeId::new("test.data.Flag"))
                 .unwrap()
                 .unwrap()
-                .value,
-            ComponentValue::map([("enabled", ComponentValue::Bool(false))])
+                .value(),
+            &ComponentValue::map([("enabled", ComponentValue::Bool(false))])
         );
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
         assert_eq!(world.resource::<RunValue>().0, 2);
@@ -287,7 +295,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         let assets = nara_scene::advanced::SceneAssetBindings::from_world(world);
         let result = foreign.prepare_scene_replacement_with_claims(
             world,
-            next.expanded_scene().unwrap(),
+            next.compiled_scene().unwrap(),
             None,
             &current,
             assets,
@@ -302,7 +310,7 @@ fn replacement_rejects_equivalent_owner_catalog_with_another_admission_basis() {
         assert_rejected(&report, "scene.prepared-definition-changed");
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
         assert_eq!(
-            source_view.with_document(|scene| scene.roots.clone()),
+            source_view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
         );
         assert_eq!(world.entities().len(), entities);
@@ -331,7 +339,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         let second = report.instance.unwrap();
         let current = world.resource::<CurrentSceneOwner>();
         assert_eq!(current.receipt(), &second);
-        assert_eq!(current.source().roots, [id("b")]);
+        assert_eq!(current.source().roots(), [id("b")]);
         assert_ne!(first.instance_id(), second.instance_id());
         assert_eq!(world.entities().len(), before_entities);
         assert!(matches!(
@@ -354,11 +362,11 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert_ne!(second.instance_id(), restarted.instance_id());
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &restarted);
         assert_eq!(
-            world.resource::<CurrentSceneOwner>().source().roots,
+            world.resource::<CurrentSceneOwner>().source().roots(),
             [id("b")]
         );
         assert_eq!(
-            second_view.with_document(|scene| scene.roots.clone()),
+            second_view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("b")])
         );
         assert!(matches!(
@@ -384,7 +392,7 @@ fn direct_replacement_changes_source_and_receipt_and_restart_uses_b() {
         assert_ne!(returned.instance_id(), first.instance_id());
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &returned);
         assert_eq!(
-            world.resource::<CurrentSceneOwner>().source().roots,
+            world.resource::<CurrentSceneOwner>().source().roots(),
             [id("a")]
         );
         assert_eq!(second_view.with_document(|_| ()), None);
@@ -431,7 +439,7 @@ fn stale_and_foreign_expected_receipts_reject_before_product_configuration() {
         assert_rejected(&report, "scene.current.expected-instance-mismatch");
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
         assert_eq!(
-            view.with_document(|scene| scene.roots.clone()),
+            view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("b")])
         );
         assert_eq!(world.entities().len(), entity_count);
@@ -447,18 +455,53 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         let view = source_view(world);
         let stats = world.resource::<WorldIdentityDomain>().stats();
         let entities = world.entities().len();
-        let invalid = Arc::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-            id("b"),
-        )
-        .with_component(
-            ComponentTypeId::new("test.unavailable"),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
-        )]));
-        let rejected_source = Arc::downgrade(&invalid);
+        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("b"))
+            .with_component(
+                ComponentTypeId::new("test.unavailable"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
+            )]);
+        #[derive(nara_ecs::Component)]
+        struct Unavailable;
+        let mut registry = nara_reflect::ComponentRegistryBuilder::new();
+        registry
+            .register_persistent_component_with_codec::<Unavailable, _, _>(
+                ComponentSchema::new(
+                    ComponentTypeId::new("test.unavailable"),
+                    "Unavailable",
+                    ComponentSchemaVersion::ONE,
+                )
+                .with_capabilities([ComponentCapability::Scene])
+                .with_fields([ComponentFieldSchema::required(
+                    ComponentFieldId::new("value"),
+                    "Value",
+                    ComponentFieldPath::empty(),
+                    ComponentValueKind::Bool,
+                )
+                .with_capabilities([ComponentCapability::Scene])]),
+                |_| Ok(Unavailable),
+                |_| Ok(ComponentValue::Bool(true)),
+            )
+            .unwrap();
+        let candidate = compile_test_scene(
+            &document,
+            &SceneComponentBindings::new(registry.freeze().unwrap(), []).unwrap(),
+            nara_scene::SourceDocumentKey::named(
+                "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+                "unavailable-receiver",
+                nara_scene::SourceDocumentKind::Scene,
+            )
+            .unwrap(),
+        );
+        let rejected_source =
+            SceneSource::direct(candidate, ByteLimit::new(16 * 1024).unwrap()).unwrap();
+        let RetainedSceneCandidate::Compiled(candidate) = &rejected_source.candidate else {
+            panic!("the fixture retains a source compilation");
+        };
+        let weak_rejected = Arc::downgrade(candidate);
         let report = replace_current_scene_with_product(
             world,
             &current,
-            SceneSource::direct(candidate(invalid), ByteLimit::new(16 * 1024).unwrap()).unwrap(),
+            rejected_source,
             limits(),
             &[],
             |writer| {
@@ -467,10 +510,10 @@ fn rejected_candidate_keeps_the_current_pair_and_product_state() {
         );
         assert!(report.diagnostics.has_errors());
         assert!(report.instance.is_none());
-        assert!(rejected_source.upgrade().is_none());
+        assert!(weak_rejected.upgrade().is_none());
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &current);
         assert_eq!(
-            view.with_document(|scene| scene.roots.clone()),
+            view.with_document(|scene| scene.roots().to_vec()),
             Some(vec![id("a")])
         );
         assert_eq!(world.entities().len(), entities);

@@ -5,21 +5,24 @@ use std::mem::size_of;
 
 use nara_asset::AssetRef;
 use nara_identity::AuthoredEntityReference;
-use nara_reflect::__private::{DeclaredEntityReferencePlan, plan_declared_entity_references};
+use nara_reflect::__private::{
+    DeclaredEntityReferencePlan, plan_declared_entity_references,
+    plan_declared_value_entity_references,
+};
 use nara_reflect::{
-    ComponentEntityReferenceRewriteError, ComponentFieldPath, ComponentFieldPathSegment,
-    ComponentSchema, ComponentTypeId, ComponentValue, ComponentValueMaterializationLimits,
-    EntityReference,
+    ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldPathSegment, ComponentSchema, ComponentTypeId, ComponentValue,
+    ComponentValueMaterializationLimits, EntityReference,
 };
 
 use super::inputs::{InputFailure, ReferenceResolution, ResolvedReference, authored_clone_bytes};
 use super::{Compiler, NodeId, ScopeId};
 use crate::prefab::overlay::properties::PropertyReferenceReplacement;
-use crate::prefab::{PrefabExpansionWorkingSet, PrefabReferenceRemapError};
+use crate::prefab::{PrefabReferenceRemapError, SceneCompilationWorkingSet};
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabOverlaySlot, ResolvedPrefabSource,
-    SceneEntityId,
+    PrefabOverlaySlot, ResolvedPrefabSource, SceneCompilationFailure, SceneCompilationFailureKind,
+    SceneComponentRecord, SceneEntityId,
 };
 
 pub(super) struct ScopedReference {
@@ -36,11 +39,17 @@ pub(super) struct ReferenceProgram {
     pub(super) plan: Option<DeclaredEntityReferencePlan>,
 }
 
-pub(super) type ReferencePrograms = BTreeMap<NodeId, BTreeMap<ComponentTypeId, ReferenceProgram>>;
+pub(super) struct ComponentReferencePrograms {
+    pub(super) value: ReferenceProgram,
+    pub(super) contextual_defaults: BTreeMap<ComponentFieldId, ReferenceProgram>,
+}
+
+pub(super) type ReferencePrograms =
+    BTreeMap<NodeId, BTreeMap<ComponentTypeId, ComponentReferencePrograms>>;
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     pub(super) fn record_reference_origins(
         &mut self,
@@ -50,7 +59,7 @@ where
         declaration: Option<(ScopeId, PrefabOverlaySlot)>,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
-    ) -> Result<ReferenceProgram, PrefabExpansionFailure> {
+    ) -> Result<ReferenceProgram, SceneCompilationFailure> {
         let cost = value.cost();
         let limits = self.value_program_limits();
         self.reserve_value_reference_work(schema, cost, limits)?;
@@ -60,6 +69,60 @@ where
             crate::validation::reference_traversal_limits(limits),
         )
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
+        self.scoped_reference_program(plan, value, scope, declaration, entity, component)
+    }
+
+    /// Conversion must carry hidden lexical defaults into the new source environment too.
+    /// Ordinary activation keeps these dormant and does not acquire their source demand.
+    pub(super) fn contextual_default_reference_programs(
+        &mut self,
+        schema: &ComponentSchema,
+        record: &SceneComponentRecord,
+        scope: ScopeId,
+        declaration: Option<(ScopeId, PrefabOverlaySlot)>,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+    ) -> Result<BTreeMap<ComponentFieldId, ReferenceProgram>, SceneCompilationFailure> {
+        let mut programs = BTreeMap::new();
+        if self.selected_anchor.is_none() {
+            return Ok(programs);
+        }
+        for (id, value) in &record.contextual_defaults {
+            let field = schema
+                .fields()
+                .iter()
+                .find(|field| field.id() == id)
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            let limits = self.value_program_limits();
+            self.reserve_value_reference_work(schema, value.cost(), limits)?;
+            self.admit(
+                size_of::<ReferenceProgram>()
+                    .checked_add(128)
+                    .and_then(|bytes| bytes.checked_add(provenance_string_bytes(id.as_str())?)),
+            )?;
+            let plan = plan_declared_value_entity_references::<PrefabReferenceRemapError>(
+                field,
+                field.shape(),
+                value,
+                crate::validation::reference_traversal_limits(limits),
+            )
+            .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
+            let program =
+                self.scoped_reference_program(plan, value, scope, declaration, entity, component)?;
+            programs.insert(id.clone(), program);
+        }
+        Ok(programs)
+    }
+
+    fn scoped_reference_program(
+        &mut self,
+        plan: DeclaredEntityReferencePlan,
+        value: &ComponentValue,
+        scope: ScopeId,
+        declaration: Option<(ScopeId, PrefabOverlaySlot)>,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+    ) -> Result<ReferenceProgram, SceneCompilationFailure> {
         let mut bytes = Some(0usize);
         plan.visit(value, |path, reference| {
             let target_bytes = match reference {
@@ -111,7 +174,7 @@ where
         record_scope: ScopeId,
         claim_scope: ScopeId,
         component_index: usize,
-    ) -> Result<(), PrefabExpansionFailure> {
+    ) -> Result<(), SceneCompilationFailure> {
         let lexical_claim_scope = self.overlay_reference_scope(claim_scope)?;
         for (claim_index, replacement) in replacements.into_iter().enumerate() {
             // The same Reflect operation selected this actual storage prefix. Equality
@@ -169,7 +232,7 @@ where
         limits: ComponentValueMaterializationLimits,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
-    ) -> Result<(), PrefabExpansionFailure> {
+    ) -> Result<(), SceneCompilationFailure> {
         let plan = match program.plan.take() {
             Some(plan) => plan,
             None => {
@@ -198,7 +261,7 @@ where
         })
         .map_err(|error| self.source_value_reference_error(entity, component, &error))?;
         if !complete || scoped_count != program.origins.len() {
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         program.plan = Some(plan);
         Ok(())
@@ -208,12 +271,17 @@ where
     pub(super) fn close_reference_demands(
         &mut self,
         programs: &mut ReferencePrograms,
-    ) -> Result<bool, PrefabExpansionFailure> {
+    ) -> Result<bool, SceneCompilationFailure> {
         // Do not reject a stale leaf before another surviving leaf has had a chance to
         // open a scope and trigger structural/program recomposition.
         for components in programs.values() {
-            for program in components.values() {
-                for origin in program.origins.values() {
+            for programs in components.values() {
+                for origin in programs.value.origins.values().chain(
+                    programs
+                        .contextual_defaults
+                        .values()
+                        .flat_map(|program| program.origins.values()),
+                ) {
                     if matches!(
                         self.reference_target(origin.scope, &origin.target)?,
                         ReferenceResolution::Entered
@@ -224,8 +292,13 @@ where
             }
         }
         for (node, components) in programs {
-            for (component, program) in components {
-                for (path, origin) in &mut program.origins {
+            for (component, programs) in components {
+                for (path, origin) in programs.value.origins.iter_mut().chain(
+                    programs
+                        .contextual_defaults
+                        .values_mut()
+                        .flat_map(|program| program.origins.iter_mut()),
+                ) {
                     let (resolved, declaring_scope) =
                         match self.reference_target(origin.scope, &origin.target)? {
                             ReferenceResolution::Resolved {
@@ -248,7 +321,7 @@ where
                                 component,
                                 path,
                                 origin,
-                                PrefabExpansionFailureKind::MissingTarget,
+                                SceneCompilationFailureKind::MissingTarget,
                                 None,
                             ));
                         }
@@ -258,7 +331,7 @@ where
                                 component,
                                 path,
                                 origin,
-                                PrefabExpansionFailureKind::Reference,
+                                SceneCompilationFailureKind::Reference,
                                 None,
                             ));
                         }
@@ -276,14 +349,15 @@ where
         component: &ComponentTypeId,
         path: &ComponentFieldPath,
         origin: &ScopedReference,
-        reason: PrefabExpansionFailureKind,
+        reason: SceneCompilationFailureKind,
         input: Option<(ScopeId, InputFailure)>,
-    ) -> PrefabExpansionFailure {
+    ) -> SceneCompilationFailure {
         let failure = if let Some((scope, failure)) = input {
             self.push_input_failure(failure);
             self.scope_failure(scope, None, reason.into())
-        } else if reason == PrefabExpansionFailureKind::Reference
-            || (origin.declaration.is_none() && reason == PrefabExpansionFailureKind::MissingTarget)
+        } else if reason == SceneCompilationFailureKind::Reference
+            || (origin.declaration.is_none()
+                && reason == SceneCompilationFailureKind::MissingTarget)
         {
             let bytes = path_storage_bytes(path).and_then(|bytes| {
                 bytes.checked_add(provenance_string_bytes(

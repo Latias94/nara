@@ -53,7 +53,7 @@ impl RecoveryFixture {
         &self,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> ObservedPendingRecoveryStorage {
-        let root = crate::project_tooling::host_fs::writable_directory(&self.project.root).unwrap();
+        let root = crate::test_host_fs::writable_directory(&self.project.root).unwrap();
         RecoveryStorageHost::load_pending(root, SourceUpgradeRecoveryLimits::default(), budget)
             .unwrap()
     }

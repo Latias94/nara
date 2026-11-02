@@ -4,7 +4,8 @@ use std::fs;
 
 use nara_asset::{AssetMeta, AssetMetaIdentity, AssetProductRef, ImportedProductId, StableAssetId};
 use nara_scene::{
-    PrefabExpansionOptions, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    SceneCompilationOptions, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
+    SourceDocumentKind,
 };
 
 use super::*;
@@ -113,7 +114,7 @@ fn finish_after_sidecar_replacement(replacement: MetadataReplacement) {
         .request_complete_prefab_conversion(
             session.revision(),
             &SceneEntityId::new("anchor").unwrap(),
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
         )
         .unwrap();
     let mut inputs = snapshot

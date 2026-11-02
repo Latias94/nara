@@ -44,8 +44,9 @@ use nara_engine::{
         encode_asset_reference_value,
     },
     scene::{
-        PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument, PrefabEntityTarget,
-        PrefabInstance, PrefabOverlay, SceneComponentRecord, SceneDocument, SceneEntityId,
+        CompiledSceneDocument, InMemoryPrefabSourceResolver, PrefabComponentIntent,
+        PrefabComponentSetMode, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+        SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId,
         SceneEntityRecord, SceneEntitySource, SourceDocumentKey, SourceDocumentKind,
         advanced::SceneProductTransactionLimits,
     },
@@ -441,7 +442,13 @@ fn assert_flat_dependencies(
             assert_eq!(dependent.source_key(), &source_key(scene));
             let targets = graph.iter().find(|(number, _)| *number == scene).unwrap().1;
             assert_eq!(dependent.document(), &document(scene, targets));
-            assert_eq!(dependent.expanded_scene(), dependent.document());
+            assert_eq!(
+                dependent.compiled_scene(),
+                &compile_expected(
+                    dependent.document(),
+                    fixture.plan.schema_validation().bindings()
+                ),
+            );
         }
     }
 }
@@ -452,12 +459,12 @@ fn assert_graph(graph: &[(u64, &[u64])], expected: &[u64]) {
     assert_flat_dependencies(&fixture, &snapshot, graph, expected);
     let outcome = execute(&fixture);
     assert_eq!(
-        outcome.startup_document.as_ref(),
-        Some(snapshot.expanded_scene())
+        outcome.startup_document,
+        Some(SceneObservation::capture(snapshot.compiled_scene()))
     );
     assert_eq!(
         outcome.startup_entities,
-        snapshot.expanded_scene().entities.len()
+        snapshot.compiled_scene().entities().len()
     );
     assert_eq!(outcome.commits, 0);
     assert_eq!(outcome.receipts.len(), 1);
@@ -538,7 +545,7 @@ fn omitted_schema_default_introduces_a_required_scene_dependency() {
             .get("target")
             .is_none()
     );
-    let effective = &snapshot.expanded_scene().entities[0].components[&component].value;
+    let effective = snapshot.compiled_scene().entities()[0].components()[&component].value();
     assert_eq!(
         decode_asset_reference_value(effective.get("target").unwrap()).unwrap(),
         AssetRef::Product(product(B)),
@@ -549,8 +556,11 @@ fn omitted_schema_default_introduces_a_required_scene_dependency() {
         &source_key(B)
     );
     assert_eq!(
-        snapshot.scene_dependencies()[0].expanded_scene(),
-        &document(B, &[])
+        snapshot.scene_dependencies()[0].compiled_scene(),
+        &compile_expected(
+            &document(B, &[]),
+            fixture.plan.schema_validation().bindings()
+        )
     );
     assert!(snapshot.content_closure().members().iter().any(|member| {
         member.kind() == ProjectContentMemberKind::Scene
@@ -558,8 +568,8 @@ fn omitted_schema_default_introduces_a_required_scene_dependency() {
     }));
     let outcome = execute(&fixture);
     assert_eq!(
-        outcome.startup_document.as_ref(),
-        Some(snapshot.expanded_scene())
+        outcome.startup_document,
+        Some(SceneObservation::capture(snapshot.compiled_scene()))
     );
     drop(snapshot);
     fixture.corrupt(B, Fault::MissingSource);
@@ -630,15 +640,15 @@ fn prefab_overlay_collects_only_the_effective_door_scene_target() {
         &source_key(B)
     );
     let targets: Vec<_> = snapshot
-        .expanded_scene()
-        .entities
+        .compiled_scene()
+        .entities()
         .iter()
         .filter_map(|entity| {
             entity
-                .components
+                .components()
                 .get(&ComponentTypeId::new(DOOR))
                 .map(|record| {
-                    DoorTarget::__decode_persistent_component(&record.value)
+                    DoorTarget::__decode_persistent_component(record.value())
                         .unwrap()
                         .target
                 })
@@ -647,8 +657,8 @@ fn prefab_overlay_collects_only_the_effective_door_scene_target() {
     assert_eq!(targets, [AssetRef::Product(product(B))]);
     let outcome = execute(&fixture);
     assert_eq!(
-        outcome.startup_document.as_ref(),
-        Some(snapshot.expanded_scene())
+        outcome.startup_document,
+        Some(SceneObservation::capture(snapshot.compiled_scene()))
     );
     drop(snapshot);
     assert_idle(&fixture.loader);
@@ -660,7 +670,7 @@ fn malformed_missing_wrong_kind_and_auxiliary_dependencies_preserve_the_before_s
         let fixture = Fixture::new(Case::Observe, &[(A, &[A]), (B, &[A])], &[B]);
         let before = fixture.load();
         let authored = before.scene().clone();
-        let effective = before.expanded_scene().clone();
+        let effective = SceneObservation::capture(before.compiled_scene());
         let revision = before.revision();
         let digest = before.content_digest();
         let budget = fixture.loader.budget_snapshot();
@@ -685,7 +695,11 @@ fn malformed_missing_wrong_kind_and_auxiliary_dependencies_preserve_the_before_s
             .unwrap_err();
         assert!(error.diagnostics().has_errors(), "{fault:?}: {error:?}");
         assert_eq!(before.scene(), &authored, "{fault:?}");
-        assert_eq!(before.expanded_scene(), &effective, "{fault:?}");
+        assert_eq!(
+            SceneObservation::capture(before.compiled_scene()),
+            effective,
+            "{fault:?}"
+        );
         assert_eq!(before.revision(), revision, "{fault:?}");
         assert_eq!(before.content_digest(), digest, "{fault:?}");
         assert_eq!(before.selected_scene_product(), Some(product(A)));
@@ -807,6 +821,66 @@ enum Phase {
     Done,
 }
 
+fn compile_expected(
+    document: &SceneDocument,
+    bindings: &SceneComponentBindings,
+) -> CompiledSceneDocument {
+    let report = bindings.compile_scene(document, &InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    report.candidate.unwrap()
+}
+
+// Owned test observations survive teardown without cloning the move-only compilation or
+// recreating a source document. Every effective field and canonical origin remains compared.
+#[derive(Clone, Debug, PartialEq)]
+struct SceneObservation {
+    roots: Vec<SceneEntityId>,
+    entities: Vec<EntityObservation>,
+    canonical_provenance: nara_engine::scene::SceneEntityProvenanceMap,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct EntityObservation {
+    id: SceneEntityId,
+    children: Vec<SceneEntityId>,
+    components: Vec<ComponentObservation>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ComponentObservation {
+    id: ComponentTypeId,
+    schema_owner: Option<PersistentComponentSchemaOwnerId>,
+    version: ComponentSchemaVersion,
+    value: ComponentValue,
+}
+
+impl SceneObservation {
+    fn capture(document: &CompiledSceneDocument) -> Self {
+        Self {
+            roots: document.roots().to_vec(),
+            entities: document
+                .entities()
+                .iter()
+                .map(|entity| EntityObservation {
+                    id: entity.id().clone(),
+                    children: entity.children().to_vec(),
+                    components: entity
+                        .components()
+                        .iter()
+                        .map(|(id, record)| ComponentObservation {
+                            id: id.clone(),
+                            schema_owner: record.schema_owner().cloned(),
+                            version: record.version(),
+                            value: record.value().clone(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            canonical_provenance: document.canonical_provenance().clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Resource)]
 struct Outcome {
     phase: Phase,
@@ -815,15 +889,15 @@ struct Outcome {
     commits: u8,
     ready_boundaries: u8,
     rejected: bool,
-    startup_document: Option<SceneDocument>,
+    startup_document: Option<SceneObservation>,
     startup_entities: usize,
     source_view: Option<SceneSourceView>,
     receipts: Vec<SpawnedSceneInstance>,
 }
 
 fn inspect_startup(world: &mut World) {
-    let (document, receipt) = live_scene(world, A);
-    let view = CurrentScene::get(world).unwrap().source_view();
+    let (view, receipt) = live_scene(world, A);
+    let document = view.with_document(SceneObservation::capture).unwrap();
     let count = world.query::<&SceneEntitySource>().iter(world).count();
     let observe = *world.resource::<Case>() == Case::Observe;
     let mut outcome = world.resource_mut::<Outcome>();
@@ -837,42 +911,45 @@ fn inspect_startup(world: &mut World) {
     }
 }
 
-fn live_scene(world: &mut World, scene: u64) -> (SceneDocument, SpawnedSceneInstance) {
-    let (document, receipt, view) = {
+fn live_scene(world: &mut World, scene: u64) -> (SceneSourceView, SpawnedSceneInstance) {
+    let (receipt, view) = {
         let current = CurrentScene::get(world).unwrap();
-        (
-            current.source().clone(),
-            current.receipt().clone(),
-            current.source_view(),
-        )
+        (current.receipt().clone(), current.source_view())
     };
-    assert!(document.roots.contains(&marker(scene)));
-    view.with_expanded_scene(|candidate, resolver| {
-        assert_eq!(candidate.source_key(), &source_key(scene));
-        assert!(resolver.is_some());
-        assert_eq!(candidate.document(), &document);
-    })
-    .expect("the current source Scene retains its admitted expansion");
-    let mut doors = 0;
-    for record in &document.entities {
-        let EntityLookup::Resolved(entity) = receipt.resolve(world, &record.id) else {
-            panic!("the current root must resolve each member through its real receipt")
-        };
-        if let Some(record) = record.components.get(&ComponentTypeId::new(DOOR)) {
-            let expected = DoorTarget::__decode_persistent_component(&record.value).unwrap();
-            assert_eq!(
-                world.get::<DoorTarget>(entity).unwrap().target,
-                expected.target
-            );
-            doors += 1;
-        }
-    }
+    let (doors, entities) = view
+        .with_compiled_scene(|candidate, resolver| {
+            let document = candidate.document();
+            assert!(document.roots().contains(&marker(scene)));
+            assert_eq!(candidate.source_key(), &source_key(scene));
+            assert!(resolver.is_some());
+            assert!(std::ptr::eq(
+                document,
+                CurrentScene::get(world).unwrap().source()
+            ));
+            let mut doors = 0;
+            for record in document.entities() {
+                let EntityLookup::Resolved(entity) = receipt.resolve(world, record.id()) else {
+                    panic!("the current root must resolve each member through its real receipt")
+                };
+                if let Some(record) = record.components().get(&ComponentTypeId::new(DOOR)) {
+                    let expected =
+                        DoorTarget::__decode_persistent_component(record.value()).unwrap();
+                    assert_eq!(
+                        world.get::<DoorTarget>(entity).unwrap().target,
+                        expected.target
+                    );
+                    doors += 1;
+                }
+            }
+            (doors, document.entities().len())
+        })
+        .expect("the current source Scene retains its admitted compilation");
     assert_eq!(world.query::<&DoorTarget>().iter(world).count(), doors);
     assert_eq!(
         world.query::<&SceneEntitySource>().iter(world).count(),
-        document.entities.len(),
+        entities,
     );
-    (document, receipt)
+    (view, receipt)
 }
 
 fn live_door(world: &mut World, scene: u64) -> (Entity, AssetProductRef, SpawnedSceneInstance) {
@@ -956,8 +1033,8 @@ fn travel(world: &mut World) {
                 });
                 assert_eq!(live_door(world, A).2, receipt);
                 assert_eq!(
-                    CurrentScene::get(world).unwrap().source(),
-                    world
+                    SceneObservation::capture(CurrentScene::get(world).unwrap().source()),
+                    *world
                         .resource::<Outcome>()
                         .startup_document
                         .as_ref()
@@ -971,6 +1048,9 @@ fn travel(world: &mut World) {
             }
             assert_eq!(state, ProjectSceneRequestState::Ready);
             let next = if commits == 0 { B } else { A };
+            let bindings = nara_engine::scene::scene_component_bindings(world)
+                .unwrap()
+                .clone();
             ProjectScenes::scope(world, |scenes| {
                 let prepared = scenes.prepared(request).unwrap();
                 assert_eq!(
@@ -983,7 +1063,10 @@ fn travel(world: &mut World) {
                     scene_name(next)
                 );
                 assert_eq!(prepared.expected_instance(), &receipt);
-                assert_eq!(prepared.scene(), &document(next, &[active]));
+                assert_eq!(
+                    prepared.scene(),
+                    &compile_expected(&document(next, &[active]), &bindings),
+                );
             });
             // An entire ordinary frame ends with only the old root instantiated and B/A Ready.
             assert_eq!(live_door(world, active).2, receipt);
@@ -1377,13 +1460,22 @@ mod deferred {
         assert_eq!(snapshot.selected_scene_path().as_str(), scene_name(scene));
         assert_eq!(snapshot.selected_scene_product(), Some(product(scene)));
         assert_eq!(snapshot.selected_scene_source_key(), &source_key(scene));
-        assert_eq!(snapshot.expanded_scene(), &document(scene));
+        assert_eq!(
+            snapshot.compiled_scene(),
+            &compile_expected(
+                &document(scene),
+                fixture.plan.schema_validation().bindings(),
+            )
+        );
         assert_eq!(snapshot.scene_dependencies().len(), usize::from(scene == A));
         if scene == A {
             let rules = &snapshot.scene_dependencies()[0];
             assert_eq!(rules.source_key(), &source_key(D));
             assert_eq!(rules.path(), &canonical_scene_path(D));
-            assert_eq!(rules.expanded_scene(), &document(D));
+            assert_eq!(
+                rules.compiled_scene(),
+                &compile_expected(&document(D), fixture.plan.schema_validation().bindings(),)
+            );
         }
         assert_images(snapshot.images().iter().map(|image| image.image()), scene);
         let closure = snapshot.content_closure();
@@ -1552,18 +1644,29 @@ mod deferred {
         world: &mut World,
         scene: u64,
     ) -> (Entity, Option<AssetProductRef>, SpawnedSceneInstance) {
-        let (current, receipt) = live_scene(world, scene);
-        assert_eq!(current, document(scene));
+        let (view, receipt) = live_scene(world, scene);
         let EntityLookup::Resolved(entity) = receipt.resolve(world, &door_id(scene, 0)) else {
             panic!("the current source Scene must instantiate its Deferred Door")
         };
-        let record = &current
-            .entities
-            .iter()
-            .find(|record| record.id == door_id(scene, 0))
-            .unwrap()
-            .components[&ComponentTypeId::new(DOOR)];
-        let expected = DeferredDoor::__decode_persistent_component(&record.value).unwrap();
+        let expected = view
+            .with_compiled_scene(|candidate, _| {
+                let current = candidate.document();
+                assert_eq!(
+                    current,
+                    &compile_expected(
+                        &document(scene),
+                        nara_engine::scene::scene_component_bindings(world).unwrap(),
+                    )
+                );
+                let record = &current
+                    .entities()
+                    .iter()
+                    .find(|record| record.id() == &door_id(scene, 0))
+                    .unwrap()
+                    .components()[&ComponentTypeId::new(DOOR)];
+                DeferredDoor::__decode_persistent_component(record.value()).unwrap()
+            })
+            .unwrap();
         let door = world.get::<DeferredDoor>(entity).unwrap();
         assert_eq!(door, &expected);
         let target = door
@@ -1592,6 +1695,7 @@ mod deferred {
         prepared: PreparedProjectSceneView<'_>,
         scene: u64,
         receipt: &SpawnedSceneInstance,
+        bindings: &SceneComponentBindings,
     ) -> Option<u32> {
         assert_eq!(
             prepared.selected_scene(),
@@ -1603,16 +1707,19 @@ mod deferred {
             scene_name(scene),
         );
         assert_eq!(prepared.expected_instance(), receipt);
-        assert_eq!(prepared.scene(), &document(scene));
+        assert_eq!(
+            prepared.scene(),
+            &compile_expected(&document(scene), bindings)
+        );
         for target in [A, B, C] {
             assert!(prepared.scene_dependency(product(target)).is_none());
         }
         assert!(prepared.scene_dependency(auxiliary(D)).is_none());
         if scene == A {
             let rules = prepared.scene_dependency(product(D)).unwrap();
-            assert_eq!(rules, &document(D));
-            let record = &rules.entities[0].components[&ComponentTypeId::new(RULES)];
-            let rules = EncounterRules::__decode_persistent_component(&record.value).unwrap();
+            assert_eq!(rules, &compile_expected(&document(D), bindings));
+            let record = &rules.entities()[0].components()[&ComponentTypeId::new(RULES)];
+            let rules = EncounterRules::__decode_persistent_component(record.value()).unwrap();
             assert_eq!(rules.spawn_count, 17);
             Some(rules.spawn_count)
         } else {
@@ -1707,8 +1814,16 @@ mod deferred {
                     return;
                 }
                 assert_eq!(state, ProjectSceneRequestState::Ready);
+                let bindings = nara_engine::scene::scene_component_bindings(world)
+                    .unwrap()
+                    .clone();
                 let spawn_count = ProjectScenes::scope(world, |scenes| {
-                    inspect_prepared(scenes.prepared(request).unwrap(), target, &receipt)
+                    inspect_prepared(
+                        scenes.prepared(request).unwrap(),
+                        target,
+                        &receipt,
+                        &bindings,
+                    )
                 });
                 assert_eq!(live_door(world, active).2, receipt);
                 assert_eq!(

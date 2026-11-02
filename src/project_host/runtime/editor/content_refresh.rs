@@ -444,7 +444,7 @@ impl EditorProjectSession {
             | ProjectContentErrorKind::SceneFormat
             | ProjectContentErrorKind::InputDefinition
             | ProjectContentErrorKind::ScenePublication
-            | ProjectContentErrorKind::PrefabExpansion
+            | ProjectContentErrorKind::SceneCompilation
             | ProjectContentErrorKind::AssetReference
             | ProjectContentErrorKind::AssetMeta
             | ProjectContentErrorKind::AssetDomain

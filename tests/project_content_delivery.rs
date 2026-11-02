@@ -88,7 +88,7 @@ fn selected_scene_content_is_truthful_without_granting_startup_or_delivery_autho
     assert_eq!(second.selected_scene_path().as_str(), SECOND_SCENE);
     assert!(second.startup_content_closure().is_none());
     assert_eq!(second.scene(), &second_scene());
-    assert!(second.expanded_scene_provenance().values().any(|source| {
+    assert!(second.compiled_scene_provenance().values().any(|source| {
         source.local_entity_id() == &scene_id("second-enemy")
             && source
                 .projection_path()

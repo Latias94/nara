@@ -283,7 +283,7 @@ fn replace(world: &mut World, snapshot: &ProjectContentSnapshot) -> SpawnedScene
     assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
     assert_eq!(
         world.resource::<CurrentSceneOwner>().source(),
-        snapshot.expanded_scene()
+        snapshot.compiled_scene()
     );
     receipt
 }
@@ -690,7 +690,8 @@ impl PublicationBaseline {
         let events = world.resource::<AssetEvents>();
         Self {
             receipt: world.resource::<CurrentSceneOwner>().receipt().clone(),
-            source: world.resource::<CurrentSceneOwner>().source() as *const SceneDocument as usize,
+            source: world.resource::<CurrentSceneOwner>().source() as *const CompiledSceneDocument
+                as usize,
             entities: world.entities().len(),
             server: world.resource::<AssetServer>().clone(),
             catalog: world.resource::<ProjectAssetDatabase>().clone(),
@@ -1002,7 +1003,7 @@ fn hosted_empty_scene_replacement_needs_no_asset_event_resource_when_no_publicat
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
         assert_eq!(
             world.resource::<CurrentSceneOwner>().source(),
-            empty.expanded_scene()
+            empty.compiled_scene()
         );
         let after = PublicationBaseline::capture(world);
         assert_eq!(after.server, before.server);

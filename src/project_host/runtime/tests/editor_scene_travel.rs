@@ -37,8 +37,15 @@ struct TravelObservation {
     path: &'static str,
     expected: SpawnedSceneInstance,
     committed: SpawnedSceneInstance,
-    prepared_source: SceneDocument,
+    prepared_source: TravelSourceObservation,
     image_allocation: usize,
+}
+
+#[derive(Debug)]
+struct TravelSourceObservation {
+    address: usize,
+    roots: Vec<nara_identity::SceneEntityId>,
+    entities: Vec<nara_identity::SceneEntityId>,
 }
 
 impl Plugin for TravelPlugin {
@@ -88,7 +95,16 @@ fn travel_between_declared_scenes(world: &mut World) {
                     let prepared = scenes.prepared(request).unwrap();
                     assert_eq!(prepared.selected_scene_path().unwrap().as_str(), path);
                     (
-                        prepared.scene().clone(),
+                        TravelSourceObservation {
+                            address: std::ptr::from_ref(prepared.scene()) as usize,
+                            roots: prepared.scene().roots().to_vec(),
+                            entities: prepared
+                                .scene()
+                                .entities()
+                                .iter()
+                                .map(|entity| entity.id().clone())
+                                .collect(),
+                        },
                         prepared.expected_instance().clone(),
                     )
                 }
@@ -108,7 +124,14 @@ fn travel_between_declared_scenes(world: &mut World) {
         );
         assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
         let receipt = report.instance.unwrap();
-        assert_eq!(world.resource::<CurrentSceneOwner>().source(), &target.0);
+        assert_eq!(
+            std::ptr::from_ref(world.resource::<CurrentSceneOwner>().source()) as usize,
+            target.0.address,
+        );
+        assert_eq!(
+            world.resource::<CurrentSceneOwner>().source().roots(),
+            target.0.roots
+        );
         assert_eq!(world.resource::<CurrentSceneOwner>().receipt(), &receipt);
         assert_ne!(receipt.instance_id(), target.1.instance_id());
         for id in receipt.entity_ids() {
@@ -243,12 +266,12 @@ fn trusted_editor_play_travels_b_then_same_a_without_losing_preview_generation_o
     assert_eq!(commits[0].prepared_source.roots, b.roots);
     assert_eq!(commits[0].committed.entity_ids(), b.roots.as_slice());
     assert_eq!(commits[0].prepared_source.entities.len(), 1);
-    assert_eq!(commits[0].prepared_source.entities[0].id, b.entities[0].id);
+    assert_eq!(commits[0].prepared_source.entities[0], b.entities[0].id);
     assert_eq!(commits[1].path, "startup.scene.json");
     assert_eq!(commits[1].prepared_source.roots, a.roots);
     assert_eq!(commits[1].committed.entity_ids(), a.roots.as_slice());
     assert_eq!(commits[1].prepared_source.entities.len(), 1);
-    assert_eq!(commits[1].prepared_source.entities[0].id, a.entities[0].id);
+    assert_eq!(commits[1].prepared_source.entities[0], a.entities[0].id);
     assert_eq!(commits[1].expected, commits[0].committed);
     assert_ne!(
         commits[0].expected.instance_id(),

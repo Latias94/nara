@@ -9,8 +9,7 @@ use nara_image::{ImageColorSpace, ImageDomain, ImageExtent, ImageFormat, ImageRu
 use nara_project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset};
 use nara_reflect::{ComponentTypeId, ComponentValue, encode_asset_reference_value};
 use nara_scene::{
-    RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneComponentRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SourceDocumentKey, SourceDocumentKind,
 };
 
 use super::*;
@@ -191,11 +190,17 @@ impl Drop for Fixture {
 }
 
 fn scene_bytes(plan: &RuntimeConfigurationPlan, reference: AssetProductRef, name: &str) -> Vec<u8> {
+    let component = ComponentTypeId::new("nara.sprite.Sprite");
     let schema = plan
         .schema_validation()
         .snapshot()
-        .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
+        .schema(&component)
         .unwrap();
+    let owner = plan
+        .schema_validation()
+        .snapshot()
+        .component_schema_owner(&component)
+        .expect("the actual Sprite definition has a selected Schema owner");
     let mut value = schema.authoring_initial_value().unwrap().clone();
     let ComponentValue::Map(fields) = &mut value else {
         unreachable!()
@@ -214,7 +219,7 @@ fn scene_bytes(plan: &RuntimeConfigurationPlan, reference: AssetProductRef, name
             "source_key": SourceDocumentKey::stable_asset(reference.source(), SourceDocumentKind::Scene),
             "roots": [name],
             "entities": [{"id": name, "children": [], "components": {
-                "nara.sprite.Sprite": SceneComponentRecord::new(schema.version, value)
+                "nara.sprite.Sprite": {"owner": owner.as_str(), "version": schema.version, "value": value}
             }}],
             "provenance": [{"entity": name, "local_entity": name, "origin": {"kind": "local"}}]
         }
@@ -271,7 +276,7 @@ impl Plugin for RequestProbePlugin {
                 let view = scenes.prepared(request).unwrap();
                 assert_eq!(view.selected_scene_path(), None);
                 assert_eq!(view.selected_scene_product(), Some(later()));
-                assert_eq!(view.scene().roots, [SceneEntityId::new("later").unwrap()]);
+                assert_eq!(view.scene().roots(), [SceneEntityId::new("later").unwrap()]);
                 true
             });
             world.insert_resource(RequestProbe {

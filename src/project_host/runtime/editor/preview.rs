@@ -19,7 +19,7 @@ use nara_render::{
 #[cfg(feature = "render-wgpu")]
 use nara_render_wgpu::{WgpuRenderInput, WgpuStockCapture, WgpuStockCaptureAdapter};
 use nara_scene::{
-    __private::AuthoringPreviewOmission, ExpandedSceneCandidate, SceneAuthoringRevision,
+    __private::AuthoringPreviewOmission, CompiledSceneCandidate, SceneAuthoringRevision,
     SceneEntityId, SceneEntitySource, SceneProjection, SourceDocumentKey,
 };
 use nara_sprite_render::__private::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
@@ -233,13 +233,13 @@ struct EditorPreviewPublicationRequest {
 
 pub(super) enum EditorPreviewProjection {
     Authoring {
-        candidate: ExpandedSceneCandidate,
+        candidate: CompiledSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
         database: Arc<ProjectAssetDatabase>,
         asset_scope: Arc<AssetPathScope>,
     },
     TrustedCompiled {
-        candidate: ExpandedSceneCandidate,
+        candidate: CompiledSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
     },
     Rejected(DiagnosticReport),
@@ -247,7 +247,7 @@ pub(super) enum EditorPreviewProjection {
 
 impl EditorPreviewProjection {
     pub(super) fn authoring(
-        candidate: ExpandedSceneCandidate,
+        candidate: CompiledSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
         database: Arc<ProjectAssetDatabase>,
         asset_scope: Arc<AssetPathScope>,
@@ -261,7 +261,7 @@ impl EditorPreviewProjection {
     }
 
     pub(super) fn trusted_compiled(
-        candidate: ExpandedSceneCandidate,
+        candidate: CompiledSceneCandidate,
         omissions: EditorAuthoringPreviewOmissions,
     ) -> Self {
         Self::TrustedCompiled {
@@ -779,7 +779,7 @@ impl EditorPreviewSession {
     pub(super) fn test_accepted_authoring_candidate<'a>(
         &self,
         world: &'a World,
-    ) -> Option<&'a ExpandedSceneCandidate> {
+    ) -> Option<&'a CompiledSceneCandidate> {
         let state = world.get_resource::<EditorPreviewRuntimeState>()?;
         let requested = state.requested.as_ref()?;
         if &state.accepted.as_ref()?.stamp != requested {

@@ -1,3 +1,6 @@
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 #[path = "support/prefab_source.rs"]
 mod prefab_source;
 
@@ -74,10 +77,10 @@ fn assert_rejected_without_mutation(
     let database = ProjectAssetDatabase::default();
     let before_document = document.clone();
 
-    let expansion = document.expand_prefabs(&registry, resolver);
+    let expansion = document.compile(&registry, resolver);
     assert!(expansion.candidate.is_none());
     assert_bounded_errors(&expansion.diagnostics, code);
-    let expansion = document.expand_prefabs_with_asset_resolution(
+    let expansion = document.compile_with_asset_resolution(
         &registry,
         resolver,
         database.resolver(&nara_asset::AssetPathScope::ROOT),
@@ -94,9 +97,11 @@ fn assert_rejected_without_mutation(
             let report = nara_scene::spawn_scene(
                 &mut world,
                 &registry,
-                &nara_scene::ExpandedSceneCandidate::plain(
+                &compiled_scene::native(
+                    &registry,
+                    &std::sync::Arc::new((existing).clone()),
                     scene_source_key("assert_rejected_without_mutation/existing"),
-                    std::sync::Arc::new((existing).clone()),
+                    None,
                 ),
                 &scene_occurrence("assert_rejected_without_mutation/report"),
                 None,
@@ -120,13 +125,13 @@ fn assert_rejected_without_mutation(
 
         for with_database in [false, true] {
             let report = if with_database {
-                (document).expand_prefabs_with_asset_resolution(
+                (document).compile_with_asset_resolution(
                     &registry,
                     resolver,
                     database.resolver(&nara_asset::AssetPathScope::ROOT),
                 )
             } else {
-                (document).expand_prefabs(&registry, resolver)
+                (document).compile(&registry, resolver)
             };
             assert!(report.candidate.is_none());
             assert_bounded_errors(&report.diagnostics, code);
@@ -268,7 +273,7 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
     );
     let registry = ComponentRegistryBuilder::new().freeze().unwrap();
     let document = SceneDocument::from_ordered_roots([anchor(source)]);
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
     assert_bounded_errors(&expansion.diagnostics, "scene.dangling-root");
@@ -332,7 +337,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
     );
     let mut document = SceneDocument::from_ordered_roots([anchor(source.clone())]);
 
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -341,11 +346,11 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
     assert_eq!(decode_count.load(Ordering::Relaxed), 0);
     let expanded = expansion.document().unwrap();
     let component = expanded
-        .entities
+        .entities()
         .iter()
-        .find_map(|entity| entity.components.get(&component_id))
+        .find_map(|entity| entity.components().get(&component_id))
         .unwrap();
-    assert_eq!(component.value.field_i64("amount").unwrap(), 5);
+    assert_eq!(component.value().field_i64("amount").unwrap(), 5);
 
     let mut overlay = PrefabOverlay::new(key.clone());
     overlay.components.push(PrefabComponentIntent::Properties {
@@ -358,7 +363,7 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
         }],
     });
     document.entities[0].prefab.as_mut().unwrap().overrides = Some(overlay);
-    let expansion = document.expand_prefabs(&registry, &resolver);
+    let expansion = document.compile(&registry, &resolver);
     assert!(
         !expansion.diagnostics.has_errors(),
         "{:?}",
@@ -366,11 +371,11 @@ fn raw_prefab_topology_admission_preserves_defaults_and_overrides_without_native
     );
     let expanded = expansion.document().unwrap();
     let component = expanded
-        .entities
+        .entities()
         .iter()
-        .find_map(|entity| entity.components.get(&component_id))
+        .find_map(|entity| entity.components().get(&component_id))
         .unwrap();
-    assert_eq!(component.value.field_i64("amount").unwrap(), 9);
+    assert_eq!(component.value().field_i64("amount").unwrap(), 9);
     assert_eq!(decode_count.load(Ordering::Relaxed), 0);
     let resolved = resolver.resolve_prefab(&source).unwrap();
     assert_eq!(resolved.document(), &prefab);

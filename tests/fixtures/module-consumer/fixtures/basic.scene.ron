@@ -19,14 +19,14 @@
                     "nara.scene.Name": (
                         version: 1,
                         value: (
-                            type: string,
+                            type: "string",
                             value: "Enemy",
                         ),
                     ),
                     "nara.scene.Visibility": (
                         version: 1,
                         value: (
-                            type: string,
+                            type: "string",
                             value: "hidden",
                         ),
                     ),
@@ -39,14 +39,14 @@
                     "nara.scene.Name": (
                         version: 1,
                         value: (
-                            type: string,
+                            type: "string",
                             value: "Player",
                         ),
                     ),
                     "nara.scene.Visibility": (
                         version: 1,
                         value: (
-                            type: string,
+                            type: "string",
                             value: "visible",
                         ),
                     ),

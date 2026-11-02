@@ -50,9 +50,9 @@ use nara::{
         RuntimeContentTarget,
     },
     scene::{
-        ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings,
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-        SourceDocumentKind, advanced::SceneProductTransactionLimits, scene_component_bindings,
+        RuntimeSceneCandidate, RuntimeSceneLimits, SceneComponentBindings, SceneComponentRecord,
+        SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        advanced::SceneProductTransactionLimits, scene_component_bindings,
     },
 };
 use nara_asset::{
@@ -237,10 +237,6 @@ fn scene_bytes_with_samples(
                 caption.__encode_persistent_component().unwrap(),
             ),
         )]);
-    let expanded = ExpandedSceneCandidate::plain(
-        SourceDocumentKey::stable_asset(stable(source), SourceDocumentKind::Scene),
-        Arc::new(document),
-    );
     let mut database = ProjectAssetDatabase::default();
     database
         .insert(AssetRecord::new(
@@ -249,6 +245,26 @@ fn scene_bytes_with_samples(
             AssetSourceKind::Other(TextBundleDomain::SOURCE_KIND.into()),
         ))
         .unwrap();
+    let compilation = bindings
+        .try_compile_scene_with_loader(
+            &document,
+            Default::default(),
+            Some(database.resolver(&nara::asset::AssetPathScope::ROOT)),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
+    );
+    let expanded = compilation
+        .candidate
+        .unwrap()
+        .bind_source(SourceDocumentKey::stable_asset(
+            stable(source),
+            SourceDocumentKind::Scene,
+        ));
     RuntimeSceneCandidate::cook(
         &expanded,
         bindings,
@@ -587,7 +603,7 @@ fn travel(world: &mut World) {
     let initial_view = current.source_view();
     let old_entity = resolve(world, &initial);
     assert_eq!(caption_text(world, &initial), "Hello world");
-    assert!(initial_view.with_expanded_scene(|_, _| ()).is_none());
+    assert!(initial_view.with_compiled_scene(|_, _| ()).is_none());
     assert!(initial_view.with_runtime_scene(|_| ()).is_some());
     let identity = world.resource::<WorldIdentityDomain>().stats();
     let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);
@@ -694,9 +710,9 @@ fn retained_pack_concurrent_scene_acquisitions_keep_independent_member_positions
                         scene.candidate().source_key(),
                         &SourceDocumentKey::stable_asset(stable(source), SourceDocumentKind::Scene,)
                     );
-                    let record = &scene.candidate().document().entities[0].components
+                    let record = &scene.candidate().document().entities()[0].components()
                         [&ComponentTypeId::new(CAPTION)];
-                    let caption = Caption::__decode_persistent_component(&record.value).unwrap();
+                    let caption = Caption::__decode_persistent_component(record.value()).unwrap();
                     assert_eq!(caption.product.as_product(), Some(selected(selection)));
                     assert!(std::ptr::eq(scene.base().plan(), base.plan()));
                 }
@@ -1633,9 +1649,9 @@ fn catalog_reference_inventory_uses_the_admitted_scene_value_limits() {
     });
     let base = fixture.open(RuntimeContentLimits::default()).unwrap();
     let scene = base.acquire_startup_scene().unwrap();
-    let samples = scene.candidate().document().entities[0].components
+    let samples = scene.candidate().document().entities()[0].components()
         [&ComponentTypeId::new(CAPTION)]
-        .value
+        .value()
         .get("samples")
         .unwrap();
     assert!(

@@ -19,7 +19,7 @@ use nara_reflect::{
 };
 
 use crate::{
-    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneComponentBindings, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
@@ -53,7 +53,7 @@ pub(crate) struct PreparedSceneComponent {
 pub(crate) struct PreparedSceneDataComponent {
     pub(crate) id: ComponentTypeId,
     pub(crate) owner: nara_reflect::ComponentSchemaOwnerSnapshot,
-    pub(crate) record: SceneComponentRecord,
+    pub(crate) record: crate::CompiledSceneComponent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +100,24 @@ pub(crate) struct EffectiveSceneValidation {
     pub(crate) asset_references: Vec<DeclaredAssetReference>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EffectiveValueRole {
+    Source,
+    Compiled,
+    Runtime,
+}
+
+/// The concrete pure value batch shared by source compilation and closed flat admission.
+/// These borrowed facts provide no source loading, mutation or activation authority.
+struct FlatSceneComponentRef<'a> {
+    entity: &'a SceneEntityId,
+    component: &'a ComponentTypeId,
+    schema_owner: Option<&'a nara_reflect::PersistentComponentSchemaOwnerId>,
+    version: nara_reflect::ComponentSchemaVersion,
+    value: &'a ComponentValue,
+    authored_metadata: bool,
+}
+
 /// Admits a complete expanded value graph before asset realization or native decoding.
 /// Runtime preparation still crosses the ordinary native path after the Host captures assets.
 /// The callback admits Schema/value/reference validation scratch and retained asset inventory;
@@ -110,38 +128,16 @@ pub(crate) fn validate_expanded_values<E>(
     context: &mut ComponentDecodeContext<'_>,
     admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
-    validate_effective_values(document, authority, context, false, admit_validation_work)
-}
-
-/// Checks current, explicit processed values without codecs or source migrations, retaining
-/// the processed owner's aggregate admission for declared-asset work and inventory.
-#[cfg(feature = "serde")]
-pub(crate) fn validate_runtime_values_with_admission<E>(
-    document: &SceneDocument,
-    bindings: &SceneComponentBindings,
-    limits: ComponentValueMaterializationLimits,
-    admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
-) -> Result<DiagnosticReport, E> {
-    let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
-    validate_effective_values(
-        document,
-        SchemaAuthority::Mixed(bindings),
-        &mut context,
-        true,
-        admit_validation_work,
-    )
-    .map(|validation| validation.diagnostics)
+    validate_effective_values(document, authority, context, admit_validation_work)
 }
 
 fn validate_effective_values<E>(
     document: &SceneDocument,
     authority: SchemaAuthority<'_>,
     context: &mut ComponentDecodeContext<'_>,
-    require_runtime_values: bool,
-    mut admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
+    admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let (placement, mut diagnostics) = validate_scene_structure_with_operation(document, None);
-    let mut asset_references = Vec::new();
     if let Some(registry) = authority.native_snapshot() {
         if let Some(entity) = placement.as_ref().and_then(|placement| {
             first_unavailable_hierarchy_projection_entity(document, placement, registry)
@@ -161,10 +157,7 @@ fn validate_effective_values<E>(
         .iter()
         .map(|entity| &entity.id)
         .collect::<BTreeSet<_>>();
-    let limits = context.materialization_limits();
-    let traversal = reference_traversal_limits(limits);
-    let mut value_budget = SceneValueBudget::new(limits);
-    for entity in sorted_entities(document) {
+    for entity in &document.entities {
         if let Some(instance) = &entity.prefab {
             diagnostics.push(with_asset_ref(
                 with_public_locator(
@@ -179,81 +172,135 @@ fn validate_effective_values<E>(
                 &instance.source,
             ));
         }
-        for (component, record) in &entity.components {
-            let locate = |diagnostic| {
-                with_public_locator(
-                    with_public_locator(diagnostic, "entity-id", entity.id.as_str()),
-                    "component-id",
-                    component.as_str(),
-                )
-            };
-            let Some(schema) = authority.schema(component) else {
-                diagnostics.push(locate(diagnostic_error(
-                    "scene.unknown-component",
-                    "Component type is not registered",
-                )));
-                continue;
-            };
-            if !authority.owner_matches(component, record) {
-                diagnostics.push(locate(diagnostic_error(
-                    "scene.component-owner-mismatch",
-                    "Persistent component owner does not match the admitted schema owner",
-                )));
-                continue;
-            }
-            if record.version != schema.version() {
-                diagnostics.push(component_migration_diagnostic(
-                    entity.id.as_str(),
-                    component.as_str(),
-                    &ComponentMigrationError::UnsupportedVersion {
-                        component_id: component.clone(),
-                        from_version: record.version,
-                        target_version: schema.version(),
-                    },
-                ));
-                continue;
-            }
-            if !schema.has_capability(ComponentCapability::Scene) {
-                diagnostics.push(locate(diagnostic_error(
-                    "scene.component-not-scene-capable",
-                    "Component is not scene-capable",
-                )));
-                continue;
-            }
-            let invalid = |error: &ComponentCodecError| {
-                locate(with_codec_error(
-                    diagnostic_error(
-                        "scene.invalid-component-payload",
-                        "Component payload is invalid",
-                    ),
-                    error,
-                    Some(schema),
-                ))
-            };
-            if let Err(error) = nara_reflect::__private::validate_schema_capabilities(
+    }
+    let records = sorted_entities(document).into_iter().flat_map(|entity| {
+        entity
+            .components
+            .iter()
+            .map(move |(component, record)| FlatSceneComponentRef {
+                entity: &entity.id,
+                component,
+                schema_owner: record.owner(),
+                version: record.version,
+                value: &record.value,
+                authored_metadata: !record.contextual_defaults.is_empty(),
+            })
+    });
+    validate_effective_component_values(
+        records,
+        &namespace,
+        authority,
+        context,
+        EffectiveValueRole::Source,
+        diagnostics,
+        admit_validation_work,
+    )
+}
+
+fn validate_effective_component_values<'a, E>(
+    records: impl IntoIterator<Item = FlatSceneComponentRef<'a>>,
+    namespace: &BTreeSet<&SceneEntityId>,
+    authority: SchemaAuthority<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+    role: EffectiveValueRole,
+    mut diagnostics: DiagnosticReport,
+    mut admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<EffectiveSceneValidation, E> {
+    let limits = context.materialization_limits();
+    let traversal = reference_traversal_limits(limits);
+    let mut value_budget = SceneValueBudget::new(limits);
+    let mut asset_references = Vec::new();
+    for record in records {
+        let entity = record.entity;
+        let component = record.component;
+        let locate = |diagnostic| {
+            with_public_locator(
+                with_public_locator(diagnostic, "entity-id", entity.as_str()),
+                "component-id",
+                component.as_str(),
+            )
+        };
+        let Some(schema) = authority.schema(component) else {
+            diagnostics.push(locate(diagnostic_error(
+                "scene.unknown-component",
+                "Component type is not registered",
+            )));
+            continue;
+        };
+        if !authority.owner_claim_matches(
+            component,
+            record.schema_owner,
+            role != EffectiveValueRole::Source,
+        ) {
+            diagnostics.push(locate(diagnostic_error(
+                "scene.component-owner-mismatch",
+                "Persistent component owner does not match the admitted schema owner",
+            )));
+            continue;
+        }
+        if record.version != schema.version() {
+            diagnostics.push(component_migration_diagnostic(
+                entity.as_str(),
+                component.as_str(),
+                &ComponentMigrationError::UnsupportedVersion {
+                    component_id: component.clone(),
+                    from_version: record.version,
+                    target_version: schema.version(),
+                },
+            ));
+            continue;
+        }
+        if !schema.has_capability(ComponentCapability::Scene) {
+            diagnostics.push(locate(diagnostic_error(
+                "scene.component-not-scene-capable",
+                "Component is not scene-capable",
+            )));
+            continue;
+        }
+        let invalid = |error: &ComponentCodecError| {
+            locate(with_codec_error(
+                diagnostic_error(
+                    "scene.invalid-component-payload",
+                    "Component payload is invalid",
+                ),
+                error,
+                Some(schema),
+            ))
+        };
+        if let Err(error) = nara_reflect::__private::validate_schema_capabilities(
+            schema,
+            [ComponentCapability::Scene],
+        ) {
+            diagnostics.push(invalid(&ComponentCodecError::Message(error.to_string())));
+            continue;
+        }
+        if record.authored_metadata {
+            diagnostics.push(invalid(&ComponentCodecError::UnresolvedAuthoredReference));
+            continue;
+        }
+        if role != EffectiveValueRole::Source {
+            let explicit = nara_reflect::__private::component_defaults_are_explicit_with_admission(
                 schema,
-                [ComponentCapability::Scene],
-            ) {
-                diagnostics.push(invalid(&ComponentCodecError::Message(error.to_string())));
-                continue;
-            }
-            if !record.contextual_defaults.is_empty() {
-                diagnostics.push(invalid(&ComponentCodecError::UnresolvedAuthoredReference));
-                continue;
-            }
-            let effective = match value_budget.materialize(schema, &record.value, None) {
-                Ok(effective) => effective,
-                Err(error) => {
-                    diagnostics.push(invalid(&error));
+                record.value,
+                &mut admit_validation_work,
+            );
+            match explicit {
+                Ok(true) => {}
+                Ok(false) => {
+                    let (code, summary) = if role == EffectiveValueRole::Runtime {
+                        (
+                            "scene.runtime-incomplete-value",
+                            "Runtime component defaults must be explicit in the processed value",
+                        )
+                    } else {
+                        (
+                            "scene.compiled-incomplete-value",
+                            "Compiled Scene component defaults must already be explicit",
+                        )
+                    };
+                    diagnostics.push(locate(diagnostic_error(code, summary)));
                     continue;
                 }
-            };
-            match nara_reflect::__private::validate_native_component_value_references_with_admission(
-                &effective,
-                limits,
-                |_, _, allocated| admit_validation_work(0, 0, allocated),
-            ) {
-                Ok(()) => {}
                 Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
                     return Err(error);
                 }
@@ -262,32 +309,58 @@ fn validate_effective_values<E>(
                     continue;
                 }
             }
-            if require_runtime_values && effective.as_ref() != &record.value {
-                diagnostics.push(locate(diagnostic_error(
-                    "scene.runtime-incomplete-value",
-                    "Runtime component defaults must be explicit in the processed value",
-                )));
+        }
+        let effective = match if role == EffectiveValueRole::Source {
+            value_budget
+                .materialize(schema, record.value, None)
+                .map_err(nara_reflect::__private::EffectiveValueAdmissionError::Value)
+        } else {
+            value_budget
+                .admit_explicit(record.value, &mut admit_validation_work)
+                .map(|()| Cow::Borrowed(record.value))
+        } {
+            Ok(effective) => effective,
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+                return Err(error);
+            }
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+                diagnostics.push(invalid(&error));
                 continue;
             }
-            // Every authority carries an admitted immutable Schema. Reuse Reflect's admitted
-            // validator and account its Schema-sized path/index and shape scratch before it
-            // allocates; the raw value size does not bound the number of optional fields.
-            match nara_reflect::__private::validate_component_value_with_admission(
-                schema,
-                &effective,
-                limits,
-                |_, _, allocated| admit_validation_work(0, 0, allocated),
-            ) {
-                Ok(()) => {}
-                Err(nara_reflect::__private::ComponentValueAdmissionError::Admission(error)) => {
-                    return Err(error);
-                }
-                Err(nara_reflect::__private::ComponentValueAdmissionError::Value(error)) => {
-                    diagnostics.push(invalid(&error));
-                    continue;
-                }
+        };
+        match nara_reflect::__private::validate_native_component_value_references_with_admission(
+            &effective,
+            limits,
+            &mut admit_validation_work,
+        ) {
+            Ok(()) => {}
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+                return Err(error);
             }
-            let references = match nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
+            Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => {
+                diagnostics.push(invalid(&error));
+                continue;
+            }
+        }
+        // Every authority carries an admitted immutable Schema. Reuse Reflect's admitted
+        // validator and account its Schema-sized path/index and shape scratch before it
+        // allocates; the raw value size does not bound the number of optional fields.
+        match nara_reflect::__private::validate_component_value_with_admission(
+            schema,
+            &effective,
+            limits,
+            &mut admit_validation_work,
+        ) {
+            Ok(()) => {}
+            Err(nara_reflect::__private::ComponentValueAdmissionError::Admission(error)) => {
+                return Err(error);
+            }
+            Err(nara_reflect::__private::ComponentValueAdmissionError::Value(error)) => {
+                diagnostics.push(invalid(&error));
+                continue;
+            }
+        }
+        let references = match nara_reflect::__private::collect_declared_effective_asset_references_with_admission(
                 schema, record.version, &effective, traversal, &mut admit_validation_work,
             ) {
                 Ok(references) => references,
@@ -298,31 +371,40 @@ fn validate_effective_values<E>(
                     continue;
                 }
             };
-            if require_runtime_values
-                && let Some(reference) = references.iter().find(|reference| {
-                    !matches!(reference.asset_ref(), nara_asset::AssetRef::Product(_))
-                })
-            {
-                diagnostics.push(with_public_locator(
-                    locate(diagnostic_error(
-                        "scene.runtime-unprocessed-asset-reference",
-                        "Runtime asset references require complete product identities",
-                    )),
-                    "field-id",
-                    reference.field_id().as_str(),
-                ));
-                continue;
+        if role == EffectiveValueRole::Runtime
+            && let Some(reference) = references.iter().find(|reference| {
+                !matches!(reference.asset_ref(), nara_asset::AssetRef::Product(_))
+            })
+        {
+            diagnostics.push(with_public_locator(
+                locate(diagnostic_error(
+                    "scene.runtime-unprocessed-asset-reference",
+                    "Runtime asset references require complete product identities",
+                )),
+                "field-id",
+                reference.field_id().as_str(),
+            ));
+            continue;
+        }
+        // Scene checks the enclosing source record only. The selected product's actual
+        // existence and typed domain admission belong to the root content owner.
+        if let Some(asset_resolution) = context.asset_resolution() {
+            let mut invalid_reference = None;
+            for reference in &references {
+                let bytes = asset_resolution.resolution_work_bytes(reference.asset_ref());
+                if bytes.is_none_or(|bytes| bytes > limits.bytes().get()) {
+                    invalid_reference = Some(reference);
+                    break;
+                }
+                // A scoped Path lookup allocates its canonical spelling. Admit that actual
+                // temporary before resolving it, independently of reference traversal work.
+                admit_validation_work(0, 0, bytes.unwrap_or(0))?;
+                if asset_resolution.resolve_ref(reference.asset_ref()).is_err() {
+                    invalid_reference = Some(reference);
+                    break;
+                }
             }
-            // Scene checks the enclosing source record only. The selected product's actual
-            // existence and typed domain admission belong to the root content owner.
-            if let Some(asset_resolution) = context.asset_resolution()
-                && let Some(reference) = references.iter().find(|reference| {
-                    asset_resolution
-                        .resolution_work_bytes(reference.asset_ref())
-                        .is_none_or(|bytes| bytes > context.materialization_limits().bytes().get())
-                        || asset_resolution.resolve_ref(reference.asset_ref()).is_err()
-                })
-            {
+            if let Some(reference) = invalid_reference {
                 diagnostics.push(invalid(&ComponentCodecError::invalid_asset_ref(
                     reference.path().to_string(),
                     reference.asset_ref().to_string(),
@@ -330,57 +412,299 @@ fn validate_effective_values<E>(
                 )));
                 continue;
             }
-            let local_references =
-                nara_reflect::__private::plan_declared_entity_references_with_admission::<
-                    SceneLocalTargetMissing,
-                    _,
-                >(schema, &effective, traversal, &mut admit_validation_work);
-            let local_references = match local_references {
-                Ok(plan) => plan.visit(&effective, |_, reference| match reference {
-                    EntityReference::SceneLocal { entity } => namespace
-                        .contains(entity)
-                        .then_some(())
-                        .ok_or(SceneLocalTargetMissing),
-                    EntityReference::Persistent { .. } | EntityReference::Authored { .. } => Ok(()),
-                }),
-                Err(nara_reflect::__private::EntityReferencePlanError::Admission(error)) => {
-                    return Err(error);
-                }
-                Err(nara_reflect::__private::EntityReferencePlanError::Reference(error)) => {
-                    Err(error)
-                }
-            };
-            if let Err(error) = local_references {
-                diagnostics.push(with_entity_reference_rewrite_error(
-                    locate(diagnostic_error(
-                        "scene.local-reference-invalid",
-                        "Scene component references do not close over the document namespace",
-                    )),
-                    &error,
-                    |_| "scene-local-target-missing",
-                ));
-                continue;
-            }
-            // Admit the complete new allocation when growing the retained inventory.
-            // Doubling amortizes component-by-component collection without hidden reallocations.
-            let required = asset_references.len().saturating_add(references.len());
-            if required > asset_references.capacity() {
-                let capacity = required.max(asset_references.capacity().saturating_mul(2));
-                admit_validation_work(
-                    0,
-                    0,
-                    capacity.saturating_mul(size_of::<DeclaredAssetReference>()),
-                )?;
-                asset_references.reserve_exact(capacity - asset_references.len());
-            }
-            asset_references.extend(references);
         }
+        let local_references =
+            nara_reflect::__private::plan_declared_entity_references_with_admission::<
+                SceneLocalTargetMissing,
+                _,
+            >(schema, &effective, traversal, &mut admit_validation_work);
+        let local_references = match local_references {
+            Ok(plan) => plan.visit(&effective, |_, reference| match reference {
+                EntityReference::SceneLocal { entity } => namespace
+                    .contains(entity)
+                    .then_some(())
+                    .ok_or(SceneLocalTargetMissing),
+                EntityReference::Persistent { .. } | EntityReference::Authored { .. } => Ok(()),
+            }),
+            Err(nara_reflect::__private::EntityReferencePlanError::Admission(error)) => {
+                return Err(error);
+            }
+            Err(nara_reflect::__private::EntityReferencePlanError::Reference(error)) => Err(error),
+        };
+        if let Err(error) = local_references {
+            diagnostics.push(with_entity_reference_rewrite_error(
+                locate(diagnostic_error(
+                    "scene.local-reference-invalid",
+                    "Scene component references do not close over the document namespace",
+                )),
+                &error,
+                |_| "scene-local-target-missing",
+            ));
+            continue;
+        }
+        // Admit the complete new allocation when growing the retained inventory.
+        // Doubling amortizes component-by-component collection without hidden reallocations.
+        let required = asset_references.len().saturating_add(references.len());
+        if required > asset_references.capacity() {
+            let capacity = required.max(asset_references.capacity().saturating_mul(2));
+            admit_validation_work(
+                0,
+                0,
+                capacity.saturating_mul(size_of::<DeclaredAssetReference>()),
+            )?;
+            asset_references.reserve_exact(capacity - asset_references.len());
+        }
+        asset_references.extend(references);
     }
     Ok(EffectiveSceneValidation {
         diagnostics,
         #[cfg(feature = "serde")]
         asset_references,
     })
+}
+
+pub(crate) fn validate_flat_claims_with_admission<E>(
+    claims: &crate::compiled::claims::FlatSceneClaims,
+    authority: SchemaAuthority<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+    require_runtime_products: bool,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<EffectiveSceneValidation, E> {
+    let mut diagnostics = DiagnosticReport::default();
+    let placement = validate_scene_placement(
+        &claims.roots,
+        claims
+            .entities
+            .iter()
+            .map(|entity| (&entity.id, entity.children.as_slice())),
+        &mut diagnostics,
+        None,
+    );
+    if let Some(registry) = authority.native_snapshot()
+        && let Some(entity) = placement.as_ref().and_then(|placement| {
+            first_unavailable_flat_projection(
+                placement,
+                claims.entities.iter().map(|entity| &entity.id),
+                claims.entities.iter().filter_map(|entity| {
+                    entity
+                        .components
+                        .keys()
+                        .any(|component| {
+                            component.as_str() == "nara.scene.Visibility"
+                                && registry.schema(component).is_some()
+                        })
+                        .then_some(&entity.id)
+                }),
+            )
+        })
+    {
+        diagnostics.push(with_public_locator(
+            diagnostic_error(
+                "scene.hierarchy-projection-unavailable",
+                "Scene hierarchy requires a runtime projection that is not implemented",
+            ),
+            "entity-id",
+            entity.as_str(),
+        ));
+    }
+    let namespace = claims
+        .entities
+        .iter()
+        .map(|entity| &entity.id)
+        .collect::<BTreeSet<_>>();
+    let records = claims.entities.iter().flat_map(|entity| {
+        entity
+            .components
+            .iter()
+            .map(move |(component, record)| FlatSceneComponentRef {
+                entity: &entity.id,
+                component,
+                schema_owner: record.schema_owner.as_ref(),
+                version: record.version,
+                value: &record.value,
+                authored_metadata: false,
+            })
+    });
+    validate_effective_component_values(
+        records,
+        &namespace,
+        authority,
+        context,
+        if require_runtime_products {
+            EffectiveValueRole::Runtime
+        } else {
+            EffectiveValueRole::Compiled
+        },
+        diagnostics,
+        admit,
+    )
+}
+
+fn validate_compiled_values_with_admission<E>(
+    document: &crate::CompiledSceneDocument,
+    authority: SchemaAuthority<'_>,
+    context: &mut ComponentDecodeContext<'_>,
+    admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<EffectiveSceneValidation, E> {
+    let mut diagnostics = DiagnosticReport::default();
+    let placement = validate_scene_placement(
+        document.roots(),
+        document
+            .entities()
+            .iter()
+            .map(|entity| (entity.id(), entity.children())),
+        &mut diagnostics,
+        None,
+    );
+    if let Some(registry) = authority.native_snapshot()
+        && let Some(entity) = placement.as_ref().and_then(|placement| {
+            first_unavailable_flat_projection(
+                placement,
+                document.entities().iter().map(|entity| entity.id()),
+                document.entities().iter().filter_map(|entity| {
+                    entity
+                        .components()
+                        .keys()
+                        .any(|component| {
+                            component.as_str() == "nara.scene.Visibility"
+                                && registry.schema(component).is_some()
+                        })
+                        .then_some(entity.id())
+                }),
+            )
+        })
+    {
+        diagnostics.push(with_public_locator(
+            diagnostic_error(
+                "scene.hierarchy-projection-unavailable",
+                "Scene hierarchy requires a runtime projection that is not implemented",
+            ),
+            "entity-id",
+            entity.as_str(),
+        ));
+    }
+    let namespace = document
+        .entities()
+        .iter()
+        .map(|entity| entity.id())
+        .collect::<BTreeSet<_>>();
+    let records = document.entities().iter().flat_map(|entity| {
+        entity
+            .components()
+            .iter()
+            .map(move |(component, record)| FlatSceneComponentRef {
+                entity: entity.id(),
+                component,
+                schema_owner: record.schema_owner(),
+                version: record.version(),
+                value: record.value(),
+                authored_metadata: false,
+            })
+    });
+    validate_effective_component_values(
+        records,
+        &namespace,
+        authority,
+        context,
+        EffectiveValueRole::Compiled,
+        diagnostics,
+        admit,
+    )
+}
+
+/// Prepares only closed values. A processed input may reuse pure admission solely after its
+/// exact immutable definitions witness has been checked by the materialization owner.
+pub(crate) fn preflight_compiled_scene_with_context(
+    document: &crate::CompiledSceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    bindings: Option<&SceneComponentBindings>,
+    context: &mut ComponentDecodeContext<'_>,
+    exact_definitions_admitted: bool,
+) -> PreparedScene {
+    let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
+    let mut diagnostics = DiagnosticReport::default();
+    if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {
+        diagnostics.push(diagnostic_error(
+            "scene.component-bindings-mismatch",
+            "Scene bindings do not select the supplied native component registry",
+        ));
+    } else if !exact_definitions_admitted {
+        let validation =
+            validate_compiled_values_with_admission(document, authority, context, |_, _, _| {
+                Ok::<_, std::convert::Infallible>(())
+            });
+        let validation = match validation {
+            Ok(value) => value,
+            Err(never) => match never {},
+        };
+        diagnostics.extend(validation.diagnostics);
+        if !diagnostics.has_errors() {
+            for entity in document.entities() {
+                for (component, record) in entity.components() {
+                    if authority
+                        .current_flat_schema(component, record.schema_owner(), record.version())
+                        .is_err()
+                    {
+                        diagnostics.push(with_public_locator(
+                            with_public_locator(
+                                diagnostic_error("scene.compiled-component-unavailable", "Compiled Scene requires an admitted current component definition"),
+                                "entity-id", entity.id().as_str(),
+                            ),
+                            "component-id", component.as_str(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if diagnostics.has_errors() {
+        return PreparedScene {
+            roots: Vec::new(),
+            entities: Vec::new(),
+            diagnostics,
+        };
+    }
+
+    let mut entities = Vec::new();
+    for entity in document.entities() {
+        let mut components = Vec::new();
+        let mut data_components = Vec::new();
+        for (component, record) in entity.components() {
+            if let Some(owner) = bindings.and_then(|bindings| bindings.data_owner(component)) {
+                data_components.push(PreparedSceneDataComponent {
+                    id: component.clone(),
+                    owner: owner.clone(),
+                    record: record.copy_for_native_preparation(),
+                });
+                continue;
+            }
+            match registry.preflight_component_with_context(component, record.value(), context) {
+                Ok(prepared) => components.push(PreparedSceneComponent {
+                    id: component.clone(),
+                    prepared,
+                }),
+                Err(error) => {
+                    diagnostics.push(component_payload_diagnostic(
+                        entity.id().as_str(),
+                        component,
+                        &error,
+                        authority,
+                    ));
+                }
+            }
+        }
+        entities.push(PreparedSceneEntity {
+            id: entity.id().clone(),
+            children: entity.children().to_vec(),
+            components,
+            data_components,
+        });
+    }
+    PreparedScene {
+        roots: document.roots().to_vec(),
+        entities,
+        diagnostics,
+    }
 }
 
 pub(crate) fn preflight_scene(
@@ -593,7 +917,14 @@ fn validate_source_structure_with_operation(
     operation_index: Option<usize>,
 ) -> (Option<ValidatedScenePlacement>, DiagnosticReport) {
     let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(roots, entities, &mut diagnostics, operation_index);
+    let placement = validate_scene_placement(
+        roots,
+        entities
+            .iter()
+            .map(|entity| (&entity.id, entity.children.as_slice())),
+        &mut diagnostics,
+        operation_index,
+    );
     (placement, diagnostics)
 }
 
@@ -1025,11 +1356,11 @@ fn preflight_scene_with_context_options(
                     prepared_data_components.push(PreparedSceneDataComponent {
                         id: component_id.clone(),
                         owner: owner.clone(),
-                        record: SceneComponentRecord::new(
+                        record: crate::CompiledSceneComponent::from_admitted_data(
+                            owner.owner_id().clone(),
                             component.schema.version(),
                             component.value.into_owned(),
-                        )
-                        .with_owner(owner.owner_id().clone()),
+                        ),
                     });
                 }
                 continue;
@@ -1104,6 +1435,43 @@ impl SceneValueBudget {
             bytes: limits.bytes().get(),
             depth: limits.depth(),
         }
+    }
+
+    fn admit_explicit<E>(
+        &mut self,
+        value: &ComponentValue,
+        admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+        use nara_reflect::__private::EffectiveValueAdmissionError;
+        let cost = value
+            .cost_up_to_with_admission(self.nodes, self.bytes, |bytes| {
+                admit(0, 0, bytes.unwrap_or(usize::MAX))
+            })
+            .map_err(EffectiveValueAdmissionError::Admission)?;
+        let Some(cost) = cost else {
+            let node_overflow = value
+                .cost_up_to_with_admission(self.nodes, usize::MAX, |bytes| {
+                    admit(0, 0, bytes.unwrap_or(usize::MAX))
+                })
+                .map_err(EffectiveValueAdmissionError::Admission)?
+                .is_none();
+            return Err(EffectiveValueAdmissionError::Value(if node_overflow {
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: self.nodes.saturating_add(1),
+                    maximum: self.nodes,
+                }
+            } else {
+                ComponentCodecError::MaterializationByteLimit {
+                    observed: self.bytes.saturating_add(1),
+                    maximum: self.bytes,
+                }
+            }));
+        };
+        // The shared admitted Native walker immediately checks depth and complete reference
+        // flatness below. Do not allocate a second unadmitted depth stack for this cost check.
+        self.nodes -= cost.nodes();
+        self.bytes -= cost.logical_bytes();
+        Ok(())
     }
 
     fn admit_input(
@@ -1272,26 +1640,29 @@ pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
     let requires_unavailable_projection = |component_id: &ComponentTypeId| {
         component_id.as_str() == "nara.scene.Visibility" && registry.schema(component_id).is_some()
     };
-    let by_id = document
-        .entities
-        .iter()
-        .map(|entity| (&entity.id, entity))
-        .collect::<BTreeMap<_, _>>();
+    first_unavailable_flat_projection(
+        placement,
+        document.entities.iter().map(|entity| &entity.id),
+        document.entities.iter().filter_map(|entity| {
+            entity
+                .components
+                .keys()
+                .any(requires_unavailable_projection)
+                .then_some(&entity.id)
+        }),
+    )
+}
 
-    document.entities.iter().find_map(|entity| {
-        let parent_id = placement.parent_of(&entity.id)?;
-        let parent = by_id.get(parent_id).copied();
-        let requires_unavailable_projection = entity
-            .components
-            .keys()
-            .any(requires_unavailable_projection)
-            || parent.is_some_and(|parent| {
-                parent
-                    .components
-                    .keys()
-                    .any(requires_unavailable_projection)
-            });
-        requires_unavailable_projection.then_some(&entity.id)
+fn first_unavailable_flat_projection<'a>(
+    placement: &ValidatedScenePlacement,
+    entities: impl IntoIterator<Item = &'a SceneEntityId>,
+    visibility_entities: impl IntoIterator<Item = &'a SceneEntityId>,
+) -> Option<&'a SceneEntityId> {
+    let visibility = visibility_entities.into_iter().collect::<BTreeSet<_>>();
+    entities.into_iter().find(|entity| {
+        placement
+            .parent_of(entity)
+            .is_some_and(|parent| visibility.contains(entity) || visibility.contains(parent))
     })
 }
 
@@ -1342,22 +1713,22 @@ fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
     entities
 }
 
-fn validate_scene_placement(
+fn validate_scene_placement<'a>(
     roots: &[SceneEntityId],
-    entities: &[SceneEntityRecord],
+    entities: impl Iterator<Item = (&'a SceneEntityId, &'a [SceneEntityId])> + Clone,
     diagnostics: &mut DiagnosticReport,
     operation_index: Option<usize>,
 ) -> Option<ValidatedScenePlacement> {
     let errors_before = diagnostics.stats().observed_errors();
     let mut ids = BTreeSet::<SceneEntityId>::new();
-    for entity in entities {
-        if !ids.insert(entity.id.clone()) {
+    for (entity, _) in entities.clone() {
+        if !ids.insert(entity.clone()) {
             push_placement_diagnostic(
                 diagnostics,
                 operation_index,
                 "scene.duplicate-entity-id",
                 "Scene entity ID is duplicated",
-                &entity.id,
+                entity,
                 None,
             );
         }
@@ -1399,9 +1770,9 @@ fn validate_scene_placement(
         }
     }
 
-    for parent in entities {
+    for (parent, children) in entities.clone() {
         let mut local_children = BTreeSet::<SceneEntityId>::new();
-        for child in &parent.children {
+        for child in children {
             if !local_children.insert(child.clone()) {
                 push_placement_diagnostic(
                     diagnostics,
@@ -1409,7 +1780,7 @@ fn validate_scene_placement(
                     "scene.duplicate-child",
                     "Scene parent lists the same child more than once",
                     child,
-                    Some(&parent.id),
+                    Some(parent),
                 );
                 continue;
             }
@@ -1420,13 +1791,13 @@ fn validate_scene_placement(
                     "scene.dangling-child",
                     "Scene child does not identify an entity record",
                     child,
-                    Some(&parent.id),
+                    Some(parent),
                 );
                 continue;
             }
             match owners.get(child) {
                 None => {
-                    owners.insert(child.clone(), PlacementOwner::Parent(parent.id.clone()));
+                    owners.insert(child.clone(), PlacementOwner::Parent(parent.clone()));
                 }
                 Some(PlacementOwner::Root) => push_placement_diagnostic(
                     diagnostics,
@@ -1434,16 +1805,16 @@ fn validate_scene_placement(
                     "scene.root-child-overlap",
                     "Scene entity cannot be both a root and a child",
                     child,
-                    Some(&parent.id),
+                    Some(parent),
                 ),
-                Some(PlacementOwner::Parent(existing)) if existing == &parent.id => {
+                Some(PlacementOwner::Parent(existing)) if existing == parent => {
                     push_placement_diagnostic(
                         diagnostics,
                         operation_index,
                         "scene.duplicate-child",
                         "Scene parent lists the same child more than once",
                         child,
-                        Some(&parent.id),
+                        Some(parent),
                     );
                 }
                 Some(PlacementOwner::Parent(existing)) => push_placement_diagnostic(
@@ -1483,14 +1854,14 @@ fn validate_scene_placement(
         .collect::<BTreeMap<_, _>>();
 
     let mut completed = BTreeSet::<SceneEntityId>::new();
-    for entity in entities {
-        if completed.contains(&entity.id) {
+    for (entity, _) in entities {
+        if completed.contains(entity) {
             continue;
         }
 
         let mut path = Vec::<SceneEntityId>::new();
         let mut positions = BTreeMap::<SceneEntityId, usize>::new();
-        let mut current = Some(entity.id.clone());
+        let mut current = Some(entity.clone());
         while let Some(id) = current {
             if completed.contains(&id) {
                 break;
@@ -1544,6 +1915,7 @@ fn push_placement_diagnostic(
 
 #[cfg(test)]
 mod tests {
+    use crate::SceneComponentRecord;
     use nara_ecs::Component;
     use nara_reflect::{
         ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,
@@ -1692,7 +2064,7 @@ mod tests {
             );
             if accepted {
                 let data = &prepared.entities[0].data_components[0];
-                assert_eq!(data.record.value.field_u64("amount").unwrap(), 7);
+                assert_eq!(data.record.value().field_u64("amount").unwrap(), 7);
                 assert!(data.owner.ptr_eq(bindings.data_owner(&data_id()).unwrap()));
             }
         }

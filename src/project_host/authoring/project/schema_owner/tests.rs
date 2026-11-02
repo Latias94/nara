@@ -15,7 +15,7 @@ use nara_reflect::{
 use nara_scene::{
     __private::{borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source},
     PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
-    PrefabExpansionFailureKind, PrefabOverlay, SceneAuthoringSession, SceneComponentRecord,
+    PrefabOverlay, SceneAuthoringSession, SceneCompilationFailureKind, SceneComponentRecord,
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     SchemaReclassificationWork,
 };
@@ -102,7 +102,7 @@ fn installed_owner() -> ComponentSchemaOwnerSnapshot {
 }
 
 fn open_project(project: &TestAuthoringProject) -> AuthoringProjectSessionSnapshot {
-    let root = crate::project_tooling::host_fs::writable_directory(&project.root).unwrap();
+    let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
     let schema = AuthoringProjectAdmissionHost::default()
         .prepare(root, None)
         .unwrap()
@@ -677,8 +677,7 @@ fn prepared_validation_refuses_content_and_nominal_drift_but_readmits_equal_save
                         project.root.join("scenes-original"),
                     )
                     .unwrap();
-                    let root =
-                        crate::project_tooling::host_fs::writable_directory(&project.root).unwrap();
+                    let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
                     let moved = root
                         .open_file_exact(
                             &RelativePath::new("scenes-original/startup.scene.json").unwrap(),
@@ -884,7 +883,7 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
             conflict
                 .composition_failure()
                 .map(|failure| *failure.reason()),
-            Some(PrefabExpansionFailureKind::Component)
+            Some(SceneCompilationFailureKind::Component)
         );
         assert!(conflict.diagnostics().has_errors());
         assert!(conflict.preview.is_none());
@@ -985,7 +984,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
         prepared
             .composition_failure()
             .map(|failure| *failure.reason()),
-        Some(PrefabExpansionFailureKind::Component)
+        Some(SceneCompilationFailureKind::Component)
     );
     prepared.validate(&mut owner).unwrap();
     let successor = publish_owner(owner, &mut publication);
@@ -997,7 +996,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
         snapshot
             .startup_composition_failure()
             .map(|failure| *failure.reason()),
-        Some(PrefabExpansionFailureKind::Component)
+        Some(SceneCompilationFailureKind::Component)
     );
     drop(snapshot);
     let mut successor = receipt.into_session_snapshot().unwrap();
@@ -1007,7 +1006,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
         successor
             .startup_composition_failure()
             .map(|failure| *failure.reason()),
-        Some(PrefabExpansionFailureKind::Component)
+        Some(SceneCompilationFailureKind::Component)
     );
     assert!(successor.take_startup_preview().is_none());
     assert_eq!(successor.fork_startup_scene().document(), &saved);

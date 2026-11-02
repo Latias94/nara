@@ -7,6 +7,7 @@ mod authoring_decode;
 #[cfg(feature = "serde")]
 mod authoring_preview;
 mod candidate;
+mod compiled;
 mod component_binding_plugin;
 mod component_bindings;
 mod data_components;
@@ -71,7 +72,10 @@ pub use authoring_decode::{
     UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
     UnavailableValuePathSegment,
 };
-pub use candidate::{ExpandedSceneCandidate, ExpandedSceneDocument};
+pub use candidate::ExpandedSceneDocument;
+pub use compiled::{
+    CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
+};
 pub use component_binding_plugin::{
     SCENE_COMPONENT_BINDINGS_PLUGIN_DECLARATION, SCENE_COMPONENT_BINDINGS_PLUGIN_ID,
     SCENE_COMPONENT_BINDINGS_PLUGIN_REQUIREMENT, SceneComponentBindingsAuthorityError,
@@ -108,13 +112,13 @@ pub use patch::{
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabExpansionBudgetKind, PrefabExpansionFailure, PrefabExpansionFailureKind,
-    PrefabExpansionLimits, PrefabExpansionOptions, PrefabExpansionReport,
-    PrefabExpansionWorkingSet, PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop,
-    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
-    PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    PrefabReferenceArguments, PrefabRevert, PrefabSourceResolver, ResolvedPrefabSource,
+    PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabInstanceLocation,
+    PrefabInstancePath, PrefabInstancePathSegment, PrefabInstantiationReport, PrefabOverlay,
+    PrefabOverlaySlot, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
+    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert,
+    PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
+    SceneCompilationFailure, SceneCompilationFailureKind, SceneCompilationLimits,
+    SceneCompilationOptions, SceneCompilationReport, SceneCompilationWorkingSet,
 };
 #[cfg(feature = "serde")]
 pub use prefab_copy::{
@@ -188,8 +192,8 @@ pub mod __private {
     };
     pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
     pub use crate::prefab::{
-        AuthoringNativePreview, AuthoringPrefabExpansionParts, AuthoringPrefabExpansionReport,
-        AuthoringPrefabOmission, AuthoringPrefabOmissionReason,
-        try_expand_authoring_prefabs_with_loader,
+        AuthoringNativePreview, AuthoringSceneCompilationOmission,
+        AuthoringSceneCompilationOmissionReason, AuthoringSceneCompilationParts,
+        AuthoringSceneCompilationReport, try_compile_authoring_scene_with_loader,
     };
 }

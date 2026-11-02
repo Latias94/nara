@@ -245,6 +245,17 @@ fn processed_scene(
         document["payload"]["entities"][0]["components"]["nara.sprite.Sprite"] =
             serde_json::to_value(SceneComponentRecord::new(sprite.version(), value)).unwrap();
     }
+    for (id, record) in document["payload"]["entities"][0]["components"]
+        .as_object_mut()
+        .unwrap()
+    {
+        if let Some(owner) = bindings
+            .native_snapshot()
+            .component_schema_owner(&ComponentTypeId::new(id))
+        {
+            record["owner"] = json!(owner.as_str());
+        }
+    }
     let encoded = serde_json::to_vec(&document).unwrap();
     RuntimeSceneDocumentCandidate::from_json_bytes(&encoded, RuntimeSceneLimits::default())
         .unwrap()
@@ -256,7 +267,8 @@ fn validate_cells(
     candidate: &RuntimeSceneCandidate,
     descriptor: TileSetDescriptor,
 ) -> Result<(), TilemapMembershipError> {
-    let value = &candidate.document().entities[0].components[&ComponentTypeId::new(TILEMAP)].value;
+    let value =
+        candidate.document().entities()[0].components()[&ComponentTypeId::new(TILEMAP)].value();
     validate_persisted_tilemap_membership(value, |reference| {
         (reference == &AssetRef::Product(descriptor.product())).then_some(descriptor.atlas())
     })
@@ -887,7 +899,7 @@ fn drive_headless_tile_travel(world: &mut World) {
             view.selected_scene_product(),
             Some(product(LATER_SOURCE, false))
         );
-        assert_eq!(view.scene().roots, [tilemap_id()]);
+        assert_eq!(view.scene().roots(), [tilemap_id()]);
         let images = view.domain_assets().collection::<ImageDomain>().unwrap();
         let tilesets = view.domain_assets().collection::<TileSetDomain>().unwrap();
         assert_eq!(images.source_records().len(), 0);
@@ -1366,10 +1378,10 @@ fn first_party_native_tileset_requires_its_own_image_edge_even_with_empty_codec_
         let base = fixture.capture();
         let startup = product(STARTUP_SOURCE, false);
         let scene = base.acquire_startup_scene().unwrap();
-        let sprite = &scene.candidate().document().entities[0].components
+        let sprite = &scene.candidate().document().entities()[0].components()
             [&ComponentTypeId::new("nara.sprite.Sprite")];
         let image_leaf = sprite
-            .value
+            .value()
             .field("material")
             .unwrap()
             .field("image")

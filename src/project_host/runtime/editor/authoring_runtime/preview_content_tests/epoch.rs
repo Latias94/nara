@@ -707,19 +707,14 @@ fn rejected_dependencies_keep_last_good_without_authorizing_the_unchanged_root_r
             root_revision,
             &rejected_dependencies,
         ));
-        let database = preview_database(&runtime);
-        let scope = preview_scope(&runtime);
+        let refusal = compile_preview_scene(&invalid, preview_source_key()).unwrap_err();
+        assert!(refusal.has_errors());
         let report = runtime
             .drive_preview(Some(EditorPreviewSource {
                 document: DOCUMENT,
                 revision: root_revision,
                 dependencies: rejected_dependencies.clone(),
-                projection: Some(EditorPreviewProjection::authoring(
-                    ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(invalid.clone())),
-                    EditorAuthoringPreviewOmissions::empty(DOCUMENT, root_revision),
-                    database,
-                    scope,
-                )),
+                projection: Some(EditorPreviewProjection::rejected(refusal)),
             }))
             .expect("dependency changes must not reuse an accepted root-only stamp");
         assert!(report.has_errors());
@@ -804,22 +799,14 @@ fn rejected_projection_keeps_last_good_without_authorizing_the_rejected_revision
             }))
             .is_none()
     );
-    let database = preview_database(&runtime);
-    let scope = preview_scope(&runtime);
+    let refusal = compile_preview_scene(rejected.document(), preview_source_key()).unwrap_err();
+    assert!(refusal.has_errors());
     let report = runtime
         .drive_preview(Some(EditorPreviewSource {
             document: DOCUMENT,
             revision: rejected.revision(),
             dependencies: EditorPreviewDependencies::empty(),
-            projection: Some(EditorPreviewProjection::authoring(
-                ExpandedSceneCandidate::plain(
-                    preview_source_key(),
-                    Arc::new(rejected.document().clone()),
-                ),
-                EditorAuthoringPreviewOmissions::empty(DOCUMENT, rejected.revision()),
-                database,
-                scope,
-            )),
+            projection: Some(EditorPreviewProjection::rejected(refusal)),
         }))
         .expect("the invalid projection must be reported");
     assert!(report.has_errors());
@@ -950,10 +937,7 @@ fn foreign_unregistered_identity_rejects_preview_epoch_without_erasing_last_good
             revision: source.revision(),
             dependencies: EditorPreviewDependencies::empty(),
             projection: Some(EditorPreviewProjection::authoring(
-                ExpandedSceneCandidate::plain(
-                    preview_source_key(),
-                    Arc::new(source.document().clone()),
-                ),
+                compile_preview_scene(source.document(), preview_source_key()).unwrap(),
                 EditorAuthoringPreviewOmissions::empty(DOCUMENT, source.revision()),
                 database,
                 scope,
@@ -1222,22 +1206,28 @@ fn nonempty_omissions_follow_only_the_accepted_epoch_and_preserve_unknown_source
     let mut runtime = EpochRuntime(runtime);
     runtime.set_preview_extent(Extent2d::new(320, 240));
 
-    let publish =
-        |runtime: &mut EditorAuthoringRuntime, source: &SceneAuthoringSession, scene, omissions| {
-            let database = preview_database(runtime);
-            let scope = preview_scope(runtime);
-            runtime.drive_preview(Some(EditorPreviewSource {
-                document: DOCUMENT,
-                revision: source.revision(),
-                dependencies: EditorPreviewDependencies::empty(),
-                projection: Some(EditorPreviewProjection::authoring(
-                    ExpandedSceneCandidate::plain(preview_source_key(), Arc::new(scene)),
-                    omissions,
-                    database,
-                    scope,
-                )),
-            }))
+    let publish = |runtime: &mut EditorAuthoringRuntime,
+                   source: &SceneAuthoringSession,
+                   scene: SceneDocument,
+                   omissions| {
+        let database = preview_database(runtime);
+        let scope = preview_scope(runtime);
+        let projection = match compile_preview_scene(&scene, preview_source_key()) {
+            Ok(candidate) => {
+                EditorPreviewProjection::authoring(candidate, omissions, database, scope)
+            }
+            Err(refusal) => {
+                assert!(refusal.has_errors());
+                EditorPreviewProjection::rejected(refusal)
+            }
         };
+        runtime.drive_preview(Some(EditorPreviewSource {
+            document: DOCUMENT,
+            revision: source.revision(),
+            dependencies: EditorPreviewDependencies::empty(),
+            projection: Some(projection),
+        }))
+    };
     assert!(
         publish(
             &mut runtime,

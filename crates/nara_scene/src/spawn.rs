@@ -45,10 +45,10 @@ use nara_reflect::{
 };
 
 use crate::{
-    ExpandedSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
+    CompiledSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
     SceneEntityProvenanceMap, SceneOccurrenceKey, SourceDocumentKey,
     asset_bindings::SceneAssetBindings,
-    candidate::{SceneMaterializationInput, validate_scene_provenance},
+    candidate::SceneMaterializationInput,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     occurrence::{
         OccurrenceError, PreparedSceneOccurrence, SceneSourceContext, occurrence_for_instance,
@@ -63,10 +63,7 @@ use crate::{
         combine_scene_hierarchy_operations, prepare_scene_hierarchy_retirement,
         validate_scene_entity_retirement_admission,
     },
-    validation::{
-        PreparedScene as PreflightScene, preflight_scene_with_context,
-        preflight_scene_with_context_and_bindings,
-    },
+    validation::{PreparedScene as PreflightScene, preflight_compiled_scene_with_context},
 };
 
 #[derive(Debug)]
@@ -282,7 +279,7 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: Option<&SpawnedSceneInstance>,
@@ -304,7 +301,7 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
@@ -327,7 +324,7 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
@@ -354,7 +351,7 @@ impl SceneSpawner {
         &mut self,
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         occurrence: &SceneOccurrenceKey,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         commit: SceneIdentityCommit<'_>,
@@ -370,7 +367,7 @@ impl SceneSpawner {
             world,
             registry,
             definition,
-            SceneMaterializationInput::Expanded(candidate),
+            SceneMaterializationInput::Compiled(candidate),
             occurrence,
             asset_resolution,
             commit,
@@ -399,8 +396,8 @@ impl SceneSpawner {
         if !definition.matches_registry(registry) {
             return Err(preparation::definition_rejection());
         }
-        let (asset_resolution, value_limits) = match candidate {
-            SceneMaterializationInput::Expanded(_) => (asset_resolution, value_limits),
+        let (asset_resolution, value_limits, exact_definitions_admitted) = match candidate {
+            SceneMaterializationInput::Compiled(_) => (asset_resolution, value_limits, false),
             #[cfg(feature = "serde")]
             SceneMaterializationInput::Runtime(candidate) => {
                 definition
@@ -410,9 +407,9 @@ impl SceneSpawner {
                 definition.validate(world)?;
                 let limits = candidate.limits().value_limits();
                 // Cook/admit validated this immutable input against these exact definitions.
-                // Every version remains current, so shared preflight cannot enter migration.
+                // Reuse its pure admission and prepare only actual receiving World/asset work.
                 // Runtime product identities resolve only through the receiving asset bindings.
-                (None, limits)
+                (None, limits, true)
             }
         };
         if registry
@@ -423,17 +420,6 @@ impl SceneSpawner {
         }
         let document = candidate.document();
         let provenance = candidate.provenance();
-        if validate_scene_provenance(document, provenance).is_err() {
-            let mut diagnostics = DiagnosticReport::default();
-            diagnostics.push(diagnostic_error(
-                "scene.invalid-provenance",
-                "Expanded scene source provenance is inconsistent",
-            ));
-            return Err(SceneSpawnReport {
-                diagnostics,
-                ..Default::default()
-            });
-        }
         let mut component_batch = match bindings.into_batch(world) {
             Ok(batch) => batch,
             Err(error) => {
@@ -455,15 +441,13 @@ impl SceneSpawner {
         };
         let mut preflight = component_batch.with_decode_context(asset_resolution, |context| {
             context.set_materialization_limits(value_limits);
-            match definition.bindings() {
-                None => preflight_scene_with_context(document, registry, context),
-                Some(component_bindings) => preflight_scene_with_context_and_bindings(
-                    document,
-                    registry,
-                    component_bindings,
-                    context,
-                ),
-            }
+            preflight_compiled_scene_with_context(
+                document,
+                registry,
+                definition.bindings(),
+                context,
+                exact_definitions_admitted,
+            )
         });
         if preflight.diagnostics.has_errors() {
             return Err(SceneSpawnReport {
@@ -673,12 +657,12 @@ impl SceneSpawner {
 /// The asset resolver must come from the admitted source, as with initial spawning; `None` is
 /// appropriate only for sources that do not require project stable-asset resolution.
 /// Replaces one active Scene Instance while preserving the source provenance of an already
-/// expanded document and its admitted asset-resolution context.
+/// compiled document and its admitted asset-resolution context.
 #[must_use]
 pub fn replace_expanded_scene_with_product<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
@@ -702,7 +686,7 @@ where
     )
 }
 
-/// Replaces an expanded Scene using the exact asset identities prepared by its content owner.
+/// Replaces a compiled Scene using the exact asset identities prepared by its content owner.
 ///
 /// Bindings must originate in this World and its unchanged live AssetServer. Component decoding
 /// extends their one scratch catalogue; successful Scene commit publishes that same catalogue.
@@ -716,7 +700,7 @@ where
 pub fn replace_expanded_scene_with_product_and_bindings<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     bindings: SceneAssetBindings,
@@ -753,7 +737,7 @@ where
 pub fn prepare_expanded_scene_replacement_with_claims<F>(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     current: &SpawnedSceneInstance,
     bindings: SceneAssetBindings,
@@ -798,7 +782,7 @@ impl SceneComponentBindings {
     pub fn prepare_scene_replacement_with_claims<F>(
         &self,
         world: &mut World,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         current: &SpawnedSceneInstance,
         assets: SceneAssetBindings,
@@ -812,7 +796,7 @@ impl SceneComponentBindings {
     {
         self.prepare_selected_scene_replacement_with_claims(
             world,
-            SceneMaterializationInput::Expanded(candidate),
+            SceneMaterializationInput::Compiled(candidate),
             asset_resolution,
             current,
             assets,
@@ -1615,12 +1599,12 @@ pub fn retire_and_despawn_scene_entity(
     Ok(())
 }
 
-/// Materializes a required source-bound candidate into one explicitly declared logical slot.
+/// Materializes a required source-bound compiled candidate into one declared logical slot.
 #[must_use]
 pub fn spawn_scene(
     world: &mut World,
     registry: &ComponentRegistrySnapshot,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     occurrence: &SceneOccurrenceKey,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
 ) -> SceneSpawnReport {
@@ -1655,15 +1639,18 @@ mod provenance_admission_tests {
             let registry = nara_reflect::ComponentRegistryBuilder::new()
                 .freeze()
                 .unwrap();
-            let candidate = ExpandedSceneCandidate::plain(
-                SourceDocumentKey::named(
-                    "56d73fb3-6fc0-435b-956b-1d4df1569e3a".parse().unwrap(),
-                    "registration",
-                    SourceDocumentKind::Scene,
-                )
-                .unwrap(),
-                Arc::new(SceneDocument::default()),
-            );
+            let candidate = SceneDocument::default()
+                .compile(&registry, &crate::InMemoryPrefabSourceResolver::new())
+                .candidate
+                .expect("the empty source must compile")
+                .bind_source(
+                    SourceDocumentKey::named(
+                        "56d73fb3-6fc0-435b-956b-1d4df1569e3a".parse().unwrap(),
+                        "registration",
+                        SourceDocumentKind::Scene,
+                    )
+                    .unwrap(),
+                );
             if installed {
                 let report = spawn_scene(
                     &mut world,

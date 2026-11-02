@@ -141,6 +141,7 @@ pub mod __private {
     pub use crate::entity_reference::{
         DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
         plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
+        plan_declared_value_entity_references_with_admission,
     };
     pub use crate::persistent_apply::{
         PreparedComponentApplyBatch, UnboundComponentApplyBatch, declare_persistent_apply_targets,

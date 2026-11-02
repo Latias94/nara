@@ -297,8 +297,8 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         .load(&repeated_candidate, &repeated)
         .unwrap();
     assert_eq!(
-        desktop_snapshot.expanded_scene(),
-        repeated_snapshot.expanded_scene()
+        desktop_snapshot.compiled_scene(),
+        repeated_snapshot.compiled_scene()
     );
     assert_eq!(
         desktop_snapshot.images()[0].source().source_hash(),

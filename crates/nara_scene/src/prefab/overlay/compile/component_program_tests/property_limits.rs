@@ -1,7 +1,7 @@
 //! Actual large value programs use their composition owner's explicit property budgets.
 
 use super::*;
-use crate::{PrefabExpansionFailure, PrefabExpansionFailureKind};
+use crate::{SceneCompilationFailure, SceneCompilationFailureKind};
 use nara_reflect::ComponentValueKind;
 
 #[derive(nara_ecs::Component)]
@@ -97,21 +97,28 @@ fn large_scene(root: &str, value: ComponentValue) -> SceneDocument {
     scene(overlay)
 }
 
-fn generous_limits() -> PrefabExpansionLimits {
-    PrefabExpansionLimits::default()
+fn generous_limits() -> SceneCompilationLimits {
+    SceneCompilationLimits::default()
         .with_materialized_value_nodes(ItemLimit::new(32_000).unwrap())
         .with_materialized_value_bytes(ByteLimit::new(512 * 1024).unwrap())
 }
 
-fn assert_large_result(document: &SceneDocument) {
+fn assert_large_result(document: &CompiledSceneDocument) {
     let values = document
-        .entities
+        .entities()
         .iter()
-        .filter_map(|entity| entity.components.get(&large_component()))
+        .filter_map(|entity| entity.components().get(&large_component()))
         .collect::<Vec<_>>();
     let [record] = values.as_slice() else {
         panic!("expected exactly one retained large component")
     };
+    assert_large_value(record.value(), record.schema_owner());
+}
+
+fn assert_large_value(
+    value: &ComponentValue,
+    selected_owner: Option<&PersistentComponentSchemaOwnerId>,
+) {
     let mut expected = large_value();
     expected
         .set_path(
@@ -119,18 +126,18 @@ fn assert_large_result(document: &SceneDocument) {
             ComponentValue::U64(7),
         )
         .unwrap();
-    assert_eq!(record.value, expected);
-    assert_eq!(record.owner(), Some(&owner()));
+    assert_eq!(value, &expected);
+    assert_eq!(selected_owner, Some(&owner()));
 }
 
-fn assert_budget_failure(failure: &PrefabExpansionFailure) {
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::WorkLimit);
+fn assert_budget_failure(failure: &SceneCompilationFailure) {
+    assert_eq!(failure.reason(), &SceneCompilationFailureKind::WorkLimit);
     assert!(failure.location().is_none());
     assert!(failure.slot().is_none());
 }
 
-fn assert_semantic_failure(failure: &PrefabExpansionFailure) {
-    assert_eq!(failure.reason(), &PrefabExpansionFailureKind::Component);
+fn assert_semantic_failure(failure: &SceneCompilationFailure) {
+    assert_eq!(failure.reason(), &SceneCompilationFailureKind::Component);
     let location = failure.location().expect("actual declaring intent");
     assert_eq!(
         location.source(),
@@ -217,7 +224,7 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("host"))
             .with_component(large_component(), effective_record(value))]),
     );
-    let limits = PrefabExpansionLimits::default()
+    let limits = SceneCompilationLimits::default()
         .with_working_bytes(ByteLimit::new(40 * 1024 * 1024).unwrap());
     for pin_count in [1, 512] {
         let mut overlay = PrefabOverlay::new(key("base"));
@@ -238,11 +245,11 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
         if pin_count == 1 {
             assert!(report.failure.is_none(), "{:?}", report.diagnostics);
             let result = expanded(&report)
-                .entities
+                .entities()
                 .iter()
-                .find_map(|entity| entity.components.get(&large_component()))
+                .find_map(|entity| entity.components().get(&large_component()))
                 .unwrap();
-            let ComponentValue::Map(fields) = &result.value else {
+            let ComponentValue::Map(fields) = result.value() else {
                 panic!("expected component fields")
             };
             assert_eq!(
@@ -264,10 +271,10 @@ fn scalar_pins_admit_repeated_schema_storage_prefixes_before_retaining_paths() {
 fn authoring_expand(
     document: &SceneDocument,
     sources: &InMemoryPrefabSourceResolver,
-    limits: PrefabExpansionLimits,
-) -> crate::__private::AuthoringPrefabExpansionReport {
+    limits: SceneCompilationLimits,
+) -> crate::__private::AuthoringSceneCompilationReport {
     use crate::{
-        __private::{AuthoringAdapterReceipt, try_expand_authoring_prefabs_with_loader},
+        __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
         AuthoringSchemaBasis, PrefabSourceResolver, ResolvedPrefabSource,
     };
     use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner};
@@ -288,10 +295,10 @@ fn authoring_expand(
     let basis = AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
     let before = document.clone();
     let sources_before = sources.clone();
-    let report = try_expand_authoring_prefabs_with_loader(
+    let report = try_compile_authoring_scene_with_loader(
         document,
         &basis,
-        PrefabExpansionOptions::default().with_limits(limits),
+        SceneCompilationOptions::default().with_limits(limits),
         None,
         |reference, _| {
             Ok::<_, Infallible>(sources.resolve_prefab(reference).map(|source| {
@@ -322,7 +329,18 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
     );
     assert!(!report.budget_exceeded());
     assert!(report.failure().is_none());
-    assert_large_result(report.candidate().unwrap().document());
+    let values = report
+        .candidate()
+        .unwrap()
+        .document()
+        .entities
+        .iter()
+        .filter_map(|entity| entity.components.get(&large_component()))
+        .collect::<Vec<_>>();
+    let [record] = values.as_slice() else {
+        panic!("expected exactly one retained authoring component")
+    };
+    assert_large_value(&record.value, record.owner());
 
     let cost = large_value().cost();
     for limits in [

@@ -445,7 +445,7 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
     assert!(second.startup_content_closure().is_none());
     assert!(
         second
-            .expanded_scene_provenance()
+            .compiled_scene_provenance()
             .values()
             .any(|source| source.local_entity_id() == &content_fixture::scene_id("second-sprite"))
     );

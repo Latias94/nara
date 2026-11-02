@@ -16,7 +16,7 @@ use crate::{
         },
         file_publication::{FilePublicationHost, FilePublicationOutcome},
     },
-    project_tooling::host_fs,
+    test_host_fs as host_fs,
 };
 
 const STARTUP: &str = "scenes/startup.scene.json";

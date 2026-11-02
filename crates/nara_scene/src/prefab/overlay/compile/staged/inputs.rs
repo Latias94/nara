@@ -10,11 +10,11 @@ use nara_identity::{
 
 use super::{Compiler, NodeId, ScopeId, Site};
 use crate::diagnostics::{error as diagnostic_error, usize_to_u64, with_public_u64};
-use crate::prefab::PrefabExpansionWorkingSet;
+use crate::prefab::SceneCompilationWorkingSet;
 use crate::provenance::provenance_string_bytes;
 use crate::{
-    PrefabEntityOrigin, PrefabExpansionFailure, PrefabExpansionFailureKind, PrefabInstanceHop,
-    ResolvedPrefabSource,
+    PrefabEntityOrigin, PrefabInstanceHop, ResolvedPrefabSource, SceneCompilationFailure,
+    SceneCompilationFailureKind,
 };
 
 pub(super) enum ResolvedReference {
@@ -32,7 +32,7 @@ pub(super) enum InputFailure {
 pub(super) enum ReferenceResolution {
     Entered,
     Invalid {
-        reason: PrefabExpansionFailureKind,
+        reason: SceneCompilationFailureKind,
         input: Option<(ScopeId, InputFailure)>,
     },
     Resolved {
@@ -42,7 +42,7 @@ pub(super) enum ReferenceResolution {
 }
 
 impl ReferenceResolution {
-    fn invalid(reason: PrefabExpansionFailureKind) -> Self {
+    fn invalid(reason: SceneCompilationFailureKind) -> Self {
         Self::Invalid {
             reason,
             input: None,
@@ -51,7 +51,7 @@ impl ReferenceResolution {
 
     fn input_failure(scope: ScopeId, failure: InputFailure) -> Self {
         Self::Invalid {
-            reason: PrefabExpansionFailureKind::Reference,
+            reason: SceneCompilationFailureKind::Reference,
             input: Some((scope, failure)),
         }
     }
@@ -59,7 +59,7 @@ impl ReferenceResolution {
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     /// Admission of an opened occurrence checks every provided name, including unused arguments.
     /// Missing values remain legal until a final surviving leaf demands that input.
@@ -67,7 +67,7 @@ where
         &mut self,
         site: &Site,
         source: &ResolvedPrefabSource,
-    ) -> Result<(), PrefabExpansionFailure> {
+    ) -> Result<(), SceneCompilationFailure> {
         let inputs = &source.document().inputs;
         let mut bytes = inputs.iter().try_fold(0usize, |bytes, input| {
             bytes
@@ -100,14 +100,14 @@ where
                     "scene.prefab-input-base-changed",
                     "Reference arguments do not match the selected Prefab source",
                 ));
-                return Err(PrefabExpansionFailureKind::SourceChanged.into());
+                return Err(SceneCompilationFailureKind::SourceChanged.into());
             }
             if arguments.values.keys().any(|input| !inputs.contains(input)) {
                 self.context.diagnostics.push(diagnostic_error(
                     "scene.prefab-input-argument-undeclared",
                     "Reference arguments contain an input not declared by the selected Prefab",
                 ));
-                return Err(PrefabExpansionFailureKind::Reference.into());
+                return Err(SceneCompilationFailureKind::Reference.into());
             }
         }
         Ok(())
@@ -130,7 +130,7 @@ where
         &mut self,
         scope: ScopeId,
         target: &AuthoredEntityReference,
-    ) -> Result<ReferenceResolution, PrefabExpansionFailure> {
+    ) -> Result<ReferenceResolution, SceneCompilationFailure> {
         let mut declaring_scope = scope;
         let mut reference = Cow::Borrowed(target);
         let mut active = Vec::<(ScopeId, ReferenceInputId)>::new();
@@ -140,7 +140,7 @@ where
                 self.admit(Some(size_of::<ScopeId>() + size_of::<NodeId>()))?;
                 let Some(&anchor) = self.scopes[current].nodes.get(&hop.anchor) else {
                     return Ok(ReferenceResolution::invalid(
-                        PrefabExpansionFailureKind::MissingTarget,
+                        SceneCompilationFailureKind::MissingTarget,
                     ));
                 };
                 let previous = self.scopes.len();
@@ -150,7 +150,7 @@ where
                 }
                 let Some(entered) = entered else {
                     return Ok(ReferenceResolution::invalid(
-                        PrefabExpansionFailureKind::MissingTarget,
+                        SceneCompilationFailureKind::MissingTarget,
                     ));
                 };
                 current = entered;
@@ -160,7 +160,7 @@ where
                     .is_none_or(|source| source.key() != &hop.expected_base)
                 {
                     return Ok(ReferenceResolution::invalid(
-                        PrefabExpansionFailureKind::SourceChanged,
+                        SceneCompilationFailureKind::SourceChanged,
                     ));
                 }
             }
@@ -172,7 +172,7 @@ where
                             declaring_scope,
                         },
                         None => {
-                            ReferenceResolution::invalid(PrefabExpansionFailureKind::MissingTarget)
+                            ReferenceResolution::invalid(SceneCompilationFailureKind::MissingTarget)
                         }
                     });
                 }
@@ -208,7 +208,7 @@ where
                     "maximum-depth",
                     usize_to_u64(maximum),
                 ));
-                return Err(PrefabExpansionFailureKind::WorkLimit.into());
+                return Err(SceneCompilationFailureKind::WorkLimit.into());
             }
             let Some(argument) = self.input_argument(current, input) else {
                 return Ok(ReferenceResolution::input_failure(
@@ -224,12 +224,12 @@ where
             active.push((current, input.clone()));
             let argument = self
                 .input_argument(current, input)
-                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
                 .clone();
             declaring_scope = self.scopes[current]
                 .site
                 .as_ref()
-                .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
                 .source;
             match argument {
                 EntityReference::Authored {
@@ -246,7 +246,7 @@ where
                                 declaring_scope,
                             },
                             None => ReferenceResolution::invalid(
-                                PrefabExpansionFailureKind::MissingTarget,
+                                SceneCompilationFailureKind::MissingTarget,
                             ),
                         },
                     );

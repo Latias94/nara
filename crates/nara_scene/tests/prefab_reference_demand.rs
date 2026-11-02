@@ -15,7 +15,7 @@ use nara_reflect::{
     encode_asset_reference_value, replace_component_property, rewrite_declared_asset_references,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
+    CompiledSceneCandidate, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
     SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     SourceDocumentKey, SourceDocumentKind,
@@ -190,7 +190,7 @@ impl Fixture {
         schema
     }
 
-    fn expand(&self, restore_default: bool) -> ExpandedSceneCandidate {
+    fn expand(&self, restore_default: bool) -> CompiledSceneCandidate {
         let mut claims = vec![PrefabPropertyClaim {
             path: future_property(),
             intent: PrefabPropertyIntent::Set(asset(SHARED)),
@@ -220,7 +220,7 @@ impl Fixture {
         let mut loads = 0;
         let report = self
             .bindings
-            .try_expand_prefabs_with_loader(
+            .try_compile_scene_with_loader(
                 &document,
                 Default::default(),
                 Some(self.assets.resolver(&AssetPathScope::ROOT)),
@@ -242,27 +242,21 @@ impl Fixture {
             "reference-demand.scene",
             SourceDocumentKind::Scene,
         ));
-        assert_eq!(candidate.document().entities.len(), 2);
-        assert!(
-            candidate
-                .document()
-                .entities
-                .iter()
-                .all(|entity| entity.prefab.is_none())
-        );
+        assert_eq!(candidate.document().entities().len(), 2);
+        // Compiled records structurally exclude Prefab declarations.
         candidate
     }
 }
 
-fn expanded_record(candidate: &ExpandedSceneCandidate) -> &SceneComponentRecord {
+fn expanded_record(candidate: &CompiledSceneCandidate) -> &nara_scene::CompiledSceneComponent {
     let mut records = candidate
         .document()
-        .entities
+        .entities()
         .iter()
-        .filter_map(|entity| entity.components.get(&component()));
+        .filter_map(|entity| entity.components().get(&component()));
     let record = records.next().unwrap();
     assert!(records.next().is_none());
-    assert_eq!(record.owner.as_ref(), Some(&owner_id()));
+    assert_eq!(record.schema_owner(), Some(&owner_id()));
     record
 }
 
@@ -330,7 +324,7 @@ fn prefab_property_pin_and_materialized_default_keep_distinct_demands_for_one_pr
     let candidate = fixture.expand(false);
     let record = expanded_record(&candidate);
     let schema = fixture.schema();
-    let references = assert_inventory(schema, &record.value, SHARED, SHARED);
+    let references = assert_inventory(schema, record.value(), SHARED, SHARED);
     assert_eq!(
         references
             .iter()
@@ -339,7 +333,7 @@ fn prefab_property_pin_and_materialized_default_keep_distinct_demands_for_one_pr
         2
     );
 
-    let mut rewritten = record.value.clone();
+    let mut rewritten = record.value().clone();
     rewrite_declared_asset_references(&mut rewritten, &references, |reference| {
         Ok::<_, Infallible>(
             if reference.asset_ref() == &AssetRef::Product(product(SHARED)) {
@@ -361,7 +355,7 @@ fn prefab_property_pin_and_materialized_default_keep_distinct_demands_for_one_pr
             .map(|reference| (reference.path(), reference.demand()))
             .collect::<Vec<_>>()
     );
-    assert_inventory(schema, &record.value, SHARED, SHARED);
+    assert_inventory(schema, record.value(), SHARED, SHARED);
 }
 
 #[test]
@@ -376,12 +370,12 @@ fn prefab_absent_restores_immediate_default_and_property_set_keeps_actual_deferr
     let candidate = fixture.expand(true);
     let record = expanded_record(&candidate);
     let schema = fixture.schema();
-    assert_inventory(schema, &record.value, SHARED, SHARED);
+    assert_inventory(schema, record.value(), SHARED, SHARED);
 
-    let mut edited = record.value.clone();
+    let mut edited = record.value().clone();
     let previous = replace_component_property(
         schema,
-        record.version,
+        record.version(),
         &mut edited,
         &future_property(),
         asset(REWRITTEN),
@@ -389,5 +383,5 @@ fn prefab_absent_restores_immediate_default_and_property_set_keeps_actual_deferr
     .unwrap();
     assert_eq!(previous, asset(SHARED));
     assert_inventory(schema, &edited, REWRITTEN, SHARED);
-    assert_inventory(schema, &record.value, SHARED, SHARED);
+    assert_inventory(schema, record.value(), SHARED, SHARED);
 }

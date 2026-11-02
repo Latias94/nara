@@ -24,12 +24,13 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    AuthoringDocumentSource, ExpandedSceneCandidate, InMemoryPrefabSourceResolver, Name,
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, SceneEntitySource, SceneExportOptions, SceneExportOutput,
-    SceneOccurrenceKey, ScenePatchDocument, ScenePatchOperation, SourceDocumentKey,
-    SourceDocumentKind, retire_and_despawn_scene_entity, retire_and_despawn_scene_instance,
+    AuthoringDocumentSource, CompiledSceneCandidate, CompiledSceneComponent,
+    InMemoryPrefabSourceResolver, Name, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
+    SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentBindings, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+    SceneExportOptions, SceneExportOutput, SceneOccurrenceKey, ScenePatchDocument,
+    ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, retire_and_despawn_scene_entity,
+    retire_and_despawn_scene_instance,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
@@ -191,8 +192,8 @@ impl Definition {
         document: &SceneDocument,
         resolver: &InMemoryPrefabSourceResolver,
         source: &str,
-    ) -> ExpandedSceneCandidate {
-        let report = self.bindings.expand_prefabs(document, resolver);
+    ) -> CompiledSceneCandidate {
+        let report = self.bindings.compile_scene(document, resolver);
         assert!(!report.diagnostics.has_errors(), "{report:?}");
         report
             .candidate
@@ -213,7 +214,7 @@ fn source_key(name: &str, kind: SourceDocumentKind) -> SourceDocumentKey {
 fn spawn(
     bindings: &SceneComponentBindings,
     world: &mut World,
-    candidate: &ExpandedSceneCandidate,
+    candidate: &CompiledSceneCandidate,
     slot: &str,
 ) -> SpawnedSceneInstance {
     let report = bindings
@@ -234,6 +235,12 @@ fn resolve(world: &World, instance: &SpawnedSceneInstance, id: &SceneEntityId) -
         EntityLookup::Resolved(entity) => entity,
         lookup => panic!("expected a live Scene entity: {lookup:?}"),
     }
+}
+
+fn assert_data_record(actual: &CompiledSceneComponent, expected: &SceneComponentRecord) {
+    assert_eq!(actual.schema_owner(), expected.owner());
+    assert_eq!(actual.version(), expected.version);
+    assert_eq!(actual.value(), &expected.value);
 }
 
 fn export(bindings: &SceneComponentBindings, world: &World) -> SceneExportOutput {
@@ -419,11 +426,19 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
     let mut world = World::new();
     let current = spawn(bindings, &mut world, &candidate, "authored");
     let entity = resolve(&world, &current, &id("actor"));
-    let sibling = bindings
-        .data_component(&world, entity, &component(SENSOR))
+    let sibling = &candidate
+        .document()
+        .entities()
+        .iter()
+        .find(|entity| entity.id() == &id("actor"))
         .unwrap()
-        .unwrap()
-        .clone();
+        .components()[&component(SENSOR)];
+    assert_eq!(
+        bindings
+            .data_component(&world, entity, &component(SENSOR))
+            .unwrap(),
+        Some(sibling),
+    );
     assert_eq!(bindings.data_components(&world, entity).unwrap().count(), 2);
     bindings
         .set_data_component(
@@ -439,7 +454,7 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
         bindings
             .data_component(&world, entity, &component(SENSOR))
             .unwrap(),
-        Some(&sibling)
+        Some(sibling)
     );
     assert_eq!(
         exported(&export(bindings, &world), &current, &id("actor")).components[&component(MOTION)],
@@ -460,11 +475,12 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
         bindings
             .data_component(&world, entity, &component(SENSOR))
             .unwrap(),
-        Some(&sibling)
+        Some(sibling)
     );
     assert_eq!(world.get::<Name>(entity), Some(&Name::new("Actor")));
     assert_eq!(fs::read(project.root().join(SCENE)).unwrap(), saved_bytes);
-    assert_eq!(candidate.document(), &saved);
+    let unchanged = definition.compile(&saved, &InMemoryPrefabSourceResolver::new(), SCENE);
+    assert_eq!(candidate.document(), unchanged.document());
     assert_eq!(
         editor
             .current_frame()
@@ -488,17 +504,18 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
         current.locator(&id("actor")),
         successor.locator(&id("actor"))
     );
-    assert_eq!(
+    assert_data_record(
         bindings
             .data_component(&world, replacement, &component(MOTION))
+            .unwrap()
             .unwrap(),
-        Some(&motion(7))
+        &motion(7),
     );
     assert_eq!(
         bindings
             .data_component(&world, replacement, &component(SENSOR))
             .unwrap(),
-        Some(&sibling)
+        Some(sibling)
     );
     assert!(
         bindings
@@ -566,7 +583,7 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
     let candidate = definition.compile(&source, &resolver, SCENE);
     let projected = |anchor: &str, local: &str| {
         candidate
-            .provenance()
+            .canonical_provenance()
             .iter()
             .find(|(_, provenance)| {
                 provenance.local_entity_id() == &id(local)
@@ -593,11 +610,12 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
     assert_ne!(first.locator(&left), first.locator(&right));
     for (actor, friend) in [(&left, &left_friend), (&right, &right_friend)] {
         let entity = resolve(&world, &first, actor);
-        assert_eq!(
+        assert_data_record(
             bindings
                 .data_component(&world, entity, &component(SENSOR))
+                .unwrap()
                 .unwrap(),
-            Some(&sensor(friend.clone()))
+            &sensor(friend.clone()),
         );
         assert_ne!(entity, resolve(&world, &first, friend));
     }
@@ -620,11 +638,12 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
             .count(),
         1
     );
-    assert_eq!(
+    assert_data_record(
         bindings
             .data_component(&world, right_entity, &component(MOTION))
+            .unwrap()
             .unwrap(),
-        Some(&motion(2))
+        &motion(2),
     );
 
     let later_path = "scenes/later.scene.json";
@@ -673,11 +692,12 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
     let mut replay = World::new();
     let replay_instance = spawn(bindings, &mut replay, &replay_candidate, "replay");
     let replay_left = resolve(&replay, &replay_instance, &left_output.id);
-    assert_eq!(
+    assert_data_record(
         bindings
             .data_component(&replay, replay_left, &component(SENSOR))
+            .unwrap()
             .unwrap(),
-        left_output.components.get(&component(SENSOR))
+        left_output.components.get(&component(SENSOR)).unwrap(),
     );
     assert_eq!(
         world.get::<Name>(left_entity),
@@ -688,7 +708,7 @@ fn disk_prefab_occurrences_export_current_membership_and_retire_independently() 
         8
     );
     assert_eq!(fs::read(project.root().join(PREFAB)).unwrap(), prefab_bytes);
-    assert_eq!(candidate.document().entities.len(), initial_count);
+    assert_eq!(candidate.document().entities().len(), initial_count);
 
     assert_eq!(
         retire_and_despawn_scene_instance(&mut world, &first).unwrap(),

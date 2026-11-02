@@ -605,7 +605,7 @@ fn declarative_property_constraints_are_preserved_until_activation_without_nativ
                     ),
                 )]),
         );
-        let error = document.expand_prefabs(&registry, &resolver);
+        let error = document.compile(&registry, &resolver);
         assert!(error.candidate.is_none());
         assert!(
             error

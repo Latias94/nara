@@ -19,9 +19,9 @@ use nara_reflect::{
     decode_asset_reference_value, encode_asset_reference_value,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneDocumentCandidate,
-    RuntimeSceneLimits, SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+    RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneLimits,
+    SceneComponentBindings, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
     advanced::{
         SceneAssetBindings, SceneNativeRetirementClaims, SceneProductResource,
         SceneProductTransactionLimits,
@@ -150,7 +150,6 @@ fn cooked(
             )
         },
     ));
-    let expanded = ExpandedSceneCandidate::plain(source(), Arc::new(document));
     let mut database = ProjectAssetDatabase::default();
     database
         .insert(AssetRecord::new(
@@ -159,6 +158,20 @@ fn cooked(
             AssetSourceKind::Other("consumer.text".into()),
         ))
         .unwrap();
+    let compilation = bindings
+        .try_compile_scene_with_loader(
+            &document,
+            Default::default(),
+            Some(database.resolver(&AssetPathScope::ROOT)),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
+    );
+    let expanded = compilation.candidate.unwrap().bind_source(source());
     let cooked = RuntimeSceneCandidate::cook(
         &expanded,
         bindings,

@@ -9,7 +9,7 @@ use nara_reflect::ComponentTypeId;
 
 use super::*;
 use crate::SceneComponentRecord;
-use crate::prefab::PrefabExpansionWorkingSet;
+use crate::prefab::SceneCompilationWorkingSet;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
 mod inputs;
@@ -100,7 +100,7 @@ fn instance_from_inputs<'a>(
 struct Compiler<'root, 'context, 'owner, F, E> {
     root: SourceTopology<'root>,
     selected_anchor: Option<NodeId>,
-    context: &'context mut PrefabExpansionContext<'owner, F, E>,
+    context: &'context mut SceneCompilationContext<'owner, F, E>,
     scopes: Vec<Scope>,
     nodes: Vec<Node>,
     locators: BTreeMap<SceneEntityId, NodeId>,
@@ -117,40 +117,40 @@ pub(super) struct SourceTopology<'a> {
 
 /// Preserves a standalone Prefab's declared input environment at the source boundary.
 pub(super) fn expand_source<F, E>(
-    context: &mut PrefabExpansionContext<'_, F, E>,
+    context: &mut SceneCompilationContext<'_, F, E>,
     source: SourceTopology<'_>,
-) -> Result<SceneDocument, PrefabExpansionFailure>
+) -> Result<SceneDocument, SceneCompilationFailure>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    compile(context, source, None)
+    compile(context, source, None).map(|output| output.document)
 }
 
 #[cfg(feature = "serde")]
 pub(super) fn expand_selected<F, E>(
-    context: &mut PrefabExpansionContext<'_, F, E>,
+    context: &mut SceneCompilationContext<'_, F, E>,
     source: SourceTopology<'_>,
     anchor: &SceneEntityId,
-) -> Result<SceneDocument, PrefabExpansionFailure>
+) -> Result<StagedSceneOutput, SceneCompilationFailure>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     // The containing scope registers direct shells first, in this source record order.
     let selected = source
         .entities
         .iter()
         .position(|entity| &entity.id == anchor && entity.prefab.is_some())
-        .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+        .ok_or(SceneCompilationFailureKind::MissingTarget)?;
     compile(context, source, Some(selected))
 }
 
 fn compile<F, E>(
-    context: &mut PrefabExpansionContext<'_, F, E>,
+    context: &mut SceneCompilationContext<'_, F, E>,
     source: SourceTopology<'_>,
     selected_anchor: Option<NodeId>,
-) -> Result<SceneDocument, PrefabExpansionFailure>
+) -> Result<StagedSceneOutput, SceneCompilationFailure>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     let mut compiler = Compiler {
         root: source,
@@ -202,13 +202,13 @@ where
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    fn admit(&mut self, bytes: Option<usize>) -> Result<(), PrefabExpansionFailure> {
+    fn admit(&mut self, bytes: Option<usize>) -> Result<(), SceneCompilationFailure> {
         self.context
             .reserve_scratch_bytes(bytes, None, None)
             .then_some(())
-            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
+            .ok_or_else(|| SceneCompilationFailureKind::WorkLimit.into())
     }
 
     /// Ownership follows instance entries, not visual parentage or locator spelling.
@@ -254,15 +254,15 @@ where
     }
 
     /// Overlay targets start in the selected base; payloads start at the physical declaration.
-    fn overlay_reference_scope(&self, scope: ScopeId) -> Result<ScopeId, PrefabExpansionFailure> {
+    fn overlay_reference_scope(&self, scope: ScopeId) -> Result<ScopeId, SceneCompilationFailure> {
         self.scopes[scope]
             .site
             .as_ref()
             .map(|site| site.source)
-            .ok_or_else(|| PrefabExpansionFailureKind::OwnerAdmission.into())
+            .ok_or_else(|| SceneCompilationFailureKind::OwnerAdmission.into())
     }
 
-    fn record_reference_scope(&self, record: Record) -> Result<ScopeId, PrefabExpansionFailure> {
+    fn record_reference_scope(&self, record: Record) -> Result<ScopeId, SceneCompilationFailure> {
         match record {
             Record::Source { scope, .. } => Ok(scope),
             Record::Addition { scope, .. } | Record::Set { scope, .. } => {
@@ -332,21 +332,22 @@ where
 
     fn failure_with_location(
         &mut self,
-        mut failure: PrefabExpansionFailure,
+        mut failure: SceneCompilationFailure,
         slot: Option<PrefabOverlaySlot>,
         bytes: Option<usize>,
         locate: impl FnOnce(&Self) -> PrefabInstanceLocation,
-    ) -> PrefabExpansionFailure {
+    ) -> SceneCompilationFailure {
         if failure.location.is_some()
             || matches!(
                 failure.reason,
-                PrefabExpansionFailureKind::WorkLimit | PrefabExpansionFailureKind::OwnerAdmission
+                SceneCompilationFailureKind::WorkLimit
+                    | SceneCompilationFailureKind::OwnerAdmission
             )
         {
             return failure;
         }
         if self.admit(bytes).is_err() {
-            return PrefabExpansionFailureKind::WorkLimit.into();
+            return SceneCompilationFailureKind::WorkLimit.into();
         }
         failure.location = Some(locate(self));
         failure.slot = slot;
@@ -357,8 +358,8 @@ where
         &mut self,
         site: &Site,
         slot: Option<PrefabOverlaySlot>,
-        failure: PrefabExpansionFailure,
-    ) -> PrefabExpansionFailure {
+        failure: SceneCompilationFailure,
+    ) -> SceneCompilationFailure {
         self.failure_with_location(failure, slot, self.site_bytes(site), |this| {
             this.stable_site(site)
         })
@@ -368,8 +369,8 @@ where
         &mut self,
         scope: ScopeId,
         slot: Option<PrefabOverlaySlot>,
-        failure: PrefabExpansionFailure,
-    ) -> PrefabExpansionFailure {
+        failure: SceneCompilationFailure,
+    ) -> SceneCompilationFailure {
         let Some(site) = self.scopes[scope].site.as_ref() else {
             return failure;
         };
@@ -387,8 +388,8 @@ where
     fn record_failure(
         &mut self,
         record: Record,
-        failure: PrefabExpansionFailure,
-    ) -> PrefabExpansionFailure {
+        failure: SceneCompilationFailure,
+    ) -> SceneCompilationFailure {
         let (scope, slot) = match record {
             Record::Source { .. } => return failure,
             Record::Addition { scope, index } => {
@@ -399,12 +400,12 @@ where
         self.scope_failure(scope, slot, failure)
     }
 
-    fn register_scope(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
+    fn register_scope(&mut self, scope: ScopeId) -> Result<(), SceneCompilationFailure> {
         self.register_scope_inner(scope)
             .map_err(|failure| self.scope_failure(scope, None, failure))
     }
 
-    fn register_scope_inner(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
+    fn register_scope_inner(&mut self, scope: ScopeId) -> Result<(), SceneCompilationFailure> {
         let entities = self.source_entities(scope);
         let count = entities.len();
         let additions = self
@@ -439,18 +440,18 @@ where
         let entities = self
             .context
             .observe_item_budget(
-                PrefabExpansionBudgetKind::MaterializedEntities,
+                SceneCompilationBudgetKind::MaterializedEntities,
                 self.context.usage.materialized_entities,
                 count.saturating_add(additions),
                 self.context.options.limits.materialized_entities(),
                 None,
                 None,
             )
-            .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+            .ok_or(SceneCompilationFailureKind::WorkLimit)?;
         let mut usage = self.context.usage;
         usage.materialized_entities = entities;
         if !self.context.admit_working_usage(usage, None, None) {
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
         self.context.usage = usage;
         let entities = self.source_entities(scope);
@@ -467,7 +468,7 @@ where
         let structure = validate_scene_structure(&document);
         if structure.has_errors() {
             self.context.diagnostics.extend(structure);
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         if let Some(overlay) = self.overlay(scope) {
             let maximum = self.context.options.limits.working_bytes().get();
@@ -491,12 +492,12 @@ where
                 super::super::cost::prefab_overlay_cost(overlay, limits).map_err(|error| {
                     let kind =
                         if error.kind == super::super::cost::PrefabOverlayCostKind::Declarations {
-                            PrefabExpansionBudgetKind::OverlayDeclarations
+                            SceneCompilationBudgetKind::OverlayDeclarations
                         } else {
-                            PrefabExpansionBudgetKind::WorkingBytes
+                            SceneCompilationBudgetKind::WorkingBytes
                         };
                     let (observed, maximum) =
-                        if kind == PrefabExpansionBudgetKind::OverlayDeclarations {
+                        if kind == SceneCompilationBudgetKind::OverlayDeclarations {
                             (
                                 self.context
                                     .usage
@@ -509,19 +510,19 @@ where
                         };
                     self.context
                         .fail_budget(kind, observed, maximum, anchor.as_ref(), None);
-                    PrefabExpansionFailureKind::WorkLimit
+                    SceneCompilationFailureKind::WorkLimit
                 })?;
             let declarations = self
                 .context
                 .observe_item_budget(
-                    PrefabExpansionBudgetKind::OverlayDeclarations,
+                    SceneCompilationBudgetKind::OverlayDeclarations,
                     self.context.usage.overlay_declarations,
                     cost.declarations,
                     self.context.options.limits.overlay_declarations(),
                     anchor.as_ref(),
                     None,
                 )
-                .ok_or(PrefabExpansionFailureKind::WorkLimit)?;
+                .ok_or(SceneCompilationFailureKind::WorkLimit)?;
             self.context.usage.overlay_declarations = declarations;
             self.admit(
                 cost.nodes
@@ -535,7 +536,7 @@ where
                     || (claim.target.through.is_empty()
                         && matches!(claim.target.entity, PrefabEntityOrigin::InstanceAddition(_)))
                 {
-                    return Err(PrefabExpansionFailureKind::DuplicateIntent.into());
+                    return Err(SceneCompilationFailureKind::DuplicateIntent.into());
                 }
             }
         }
@@ -577,7 +578,7 @@ where
                 .insert(origin.clone(), node)
                 .is_some()
             {
-                return Err(PrefabExpansionFailureKind::DuplicateIntent.into());
+                return Err(SceneCompilationFailureKind::DuplicateIntent.into());
             }
             self.locators.insert(locator.clone(), node);
             self.nodes.push(Node {
@@ -619,7 +620,7 @@ where
                     Some(&entity.id),
                     None,
                 ) {
-                    return Err(PrefabExpansionFailureKind::WorkLimit.into());
+                    return Err(SceneCompilationFailureKind::WorkLimit.into());
                 }
             }
         }
@@ -682,7 +683,7 @@ where
         node: NodeId,
         site: &Site,
         _key: &SourceDocumentKey,
-    ) -> Result<State, PrefabExpansionFailure> {
+    ) -> Result<State, SceneCompilationFailure> {
         // Only work which can still enter this slot distinguishes a finite re-entry.
         // Stable source positions, rather than arena addresses, detect actual recursion.
         self.admit(
@@ -714,7 +715,7 @@ where
                 let layer = self.overlay(current).unwrap();
                 let relative = self
                     .relative(current, node)
-                    .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
                 let prefix = relative
                     .through
                     .iter()
@@ -753,7 +754,7 @@ where
         node: NodeId,
         request: &AssetRef,
         key: &SourceDocumentKey,
-    ) -> Result<(), PrefabExpansionFailure> {
+    ) -> Result<(), SceneCompilationFailure> {
         self.context
             .reserve_provenance_bytes(
                 size_of::<AssetRef>()
@@ -764,10 +765,10 @@ where
                 Some(request),
             )
             .then_some(())
-            .ok_or_else(|| PrefabExpansionFailureKind::WorkLimit.into())
+            .ok_or_else(|| SceneCompilationFailureKind::WorkLimit.into())
     }
 
-    fn select_site(&mut self, node: NodeId) -> Result<Option<Site>, PrefabExpansionFailure> {
+    fn select_site(&mut self, node: NodeId) -> Result<Option<Site>, SceneCompilationFailure> {
         let mut site = self.nodes[node].slot.clone();
         let mut current = self.nodes[node].scope;
         loop {
@@ -777,7 +778,7 @@ where
             {
                 let target = self
                     .relative(current, node)
-                    .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
                 let mut matched = false;
                 for (index, claim) in overlay.instances.iter().enumerate() {
                     if claim
@@ -792,14 +793,14 @@ where
                             return Err(self.scope_failure(
                                 current,
                                 Some(PrefabOverlaySlot::InstanceClaim { index }),
-                                PrefabExpansionFailureKind::DuplicateIntent.into(),
+                                SceneCompilationFailureKind::DuplicateIntent.into(),
                             ));
                         }
                         if claim.target != target {
                             return Err(self.scope_failure(
                                 current,
                                 Some(PrefabOverlaySlot::InstanceClaim { index }),
-                                PrefabExpansionFailureKind::SourceChanged.into(),
+                                SceneCompilationFailureKind::SourceChanged.into(),
                             ));
                         }
                         matched = true;
@@ -820,7 +821,7 @@ where
         Ok(site)
     }
 
-    fn open_slot(&mut self, node: NodeId) -> Result<Option<ScopeId>, PrefabExpansionFailure> {
+    fn open_slot(&mut self, node: NodeId) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         if self.nodes[node].opened {
             return Ok(self.nodes[node].entered);
         }
@@ -860,11 +861,11 @@ where
         &mut self,
         node: NodeId,
         site: &Site,
-    ) -> Result<Option<ScopeId>, PrefabExpansionFailure> {
+    ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         self.admit(Some(512))?;
         let instance = self
             .instance(&site)
-            .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
         if !instance.source.is_primary() {
             let diagnostic = with_asset_ref(
                 diagnostic_error(
@@ -875,7 +876,7 @@ where
                 &instance.source,
             );
             self.context.diagnostics.push(diagnostic);
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         self.admit(
             provenance_asset_ref_bytes(&instance.source)
@@ -909,10 +910,10 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
         if !self.context.reserve_resolved_instance(&anchor, &request) {
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
         let mut working = self.context.working_set();
         working.source_depth = depth;
@@ -920,7 +921,7 @@ where
             Ok(source) => source,
             Err(error) => {
                 self.context.load_error = Some(error);
-                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+                return Err(SceneCompilationFailureKind::OwnerAdmission.into());
             }
         };
         self.context.options.limits = self
@@ -932,7 +933,7 @@ where
             .context
             .admit_working_usage(self.context.usage, Some(&anchor), Some(&request))
         {
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
         let Some(source) = source else {
             self.context.diagnostics.push(with_asset_ref(
@@ -951,7 +952,7 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         };
         if source.key().kind() != SourceDocumentKind::Prefab {
             self.context.diagnostics.push(with_asset_ref(
@@ -962,7 +963,7 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         if !source.matches_request(&request) {
             self.context.diagnostics.push(with_asset_ref(
@@ -973,10 +974,10 @@ where
                 "asset-ref",
                 &request,
             ));
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         if !source.matches_authority(self.context.authority) {
-            return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+            return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
         if self
             .instance(&site)
@@ -985,7 +986,7 @@ where
             .as_ref()
             .is_some_and(|overlay| &overlay.base != source.key())
         {
-            return Err(PrefabExpansionFailureKind::SourceChanged.into());
+            return Err(SceneCompilationFailureKind::SourceChanged.into());
         }
         self.admit_input_arguments(site, &source)?;
         self.reserve_occurrence(node, &request, source.key())?;
@@ -1024,7 +1025,7 @@ where
                     diagnostic = with_asset_ref(diagnostic, "cycle-from", previous);
                 }
                 self.context.diagnostics.push(diagnostic);
-                return Err(PrefabExpansionFailureKind::OwnerAdmission.into());
+                return Err(SceneCompilationFailureKind::OwnerAdmission.into());
             }
             ancestor = self.nodes[parent].scope;
         }
@@ -1057,28 +1058,28 @@ where
         &mut self,
         scope: ScopeId,
         target: &PrefabEntityTarget,
-    ) -> Result<NodeId, PrefabExpansionFailure> {
+    ) -> Result<NodeId, SceneCompilationFailure> {
         let mut current = scope;
         for hop in &target.through {
             let anchor = *self.scopes[current]
                 .nodes
                 .get(&hop.anchor)
-                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+                .ok_or(SceneCompilationFailureKind::MissingTarget)?;
             current = self
                 .open_slot(anchor)?
-                .ok_or(PrefabExpansionFailureKind::MissingTarget)?;
+                .ok_or(SceneCompilationFailureKind::MissingTarget)?;
             if self.scopes[current].source.as_ref().unwrap().key() != &hop.expected_base {
-                return Err(PrefabExpansionFailureKind::SourceChanged.into());
+                return Err(SceneCompilationFailureKind::SourceChanged.into());
             }
         }
         self.scopes[current]
             .nodes
             .get(&target.entity)
             .copied()
-            .ok_or_else(|| PrefabExpansionFailureKind::MissingTarget.into())
+            .ok_or_else(|| SceneCompilationFailureKind::MissingTarget.into())
     }
 
-    fn close_demands(&mut self, scanned: &mut usize) -> Result<(), PrefabExpansionFailure> {
+    fn close_demands(&mut self, scanned: &mut usize) -> Result<(), SceneCompilationFailure> {
         while *scanned < self.scopes.len() {
             let scope = *scanned;
             *scanned += 1;
@@ -1108,7 +1109,7 @@ where
     fn close_structure(
         &mut self,
         scanned: &mut usize,
-    ) -> Result<SceneDocument, PrefabExpansionFailure> {
+    ) -> Result<SceneDocument, SceneCompilationFailure> {
         loop {
             self.close_demands(scanned)?;
             self.postorder.clear();
@@ -1137,19 +1138,19 @@ where
     fn target_nodes(
         &self,
         scope: ScopeId,
-    ) -> Result<BTreeMap<PrefabEntityTarget, SceneEntityId>, PrefabExpansionFailure> {
+    ) -> Result<BTreeMap<PrefabEntityTarget, SceneEntityId>, SceneCompilationFailure> {
         self.scopes[scope]
             .output
             .iter()
             .map(|&node| {
                 self.relative(scope, node)
                     .map(|target| (target, self.nodes[node].locator.clone()))
-                    .ok_or_else(|| PrefabExpansionFailureKind::OwnerAdmission.into())
+                    .ok_or_else(|| SceneCompilationFailureKind::OwnerAdmission.into())
             })
             .collect()
     }
 
-    fn compose_programs(&mut self) -> Result<(), PrefabExpansionFailure> {
+    fn compose_programs(&mut self) -> Result<(), SceneCompilationFailure> {
         let bytes = self
             .nodes
             .iter()
@@ -1189,7 +1190,16 @@ where
         Ok(())
     }
 
-    fn compose_scope_programs(&mut self, scope: ScopeId) -> Result<(), PrefabExpansionFailure> {
+    fn compose_scope_programs(&mut self, scope: ScopeId) -> Result<(), SceneCompilationFailure> {
+        // A scope opened only for a reference route or input environment contributes no
+        // selected component values. Its layout has already passed structural composition.
+        if !self.scopes[scope]
+            .output
+            .iter()
+            .any(|&node| self.selects_values(node))
+        {
+            return Ok(());
+        }
         let Some(overlay) = self.overlay(scope) else {
             return Ok(());
         };
@@ -1225,7 +1235,7 @@ where
                 return Err(self.scope_failure(
                     scope,
                     Some(PrefabOverlaySlot::Component { index }),
-                    PrefabExpansionFailureKind::DuplicateIntent.into(),
+                    SceneCompilationFailureKind::DuplicateIntent.into(),
                 ));
             }
             let Some(node) = targets
@@ -1236,14 +1246,17 @@ where
                 return Err(self.scope_failure(
                     scope,
                     Some(PrefabOverlaySlot::Component { index }),
-                    PrefabExpansionFailureKind::MissingTarget.into(),
+                    SceneCompilationFailureKind::MissingTarget.into(),
                 ));
             };
+            if !self.selects_values(node) {
+                continue;
+            }
             if !touched.insert((node, component.clone())) {
                 return Err(self.scope_failure(
                     scope,
                     Some(PrefabOverlaySlot::Component { index }),
-                    PrefabExpansionFailureKind::DuplicateIntent.into(),
+                    SceneCompilationFailureKind::DuplicateIntent.into(),
                 ));
             }
             intents.push((node, component.clone(), index));
@@ -1256,7 +1269,7 @@ where
                         return Err(self.scope_failure(
                             scope,
                             Some(PrefabOverlaySlot::Component { index }),
-                            PrefabExpansionFailureKind::Component.into(),
+                            SceneCompilationFailureKind::Component.into(),
                         ));
                     }
                     self.nodes[node].programs.insert(
@@ -1272,7 +1285,7 @@ where
                         return Err(self.scope_failure(
                             scope,
                             Some(PrefabOverlaySlot::Component { index }),
-                            PrefabExpansionFailureKind::Component.into(),
+                            SceneCompilationFailureKind::Component.into(),
                         ));
                     }
                     self.nodes[node].programs.remove(&component);
@@ -1295,7 +1308,7 @@ where
                         return Err(self.scope_failure(
                             scope,
                             Some(PrefabOverlaySlot::Component { index }),
-                            PrefabExpansionFailureKind::Component.into(),
+                            SceneCompilationFailureKind::Component.into(),
                         ));
                     }
                     let program = self.nodes[node]
@@ -1314,7 +1327,7 @@ where
         &mut self,
         scope: ScopeId,
         nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-    ) -> Result<SceneDocument, PrefabExpansionFailure> {
+    ) -> Result<SceneDocument, SceneCompilationFailure> {
         self.layout_scope_inner(scope, nested)
             .map_err(|failure| self.scope_failure(scope, None, failure))
     }
@@ -1323,7 +1336,7 @@ where
         &mut self,
         scope: ScopeId,
         nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-    ) -> Result<SceneDocument, PrefabExpansionFailure> {
+    ) -> Result<SceneDocument, SceneCompilationFailure> {
         let local = self.scopes[scope]
             .nodes
             .values()

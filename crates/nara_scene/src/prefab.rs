@@ -8,14 +8,17 @@ use std::{
 use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
+#[cfg(feature = "serde")]
+use nara_reflect::ComponentDecodeContext;
 use nara_reflect::{
-    ComponentDecodeContext, ComponentEntityReferenceRewriteError, ComponentRegistrySnapshot,
+    ComponentEntityReferenceRewriteError, ComponentRegistrySnapshot,
     ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
 };
 
 use crate::{
-    ExpandedSceneDocument, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
+    CompiledSceneDocument, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
     ScenePatchDocument, SourceDocumentBindingError, SourceDocumentKey,
+    compiled::CompiledSceneAdmissionError,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref,
         with_entity_reference_rewrite_error, with_public_locator, with_public_u64,
@@ -23,6 +26,8 @@ use crate::{
     schema_authority::SchemaAuthority,
 };
 
+#[cfg(feature = "serde")]
+use crate::ExpandedSceneDocument;
 #[cfg(test)]
 use crate::SourceDocumentKind;
 mod declaration;
@@ -33,9 +38,8 @@ mod overlay;
 pub(crate) use overlay::validate_claim_paths;
 
 pub use declaration::{
-    PrefabDeclarationSource, PrefabExpansionFailure, PrefabExpansionFailureKind,
-    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment, PrefabOverlaySlot,
-    PrefabRevert,
+    PrefabDeclarationSource, PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
+    PrefabOverlaySlot, PrefabRevert, SceneCompilationFailure, SceneCompilationFailureKind,
 };
 #[cfg(feature = "serde")]
 pub(crate) use overlay::cost::{PrefabOverlayCostError, PrefabOverlayCostKind};
@@ -141,40 +145,40 @@ impl PrefabDocument {
     }
 
     #[must_use]
-    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
-    ) -> PrefabExpansionReport {
-        self.expand_with_resolution(registry, resolver, None)
+    ) -> SceneCompilationReport {
+        self.compile_with_resolution(registry, resolver, None)
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
         asset_resolution: AssetReferenceResolver<'_>,
-    ) -> PrefabExpansionReport {
-        self.expand_with_resolution(registry, resolver, Some(asset_resolution))
+    ) -> SceneCompilationReport {
+        self.compile_with_resolution(registry, resolver, Some(asset_resolution))
     }
 
-    fn expand_with_resolution<R: PrefabSourceResolver + ?Sized>(
+    fn compile_with_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
-    ) -> PrefabExpansionReport {
-        let mut loader = |source: &AssetRef, _: &mut PrefabExpansionWorkingSet| {
+    ) -> SceneCompilationReport {
+        let mut loader = |source: &AssetRef, _: &mut SceneCompilationWorkingSet| {
             Ok::<_, Infallible>(resolver.resolve_prefab(source))
         };
-        let mut context = PrefabExpansionContext::new(
+        let mut context = SceneCompilationContext::new(
             SchemaAuthority::Native(registry),
             &mut loader,
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
             asset_resolution,
         );
-        context.expand_source_document(&self.roots, &self.entities, Some(&self.inputs))
+        context.compile_source_document(&self.roots, &self.entities, Some(&self.inputs))
     }
 }
 
@@ -532,7 +536,7 @@ impl PrefabSourceResolver for InMemoryPrefabSourceResolver {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrefabExpansionBudgetKind {
+pub enum SceneCompilationBudgetKind {
     MaterializedEntities,
     MaterializedComponents,
     MaterializedValueNodes,
@@ -548,7 +552,7 @@ pub enum PrefabExpansionBudgetKind {
     ReferenceWorkBytes,
 }
 
-impl PrefabExpansionBudgetKind {
+impl SceneCompilationBudgetKind {
     const fn as_str(self) -> &'static str {
         match self {
             Self::MaterializedEntities => "materialized-entities",
@@ -568,14 +572,14 @@ impl PrefabExpansionBudgetKind {
     }
 }
 
-impl Display for PrefabExpansionBudgetKind {
+impl Display for SceneCompilationBudgetKind {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrefabExpansionLimits {
+pub struct SceneCompilationLimits {
     materialized_entities: ItemLimit,
     materialized_components: ItemLimit,
     materialized_value_nodes: ItemLimit,
@@ -590,7 +594,7 @@ pub struct PrefabExpansionLimits {
     reference_work_bytes: ByteLimit,
 }
 
-impl Default for PrefabExpansionLimits {
+impl Default for SceneCompilationLimits {
     fn default() -> Self {
         Self {
             materialized_entities: ItemLimit::new(100_000)
@@ -621,9 +625,10 @@ impl Default for PrefabExpansionLimits {
     }
 }
 
-impl PrefabExpansionLimits {
-    /// Document-wide Schema, value and path work for effective asset-reference discovery.
-    /// This includes unsuccessful/empty discovery and is separate from stored value size.
+impl SceneCompilationLimits {
+    /// Document-wide Schema, value and path work proving complete effective reference meaning.
+    /// This includes defaults, shape and Native-leaf checks, unsuccessful/empty discovery and
+    /// final local-reference closure. It is separate from stored value size and allocated bytes.
     #[must_use]
     pub const fn reference_work_nodes(self) -> ItemLimit {
         self.reference_work_nodes
@@ -760,24 +765,32 @@ impl PrefabExpansionLimits {
         self.provenance_bytes = limit;
         self
     }
+
+    fn materialization_limits(self) -> ComponentValueMaterializationLimits {
+        ComponentValueMaterializationLimits::new(
+            self.materialized_value_nodes(),
+            self.materialized_value_bytes(),
+            EntityReferenceTraversalLimits::default().depth(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrefabExpansionOptions {
+pub struct SceneCompilationOptions {
     pub max_depth: usize,
-    pub limits: PrefabExpansionLimits,
+    pub limits: SceneCompilationLimits,
 }
 
-impl Default for PrefabExpansionOptions {
+impl Default for SceneCompilationOptions {
     fn default() -> Self {
         Self {
             max_depth: 32,
-            limits: PrefabExpansionLimits::default(),
+            limits: SceneCompilationLimits::default(),
         }
     }
 }
 
-impl PrefabExpansionOptions {
+impl SceneCompilationOptions {
     #[must_use]
     pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
         self.max_depth = max_depth;
@@ -785,22 +798,22 @@ impl PrefabExpansionOptions {
     }
 
     #[must_use]
-    pub const fn with_limits(mut self, limits: PrefabExpansionLimits) -> Self {
+    pub const fn with_limits(mut self, limits: SceneCompilationLimits) -> Self {
         self.limits = limits;
         self
     }
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct PrefabExpansionReport {
-    /// The immutable expanded document and its complete provenance, absent after failed expansion.
+pub struct SceneCompilationReport {
+    /// The sealed flat document and its canonical provenance, absent after failed compilation.
     ///
     /// Its source owner must bind the containing source before materialization. Expansion does
     /// not infer that source or claim a runtime occurrence.
-    pub candidate: Option<ExpandedSceneDocument>,
+    pub candidate: Option<CompiledSceneDocument>,
     pub diagnostics: DiagnosticReport,
     /// The first rejected compiler step, independent of source Schema classification.
-    pub failure: Option<PrefabExpansionFailure>,
+    pub failure: Option<SceneCompilationFailure>,
     source_upgrade_required: bool,
 }
 
@@ -811,34 +824,35 @@ pub struct PrefabExpansionReport {
 /// Callers cannot replace the candidate or clear omissions before native preview restriction:
 ///
 /// ```compile_fail,E0616
-/// use nara_scene::__private::AuthoringPrefabExpansionReport;
-/// fn replace_candidate(report: &mut AuthoringPrefabExpansionReport) {
+/// use nara_scene::__private::AuthoringSceneCompilationReport;
+/// fn replace_candidate(report: &mut AuthoringSceneCompilationReport) {
 ///     report.candidate = None;
 /// }
 /// ```
 ///
 /// ```compile_fail,E0616
-/// use nara_scene::__private::AuthoringPrefabExpansionReport;
-/// fn clear_omissions(report: &mut AuthoringPrefabExpansionReport) {
+/// use nara_scene::__private::AuthoringSceneCompilationReport;
+/// fn clear_omissions(report: &mut AuthoringSceneCompilationReport) {
 ///     report.omissions.clear();
 /// }
 /// ```
 #[cfg(feature = "serde")]
 #[derive(Debug)]
-pub struct AuthoringPrefabExpansionReport {
+pub struct AuthoringSceneCompilationReport {
     candidate: Option<ExpandedSceneDocument>,
     diagnostics: DiagnosticReport,
-    failure: Option<PrefabExpansionFailure>,
-    omissions: Vec<AuthoringPrefabOmission>,
+    failure: Option<SceneCompilationFailure>,
+    omissions: Vec<AuthoringSceneCompilationOmission>,
     asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     basis: crate::AuthoringSchemaBasis,
-    usage: PrefabExpansionUsage,
-    working_limit: ByteLimit,
+    usage: SceneCompilationUsage,
+    limits: SceneCompilationLimits,
+    reference_work: (usize, usize),
     budget_failed: bool,
 }
 
 #[cfg(feature = "serde")]
-impl AuthoringPrefabExpansionReport {
+impl AuthoringSceneCompilationReport {
     /// Borrows the exact semantic candidate before native preview filtering.
     #[must_use]
     pub fn candidate(&self) -> Option<&ExpandedSceneDocument> {
@@ -853,13 +867,13 @@ impl AuthoringPrefabExpansionReport {
 
     /// Borrows the first rejected compiler step, independently of source classification.
     #[must_use]
-    pub fn failure(&self) -> Option<&PrefabExpansionFailure> {
+    pub fn failure(&self) -> Option<&SceneCompilationFailure> {
         self.failure.as_ref()
     }
 
     /// Borrows all compiler omissions paired with this candidate and working allowance.
     #[must_use]
-    pub fn omissions(&self) -> &[AuthoringPrefabOmission] {
+    pub fn omissions(&self) -> &[AuthoringSceneCompilationOmission] {
         &self.omissions
     }
 
@@ -870,9 +884,9 @@ impl AuthoringPrefabExpansionReport {
     ///
     /// ```compile_fail,E0382
     /// use nara_reflect::ComponentRegistrySnapshot;
-    /// use nara_scene::__private::AuthoringPrefabExpansionReport;
+    /// use nara_scene::__private::AuthoringSceneCompilationReport;
     /// fn reuse_report(
-    ///     report: AuthoringPrefabExpansionReport,
+    ///     report: AuthoringSceneCompilationReport,
     ///     registry: &ComponentRegistrySnapshot,
     /// ) {
     ///     let _parts = report.into_parts();
@@ -880,8 +894,8 @@ impl AuthoringPrefabExpansionReport {
     /// }
     /// ```
     #[must_use]
-    pub fn into_parts(self) -> AuthoringPrefabExpansionParts {
-        AuthoringPrefabExpansionParts {
+    pub fn into_parts(self) -> AuthoringSceneCompilationParts {
+        AuthoringSceneCompilationParts {
             candidate: self.candidate,
             diagnostics: self.diagnostics,
             failure: self.failure,
@@ -892,6 +906,14 @@ impl AuthoringPrefabExpansionReport {
 
     pub fn checked_work_bytes(&self) -> Option<usize> {
         self.usage.checked_work_bytes()
+    }
+
+    /// Tightens the original allowance before a consuming Native projection. Actual accumulated
+    /// work remains charged; consumption refuses if that work already exceeds the new limit.
+    pub fn restrict_working_bytes(&mut self, limit: ByteLimit) {
+        if limit.get() < self.limits.working_bytes().get() {
+            self.limits = self.limits.with_working_bytes(limit);
+        }
     }
 
     pub const fn budget_exceeded(&self) -> bool {
@@ -907,15 +929,15 @@ impl AuthoringPrefabExpansionReport {
 /// Owned semantic observations after consuming the compiler report.
 ///
 /// These parts carry no Schema evidence, compiler allowance or native preview conversion API.
-/// Their candidate has not undergone presentation filtering; its source owner still owns
-/// containing-source binding and materialization admission.
+/// Their candidate has not undergone presentation filtering or strict sealing. Native preview
+/// requires consuming the original report while it still owns its basis and allowance.
 #[cfg(feature = "serde")]
 #[derive(Debug)]
-pub struct AuthoringPrefabExpansionParts {
+pub struct AuthoringSceneCompilationParts {
     pub candidate: Option<ExpandedSceneDocument>,
     pub diagnostics: DiagnosticReport,
-    pub failure: Option<PrefabExpansionFailure>,
-    pub omissions: Vec<AuthoringPrefabOmission>,
+    pub failure: Option<SceneCompilationFailure>,
+    pub omissions: Vec<AuthoringSceneCompilationOmission>,
     pub effective_asset_references: Vec<nara_reflect::DeclaredAssetReference>,
 }
 
@@ -926,24 +948,33 @@ pub struct AuthoringPrefabExpansionParts {
 #[cfg(feature = "serde")]
 #[derive(Debug)]
 pub struct AuthoringNativePreview {
-    pub candidate: ExpandedSceneDocument,
+    pub candidate: CompiledSceneDocument,
     pub omissions: Vec<crate::authoring_preview::AuthoringPreviewOmission>,
     pub diagnostics: DiagnosticReport,
-    pub failure: Option<PrefabExpansionFailure>,
+    pub failure: Option<SceneCompilationFailure>,
+    work_bytes: Option<usize>,
+}
+
+#[cfg(feature = "serde")]
+impl AuthoringNativePreview {
+    /// Complete accumulated compiler and sealing work, for the original Host reservation.
+    pub const fn checked_work_bytes(&self) -> Option<usize> {
+        self.work_bytes
+    }
 }
 
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthoringPrefabOmission {
+pub struct AuthoringSceneCompilationOmission {
     /// Projected locator in this report's immutable candidate; consult its typed provenance.
     pub entity: SceneEntityId,
     pub component: nara_reflect::ComponentTypeId,
-    pub reason: AuthoringPrefabOmissionReason,
+    pub reason: AuthoringSceneCompilationOmissionReason,
 }
 
 #[cfg(feature = "serde")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthoringPrefabOmissionReason {
+pub enum AuthoringSceneCompilationOmissionReason {
     RecordUnavailable(crate::AuthoringRecordReadiness),
     NativeBindingUnavailable,
 }
@@ -951,35 +982,41 @@ pub enum AuthoringPrefabOmissionReason {
 /// Compiles the same selected declaration program without native codecs or migrations.
 /// Source publication, saving and history remain the containing source owner's responsibility.
 #[cfg(feature = "serde")]
-pub fn try_expand_authoring_prefabs_with_loader<F, E>(
+pub fn try_compile_authoring_scene_with_loader<F, E>(
     document: &SceneDocument,
     basis: &crate::AuthoringSchemaBasis,
-    options: PrefabExpansionOptions,
+    options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
-) -> Result<AuthoringPrefabExpansionReport, E>
+) -> Result<AuthoringSceneCompilationReport, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let mut context = PrefabExpansionContext::new(
+    let mut context = SceneCompilationContext::new(
         SchemaAuthority::Authoring(basis),
         &mut loader,
         options,
         asset_resolution,
     );
-    let report = context.expand_scene_document(document);
+    let (candidate, failure) = context.compile_source_with_terminal(
+        &document.roots,
+        &document.entities,
+        None,
+        SceneCompilationContext::finish_authoring_document,
+    );
     if let Some(error) = context.load_error {
         return Err(error);
     }
-    Ok(AuthoringPrefabExpansionReport {
-        candidate: report.candidate,
-        diagnostics: report.diagnostics,
-        failure: report.failure,
+    Ok(AuthoringSceneCompilationReport {
+        candidate,
+        diagnostics: context.diagnostics,
+        failure,
         omissions: context.omissions,
         asset_references: context.asset_references,
         basis: basis.clone(),
         usage: context.usage,
-        working_limit: context.options.limits.working_bytes(),
+        limits: context.options.limits,
+        reference_work: context.reference_work,
         budget_failed: context.budget_failed,
     })
 }
@@ -1007,8 +1044,8 @@ pub(crate) struct SelectedInstanceFragment {
 pub(crate) struct SelectedInstanceCompilation {
     pub(crate) fragment: Option<SelectedInstanceFragment>,
     pub(crate) diagnostics: DiagnosticReport,
-    pub(crate) failure: Option<PrefabExpansionFailure>,
-    pub(crate) omissions: Vec<AuthoringPrefabOmission>,
+    pub(crate) failure: Option<SceneCompilationFailure>,
+    pub(crate) omissions: Vec<AuthoringSceneCompilationOmission>,
     pub(crate) asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     pub(crate) work_bytes: Option<usize>,
     pub(crate) budget_failed: bool,
@@ -1021,20 +1058,20 @@ pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
     source: SelectedInstanceSource<'_>,
     anchor: &SceneEntityId,
     basis: &crate::AuthoringSchemaBasis,
-    options: PrefabExpansionOptions,
+    options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
 ) -> Result<SelectedInstanceCompilation, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let mut context = PrefabExpansionContext::new(
+    let mut context = SceneCompilationContext::new(
         SchemaAuthority::Authoring(basis),
         &mut loader,
         options,
         asset_resolution,
     );
-    let result: Result<SelectedInstanceFragment, PrefabExpansionFailure> = (|| {
+    let result: Result<SelectedInstanceFragment, SceneCompilationFailure> = (|| {
         if !context.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
             None,
@@ -1045,25 +1082,41 @@ where
             None,
             None,
         ) {
-            return Err(PrefabExpansionFailureKind::WorkLimit.into());
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
-        let mut document =
-            overlay::compile::expand_selected_instance(&mut context, source, anchor)?;
+        let output = overlay::compile::expand_selected_instance(&mut context, source, anchor)?;
+        let mut document = output.document;
         document.canonicalize();
         context.observe_authoring_omissions(&mut document);
         if !context.diagnostics.has_errors() {
             // The staged layout retains real containing-source shells. Their IDs close
             // references, but they have no component programs in selected demand.
-            let validation = context.validate_document(&document);
+            let validation = context.validate_authoring_document(&document);
             context.diagnostics.extend(validation);
         }
         if context.diagnostics.has_errors() {
             return Err(if context.budget_failed {
-                PrefabExpansionFailureKind::WorkLimit
+                SceneCompilationFailureKind::WorkLimit
             } else {
-                PrefabExpansionFailureKind::OwnerAdmission
+                SceneCompilationFailureKind::OwnerAdmission
             }
             .into());
+        }
+        // These source-only snapshots have their own lexical proof and allocation admission.
+        // Restore them only after the flat effective values passed their ordinary validator.
+        for defaults in output.source_defaults {
+            let index = document
+                .entities
+                .binary_search_by(|record| record.id.cmp(&defaults.entity))
+                .map_err(|_| SceneCompilationFailureKind::OwnerAdmission)?;
+            let record = document.entities[index]
+                .components
+                .get_mut(&defaults.component)
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            if !record.contextual_defaults.is_empty() {
+                return Err(SceneCompilationFailureKind::OwnerAdmission.into());
+            }
+            record.contextual_defaults = defaults.values;
         }
         context.provenance.retain(|_, origin| {
             origin
@@ -1074,7 +1127,7 @@ where
             .entities
             .iter_mut()
             .find(|record| &record.id == anchor)
-            .ok_or(PrefabExpansionFailureKind::OwnerAdmission)?;
+            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
         // The existing layout owner puts projected roots before ordinary local children.
         let mut roots = std::mem::take(&mut record.children);
         roots.retain(|id| context.provenance.contains_key(id));
@@ -1109,7 +1162,7 @@ where
     })
 }
 
-impl PrefabExpansionReport {
+impl SceneCompilationReport {
     /// Whether a retained source component was migrated during successful compilation.
     /// Discarded component payloads do not contribute to this observation.
     #[must_use]
@@ -1117,10 +1170,10 @@ impl PrefabExpansionReport {
         self.source_upgrade_required
     }
 
-    /// Borrows the expanded document without granting materialization authority by itself.
+    /// Borrows the sealed document before its source owner binds the containing source.
     #[must_use]
-    pub fn document(&self) -> Option<&SceneDocument> {
-        self.candidate.as_ref().map(ExpandedSceneDocument::document)
+    pub fn document(&self) -> Option<&CompiledSceneDocument> {
+        self.candidate.as_ref()
     }
 
     /// Borrows the source association established by this expansion.
@@ -1128,12 +1181,12 @@ impl PrefabExpansionReport {
     pub fn provenance(&self) -> Option<&crate::SceneEntityProvenanceMap> {
         self.candidate
             .as_ref()
-            .map(ExpandedSceneDocument::provenance)
+            .map(CompiledSceneDocument::canonical_provenance)
     }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct PrefabExpansionUsage {
+struct SceneCompilationUsage {
     materialized_entities: usize,
     materialized_components: usize,
     materialized_value_nodes: usize,
@@ -1145,7 +1198,7 @@ struct PrefabExpansionUsage {
     scratch_bytes: usize,
 }
 
-impl PrefabExpansionUsage {
+impl SceneCompilationUsage {
     fn checked_work_bytes(self) -> Option<usize> {
         expansion_work_bytes(
             [
@@ -1163,16 +1216,60 @@ impl PrefabExpansionUsage {
     }
 }
 
+/// One terminal ledger admits traversal work and allocation requests for both strict sealing and
+/// authoring observations. An allocation overflow is distinct from an allocation-free callback.
+fn admit_prefab_terminal_work(
+    limits: SceneCompilationLimits,
+    usage: &mut SceneCompilationUsage,
+    reference_work: &mut (usize, usize),
+    nodes: usize,
+    bytes: usize,
+    allocation: Option<usize>,
+) -> Result<(), (SceneCompilationBudgetKind, usize, usize)> {
+    reference_work.0 = reference_work.0.saturating_add(nodes);
+    reference_work.1 = reference_work.1.saturating_add(bytes);
+    for (kind, observed, maximum) in [
+        (
+            SceneCompilationBudgetKind::ReferenceWorkNodes,
+            reference_work.0,
+            limits.reference_work_nodes().get(),
+        ),
+        (
+            SceneCompilationBudgetKind::ReferenceWorkBytes,
+            reference_work.1,
+            limits.reference_work_bytes().get(),
+        ),
+    ] {
+        if observed > maximum {
+            return Err((kind, observed, maximum));
+        }
+    }
+    let mut next = *usage;
+    let scratch = allocation.and_then(|allocation| next.scratch_bytes.checked_add(allocation));
+    next.scratch_bytes = scratch.unwrap_or(usize::MAX);
+    let work = scratch.and_then(|_| next.checked_work_bytes());
+    let maximum = limits.working_bytes().get();
+    if work.is_none_or(|work| work > maximum) {
+        return Err((
+            SceneCompilationBudgetKind::WorkingBytes,
+            work.unwrap_or(usize::MAX),
+            maximum,
+        ));
+    }
+    *usage = next;
+    Ok(())
+}
+
 /// Conservative modeled allocation held by a suspended expansion, excluding resolver caches.
 /// Raw clones and derived scratch are cumulatively charged without refunds to private work.
 #[derive(Debug, Clone, Copy)]
-pub struct PrefabExpansionWorkingSet {
+pub struct SceneCompilationWorkingSet {
     bytes: Option<usize>,
     working_limit: ByteLimit,
     source_depth: usize,
 }
 
-impl PrefabExpansionWorkingSet {
+impl SceneCompilationWorkingSet {
     /// Actual selected source depth. The first requested Prefab has depth one.
     #[must_use]
     pub const fn source_depth(&self) -> usize {
@@ -1227,7 +1324,7 @@ fn expansion_work_bytes(
         .checked_add(provenance)
 }
 
-impl PrefabExpansionLimits {
+impl SceneCompilationLimits {
     /// Upper reservation for the same allocation model reported to loading callbacks.
     #[must_use]
     pub fn checked_work_bytes(self) -> Option<usize> {
@@ -1239,37 +1336,37 @@ impl PrefabExpansionLimits {
 
 impl SceneDocument {
     #[must_use]
-    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
-    ) -> PrefabExpansionReport {
-        self.expand_prefabs_with_options(registry, resolver, PrefabExpansionOptions::default())
+    ) -> SceneCompilationReport {
+        self.compile_with_options(registry, resolver, SceneCompilationOptions::default())
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile_with_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
         asset_resolution: AssetReferenceResolver<'_>,
-    ) -> PrefabExpansionReport {
-        self.expand_prefabs_with_options_and_asset_resolution(
+    ) -> SceneCompilationReport {
+        self.compile_with_options_and_asset_resolution(
             registry,
             resolver,
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
             asset_resolution,
         )
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_options<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile_with_options<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
-        options: PrefabExpansionOptions,
-    ) -> PrefabExpansionReport {
-        match self.try_expand_prefabs_with_loader(registry, options, None, |source, _| {
+        options: SceneCompilationOptions,
+    ) -> SceneCompilationReport {
+        match self.try_compile_with_loader(registry, options, None, |source, _| {
             Ok::<_, Infallible>(resolver.resolve_prefab(source))
         }) {
             Ok(report) => report,
@@ -1278,14 +1375,14 @@ impl SceneDocument {
     }
 
     #[must_use]
-    pub fn expand_prefabs_with_options_and_asset_resolution<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile_with_options_and_asset_resolution<R: PrefabSourceResolver + ?Sized>(
         &self,
         registry: &ComponentRegistrySnapshot,
         resolver: &R,
-        options: PrefabExpansionOptions,
+        options: SceneCompilationOptions,
         asset_resolution: AssetReferenceResolver<'_>,
-    ) -> PrefabExpansionReport {
-        match self.try_expand_prefabs_with_loader(
+    ) -> SceneCompilationReport {
+        match self.try_compile_with_loader(
             registry,
             options,
             Some(asset_resolution),
@@ -1303,20 +1400,20 @@ impl SceneDocument {
     /// concrete error is returned unchanged; source/overlay conflicts remain in the report.
     /// The second callback argument includes all pre-admitted clones and compiler scratch
     /// held while loading is suspended. Resolver caches and decoding peaks belong to the loader.
-    pub fn try_expand_prefabs_with_loader<F, E>(
+    pub fn try_compile_with_loader<F, E>(
         &self,
         registry: &ComponentRegistrySnapshot,
-        options: PrefabExpansionOptions,
+        options: SceneCompilationOptions,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
-    ) -> Result<PrefabExpansionReport, E>
+    ) -> Result<SceneCompilationReport, E>
     where
         F: FnMut(
             &AssetRef,
-            &mut PrefabExpansionWorkingSet,
+            &mut SceneCompilationWorkingSet,
         ) -> Result<Option<ResolvedPrefabSource>, E>,
     {
-        try_expand_with_authority(
+        try_compile_with_authority(
             self,
             SchemaAuthority::Native(registry),
             options,
@@ -1331,14 +1428,14 @@ impl crate::SceneComponentBindings {
     /// Data records require an exact durable owner claim and current Schema version. This does
     /// not install runtime components or establish gameplay callback availability.
     #[must_use]
-    pub fn expand_prefabs<R: PrefabSourceResolver + ?Sized>(
+    pub fn compile_scene<R: PrefabSourceResolver + ?Sized>(
         &self,
         document: &SceneDocument,
         resolver: &R,
-    ) -> PrefabExpansionReport {
-        match self.try_expand_prefabs_with_loader(
+    ) -> SceneCompilationReport {
+        match self.try_compile_scene_with_loader(
             document,
-            PrefabExpansionOptions::default(),
+            SceneCompilationOptions::default(),
             None,
             |source, _| Ok::<_, Infallible>(resolver.resolve_prefab(source)),
         ) {
@@ -1349,21 +1446,21 @@ impl crate::SceneComponentBindings {
 
     /// Acquires only effective source demand under this immutable representation selection.
     /// Loader errors and working-set restrictions follow
-    /// [`SceneDocument::try_expand_prefabs_with_loader`]; no native-preview omission is used.
-    pub fn try_expand_prefabs_with_loader<F, E>(
+    /// [`SceneDocument::try_compile_with_loader`]; no native-preview omission is used.
+    pub fn try_compile_scene_with_loader<F, E>(
         &self,
         document: &SceneDocument,
-        options: PrefabExpansionOptions,
+        options: SceneCompilationOptions,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
         loader: F,
-    ) -> Result<PrefabExpansionReport, E>
+    ) -> Result<SceneCompilationReport, E>
     where
         F: FnMut(
             &AssetRef,
-            &mut PrefabExpansionWorkingSet,
+            &mut SceneCompilationWorkingSet,
         ) -> Result<Option<ResolvedPrefabSource>, E>,
     {
-        try_expand_with_authority(
+        try_compile_with_authority(
             document,
             SchemaAuthority::Mixed(self),
             options,
@@ -1373,32 +1470,33 @@ impl crate::SceneComponentBindings {
     }
 }
 
-fn try_expand_with_authority<F, E>(
+fn try_compile_with_authority<F, E>(
     document: &SceneDocument,
     authority: SchemaAuthority<'_>,
-    options: PrefabExpansionOptions,
+    options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
-) -> Result<PrefabExpansionReport, E>
+) -> Result<SceneCompilationReport, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     let mut context =
-        PrefabExpansionContext::new(authority, &mut loader, options, asset_resolution);
-    let report = context.expand_scene_document(document);
+        SceneCompilationContext::new(authority, &mut loader, options, asset_resolution);
+    let report = context.compile_scene_document(document);
     match context.load_error {
         Some(error) => Err(error),
         None => Ok(report),
     }
 }
 
-struct PrefabExpansionContext<'a, F, E> {
+struct SceneCompilationContext<'a, F, E> {
     authority: SchemaAuthority<'a>,
     resolver: &'a mut F,
     load_error: Option<E>,
-    options: PrefabExpansionOptions,
+    options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'a>>,
-    usage: PrefabExpansionUsage,
+    usage: SceneCompilationUsage,
+    reference_work: (usize, usize),
     budget_failed: bool,
     source_upgrade_required: bool,
     diagnostics: DiagnosticReport,
@@ -1408,7 +1506,7 @@ struct PrefabExpansionContext<'a, F, E> {
     #[cfg(feature = "serde")]
     asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     #[cfg(feature = "serde")]
-    omissions: Vec<AuthoringPrefabOmission>,
+    omissions: Vec<AuthoringSceneCompilationOmission>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1419,14 +1517,14 @@ enum PrefabReferenceRemapError {
     MissingSourceEntity,
 }
 
-impl<'a, F, E> PrefabExpansionContext<'a, F, E>
+impl<'a, F, E> SceneCompilationContext<'a, F, E>
 where
-    F: FnMut(&AssetRef, &mut PrefabExpansionWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
+    F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
     fn new(
         authority: SchemaAuthority<'a>,
         resolver: &'a mut F,
-        options: PrefabExpansionOptions,
+        options: SceneCompilationOptions,
         asset_resolution: Option<AssetReferenceResolver<'a>>,
     ) -> Self {
         Self {
@@ -1435,7 +1533,8 @@ where
             load_error: None,
             options,
             asset_resolution,
-            usage: PrefabExpansionUsage::default(),
+            usage: SceneCompilationUsage::default(),
+            reference_work: (0, 0),
             budget_failed: false,
             source_upgrade_required: false,
             diagnostics: DiagnosticReport::default(),
@@ -1449,38 +1548,45 @@ where
         }
     }
 
-    fn expand_scene_document(&mut self, document: &SceneDocument) -> PrefabExpansionReport {
-        self.expand_source_document(&document.roots, &document.entities, None)
+    fn compile_scene_document(&mut self, document: &SceneDocument) -> SceneCompilationReport {
+        self.compile_source_document(&document.roots, &document.entities, None)
     }
 
-    fn expand_source_document(
+    fn compile_source_document(
         &mut self,
         roots: &[SceneEntityId],
         entities: &[SceneEntityRecord],
         inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
-    ) -> PrefabExpansionReport {
+    ) -> SceneCompilationReport {
+        let (candidate, failure) =
+            self.compile_source_with_terminal(roots, entities, inputs, Self::seal_document);
+        SceneCompilationReport {
+            source_upgrade_required: candidate.is_some() && self.source_upgrade_required,
+            candidate,
+            diagnostics: std::mem::take(&mut self.diagnostics),
+            failure,
+        }
+    }
+
+    fn compile_source_with_terminal<T>(
+        &mut self,
+        roots: &[SceneEntityId],
+        entities: &[SceneEntityRecord],
+        inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
+        terminal: impl FnOnce(&mut Self, SceneDocument) -> Option<T>,
+    ) -> (Option<T>, Option<SceneCompilationFailure>) {
         if !self.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
             None,
             None,
         ) {
-            return PrefabExpansionReport {
-                candidate: None,
-                diagnostics: std::mem::take(&mut self.diagnostics),
-                failure: Some(PrefabExpansionFailureKind::WorkLimit.into()),
-                source_upgrade_required: false,
-            };
+            return (None, Some(SceneCompilationFailureKind::WorkLimit.into()));
         }
         let mut expanded = match overlay::compile::expand_source(self, roots, entities, inputs) {
             Ok(document) => document,
             Err(failure) => {
                 self.push_expansion_failure(&failure);
-                return PrefabExpansionReport {
-                    candidate: None,
-                    diagnostics: std::mem::take(&mut self.diagnostics),
-                    failure: Some(failure),
-                    source_upgrade_required: false,
-                };
+                return (None, Some(failure));
             }
         };
         expanded.canonicalize();
@@ -1490,24 +1596,49 @@ where
             self.observe_authoring_omissions(&mut expanded);
         }
 
-        if !self.diagnostics.has_errors() {
-            let validation = self.validate_document(&expanded);
-            self.diagnostics.extend(validation);
-        }
-
         if self.diagnostics.has_errors() {
-            return PrefabExpansionReport {
-                candidate: None,
-                diagnostics: std::mem::take(&mut self.diagnostics),
-                failure: None,
-                source_upgrade_required: false,
-            };
+            return (None, None);
         }
+        (terminal(self, expanded), None)
+    }
 
-        let candidate =
-            ExpandedSceneDocument::from_expansion(expanded, std::mem::take(&mut self.provenance));
-        let candidate = match candidate {
-            Ok(candidate) => Some(candidate),
+    fn seal_document(&mut self, document: SceneDocument) -> Option<CompiledSceneDocument> {
+        let authority = self.authority;
+        let limits = self.materialization_limits();
+        let asset_resolution = self.asset_resolution;
+        let provenance = std::mem::take(&mut self.provenance);
+        match crate::compiled::admit_draft(
+            document,
+            provenance,
+            authority,
+            limits,
+            asset_resolution,
+            |nodes, bytes, allocation| self.admit_terminal_work(nodes, bytes, allocation),
+        ) {
+            Ok(document) => Some(document),
+            Err(CompiledSceneAdmissionError::Admission(())) => None,
+            Err(CompiledSceneAdmissionError::Diagnostics(diagnostics)) => {
+                self.diagnostics.extend(diagnostics);
+                None
+            }
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    fn finish_authoring_document(
+        &mut self,
+        document: SceneDocument,
+    ) -> Option<ExpandedSceneDocument> {
+        let validation = self.validate_authoring_document(&document);
+        self.diagnostics.extend(validation);
+        if self.diagnostics.has_errors() {
+            return None;
+        }
+        match ExpandedSceneDocument::from_compilation(
+            document,
+            std::mem::take(&mut self.provenance),
+        ) {
+            Ok(document) => Some(document),
             Err(_) => {
                 self.diagnostics.push(diagnostic_error(
                     "scene.invalid-provenance",
@@ -1515,13 +1646,26 @@ where
                 ));
                 None
             }
-        };
-        PrefabExpansionReport {
-            candidate,
-            diagnostics: std::mem::take(&mut self.diagnostics),
-            failure: None,
-            source_upgrade_required: self.source_upgrade_required,
         }
+    }
+
+    fn admit_terminal_work(
+        &mut self,
+        nodes: usize,
+        bytes: usize,
+        allocation: Option<usize>,
+    ) -> Result<(), ()> {
+        admit_prefab_terminal_work(
+            self.options.limits,
+            &mut self.usage,
+            &mut self.reference_work,
+            nodes,
+            bytes,
+            allocation,
+        )
+        .map_err(|(kind, observed, maximum)| {
+            self.fail_budget(kind, observed, maximum, None, None);
+        })
     }
 
     fn allocate_projected_entity_ids(
@@ -1574,7 +1718,7 @@ where
 
     fn reserve_resolved_instance(&mut self, anchor_id: &SceneEntityId, source: &AssetRef) -> bool {
         let Some(instances) = self.observe_item_budget(
-            PrefabExpansionBudgetKind::ResolvedInstances,
+            SceneCompilationBudgetKind::ResolvedInstances,
             self.usage.resolved_instances,
             1,
             self.options.limits.resolved_instances(),
@@ -1603,7 +1747,7 @@ where
             amount.filter(|amount| self.usage.provenance_bytes.checked_add(*amount).is_some())
         else {
             self.fail_budget(
-                PrefabExpansionBudgetKind::ProvenanceBytes,
+                SceneCompilationBudgetKind::ProvenanceBytes,
                 usize::MAX,
                 limit.get(),
                 entity,
@@ -1612,7 +1756,7 @@ where
             return false;
         };
         let Some(bytes) = self.observe_byte_budget(
-            PrefabExpansionBudgetKind::ProvenanceBytes,
+            SceneCompilationBudgetKind::ProvenanceBytes,
             self.usage.provenance_bytes,
             amount,
             limit,
@@ -1630,8 +1774,8 @@ where
         true
     }
 
-    fn working_set(&self) -> PrefabExpansionWorkingSet {
-        PrefabExpansionWorkingSet {
+    fn working_set(&self) -> SceneCompilationWorkingSet {
+        SceneCompilationWorkingSet {
             bytes: self.usage.checked_work_bytes(),
             working_limit: self.options.limits.working_bytes(),
             source_depth: 1,
@@ -1640,7 +1784,7 @@ where
 
     fn admit_working_usage(
         &mut self,
-        usage: PrefabExpansionUsage,
+        usage: SceneCompilationUsage,
         entity: Option<&SceneEntityId>,
         source: Option<&AssetRef>,
     ) -> bool {
@@ -1648,7 +1792,7 @@ where
         let maximum = self.options.limits.working_bytes().get();
         if bytes.is_none_or(|bytes| bytes > maximum) {
             self.fail_budget(
-                PrefabExpansionBudgetKind::WorkingBytes,
+                SceneCompilationBudgetKind::WorkingBytes,
                 bytes.unwrap_or(usize::MAX),
                 maximum,
                 entity,
@@ -1668,7 +1812,7 @@ where
         let mut usage = self.usage;
         let Some(bytes) = bytes.and_then(|bytes| usage.scratch_bytes.checked_add(bytes)) else {
             self.fail_budget(
-                PrefabExpansionBudgetKind::WorkingBytes,
+                SceneCompilationBudgetKind::WorkingBytes,
                 usize::MAX,
                 self.options.limits.working_bytes().get(),
                 entity,
@@ -1707,11 +1851,7 @@ where
     }
 
     fn materialization_limits(&self) -> ComponentValueMaterializationLimits {
-        ComponentValueMaterializationLimits::new(
-            self.options.limits.materialized_value_nodes(),
-            self.options.limits.materialized_value_bytes(),
-            EntityReferenceTraversalLimits::default().depth(),
-        )
+        self.options.limits.materialization_limits()
     }
 
     fn fail_prefab_remap_budget(
@@ -1721,17 +1861,17 @@ where
     ) -> bool {
         let (kind, observed, maximum) = match error {
             PrefabReferenceRemapError::SingleGeneratedIdentifier { observed, maximum } => (
-                PrefabExpansionBudgetKind::SingleGeneratedIdentifierBytes,
+                SceneCompilationBudgetKind::SingleGeneratedIdentifierBytes,
                 observed,
                 maximum,
             ),
             PrefabReferenceRemapError::GeneratedIdentifier { observed, maximum } => (
-                PrefabExpansionBudgetKind::GeneratedIdentifierBytes,
+                SceneCompilationBudgetKind::GeneratedIdentifierBytes,
                 observed,
                 maximum,
             ),
             PrefabReferenceRemapError::MaterializedValue { observed, maximum } => (
-                PrefabExpansionBudgetKind::MaterializedValueBytes,
+                SceneCompilationBudgetKind::MaterializedValueBytes,
                 observed,
                 maximum,
             ),
@@ -1782,7 +1922,7 @@ where
             .and_then(|value| value.checked_add(replacement_nodes))
         else {
             self.fail_budget(
-                PrefabExpansionBudgetKind::MaterializedValueNodes,
+                SceneCompilationBudgetKind::MaterializedValueNodes,
                 usize::MAX,
                 node_limit,
                 Some(anchor_id),
@@ -1797,7 +1937,7 @@ where
             .and_then(|value| value.checked_add(replacement_bytes))
         else {
             self.fail_budget(
-                PrefabExpansionBudgetKind::MaterializedValueBytes,
+                SceneCompilationBudgetKind::MaterializedValueBytes,
                 usize::MAX,
                 byte_limit,
                 Some(anchor_id),
@@ -1807,7 +1947,7 @@ where
         };
         if nodes > node_limit {
             self.fail_budget(
-                PrefabExpansionBudgetKind::MaterializedValueNodes,
+                SceneCompilationBudgetKind::MaterializedValueNodes,
                 nodes,
                 node_limit,
                 Some(anchor_id),
@@ -1817,7 +1957,7 @@ where
         }
         if bytes > byte_limit {
             self.fail_budget(
-                PrefabExpansionBudgetKind::MaterializedValueBytes,
+                SceneCompilationBudgetKind::MaterializedValueBytes,
                 bytes,
                 byte_limit,
                 Some(anchor_id),
@@ -1837,7 +1977,7 @@ where
 
     fn observe_item_budget(
         &mut self,
-        kind: PrefabExpansionBudgetKind,
+        kind: SceneCompilationBudgetKind,
         current: usize,
         amount: usize,
         limit: ItemLimit,
@@ -1854,7 +1994,7 @@ where
 
     fn observe_byte_budget(
         &mut self,
-        kind: PrefabExpansionBudgetKind,
+        kind: SceneCompilationBudgetKind,
         current: usize,
         amount: usize,
         limit: ByteLimit,
@@ -1871,7 +2011,7 @@ where
 
     fn fail_budget(
         &mut self,
-        kind: PrefabExpansionBudgetKind,
+        kind: SceneCompilationBudgetKind,
         observed: usize,
         maximum: usize,
         entity: Option<&SceneEntityId>,
@@ -1886,7 +2026,8 @@ where
         ));
     }
 
-    fn validate_document(&mut self, document: &SceneDocument) -> DiagnosticReport {
+    #[cfg(feature = "serde")]
+    fn validate_authoring_document(&mut self, document: &SceneDocument) -> DiagnosticReport {
         // Final values have already paid their materialized counters during lowering. This
         // guard admits validation's complete temporary copy, including IDs and record metadata,
         // against working storage rather than imposing value-only ceilings on that metadata.
@@ -1902,7 +2043,7 @@ where
         );
         let Some(cost) = cost else {
             self.fail_budget(
-                PrefabExpansionBudgetKind::WorkingBytes,
+                SceneCompilationBudgetKind::WorkingBytes,
                 usize::MAX,
                 self.options.limits.working_bytes().get(),
                 None,
@@ -1918,42 +2059,12 @@ where
         if let Some(asset_resolution) = self.asset_resolution {
             context = context.with_asset_resolution(asset_resolution);
         }
-        let reference_node_limit = self.options.limits.reference_work_nodes().get();
-        let reference_byte_limit = self.options.limits.reference_work_bytes().get();
-        let mut reference_nodes = 0_usize;
-        let mut reference_bytes = 0_usize;
         let authority = self.authority;
         let result = crate::validation::validate_expanded_values(
             document,
             authority,
             &mut context,
-            |nodes, bytes, allocation| {
-                reference_nodes = reference_nodes.saturating_add(nodes);
-                reference_bytes = reference_bytes.saturating_add(bytes);
-                if reference_nodes > reference_node_limit {
-                    self.fail_budget(
-                        PrefabExpansionBudgetKind::ReferenceWorkNodes,
-                        reference_nodes,
-                        reference_node_limit,
-                        None,
-                        None,
-                    );
-                    return Err(());
-                }
-                if reference_bytes > reference_byte_limit {
-                    self.fail_budget(
-                        PrefabExpansionBudgetKind::ReferenceWorkBytes,
-                        reference_bytes,
-                        reference_byte_limit,
-                        None,
-                        None,
-                    );
-                    return Err(());
-                }
-                self.reserve_scratch_bytes(Some(allocation), None, None)
-                    .then_some(())
-                    .ok_or(())
-            },
+            |nodes, bytes, allocation| self.admit_terminal_work(nodes, bytes, Some(allocation)),
         );
         let Ok(result) = result else {
             return DiagnosticReport::default();
@@ -1976,10 +2087,11 @@ where
             entity.components.retain(|component, record| {
                 let unavailable = self.authority.unavailable_reason(component, record);
                 let reason = unavailable
-                    .map(AuthoringPrefabOmissionReason::RecordUnavailable)
+                    .map(AuthoringSceneCompilationOmissionReason::RecordUnavailable)
                     .or_else(|| {
-                        (!basis.has_native_preview_adapter(component))
-                            .then_some(AuthoringPrefabOmissionReason::NativeBindingUnavailable)
+                        (!basis.has_native_preview_adapter(component)).then_some(
+                            AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable,
+                        )
                     });
                 if let Some(reason) = reason {
                     let bytes = native_preview::omission_work_bytes(
@@ -1990,7 +2102,7 @@ where
                     if !self.reserve_scratch_bytes(bytes, Some(&entity.id), None) {
                         return true;
                     }
-                    self.omissions.push(AuthoringPrefabOmission {
+                    self.omissions.push(AuthoringSceneCompilationOmission {
                         entity: entity.id.clone(),
                         component: component.clone(),
                         reason,
@@ -2003,7 +2115,7 @@ where
 }
 
 fn prefab_expansion_budget_diagnostic(
-    kind: PrefabExpansionBudgetKind,
+    kind: SceneCompilationBudgetKind,
     observed: usize,
     maximum: usize,
     entity: Option<&SceneEntityId>,
@@ -2116,21 +2228,17 @@ mod resolver_tests {
             arguments: None,
             overrides: None,
         });
-        let report =
-            SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+        let report = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
 
         assert!(!report.diagnostics.has_errors());
-        let expanded: &ExpandedSceneDocument = report.candidate.as_ref().unwrap();
-        assert!(std::ptr::eq(
-            report.document().unwrap(),
-            expanded.document()
-        ));
+        let compiled: &CompiledSceneDocument = report.candidate.as_ref().unwrap();
+        assert!(std::ptr::eq(report.document().unwrap(), compiled));
         assert!(std::ptr::eq(
             report.provenance().unwrap(),
-            expanded.provenance()
+            compiled.canonical_provenance()
         ));
-        assert_eq!(expanded.document().entities.len(), 2);
-        assert_eq!(expanded.provenance().len(), 2);
+        assert_eq!(compiled.entities().len(), 2);
+        assert_eq!(compiled.canonical_provenance().len(), 2);
     }
 
     #[test]
@@ -2145,7 +2253,7 @@ mod resolver_tests {
             overrides: None,
         });
         let report = SceneDocument::from_ordered_roots([anchor])
-            .expand_prefabs(&registry, &InMemoryPrefabSourceResolver::new());
+            .compile(&registry, &InMemoryPrefabSourceResolver::new());
 
         assert!(report.diagnostics.has_errors());
         assert!(report.candidate.is_none());

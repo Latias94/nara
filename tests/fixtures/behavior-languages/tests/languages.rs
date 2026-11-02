@@ -127,8 +127,8 @@ fn capture(
     for field in schema.fields() {
         match resolve_component_property(
             schema,
-            record.version,
-            &record.value,
+            record.version(),
+            record.value(),
             &ComponentPropertyPath::new(field.id.clone()),
         ) {
             Ok(property) => {
@@ -142,7 +142,7 @@ fn capture(
     // Observe through the public bounded reference traversal; keep the rewritten value local.
     rewrite_declared_entity_references(
         schema,
-        &record.value,
+        record.value(),
         Default::default(),
         |_, reference| {
             let EntityReference::SceneLocal { entity } = reference else {
@@ -353,7 +353,7 @@ fn workflow(program: &dyn Language) {
         if count == 2 {
             let locate = |anchor: &str, local: &str| {
                 candidate
-                    .provenance()
+                    .canonical_provenance()
                     .iter()
                     .find(|(_, source)| {
                         source.local_entity_id() == &id(local)
@@ -390,19 +390,19 @@ fn workflow(program: &dyn Language) {
             runtime.world.get_mut::<Name>(entity).unwrap().0 = "Friend".into();
         }
         // Every present Behavior is dispatched by its admitted ID, not a native type/field switch.
-        for entity in &candidate.document().entities {
-            let target = runtime.target(&entity.id);
+        for entity in candidate.document().entities() {
+            let target = runtime.target(entity.id());
             for component in runtime.components(&target).unwrap() {
-                invoke(&mut runtime, &definition, program, &entity.id, &component);
+                invoke(&mut runtime, &definition, program, entity.id(), &component);
             }
         }
-        for entity in &candidate.document().entities {
-            let target = runtime.target(&entity.id);
-            if entity.components.contains_key(&mover()) {
+        for entity in candidate.document().entities() {
+            let target = runtime.target(entity.id());
+            if entity.components().contains_key(&mover()) {
                 assert_eq!(runtime.native_name(&target), "Moved 7");
             }
             if entity
-                .components
+                .components()
                 .contains_key(&ComponentTypeId::new("trial.behavior.Label"))
             {
                 assert_eq!(runtime.native_name(&target), "Edited label");
@@ -410,19 +410,19 @@ fn workflow(program: &dyn Language) {
         }
         let actors = candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .filter(|entity| entity.components.contains_key(&mover()))
-            .map(|entity| entity.id.clone())
+            .filter(|entity| entity.components().contains_key(&mover()))
+            .map(|entity| entity.id().clone())
             .collect::<Vec<_>>();
         assert_eq!(actors.len(), count);
-        let actor = &candidate
+        let actor = candidate
             .document()
-            .entities
+            .entities()
             .iter()
-            .find(|entity| entity.components.contains_key(&mover()))
+            .find(|entity| entity.components().contains_key(&mover()))
             .unwrap()
-            .id;
+            .id();
         let target = runtime.target(actor);
         let input = capture(&runtime, &definition, actor, &mover()).unwrap();
         let readmitted = Definition::from_catalog("trial.behaviors", catalog()).unwrap();

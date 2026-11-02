@@ -90,7 +90,7 @@ impl PreparedSchemaOwnerSceneCapture {
     pub(crate) fn diagnostics(&self) -> &DiagnosticReport {
         self.capture.diagnostics()
     }
-    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::PrefabExpansionFailure> {
+    pub(crate) fn composition_failure(&self) -> Option<&nara_scene::SceneCompilationFailure> {
         self.capture.composition_failure()
     }
 

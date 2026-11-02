@@ -1,89 +1,63 @@
-use std::{borrow::Cow, collections::BTreeMap, mem::size_of};
+use std::{collections::BTreeMap, mem::size_of};
 
 use nara_asset::{AssetProductRef, AssetRef, AssetReferenceResolver, ImportedProductId};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_reflect::{
     __private::{
-        AssetReferenceCollectionError, EffectiveValueAdmissionError, EntityReferencePlanError,
+        AssetReferenceCollectionError, EntityReferencePlanError,
         collect_declared_effective_asset_references_with_admission,
-        effective_component_value_with_admission, plan_declared_entity_references_with_admission,
+        plan_declared_entity_references_with_admission,
     },
-    ComponentCodecError, ComponentFieldPathSegment, ComponentValueMaterializationLimits,
-    DeclaredAssetReference, EntityReference, EntityReferenceTraversalLimits,
+    ComponentFieldPathSegment, ComponentValueMaterializationLimits, DeclaredAssetReference,
+    EntityReference, EntityReferenceTraversalLimits,
     rewrite_declared_asset_references_with_admission,
 };
 
 use super::{
-    RuntimeSceneCandidate, RuntimeSceneError, RuntimeSceneLimits,
-    budget::{ProvenanceBudget, WorkBudget, provenance_cost, scene_budget_error, value_cost},
-    identity, require_scene_source, validate_values, wire,
+    RuntimeSceneCandidate, RuntimeSceneError, RuntimeSceneLimits, admit_flat_claims,
+    budget::{ProvenanceBudget, WorkBudget, provenance_cost},
+    identity, require_scene_source, wire,
 };
 use crate::{
-    ExpandedSceneCandidate, SceneComponentBindings, SceneEntityId,
-    diagnostics::{error, with_codec_error},
-    schema_authority::SchemaAuthority,
+    CompiledSceneCandidate, SceneComponentBindings, SceneEntityId, SceneEntityProvenance,
+    compiled::claims::{FlatSceneClaims, FlatSceneComponentClaim, FlatSceneEntityClaim},
 };
 
 pub(super) fn cook(
-    expanded: &ExpandedSceneCandidate,
+    compiled: &CompiledSceneCandidate,
     bindings: &SceneComponentBindings,
     asset_resolution: AssetReferenceResolver<'_>,
     limits: RuntimeSceneLimits,
 ) -> Result<RuntimeSceneCandidate, RuntimeSceneError> {
-    require_scene_source(expanded.source_key())?;
+    require_scene_source(compiled.source_key())?;
     let mut work = WorkBudget::new(limits);
-    provenance_cost(expanded.source_key(), expanded.provenance(), limits)?;
-    work.document_clone(expanded.document())?;
-    let diagnostics = crate::validation::validate_scene_structure(expanded.document());
-    if diagnostics.has_errors() {
-        return Err(RuntimeSceneError { diagnostics });
-    }
-    let identifiers = identity::canonical_ids(
-        expanded.source_key(),
-        expanded.document(),
-        expanded.provenance(),
-        false,
-        &mut work,
-    )?;
-    // Everything below owns its unpublished copies. Failure never edits the source candidate.
-    let mut document = expanded.document().clone();
-    let mut used_nodes = 0usize;
-    let mut used_bytes = 0usize;
+    // This exact independent payload, including actual owner strings, is admitted before
+    // cloning. All subsequent edits belong exclusively to unpublished flat claims.
+    let mut claims = clone_claims(compiled, &mut work)?;
+    let identifiers =
+        identity::canonical_ids(compiled.source_key(), compiled.document(), false, &mut work)?;
     let traversal = crate::validation::reference_traversal_limits(limits.value_limits());
-    for root in &mut document.roots {
+    for root in &mut claims.roots {
         *root = copy_id(root, &identifiers, &mut work)?;
     }
-    for entity in &mut document.entities {
+    for entity in &mut claims.entities {
         entity.id = copy_id(&entity.id, &identifiers, &mut work)?;
         for child in &mut entity.children {
             *child = copy_id(child, &identifiers, &mut work)?;
         }
         for (component, record) in &mut entity.components {
-            let schema = SchemaAuthority::Mixed(bindings).current_schema(component, record)
-                .map_err(|_| RuntimeSceneError::refused(
+            let schema = bindings.schema(component).ok_or_else(|| {
+                RuntimeSceneError::refused(
                     "scene.runtime-component-definition",
-                    "Runtime cook requires a current Scene-capable component and its selected owner",
-                ))?;
-            let residual = residual_limits(limits, used_nodes, used_bytes)?;
-            let effective = effective_component_value_with_admission(
-                schema,
-                &record.value,
-                residual,
-                |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
-            )
-            .map_err(|failure| match failure {
-                EffectiveValueAdmissionError::Admission(error) => error,
-                EffectiveValueAdmissionError::Value(error) => component_error(&error, schema),
+                    "Runtime cook requires a selected component Schema",
+                )
             })?;
-            if let Cow::Owned(value) = effective {
-                record.value = value;
-            }
             let references = collect_declared_effective_asset_references_with_admission(
                 schema,
                 record.version,
                 &record.value,
                 traversal,
-                |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
+                |nodes, bytes, allocated| work.admit(nodes, bytes, Some(allocated)),
             )
             .map_err(|failure| match failure {
                 AssetReferenceCollectionError::Admission(error) => error,
@@ -99,7 +73,7 @@ pub(super) fn cook(
                 &references,
                 asset_rewrite_limits(limits.value_limits(), &references),
                 |reference| canonical_product(reference.asset_ref(), asset_resolution),
-                |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
+                |nodes, bytes, allocated| work.admit(nodes, bytes, Some(allocated)),
             )
             .map_err(|failure| match failure {
                 nara_reflect::AssetReferenceRewriteError::Admission(error) => error,
@@ -110,7 +84,7 @@ pub(super) fn cook(
                 schema,
                 &record.value,
                 traversal,
-                |nodes, bytes, allocated| work.admit(nodes, bytes, allocated),
+                |nodes, bytes, allocated| work.admit(nodes, bytes, Some(allocated)),
             )
             .map_err(|failure| match failure {
                 EntityReferencePlanError::Admission(error) => error,
@@ -134,38 +108,25 @@ pub(super) fn cook(
                 nara_reflect::ComponentEntityReferenceRewriteError::Rewrite { error, .. } => error,
                 _ => reference_error(),
             })?;
-            let cost = value_cost(&record.value, used_nodes, used_bytes, &mut work)?;
-            used_nodes = used_nodes.saturating_add(cost.nodes());
-            used_bytes = used_bytes.saturating_add(cost.logical_bytes());
         }
     }
-    document
-        .entities
-        .sort_unstable_by(|left, right| left.id.cmp(&right.id));
-    crate::format::validate_scene_value_budget(&document, limits.base())
-        .map_err(scene_budget_error)?;
-    let mut provenance_budget = ProvenanceBudget::new(expanded.source_key(), limits)?;
-    for (old, origin) in expanded.provenance() {
+    let mut provenance_budget = ProvenanceBudget::new(compiled.source_key(), limits)?;
+    for (old, origin) in &claims.canonical_provenance {
         provenance_budget.entry(identifiers.get(old).ok_or_else(reference_error)?, origin)?;
     }
-    work.reserve(Some(provenance_budget.bytes()))?;
-    let provenance = expanded
-        .provenance()
-        .iter()
-        .map(|(old, origin)| {
-            // The complete identifiers map was checked against every provenance entry above.
-            identifiers
-                .get(old)
-                .map(|id| (id.clone(), origin.clone()))
-                .ok_or_else(reference_error)
-        })
-        .collect::<Result<_, _>>()?;
-    validate_values(&document, bindings, &mut work)?;
+    work.reserve(claims.canonical_provenance.len().checked_mul(
+        size_of::<(SceneEntityId, SceneEntityProvenance)>() + 6 * size_of::<usize>(),
+    ))?;
+    let mut provenance = BTreeMap::new();
+    for (old, origin) in std::mem::take(&mut claims.canonical_provenance) {
+        provenance.insert(copy_id(&old, &identifiers, &mut work)?, origin);
+    }
+    claims.canonical_provenance = provenance;
+    work.claims(&claims)?;
+    let document = admit_flat_claims(claims, bindings, &mut work)?;
     work.witness(bindings)?;
     let candidate = RuntimeSceneCandidate {
-        source_key: expanded.source_key().clone(),
-        document,
-        provenance,
+        compiled: document.bind_source(compiled.source_key().clone()),
         definitions: bindings.witness(),
         limits,
     };
@@ -173,6 +134,48 @@ pub(super) fn cook(
     // borrowed encoding and core shape preflight, not a source publication or second admission.
     wire::encode(&candidate, &mut work)?;
     Ok(candidate)
+}
+
+/// Copies only the independent flat storage. Neither source records nor effective defaults
+/// participate; the caller reserves the containing key here for its eventual candidate binding.
+pub(super) fn clone_claims(
+    compiled: &CompiledSceneCandidate,
+    work: &mut WorkBudget,
+) -> Result<FlatSceneClaims, RuntimeSceneError> {
+    let document = compiled.document();
+    work.document_clone(document)?;
+    let provenance = provenance_cost(
+        compiled.source_key(),
+        compiled.canonical_provenance(),
+        work.limits(),
+    )?;
+    work.reserve(Some(provenance))?;
+    Ok(FlatSceneClaims {
+        roots: document.roots().to_vec(),
+        entities: document
+            .entities()
+            .iter()
+            .map(|entity| FlatSceneEntityClaim {
+                id: entity.id().clone(),
+                children: entity.children().to_vec(),
+                components: entity
+                    .components()
+                    .iter()
+                    .map(|(component, record)| {
+                        (
+                            component.clone(),
+                            FlatSceneComponentClaim {
+                                schema_owner: record.schema_owner().cloned(),
+                                version: record.version(),
+                                value: record.value().clone(),
+                            },
+                        )
+                    })
+                    .collect(),
+            })
+            .collect(),
+        canonical_provenance: compiled.canonical_provenance().clone(),
+    })
 }
 
 fn asset_rewrite_limits(
@@ -215,31 +218,6 @@ fn asset_rewrite_limits(
         .expect("nonzero value limits produce nonzero rewrite byte limits"),
         values.depth(),
     )
-}
-
-fn residual_limits(
-    limits: RuntimeSceneLimits,
-    used_nodes: usize,
-    used_bytes: usize,
-) -> Result<ComponentValueMaterializationLimits, RuntimeSceneError> {
-    let maximum = limits.value_limits();
-    let nodes =
-        ItemLimit::new(maximum.nodes().get().saturating_sub(used_nodes)).ok_or_else(|| {
-            RuntimeSceneError::budget(
-                "component-value-nodes",
-                used_nodes.saturating_add(1),
-                maximum.nodes().get(),
-            )
-        })?;
-    // A zero byte residual may still admit Null or empty containers. Reflect's borrowed default
-    // planner accepts a nonzero typed ceiling; final cost admission enforces the exact residual.
-    let bytes =
-        ByteLimit::new(maximum.bytes().get().saturating_sub(used_bytes)).unwrap_or(ByteLimit::ONE);
-    Ok(ComponentValueMaterializationLimits::new(
-        nodes,
-        bytes,
-        maximum.depth(),
-    ))
 }
 
 fn copy_id(
@@ -290,20 +268,4 @@ fn reference_error() -> RuntimeSceneError {
         "scene.runtime-reference",
         "Runtime Scene requires valid declared reference leaves and surviving local targets",
     )
-}
-
-fn component_error(
-    error_value: &ComponentCodecError,
-    schema: &nara_reflect::ComponentSchema,
-) -> RuntimeSceneError {
-    let mut diagnostics = nara_diagnostic::DiagnosticReport::default();
-    diagnostics.push(with_codec_error(
-        error(
-            "scene.runtime-component-value",
-            "Runtime component default materialization failed",
-        ),
-        error_value,
-        Some(schema),
-    ));
-    RuntimeSceneError { diagnostics }
 }

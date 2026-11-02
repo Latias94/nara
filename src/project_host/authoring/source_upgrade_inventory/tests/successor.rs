@@ -108,7 +108,7 @@ impl SuccessorFixture {
         project.write(BUNDLE, &old);
         // The same real writable capability session is retained from ordinary admission through
         // Pending and final-set proof. No temporary Ready receipt or native registry is used.
-        let root = crate::project_tooling::host_fs::writable_directory(&project.root).unwrap();
+        let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
         let incumbent = Arc::new(
             AuthoringProjectAdmissionHost::default()
                 .prepare(root, None)

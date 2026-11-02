@@ -38,7 +38,7 @@ use nara_identity::SpawnedSceneInstance;
 #[cfg(feature = "serde")]
 use nara_scene::RuntimeSceneCandidate;
 use nara_scene::{
-    ExpandedSceneCandidate, SceneComponentBindings, SceneDocument, SceneOccurrenceKey,
+    CompiledSceneCandidate, CompiledSceneDocument, SceneComponentBindings, SceneOccurrenceKey,
     scene_component_bindings, validate_scene_component_bindings_authority,
 };
 
@@ -111,7 +111,7 @@ enum RuntimeContentCustody {
 }
 
 enum RetainedSceneCandidate {
-    Expanded(Arc<ExpandedSceneCandidate>),
+    Compiled(Arc<CompiledSceneCandidate>),
     #[cfg(feature = "serde")]
     Runtime(Arc<RuntimeSceneCandidate>),
 }
@@ -119,7 +119,7 @@ enum RetainedSceneCandidate {
 /// Move-only retained source accepted by startup materialization or current-Scene replacement.
 ///
 /// File-backed callers receive this value from Project Content. Direct managed-App callers use
-/// [`SceneSource::direct`] for expanded sources or `SceneSource::runtime` for processed Scenes,
+/// [`SceneSource::direct`] for compiled sources or `SceneSource::runtime` for processed Scenes,
 /// and must declare a deterministic logical retained-byte limit. The processed entry requires
 /// the `serde` feature.
 /// That direct limit is neither allocator-capacity nor RSS accounting and does not claim a Project
@@ -148,7 +148,7 @@ impl SceneSource {
     /// This path enforces its explicit limit but does not claim or imply a
     /// `ProjectContentBudgetHost` reservation.
     pub fn direct(
-        candidate: ExpandedSceneCandidate,
+        candidate: CompiledSceneCandidate,
         retained_byte_limit: ByteLimit,
     ) -> Result<Self, SceneSourceError> {
         let retained_bytes = direct_startup_scene_retained_bytes(&candidate)
@@ -161,7 +161,7 @@ impl SceneSource {
             });
         }
         Ok(Self {
-            candidate: RetainedSceneCandidate::Expanded(Arc::new(candidate)),
+            candidate: RetainedSceneCandidate::Compiled(Arc::new(candidate)),
             retention: SceneRetention::Direct {
                 retained_bytes,
                 _limit: limit,
@@ -200,7 +200,7 @@ impl SceneSource {
 
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn from_project_content(
-        candidate: Arc<ExpandedSceneCandidate>,
+        candidate: Arc<CompiledSceneCandidate>,
         sources: Arc<ProjectSourceContent>,
         lease: ProjectContentLease,
         generation: ProjectContentGenerationLease,
@@ -208,7 +208,7 @@ impl SceneSource {
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     ) -> Self {
         Self {
-            candidate: RetainedSceneCandidate::Expanded(candidate),
+            candidate: RetainedSceneCandidate::Compiled(candidate),
             retention: SceneRetention::Project {
                 _lease: lease,
                 _generation: generation,
@@ -247,17 +247,17 @@ impl SceneSource {
     }
 
     #[must_use]
-    pub(crate) fn document(&self) -> &SceneDocument {
+    pub(crate) fn document(&self) -> &CompiledSceneDocument {
         match &self.candidate {
-            RetainedSceneCandidate::Expanded(candidate) => candidate.document(),
+            RetainedSceneCandidate::Compiled(candidate) => candidate.document(),
             #[cfg(feature = "serde")]
             RetainedSceneCandidate::Runtime(candidate) => candidate.document(),
         }
     }
 
-    fn expanded_scene(&self) -> Option<&ExpandedSceneCandidate> {
+    fn compiled_scene(&self) -> Option<&CompiledSceneCandidate> {
         match &self.candidate {
-            RetainedSceneCandidate::Expanded(candidate) => Some(candidate),
+            RetainedSceneCandidate::Compiled(candidate) => Some(candidate),
             #[cfg(feature = "serde")]
             RetainedSceneCandidate::Runtime(_) => None,
         }
@@ -348,7 +348,7 @@ impl fmt::Debug for SceneSource {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SceneSource")
-            .field("entity_count", &self.document().entities.len())
+            .field("entity_count", &self.document().entities().len())
             .field("retained_bytes", &self.retained_bytes())
             .field(
                 "retention",
@@ -369,31 +369,31 @@ impl SceneSourceView {
     ///
     /// Returns `None` after that authority has retired. The temporary strong reference is kept
     /// inside this method so the view cannot accidentally extend the retained allocation.
-    pub fn with_document<R>(&self, inspect: impl FnOnce(&SceneDocument) -> R) -> Option<R> {
+    pub fn with_document<R>(&self, inspect: impl FnOnce(&CompiledSceneDocument) -> R) -> Option<R> {
         self.source
             .upgrade()
             .map(|source| inspect(source.document()))
     }
 
-    /// Borrows the exact expanded candidate and scoped source resolution together.
+    /// Borrows the exact compiled candidate and scoped source resolution together.
     ///
-    /// Both values come from the same retained source owner. Direct expanded sources have no
+    /// Both values come from the same retained source owner. Direct compiled sources have no
     /// project database. Returns `None` for a processed Runtime Scene or after the root activation
     /// owner retires, even if another caller still retains the underlying document.
-    pub fn with_expanded_scene<R>(
+    pub fn with_compiled_scene<R>(
         &self,
         inspect: impl FnOnce(
-            &ExpandedSceneCandidate,
+            &CompiledSceneCandidate,
             Option<nara_asset::AssetReferenceResolver<'_>>,
         ) -> R,
     ) -> Option<R> {
         let source = self.source.upgrade()?;
-        Some(inspect(source.expanded_scene()?, source.asset_resolution()))
+        Some(inspect(source.compiled_scene()?, source.asset_resolution()))
     }
 
     /// Borrows the exact admitted processed candidate while the current owner retains it.
     ///
-    /// Returns `None` for an expanded source or after owner retirement. The bounded borrow does
+    /// Returns `None` for a source compilation or after owner retirement. The bounded borrow does
     /// not retain the candidate, its definitions or the Runtime content base beyond this call.
     #[cfg(feature = "serde")]
     pub fn with_runtime_scene<R>(
@@ -402,7 +402,7 @@ impl SceneSourceView {
     ) -> Option<R> {
         let source = self.source.upgrade()?;
         match &source.candidate {
-            RetainedSceneCandidate::Expanded(_) => None,
+            RetainedSceneCandidate::Compiled(_) => None,
             RetainedSceneCandidate::Runtime(candidate) => Some(inspect(candidate)),
         }
     }
@@ -479,7 +479,7 @@ impl CurrentScene<'_> {
 
     /// Returns the exact immutable source admitted for the active runtime.
     #[must_use]
-    pub fn source(&self) -> &SceneDocument {
+    pub fn source(&self) -> &CompiledSceneDocument {
         self.owner.source()
     }
 
@@ -502,7 +502,7 @@ impl CurrentScene<'_> {
 impl CurrentSceneView<'_> {
     /// Returns the exact immutable source admitted for the active runtime.
     #[must_use]
-    pub fn source(&self) -> &SceneDocument {
+    pub fn source(&self) -> &CompiledSceneDocument {
         self.owner.source()
     }
 
@@ -553,7 +553,7 @@ impl CurrentSceneOwner {
         self.receipt = receipt;
     }
 
-    pub(crate) fn source(&self) -> &SceneDocument {
+    pub(crate) fn source(&self) -> &CompiledSceneDocument {
         self.source.document()
     }
 
@@ -774,7 +774,7 @@ pub fn materialize_startup_scene(
     let occurrence = SceneOccurrenceKey::new("nara.product", "current-scene")
         .expect("the product declares a valid startup occurrence");
     let prepared = match &source.candidate {
-        RetainedSceneCandidate::Expanded(candidate) => {
+        RetainedSceneCandidate::Compiled(candidate) => {
             bindings.prepare_scene(world, candidate, &occurrence, source.asset_resolution())
         }
         #[cfg(feature = "serde")]
@@ -893,24 +893,40 @@ impl Error for StartupSceneMaterializeError {}
 mod replacement_tests;
 
 #[cfg(test)]
+pub(crate) fn compile_test_scene(
+    document: &nara_scene::SceneDocument,
+    bindings: &SceneComponentBindings,
+    source: nara_scene::SourceDocumentKey,
+) -> CompiledSceneCandidate {
+    let report = bindings.compile_scene(document, &nara_scene::InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    report
+        .candidate
+        .expect("the fixture compiles")
+        .bind_source(source)
+}
+
+#[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
 
     use nara_ecs::bevy_ecs::system::SystemState;
     use nara_reflect::ComponentRegistryBuilder;
-    use nara_scene::spawn_scene;
+    use nara_scene::{SceneDocument, spawn_scene};
 
     use super::*;
 
-    fn scene_candidate(document: Arc<SceneDocument>) -> ExpandedSceneCandidate {
-        ExpandedSceneCandidate::plain(
+    fn scene_candidate(document: Arc<SceneDocument>) -> CompiledSceneCandidate {
+        let registry = ComponentRegistryBuilder::new().freeze().unwrap();
+        compile_test_scene(
+            &document,
+            &SceneComponentBindings::new(registry, []).unwrap(),
             nara_scene::SourceDocumentKey::named(
                 "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
                 "startup-scene-fixture",
                 nara_scene::SourceDocumentKind::Scene,
             )
             .unwrap(),
-            document,
         )
     }
 
@@ -932,11 +948,15 @@ mod tests {
             )
             .unwrap(),
         );
+        let RetainedSceneCandidate::Compiled(compiled) = &source.candidate else {
+            panic!("the fixture retains a source compilation");
+        };
+        let compiled_weak = Arc::downgrade(compiled);
         let registry = ComponentRegistryBuilder::new().freeze().unwrap();
         let report = spawn_scene(
             &mut world,
             &registry,
-            source.expanded_scene().unwrap(),
+            source.compiled_scene().unwrap(),
             &SceneOccurrenceKey::new("startup-fixture", "current").unwrap(),
             None,
         );
@@ -949,15 +969,18 @@ mod tests {
         let (source_view, scheduled_view) = {
             let current = CurrentScene::get(&world).unwrap();
             let scheduled = access.get(&world).unwrap();
-            assert!(std::ptr::eq(current.source(), document.as_ref()));
+            assert!(std::ptr::eq(
+                current.source(),
+                current.owner.source.compiled_scene().unwrap().document()
+            ));
             assert!(std::ptr::eq(current.source(), scheduled.source()));
             assert!(std::ptr::eq(current.receipt(), scheduled.receipt()));
             let source_view = current.source_view();
             let scheduled_view = scheduled.source_view();
             assert!(Weak::ptr_eq(&source_view.source, &scheduled_view.source));
             assert_eq!(
-                source_view.with_document(|source| source as *const SceneDocument),
-                Some(current.source() as *const SceneDocument)
+                source_view.with_document(|source| source as *const CompiledSceneDocument),
+                Some(current.source() as *const CompiledSceneDocument)
             );
             assert_eq!(Arc::strong_count(&current.owner.source), 1);
             (source_view, scheduled_view)
@@ -966,6 +989,7 @@ mod tests {
         drop(world);
         assert_eq!(source_view.with_document(|_| ()), None);
         assert_eq!(scheduled_view.with_document(|_| ()), None);
+        assert!(compiled_weak.upgrade().is_none());
         assert_eq!(Arc::strong_count(&document), 1);
     }
 
@@ -982,7 +1006,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(std::ptr::eq(source.document(), document.as_ref()));
+        assert!(std::ptr::eq(
+            source.document(),
+            source.compiled_scene().unwrap().document()
+        ));
         assert_eq!(source.retained_bytes(), required);
         assert_eq!(source.direct_limit(), Some(required));
         assert_eq!(
@@ -1013,24 +1040,32 @@ mod tests {
             retained_bytes: source.retained_bytes(),
         };
         let clone = view.clone();
+        let RetainedSceneCandidate::Compiled(compiled) = &source.candidate else {
+            panic!("the fixture retains a source compilation");
+        };
+        let compiled_weak = Arc::downgrade(compiled);
 
         assert_eq!(Arc::strong_count(&source), 1);
-        assert_eq!(view.with_document(|source| source.entities.len()), Some(0));
+        assert_eq!(
+            view.with_document(|source| source.entities().len()),
+            Some(0)
+        );
         assert_eq!(clone.retained_bytes(), source.retained_bytes());
         assert_eq!(
-            view.with_expanded_scene(|candidate, database| {
-                assert!(candidate.provenance().is_empty());
+            view.with_compiled_scene(|candidate, database| {
+                assert!(candidate.canonical_provenance().is_empty());
                 assert!(database.is_none());
-                candidate.document().entities.len()
+                candidate.document().entities().len()
             }),
             Some(0)
         );
 
         drop(source);
+        assert!(compiled_weak.upgrade().is_none());
         assert_eq!(Arc::strong_count(&document), 1);
-        assert_eq!(view.with_document(|source| source.entities.len()), None);
-        assert_eq!(clone.with_document(|source| source.entities.len()), None);
-        assert_eq!(view.with_expanded_scene(|_, _| ()), None);
+        assert_eq!(view.with_document(|source| source.entities().len()), None);
+        assert_eq!(clone.with_document(|source| source.entities().len()), None);
+        assert_eq!(view.with_compiled_scene(|_, _| ()), None);
     }
 
     #[test]

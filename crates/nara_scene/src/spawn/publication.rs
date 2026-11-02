@@ -559,7 +559,7 @@ mod tests {
     fn native_value_candidate(
         id: SceneEntityId,
         probe: &Arc<NativePreparationProbe>,
-    ) -> (ComponentRegistrySnapshot, ExpandedSceneCandidate) {
+    ) -> (ComponentRegistrySnapshot, CompiledSceneCandidate) {
         let component_id = ComponentTypeId::new("test.PreparedNativeValue");
         let schema = ComponentSchema::new(
             component_id.clone(),
@@ -622,16 +622,23 @@ mod tests {
                     ComponentValue::map([("asset", encode_persistent_field(&asset).unwrap())]),
                 ),
             )]);
-        (
-            registry,
-            ExpandedSceneCandidate::plain(source_key(), Arc::new(document)),
-        )
+        let candidate = compile_scene(&document, &registry);
+        (registry, candidate)
+    }
+
+    fn compile_scene(
+        document: &SceneDocument,
+        registry: &ComponentRegistrySnapshot,
+    ) -> CompiledSceneCandidate {
+        let report = document.compile(registry, &crate::InMemoryPrefabSourceResolver::new());
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        report.candidate.unwrap().bind_source(source_key())
     }
 
     fn fixture() -> (
         World,
         ComponentRegistrySnapshot,
-        ExpandedSceneCandidate,
+        CompiledSceneCandidate,
         SpawnedSceneInstance,
         Entity,
         SceneEntityId,
@@ -644,7 +651,7 @@ mod tests {
             .unwrap();
         let id = SceneEntityId::new("root").unwrap();
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())]);
-        let candidate = ExpandedSceneCandidate::plain(source_key(), Arc::new(document));
+        let candidate = compile_scene(&document, &registry);
         let report = spawn_scene(&mut world, &registry, &candidate, &occurrence(), None);
         let receipt = report.instance.unwrap();
         let EntityLookup::Resolved(entity) = receipt.resolve(&world, &id) else {
@@ -661,7 +668,7 @@ mod tests {
     fn prepare_fixture_replacement(
         world: &mut World,
         registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
+        candidate: &CompiledSceneCandidate,
         current: &SpawnedSceneInstance,
     ) -> PreparedSceneReplacement {
         let claims = SceneNativeRetirementClaims::from_component_ids([world
@@ -895,12 +902,12 @@ mod tests {
     fn discard_cleans_remaining_candidates_after_one_is_missing() {
         let (mut world, registry, _, current, old, id) = fixture();
         let other = SceneEntityId::new("other").unwrap();
-        let candidate = ExpandedSceneCandidate::plain(
-            source_key(),
-            Arc::new(SceneDocument::from_ordered_roots([
+        let candidate = compile_scene(
+            &SceneDocument::from_ordered_roots([
                 SceneEntityRecord::new(id.clone()),
                 SceneEntityRecord::new(other.clone()),
-            ])),
+            ]),
+            &registry,
         );
         let prepared = prepare_fixture_replacement(&mut world, &registry, &candidate, &current);
         let missing = prepared.0.spawned_by_id[&id];

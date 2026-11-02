@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::project_host::authoring::document::AuthoringDocumentSourceFact;
-use nara_scene::{PrefabExpansionWorkingSet, SourceDocumentKind};
+use nara_scene::{SceneCompilationWorkingSet, SourceDocumentKind};
 
 /// Owned finite background inputs; constructing this request does not read dependencies.
 /// The source owner retains its actual nominal root document and request separately.
@@ -221,7 +221,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
         let compiler_limit = remaining_compiler_work(
             budget,
             0,
-            nara_scene::PrefabExpansionLimits::default().working_bytes(),
+            nara_scene::SceneCompilationLimits::default().working_bytes(),
         )?;
         let mut compiler_reservation = 0;
         resize_compiler_work(budget, &mut compiler_reservation, compiler_limit.get())?;
@@ -259,7 +259,7 @@ impl<'a> AuthoringPrefabAcquisition<'a> {
     pub(crate) fn load(
         &mut self,
         reference: &AssetRef,
-        working_set: &mut PrefabExpansionWorkingSet,
+        working_set: &mut SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, AuthoringProjectSourceAdmissionError> {
         let suspended = working_set
             .checked_work_bytes()

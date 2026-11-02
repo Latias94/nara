@@ -314,7 +314,7 @@ fn processed_scene(
             "source_key":{"kind":"scene","origin":{"kind":"stable_asset","stable_id":"@SCENE@"}},
             "roots":["portrait"],
             "entities":[{"id":"portrait","children":[],"components":{
-                "consumer.runtime-image.Portrait":{"version":1,"value":{
+                "consumer.runtime-image.Portrait":{"owner":"@OWNER@","version":1,"value":{
                     "type":"map","value":{
                         "kind":{"type":"string","value":"product"},
                         "value":{"type":"map","value":{
@@ -328,6 +328,14 @@ fn processed_scene(
         }
     }"#
     .replace("@SCENE@", source)
+    .replace(
+        "@OWNER@",
+        bindings
+            .native_snapshot()
+            .component_schema_owner(&ComponentTypeId::new(PORTRAIT))
+            .unwrap()
+            .as_str(),
+    )
     .replace("@SOURCE@", &reference.source().to_string())
     .replace("@SELECTION@", &selection);
     RuntimeSceneDocumentCandidate::from_json_bytes(

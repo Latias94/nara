@@ -117,6 +117,15 @@ arbitrary runtime-only ECS components do not become persistent. Export of flatte
 is distinct from source Save. Data asset policy lowering uses admitted project metadata without
 native handles or asset loading.
 
+A successful live export produces a new source snapshot that ordinary admission can reopen under
+the same definitions. Where the Schema default requires a source context, the export establishes
+that new context from the selected effective field after entity/asset reference lowering. It does
+not recover the original source's hidden defaults or inheritance. Both the explicit values and
+these new contextual snapshots consume the aggregate export value allowance before copying. If
+the selected field cannot establish a valid new context, refuse the complete export. Source
+conversion retains its distinct obligation to preserve the original lexical defaults under
+ADR0038; a live World is not authority to reconstruct them.
+
 Guarded member enumeration, read, complete-value replacement and removal preserve sibling
 members and validate exact owner, current payload, references and runtime target before a write.
 Pure data retires through ordinary strict entity retirement with no carrier hook exemption.
@@ -126,10 +135,10 @@ under ADR 0120. Implementation status and actual verification belong in the impl
 
 ### Derived Runtime Scene Representation
 
-Scene owns a distinct processed representation for source-free delivery. Cook consumes a complete
-source-bound effective expansion under the selected native/data definitions. It preserves actual
-containing-source identity and every entity's typed source/addition provenance, while removing
-executable dependence on Prefab declarations, overlays, source migrations and authoring metadata.
+Scene owns a distinct processed representation for source-free delivery. Cook consumes a
+source-bound `CompiledSceneCandidate` under the selected native/data definitions. It preserves
+actual containing-source identity and every entity's typed source/addition provenance without
+executable dependence on Prefab declarations, overlays, source migrations or authoring metadata.
 The processed record has its own `runtime_scene` envelope and flat hierarchy/component payload;
 it does not accept dormant source fields or disguise an expansion as a plain local document.
 
@@ -156,10 +165,11 @@ source-backed Scenes through a private closed input selection. It does not creat
 transaction or public generic provider interface. Runtime prepare and commit retain the existing
 receiving-World/definition/native-claim checks and last-good replacement behavior.
 
-The root retained current-Scene owner accepts source expansion and processed Runtime candidates
-through one private closed input selection. Startup activation, replacement, restart, native
-claims and publication keep the same lifecycle. A Runtime input retains its actual processed
-candidate and exact definitions; it does not synthesize an expanded source or project database.
+The root retained current-Scene owner accepts source-bound `CompiledSceneCandidate` values and
+processed Runtime candidates through one private closed input selection. Startup activation,
+replacement, restart, native claims and publication keep the same lifecycle. A Runtime input retains
+its actual processed candidate and exact definitions; it does not synthesize an expanded source or
+project database.
 Bounded source views expose the representation they actually retain. A Runtime-content Scene
 also retains the original immutable base and its decoded-output reservation until the last
 owning current/candidate reference retires. A non-owning view cannot prolong that custody.
@@ -210,6 +220,12 @@ explicit compiled values; it does not perform source migrations or synthesize mi
 after declaration scope has been erased. An incompatible receiving definition requires source
 recompilation. The entire received batch is checked before codecs. New owner storage and
 representation containers require admission before allocation.
+
+The complete operation is `compile`, including sources without Prefabs. Its `SceneCompilation*`
+reports and limits cover defaults, hierarchy, selected declarations and reference closure. Native
+and processed reception consume only the source-bound `CompiledSceneCandidate`; there is no
+unchecked constructor from a source document. `ExpandedSceneDocument` remains an authoring
+observation. Its paired report owns basis restriction and admission of a separate Native preview.
 
 Canonical provenance gives each final entity one Runtime address. It is not complete declaration
 attribution: root-bound source contributors may map many-to-one while their instance slots,
@@ -266,7 +282,10 @@ Compiled Scene
   entities: flat records with resolved component values and ordered local child IDs
   roots: ordered local IDs
   provenance: one canonical occurrence per effective entity
-  root correspondence: retained source declaration facets, not extra Runtime identities
+
+Authoring compilation correspondence
+  source declaration facets and instance slots mapped to compiled entities
+  retained by the source owner, not stored as extra Runtime identities
 ```
 
 The exact syntax follows the owning implementation. The implementation ledger distinguishes the

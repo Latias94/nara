@@ -181,15 +181,47 @@ fn record() -> SceneComponentRecord {
     )
 }
 
-fn compile(basis: &AuthoringSchemaBasis, scene: &SceneDocument) -> AuthoringPrefabExpansionReport {
-    try_expand_authoring_prefabs_with_loader(
+fn compile(basis: &AuthoringSchemaBasis, scene: &SceneDocument) -> AuthoringSceneCompilationReport {
+    compile_with_limits(basis, scene, SceneCompilationLimits::default())
+}
+
+fn compile_with_limits(
+    basis: &AuthoringSchemaBasis,
+    scene: &SceneDocument,
+    limits: SceneCompilationLimits,
+) -> AuthoringSceneCompilationReport {
+    try_compile_authoring_scene_with_loader(
         scene,
         basis,
-        PrefabExpansionOptions::default(),
+        SceneCompilationOptions::default().with_limits(limits),
         None,
         |_, _| Ok::<_, Infallible>(None),
     )
     .unwrap()
+}
+
+fn assert_flat_values(
+    preview: &CompiledSceneDocument,
+    source: &SceneDocument,
+    basis: &AuthoringSchemaBasis,
+) {
+    assert_eq!(preview.roots(), source.roots.as_slice());
+    assert_eq!(preview.entities().len(), source.entities.len());
+    assert_eq!(preview.canonical_provenance().len(), source.entities.len());
+    for (compiled, source) in preview.entities().iter().zip(&source.entities) {
+        assert_eq!(compiled.id(), &source.id);
+        assert_eq!(compiled.children(), source.children.as_slice());
+        assert_eq!(compiled.components().len(), source.components.len());
+        for (component, record) in &source.components {
+            let compiled = &compiled.components()[component];
+            assert_eq!(compiled.version(), record.version);
+            assert_eq!(compiled.value(), &record.value);
+            assert_eq!(
+                compiled.schema_owner(),
+                basis.component_schema_owner(component)
+            );
+        }
+    }
 }
 
 #[test]
@@ -217,7 +249,7 @@ fn installed_registry_keeps_ownerless_builtin_native_record() {
         ..
     } = report.into_native_preview_for(&installed).unwrap();
     assert!(omissions.is_empty());
-    assert_eq!(preview.document(), &scene);
+    assert_flat_values(&preview, &scene, &basis);
 }
 
 #[test]
@@ -239,10 +271,10 @@ fn restriction_preserves_data_and_unavailable_omissions_without_duplicates() {
         omissions: original,
         ..
     } = compile(&basis, &scene).into_native_preview().unwrap();
-    assert_eq!(ordinary.document().entities[0].components.len(), 1);
+    assert_eq!(ordinary.entities()[0].components().len(), 1);
     assert!(
-        ordinary.document().entities[0]
-            .components
+        ordinary.entities()[0]
+            .components()
             .contains_key(&native_id())
     );
     assert_eq!(original.len(), 2);
@@ -266,7 +298,7 @@ fn restriction_preserves_data_and_unavailable_omissions_without_duplicates() {
         omissions,
         ..
     } = report.into_native_preview_for(&installed).unwrap();
-    assert!(preview.document().entities[0].components.is_empty());
+    assert!(preview.entities()[0].components().is_empty());
     assert_eq!(&omissions[..original.len()], original.as_slice());
     assert_eq!(omissions.len(), 3);
     assert_eq!(
@@ -300,7 +332,7 @@ fn restriction_preserves_data_and_unavailable_omissions_without_duplicates() {
     } = compile(&data_basis, &data_scene)
         .into_native_preview_for(&registry(Some(data_schema_provider)))
         .unwrap();
-    assert!(preview.document().entities[0].components.is_empty());
+    assert!(preview.entities()[0].components().is_empty());
     assert_eq!(omissions.len(), 1);
 }
 
@@ -318,7 +350,7 @@ fn native_preview_requires_matching_owner_schema_and_executable_receipt() {
     } = compile(&basis, &scene)
         .into_native_preview_for(&registry(Some(source)))
         .unwrap();
-    assert_eq!(preview.document(), &scene);
+    assert_flat_values(&preview, &scene, &basis);
     assert!(omissions.is_empty());
 
     let mut raw = ComponentRegistryBuilder::from_owner_catalog_candidate(
@@ -349,10 +381,7 @@ fn native_preview_requires_matching_owner_schema_and_executable_receipt() {
             omissions,
             ..
         } = report.into_native_preview_for(&installed).unwrap();
-        assert!(
-            preview.document().entities[0].components.is_empty(),
-            "{case}"
-        );
+        assert!(preview.entities()[0].components().is_empty(), "{case}");
         assert_eq!(omissions.len(), 1, "{case}");
         assert_eq!(
             omissions[0].reason(),
@@ -362,10 +391,69 @@ fn native_preview_requires_matching_owner_schema_and_executable_receipt() {
     }
 }
 
+#[test]
+fn native_preview_sealing_keeps_the_original_reference_work_allowance() {
+    let basis = basis(provider(NATIVE_OWNER, 1, false), false);
+    let scene = SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(id("root")).with_component(native_id(), record())
+    ]);
+    let mut report = compile(&basis, &scene);
+    let initial = report.reference_work;
+    let preview = report.finish_native_preview(None).unwrap();
+    assert_flat_values(&preview.candidate, &scene, &basis);
+    let complete = report.reference_work;
+    assert!(complete.0 > initial.0 && complete.1 > initial.1);
+
+    for (nodes, bytes, failure) in [
+        (complete.0, complete.1, None),
+        (complete.0 - 1, complete.1, Some("reference-work-nodes")),
+        (complete.0, complete.1 - 1, Some("reference-work-bytes")),
+    ] {
+        let limits = SceneCompilationLimits::default()
+            .with_reference_work_nodes(ItemLimit::new(nodes).unwrap())
+            .with_reference_work_bytes(ByteLimit::new(bytes).unwrap());
+        let report = compile_with_limits(&basis, &scene, limits);
+        assert!(report.candidate().is_some(), "{:?}", report.diagnostics());
+        assert_eq!(report.reference_work, initial);
+        match (report.into_native_preview(), failure) {
+            (Ok(preview), None) => assert_flat_values(&preview.candidate, &scene, &basis),
+            (Err(diagnostics), Some(kind)) => {
+                let diagnostic = diagnostics
+                    .iter()
+                    .find(|diagnostic| {
+                        diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+                    })
+                    .unwrap();
+                assert_eq!(
+                    field(diagnostic, "budget-kind"),
+                    DiagnosticValueRef::Identifier(kind),
+                );
+                assert_eq!(
+                    field(diagnostic, "observed"),
+                    DiagnosticValueRef::Unsigned(if kind == "reference-work-nodes" {
+                        complete.0 as u64
+                    } else {
+                        complete.1 as u64
+                    }),
+                );
+                assert_eq!(
+                    field(diagnostic, "maximum"),
+                    DiagnosticValueRef::Unsigned(if kind == "reference-work-nodes" {
+                        nodes as u64
+                    } else {
+                        bytes as u64
+                    }),
+                );
+            }
+            (result, failure) => panic!("unexpected preview admission: {result:?}, {failure:?}"),
+        }
+    }
+}
+
 fn projected_report(
     basis: &AuthoringSchemaBasis,
     working_limit: ByteLimit,
-) -> AuthoringPrefabExpansionReport {
+) -> AuthoringSceneCompilationReport {
     let source = AssetRef::path("prefabs/native-preview.ron").unwrap();
     let key = SourceDocumentKey::named(
         "dc807516-225d-4e25-9cbd-de8e54805c73".parse().unwrap(),
@@ -382,10 +470,10 @@ fn projected_report(
         arguments: None,
         overrides: None,
     });
-    try_expand_authoring_prefabs_with_loader(
+    try_compile_authoring_scene_with_loader(
         &SceneDocument::from_ordered_roots([anchor]),
         basis,
-        PrefabExpansionOptions::default(),
+        SceneCompilationOptions::default(),
         None,
         |request, working| {
             assert_eq!(request, &source);
@@ -410,22 +498,27 @@ fn field<'a>(diagnostic: &'a Diagnostic, key: &str) -> DiagnosticValueRef<'a> {
 }
 
 #[test]
-fn native_preview_restriction_admits_complete_projected_omission_cost_before_allocation() {
+fn native_preview_admits_projected_omissions_and_sealing_under_the_original_allowance() {
     let basis = basis(provider(NATIVE_OWNER, 1, false), false);
     let installed = registry(None);
-    let report = projected_report(&basis, PrefabExpansionLimits::default().working_bytes());
+    let mut report = projected_report(&basis, SceneCompilationLimits::default().working_bytes());
     assert!(report.candidate().is_some(), "{:?}", report.diagnostics());
     assert!(report.omissions().is_empty());
     let initial = report.checked_work_bytes().unwrap();
-    let complete = report
+    let restriction = report
         .checked_native_preview_work_bytes_for(&installed)
         .unwrap();
-    assert!(complete > initial);
+    assert!(restriction > initial);
     let AuthoringNativePreview {
         candidate: preview,
         omissions,
         ..
-    } = report.into_native_preview_for(&installed).unwrap();
+    } = report.finish_native_preview(Some(&installed)).unwrap();
+    let complete = report.checked_work_bytes().unwrap();
+    assert!(
+        complete > restriction,
+        "terminal sealing must retain its original allowance"
+    );
     assert_eq!(omissions.len(), 1);
     assert!(matches!(
         omissions[0].location(),
@@ -434,10 +527,9 @@ fn native_preview_restriction_admits_complete_projected_omission_cost_before_all
     ));
     assert!(
         preview
-            .document()
-            .entities
+            .entities()
             .iter()
-            .all(|entity| entity.components.is_empty())
+            .all(|entity| entity.components().is_empty())
     );
 
     let exact = projected_report(&basis, ByteLimit::new(complete).unwrap());
@@ -464,5 +556,26 @@ fn native_preview_restriction_admits_complete_projected_omission_cost_before_all
     assert_eq!(
         field(diagnostic, "maximum"),
         DiagnosticValueRef::Unsigned((complete - 1) as u64)
+    );
+
+    let short = projected_report(&basis, ByteLimit::new(restriction - 1).unwrap());
+    assert!(short.candidate().is_some(), "{:?}", short.diagnostics());
+    assert_eq!(short.checked_work_bytes(), Some(initial));
+    let diagnostics = short.into_native_preview_for(&installed).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded")
+        .unwrap();
+    assert_eq!(
+        field(diagnostic, "budget-kind"),
+        DiagnosticValueRef::Identifier("working-bytes")
+    );
+    assert_eq!(
+        field(diagnostic, "observed"),
+        DiagnosticValueRef::Unsigned(restriction as u64)
+    );
+    assert_eq!(
+        field(diagnostic, "maximum"),
+        DiagnosticValueRef::Unsigned((restriction - 1) as u64)
     );
 }

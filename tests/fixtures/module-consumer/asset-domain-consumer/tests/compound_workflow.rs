@@ -516,9 +516,9 @@ fn copied_source_needs_a_new_enclosing_identity_before_catalogue_admission() {
             &ProjectPath::new("other.scene.json").unwrap(),
         )
         .unwrap();
-    let record = &copied_snapshot.expanded_scene().entities[0].components
+    let record = &copied_snapshot.compiled_scene().entities()[0].components()
         [&ComponentTypeId::new("consumer.bundle.Caption")];
-    let caption = Caption::__decode_persistent_component(&record.value).unwrap();
+    let caption = Caption::__decode_persistent_component(record.value()).unwrap();
     let selected = caption.product.as_product().unwrap();
     assert_eq!(selected, foreign);
     let copied_collection = copied_snapshot

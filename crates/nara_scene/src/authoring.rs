@@ -12,7 +12,7 @@ use nara_identity::SpawnedSceneInstance;
 use nara_reflect::ComponentRegistrySnapshot;
 
 use crate::{
-    ExpandedSceneCandidate, PrefabDocument, PrefabSourceResolver, SceneDocument,
+    InMemoryPrefabSourceResolver, PrefabDocument, PrefabSourceResolver, SceneDocument,
     SceneOccurrenceKey, ScenePatchDocument, ScenePatchReport, SceneSpawnReport, SourceDocumentKey,
     diagnostics::{error as diagnostic_error, info as diagnostic_info},
     patch::{PreparedScenePatch, scene_patch_cost},
@@ -1784,9 +1784,13 @@ impl SceneAuthoringSession {
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
-        self.authority.require_native()?;
-        let candidate = ExpandedSceneCandidate::plain(source.clone(), Arc::clone(&self.document));
-        Ok(self.sync_bound_candidate(world, registry, &candidate, occurrence, None))
+        self.sync_world_with_prefab_resolver(
+            world,
+            registry,
+            source,
+            occurrence,
+            &InMemoryPrefabSourceResolver::new(),
+        )
     }
 
     pub fn sync_world_with_asset_resolution(
@@ -1797,15 +1801,14 @@ impl SceneAuthoringSession {
         occurrence: &SceneOccurrenceKey,
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
-        self.authority.require_native()?;
-        let candidate = ExpandedSceneCandidate::plain(source.clone(), Arc::clone(&self.document));
-        Ok(self.sync_bound_candidate(
+        self.sync_world_with_prefab_resolver_and_asset_resolution(
             world,
             registry,
-            &candidate,
+            source,
             occurrence,
-            Some(asset_resolution),
-        ))
+            &InMemoryPrefabSourceResolver::new(),
+            asset_resolution,
+        )
     }
 
     pub fn sync_world_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
@@ -1817,7 +1820,7 @@ impl SceneAuthoringSession {
         resolver: &R,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let report = self.document.expand_prefabs(registry, resolver);
+        let report = self.document.compile(registry, resolver);
         Ok(self.sync_expansion(world, registry, source, occurrence, report, None))
     }
 
@@ -1833,11 +1836,9 @@ impl SceneAuthoringSession {
         asset_resolution: AssetReferenceResolver<'_>,
     ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
         self.authority.require_native()?;
-        let report = self.document.expand_prefabs_with_asset_resolution(
-            registry,
-            resolver,
-            asset_resolution,
-        );
+        let report =
+            self.document
+                .compile_with_asset_resolution(registry, resolver, asset_resolution);
         Ok(self.sync_expansion(
             world,
             registry,
@@ -1854,7 +1855,7 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistrySnapshot,
         source: &SourceDocumentKey,
         occurrence: &SceneOccurrenceKey,
-        expansion: crate::PrefabExpansionReport,
+        expansion: crate::SceneCompilationReport,
         asset_resolution: Option<AssetReferenceResolver<'_>>,
     ) -> SceneAuthoringSyncReport {
         let mut diagnostics = expansion.diagnostics;
@@ -1871,25 +1872,6 @@ impl SceneAuthoringSession {
         };
         diagnostics.extend(report.diagnostics);
         report.diagnostics = diagnostics;
-        self.finish_world_sync(report)
-    }
-
-    fn sync_bound_candidate(
-        &mut self,
-        world: &mut World,
-        registry: &ComponentRegistrySnapshot,
-        candidate: &ExpandedSceneCandidate,
-        occurrence: &SceneOccurrenceKey,
-        asset_resolution: Option<AssetReferenceResolver<'_>>,
-    ) -> SceneAuthoringSyncReport {
-        let report = SceneSpawner::new().sync(
-            world,
-            registry,
-            candidate,
-            occurrence,
-            asset_resolution,
-            self.live_instance.as_ref(),
-        );
         self.finish_world_sync(report)
     }
 

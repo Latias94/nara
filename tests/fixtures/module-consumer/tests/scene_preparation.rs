@@ -13,10 +13,10 @@ use nara_reflect::{
     PreparedComponentCandidate,
 };
 use nara_scene::{
-    ExpandedSceneCandidate, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, prepare_scene,
-    prepare_scene_replacement, retire_and_despawn_scene_entity, retire_and_despawn_scene_instance,
-    spawn_scene,
+    CompiledSceneCandidate, InMemoryPrefabSourceResolver, SceneComponentRecord, SceneDocument,
+    SceneEntityId, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey,
+    SourceDocumentKind, prepare_scene, prepare_scene_replacement, retire_and_despawn_scene_entity,
+    retire_and_despawn_scene_instance, spawn_scene,
 };
 
 #[derive(Component)]
@@ -112,27 +112,34 @@ fn slot(name: &str) -> SceneOccurrenceKey {
     SceneOccurrenceKey::new("consumer.prepare", name).unwrap()
 }
 
-fn candidate(name: &str, values: &[i64]) -> ExpandedSceneCandidate {
+fn candidate(
+    registry: &ComponentRegistrySnapshot,
+    name: &str,
+    values: &[i64],
+) -> CompiledSceneCandidate {
     let source = SourceDocumentKey::named(
         "90d048a8-122e-4a23-9cf0-13ab9d3178e5".parse().unwrap(),
         name,
         SourceDocumentKind::Scene,
     )
     .unwrap();
-    ExpandedSceneCandidate::plain(
-        source,
-        Arc::new(SceneDocument::from_ordered_roots(
-            values.iter().enumerate().map(|(index, value)| {
-                SceneEntityRecord::new(id(&format!("e{index}"))).with_component(
-                    component(),
-                    SceneComponentRecord::new(
-                        ComponentSchemaVersion::ONE,
-                        ComponentValue::map([("value", ComponentValue::I64(*value))]),
-                    ),
-                )
-            }),
-        )),
-    )
+    let document =
+        SceneDocument::from_ordered_roots(values.iter().enumerate().map(|(index, value)| {
+            SceneEntityRecord::new(id(&format!("e{index}"))).with_component(
+                component(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("value", ComponentValue::I64(*value))]),
+                ),
+            )
+        }));
+    let compilation = document.compile(registry, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
+    );
+    compilation.candidate.unwrap().bind_source(source)
 }
 
 fn resolve(
@@ -158,7 +165,7 @@ fn preparation_owns_actual_values_and_cancels_without_world_cleanup_or_target_al
     let pending = prepare_scene(
         &mut world,
         &registry,
-        &candidate("cancel", &[1, 2]),
+        &candidate(&registry, "cancel", &[1, 2]),
         &slot("cancel"),
         None,
     )
@@ -184,7 +191,7 @@ fn preparation_owns_actual_values_and_cancels_without_world_cleanup_or_target_al
     let pending = prepare_scene(
         &mut world,
         &registry,
-        &candidate("after-world", &[3]),
+        &candidate(&registry, "after-world", &[3]),
         &slot("after-world"),
         None,
     )
@@ -203,7 +210,7 @@ fn independent_tokens_commit_in_reverse_order_after_registry_drop_without_reexec
     let first = prepare_scene(
         &mut world,
         &registry,
-        &candidate("first", &[1]),
+        &candidate(&registry, "first", &[1]),
         &slot("first"),
         None,
     )
@@ -211,7 +218,7 @@ fn independent_tokens_commit_in_reverse_order_after_registry_drop_without_reexec
     let second = prepare_scene(
         &mut world,
         &registry,
-        &candidate("second", &[2]),
+        &candidate(&registry, "second", &[2]),
         &slot("second"),
         None,
     )
@@ -251,18 +258,23 @@ fn replacement_targets_the_activation_after_individual_retirement_and_rejects_a_
     let old = spawn_scene(
         &mut world,
         &registry,
-        &candidate("old", &[1, 2]),
+        &candidate(&registry, "old", &[1, 2]),
         &slot("replace"),
         None,
     )
     .instance
     .unwrap();
-    let replacement_source = candidate("new", &[3]);
+    let replacement_source = candidate(&registry, "new", &[3]);
     let replacement =
         prepare_scene_replacement(&mut world, &registry, &replacement_source, &old, None).unwrap();
-    let stale =
-        prepare_scene_replacement(&mut world, &registry, &candidate("stale", &[4]), &old, None)
-            .unwrap();
+    let stale = prepare_scene_replacement(
+        &mut world,
+        &registry,
+        &candidate(&registry, "stale", &[4]),
+        &old,
+        None,
+    )
+    .unwrap();
     let removed = resolve(&world, &old, "e1");
     retire_and_despawn_scene_entity(&mut world, removed).unwrap();
     let current = replacement.commit(&mut world).instance.unwrap();
@@ -288,7 +300,7 @@ fn native_prepare_failure_releases_partial_values_without_allocating_scene_targe
     let report = match prepare_scene(
         &mut world,
         &registry,
-        &candidate("failure", &[1, -1]),
+        &candidate(&registry, "failure", &[1, -1]),
         &slot("failure"),
         None,
     ) {
@@ -310,17 +322,21 @@ fn late_hierarchy_observer_rejects_before_scene_target_allocation() {
     let runs = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
     let registry = registry(&runs, &drops, false);
-    let source = candidate("tree", &[]).source_key().clone();
-    let tree = ExpandedSceneCandidate::plain(
-        source,
-        Arc::new(SceneDocument {
-            roots: vec![id("parent")],
-            entities: vec![
-                SceneEntityRecord::new(id("parent")).with_children([id("child")]),
-                SceneEntityRecord::new(id("child")),
-            ],
-        }),
+    let source = candidate(&registry, "tree", &[]).source_key().clone();
+    let compilation = SceneDocument {
+        roots: vec![id("parent")],
+        entities: vec![
+            SceneEntityRecord::new(id("parent")).with_children([id("child")]),
+            SceneEntityRecord::new(id("child")),
+        ],
+    }
+    .compile(&registry, &InMemoryPrefabSourceResolver::new());
+    assert!(
+        !compilation.diagnostics.has_errors(),
+        "{:?}",
+        compilation.diagnostics
     );
+    let tree = compilation.candidate.unwrap().bind_source(source);
     let mut world = World::new();
     let mut control = World::new();
     let pending = prepare_scene(&mut world, &registry, &tree, &slot("tree"), None).unwrap();
@@ -370,7 +386,7 @@ fn managed_registry_loss_is_not_a_standalone_definition() {
                 prepare_scene(
                     world,
                     &registry,
-                    &candidate("managed-missing", &[]),
+                    &candidate(&registry, "managed-missing", &[]),
                     &slot("managed"),
                     None,
                 )
@@ -387,7 +403,7 @@ fn managed_registry_loss_is_not_a_standalone_definition() {
                     None => prepare_scene(
                         world,
                         &registry,
-                        &candidate("managed-missing", &[]),
+                        &candidate(&registry, "managed-missing", &[]),
                         &slot("managed"),
                         None,
                     )
@@ -429,7 +445,7 @@ fn managed_definition_requires_the_exact_snapshot_not_a_structurally_equal_regis
         let different = ComponentRegistryBuilder::new().freeze().unwrap();
         assert_eq!(compatible.catalog(), different.catalog());
         assert!(!compatible.ptr_eq(&different));
-        let source = candidate("managed", &[]);
+        let source = candidate(&compatible, "managed", &[]);
         let rejected = prepare_scene(world, &different, &source, &slot("managed"), None).is_err();
         let prepared = prepare_scene(world, &compatible, &source, &slot("managed"), None).unwrap();
         drop(compatible);
@@ -452,7 +468,7 @@ fn foreign_world_rejection_does_not_flush_its_pending_commands() {
     let pending = prepare_scene(
         &mut origin,
         &registry,
-        &candidate("foreign", &[1]),
+        &candidate(&registry, "foreign", &[1]),
         &slot("foreign"),
         None,
     )
@@ -483,8 +499,8 @@ fn later_slot_occupancy_including_empty_instances_rejects_before_allocating_targ
         let runs = Arc::new(AtomicUsize::new(0));
         let drops = Arc::new(AtomicUsize::new(0));
         let registry = registry(&runs, &drops, false);
-        let source = candidate("contender", &[1]);
-        let occupying = candidate("occupier", if empty { &[] } else { &[2] });
+        let source = candidate(&registry, "contender", &[1]);
+        let occupying = candidate(&registry, "occupier", if empty { &[] } else { &[2] });
         let mut world = World::new();
         let mut control = World::new();
         let pending = prepare_scene(&mut world, &registry, &source, &slot("shared"), None).unwrap();
@@ -519,7 +535,7 @@ fn retained_assets_use_only_the_original_touched_catalogue_basis() {
             let pending = prepare_scene(
                 &mut world,
                 &registry,
-                &candidate("assets", &[1]),
+                &candidate(&registry, "assets", &[1]),
                 &slot("assets"),
                 None,
             )
@@ -561,7 +577,7 @@ fn queued_native_hook_rejects_before_target_allocation_and_drops_values_once() {
     let runs = Arc::new(AtomicUsize::new(0));
     let drops = Arc::new(AtomicUsize::new(0));
     let registry = registry(&runs, &drops, false);
-    let source = candidate("late-native", &[1]);
+    let source = candidate(&registry, "late-native", &[1]);
     let mut world = World::new();
     let mut control = World::new();
     let pending =
@@ -601,7 +617,7 @@ fn explicit_projection_definition_preserves_the_distinct_managed_host_basis() {
     app.add_systems(Project, move |world: &mut World| {
         let host = component_registry(world).unwrap().clone();
         assert!(!native.ptr_eq(&host));
-        let source = candidate("explicit-projection", &[7]);
+        let source = candidate(&native, "explicit-projection", &[7]);
         assert!(prepare_scene(world, &native, &source, &slot("explicit"), None).is_err());
         assert_eq!(prepared_runs.load(Ordering::SeqCst), 0);
         let mut projection = SceneProjection::new(slot("explicit"));

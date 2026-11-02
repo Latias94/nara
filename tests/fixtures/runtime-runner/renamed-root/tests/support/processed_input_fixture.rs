@@ -5,7 +5,6 @@ use std::{
     fs::{self, File},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -28,7 +27,7 @@ use engine::{
         RuntimeContentMemberKind, RuntimeContentTarget,
     },
     scene::{
-        ExpandedSceneCandidate, RuntimeSceneCandidate, RuntimeSceneLimits, SceneDocumentCandidate,
+        RuntimeSceneCandidate, RuntimeSceneLimits, SceneCompilationOptions, SceneDocumentCandidate,
         SourceDocumentKey, SourceDocumentKind,
     },
 };
@@ -208,9 +207,27 @@ fn cook(
             probe::product(scene).source(),
             SourceDocumentKind::Scene,
         );
-        let expanded = ExpandedSceneCandidate::plain(key.clone(), Arc::new(document));
+        let compilation = plan
+            .schema_validation()
+            .bindings()
+            .try_compile_scene_with_loader(
+                &document,
+                SceneCompilationOptions::default(),
+                Some(database.resolver(&AssetPathScope::ROOT)),
+                |_, _| Ok::<_, std::convert::Infallible>(None),
+            )
+            .unwrap();
+        assert!(
+            !compilation.diagnostics.has_errors(),
+            "{:?}",
+            compilation.diagnostics
+        );
+        let compiled = compilation
+            .candidate
+            .expect("the saved process Scene compiles")
+            .bind_source(key.clone());
         let mut encoded = RuntimeSceneCandidate::cook(
-            &expanded,
+            &compiled,
             plan.schema_validation().bindings(),
             database.resolver(&AssetPathScope::ROOT),
             RuntimeSceneLimits::default(),

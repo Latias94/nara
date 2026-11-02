@@ -4074,16 +4074,17 @@ mod tests {
         let registry = nara_reflect::ComponentRegistryBuilder::new()
             .freeze()
             .unwrap();
-        let candidate = nara_scene::ExpandedSceneCandidate::plain(
+        let candidate = crate::startup_scene::compile_test_scene(
+            &nara_scene::SceneDocument::from_ordered_roots([nara_scene::SceneEntityRecord::new(
+                entity_id.clone(),
+            )]),
+            &nara_scene::SceneComponentBindings::new(registry.clone(), []).unwrap(),
             nara_scene::SourceDocumentKey::named(
                 "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
                 "runtime-edit-probe",
                 nara_scene::SourceDocumentKind::Scene,
             )
             .unwrap(),
-            Arc::new(nara_scene::SceneDocument::from_ordered_roots([
-                nara_scene::SceneEntityRecord::new(entity_id.clone()),
-            ])),
         );
         let report = nara_scene::spawn_scene(
             &mut fixture,

@@ -124,7 +124,7 @@ impl PreparedProjectSceneView<'_> {
 
     /// Admitted target document, matching the document that becomes `CurrentScene::source`.
     #[must_use]
-    pub fn scene(&self) -> &SceneDocument {
+    pub fn scene(&self) -> &CompiledSceneDocument {
         self.content.document()
     }
 
@@ -134,7 +134,7 @@ impl PreparedProjectSceneView<'_> {
     /// catalogue members and the selected root return `None`. The borrow cannot outlive this
     /// prepared view or its actual source/processed content owner.
     #[must_use]
-    pub fn scene_dependency(&self, product: AssetProductRef) -> Option<&SceneDocument> {
+    pub fn scene_dependency(&self, product: AssetProductRef) -> Option<&CompiledSceneDocument> {
         self.content.scene_dependency(product)
     }
 
@@ -212,7 +212,7 @@ impl ProjectScenes<'_> {
     ///
     /// fn inspect_and_commit(world: &mut World, request: ProjectSceneRequestId) {
     ///     let roots = ProjectScenes::scope(world, |scenes| {
-    ///         scenes.prepared(request).map(|view| view.scene().roots.clone())
+    ///         scenes.prepared(request).map(|view| view.scene().roots().to_vec())
     ///     });
     ///     if let Some(roots) = roots {
     ///         let limits = SceneProductTransactionLimits::new(ItemLimit::ONE, ItemLimit::ONE);

@@ -36,7 +36,7 @@ use engine::{
     },
     runtime_content::RuntimeCodecDefinitionId,
     scene::{
-        SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+        CompiledSceneDocument, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
         advanced::SceneProductTransactionLimits,
     },
 };
@@ -373,13 +373,27 @@ fn inspect_first_startup(world: &mut World) {
 
 fn live_scene(world: &World, scene: u8) -> SpawnedSceneInstance {
     let current = CurrentScene::get(world).unwrap();
-    assert_eq!(current.source(), &document(scene));
+    assert_compiled_scene(current.source(), scene);
     let receipt = current.receipt().clone();
     let EntityLookup::Resolved(entity) = receipt.resolve(world, &marker(scene)) else {
         panic!("the current Scene must resolve its authored marker")
     };
     assert!(world.get::<SceneEntitySource>(entity).is_some());
     receipt
+}
+
+fn assert_compiled_scene(document: &CompiledSceneDocument, scene: u8) {
+    let marker = marker(scene);
+    assert_eq!(document.roots(), &[marker.clone()]);
+    assert_eq!(document.entities().len(), 1);
+    let entity = &document.entities()[0];
+    assert_eq!(entity.id(), &marker);
+    assert!(entity.children().is_empty());
+    assert!(entity.components().is_empty());
+    assert_eq!(document.canonical_provenance().len(), 1);
+    let origin = &document.canonical_provenance()[&marker];
+    assert_eq!(origin.local_entity_id(), &marker);
+    assert!(origin.projection_path().is_none());
 }
 
 fn inspect_startup_scene(world: &mut World) {
@@ -625,7 +639,7 @@ fn travel(world: &mut World, phase: Phase) {
                 assert_eq!(prepared.selected_scene_product(), Some(product(target)));
                 assert!(prepared.selected_scene_path().is_none());
                 assert_eq!(prepared.expected_instance(), &receipt);
-                assert_eq!(prepared.scene(), &document(target));
+                assert_compiled_scene(prepared.scene(), target);
             });
             let mut outcome = world.resource_mut::<Outcome>();
             outcome.ready_boundaries += 1;

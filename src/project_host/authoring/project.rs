@@ -449,7 +449,7 @@ struct AuthoringProjectSnapshotInner {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_compilation_diagnostics: DiagnosticReport,
-    startup_composition_failure: Option<nara_scene::PrefabExpansionFailure>,
+    startup_composition_failure: Option<nara_scene::SceneCompilationFailure>,
     startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
@@ -530,7 +530,7 @@ impl AuthoringProjectSnapshot {
 
     pub(crate) fn startup_composition_failure(
         &self,
-    ) -> Option<&nara_scene::PrefabExpansionFailure> {
+    ) -> Option<&nara_scene::SceneCompilationFailure> {
         self.inner.startup_composition_failure.as_ref()
     }
 
@@ -702,7 +702,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_compilation_diagnostics: DiagnosticReport,
-    startup_composition_failure: Option<nara_scene::PrefabExpansionFailure>,
+    startup_composition_failure: Option<nara_scene::SceneCompilationFailure>,
     startup_preview: Option<CapturedAuthoringPreview>,
     startup_source: Arc<AuthoringSourceFact>,
     startup_native_source: AdmittedNativeDocumentSource,
@@ -1002,7 +1002,7 @@ impl AuthoringProjectSessionSnapshot {
 
     pub(crate) fn startup_composition_failure(
         &self,
-    ) -> Option<&nara_scene::PrefabExpansionFailure> {
+    ) -> Option<&nara_scene::SceneCompilationFailure> {
         self.startup_composition_failure.as_ref()
     }
 

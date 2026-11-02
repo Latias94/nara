@@ -63,7 +63,7 @@ struct LifecycleCanary(u32);
 struct ReplacementFixture {
     world: World,
     registry: ComponentRegistrySnapshot,
-    replacement: SceneDocument,
+    replacement: CompiledSceneCandidate,
     current: SpawnedSceneInstance,
     target: SceneEntityId,
     old_entity: Entity,
@@ -76,15 +76,13 @@ impl ReplacementFixture {
             .unwrap();
         let target = scene_id("player");
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(target.clone())]);
+        let replacement = compile_scene(&document, &registry, "scene-product/fixture");
         let mut world = World::new();
         world.insert_resource(RunState::new(1));
         let initial = crate::spawn_scene(
             &mut world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
-                scene_source_key("scene-product/fixture"),
-                std::sync::Arc::new((document).clone()),
-            ),
+            &replacement,
             &scene_occurrence("new/initial"),
             None,
         );
@@ -94,7 +92,7 @@ impl ReplacementFixture {
         Self {
             world,
             registry,
-            replacement: document,
+            replacement,
             current,
             target,
             old_entity,
@@ -131,6 +129,19 @@ impl ReplacementFixture {
 
 fn scene_id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
+}
+
+fn compile_scene(
+    document: &SceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    source: &str,
+) -> CompiledSceneCandidate {
+    let report = document.compile(registry, &InMemoryPrefabSourceResolver::new());
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    report
+        .candidate
+        .unwrap()
+        .bind_source(scene_source_key(source))
 }
 
 fn item_limit(value: usize) -> ItemLimit {
@@ -213,9 +224,10 @@ fn product_replacement_commits_one_coherent_scene_generation() {
     let initial = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("product_replacement_commits_one_coherent_scene_generation/document"),
-            std::sync::Arc::new((document).clone()),
+        &compile_scene(
+            &document,
+            &registry,
+            "product_replacement_commits_one_coherent_scene_generation/document",
         ),
         &scene_occurrence("product_replacement_commits_one_coherent_scene_generation/initial"),
         None,
@@ -237,9 +249,10 @@ fn product_replacement_commits_one_coherent_scene_generation() {
     let report = replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("product_replacement_commits_one_coherent_scene_generation/document"),
-            std::sync::Arc::new((document).clone()),
+        &compile_scene(
+            &document,
+            &registry,
+            "product_replacement_commits_one_coherent_scene_generation/document",
         ),
         None,
         &current,
@@ -288,10 +301,7 @@ fn product_replacement_accepts_empty_overlay_and_retirement_sets() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -317,10 +327,7 @@ fn product_transaction_engine_ceilings_reject_before_world_mutation() {
     let overlay_report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         limits,
@@ -341,10 +348,7 @@ fn product_transaction_engine_ceilings_reject_before_world_mutation() {
     let retirement_report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         limits,
@@ -379,10 +383,7 @@ fn product_overlay_rejections_leave_the_old_generation_unchanged() {
         let report = replace_expanded_scene_with_product(
             &mut fixture.world,
             &fixture.registry,
-            &crate::ExpandedSceneCandidate::plain(
-                scene_source_key("scene-product/fixture"),
-                std::sync::Arc::new((fixture.replacement).clone()),
-            ),
+            &fixture.replacement,
             None,
             &fixture.current,
             transaction_limits(overlay_limit, 1),
@@ -434,10 +435,7 @@ fn overlay_rejection_does_not_flush_the_deferred_world_baseline() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -478,10 +476,7 @@ fn resource_baseline_is_captured_before_deferred_preparation_writes() {
         let report = replace_expanded_scene_with_product(
             &mut fixture.world,
             &fixture.registry,
-            &ExpandedSceneCandidate::plain(
-                scene_source_key("scene-product/fixture"),
-                Arc::new(fixture.replacement.clone()),
-            ),
+            &fixture.replacement,
             None,
             &fixture.current,
             transaction_limits(1, 1),
@@ -546,10 +541,7 @@ fn invalid_existing_hierarchy_rejects_product_replacement_without_scratch_mutati
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -580,11 +572,10 @@ fn authored_component_collision_is_rejected_before_candidate_allocation() {
     let initial = crate::spawn_scene(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "authored_component_collision_is_rejected_before_candidate_allocation/document",
-            ),
-            std::sync::Arc::new((document).clone()),
+        &compile_scene(
+            &document,
+            &registry,
+            "authored_component_collision_is_rejected_before_candidate_allocation/document",
         ),
         &scene_occurrence(
             "authored_component_collision_is_rejected_before_candidate_allocation/initial",
@@ -603,11 +594,10 @@ fn authored_component_collision_is_rejected_before_candidate_allocation() {
     let report = replace_expanded_scene_with_product(
         &mut world,
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "authored_component_collision_is_rejected_before_candidate_allocation/document",
-            ),
-            std::sync::Arc::new((document).clone()),
+        &compile_scene(
+            &document,
+            &registry,
+            "authored_component_collision_is_rejected_before_candidate_allocation/document",
         ),
         None,
         &current,
@@ -656,10 +646,7 @@ fn overlay_lifecycle_rejection_rolls_back_scratch_and_resource_replacement() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(2, 1),
@@ -705,11 +692,10 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     let initial = crate::spawn_scene(
         app.world_mut().unwrap(),
         &registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key(
-                "overlay_lifecycle_rejection_preserves_completed_hierarchy_generation/document",
-            ),
-            std::sync::Arc::new((document).clone()),
+        &compile_scene(
+            &document,
+            &registry,
+            "overlay_lifecycle_rejection_preserves_completed_hierarchy_generation/document",
         ),
         &scene_occurrence(
             "overlay_lifecycle_rejection_preserves_completed_hierarchy_generation/initial",
@@ -784,9 +770,10 @@ impl OverlayLifecycleRejectionPort {
         Ok(replace_expanded_scene_with_product(
             world,
             &registry,
-            &crate::ExpandedSceneCandidate::plain(
-                scene_source_key("apply_driver_input_in_world/replacement"),
-                std::sync::Arc::new((document).clone()),
+            &compile_scene(
+                &document,
+                &registry,
+                "apply_driver_input_in_world/replacement",
             ),
             None,
             &current,
@@ -810,10 +797,7 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
     let over_limit = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -829,10 +813,7 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
     let duplicate = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 2),
@@ -849,10 +830,7 @@ fn additional_retirement_limits_and_identity_axes_are_fail_closed() {
     let scene_owned = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -880,10 +858,7 @@ fn additional_retirement_rejects_a_foreign_token_with_matching_entity_bits() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -915,10 +890,7 @@ fn deferred_persistent_registration_is_part_of_the_validated_baseline() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -954,10 +926,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
     let missing_report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -978,10 +947,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
     let persistent_report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -1007,10 +973,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
     let lifecycle_report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -1053,10 +1016,7 @@ fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
     let report = replace_expanded_scene_with_product(
         &mut fixture.world,
         &fixture.registry,
-        &crate::ExpandedSceneCandidate::plain(
-            scene_source_key("scene-product/fixture"),
-            std::sync::Arc::new((fixture.replacement).clone()),
-        ),
+        &fixture.replacement,
         None,
         &fixture.current,
         transaction_limits(1, 1),
@@ -1111,14 +1071,13 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
         arguments: None,
         overrides: None,
     });
-    let expansion =
-        SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&registry, &resolver);
+    let expansion = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
     let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
         "expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replacement/source",
     ));
     let (leaf_id, expected_source) = candidate
-        .provenance()
+        .canonical_provenance()
         .iter()
         .find(|(_, source)| source.local_entity_id() == &scene_id("leaf"))
         .unwrap();
@@ -1202,12 +1161,12 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
         overrides: None,
     });
     let expansion =
-        SceneDocument::from_ordered_roots([anchor]).expand_prefabs(&fixture.registry, &resolver);
+        SceneDocument::from_ordered_roots([anchor]).compile(&fixture.registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
     let candidate = expansion.candidate.unwrap().bind_source(scene_source_key("expanded_candidate_source_observer_rejects_before_publication_and_preserves_old_source/source"));
     assert!(
         candidate
-            .provenance()
+            .canonical_provenance()
             .values()
             .any(|source| source.projection_path().is_some())
     );
@@ -1252,45 +1211,14 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
 }
 
 #[test]
-fn plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_mutation() {
-    let mut fixture = ReplacementFixture::new();
+fn unresolved_prefab_is_rejected_by_compilation_before_activation() {
+    let fixture = ReplacementFixture::new();
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());
     anchor.prefab = Some(PrefabInstance {
         source: nara_asset::AssetRef::path("prefabs/unresolved.ron").unwrap(),
         arguments: None,
         overrides: None,
     });
-    let candidate = ExpandedSceneCandidate::plain(
-        scene_source_key(
-            "plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_mutation/candidate",
-        ),
-        std::sync::Arc::new(SceneDocument::from_ordered_roots([anchor])),
-    );
-    let mut empty = World::new();
-    let empty_entities = empty
-        .iter_entities()
-        .map(|entity| entity.id())
-        .collect::<Vec<_>>();
-    let spawn = crate::spawn_scene(
-        &mut empty,
-        &fixture.registry,
-        &candidate,
-        &scene_occurrence(
-            "plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_mutation/spawn",
-        ),
-        None,
-    );
-    assert!(spawn.instance.is_none());
-    assert!(has_diagnostic(&spawn, "scene.prefab-instance-unsupported"));
-    assert_eq!(
-        empty
-            .iter_entities()
-            .map(|entity| entity.id())
-            .collect::<Vec<_>>(),
-        empty_entities
-    );
-    assert!(!empty.contains_resource::<WorldIdentityDomain>());
-
     let before_entities = fixture.entity_ids();
     let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
     let old_source = fixture
@@ -1298,22 +1226,16 @@ fn plain_candidate_with_unresolved_prefab_rejects_spawn_and_replacement_without_
         .get::<SceneEntitySource>(fixture.old_entity)
         .unwrap()
         .clone();
-    let replacement = replace_expanded_scene_with_product(
-        &mut fixture.world,
-        &fixture.registry,
-        &candidate,
-        None,
-        &fixture.current,
-        transaction_limits(1, 1),
-        &[],
-        |_| panic!("unresolved Prefab must reject before product configuration"),
+    let compilation = SceneDocument::from_ordered_roots([anchor])
+        .compile(&fixture.registry, &InMemoryPrefabSourceResolver::new());
+    assert!(compilation.candidate.is_none());
+    assert!(compilation.diagnostics.has_errors());
+    assert!(
+        compilation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.prefab-source-missing")
     );
-    assert!(replacement.instance.is_none());
-    assert!(has_diagnostic(
-        &replacement,
-        "scene.prefab-instance-unsupported"
-    ));
-    assert_eq!(replacement.retired_entities(), 0);
     fixture.assert_unchanged(&before_entities, before_stats);
     assert_eq!(
         fixture.world.get::<SceneEntitySource>(fixture.old_entity),

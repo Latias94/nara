@@ -173,10 +173,11 @@ fn spawn_scene_overlay(world: &mut World) -> Result<Entity, Box<dyn Error>> {
     let report = nara_scene::spawn_scene(
         world,
         &registry,
-        &nara_scene::ExpandedSceneCandidate::plain(
-            scene_source_key("spawn_scene_overlay/document"),
-            std::sync::Arc::new((document).clone()),
-        ),
+        &document
+            .compile(&registry, &nara_scene::InMemoryPrefabSourceResolver::new())
+            .candidate
+            .unwrap()
+            .bind_source(scene_source_key("spawn_scene_overlay/document")),
         &scene_occurrence("spawn_scene_overlay/report"),
         None,
     );

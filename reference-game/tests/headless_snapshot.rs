@@ -40,7 +40,7 @@ fn authoritative_snapshot_uses_sorted_instance_local_identities() {
     let enemy_id = |root_anchor: &str| {
         loaded
             .snapshot
-            .expanded_scene_provenance()
+            .compiled_scene_provenance()
             .iter()
             .find_map(|(id, source)| {
                 (source.local_entity_id().as_str() == "enemy"

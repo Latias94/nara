@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
+#[path = "support/compiled_scene.rs"]
+mod compiled_scene;
+
 use nara_asset::ProjectAssetDatabase;
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::World;
 use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
-    ExpandedSceneCandidate, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
+    CompiledSceneCandidate, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
     SceneOccurrenceKey, SceneOccurrenceLimits, SceneProjection, SourceDocumentKey,
     SourceDocumentKind, retire_and_despawn_scene_entity, retire_and_despawn_scene_instance,
     spawn_scene,
@@ -25,7 +28,11 @@ fn occurrence(slot: &str) -> SceneOccurrenceKey {
     SceneOccurrenceKey::new("test.occurrence", slot).unwrap()
 }
 
-fn candidate(name: &str, empty: bool) -> ExpandedSceneCandidate {
+fn candidate(
+    registry: &ComponentRegistrySnapshot,
+    name: &str,
+    empty: bool,
+) -> CompiledSceneCandidate {
     let document = if empty {
         SceneDocument::default()
     } else {
@@ -33,7 +40,7 @@ fn candidate(name: &str, empty: bool) -> ExpandedSceneCandidate {
             SceneEntityId::new("root").unwrap(),
         )])
     };
-    ExpandedSceneCandidate::plain(source(name), Arc::new(document))
+    compiled_scene::native(&registry, &Arc::new(document), source(name), None)
 }
 
 fn registry() -> ComponentRegistrySnapshot {
@@ -47,8 +54,8 @@ fn registry() -> ComponentRegistrySnapshot {
 fn explicit_slots_separate_sources_and_duplicate_slot_refusal_precedes_allocation() {
     let registry = registry();
     let mut world = World::new();
-    let first = candidate("first", false);
-    let second = candidate("second", false);
+    let first = candidate(&registry, "first", false);
+    let second = candidate(&registry, "second", false);
     let first_receipt = spawn_scene(&mut world, &registry, &first, &occurrence("left"), None)
         .instance
         .unwrap();
@@ -99,7 +106,7 @@ fn empty_and_individually_emptied_instances_hold_slots_until_exact_end() {
         let original = spawn_scene(
             &mut world,
             &registry,
-            &candidate("old", empty),
+            &candidate(&registry, "old", empty),
             &occurrence("slot"),
             None,
         )
@@ -116,7 +123,7 @@ fn empty_and_individually_emptied_instances_hold_slots_until_exact_end() {
             spawn_scene(
                 &mut world,
                 &registry,
-                &candidate("other", true),
+                &candidate(&registry, "other", true),
                 &occurrence("slot"),
                 None
             )
@@ -130,7 +137,7 @@ fn empty_and_individually_emptied_instances_hold_slots_until_exact_end() {
         let successor = spawn_scene(
             &mut world,
             &registry,
-            &candidate("new", false),
+            &candidate(&registry, "new", false),
             &occurrence("slot"),
             None,
         )
@@ -155,7 +162,7 @@ fn active_item_and_byte_budgets_reject_without_evicting_or_installing_identity()
     let rejected = spawn_scene(
         &mut world,
         &registry,
-        &candidate("first", true),
+        &candidate(&registry, "first", true),
         &occurrence("one"),
         None,
     );
@@ -165,7 +172,7 @@ fn active_item_and_byte_budgets_reject_without_evicting_or_installing_identity()
     let first = spawn_scene(
         &mut world,
         &registry,
-        &candidate("first", true),
+        &candidate(&registry, "first", true),
         &occurrence("one"),
         None,
     )
@@ -175,7 +182,7 @@ fn active_item_and_byte_budgets_reject_without_evicting_or_installing_identity()
     let rejected = spawn_scene(
         &mut world,
         &registry,
-        &candidate("second", true),
+        &candidate(&registry, "second", true),
         &occurrence("two"),
         None,
     );
@@ -186,7 +193,7 @@ fn active_item_and_byte_budgets_reject_without_evicting_or_installing_identity()
         spawn_scene(
             &mut world,
             &registry,
-            &candidate("second", true),
+            &candidate(&registry, "second", true),
             &occurrence("two"),
             None
         )
@@ -205,7 +212,7 @@ fn projection_epochs_replace_exact_occupancy_and_stale_end_cannot_release_succes
         .publish(
             &mut world,
             &registry,
-            &candidate("old", true),
+            &candidate(&registry, "old", true),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
         )
         .instance
@@ -214,7 +221,7 @@ fn projection_epochs_replace_exact_occupancy_and_stale_end_cannot_release_succes
         .publish(
             &mut world,
             &registry,
-            &candidate("new", true),
+            &candidate(&registry, "new", true),
             database.resolver(&nara_asset::AssetPathScope::ROOT),
         )
         .instance
@@ -226,7 +233,7 @@ fn projection_epochs_replace_exact_occupancy_and_stale_end_cannot_release_succes
         spawn_scene(
             &mut world,
             &registry,
-            &candidate("intruder", true),
+            &candidate(&registry, "intruder", true),
             &occurrence("preview"),
             None
         )
@@ -238,7 +245,7 @@ fn projection_epochs_replace_exact_occupancy_and_stale_end_cannot_release_succes
         spawn_scene(
             &mut world,
             &registry,
-            &candidate("new", true),
+            &candidate(&registry, "new", true),
             &occurrence("preview"),
             None
         )
@@ -252,7 +259,7 @@ fn same_slot_in_two_worlds_is_independent_and_foreign_end_preserves_both() {
     let registry = registry();
     let mut first = World::new();
     let mut second = World::new();
-    let candidate = candidate("source", true);
+    let candidate = candidate(&registry, "source", true);
     let slot = occurrence("same");
     let a = spawn_scene(&mut first, &registry, &candidate, &slot, None)
         .instance
@@ -281,13 +288,13 @@ fn exact_replacement_switches_source_in_the_same_slot_and_fences_old_receipt() {
     let old = spawn_scene(
         &mut world,
         &registry,
-        &candidate("first", false),
+        &candidate(&registry, "first", false),
         &slot,
         None,
     )
     .instance
     .unwrap();
-    let replacement = candidate("second", false);
+    let replacement = candidate(&registry, "second", false);
     let report = replace_expanded_scene_with_product(
         &mut world,
         &registry,
@@ -311,7 +318,7 @@ fn exact_replacement_switches_source_in_the_same_slot_and_fences_old_receipt() {
         spawn_scene(
             &mut world,
             &registry,
-            &candidate("third", true),
+            &candidate(&registry, "third", true),
             &slot,
             None
         )
@@ -323,7 +330,7 @@ fn exact_replacement_switches_source_in_the_same_slot_and_fences_old_receipt() {
         spawn_scene(
             &mut world,
             &registry,
-            &candidate("third", true),
+            &candidate(&registry, "third", true),
             &slot,
             None
         )
@@ -339,14 +346,14 @@ fn shrinking_limits_rejects_replacement_without_evicting_the_predecessor() {
     };
     let registry = registry();
     let mut world = World::new();
-    let old_source = candidate("old", false);
+    let old_source = candidate(&registry, "old", false);
     let slot = occurrence("shrink");
     let old = spawn_scene(&mut world, &registry, &old_source, &slot, None)
         .instance
         .unwrap();
     world.insert_resource(SceneOccurrenceLimits::default().with_retained_bytes(ByteLimit::ONE));
     let stats = world.resource::<WorldIdentityDomain>().stats();
-    let replacement = candidate("new", false);
+    let replacement = candidate(&registry, "new", false);
     let rejected = replace_expanded_scene_with_product(
         &mut world,
         &registry,
