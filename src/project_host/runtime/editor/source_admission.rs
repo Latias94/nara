@@ -156,21 +156,7 @@ impl EditorProjectSession {
         {
             return Err(SourceAdmissionError::AlreadyOpen);
         }
-        // Resolve the exact stored spelling as well as the object. Native short-name aliases
-        // must not bypass the private namespace before live artifact custody is registered.
         let path = RelativePath::new(project_path).map_err(|_| SourceAdmissionError::SourceRead)?;
-        match self.source_project_root().open_file_exact(&path) {
-            Ok(exact) => {
-                if !exact
-                    .same_object(current)
-                    .map_err(|_| SourceAdmissionError::SourceRead)?
-                {
-                    return Err(SourceAdmissionError::SourceRead);
-                }
-            }
-            Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err(SourceAdmissionError::SourceRead),
-        }
         // Reserve the current metadata objects even before parsing or Host admission succeeds.
         let root = self
             .source_project_root()
@@ -217,8 +203,9 @@ impl EditorProjectSession {
                 .ok_or(SourceAdmissionError::HostUnavailable)??;
         }
         self.source_tools.exclude_metadata_source_aliases(current)?;
-        // Unclaimed sources must also satisfy the strict root policy. This prevents a junction
-        // or another traversal alias from reaching the store before inventory registration.
+        // Object ownership is checked before admitting an unclaimed source. Its strict exact
+        // spelling and root policy still reject short names, hard links and traversal aliases
+        // before parsing or inventory registration.
         let exact = match root.open_file_exact(&path) {
             Ok(exact) => exact,
             Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {

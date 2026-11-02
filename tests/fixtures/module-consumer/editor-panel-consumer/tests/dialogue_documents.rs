@@ -254,10 +254,19 @@ fn open_browser_document(editor: &mut EditorProjectSession, path: &str) -> Edito
 fn extension_document_rejects_an_actual_file_alias() {
     let project = DialogueProject::new();
     let alias = "dialogue/alias.json";
-    fs::hard_link(project.root.join(SOURCE), project.root.join(alias)).unwrap();
     let mut editor = open(&project);
     editor.register_extension_document::<Dialogue>().unwrap();
     let document = editor.open_extension_document::<Dialogue>(SOURCE).unwrap();
+    // A new owner requires a single-link source; aliases of its retained object are duplicates.
+    fs::hard_link(project.root.join(SOURCE), project.root.join(alias)).unwrap();
+    let root = project.capability();
+    let source = root
+        .open_file(&nara::fs::RelativePath::new(SOURCE).unwrap())
+        .unwrap();
+    let aliased = root
+        .open_file(&nara::fs::RelativePath::new(alias).unwrap())
+        .unwrap();
+    assert!(source.same_object(&aliased).unwrap());
     let before = editor.current_frame();
     assert_eq!(
         editor.open_extension_document::<Dialogue>(alias),
@@ -321,12 +330,26 @@ fn ordinary_document_open_rejects_an_actual_alias_owned_by_an_extension() {
     ] {
         let project = DialogueProject::new();
         let alias = "dialogue/document-alias.json";
-        fs::hard_link(project.root.join(path), project.root.join(alias)).unwrap();
         let mut editor = open(&project);
         wait_for_browser_entry(&mut editor, path);
         fs::write(project.root.join(alias), br#"["Dialogue source"]"#).unwrap();
         editor.register_extension_document::<Dialogue>().unwrap();
         let document = editor.open_extension_document::<Dialogue>(alias).unwrap();
+        let root = project.capability();
+        let source = root
+            .open_file_exact(&nara::fs::RelativePath::new(alias).unwrap())
+            .unwrap();
+        // Introduce the ordinary path alias only after the extension owns an admitted source.
+        fs::rename(
+            project.root.join(path),
+            project.root.join("dialogue/previous-native-source.json"),
+        )
+        .unwrap();
+        fs::hard_link(project.root.join(alias), project.root.join(path)).unwrap();
+        let ordinary = root
+            .open_file(&nara::fs::RelativePath::new(path).unwrap())
+            .unwrap();
+        assert!(source.same_object(&ordinary).unwrap());
         let before = editor.current_frame();
         let outcomes = dispatch(
             &mut editor,
@@ -361,20 +384,68 @@ fn extension_alias_checks_follow_retained_scene_and_prefab_parent_directories() 
             open_browser_document(&mut editor, &format!("{directory}/{file_name}"));
         }
         let moved = format!("{directory}-moved");
-        fs::rename(project.root.join(directory), project.root.join(&moved)).unwrap();
-        fs::create_dir(project.root.join(directory)).unwrap();
-        fs::write(
-            project.root.join(directory).join(file_name),
-            br#"["Different source at the old path"]"#,
-        )
-        .unwrap();
-        let alias = format!("{moved}/{file_name}");
-        fs::write(project.root.join(&alias), br#"["Retained source"]"#).unwrap();
-        editor.register_extension_document::<Dialogue>().unwrap();
-        assert_eq!(
-            editor.open_extension_document::<Dialogue>(&alias),
-            Err(EditorExtensionDocumentHostError::SourceAlreadyOpen)
-        );
+        #[cfg(windows)]
+        {
+            let root = project.capability();
+            let parent = root
+                .open_directory(&nara::fs::RelativePath::new(directory).unwrap())
+                .unwrap();
+            let error =
+                fs::rename(project.root.join(directory), project.root.join(&moved)).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+            assert!(!project.root.join(&moved).exists());
+            let current_parent = root
+                .open_directory(&nara::fs::RelativePath::new(directory).unwrap())
+                .unwrap();
+            assert!(parent.same_object(&current_parent).unwrap());
+            let alias = format!("dialogue/retained-{file_name}");
+            fs::hard_link(
+                project.root.join(directory).join(file_name),
+                project.root.join(&alias),
+            )
+            .unwrap();
+            fs::write(project.root.join(&alias), br#"["Retained source"]"#).unwrap();
+            editor.register_extension_document::<Dialogue>().unwrap();
+            let before = editor.current_frame();
+            assert_eq!(
+                editor.open_extension_document::<Dialogue>(&alias),
+                Err(EditorExtensionDocumentHostError::SourceAlreadyOpen)
+            );
+            assert_eq!(editor.current_frame().workspace(), before.workspace());
+
+            // After physical Close/drop, rename is available again.
+            close_session(&mut editor);
+            drop(editor);
+            fs::rename(project.root.join(directory), project.root.join(&moved)).unwrap();
+            let moved_parent = root
+                .open_directory(&nara::fs::RelativePath::new(&moved).unwrap())
+                .unwrap();
+            assert!(parent.same_object(&moved_parent).unwrap());
+            let retained = root
+                .open_file(&nara::fs::RelativePath::new(format!("{moved}/{file_name}")).unwrap())
+                .unwrap();
+            let aliased = root
+                .open_file(&nara::fs::RelativePath::new(&alias).unwrap())
+                .unwrap();
+            assert!(retained.same_object(&aliased).unwrap());
+        }
+        #[cfg(not(windows))]
+        {
+            fs::rename(project.root.join(directory), project.root.join(&moved)).unwrap();
+            fs::create_dir(project.root.join(directory)).unwrap();
+            fs::write(
+                project.root.join(directory).join(file_name),
+                br#"["Different source at the old path"]"#,
+            )
+            .unwrap();
+            let alias = format!("{moved}/{file_name}");
+            fs::write(project.root.join(&alias), br#"["Retained source"]"#).unwrap();
+            editor.register_extension_document::<Dialogue>().unwrap();
+            assert_eq!(
+                editor.open_extension_document::<Dialogue>(&alias),
+                Err(EditorExtensionDocumentHostError::SourceAlreadyOpen)
+            );
+        }
     }
 }
 
@@ -406,9 +477,26 @@ fn ordinary_document_open_rejects_a_case_alias_owned_by_an_extension() {
         return;
     }
     wait_for_browser_entry(&mut editor, path);
+    // First admit the exact stored spelling, then make the Browser path a case alias of it.
+    let stored = "worlds/EXTERNAL.SCENE.JSON";
+    let root = project.capability();
+    let original = root
+        .open_file_exact(&nara::fs::RelativePath::new(path).unwrap())
+        .unwrap();
+    fs::rename(project.root.join(path), project.root.join(stored)).unwrap();
     fs::write(project.root.join(alias), br#"["Dialogue source"]"#).unwrap();
     editor.register_extension_document::<Dialogue>().unwrap();
-    let document = editor.open_extension_document::<Dialogue>(alias).unwrap();
+    let document = editor.open_extension_document::<Dialogue>(stored).unwrap();
+    let owned = root
+        .open_file_exact(&nara::fs::RelativePath::new(stored).unwrap())
+        .unwrap();
+    assert!(original.same_object(&owned).unwrap());
+    fs::rename(project.root.join(stored), project.root.join(path)).unwrap();
+    let ordinary = root
+        .open_file_exact(&nara::fs::RelativePath::new(path).unwrap())
+        .unwrap();
+    assert!(owned.same_object(&ordinary).unwrap());
+    let before = editor.current_frame();
     let outcomes = dispatch(
         &mut editor,
         [EditorAction::ProjectBrowser(
@@ -425,6 +513,7 @@ fn ordinary_document_open_rejects_a_case_alias_owned_by_an_extension() {
             },
         )]
     ));
+    assert_eq!(editor.current_frame().workspace(), before.workspace());
     assert_eq!(line(&editor, document), "Dialogue source");
 }
 
@@ -516,7 +605,6 @@ fn extension_alias_checks_follow_atomic_save_replacement() {
     let project = DialogueProject::new();
     let previous_alias = "dialogue/before-save.json";
     let current_alias = "dialogue/after-save.json";
-    fs::hard_link(project.root.join(SOURCE), project.root.join(previous_alias)).unwrap();
     let root = project.capability();
     let original = root
         .open_file(&nara::fs::RelativePath::new(SOURCE).unwrap())
@@ -524,6 +612,8 @@ fn extension_alias_checks_follow_atomic_save_replacement() {
     let mut editor = open(&project);
     editor.register_extension_document::<Dialogue>().unwrap();
     let document = editor.open_extension_document::<Dialogue>(SOURCE).unwrap();
+    // Keep the previous object live, but add its alias only after strict initial admission.
+    fs::hard_link(project.root.join(SOURCE), project.root.join(previous_alias)).unwrap();
     edit(&mut editor, document, "Saved replacement");
     let revision = editor
         .current_frame()
