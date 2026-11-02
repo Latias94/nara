@@ -2862,6 +2862,27 @@ impl WgpuRenderHost {
         Ok(WgpuImageDisplay::issue(output))
     }
 
+    fn invalidate_replaced_world_presentations(
+        &mut self,
+        window: WindowId,
+        runtime_producer: Option<WgpuRenderProducerId>,
+    ) {
+        // Successful presentation replaces this window's pixels, even without a successor
+        // picking mapping. A Runtime also replaces its own producer's previous permission.
+        for (id, view) in &mut self.views {
+            if runtime_producer == Some(*id)
+                || view
+                    .runtime_presentation
+                    .as_ref()
+                    .is_some_and(|presented| presented.window.id == window)
+            {
+                view.world_presentation.invalidate();
+                view.runtime_presentation = None;
+                self.backend.retire_editor_world_presentation(*id);
+            }
+        }
+    }
+
     pub fn present_window(
         &mut self,
         window: RenderWindowPacket,
@@ -3003,6 +3024,7 @@ impl WgpuRenderHost {
         if let Some(error) = presentation_error {
             return Err(Self::native_error(error));
         }
+        self.invalidate_replaced_world_presentations(window.id, None);
         self.backend.record_editor_window_presentation();
         self.last_presentation_generation = presentation_generation;
         Ok(WgpuWindowFrameOutcome {

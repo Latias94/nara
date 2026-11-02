@@ -71,6 +71,19 @@ retired by their existing owners. Allow up to ten minutes for build/READY on a c
 
 ## Broader Qualification
 
+For changes to same-window Runtime interaction and public Host composition, execute the owning
+renderer regressions with the same explicit DX12 adapter prerequisites:
+
+```powershell
+cargo +1.95.0 nextest run -p nara_render_wgpu --all-features --lib --locked --run-ignored only -E 'test(native_window_clear_revokes_only_displaced_runtime_after_success) | test(native_unpickable_successor_revokes_displaced_world_without_issuing_permission)' --test-threads=1
+```
+
+These use actual Host presentation. Failed paint preserves the incumbent, a successful window
+clear revokes the displaced Runtime's pointer authority, another window stays current, and an
+immutable retained image remains readable. A successor without picking data still displaces
+its producer's old presentation. This establishes the selected Host interaction transitions,
+not monitor scanout or complete Editor frontend qualification.
+
 When the change affects image/Canvas workflows, project opening, docking/layout, or supervised builds, also execute the corresponding ignored native tests.
 For selected stock-stage policies, Scene rendering adapters or picking independent of the concrete
 policy, execute the independent effects through the actual native Scene View:

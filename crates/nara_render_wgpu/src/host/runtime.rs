@@ -32,7 +32,7 @@ pub struct WgpuRuntimeMaintenance {
 
 pub(super) struct RuntimeWorldPresentation {
     _guard: nara_render::__private::WorldPresentationGuard,
-    window: nara_render::RenderWindowPacket,
+    pub(super) window: nara_render::RenderWindowPacket,
     canvas: Option<nara_render::WorldCanvasFrame>,
 }
 
@@ -494,21 +494,7 @@ impl WgpuRenderHost {
         let RenderFrameTarget::Window(window) = packet.target() else {
             return Ok(None);
         };
-        // A successful surface present replaces pixels in this physical target, including
-        // a different Runtime's last frame, even if its successor has no picking mapping.
-        // Presentations in other windows remain current.
-        for (other_id, view) in &mut self.views {
-            if *other_id == id
-                || view
-                    .runtime_presentation
-                    .as_ref()
-                    .is_some_and(|presented| presented.window.id == window.id)
-            {
-                view.world_presentation.invalidate();
-                view.runtime_presentation = None;
-                self.backend.retire_editor_world_presentation(*other_id);
-            }
-        }
+        self.invalidate_replaced_world_presentations(window.id, Some(id));
         let Some((snapshot, guard)) = nara_render::__private::prepare_world_presentation(packet)
         else {
             return Ok(None);

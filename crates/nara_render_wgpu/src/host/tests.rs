@@ -2232,7 +2232,7 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
     drain_submission_prefix(&replacement.retire_producer(&replacement_producer).unwrap());
 }
 
-fn read_output_pixel(
+pub(super) fn read_output_pixel(
     execution: &mut WgpuRenderHost,
     output: &WgpuImageOutput,
     x: u32,
