@@ -1,7 +1,7 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, ExitStatus},
 };
 
 use thiserror::Error;
@@ -10,13 +10,15 @@ use super::cargo_build::{
     CargoBuildFailure, CargoBuildTools, bounded_status_output as bounded_output, parse_host_target,
 };
 use super::{ProjectToolFailure, ProjectToolRequest, ProjectToolSummary, protocol};
-use crate::project_workflow::cargo::{CargoBuildDecoder, CargoBuildSelection, CargoMetadataFacts};
+use crate::project_workflow::cargo::{
+    CargoBuildDecoder, CargoBuildInvocation, CargoBuildSelection, CargoMetadataFacts,
+};
 
 #[derive(Debug, Error)]
 pub enum ProjectToolInvocationError {
     #[error("failed to resolve the explicit project or export directory")]
     Resolve(#[source] io::Error),
-    #[error(transparent)]
+    #[error("{0}{details}", details = bootstrap_failure_details(.0))]
     ProcessOwner(#[from] CargoBuildFailure),
     #[error("{0}")]
     Bootstrap(String),
@@ -24,6 +26,37 @@ pub enum ProjectToolInvocationError {
     Protocol(&'static str),
     #[error("{0}")]
     Project(ProjectToolFailure),
+}
+
+fn bootstrap_failure_details(failure: &CargoBuildFailure) -> String {
+    let CargoBuildFailure::Compilation {
+        status,
+        diagnostics,
+        protocol,
+    } = failure
+    else {
+        return String::new();
+    };
+    let mut details = format!(" ({status})");
+    if let Some(error) = protocol {
+        details.push_str(&format!("\n{error}"));
+    }
+    for diagnostic in diagnostics.entries() {
+        details.push('\n');
+        if let Some(code) = diagnostic.code() {
+            details.push_str(code);
+            details.push_str(": ");
+        }
+        details.push_str(diagnostic.message());
+    }
+    if diagnostics.dropped_count() != 0 || diagnostics.truncated_count() != 0 {
+        details.push_str(&format!(
+            "\nCargo diagnostics: {} omitted, {} truncated",
+            diagnostics.dropped_count(),
+            diagnostics.truncated_count(),
+        ));
+    }
+    details
 }
 
 /// Builds the existing headless entry and delegates an operation without admitting project data.
@@ -245,20 +278,31 @@ fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolI
         build.args(["--features", "desktop"]);
     }
     let (status, bytes) = bounded_output(&mut build, 64 * 1024 * 1024)?;
-    if !status.success() {
-        return Err(ProjectToolInvocationError::Bootstrap("the project headless bootstrap build failed; fix its Cargo diagnostics before running the project tool".to_owned()));
-    }
+    finish_bootstrap_build(status, &bytes, invocation)
+}
+
+fn finish_bootstrap_build(
+    status: ExitStatus,
+    bytes: &[u8],
+    invocation: CargoBuildInvocation,
+) -> Result<PathBuf, ProjectToolInvocationError> {
     let mut decoder = CargoBuildDecoder::new(invocation);
-    decoder
-        .push(&bytes)
-        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    let selected = decoder
-        .finish()
-        .map_err(|error| ProjectToolInvocationError::Bootstrap(error.to_string()))?;
-    for diagnostic in selected.diagnostics().entries() {
-        eprintln!("{}", diagnostic.message());
+    let decoded = decoder.push(bytes).and_then(|()| decoder.finish());
+    match decoded {
+        Ok(selected) if status.success() => {
+            for diagnostic in selected.diagnostics().entries() {
+                eprintln!("{}", diagnostic.message());
+            }
+            Ok(selected.artifact().executable().to_owned())
+        }
+        decoded => Err(CargoBuildFailure::Compilation {
+            status,
+            // Both push and finish can reject after observing actionable compiler messages.
+            diagnostics: decoder.diagnostics(),
+            protocol: decoded.err(),
+        }
+        .into()),
     }
-    Ok(selected.artifact().executable().to_owned())
 }
 
 fn paths_match(left: &Path, right: &Path) -> bool {
@@ -275,5 +319,206 @@ fn paths_match(left: &Path, right: &Path) -> bool {
     #[cfg(not(windows))]
     {
         left == right
+    }
+}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod build_tests {
+    #[cfg(target_os = "linux")]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::project_workflow::cargo::CargoBuildError;
+
+    const DIAGNOSTIC: &str = "bootstrap compiler diagnostic must survive failure";
+    const PACKAGE_ID: &str = "bootstrap-test-package-id";
+
+    #[test]
+    fn failed_compilation_keeps_its_diagnostics_status_and_protocol_error() {
+        let mut output = diagnostic_output("error", DIAGNOSTIC);
+        output.extend_from_slice(b"{\"reason\":\"build-finished\",\"success\":false}\n");
+        let error = finish_bootstrap_build(exit_status(false), &output, invocation()).unwrap_err();
+        let displayed = error.to_string();
+        assert!(displayed.contains(DIAGNOSTIC), "{displayed}");
+        assert!(
+            displayed.contains(&exit_status(false).to_string()),
+            "{displayed}",
+        );
+        let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+            status,
+            diagnostics,
+            protocol,
+        }) = error
+        else {
+            panic!("bootstrap must retain the structured compilation failure")
+        };
+        assert_eq!(status, exit_status(false));
+        assert!(matches!(protocol, Some(CargoBuildError::BuildFailed)));
+        assert_eq!(diagnostics.entries()[0].message(), DIAGNOSTIC);
+    }
+
+    #[test]
+    fn decoder_push_failure_keeps_prior_diagnostics_and_the_original_protocol_error() {
+        let mut output = diagnostic_output("error", DIAGNOSTIC);
+        output.extend_from_slice(b"invalid Cargo JSON\n");
+        let error = finish_bootstrap_build(exit_status(true), &output, invocation()).unwrap_err();
+        let displayed = error.to_string();
+        assert!(displayed.contains(DIAGNOSTIC), "{displayed}");
+        let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+            status,
+            diagnostics,
+            protocol,
+        }) = error
+        else {
+            panic!("bootstrap must retain a rejected stream's diagnostics and protocol error")
+        };
+        assert!(status.success());
+        assert_eq!(diagnostics.entries()[0].message(), DIAGNOSTIC);
+        assert!(matches!(protocol, Some(CargoBuildError::Message(_))));
+    }
+
+    #[test]
+    fn decoder_finish_failure_keeps_diagnostics_even_after_a_successful_exit() {
+        let mut output = diagnostic_output("error", DIAGNOSTIC);
+        // finish must admit the final unterminated diagnostic before rejecting the missing result.
+        assert_eq!(output.pop(), Some(b'\n'));
+        let error = finish_bootstrap_build(exit_status(true), &output, invocation()).unwrap_err();
+        let displayed = error.to_string();
+        assert!(displayed.contains(DIAGNOSTIC), "{displayed}");
+        assert!(
+            displayed.contains("Cargo did not emit build-finished"),
+            "{displayed}",
+        );
+        assert!(matches!(
+            error,
+            ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+                status,
+                protocol: Some(CargoBuildError::MissingBuildFinished),
+                ..
+            }) if status.success()
+        ));
+    }
+
+    #[test]
+    fn complete_artifact_selection_still_requires_a_successful_process_exit() {
+        let invocation = invocation();
+        let executable = invocation
+            .target_directory()
+            .join(invocation.target_triple())
+            .join("debug/exact-cargo-reported-executable");
+        let artifact = json!({
+            "reason": "compiler-artifact", "package_id": PACKAGE_ID,
+            "manifest_path": invocation.manifest_path(),
+            "target": {
+                "kind": ["bin"], "crate_types": ["bin"], "name": "headless",
+                "src_path": invocation.source_path(), "required-features": []
+            },
+            "profile": {"test": false}, "features": [],
+            "executable": executable, "fresh": false
+        });
+        let mut output = diagnostic_output("warning", DIAGNOSTIC);
+        serde_json::to_writer(&mut output, &artifact).unwrap();
+        output.extend_from_slice(b"\n{\"reason\":\"build-finished\",\"success\":true}\n");
+        let error =
+            finish_bootstrap_build(exit_status(false), &output, invocation.clone()).unwrap_err();
+        assert!(error.to_string().contains(DIAGNOSTIC));
+        assert!(matches!(
+            error,
+            ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+                status,
+                protocol: None,
+                ..
+            }) if !status.success()
+        ));
+        assert_eq!(
+            finish_bootstrap_build(exit_status(true), &output, invocation).unwrap(),
+            executable,
+        );
+    }
+
+    #[test]
+    fn bootstrap_failure_display_keeps_decoder_diagnostic_bounds_and_loss_facts() {
+        let long_message = "⚠".repeat(6_000);
+        let mut output = diagnostic_output("error", &long_message);
+        for _ in 0..256 {
+            output.extend_from_slice(&diagnostic_output("error", DIAGNOSTIC));
+        }
+        output.extend_from_slice(b"{\"reason\":\"build-finished\",\"success\":false}\n");
+        let error = finish_bootstrap_build(exit_status(false), &output, invocation()).unwrap_err();
+        let displayed = error.to_string();
+        assert!(displayed.contains("1 omitted, 1 truncated"), "{displayed}");
+        assert!(!displayed.contains(&long_message));
+        let ProjectToolInvocationError::ProcessOwner(CargoBuildFailure::Compilation {
+            diagnostics,
+            ..
+        }) = error
+        else {
+            panic!("bootstrap must keep the decoder's bounded diagnostic summary")
+        };
+        assert_eq!(diagnostics.entries().len(), 256);
+        assert_eq!(diagnostics.dropped_count(), 1);
+        assert_eq!(diagnostics.truncated_count(), 1);
+    }
+
+    fn invocation() -> CargoBuildInvocation {
+        let root = if cfg!(windows) {
+            PathBuf::from(r"C:\bootstrap-test")
+        } else {
+            PathBuf::from("/bootstrap-test")
+        };
+        let manifest = root.join("Cargo.toml");
+        let selection = CargoBuildSelection::new(
+            "bootstrap-test",
+            "headless",
+            "dev",
+            "x86_64-unknown-linux-gnu",
+            std::iter::empty::<&str>(),
+            false,
+        )
+        .unwrap();
+        let metadata = json!({
+            "version": 1,
+            "packages": [{
+                "name": "bootstrap-test", "version": "0.0.0", "id": PACKAGE_ID, "source": null,
+                "manifest_path": manifest, "features": {},
+                "targets": [{
+                    "kind": ["bin"], "crate_types": ["bin"], "name": "headless",
+                    "src_path": root.join("src/bin/headless.rs"), "required-features": []
+                }]
+            }],
+            "workspace_members": [PACKAGE_ID], "workspace_root": root,
+            "target_directory": root.join("target"),
+            "resolve": {"nodes": [{"id": PACKAGE_ID, "features": []}]}
+        });
+        CargoMetadataFacts::parse(
+            &serde_json::to_vec(&metadata).unwrap(),
+            &manifest,
+            &selection,
+        )
+        .unwrap()
+        .build_invocation(selection)
+        .unwrap()
+    }
+
+    fn diagnostic_output(level: &str, message: &str) -> Vec<u8> {
+        let mut output = serde_json::to_vec(&json!({
+            "reason": "compiler-message",
+            "message": {"level": level, "code": null, "message": message}
+        }))
+        .unwrap();
+        output.push(b'\n');
+        output
+    }
+
+    fn exit_status(success: bool) -> ExitStatus {
+        #[cfg(windows)]
+        let code = if success { 0 } else { 101 };
+        #[cfg(target_os = "linux")]
+        let code = if success { 0 } else { 101 << 8 };
+        ExitStatus::from_raw(code)
     }
 }
