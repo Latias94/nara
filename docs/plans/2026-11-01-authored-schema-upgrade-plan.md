@@ -393,7 +393,12 @@ attempts, recovery, confirmation and publication together. The new work meter st
 with inherited content and original custody admission. Its selected ceiling cannot increase during
 a retry. Report work exhaustion
 specifically; cancellation can end that operation before a caller starts another with an explicit
-ceiling. Source preparation, retained storage and native handles keep their independent limits.
+ceiling. A fresh operation chooses a distinct recovery publication destination even for an
+identical proposal; a cancelled operation's durable package must not block this retry. Retrying
+within one operation retains its exact path and observations. Existing or competing destination
+bytes still refuse replacement. Qualify recovery publication followed by pre-Pending refusal,
+actual task return, cancellation and successful unchanged-proposal retry with adequate limits.
+Source preparation, retained storage and native handles keep their independent limits.
 The installed Schema's ordinary capture policy and live storage/custody admission are separate
 from the completed upgrade's work evidence. Ready installation must not export the upgrade's
 larger allowance or consumed historical work to subsequent ordinary captures or a new upgrade.

@@ -40,6 +40,8 @@ pub(crate) enum AuthoredSourceUpgradePublicationFailure {
     Original(#[from] SourceUpgradePreparationError),
     #[error("recovery publication was refused")]
     Storage(#[from] RecoveryStorageError),
+    #[error("the recovery publication identity could not be generated")]
+    RecoveryIdentity(#[source] getrandom::Error),
     #[error("source publication was refused")]
     Source(#[from] SourceUpgradePublicationError),
     #[error("the successor complete inventory was refused")]
@@ -529,20 +531,33 @@ impl AuthoredSourceUpgradePublication {
                         Err(error) => return (Stage::CaptureStorage, Some(E::Source(error))),
                     }
                 }
-                // A unique root-level leaf needs no hidden-directory creation authority.
-                // The package remains durable recovery data after the operation completes.
+                // A fresh publication identity separates identical proposals, including across
+                // processes. Retain the exact path on retry; cancelled packages stay durable.
+                // A root-level leaf needs no hidden-directory creation authority.
                 if self.recovery_path.is_none() {
-                    let path_bytes = 32 + 64;
+                    let path_bytes = ".nara-authored-upgrade-".len() + 64 + 1 + 32 + ".json".len();
+                    let retained_before = self.budget.retained_candidate_bytes;
                     if let Err(error) = self
                         .budget
                         .charge_source_bytes(0, 0, path_bytes, path_bytes)
                     {
+                        let unused = self.budget.retained_candidate_bytes - retained_before;
+                        self.release_installation_storage(unused);
                         return (Stage::CaptureStorage, Some(E::Admission(error)));
+                    }
+                    let mut identity = [0_u8; 16];
+                    if let Err(error) = getrandom::fill(&mut identity) {
+                        self.release_installation_storage(path_bytes);
+                        return (Stage::CaptureStorage, Some(E::RecoveryIdentity(error)));
                     }
                     let mut path = String::with_capacity(path_bytes);
                     path.push_str(".nara-authored-upgrade-");
                     use std::fmt::Write as _;
                     for byte in self.sources().recovery().digest().as_bytes() {
+                        write!(&mut path, "{byte:02x}").expect("String formatting is infallible");
+                    }
+                    path.push('-');
+                    for byte in identity {
                         write!(&mut path, "{byte:02x}").expect("String formatting is infallible");
                     }
                     path.push_str(".json");

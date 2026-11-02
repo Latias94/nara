@@ -15,6 +15,24 @@ fn prepared(editor: &mut EditorProjectSession) -> EditorAuthoredSchemaUpgradeId 
     operation
 }
 
+fn recovery_packages(fixture: &Fixture) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    fs::read_dir(&fixture.root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(".nara-authored-upgrade-")
+        })
+        .map(|path| {
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
+        })
+        .collect()
+}
+
 #[test]
 fn confirmed_complete_upgrade_publishes_ready_and_installs_all_dirty_and_closed_sources() {
     let fixture = enemy_fixture();
@@ -257,7 +275,7 @@ fn complete_membership_changed_after_review_refuses_before_pending_and_retains_t
 }
 
 #[test]
-fn pending_prepublication_work_refusal_keeps_ready_and_can_cancel_after_actual_return() {
+fn pending_prepublication_work_refusal_can_cancel_and_restart_the_identical_proposal() {
     let fixture = enemy_fixture();
     fixture.run(|editor| {
         let document = editor.workspace().active_document().unwrap();
@@ -265,6 +283,12 @@ fn pending_prepublication_work_refusal_keeps_ready_and_can_cancel_after_actual_r
         let before = state(editor, document);
         let disk = fixture.disk();
         let operation = prepared(editor);
+        let expected: Vec<_> = editor
+            .authored_schema_upgrade_review(operation)
+            .unwrap()
+            .sources()
+            .map(|source| (source.project_path.to_owned(), source.successor.to_vec()))
+            .collect();
         editor.confirm_authored_schema_upgrade(operation).unwrap();
         editor
             .authored_schema_upgrade
@@ -284,6 +308,17 @@ fn pending_prepublication_work_refusal_keeps_ready_and_can_cancel_after_actual_r
             view.can_cancel(),
             "a proven pre-publisher refusal keeps the old generation cancellable: {view:?}"
         );
+        assert_eq!(
+            view.refusal,
+            Some(EditorAuthoredSchemaUpgradeError::WorkLimit)
+        );
+        assert!(!view.can_retry());
+        let retained = recovery_packages(&fixture);
+        assert_eq!(
+            retained.len(),
+            1,
+            "recovery must precede the refused Pending"
+        );
         assert_eq!(fixture.disk(), disk);
         assert_eq!(state(editor, document), before);
         editor.cancel_authored_schema_upgrade(operation).unwrap();
@@ -293,6 +328,64 @@ fn pending_prepublication_work_refusal_keeps_ready_and_can_cancel_after_actual_r
         });
         cancelled(editor, operation);
         assert_eq!(fixture.disk(), disk);
+        assert_eq!(state(editor, document), before);
+        assert_eq!(recovery_packages(&fixture), retained);
+
+        let next_operation = prepared(editor);
+        assert_ne!(next_operation, operation);
+        assert_eq!(
+            editor
+                .authored_schema_upgrade_review(next_operation)
+                .unwrap()
+                .sources()
+                .map(|source| (source.project_path.to_owned(), source.successor.to_vec()))
+                .collect::<Vec<_>>(),
+            expected
+        );
+        editor
+            .confirm_authored_schema_upgrade(next_operation)
+            .unwrap();
+        wait(editor, |editor| {
+            !editor.authored_schema_upgrade_view().work_pending
+        });
+        let view = editor.authored_schema_upgrade_view();
+        assert_eq!(
+            view.outcome,
+            Some(EditorAuthoredSchemaUpgradeOutcome::Adopted),
+            "{view:?}; {:?}",
+            editor
+                .authored_schema_upgrade
+                .publication
+                .as_ref()
+                .and_then(|publication| publication.failure())
+        );
+        assert!(!view.writes_fenced);
+        assert!(matches!(
+            nara_project::ProjectManifest::parse_toml_bytes(&fixture.bytes("nara.toml"))
+                .manifest
+                .unwrap()
+                .authoring
+                .state,
+            nara_project::ProjectAuthoringState::Ready
+        ));
+        for (path, bytes) in expected {
+            assert_eq!(fixture.bytes(&path), bytes, "{path}");
+        }
+        assert!(!state(editor, document).dirty);
+        let packages = recovery_packages(&fixture);
+        assert_eq!(
+            packages.len(),
+            2,
+            "each operation owns a distinct destination"
+        );
+        for (path, bytes) in &retained {
+            assert_eq!(packages.get(path), Some(bytes));
+        }
+        let original_bytes = retained.values().next().unwrap();
+        assert!(
+            packages.values().all(|bytes| bytes == original_bytes),
+            "identical proposals retain identical recovery bytes at distinct paths"
+        );
     });
 }
 

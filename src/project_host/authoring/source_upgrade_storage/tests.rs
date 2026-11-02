@@ -498,6 +498,37 @@ fn existing_or_competing_recovery_leaf_is_never_replaced() {
 }
 
 #[test]
+fn matching_recovery_bytes_at_an_existing_destination_are_not_reused() {
+    let fixture = Fixture::new();
+    let mut work = budget();
+    let recovery = fixture.package(&mut work).into_shared(&mut work).unwrap();
+    fs::write(
+        fixture.directory.join(RECOVERY_PATH),
+        recovery.encoded_bytes(),
+    )
+    .unwrap();
+    let host = RecoveryStorageHost::capture(fixture.root.share(), &mut work).unwrap();
+    let Err(refusal) = host.prepare(
+        Arc::clone(&recovery),
+        ProjectPath::new(RECOVERY_PATH).unwrap(),
+        &mut work,
+    ) else {
+        panic!("matching bytes do not grant publication ownership of an existing destination");
+    };
+    assert!(matches!(
+        &refusal.error,
+        RecoveryStorageError::RecoveryAlreadyExists
+    ));
+    assert_eq!(refusal.path.as_str(), RECOVERY_PATH);
+    assert!(Arc::ptr_eq(&refusal.recovery, &recovery));
+    assert_eq!(
+        fs::read(fixture.directory.join(RECOVERY_PATH)).unwrap(),
+        recovery.encoded_bytes()
+    );
+    fixture.assert_original_ready();
+}
+
+#[test]
 fn capture_refusal_drops_only_new_storage_and_handles_while_work_accumulates() {
     let fixture = Fixture::new();
     fs::write(
