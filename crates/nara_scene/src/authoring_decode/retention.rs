@@ -8,7 +8,8 @@ use std::mem::size_of;
 
 use super::*;
 use crate::{
-    PrefabInstanceHop, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+    PrefabInstanceHop, SceneEntityPlacement, ScenePlacement, ScenePlacementParent,
+    ScenePlacementSlot,
     prefab::{PrefabOverlayCostLimits, prefab_instance_cost},
     provenance::{provenance_asset_ref_bytes, provenance_string_bytes},
 };
@@ -134,6 +135,9 @@ impl AuthoringDocumentState {
                 .checked_add(cost.value_cost.nodes().checked_mul(96)?)?
                 .checked_add(cost.logical_bytes())?;
         }
+        bytes = bytes.checked_add(source_placements_bytes(
+            &self.unavailable_manifest.source_placements,
+        )?)?;
         Some(bytes)
     }
 }
@@ -233,16 +237,29 @@ pub(super) fn placement_dynamic_bytes(placement: Option<&ScenePlacement>) -> Opt
     let Some(placement) = placement else {
         return Some(0);
     };
-    let bytes = match &placement.owner {
-        ScenePlacementOwner::Root => 0,
-        ScenePlacementOwner::Parent { parent } => provenance_string_bytes(parent.as_str())?,
+    let bytes = match &placement.parent {
+        ScenePlacementParent::Root => 0,
+        ScenePlacementParent::Entity(parent) => target_dynamic_bytes(parent)?,
     };
-    match &placement.anchor {
-        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
-            bytes.checked_add(provenance_string_bytes(sibling.as_str())?)
+    match &placement.slot {
+        ScenePlacementSlot::Before(sibling) | ScenePlacementSlot::After(sibling) => {
+            bytes.checked_add(target_dynamic_bytes(sibling)?)
         }
-        ScenePlacementAnchor::First | ScenePlacementAnchor::Last => Some(bytes),
+        ScenePlacementSlot::First | ScenePlacementSlot::Last => Some(bytes),
     }
+}
+
+pub(super) fn source_placements_bytes(placements: &[SceneEntityPlacement]) -> Option<usize> {
+    placements.iter().try_fold(
+        placements
+            .len()
+            .checked_mul(size_of::<SceneEntityPlacement>())?,
+        |bytes, declaration| {
+            bytes
+                .checked_add(target_dynamic_bytes(&declaration.target)?)?
+                .checked_add(placement_dynamic_bytes(Some(&declaration.placement))?)
+        },
+    )
 }
 
 fn unavailable_record_dynamic_bytes(

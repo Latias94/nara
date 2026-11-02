@@ -136,7 +136,7 @@ where
         let mut active = Vec::<(ScopeId, ReferenceInputId)>::new();
         loop {
             let mut current = declaring_scope;
-            for hop in &reference.through {
+            for (index, hop) in reference.through.iter().enumerate() {
                 self.admit(Some(size_of::<ScopeId>() + size_of::<NodeId>()))?;
                 let Some(&anchor) = self.scopes[current].nodes.get(&hop.anchor) else {
                     return Ok(ReferenceResolution::invalid(
@@ -144,7 +144,12 @@ where
                     ));
                 };
                 let previous = self.scopes.len();
-                let entered = self.open_slot(anchor)?;
+                let entered = self.open_reference_slot(
+                    anchor,
+                    &reference,
+                    reference.through.len() - index - 1,
+                    declaring_scope,
+                )?;
                 if previous != self.scopes.len() {
                     return Ok(ReferenceResolution::Entered);
                 }

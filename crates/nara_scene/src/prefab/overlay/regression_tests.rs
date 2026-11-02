@@ -793,8 +793,8 @@ mod expansion {
     use crate::{
         AuthoringDocumentSource, InMemoryPrefabSourceResolver, PrefabDocument,
         PrefabProjectionStep, SceneAuthoringSession, SceneCompilationReport, SceneDocument,
-        SceneDocumentCandidate, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-        ScenePlacement, ScenePlacementOwner,
+        SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
     };
 
     fn id(name: &str) -> SceneEntityId {
@@ -846,9 +846,8 @@ mod expansion {
     ) -> SceneEntityRecord {
         let mut record = SceneEntityRecord::new(id(name));
         record.prefab = Some(PrefabInstance {
-            source,
-            arguments: None,
             overrides,
+            ..PrefabInstance::forest(source)
         });
         record
     }
@@ -1020,14 +1019,10 @@ mod expansion {
 
     fn place(
         target: PrefabEntityTarget,
-        parent: PrefabPlacementParent,
-        slot: PrefabPlacementSlot,
-    ) -> PrefabPlacement {
-        PrefabPlacement {
-            target,
-            parent,
-            slot,
-        }
+        parent: ScenePlacementParent,
+        slot: ScenePlacementSlot,
+    ) -> SceneEntityPlacement {
+        SceneEntityPlacement::new(target, ScenePlacement { parent, slot })
     }
 
     fn local(name: &str) -> ComponentValue {
@@ -1106,10 +1101,15 @@ mod expansion {
     #[test]
     fn desired_placement_rebases_while_exact_source_move_keeps_its_precondition() {
         let original = outer(&["socket", "nest_a", "nest_b", "tail"]);
-        let patch = ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
-            entity: id("tail"),
-            from: ScenePlacement::current_prefab(&original, &id("tail")).unwrap(),
-            to: ScenePlacement::after(ScenePlacementOwner::Root, id("socket")),
+        let mut value = original.placements.clone();
+        value
+            .iter_mut()
+            .find(|entry| entry.target == direct("tail"))
+            .unwrap()
+            .placement = ScenePlacement::after(ScenePlacementParent::Root, direct("socket"));
+        let patch = ScenePatchDocument::new([ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value,
         }]);
         assert!(
             patch
@@ -1123,8 +1123,8 @@ mod expansion {
         let mut overlay = PrefabOverlay::new(key("outer"));
         overlay.placements.push(place(
             direct("tail"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::After(direct("socket")),
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::After(direct("socket")),
         ));
         let encoded = serde_json::to_vec(&overlay).unwrap();
         assert!(
@@ -1163,13 +1163,13 @@ mod expansion {
         overlay.placements = vec![
             place(
                 added("first"),
-                PrefabPlacementParent::Root,
-                PrefabPlacementSlot::Before(direct("tail")),
+                ScenePlacementParent::Root,
+                ScenePlacementSlot::Before(direct("tail")),
             ),
             place(
                 added("second"),
-                PrefabPlacementParent::Root,
-                PrefabPlacementSlot::Before(direct("tail")),
+                ScenePlacementParent::Root,
+                ScenePlacementSlot::Before(direct("tail")),
             ),
         ];
         for reverse in [false, true] {
@@ -1208,13 +1208,13 @@ mod expansion {
         overlay.placements = vec![
             place(
                 direct("nest_a"),
-                PrefabPlacementParent::Entity(nested("nest_a", "socket")),
-                PrefabPlacementSlot::Last,
+                ScenePlacementParent::Entity(nested("nest_a", "socket")),
+                ScenePlacementSlot::Last,
             ),
             place(
                 nested("nest_a", "socket"),
-                PrefabPlacementParent::Root,
-                PrefabPlacementSlot::First,
+                ScenePlacementParent::Root,
+                ScenePlacementSlot::First,
             ),
         ];
         let report = accepted(
@@ -1268,41 +1268,41 @@ mod expansion {
         let cases = [
             vec![place(
                 direct("socket"),
-                PrefabPlacementParent::Root,
-                PrefabPlacementSlot::Before(direct("missing")),
+                ScenePlacementParent::Root,
+                ScenePlacementSlot::Before(direct("missing")),
             )],
             vec![place(
                 nested("nest_a", "socket"),
-                PrefabPlacementParent::Entity(direct("nest_a")),
-                PrefabPlacementSlot::Before(nested("nest_b", "socket")),
+                ScenePlacementParent::Entity(direct("nest_a")),
+                ScenePlacementSlot::Before(nested("nest_b", "socket")),
             )],
             vec![
                 place(
                     direct("socket"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::After(direct("tail")),
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::After(direct("tail")),
                 ),
                 place(
                     direct("tail"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::After(direct("socket")),
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::After(direct("socket")),
                 ),
             ],
             vec![place(
                 direct("nest_a"),
-                PrefabPlacementParent::Entity(nested("nest_a", "socket")),
-                PrefabPlacementSlot::Last,
+                ScenePlacementParent::Entity(nested("nest_a", "socket")),
+                ScenePlacementSlot::Last,
             )],
             vec![
                 place(
                     direct("socket"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::First,
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::First,
                 ),
                 place(
                     direct("socket"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::Last,
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::Last,
                 ),
             ],
         ];
@@ -1335,8 +1335,8 @@ mod expansion {
         let mut overlay = PrefabOverlay::new(key("outer"));
         overlay.placements.push(place(
             direct("socket"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::Before(direct("tail")),
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::Before(direct("tail")),
         ));
         rejected(outer(&["socket"]), overlay.clone());
         let source = scene(overlay, true);
@@ -1362,8 +1362,8 @@ mod expansion {
             if mode == 1 {
                 overlay.placements.push(place(
                     direct("tail"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::After(direct("socket")),
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::After(direct("socket")),
                 ));
             }
             if mode == 2 {
@@ -1371,26 +1371,37 @@ mod expansion {
                 overlay.placements = vec![
                     place(
                         direct("tail"),
-                        PrefabPlacementParent::Root,
-                        PrefabPlacementSlot::First,
+                        ScenePlacementParent::Root,
+                        ScenePlacementSlot::First,
                     ),
                     place(
                         added("addition"),
-                        PrefabPlacementParent::Root,
-                        PrefabPlacementSlot::Last,
+                        ScenePlacementParent::Root,
+                        ScenePlacementSlot::Last,
                     ),
                 ];
             }
             let mut document = scene(overlay.clone(), true);
             document
-                .entities
+                .placements
                 .iter_mut()
-                .find(|record| record.id == id("host_a"))
+                .find(|entry| entry.target == direct("socket"))
                 .unwrap()
-                .children = vec![id("local_a"), id("local_b")];
-            document.roots.retain(|entity| entity != &id("socket"));
+                .placement = ScenePlacement::last(ScenePlacementParent::Entity(direct("local_a")));
+            document.placements.extend([
+                place(
+                    direct("local_a"),
+                    ScenePlacementParent::Entity(direct("host_a")),
+                    ScenePlacementSlot::Last,
+                ),
+                place(
+                    direct("local_b"),
+                    ScenePlacementParent::Entity(direct("host_a")),
+                    ScenePlacementSlot::After(direct("local_a")),
+                ),
+            ]);
             document.entities.extend([
-                SceneEntityRecord::new(id("local_a")).with_children([id("socket")]),
+                SceneEntityRecord::new(id("local_a")),
                 SceneEntityRecord::new(id("local_b")),
             ]);
             let before = document.clone();
@@ -1406,7 +1417,11 @@ mod expansion {
             }
             expected.extend([id("local_a"), id("local_b")]);
             assert_eq!(children(&report, &id("host_a")), expected);
-            for name in ["local_a", "local_b", "socket"] {
+            for (name, expected_children) in [
+                ("local_a", vec![id("socket")]),
+                ("local_b", Vec::new()),
+                ("socket", Vec::new()),
+            ] {
                 let actual = record(&report, &id(name));
                 let expected = document
                     .entities
@@ -1414,7 +1429,7 @@ mod expansion {
                     .find(|record| record.id == id(name))
                     .unwrap();
                 assert_eq!(actual.id(), &expected.id);
-                assert_eq!(actual.children(), expected.children);
+                assert_eq!(actual.children(), expected_children);
                 assert_eq!(actual.components().len(), expected.components.len());
                 for (component, expected) in &expected.components {
                     let actual = &actual.components()[component];
@@ -1451,8 +1466,8 @@ mod expansion {
             .push(PrefabAddition::new(id("added_leaf")));
         leaf_overlay.placements.push(place(
             added("added_leaf"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::Last,
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::Last,
         ));
         let base = PrefabDocument::from_ordered_roots([
             instance("nested", path("leaf"), Some(leaf_overlay.clone())),
@@ -1461,15 +1476,14 @@ mod expansion {
         let mut overlay = PrefabOverlay::new(key("outer"));
         let mut anchor = PrefabAddition::new(id("added_anchor"));
         anchor.prefab = Some(PrefabInstance {
-            source: path("leaf"),
-            arguments: None,
             overrides: Some(leaf_overlay),
+            ..PrefabInstance::forest(path("leaf"))
         });
         overlay.additions.push(anchor);
         overlay.placements.push(place(
             added("added_anchor"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::Last,
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::Last,
         ));
         let inherited_addition = inside(
             PrefabEntityOrigin::SourceEntity(id("nested")),
@@ -1630,8 +1644,8 @@ mod expansion {
         overlay.additions.push(addition);
         overlay.placements.push(place(
             added("socket"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::Before(direct("socket")),
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::Before(direct("socket")),
         ));
         overlay.components = vec![
             link(
@@ -1897,8 +1911,8 @@ mod expansion {
                     .push(PrefabAddition::new(id("only_addition")));
                 inner_overlay.placements.push(place(
                     added("only_addition"),
-                    PrefabPlacementParent::Root,
-                    PrefabPlacementSlot::Last,
+                    ScenePlacementParent::Root,
+                    ScenePlacementSlot::Last,
                 ));
                 let root = if nested_layer {
                     PrefabDocument::from_ordered_roots([instance(
@@ -2296,8 +2310,8 @@ mod expansion {
         overlay.additions.push(addition);
         overlay.placements.push(place(
             added("socket"),
-            PrefabPlacementParent::Root,
-            PrefabPlacementSlot::Last,
+            ScenePlacementParent::Root,
+            ScenePlacementSlot::Last,
         ));
         let source = scene(overlay, true);
         let published = SceneDocumentCandidate::decode_json_str(&source.to_json_string().unwrap())

@@ -34,20 +34,31 @@ fn basis() -> AuthoringSchemaBasis {
 }
 
 fn document() -> SceneDocument {
-    let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("ordinary")]);
+    let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/relationships.prefab.ron").unwrap(),
         arguments: None,
         overrides: None,
     });
     let mut unrelated = SceneEntityRecord::new(id("unrelated"));
     unrelated.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/missing.prefab.ron").unwrap(),
         arguments: None,
         overrides: None,
     });
     SceneDocument::new(
-        [id("anchor"), id("unrelated")],
+        [
+            nara_scene::SceneEntityPlacement::root(id("anchor")),
+            nara_scene::SceneEntityPlacement::root(id("unrelated")),
+            nara_scene::SceneEntityPlacement::new(
+                nara_scene::PrefabEntityTarget::source(id("ordinary")),
+                nara_scene::ScenePlacement::last(nara_scene::ScenePlacementParent::Entity(
+                    nara_scene::PrefabEntityTarget::source(id("anchor")),
+                )),
+            ),
+        ],
         [anchor, unrelated, SceneEntityRecord::new(id("ordinary"))],
     )
 }
@@ -59,7 +70,7 @@ fn source(basis: &AuthoringSchemaBasis, request: &AssetRef) -> ResolvedPrefabSou
     );
     let document = nested_schema::document();
     ResolvedPrefabSource::bound_authoring_source(
-        Arc::new(PrefabDocument::new(document.roots, document.entities)),
+        Arc::new(PrefabDocument::new(document.placements, document.entities)),
         basis.clone(),
         SourceDocumentKey::named(
             "46806b15-ef25-4da2-9983-32078fd5b5a7".parse().unwrap(),
@@ -160,7 +171,7 @@ fn independent_scene_request_runs_off_owner_and_preserves_remapped_data_through_
 fn renamed_root_prefab_request_commits_the_reviewed_nominal_candidate() {
     let basis = basis();
     let original = document();
-    let original = PrefabDocument::new(original.roots, original.entities);
+    let original = PrefabDocument::new(original.placements, original.entities);
     let published = PrefabDocumentCandidate::decode_ron_str(&original.to_ron_string().unwrap())
         .unwrap()
         .admit_authoring_with_basis(

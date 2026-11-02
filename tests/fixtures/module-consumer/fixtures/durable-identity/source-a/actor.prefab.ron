@@ -4,10 +4,12 @@
     engine_min_version: "0.1.0",
     generator: (name: "durable-identity-consumer", version: "0.0.0"),
     payload: (
-        roots: ["opaque/actor"],
+        placements: [
+            (target: (entity: (kind: "source_entity", entity: "opaque/actor")),
+             placement: (parent: (kind: root), slot: (kind: last))),
+        ],
         entities: [(
             id: "opaque/actor",
-            children: [],
             components: {
                 "nara.scene.Name": (
                     version: 1,
@@ -16,6 +18,7 @@
             },
             prefab: Some((
                 source: (kind: "stable_id", value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+                binding: (kind: "forest"),
                 overrides: None,
             )),
         )],

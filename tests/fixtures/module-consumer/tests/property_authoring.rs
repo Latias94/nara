@@ -29,11 +29,11 @@ use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationLimits, PrefabDocument, PrefabDocumentCandidate, PrefabEntityOrigin,
     PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabInstancePath, PrefabOverlay,
-    PrefabOverlaySlot, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert, PrefabSourceResolver,
-    SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
+    PrefabOverlaySlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabRevert,
+    PrefabSourceResolver, SceneAuthoringRevision, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
     UnavailableRecordManifestEntry,
 };
 use nara_tooling::{
@@ -302,6 +302,7 @@ fn instance_declaration(root: ComponentValue) -> PrefabInstance {
     });
     let mut addition = PrefabAddition::new(id("nested"));
     addition.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source.clone(),
         arguments: None,
         overrides: None,
@@ -333,12 +334,12 @@ fn instance_declaration(root: ComponentValue) -> PrefabInstance {
         .with_owner(PersistentComponentSchemaOwnerId::try_new("consumer.property").unwrap()),
     );
     overlay.additions.push(addition);
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("nested")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("nested")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source,
         arguments: None,
         overrides: Some(overlay),
@@ -355,8 +356,13 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
         let mut editor = open_project(&project);
         let document = open_source(&mut editor, source);
         let manifest = manifest(&editor);
+        let mut expected_placements = vec![
+            SceneEntityPlacement::root(id("actor")),
+            SceneEntityPlacement::root(id("observer")),
+        ];
+        assert_eq!(manifest.source_placements(), expected_placements.as_slice());
         let base_revision = revision(&editor, document);
-        let placement = ScenePlacement::last(ScenePlacementOwner::Root);
+        let placement = ScenePlacement::last(ScenePlacementParent::Root);
         let mutation = if source == SCENE {
             EditorDocumentMutation::ComposeScene {
                 document,
@@ -410,9 +416,27 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
                 .undo_depth,
             1
         );
+        let created_manifest = editor
+            .active_authoring_unavailable_record_manifest()
+            .unwrap()
+            .clone();
+        assert_eq!(created_manifest.entries(), manifest.entries());
+        assert_eq!(created_manifest.record_count(), manifest.record_count());
         assert_eq!(
-            editor.active_authoring_unavailable_record_manifest(),
-            Some(&manifest)
+            created_manifest.overlay_target_count(),
+            manifest.overlay_target_count()
+        );
+        assert_eq!(
+            created_manifest.overlay_declarations().collect::<Vec<_>>(),
+            manifest.overlay_declarations().collect::<Vec<_>>()
+        );
+        expected_placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(created.clone()),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
+        assert_eq!(
+            created_manifest.source_placements(),
+            expected_placements.as_slice()
         );
         for redo in [false, true] {
             let base_revision = revision(&editor, document);
@@ -450,7 +474,7 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
             );
             assert_eq!(
                 editor.active_authoring_unavailable_record_manifest(),
-                Some(&manifest)
+                Some(if redo { &created_manifest } else { &manifest })
             );
         }
         let saved_revision = revision(&editor, document);
@@ -470,14 +494,18 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
         assert!(
             matches!(editor.current_frame().persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, revision, .. }) if saved == document && revision == saved_revision)
         );
+        assert_eq!(
+            editor.active_authoring_unavailable_record_manifest(),
+            Some(&created_manifest)
+        );
         let mut expected = records(initial());
         expected.push(SceneEntityRecord::new(created.clone()));
         let expected = if source == SCENE {
-            SceneDocument::from_ordered_roots(expected)
+            SceneDocument::new(expected_placements, expected)
                 .to_json_string()
                 .unwrap()
         } else {
-            PrefabDocument::from_ordered_roots(expected)
+            PrefabDocument::new(expected_placements, expected)
                 .to_json_string()
                 .unwrap()
         };
@@ -536,7 +564,7 @@ fn ordinary_creation_retains_generated_identity_and_unavailable_records_through_
         );
         assert_eq!(
             editor.active_authoring_unavailable_record_manifest(),
-            Some(&manifest)
+            Some(&created_manifest)
         );
         close_editor(&mut editor);
     }
@@ -1110,9 +1138,19 @@ fn explicitly_targeted_inactive_scene_and_prefab_keep_tabs_and_selections() {
 fn inactive_source_instance_attach_replace_and_detach_preserve_local_records_and_history() {
     for source in [SCENE, PREFAB] {
         let project = Project::new();
-        let mut local = records(initial());
-        local[0].children.push(id("observer"));
-        let mut expected = SceneDocument::new([id("actor")], local);
+        let local = records(initial());
+        let mut expected = SceneDocument::new(
+            [
+                nara_scene::SceneEntityPlacement::root(id("actor")),
+                nara_scene::SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(id("observer")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        id("actor"),
+                    ))),
+                ),
+            ],
+            local,
+        );
         fs::write(project.root.join(source), source_bytes(source, &expected)).unwrap();
         let mut editor = open_project(&project);
         let scene = editor.current_frame().workspace().active_document.unwrap();
@@ -1319,6 +1357,7 @@ fn exact_instance_mismatch_is_atomic_and_unknown_override_repair_has_exact_histo
         record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
     });
     let declaration = PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source.clone(),
         arguments: None,
         overrides: Some(overlay),
@@ -1492,6 +1531,7 @@ fn observed_prefab_intent_revert_preserves_unknown_siblings_and_round_trips_both
             record: local[0].components[&ComponentTypeId::new(UNKNOWN)].clone(),
         });
         local[0].prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: lookup,
             arguments: None,
             overrides: Some(overlay),
@@ -1924,7 +1964,7 @@ fn source_bytes(source: &str, document: &SceneDocument) -> Vec<u8> {
     if source == SCENE {
         document.to_json_string().unwrap().into_bytes()
     } else {
-        PrefabDocument::new(document.roots.clone(), document.entities.clone())
+        PrefabDocument::new(document.placements.clone(), document.entities.clone())
             .to_json_string()
             .unwrap()
             .into_bytes()

@@ -185,7 +185,7 @@ fn empty_occurrences_are_exclusive_and_scene_rejection_keeps_the_predecessor() {
     let error = BoundScene::named(
         universe(),
         "invalid",
-        SceneDocument::new([local()], []),
+        SceneDocument::new([nara_scene::SceneEntityPlacement::root(local())], []),
         host.registry(),
     )
     .unwrap_err();

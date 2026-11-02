@@ -93,7 +93,7 @@ use nara_scene::{CompiledSceneDocument, SceneComponentRecord, SceneDocument, Sce
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_scene::{PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_PROVIDER};
 #[cfg(feature = "tooling")]
-use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
+use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
@@ -779,10 +779,16 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
     let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
         document,
         base_revision,
-        patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(nara_identity::SceneEntityId::new("edited").unwrap()),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]),
+        patch: crate::scene_test_support::add_root_entity_patch(
+            &editor
+                .workspace()
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .placements,
+            SceneEntityRecord::new(nara_identity::SceneEntityId::new("edited").unwrap()),
+        ),
     });
     assert!(report.applied);
     assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
@@ -913,12 +919,14 @@ logical_height = 540
     .unwrap();
     let mut anchor = SceneEntityRecord::new(prefab_anchor.clone());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
         overrides: None,
     });
     let mut plain = SceneEntityRecord::new(plain_anchor.clone());
     plain.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("plain.prefab.json").unwrap(),
         overrides: None,
@@ -2592,12 +2600,16 @@ fn scene_save_cleanup_blocks_session_close_until_retry() {
             .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
                 document,
                 base_revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(
-                        nara_identity::SceneEntityId::new("unsaved").unwrap()
-                    ),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
+                patch: crate::scene_test_support::add_root_entity_patch(
+                    &editor
+                        .workspace()
+                        .scene(document)
+                        .unwrap()
+                        .session()
+                        .document()
+                        .placements,
+                    SceneEntityRecord::new(nara_identity::SceneEntityId::new("unsaved").unwrap()),
+                ),
             })
             .applied
     );
@@ -3056,6 +3068,7 @@ fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement
             let mut anchor =
                 SceneEntityRecord::new(nara_identity::SceneEntityId::new("prefab-anchor").unwrap());
             anchor.prefab = Some(nara_scene::PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path("actor.prefab.json").unwrap(),
                 overrides: None,
@@ -4513,6 +4526,7 @@ fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
     let anchor = nara_identity::SceneEntityId::new("panel-anchor").unwrap();
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::Path(prefab),
         overrides: None,
@@ -4720,10 +4734,17 @@ logical_height = 540
     let button = nara_identity::SceneEntityId::new("retry").unwrap();
     let anchor = nara_identity::SceneEntityId::new("ui-anchor").unwrap();
     let prefab = PrefabDocument::new(
-        [root.clone()],
+        [
+            nara_scene::SceneEntityPlacement::root(root.clone()),
+            nara_scene::SceneEntityPlacement::new(
+                nara_scene::PrefabEntityTarget::source(button.clone()),
+                ScenePlacement::last(ScenePlacementParent::Entity(
+                    nara_scene::PrefabEntityTarget::source(root.clone()),
+                )),
+            ),
+        ],
         [
             SceneEntityRecord::new(root.clone())
-                .with_children([button.clone()])
                 .with_component(
                     ComponentTypeId::new("nara.ui.UiRoot"),
                     SceneComponentRecord::new(
@@ -4768,6 +4789,7 @@ logical_height = 540
     .unwrap();
     let mut anchor_record = SceneEntityRecord::new(anchor.clone());
     anchor_record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
         overrides: None,
@@ -5408,9 +5430,9 @@ logical_height = 540
     let cross_document_create = structure_ui
         .lower_structure_intent(&nara_ui::__private::UiStructureIntent::Create {
             parameters: nara_ui::__private::UiCreateParameters::Container,
-            placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: root.clone(),
-            }),
+            placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                nara_scene::PrefabEntityTarget::source(root.clone()),
+            )),
         })
         .unwrap();
     let EditorDocumentMutation::ComposePrefab {
@@ -5437,9 +5459,9 @@ logical_height = 540
                     base_revision: structure_ui.revision(),
                     command: nara_tooling::PrefabCompositionCommand::CreateEntity {
                         draft: forged_draft,
-                        placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                            parent: root.clone(),
-                        }),
+                        placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                            nara_scene::PrefabEntityTarget::source(root.clone()),
+                        )),
                     },
                 }),
                 EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
@@ -5476,7 +5498,9 @@ logical_height = 540
     let create = retained_ui
         .lower_structure_intent(&nara_ui::__private::UiStructureIntent::Create {
             parameters: nara_ui::__private::UiCreateParameters::Container,
-            placement: ScenePlacement::last(ScenePlacementOwner::Parent { parent: root }),
+            placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                nara_scene::PrefabEntityTarget::source(root),
+            )),
         })
         .unwrap();
     let created_batch = editor
@@ -5730,12 +5754,16 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
             .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
                 document,
                 base_revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(
-                        nara_identity::SceneEntityId::new("unsaved").unwrap(),
-                    ),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
+                patch: crate::scene_test_support::add_root_entity_patch(
+                    &editor
+                        .workspace()
+                        .scene(document)
+                        .unwrap()
+                        .session()
+                        .document()
+                        .placements,
+                    SceneEntityRecord::new(nara_identity::SceneEntityId::new("unsaved").unwrap(),),
+                ),
             })
             .applied
     );
@@ -7623,10 +7651,17 @@ logical_height = 540
         let root = nara_identity::SceneEntityId::new("ui-root").unwrap();
         let image = nara_identity::SceneEntityId::new("image-node").unwrap();
         let prefab = PrefabDocument::new(
-            [root.clone()],
+            [
+                nara_scene::SceneEntityPlacement::root(root.clone()),
+                nara_scene::SceneEntityPlacement::new(
+                    nara_scene::PrefabEntityTarget::source(image.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(
+                        nara_scene::PrefabEntityTarget::source(root.clone()),
+                    )),
+                ),
+            ],
             [
                 SceneEntityRecord::new(root.clone())
-                    .with_children([image.clone()])
                     .with_component(
                         ComponentTypeId::new("nara.ui.UiRoot"),
                         SceneComponentRecord::new(
@@ -7661,6 +7696,7 @@ logical_height = 540
         let mut anchor =
             SceneEntityRecord::new(nara_identity::SceneEntityId::new("ui-anchor").unwrap());
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("ui.prefab.json").unwrap(),
             overrides: None,

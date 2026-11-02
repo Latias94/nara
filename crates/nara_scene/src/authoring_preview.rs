@@ -10,7 +10,7 @@ use nara_reflect::ComponentTypeId;
 
 use crate::{
     PrefabAuthoringSession, PrefabDocument, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord,
+    SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
     authoring_decode::{
         AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordOwnerClaim,
         AuthoringRecordReadiness, PublishedAuthoringPrefabDocument,
@@ -125,7 +125,7 @@ impl<Document> AuthoringPreviewDocument<Document> {
 /// Direct components survive only when one exact direct-record fact classifies the current
 /// owner/version as Available. Nested Prefab instances and their patches are removed and reported
 /// rather than interpreted. Projection clones source data and consults no runtime registry or
-/// migration path.
+/// migration path. Authored placements remain declarations; this is not a flat Native input.
 #[doc(hidden)]
 pub type AuthoringScenePreviewDocument = AuthoringPreviewDocument<SceneDocument>;
 
@@ -162,13 +162,13 @@ pub fn project_published_authoring_scene_preview(
     published: &PublishedAuthoringSceneDocument,
 ) -> AuthoringScenePreviewDocument {
     let projection = project_authoring_preview(
-        &published.document().roots,
+        &published.document().placements,
         &published.document().entities,
         published.record_facts(),
     );
     AuthoringPreviewDocument {
         document: SceneDocument {
-            roots: projection.roots,
+            placements: projection.placements,
             entities: projection.entities,
         },
         omissions: projection.omissions,
@@ -184,13 +184,13 @@ pub fn project_authoring_scene_session_preview(
         .authoring_record_facts()
         .ok_or(AuthoringPreviewProjectionError::ClassificationBasisUnavailable)?;
     let projection = project_authoring_preview(
-        &session.document().roots,
+        &session.document().placements,
         &session.document().entities,
         record_facts,
     );
     Ok(AuthoringPreviewDocument {
         document: SceneDocument {
-            roots: projection.roots,
+            placements: projection.placements,
             entities: projection.entities,
         },
         omissions: projection.omissions,
@@ -204,14 +204,14 @@ pub fn project_published_authoring_prefab_preview(
     published: &PublishedAuthoringPrefabDocument,
 ) -> AuthoringPrefabPreviewDocument {
     let projection = project_authoring_preview(
-        &published.document().roots,
+        &published.document().placements,
         &published.document().entities,
         published.record_facts(),
     );
     AuthoringPreviewDocument {
         document: PrefabDocument {
             inputs: published.document().inputs.clone(),
-            roots: projection.roots,
+            placements: projection.placements,
             entities: projection.entities,
         },
         omissions: projection.omissions,
@@ -227,14 +227,14 @@ pub fn project_authoring_prefab_session_preview(
         .authoring_record_facts()
         .ok_or(AuthoringPreviewProjectionError::ClassificationBasisUnavailable)?;
     let projection = project_authoring_preview(
-        &session.document().roots,
+        &session.document().placements,
         &session.document().entities,
         record_facts,
     );
     Ok(AuthoringPreviewDocument {
         document: PrefabDocument {
             inputs: session.document().inputs.clone(),
-            roots: projection.roots,
+            placements: projection.placements,
             entities: projection.entities,
         },
         omissions: projection.omissions,
@@ -242,7 +242,7 @@ pub fn project_authoring_prefab_session_preview(
 }
 
 struct AuthoringPreviewDocumentParts {
-    roots: Vec<SceneEntityId>,
+    placements: Vec<SceneEntityPlacement>,
     entities: Vec<SceneEntityRecord>,
     omissions: Vec<AuthoringPreviewOmission>,
 }
@@ -253,7 +253,7 @@ enum IndexedDirectRecordFact<'a> {
 }
 
 fn project_authoring_preview(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     source_entities: &[SceneEntityRecord],
     record_facts: &[AuthoringRecordFact],
 ) -> AuthoringPreviewDocumentParts {
@@ -277,8 +277,7 @@ fn project_authoring_preview(
     let mut omissions = Vec::new();
     let mut entities = Vec::with_capacity(source_entities.len());
     for source_entity in source_entities {
-        let mut entity = SceneEntityRecord::new(source_entity.id.clone())
-            .with_children(source_entity.children.iter().cloned());
+        let mut entity = SceneEntityRecord::new(source_entity.id.clone());
         let entity_facts = direct_facts.get(&entity.id);
         for (component, record) in &source_entity.components {
             let reason = match entity_facts.and_then(|facts| facts.get(component)) {
@@ -331,7 +330,7 @@ fn project_authoring_preview(
     }
 
     AuthoringPreviewDocumentParts {
-        roots: roots.to_vec(),
+        placements: placements.to_vec(),
         entities,
         omissions,
     }

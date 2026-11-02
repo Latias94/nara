@@ -21,11 +21,11 @@ use nara_scene::{
     AuthoringDocumentSource, AuthoringOverlayPathSegment, AuthoringOverlayRecordSlot,
     AuthoringRecordLocation, PrefabAddition, PrefabAuthoringSession, PrefabComponentIntent,
     PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SceneFileBudgetKind, SceneFileLimits, SceneFormatError, ScenePatchDocument,
-    ScenePatchDocumentCandidate, ScenePatchOperation, UnavailableRecordManifestEntry,
+    PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits,
+    SceneFormatError, ScenePatchDocument, ScenePatchDocumentCandidate, ScenePatchOperation,
+    ScenePlacement, ScenePlacementParent, UnavailableRecordManifestEntry,
 };
 use serde::Serialize;
 
@@ -39,6 +39,7 @@ fn component() -> ComponentTypeId {
 
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -141,27 +142,27 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7)),
     );
     added.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         arguments: None,
         overrides: None,
     });
     let mut declarations = overlay();
     declarations.additions.push(added);
-    declarations.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    declarations.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let snapshot = instance(declarations);
     let patch = ScenePatchDocument::new([replace(Some(snapshot.clone()), Some(snapshot))]);
     // The exact operation retains both complete declaration trees. Each side contains one
     // overlay, one addition, one placement, one component and two instance declarations.
-    // Each snapshot has nine nodes: two instances, overlay/base, addition, record/value,
-    // and placement/target. Both sides therefore retain eighteen nodes.
+    // Each snapshot has twelve nodes: two instances and their Forest bindings, overlay/base,
+    // addition, record/value, and placement/target/location. Both sides retain twenty-four nodes.
     // Each source claim retains the AssetRef map keys/kind (13) and path. A Named base
     // retains document kind and UUID text (37), plus its name. The addition retains its ID,
     // component ID, record version/owner flag (5), U64 (8), and placement target/tags (3).
-    let source_bytes = 13 + "prefabs/base.prefab.json".len();
+    let source_bytes = 13 + "prefabs/base.prefab.json".len() + 1; // Required Forest binding.
     let snapshot_bytes = 2 * source_bytes
         + (37 + "snapshot.base".len())
         + "added".len()
@@ -176,7 +177,7 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
         .with_patch_operations(ItemLimit::ONE)
         .with_overlay_declarations(ItemLimit::new(6).unwrap())
         .with_diagnostic_sources(ItemLimit::new(13).unwrap())
-        .with_component_value_nodes(ItemLimit::new(18).unwrap())
+        .with_component_value_nodes(ItemLimit::new(24).unwrap())
         .with_component_value_bytes(ByteLimit::new(complete_bytes).unwrap());
     for encoding in [Encoding::Json, Encoding::Ron] {
         let bytes = encoding.patch(&patch);
@@ -219,10 +220,10 @@ fn both_snapshot_trees_share_inclusive_domain_budgets() {
                 12,
             ),
             (
-                inclusive.with_component_value_nodes(ItemLimit::new(17).unwrap()),
+                inclusive.with_component_value_nodes(ItemLimit::new(23).unwrap()),
                 SceneFileBudgetKind::ComponentValueNodes,
-                18,
-                17,
+                24,
+                23,
             ),
             (
                 inclusive.with_component_value_bytes(ByteLimit::new(complete_bytes - 1).unwrap()),
@@ -820,7 +821,9 @@ fn unavailable_nested_property_repair_is_exact_and_readmission_still_rejects_dri
                     "field",
                     PrefabPropertyIntent::Set(ComponentValue::U64(99)),
                 )));
-                document.roots.push(other.id.clone());
+                document
+                    .placements
+                    .push(SceneEntityPlacement::root(other.id.clone()));
                 document.entities.push(other);
                 document
             };
@@ -926,8 +929,9 @@ fn unavailable_nested_property_repair_is_exact_and_readmission_still_rejects_dri
             assert_eq!(session.document(), &drifted);
             assert!(repaired_readmission.preserves_scene(&session));
 
-            let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
-            let drifted = PrefabDocument::new(drifted.roots, drifted.entities);
+            let prefab =
+                PrefabDocument::new(document.placements.clone(), document.entities.clone());
+            let drifted = PrefabDocument::new(drifted.placements, drifted.entities);
             let published = PrefabDocumentCandidate::decode_json_bytes(
                 prefab.to_json_string().unwrap().as_bytes(),
             )

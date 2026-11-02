@@ -7,17 +7,120 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "enemy-anchor",
-      "enemy-anchor-2",
-      "enemy-anchor-3",
-      "player",
-      "reference-ui"
+    "placements": [
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "enemy-anchor"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "enemy-anchor-2"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "enemy-anchor-3"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "player"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "reference-ui"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "player-weapon"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "player"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      }
     ],
     "entities": [
       {
         "id": "enemy-anchor",
-        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -63,12 +166,14 @@
             "kind": "path",
             "value": "enemy.prefab.json"
           },
+          "binding": {
+            "kind": "forest"
+          },
           "overrides": null
         }
       },
       {
         "id": "enemy-anchor-2",
-        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -113,6 +218,9 @@
           "source": {
             "kind": "path",
             "value": "enemy.prefab.json"
+          },
+          "binding": {
+            "kind": "forest"
           },
           "overrides": {
             "base": {
@@ -192,7 +300,6 @@
       },
       {
         "id": "enemy-anchor-3",
-        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -237,6 +344,9 @@
           "source": {
             "kind": "path",
             "value": "enemy.prefab.json"
+          },
+          "binding": {
+            "kind": "forest"
           },
           "overrides": {
             "base": {
@@ -316,9 +426,6 @@
       },
       {
         "id": "player",
-        "children": [
-          "player-weapon"
-        ],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,
@@ -526,7 +633,6 @@
       },
       {
         "id": "player-weapon",
-        "children": [],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,
@@ -633,12 +739,14 @@
       },
       {
         "id": "reference-ui",
-        "children": [],
         "components": {},
         "prefab": {
           "source": {
             "kind": "path",
             "value": "reference-ui.prefab.json"
+          },
+          "binding": {
+            "kind": "forest"
           },
           "overrides": null
         }

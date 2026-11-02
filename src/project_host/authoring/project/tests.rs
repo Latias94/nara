@@ -7,9 +7,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
-    PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, SceneComponentRecord, SceneEntityId, SourceDocumentKey,
-    SourceDocumentKind,
+    PrefabInstanceClaim, PrefabOverlay, SceneComponentRecord, SceneEntityId, SceneEntityPlacement,
+    ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
 };
 
 fn overlay_base(name: &str) -> SourceDocumentKey {
@@ -37,6 +36,7 @@ fn instance_retention_counts_record_owner_payloads() {
             record,
         });
         PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("retained/base.prefab.json").unwrap(),
             overrides: Some(overlay),
@@ -263,21 +263,22 @@ fn structural_overlay_manifests_charge_full_instance_copies_at_the_budget_bounda
     });
     let mut addition = PrefabAddition::new(SceneEntityId::new("addition").unwrap());
     addition.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("nested.prefab.json").unwrap(),
         overrides: Some(nested),
     });
     let mut overlay = PrefabOverlay::new(overlay_base("structural"));
-    overlay.placements.push(PrefabPlacement {
+    overlay.placements.push(SceneEntityPlacement {
         target: PrefabEntityTarget::addition(addition.id.clone()),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
+        placement: ScenePlacement::last(ScenePlacementParent::Root),
     });
     overlay.additions.push(addition);
     overlay.suppressions.push(PrefabEntityTarget::source(
         SceneEntityId::new("missing-target".repeat(128)).unwrap(),
     ));
     let instance = PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("structural.prefab.json").unwrap(),
         overrides: Some(overlay),
@@ -410,6 +411,7 @@ fn raw_composition_accounting_retains_one_payload_and_no_publication_projections
     ));
     let mut entity = SceneEntityRecord::new(SceneEntityId::new("raw").unwrap());
     entity.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: Some(PrefabReferenceArguments {
             base: overlay_base("raw"),
             values: [(
@@ -515,13 +517,18 @@ fn composition_source_candidates_keep_selected_limits_and_validate_only_local_st
         Err(SceneFormatError::Budget(_))
     ));
 
-    let invalid = PrefabDocument::new([SceneEntityId::new("missing").unwrap()], [entity]);
+    let invalid = PrefabDocument::new(
+        [nara_scene::SceneEntityPlacement::root(
+            SceneEntityId::new("missing").unwrap(),
+        )],
+        [entity],
+    );
     let candidate = PrefabDocumentCandidate::from_source_document(invalid, limits).unwrap();
     let rejection = candidate.into_composition_source().unwrap_err();
     assert!(
         rejection
             .diagnostics()
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.dangling-root" })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.invalid-placement-target" })
     );
 }

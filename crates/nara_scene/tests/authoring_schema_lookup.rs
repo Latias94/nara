@@ -35,6 +35,7 @@ fn authoring_schema_lookup_requires_an_exact_available_direct_record_in_both_kin
         record: record(CURRENT, OWNER),
     });
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/nested.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -112,7 +113,7 @@ fn authoring_schema_lookup_requires_an_exact_available_direct_record_in_both_kin
     }), "an Available overlay record must not become direct schema authority");
     let native = SceneAuthoringSession::new(document.clone());
     let native_prefab =
-        PrefabAuthoringSession::new(PrefabDocument::new(document.roots, document.entities));
+        PrefabAuthoringSession::new(PrefabDocument::new(document.placements, document.entities));
     assert!(
         native
             .authoring_component_schema(&id("available"), &component())
@@ -235,7 +236,7 @@ fn authoring_schema_lookup_is_rebuilt_for_reopened_classification_without_mutati
         .unwrap()
         .reopen_prefab_candidate(
             PrefabDocumentCandidate::decode_json_bytes(
-                PrefabDocument::new(changed.roots, changed.entities)
+                PrefabDocument::new(changed.placements, changed.entities)
                     .to_json_string()
                     .unwrap()
                     .as_bytes(),
@@ -283,7 +284,7 @@ fn authoring_schema_lookup_is_rebuilt_for_reopened_classification_without_mutati
         .unwrap()
         .reopen_prefab_candidate(
             PrefabDocumentCandidate::decode_json_bytes(
-                PrefabDocument::new(document.roots.clone(), document.entities.clone())
+                PrefabDocument::new(document.placements.clone(), document.entities.clone())
                     .to_json_string()
                     .unwrap()
                     .as_bytes(),
@@ -375,7 +376,7 @@ fn independent_basis_and_convenience_admissions_keep_distinct_identities() {
         .admit_authoring(source("scenes/independent.scene.json"), &bundle, &adapters)
         .unwrap()
         .publish();
-    let prefab_document = PrefabDocument::new(document.roots, document.entities);
+    let prefab_document = PrefabDocument::new(document.placements, document.entities);
     let prefab = PrefabDocumentCandidate::decode_json_bytes(
         prefab_document.to_json_string().unwrap().as_bytes(),
     )
@@ -427,7 +428,8 @@ fn shared_basis_preserves_exact_owner_version_and_adapter_classification_in_both
             .admit_authoring_with_basis(source("scenes/classified.scene.json"), &basis)
             .unwrap()
             .publish();
-    let prefab_document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab_document =
+        PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let prefab = PrefabDocumentCandidate::decode_json_bytes(
         prefab_document.to_json_string().unwrap().as_bytes(),
     )
@@ -529,6 +531,7 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
     });
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: request.clone(),
         arguments: None,
         overrides: Some(overlay),
@@ -566,12 +569,11 @@ fn data_only_prefab_compilation_preserves_pins_and_typed_omissions_without_nativ
     assert_eq!(provenance.local_entity_id(), &id("leaf"));
     assert_eq!(
         candidate
-            .document()
-            .entities
+            .entities()
             .iter()
-            .find(|entity| &entity.id == projected)
+            .find(|entity| entity.id() == projected)
             .unwrap()
-            .components[&component()]
+            .components()[&component()]
             .value
             .field_u64("value")
             .unwrap(),
@@ -620,6 +622,7 @@ fn prefab_compilation_rejects_an_independently_admitted_identical_basis() {
     );
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("shared.json").unwrap(),
         arguments: None,
         overrides: None,
@@ -694,7 +697,7 @@ fn sessions(
             .admit_authoring(source("scenes/lookup.scene.json"), bundle, adapters)
             .unwrap()
             .publish();
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let prefab =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()

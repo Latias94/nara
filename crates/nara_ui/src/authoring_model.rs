@@ -6,13 +6,15 @@ use std::{
 };
 
 use nara_asset::AssetRef;
+use nara_core::ItemLimit;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
-    PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation,
+    PrefabDocument, SceneCompilationFailureKind, SceneCompilationLimits, SceneComponentRecord,
+    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    SourceLocalSceneHierarchy,
 };
 use nara_ui_kernel::{UiPoint, UiRect, UiSize, UiSurfaceContentTransform};
 use thiserror::Error;
@@ -1134,17 +1136,34 @@ pub enum UiAuthoringProjectionError {
     FieldLimitExceeded,
 }
 
-/// Projects the persistent UI vocabulary of one Prefab without importing Editor/toolkit identity.
+/// Projects direct source UI records using Scene's bounded local hierarchy query.
+///
+/// Prefab slots remain local anchors. Routed placements require the actual selected sources and
+/// are refused here rather than interpreted as a complete expanded hierarchy.
 pub fn project_prefab_authoring(
     prefab: &PrefabDocument,
 ) -> Result<UiAuthoringProjection, UiAuthoringProjectionError> {
+    let hierarchy = prefab
+        .local_hierarchy(
+            SceneCompilationLimits::default().with_materialized_entities(
+                ItemLimit::new(MAX_AUTHORING_NODES)
+                    .expect("the UI authoring node limit is non-zero"),
+            ),
+        )
+        .map_err(|failure| match failure {
+            SceneCompilationFailureKind::WorkLimit => {
+                UiAuthoringProjectionError::HierarchyLimitExceeded
+            }
+            SceneCompilationFailureKind::MissingTarget => UiAuthoringProjectionError::MissingEntity,
+            _ => UiAuthoringProjectionError::InvalidHierarchy,
+        })?;
     let entities = prefab
         .entities
         .iter()
         .map(|entity| (&entity.id, entity))
         .collect::<BTreeMap<_, _>>();
-    let ordered = ordered_entities(prefab, &entities)?;
-    let source_topology = source_topology(&ordered, &entities)?;
+    let ordered = ordered_entities(&hierarchy, &entities)?;
+    let source_topology = source_topology(&ordered, &hierarchy)?;
     let source_orders = source_topology
         .iter()
         .map(|node| (node.entity.clone(), node.structural_order))
@@ -1168,7 +1187,7 @@ pub fn project_prefab_authoring(
 
     let mut projection = ProjectionBuilder::default();
     for root in roots {
-        projection.project_root(root, &entities, &source_orders, authoring_schemas())?;
+        projection.project_root(root, &entities, &source_orders, &hierarchy)?;
     }
     projection.finish(source_topology)
 }
@@ -1200,9 +1219,9 @@ impl ProjectionBuilder {
         root: &SceneEntityRecord,
         entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
         source_orders: &BTreeMap<SceneEntityId, u32>,
-        schemas: &BTreeMap<ComponentTypeId, ComponentSchema>,
+        hierarchy: &SourceLocalSceneHierarchy,
     ) -> Result<(), UiAuthoringProjectionError> {
-        self.project_node(root, None, 0, entities, source_orders, schemas)
+        self.project_node(root, None, 0, entities, source_orders, hierarchy)
     }
 
     fn project_node(
@@ -1212,7 +1231,7 @@ impl ProjectionBuilder {
         depth: usize,
         entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
         source_orders: &BTreeMap<SceneEntityId, u32>,
-        schemas: &BTreeMap<ComponentTypeId, ComponentSchema>,
+        hierarchy: &SourceLocalSceneHierarchy,
     ) -> Result<(), UiAuthoringProjectionError> {
         if depth > MAX_AUTHORING_DEPTH || self.hierarchy.len() == MAX_AUTHORING_NODES {
             return Err(UiAuthoringProjectionError::HierarchyLimitExceeded);
@@ -1246,9 +1265,12 @@ impl ProjectionBuilder {
             entity: entity.id.clone(),
             structural_order,
         });
-        self.project_component_fields(entity, schemas)?;
+        self.project_component_fields(entity, authoring_schemas())?;
 
-        for child in &entity.children {
+        for child in hierarchy
+            .children(&entity.id)
+            .ok_or(UiAuthoringProjectionError::MissingEntity)?
+        {
             let child = entities
                 .get(child)
                 .copied()
@@ -1271,7 +1293,7 @@ impl ProjectionBuilder {
                 depth + 1,
                 entities,
                 source_orders,
-                schemas,
+                hierarchy,
             )?;
         }
         Ok(())
@@ -1353,13 +1375,12 @@ impl ProjectionBuilder {
 }
 
 fn ordered_entities<'a>(
-    prefab: &'a PrefabDocument,
+    hierarchy: &SourceLocalSceneHierarchy,
     entities: &BTreeMap<&'a SceneEntityId, &'a SceneEntityRecord>,
 ) -> Result<Vec<&'a SceneEntityRecord>, UiAuthoringProjectionError> {
-    let mut ordered = Vec::with_capacity(prefab.entities.len());
-    let mut visited = BTreeSet::new();
-    let mut pending = prefab
-        .roots
+    let mut ordered = Vec::with_capacity(entities.len());
+    let mut pending = hierarchy
+        .roots()
         .iter()
         .rev()
         .map(|entity| (entity, 0usize))
@@ -1368,35 +1389,34 @@ fn ordered_entities<'a>(
         if depth > MAX_AUTHORING_DEPTH || ordered.len() == MAX_AUTHORING_NODES {
             return Err(UiAuthoringProjectionError::HierarchyLimitExceeded);
         }
-        if !visited.insert(entity.clone()) {
-            return Err(UiAuthoringProjectionError::InvalidHierarchy);
-        }
         let record = entities
             .get(entity)
             .copied()
             .ok_or(UiAuthoringProjectionError::MissingEntity)?;
         ordered.push(record);
-        pending.extend(record.children.iter().rev().map(|child| (child, depth + 1)));
-    }
-    if visited.len() != prefab.entities.len() {
-        return Err(UiAuthoringProjectionError::InvalidHierarchy);
+        pending.extend(
+            hierarchy
+                .children(entity)
+                .ok_or(UiAuthoringProjectionError::MissingEntity)?
+                .iter()
+                .rev()
+                .map(|child| (child, depth + 1)),
+        );
     }
     Ok(ordered)
 }
 
 fn source_topology(
     ordered: &[&SceneEntityRecord],
-    entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
+    hierarchy: &SourceLocalSceneHierarchy,
 ) -> Result<Vec<UiAuthoringSourceTopologyNode>, UiAuthoringProjectionError> {
     let mut parents = BTreeMap::<SceneEntityId, SceneEntityId>::new();
     for entity in ordered {
-        for child in &entity.children {
-            if !entities.contains_key(child) {
-                return Err(UiAuthoringProjectionError::MissingEntity);
-            }
-            if parents.insert(child.clone(), entity.id.clone()).is_some() {
-                return Err(UiAuthoringProjectionError::InvalidHierarchy);
-            }
+        for child in hierarchy
+            .children(&entity.id)
+            .ok_or(UiAuthoringProjectionError::MissingEntity)?
+        {
+            parents.insert(child.clone(), entity.id.clone());
         }
     }
     ordered
@@ -1406,7 +1426,10 @@ fn source_topology(
             Ok(UiAuthoringSourceTopologyNode {
                 entity: entity.id.clone(),
                 parent: parents.get(&entity.id).cloned(),
-                children: entity.children.clone(),
+                children: hierarchy
+                    .children(&entity.id)
+                    .ok_or(UiAuthoringProjectionError::MissingEntity)?
+                    .to_vec(),
                 structural_order: u32::try_from(order)
                     .map_err(|_| UiAuthoringProjectionError::HierarchyLimitExceeded)?,
                 contains_ui_root: entity
@@ -2187,6 +2210,9 @@ fn read_string_path<'a>(value: &'a ComponentValue, fields: &[&str]) -> Option<&'
 mod tests {
     use super::*;
     use nara_reflect::ComponentSchemaVersion;
+    use nara_scene::{
+        PrefabEntityTarget, SceneEntityPlacement, ScenePlacement, ScenePlacementParent,
+    };
 
     fn id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).expect("test entity id must be valid")
@@ -2257,10 +2283,17 @@ mod tests {
         let root = id("root");
         let button = id("button");
         PrefabDocument::new(
-            [root.clone()],
+            [
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(button.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+            ],
             [
                 SceneEntityRecord::new(root.clone())
-                    .with_children([button.clone()])
                     .with_component(
                         UiAuthoringComponentKind::Root.component_type(),
                         component(ComponentValue::map([(
@@ -2324,6 +2357,76 @@ mod tests {
                 UiAuthoringCanvasUnavailableReason::PresentationNotCompiled
             )
         ));
+    }
+
+    #[test]
+    fn source_projection_uses_desired_layout_without_loading_prefabs_or_decoding_other_components()
+    {
+        let mut prefab = ui_prefab("absolute", ("px", 180.0));
+        let root = prefab
+            .entities
+            .iter_mut()
+            .find(|entity| entity.id == id("root"))
+            .unwrap();
+        root.prefab = Some(nara_scene::PrefabInstance::forest(
+            AssetRef::path("prefabs/unavailable.ron").unwrap(),
+        ));
+        root.components.insert(
+            ComponentTypeId::new("game.Unavailable"),
+            component(ComponentValue::String("preserved source".to_owned())),
+        );
+        prefab
+            .entities
+            .push(SceneEntityRecord::new(id("z-first")).with_component(
+                UiAuthoringComponentKind::Node.component_type(),
+                component(node_value("flow", ("px", 100.0), ("px", 24.0))),
+            ));
+        prefab.placements[1].placement = ScenePlacement::after(
+            ScenePlacementParent::Entity(PrefabEntityTarget::source(id("root"))),
+            PrefabEntityTarget::source(id("z-first")),
+        );
+        prefab.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(id("z-first")),
+            ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id("root"),
+            ))),
+        ));
+        let before = prefab.clone();
+
+        let projection = project_prefab_authoring(&prefab).unwrap();
+
+        assert_eq!(
+            projection
+                .hierarchy()
+                .iter()
+                .map(|node| node.entity().as_str())
+                .collect::<Vec<_>>(),
+            ["root", "z-first", "button"],
+        );
+        assert_eq!(
+            projection.source_node(&id("root")).unwrap().children,
+            [id("z-first"), id("button")],
+        );
+        assert_eq!(prefab, before);
+    }
+
+    #[test]
+    fn source_projection_refuses_routed_placements_without_a_selected_occurrence() {
+        let mut prefab = ui_prefab("absolute", ("px", 180.0));
+        let base = nara_scene::SourceDocumentKey::named(
+            "f9ab807a-c61e-4c92-bfee-b6fa153b8efc".parse().unwrap(),
+            "ui.nested",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let mut parent = PrefabEntityTarget::source(id("nested-parent"));
+        parent.through.push(nara_scene::PrefabInstanceHop {
+            anchor: nara_scene::PrefabEntityOrigin::SourceEntity(id("root")),
+            expected_base: base,
+        });
+        prefab.placements[1].placement = ScenePlacement::last(ScenePlacementParent::Entity(parent));
+
+        assert!(project_prefab_authoring(&prefab).is_err());
     }
 
     #[test]

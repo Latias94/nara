@@ -8,6 +8,8 @@ mod copy_admission;
 mod field_candidate;
 mod overlay;
 #[cfg(test)]
+mod placement_tests;
+#[cfg(test)]
 mod product_reference_tests;
 mod read;
 mod reclassification;
@@ -49,8 +51,8 @@ use nara_reflect::{
 use crate::{
     PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
     PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchDocument,
-    ScenePatchOperation, ScenePatchReport,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    SceneFileLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
     diagnostics::{
         error as diagnostic_error, warning as diagnostic_warning, with_asset_ref, with_codec_error,
         with_public_locator,
@@ -224,8 +226,8 @@ impl AuthoringDocumentReadmission {
             );
         }
         let (document, limits) = candidate.into_authoring_parts();
-        let state = classify_scene_document(
-            &document.instantiate(),
+        let state = classify_prefab_document(
+            &document,
             self.source.clone(),
             AuthoringDocumentKind::Prefab,
             Arc::clone(&self.basis),
@@ -717,7 +719,8 @@ impl UnavailableRecord {
         &self.contextual_defaults
     }
 
-    /// Stable parent/root and relative ordering of the source-local owning entity.
+    /// Exact desired location of the source-local owning entity. The complete declaration order
+    /// and routed pins are retained separately by the preservation manifest.
     #[must_use]
     pub const fn placement(&self) -> Option<&crate::ScenePlacement> {
         self.placement.as_ref()
@@ -903,12 +906,16 @@ pub struct UnavailableRecordManifest {
     // This also preserves bindings, placements, empty base claims and nested detach declarations
     // that do not themselves produce an unavailable component entry.
     overlays: BTreeMap<SceneEntityId, PrefabInstance>,
+    // A routed target may affect an unavailable descendant without naming its local owner.
+    // Preserve the complete ordered source intent, not a projection or a local-target subset.
+    source_placements: Vec<SceneEntityPlacement>,
 }
 
 impl UnavailableRecordManifest {
     fn new(
         entries: Vec<UnavailableRecordManifestEntry>,
         overlays: BTreeMap<SceneEntityId, PrefabInstance>,
+        source_placements: Vec<SceneEntityPlacement>,
     ) -> Self {
         let record_count = entries
             .iter()
@@ -920,6 +927,7 @@ impl UnavailableRecordManifest {
             overlay_target_count,
             entries,
             overlays,
+            source_placements,
         }
     }
 
@@ -947,6 +955,13 @@ impl UnavailableRecordManifest {
     /// These are inventory, including dormant intent, not effective activation requirements.
     pub fn overlay_declarations(&self) -> impl Iterator<Item = (&SceneEntityId, &PrefabInstance)> {
         self.overlays.iter()
+    }
+
+    /// Complete ordered layout declarations, including routed pins and their canonical predicates.
+    /// These remain source intent; preserving them does not resolve their effective targets.
+    #[must_use]
+    pub fn source_placements(&self) -> &[SceneEntityPlacement] {
+        &self.source_placements
     }
 }
 
@@ -1643,8 +1658,8 @@ impl PrefabDocumentCandidate {
         basis: &AuthoringSchemaBasis,
     ) -> Result<PrefabAuthoringDocumentCandidate, AuthoringDocumentPublicationError> {
         let (document, limits) = self.into_authoring_parts();
-        let state = classify_scene_document(
-            &document.instantiate(),
+        let state = classify_prefab_document(
+            &document,
             source,
             AuthoringDocumentKind::Prefab,
             Arc::clone(&basis.0),
@@ -1921,7 +1936,7 @@ fn classify_scene_document_impl(
 ) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
     classify_source_document_impl(
         AuthoringSourceParts {
-            roots: &document.roots,
+            placements: &document.placements,
             entities: &document.entities,
             inputs: None,
         },
@@ -1933,9 +1948,30 @@ fn classify_scene_document_impl(
     )
 }
 
+fn classify_prefab_document(
+    document: &PrefabDocument,
+    source: AuthoringDocumentSource,
+    kind: AuthoringDocumentKind,
+    basis: Arc<AuthoringClassificationBasis>,
+    limits: SceneFileLimits,
+) -> Result<AuthoringDocumentState, AuthoringDocumentPublicationError> {
+    classify_source_document_impl(
+        AuthoringSourceParts {
+            placements: &document.placements,
+            entities: &document.entities,
+            inputs: Some(&document.inputs),
+        },
+        source,
+        kind,
+        basis,
+        limits,
+        None,
+    )
+}
+
 /// Actual source declarations; Prefab inputs remain metadata rather than synthetic bindings.
 struct AuthoringSourceParts<'a> {
-    roots: &'a [SceneEntityId],
+    placements: &'a [SceneEntityPlacement],
     entities: &'a [SceneEntityRecord],
     inputs: Option<&'a BTreeSet<nara_identity::ReferenceInputId>>,
 }
@@ -1954,9 +1990,10 @@ fn classify_source_document_impl(
         })?;
     }
     reclassification::charge(&mut admission, "classification-structure", || {
-        reclassification::structure_parts_bytes(document.roots, document.entities)
+        reclassification::structure_parts_bytes(document.placements, document.entities)
     })?;
-    let structure = crate::validation::validate_source_structure(document.roots, document.entities);
+    let structure =
+        crate::validation::validate_source_structure(document.placements, document.entities);
     if structure.has_errors() {
         return Err(AuthoringDocumentPublicationError::new(structure));
     }
@@ -1969,10 +2006,7 @@ fn classify_source_document_impl(
             record_facts: Vec::new(),
             overlay_asset_references: BTreeMap::new(),
             manifest: Vec::new(),
-            placements: crate::patch::authoring_entity_placements(
-                document.roots,
-                document.entities,
-            ),
+            placements: crate::patch::authoring_entity_placements(document.placements),
             namespace: document.entities.iter().map(|entity| &entity.id).collect(),
             limits,
             property_read_budget: nara_reflect::ComponentPropertyReadBudget::new(
@@ -1995,6 +2029,9 @@ fn classify_source_document_impl(
     reclassification::charge_measured(&mut admission, "classification-overlays", |scratch| {
         reclassification::overlay_parts_copies_bytes(document.entities, limits, scratch)
     })?;
+    reclassification::charge(&mut admission, "classification-source-placements", || {
+        retention::source_placements_bytes(document.placements)
+    })?;
     let unavailable_manifest = UnavailableRecordManifest::new(
         manifest,
         document
@@ -2007,6 +2044,7 @@ fn classify_source_document_impl(
                     .map(|instance| (entity.id.clone(), instance.clone()))
             })
             .collect(),
+        document.placements.to_vec(),
     );
     reclassification::charge(&mut admission, "classification-diagnostics", || {
         reclassification::diagnostics_bytes(unavailable_manifest.entries())
@@ -2553,7 +2591,12 @@ fn prepare_scene_authoring_patch_impl(
         );
     }
     if let Some(admit) = admit.as_deref_mut() {
-        reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+        reclassification::admit_document(
+            &document.placements,
+            &document.entities,
+            state.limits,
+            admit,
+        )?;
         reclassification::admit_patch_copy(patch, "field-edits", admit)?;
         reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
         reclassification::admit_patch_copy(patch, "field-candidate-writes", admit)?;
@@ -2640,7 +2683,12 @@ pub(crate) fn prepare_prefab_conversion_patch_with_admission(
     footprint: &crate::authoring::prefab_conversion::PrefabConversionFootprint,
     admit: &mut reclassification::AdmissionCallback<'_>,
 ) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
-    reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+    reclassification::admit_document(
+        &document.placements,
+        &document.entities,
+        state.limits,
+        admit,
+    )?;
     let prepared = structure::prepare_conversion_structure_with_admission(
         &document.instantiate(),
         state,
@@ -2654,7 +2702,7 @@ pub(crate) fn prepare_prefab_conversion_patch_with_admission(
     )?;
     let document = PrefabDocument {
         inputs: document.inputs.clone(),
-        roots: prepared.document.roots,
+        placements: prepared.document.placements,
         entities: prepared.document.entities,
     };
     reclassification::validate_prefab_shape(&document, state.limits, Some(admit))?;
@@ -2674,7 +2722,7 @@ pub(crate) fn prepare_scene_prefab_conversion_patch_with_work(
     work: &mut crate::authoring::prefab_conversion::work::ConversionWork,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     structure::prepare_conversion_structure_with_work(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state,
         patch,
@@ -2691,7 +2739,7 @@ pub(crate) fn prepare_prefab_conversion_patch_with_work(
     work: &mut crate::authoring::prefab_conversion::work::ConversionWork,
 ) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
     let prepared = structure::prepare_conversion_structure_with_work(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state,
         patch,
@@ -2704,7 +2752,7 @@ pub(crate) fn prepare_prefab_conversion_patch_with_work(
     )?;
     let document = PrefabDocument {
         inputs: document.inputs.clone(),
-        roots: prepared.document.roots,
+        placements: prepared.document.placements,
         entities: prepared.document.entities,
     };
     crate::format::validate_prefab_publication_shape_with_admission(
@@ -2736,7 +2784,7 @@ pub(crate) fn prepare_prefab_conversion_patch(
         structure::prepare_conversion_structure(&document.instantiate(), state, patch, footprint)?;
     let document = PrefabDocument {
         inputs: document.inputs.clone(),
-        roots: prepared.document.roots,
+        placements: prepared.document.placements,
         entities: prepared.document.entities,
     };
     if crate::format::validate_prefab_publication_shape(&document, state.limits).is_err() {
@@ -2790,7 +2838,7 @@ fn prepare_prefab_authoring_patch_impl(
     {
         if let Some(admit) = admit.as_deref_mut() {
             reclassification::admit_document(
-                &document.roots,
+                &document.placements,
                 &document.entities,
                 state.limits,
                 admit,
@@ -2811,7 +2859,7 @@ fn prepare_prefab_authoring_patch_impl(
         }
         let candidate = PrefabDocument {
             inputs: document.inputs.clone(),
-            roots: prepared.document.roots,
+            placements: prepared.document.placements,
             entities: prepared.document.entities,
         };
         reclassification::validate_prefab_shape(&candidate, state.limits, admit.as_deref_mut())?;
@@ -2823,7 +2871,12 @@ fn prepare_prefab_authoring_patch_impl(
         });
     }
     if let Some(admit) = admit.as_deref_mut() {
-        reclassification::admit_document(&document.roots, &document.entities, state.limits, admit)?;
+        reclassification::admit_document(
+            &document.placements,
+            &document.entities,
+            state.limits,
+            admit,
+        )?;
         reclassification::admit_patch_copy(patch, "field-edits", admit)?;
         reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
         reclassification::admit_patch_copy(patch, "field-candidate-writes", admit)?;
@@ -2868,7 +2921,7 @@ fn prepare_prefab_authoring_patch_impl(
     Ok(PreparedPrefabAuthoringPatch {
         document: PrefabDocument {
             inputs: document.inputs.clone(),
-            roots: candidate.roots,
+            placements: candidate.placements,
             entities: candidate.entities,
         },
         state: candidate_state,

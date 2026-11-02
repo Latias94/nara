@@ -16,12 +16,13 @@ use nara_reflect::{
 use super::work::ConversionWork;
 use super::{LocalizedPrefabEntity, PrefabConversionError, PrefabConversionFootprint};
 use crate::{
-    AuthoringSchemaBasis, PrefabProjectionPath, ResolvedPrefabSource, SceneAuthoringHistoryLimits,
-    SceneCompilationOptions, SceneEntityId, SceneEntityRecord, SceneFileLimits,
-    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
-    ScenePlacement, ScenePlacementOwner,
+    AuthoringSchemaBasis, PrefabEntityTarget, PrefabInstanceBinding, PrefabProjectionPath,
+    ResolvedPrefabSource, SceneAuthoringHistoryLimits, SceneCompilationOptions, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, SceneFileLimits, ScenePatchApplyLimits,
+    ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
+    ScenePlacementParent,
     authoring::{creation::allocate_entity_id, history_error_report},
-    patch::bounded_scene_entities_source_cost,
+    patch::bounded_component_records_source_cost,
     prefab::{
         AuthoringSceneCompilationOmissionReason, PrefabOverlayCostLimits,
         SceneCompilationWorkingSet, SelectedInstanceCompilation, SelectedInstanceSource,
@@ -30,6 +31,7 @@ use crate::{
 };
 
 mod dependencies;
+mod source;
 pub(super) use dependencies::CapturedPrefabSources;
 
 pub(super) struct LocalizedConversion {
@@ -46,6 +48,7 @@ pub(super) fn prepare<F, E>(
     anchor: &SceneEntityId,
     basis: &AuthoringSchemaBasis,
     history: SceneAuthoringHistoryLimits,
+    source_limits: SceneFileLimits,
     options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut loader: F,
@@ -69,15 +72,48 @@ where
         .limits
         .with_materialized_value_nodes(value_nodes)
         .with_materialized_value_bytes(value_bytes);
-    let records = match &source {
-        SelectedInstanceSource::Scene(document) => &document.entities,
-        SelectedInstanceSource::Prefab(document) => &document.entities,
+    let (placements, records) = match &source {
+        SelectedInstanceSource::Scene(document) => (&document.placements, &document.entities),
+        SelectedInstanceSource::Prefab(document) => (&document.placements, &document.entities),
     };
-    let mut dependencies = CapturedPrefabSources::new(limits.working_bytes().get());
-    let mut working_limit = limits.working_bytes();
-    let compiler_limit = limits
+    // Reading retained source is independent of how much selected output is materialized.
+    // Preserve the actual source admission and configured reference-work ceilings.
+    let source_references = crate::validation::reference_traversal_limits(
+        source_limits.component_materialization_limits(),
+    );
+    let source_references = nara_reflect::EntityReferenceTraversalLimits::new(
+        nara_core::ItemLimit::new(
+            source_references
+                .nodes()
+                .get()
+                .min(options.limits.reference_work_nodes().get()),
+        )
+        .expect("source read limits are nonzero"),
+        nara_core::ByteLimit::new(
+            source_references
+                .bytes()
+                .get()
+                .min(options.limits.reference_work_bytes().get()),
+        )
+        .expect("source read limits are nonzero"),
+        source_references.depth(),
+    );
+    let reference_queries = source::collect_source_reference_queries(
+        records,
+        anchor,
+        basis,
+        source_references,
+        limits.working_bytes(),
+    )
+    .map_err(PrefabConversionError::Source)?;
+    let dependency_limit = limits
         .working_bytes()
         .get()
+        .checked_sub(reference_queries.work_bytes)
+        .ok_or_else(|| PrefabConversionError::Source(copy_limit()))?;
+    let mut dependencies = CapturedPrefabSources::new(dependency_limit);
+    let mut working_limit = limits.working_bytes();
+    let compiler_limit = dependency_limit
         .checked_sub(dependencies.retained_bytes())
         .and_then(nara_core::ByteLimit::new)
         .ok_or_else(|| PrefabConversionError::Source(dependencies::source_budget()))?;
@@ -85,12 +121,19 @@ where
     let mut compiled = try_compile_selected_authoring_instance_with_loader(
         source,
         anchor,
+        &reference_queries.values,
+        reference_queries.reference_work,
         basis,
         options.with_limits(limits),
         asset_resolution,
         |request, working| {
             let mut loading = working
-                .including_retained_working_bytes(dependencies.retained_bytes())
+                .including_retained_working_bytes(
+                    dependencies
+                        .retained_bytes()
+                        .checked_add(reference_queries.work_bytes)
+                        .ok_or_else(|| PrefabConversionError::Source(copy_limit()))?,
+                )
                 .ok_or_else(|| PrefabConversionError::Source(dependencies::source_budget()))?;
             let loaded = loader(request, &mut loading).map_err(PrefabConversionError::Loader)?;
             working_limit = nara_core::ByteLimit::new(
@@ -101,6 +144,7 @@ where
                 .working_byte_limit()
                 .get()
                 .checked_sub(dependencies.retained_bytes())
+                .and_then(|bytes| bytes.checked_sub(reference_queries.work_bytes))
                 .and_then(nara_core::ByteLimit::new)
                 .ok_or_else(|| PrefabConversionError::Source(dependencies::source_budget()))?;
             working.restrict_working_bytes(remaining);
@@ -132,13 +176,20 @@ where
     )
     .map_err(PrefabConversionError::Source)?;
     work.reserve(
+        "source-reference-inventory",
+        Some(reference_queries.work_bytes),
+    )
+    .map_err(PrefabConversionError::Source)?;
+    work.reserve(
         "conversion-result",
         Some(std::mem::size_of::<LocalizedConversion>()),
     )
     .map_err(PrefabConversionError::Source)?;
     let asset_references = std::mem::take(&mut compiled.asset_references);
-    let (patch, footprint, entities) = lower(records, anchor, basis, history, compiled, &mut work)
-        .map_err(PrefabConversionError::Source)?;
+    let (patch, footprint, entities) = lower(
+        placements, records, anchor, basis, history, compiled, &mut work,
+    )
+    .map_err(PrefabConversionError::Source)?;
     Ok(LocalizedConversion {
         patch,
         footprint,
@@ -150,6 +201,7 @@ where
 }
 
 fn lower(
+    placements: &[SceneEntityPlacement],
     source: &[SceneEntityRecord],
     anchor: &SceneEntityId,
     basis: &AuthoringSchemaBasis,
@@ -175,16 +227,6 @@ fn lower(
             diagnostics: compiled.diagnostics,
         });
     }
-    if compiled.omissions.iter().any(|omission| {
-        matches!(
-            omission.reason,
-            AuthoringSceneCompilationOmissionReason::RecordUnavailable(_)
-        )
-    }) {
-        return Err(refused(
-            "Conversion cannot localize an unavailable surviving projected record",
-        ));
-    }
     let fragment = compiled
         .fragment
         .ok_or_else(|| refused("Conversion requires complete selected semantic data"))?;
@@ -202,6 +244,17 @@ fn lower(
         .prefab
         .as_ref()
         .ok_or_else(|| refused("Conversion requires a source instance declaration"))?;
+    if compiled.omissions.iter().any(|omission| {
+        matches!(
+            omission.reason,
+            AuthoringSceneCompilationOmissionReason::RecordUnavailable(_)
+        ) && (&omission.entity != anchor
+            || !anchor_record.components.contains_key(&omission.component))
+    }) {
+        return Err(refused(
+            "Conversion cannot localize an unavailable surviving projected record",
+        ));
+    }
     let replay = ScenePatchApplyLimits::default();
     let maximum = history
         .max_entry_logical_bytes()
@@ -209,8 +262,14 @@ fn lower(
     let nodes = history
         .max_entry_value_nodes()
         .min(replay.validation_value_nodes().get());
-    let raw =
-        bounded_scene_entities_source_cost(&fragment.entities, replay).ok_or_else(copy_limit)?;
+    let raw = bounded_component_records_source_cost(
+        fragment
+            .entities
+            .iter()
+            .flat_map(|entity| entity.components.values()),
+        replay,
+    )
+    .ok_or_else(copy_limit)?;
     let old = prefab_instance_cost(
         original,
         PrefabOverlayCostLimits {
@@ -256,18 +315,12 @@ fn lower(
             .checked_mul(2)
             .ok_or_else(copy_limit)?,
     )?;
-    let root_placement_bytes = anchor
-        .as_str()
-        .len()
-        .checked_add(
-            anchor_record
-                .children
-                .first()
-                .map_or(0, |child| child.as_str().len()),
-        )
-        .and_then(|bytes| bytes.checked_mul(fragment.roots.len().checked_add(1)?))
-        .ok_or_else(copy_limit)?;
-    work.reserve(root_placement_bytes)?;
+    let root_bound = matches!(original.binding, PrefabInstanceBinding::Root { .. });
+    if root_bound && fragment.roots.as_slice() != std::slice::from_ref(anchor) {
+        return Err(refused(
+            "Root-bound conversion requires its merged original anchor",
+        ));
+    }
     for record in &fragment.entities {
         // Two temporary ID indices, the replay footprint and the retained review mapping.
         work.reserve(512)?;
@@ -275,19 +328,26 @@ fn lower(
         let provenance = fragment.provenance.get(&record.id).ok_or_else(|| {
             refused("Every localized record requires its complete compiler provenance")
         })?;
-        let path = provenance
-            .projection_path()
-            .filter(|path| path.root_anchor() == anchor)
-            .ok_or_else(|| refused("Conversion cannot claim another source occurrence"))?;
+        let path = match provenance.projection_path() {
+            Some(path) if path.root_anchor() == anchor => Some(path),
+            None if root_bound
+                && &record.id == anchor
+                && provenance.local_entity_id() == anchor =>
+            {
+                None
+            }
+            _ => return Err(refused("Conversion cannot claim another source occurrence")),
+        };
         work.reserve(
             crate::provenance::provenance_entry_bytes(&record.id, provenance.local_entity_id())
-                .and_then(|bytes| {
-                    PrefabProjectionPath::extended_allocation_bytes(
+                .and_then(|bytes| match path {
+                    Some(path) => PrefabProjectionPath::extended_allocation_bytes(
                         Some(path),
                         path.root_anchor(),
                         0,
                     )
-                    .and_then(|path_bytes| bytes.checked_add(path_bytes))
+                    .and_then(|path_bytes| bytes.checked_add(path_bytes)),
+                    None => Some(bytes),
                 })
                 .ok_or_else(copy_limit)?,
         )?;
@@ -296,6 +356,10 @@ fn lower(
     let mut identifiers = BTreeMap::new();
     let mut allocated = BTreeSet::new();
     for record in &fragment.entities {
+        if root_bound && &record.id == anchor {
+            identifiers.insert(record.id.clone(), anchor.clone());
+            continue;
+        }
         let entity = allocate_entity_id(|candidate| {
             source
                 .binary_search_by(|record| record.id.cmp(candidate))
@@ -307,30 +371,6 @@ fn lower(
         identifiers.insert(record.id.clone(), entity);
     }
     let created = allocated.into_iter().collect::<Vec<_>>();
-    let footprint = PrefabConversionFootprint::new(anchor, &created, maximum)?;
-    let mut records = fragment
-        .entities
-        .into_iter()
-        .map(|record| (record.id.clone(), record))
-        .collect::<BTreeMap<_, _>>();
-    let mut provenance = fragment.provenance;
-    let root_placement = match anchor_record.children.first() {
-        Some(first) => ScenePlacement::before(
-            ScenePlacementOwner::Parent {
-                parent: anchor.clone(),
-            },
-            first.clone(),
-        ),
-        None => ScenePlacement::last(ScenePlacementOwner::Parent {
-            parent: anchor.clone(),
-        }),
-    };
-    let mut pending = fragment
-        .roots
-        .into_iter()
-        .rev()
-        .map(|root| (root, root_placement.clone()))
-        .collect::<Vec<_>>();
     let mut operations = vec![ScenePatchOperation::SetPrefabInstance {
         entity: anchor.clone(),
         expected: Some(original.clone()),
@@ -343,17 +383,50 @@ fn lower(
             nara_core::ByteLimit::new(maximum).ok_or_else(copy_limit)?,
             ComponentValueMaterializationLimits::default().depth(),
         ));
-    while let Some((old_id, placement)) = pending.pop() {
-        let mut record = records
-            .remove(&old_id)
-            .ok_or_else(|| refused("Conversion requires one complete selected entity forest"))?;
-        if record.prefab.is_some() {
-            return Err(refused(
-                "Conversion requires fully composed selected records",
-            ));
+    let mut localized_placements = source::localize_placements(
+        placements,
+        &fragment,
+        &identifiers,
+        anchor,
+        source,
+        &mut work,
+    )?;
+    let targets = source::SourceTargets {
+        entities: &fragment.targets,
+        references: &fragment.reference_targets,
+        identifiers: &identifiers,
+        anchor,
+        source,
+    };
+    let mut provenance = fragment.provenance;
+    for mut expanded in fragment.entities {
+        let entity = identifiers
+            .get(&expanded.id)
+            .ok_or_else(copy_limit)?
+            .clone();
+        let merged_anchor = root_bound && &expanded.id == anchor;
+        if merged_anchor {
+            // Containing complete records win over the inherited root. Preserve raw
+            // omissions and hidden defaults; replace only actual reference changes.
+            for (component, original) in &anchor_record.components {
+                expanded.components.remove(component);
+                if let std::borrow::Cow::Owned(value) = source::localize_record(
+                    original,
+                    component,
+                    basis,
+                    targets,
+                    reference_limits,
+                    &mut work,
+                )? {
+                    operations.push(ScenePatchOperation::ReplaceComponent {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                        value,
+                    });
+                }
+            }
         }
-        let entity = identifiers.get(&old_id).ok_or_else(copy_limit)?.clone();
-        for (component, payload) in &mut record.components {
+        for (component, payload) in &mut expanded.components {
             let schema = basis
                 .schema(component)
                 .filter(|schema| {
@@ -384,7 +457,14 @@ fn lower(
                 EntityReferencePlanError::Reference(error) => reference_error(error),
                 EntityReferencePlanError::Admission(report) => report,
             })?;
-            localize_references(&mut payload.value, &plan, &identifiers, source, &mut work)?;
+            localize_references(
+                &mut payload.value,
+                &plan,
+                &identifiers,
+                &fragment.targets,
+                source,
+                &mut work,
+            )?;
             for (id, value) in &mut payload.contextual_defaults {
                 let field = schema
                     .fields()
@@ -405,40 +485,91 @@ fn lower(
                         EntityReferencePlanError::Reference(error) => reference_error(error),
                         EntityReferencePlanError::Admission(report) => report,
                     })?;
-                localize_references(value, &plan, &identifiers, source, &mut work)?;
+                localize_references(
+                    value,
+                    &plan,
+                    &identifiers,
+                    &fragment.targets,
+                    source,
+                    &mut work,
+                )?;
             }
         }
-        let children = std::mem::take(&mut record.children);
-        record.id = entity.clone();
-        for child in children.into_iter().rev() {
-            pending.push((
-                child,
-                ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: entity.clone(),
-                }),
-            ));
-        }
         entities.push(LocalizedPrefabEntity {
-            provenance: provenance.remove(&old_id).ok_or_else(copy_limit)?,
-            entity,
+            provenance: provenance.remove(&expanded.id).ok_or_else(copy_limit)?,
+            entity: entity.clone(),
         });
-        operations.push(ScenePatchOperation::AddEntity {
-            entity: record,
-            placement,
-        });
+        if merged_anchor {
+            for (component, value) in expanded.components {
+                operations.push(ScenePatchOperation::AddComponent {
+                    entity: entity.clone(),
+                    component,
+                    value,
+                });
+            }
+        } else {
+            operations.push(ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord {
+                    id: entity,
+                    components: expanded.components,
+                    prefab: None,
+                },
+            });
+        }
     }
-    if !records.is_empty() || !provenance.is_empty() {
+    if !provenance.is_empty() {
         return Err(refused(
             "Conversion requires a complete reachable selected entity forest",
         ));
     }
-    Ok((ScenePatchDocument::new(operations), footprint, entities))
+    for record in source {
+        if !root_bound || &record.id != anchor {
+            for (component, original) in &record.components {
+                let value = source::localize_record(
+                    original,
+                    component,
+                    basis,
+                    targets,
+                    reference_limits,
+                    &mut work,
+                )?;
+                if value.as_ref() != original {
+                    operations.push(ScenePatchOperation::ReplaceComponent {
+                        entity: record.id.clone(),
+                        component: component.clone(),
+                        value: value.into_owned(),
+                    });
+                }
+            }
+        }
+        if &record.id != anchor
+            && let Some(original) = &record.prefab
+            && let std::borrow::Cow::Owned(value) =
+                source::localize_instance(original, basis, targets, reference_limits, &mut work)?
+        {
+            operations.push(ScenePatchOperation::SetPrefabInstance {
+                entity: record.id.clone(),
+                expected: Some(original.clone()),
+                value: Some(value),
+            });
+        }
+    }
+    if localized_placements != placements {
+        operations.push(ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value: std::mem::take(&mut localized_placements),
+        });
+    }
+    let patch = ScenePatchDocument::new(operations);
+    let footprint = PrefabConversionFootprint::new(anchor, &created, &patch, maximum)?;
+    Ok((patch, footprint, entities))
 }
 
 fn localize_references(
     value: &mut ComponentValue,
     plan: &DeclaredEntityReferencePlan,
     identifiers: &BTreeMap<SceneEntityId, SceneEntityId>,
+    targets: &BTreeMap<PrefabEntityTarget, SceneEntityId>,
     source: &[SceneEntityRecord],
     work: &mut LocalizationWork<'_>,
 ) -> Result<(), ScenePatchReport> {
@@ -455,9 +586,27 @@ fn localize_references(
                         .binary_search_by(|record| record.id.cmp(entity))
                         .is_err()
                 {
-                    Err(refused(
-                        "Conversion cannot retain another occurrence's projected locator",
-                    ))
+                    external_target(entity, targets).and_then(|target| {
+                        let bytes = target.through.iter().try_fold(
+                            256usize
+                                .checked_add(target.entity.entity().as_str().len())
+                                .ok_or_else(copy_limit)?,
+                            |bytes, hop| {
+                                bytes
+                                    .checked_add(std::mem::size_of::<crate::PrefabInstanceHop>())
+                                    .and_then(|bytes| {
+                                        bytes.checked_add(hop.anchor.entity().as_str().len())
+                                    })
+                                    .and_then(|bytes| {
+                                        bytes.checked_add(
+                                            hop.expected_base.checked_retained_bytes()?,
+                                        )
+                                    })
+                                    .ok_or_else(copy_limit)
+                            },
+                        )?;
+                        work.reserve(bytes)
+                    })
                 } else {
                     work.reserve(target.as_str().len())
                 }
@@ -477,9 +626,24 @@ fn localize_references(
     }
     plan.rewrite_in_place(value, |_, reference| {
         Ok::<_, ScenePatchReport>(match reference {
-            EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
-                entity: identifiers.get(entity).unwrap_or(entity).clone(),
-            },
+            EntityReference::SceneLocal { entity } => {
+                if let Some(local) = identifiers.get(entity) {
+                    EntityReference::SceneLocal {
+                        entity: local.clone(),
+                    }
+                } else if source
+                    .binary_search_by(|record| record.id.cmp(entity))
+                    .is_ok()
+                {
+                    EntityReference::SceneLocal {
+                        entity: entity.clone(),
+                    }
+                } else {
+                    EntityReference::Authored {
+                        reference: external_target(entity, targets)?.clone().into(),
+                    }
+                }
+            }
             EntityReference::Persistent { .. } => reference.clone(),
             EntityReference::Authored { .. } => {
                 return Err(refused(
@@ -489,6 +653,18 @@ fn localize_references(
         })
     })
     .map_err(reference_error)
+}
+
+fn external_target<'a>(
+    entity: &SceneEntityId,
+    targets: &'a BTreeMap<PrefabEntityTarget, SceneEntityId>,
+) -> Result<&'a PrefabEntityTarget, ScenePatchReport> {
+    targets
+        .iter()
+        .filter(|(_, actual)| *actual == entity)
+        .min_by_key(|(target, _)| target.through.len())
+        .map(|(target, _)| target)
+        .ok_or_else(|| refused("Conversion requires the compiler's actual external source target"))
 }
 
 struct LocalizationWork<'a> {

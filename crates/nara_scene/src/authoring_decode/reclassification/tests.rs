@@ -190,7 +190,7 @@ fn tiny_allowance_refuses_before_value_validation_or_source_copy() {
     assert_eq!(stages, ["classification-source"]);
     let prefab = PrefabDocument {
         inputs: Default::default(),
-        roots: document.roots.clone(),
+        placements: document.placements.clone(),
         entities: document.entities.clone(),
     };
     stages.clear();
@@ -209,7 +209,7 @@ fn tiny_allowance_refuses_before_value_validation_or_source_copy() {
             )
             .is_err()
     );
-    assert_eq!(stages, ["source-cost-walk"]);
+    assert_eq!(stages, ["classification-source"]);
 }
 
 #[test]
@@ -424,6 +424,7 @@ fn fixed_scalar_overlay_claims_charge_schema_scans_and_refuse_in_the_selector_wa
     let mut root = SceneEntityRecord::new(id());
     root.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/selector-base.prefab.json").unwrap(),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: Some(overlay),
     });

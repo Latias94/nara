@@ -202,11 +202,7 @@ fn custom_source_roots_resolve_same_local_aliases_through_the_complete_loader() 
                         ComponentTypeId::new("nara.transform.Transform2d"),
                         identity_transform_record(),
                     );
-                anchor.prefab = Some(PrefabInstance {
-                    source: reference.clone(),
-                    arguments: None,
-                    overrides: None,
-                });
+                anchor.prefab = Some(PrefabInstance::forest(reference.clone()));
                 anchor
             },
         ));
@@ -482,11 +478,9 @@ fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup(
         ComponentTypeId::new("nara.transform.Transform2d"),
         identity_transform_record(),
     );
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::path("second.prefab.json").unwrap(),
-        arguments: None,
-        overrides: Default::default(),
-    });
+    anchor.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("second.prefab.json").unwrap(),
+    ));
     fs::write(
         project.path().join("scenes").join(selected.as_str()),
         SceneDocument::from_ordered_roots([anchor])
@@ -503,7 +497,14 @@ fn selected_scene_loads_only_its_dependency_closure_without_retargeting_startup(
     assert_eq!(second.selected_scene_path(), &selected);
     assert_eq!(second.lineage(), startup.lineage());
     assert_eq!(second.schema_fingerprint(), startup.schema_fingerprint());
-    assert_eq!(second.scene().roots, [scene_id("second-anchor")]);
+    assert_eq!(
+        second
+            .scene()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [scene_id("second-anchor")]
+    );
     assert_eq!(second.compiled_scene().entities().len(), 2);
     assert_eq!(second.compiled_scene_provenance().len(), 2);
     assert!(second.compiled_scene_provenance().values().any(|source| {

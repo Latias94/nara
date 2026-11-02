@@ -30,12 +30,12 @@ use nara_reflect::{
 };
 use nara_scene::{
     CompiledSceneCandidate, InMemoryPrefabSourceResolver, Name, PrefabAddition, PrefabDocument,
-    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep, RuntimeSceneCandidate,
-    RuntimeSceneDocumentCandidate, RuntimeSceneLimits, SceneComponentBindings,
-    SceneComponentBindingsPlugin, SceneComponentRecord, SceneComponentsPlugin, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-    SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
+    PrefabProjectionStep, RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneLimits,
+    SceneComponentBindings, SceneComponentBindingsPlugin, SceneComponentRecord,
+    SceneComponentsPlugin, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey, ScenePlacement,
+    ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
     advanced::{
         SceneAssetBindings, SceneNativeRetirementClaims, SceneProductResource,
         SceneProductTransactionLimits,
@@ -181,10 +181,17 @@ impl Definition {
         let leaf_ref = AssetRef::path(format!("prefabs/{name}-leaf.prefab.json")).unwrap();
         let wrapper_ref = AssetRef::path(format!("prefabs/{name}-wrapper.prefab.json")).unwrap();
         let leaf = PrefabDocument::new(
-            [id("actor")],
+            [
+                nara_scene::SceneEntityPlacement::root(id("actor")),
+                nara_scene::SceneEntityPlacement::new(
+                    nara_scene::PrefabEntityTarget::source(id("friend")),
+                    nara_scene::ScenePlacement::last(nara_scene::ScenePlacementParent::Entity(
+                        nara_scene::PrefabEntityTarget::source(id("actor")),
+                    )),
+                ),
+            ],
             [
                 native("actor", amount)
-                    .with_children([id("friend")])
                     .with_component(
                         component(LINK),
                         data(ComponentValue::EntityReference(
@@ -220,11 +227,10 @@ impl Definition {
             .components
             .insert(component(PROBE), native_record(9));
         overlay.additions.push(addition);
-        overlay.placements.push(PrefabPlacement {
-            target: PrefabEntityTarget::addition(id("added")),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::Last,
-        });
+        overlay.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(id("added")),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
         let document = SceneDocument::from_ordered_roots([
             instance("anchor_a", wrapper_ref.clone(), Some(overlay)),
             instance("anchor_b", wrapper_ref.clone(), None),
@@ -316,6 +322,7 @@ fn data(value: ComponentValue) -> SceneComponentRecord {
 fn instance(name: &str, source: AssetRef, overrides: Option<PrefabOverlay>) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
     entity.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source,
         arguments: None,
         overrides,

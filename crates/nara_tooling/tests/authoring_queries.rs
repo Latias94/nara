@@ -11,7 +11,7 @@ use nara_scene::{
     AuthoringReadError, AuthoringRecordReadiness, PrefabAuthoringSession, PrefabDocument,
     PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 use nara_tooling::{
     EditorAuthoringMemberStatus, EditorAuthoringPage, EditorAuthoringProjection,
@@ -860,7 +860,7 @@ fn every_preparation_entry_rejects_inexact_observations_and_does_not_rebase_draf
         }];
         let mut draft = workspace.begin_authoring_construction(&captured).unwrap();
         draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let before = workspace.authoring_model();
         assert!(workspace.prepare_authoring_edit(&captured, &patch).is_ok());

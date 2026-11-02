@@ -13,7 +13,7 @@ use nara_reflect::{
 use crate::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabInstance, PrefabInstanceClaim, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent,
-    SceneComponentRecord, authoring_decode::AuthoringAdapterReceipt,
+    SceneComponentRecord, SceneEntityId, authoring_decode::AuthoringAdapterReceipt,
 };
 
 const COMPONENT: &str = "trial.enemy.EnemyStats";
@@ -161,6 +161,7 @@ fn document(next: bool) -> SceneDocument {
     let mut nested = PrefabOverlay::new(base());
     nested.components = vec![properties(next, false), properties(next, true)];
     let nested = PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("missing-nested.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(nested),
@@ -185,6 +186,7 @@ fn document(next: bool) -> SceneDocument {
     let mut root = SceneEntityRecord::new(id("root"))
         .with_component(ComponentTypeId::new(COMPONENT), record(next));
     root.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("missing-outer.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -220,9 +222,10 @@ fn validate(
         ),
         SourceDocumentKind::Prefab => {
             // These decoded input owners belong to the caller, before transition validation.
-            let original = PrefabDocument::new(original.roots.clone(), original.entities.clone());
+            let original =
+                PrefabDocument::new(original.placements.clone(), original.entities.clone());
             let successor =
-                PrefabDocument::new(successor.roots.clone(), successor.entities.clone());
+                PrefabDocument::new(successor.placements.clone(), successor.entities.clone());
             crate::__private::validate_authored_upgrade_prefab_transition(
                 &original,
                 &successor,
@@ -319,7 +322,7 @@ fn stored_pairs_refuse_unrelated_armor_opaque_payload_and_topology_changes() {
                     .unwrap()
                     .value = ComponentValue::String("changed".into());
             }
-            _ => successor.roots.reverse(),
+            _ => successor.placements.reverse(),
         }
         for kind in [SourceDocumentKind::Scene, SourceDocumentKind::Prefab] {
             let report = validate(
@@ -571,8 +574,8 @@ fn decoded_successors_cannot_bypass_original_publication_limits() {
         .with_component(ComponentTypeId::new(COMPONENT), record(false))]);
     let successor = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("enemy"))
         .with_component(ComponentTypeId::new(COMPONENT), record(true))]);
-    let old_prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
-    let next_prefab = PrefabDocument::new(successor.roots.clone(), successor.entities.clone());
+    let old_prefab = PrefabDocument::new(original.placements.clone(), original.entities.clone());
+    let next_prefab = PrefabDocument::new(successor.placements.clone(), successor.entities.clone());
     let old_bytes = original
         .to_json_string()
         .unwrap()

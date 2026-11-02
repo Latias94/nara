@@ -43,12 +43,12 @@ impl PreparedFieldCandidate<'_> {
         // Move the nominal projection through its own format boundary; no second value tree.
         let prefab = PrefabDocument {
             inputs: inputs.clone(),
-            roots: self.document.roots,
+            placements: self.document.placements,
             entities: self.document.entities,
         };
         crate::format::validate_prefab_publication_shape(&prefab, self.state.limits)?;
         self.document = SceneDocument {
-            roots: prefab.roots,
+            placements: prefab.placements,
             entities: prefab.entities,
         };
         Ok(self)
@@ -62,12 +62,12 @@ impl PreparedFieldCandidate<'_> {
         admit("prefab-inputs", retention::prefab_inputs_bytes(inputs))?;
         let prefab = PrefabDocument {
             inputs: inputs.clone(),
-            roots: self.document.roots,
+            placements: self.document.placements,
             entities: self.document.entities,
         };
         reclassification::validate_prefab_shape(&prefab, self.state.limits, Some(admit))?;
         self.document = SceneDocument {
-            roots: prefab.roots,
+            placements: prefab.placements,
             entities: prefab.entities,
         };
         Ok(self)

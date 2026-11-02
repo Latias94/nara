@@ -39,6 +39,7 @@ fn record() -> AssetRecord {
 fn containing_scene(request: AssetRef) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: request,
         arguments: None,
         overrides: None,

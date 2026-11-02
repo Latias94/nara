@@ -46,7 +46,7 @@ pub(super) fn prepare_scene_authoring_structure_with_admission(
         return prepare_scene_authoring_structure(document, state, patch, history);
     }
     prepare_structure_from_parts(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state,
         patch,
@@ -69,7 +69,7 @@ pub(super) fn prepare_conversion_structure_with_admission(
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     footprint.admit_patch(patch)?;
     prepare_structure_from_parts(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state,
         patch,
@@ -95,7 +95,7 @@ pub(super) fn prepare_conversion_structure(
 }
 
 pub(super) fn prepare_conversion_structure_with_work(
-    roots: &[crate::SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[crate::SceneEntityRecord],
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
@@ -110,18 +110,13 @@ pub(super) fn prepare_conversion_structure_with_work(
             value: None,
             ..
         })
-    ) || patch
-        .operations
-        .iter()
-        .skip(1)
-        .any(|operation| !matches!(operation, ScenePatchOperation::AddEntity { .. }))
-    {
+    ) {
         return Err(authoring_structure_rejection(
             "Conversion preparation requires its complete forward localization",
         ));
     }
     prepare_structure_from_parts(
-        roots,
+        placements,
         entities,
         state,
         patch,
@@ -138,7 +133,7 @@ fn prepare_structure(
     admission: StructureAdmission<'_>,
 ) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
     prepare_structure_from_parts(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state,
         patch,
@@ -149,7 +144,7 @@ fn prepare_structure(
 }
 
 fn prepare_structure_from_parts(
-    roots: &[crate::SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[crate::SceneEntityRecord],
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
@@ -172,7 +167,7 @@ fn prepare_structure_from_parts(
         }
     }
     if let Some(admit) = admit.as_deref_mut() {
-        super::reclassification::admit_document(roots, entities, state.limits, admit)?;
+        super::reclassification::admit_document(placements, entities, state.limits, admit)?;
         super::reclassification::admit_patch_copy(patch, "parsed-fields", admit)?;
         super::reclassification::admit_patch_copy(patch, "candidate-insertions", admit)?;
         super::reclassification::admit_patch_copy(patch, "forward-patch", admit)?;
@@ -198,7 +193,7 @@ fn prepare_structure_from_parts(
     if let Some(work) = work.as_deref_mut() {
         work.reserve(
             "complete-document",
-            retention::document_dynamic_bytes(roots, entities, state.limits),
+            retention::document_dynamic_bytes(placements, entities, state.limits),
         )?;
         // Candidate insertions, exact inverse, and retained forward patch coexist.
         work.reserve(
@@ -208,7 +203,7 @@ fn prepare_structure_from_parts(
         work::copying("complete-document");
     }
     let mut candidate = SceneDocument {
-        roots: roots.to_vec(),
+        placements: placements.to_vec(),
         entities: entities.to_vec(),
     };
     let mut created = BTreeSet::new();
@@ -216,9 +211,9 @@ fn prepare_structure_from_parts(
     for (operation_index, operation) in patch.operations.iter().enumerate() {
         if let Some(admit) = admit.as_deref_mut() {
             // Each operation can retain at most the current source in its exact inverse.
-            // This actual-state bound also covers RestoreEntity and destructive subtrees.
+            // This actual-state bound also covers complete restored records and layout vectors.
             let inverse_bound = retention::document_dynamic_bytes_with_admission(
-                &candidate.roots,
+                &candidate.placements,
                 &candidate.entities,
                 state.limits,
                 |bytes| admit("operation-inverse-scan", bytes),
@@ -269,36 +264,23 @@ fn prepare_structure_from_parts(
             ScenePatchOperation::RemoveComponent { entity, component } => {
                 created.remove(&(entity.clone(), component.clone()));
             }
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                ..
-            } => {
+            ScenePatchOperation::RestoreEntity { entity } => {
                 // Only owner-created history can restore records. Their fields still cross
                 // the ordinary schema/version/capability checks before any further edit.
-                for record in std::iter::once(entity).chain(descendants.iter()) {
-                    created.extend(
-                        record
-                            .components
-                            .keys()
-                            .cloned()
-                            .map(|component| (record.id.clone(), component)),
-                    );
-                }
+                created.extend(
+                    entity
+                        .components
+                        .keys()
+                        .cloned()
+                        .map(|component| (entity.id.clone(), component)),
+                );
             }
             ScenePatchOperation::RemoveEntity { .. } => {
                 if !created.is_empty() {
                     for operation in &inverse {
-                        if let ScenePatchOperation::RestoreEntity {
-                            entity,
-                            descendants,
-                            ..
-                        } = operation
-                        {
-                            for record in std::iter::once(entity).chain(descendants.iter()) {
-                                for component in record.components.keys() {
-                                    created.remove(&(record.id.clone(), component.clone()));
-                                }
+                        if let ScenePatchOperation::RestoreEntity { entity } = operation {
+                            for component in entity.components.keys() {
+                                created.remove(&(entity.id.clone(), component.clone()));
                             }
                         }
                     }
@@ -335,6 +317,13 @@ fn prepare_structure_from_parts(
         )?;
     }
     candidate.canonicalize();
+    if let Some(work) = work.as_deref_mut() {
+        work.reserve("source-edit-topology", topology_work_bytes(&candidate))?;
+    }
+    if let Some(admit) = admit.as_deref_mut() {
+        admit("source-edit-topology", topology_work_bytes(&candidate))?;
+    }
+    crate::patch::validate_source_edit_topology(&candidate)?;
     if let Some(admit) = admit.as_deref_mut() {
         crate::format::validate_scene_publication_shape_with_admission(
             &candidate,
@@ -409,7 +398,7 @@ fn prepare_structure_from_parts(
                 ScenePatchOperation::AddEntity { .. }
                     | ScenePatchOperation::RemoveEntity { .. }
                     | ScenePatchOperation::RestoreEntity { .. }
-                    | ScenePatchOperation::MoveEntity { .. }
+                    | ScenePatchOperation::SetPlacements { .. }
             )
         }) {
             manifest_after_topology(&state.unavailable_manifest, &candidate)
@@ -449,32 +438,61 @@ fn prepare_structure_from_parts(
     })
 }
 
+fn topology_work_bytes(document: &SceneDocument) -> Option<usize> {
+    let bytes = super::retention::source_placements_bytes(&document.placements)?;
+    document.entities.iter().try_fold(bytes, |bytes, entity| {
+        bytes
+            .checked_add(512)?
+            .checked_add(entity.id.as_str().len().checked_mul(4)?)
+    })
+}
+
 fn validate_conversion_record(
     state: &AuthoringDocumentState,
     operation: &ScenePatchOperation,
 ) -> Result<(), ScenePatchReport> {
-    let record = match operation {
+    match operation {
         ScenePatchOperation::AddEntity { entity, .. }
-        | ScenePatchOperation::RestoreEntity { entity, .. } => entity,
-        _ => return Ok(()),
-    };
-    for (component, value) in &record.components {
-        let Some(entry) = state.basis.schemas.get(component) else {
-            return Err(authoring_structure_rejection(
-                "Conversion insertion requires an admitted component Schema",
-            ));
-        };
-        if entry.adapter.is_none()
-            || !entry
-                .schema
-                .has_capability(nara_reflect::ComponentCapability::Scene)
-            || value.version != entry.schema.version()
-            || value.owner() != Some(&entry.owner)
-        {
-            return Err(authoring_structure_rejection(
-                "Conversion insertion requires a complete current data-authoring record",
-            ));
+        | ScenePatchOperation::RestoreEntity { entity, .. } => {
+            for (component, value) in &entity.components {
+                validate_conversion_component(state, component, value, true)?;
+            }
         }
+        ScenePatchOperation::AddComponent {
+            component, value, ..
+        }
+        | ScenePatchOperation::ReplaceComponent {
+            component, value, ..
+        } => {
+            validate_conversion_component(state, component, value, false)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_conversion_component(
+    state: &AuthoringDocumentState,
+    component: &nara_reflect::ComponentTypeId,
+    value: &crate::SceneComponentRecord,
+    inserted: bool,
+) -> Result<(), ScenePatchReport> {
+    let Some(entry) = state.basis.schemas.get(component) else {
+        return Err(authoring_structure_rejection(
+            "Conversion insertion requires an admitted component Schema",
+        ));
+    };
+    if entry.adapter.is_none()
+        || !entry
+            .schema
+            .has_capability(nara_reflect::ComponentCapability::Scene)
+        || value.version != entry.schema.version()
+        || value.owner().is_some_and(|owner| owner != &entry.owner)
+        || (inserted && value.owner().is_none())
+    {
+        return Err(authoring_structure_rejection(
+            "Conversion insertion requires a complete current data-authoring record",
+        ));
     }
     Ok(())
 }
@@ -506,9 +524,7 @@ fn validate_operation_shape(
 ) -> Result<(), ScenePatchReport> {
     match operation {
         ScenePatchOperation::AddEntity { entity, .. }
-            if !entity.components.is_empty()
-                || !entity.children.is_empty()
-                || entity.prefab.is_some() =>
+            if !entity.components.is_empty() || entity.prefab.is_some() =>
         {
             Err(authoring_structure_rejection(
                 "Generic authoring creates only an empty entity",
@@ -533,15 +549,12 @@ fn validate_structure_operation(
 ) -> Result<(), ScenePatchReport> {
     match operation {
         ScenePatchOperation::AddEntity { .. } => {}
-        ScenePatchOperation::MoveEntity { .. } => {}
+        ScenePatchOperation::SetPlacements { .. } => {}
         ScenePatchOperation::SetPrefabInstance { .. } => {}
         ScenePatchOperation::RemoveEntity { entity, .. } => {
             let empty_history_inverse = history
                 && document.entities.iter().any(|record| {
-                    &record.id == entity
-                        && record.components.is_empty()
-                        && record.children.is_empty()
-                        && record.prefab.is_none()
+                    &record.id == entity && record.components.is_empty() && record.prefab.is_none()
                 });
             if !empty_history_inverse && !authoring_deletion_closure_is_complete(document, state) {
                 return Err(authoring_structure_rejection(
@@ -549,8 +562,10 @@ fn validate_structure_operation(
                 ));
             }
         }
-        ScenePatchOperation::RestoreEntity { .. }
-            if history && authoring_deletion_closure_is_complete(document, state) => {}
+        ScenePatchOperation::RestoreEntity { entity }
+            if history
+                && (authoring_deletion_closure_is_complete(document, state)
+                    || (entity.components.is_empty() && entity.prefab.is_none())) => {}
         ScenePatchOperation::AddComponent {
             component, value, ..
         } => {
@@ -617,8 +632,9 @@ fn manifest_after_topology(
     manifest: &UnavailableRecordManifest,
     document: &SceneDocument,
 ) -> UnavailableRecordManifest {
-    let placements = crate::patch::authoring_entity_placements(&document.roots, &document.entities);
+    let placements = crate::patch::authoring_entity_placements(&document.placements);
     let mut expected = manifest.clone();
+    expected.source_placements = document.placements.clone();
     for entry in &mut expected.entries {
         match entry {
             UnavailableRecordManifestEntry::Record(record) => match &record.location {
@@ -666,11 +682,12 @@ fn preserves_unedited_declarations(
             AuthoringRecordLocation::OverlayComponent { anchor, .. } => !replaced.contains(anchor),
         }
     };
-    expected
-        .entries
-        .iter()
-        .filter(unedited)
-        .eq(candidate.entries.iter().filter(unedited))
+    expected.source_placements == candidate.source_placements
+        && expected
+            .entries
+            .iter()
+            .filter(unedited)
+            .eq(candidate.entries.iter().filter(unedited))
         && expected
             .overlays
             .iter()
@@ -697,12 +714,85 @@ pub(super) fn authoring_structure_rejection(summary: &'static str) -> ScenePatch
 #[cfg(test)]
 mod tests {
     use crate::{
-        AuthoringDocumentSource, SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneDocument,
-        SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation, ScenePlacement,
+        AuthoringDocumentSource, PrefabEntityTarget, SceneAuthoringHistoryLimits,
+        SceneAuthoringSession, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+        SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+        ScenePlacement, ScenePlacementParent,
     };
     use nara_asset::AssetRef;
     use nara_reflect::AuthoringSchemaBundle;
+
+    #[test]
+    fn generic_authoring_rejects_invalid_complete_local_layout_without_history_changes() {
+        let id = |name: &str| SceneEntityId::new(name).unwrap();
+        let target = |name: &str| PrefabEntityTarget::source(id(name));
+        let document = SceneDocument::from_ordered_roots([
+            SceneEntityRecord::new(id("a")),
+            SceneEntityRecord::new(id("b")),
+        ]);
+        let published =
+            SceneDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
+                .unwrap()
+                .admit_authoring(
+                    AuthoringDocumentSource::new(
+                        AssetRef::path("scenes/layout.scene.json").unwrap(),
+                    ),
+                    &AuthoringSchemaBundle::new([]).unwrap(),
+                    &[],
+                )
+                .unwrap()
+                .publish();
+        let session = SceneAuthoringSession::from_published_authoring_document(published);
+        let before = session.shared_document();
+        let revision = session.revision();
+        for value in [
+            vec![
+                SceneEntityPlacement::new(
+                    target("a"),
+                    ScenePlacement::last(ScenePlacementParent::Entity(target("b"))),
+                ),
+                SceneEntityPlacement::new(
+                    target("b"),
+                    ScenePlacement::last(ScenePlacementParent::Entity(target("a"))),
+                ),
+            ],
+            vec![
+                SceneEntityPlacement::new(
+                    target("a"),
+                    ScenePlacement::before(ScenePlacementParent::Root, target("a")),
+                ),
+                SceneEntityPlacement::root(id("b")),
+            ],
+            vec![
+                SceneEntityPlacement::new(
+                    target("a"),
+                    ScenePlacement::before(ScenePlacementParent::Root, target("b")),
+                ),
+                SceneEntityPlacement::new(
+                    target("b"),
+                    ScenePlacement::before(ScenePlacementParent::Root, target("a")),
+                ),
+            ],
+        ] {
+            let patch = ScenePatchDocument::new([ScenePatchOperation::SetPlacements {
+                expected: document.placements.clone(),
+                value,
+            }]);
+            let report = session
+                .prepare_authoring_edit(revision, &patch)
+                .unwrap_err();
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str()
+                        == "scene.patch-local-layout-invalid")
+            );
+            assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));
+            assert_eq!(session.revision(), revision);
+            assert_eq!(session.history_status().undo_depth, 0);
+        }
+    }
 
     #[test]
     fn oversized_structural_inverse_is_refused_even_with_larger_history_limits() {
@@ -754,20 +844,26 @@ mod tests {
         let root = SceneEntityId::new("root").unwrap();
         let child = SceneEntityId::new("child").unwrap();
         let document = SceneDocument::new(
-            [root.clone()],
             [
-                SceneEntityRecord::new(root.clone())
-                    .with_children([child.clone()])
-                    .with_component(
-                        component.clone(),
-                        SceneComponentRecord::new(
-                            ComponentSchemaVersion::ONE,
-                            ComponentValue::map([(
-                                "text",
-                                ComponentValue::String("x".repeat(65 * 1024 * 1024)),
-                            )]),
-                        ),
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(root.clone()).with_component(
+                    component.clone(),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([(
+                            "text",
+                            ComponentValue::String("x".repeat(65 * 1024 * 1024)),
+                        )]),
                     ),
+                ),
                 SceneEntityRecord::new(child),
             ],
         );
@@ -806,7 +902,6 @@ mod tests {
                 let patch = ScenePatchDocument::new([if remove_entity {
                     ScenePatchOperation::RemoveEntity {
                         entity: root.clone(),
-                        from: ScenePlacement::current(&document, &root).unwrap(),
                     }
                 } else {
                     ScenePatchOperation::RemoveComponent {
@@ -830,8 +925,10 @@ mod tests {
                         )
                     }
                     AuthoringDocumentKind::Prefab => {
-                        let prefab =
-                            PrefabDocument::new(document.roots.clone(), document.entities.clone());
+                        let prefab = PrefabDocument::new(
+                            document.placements.clone(),
+                            document.entities.clone(),
+                        );
                         let session = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
                             PrefabAuthoringDocumentCandidate { document: prefab.clone(), state }.publish(),
                             history_limits,
@@ -856,13 +953,21 @@ mod tests {
     }
 
     #[test]
-    fn subtree_deletion_refuses_an_oversized_inverse_without_publishing() {
+    fn declaration_deletion_refuses_an_oversized_inverse_without_publishing() {
         let root = SceneEntityId::new("root").unwrap();
         let child = SceneEntityId::new("child").unwrap();
         let document = SceneDocument::new(
-            [root.clone()],
             [
-                SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(root.clone()),
                 SceneEntityRecord::new(child),
             ],
         );
@@ -888,7 +993,6 @@ mod tests {
         let report = session.apply_authoring_patch(&ScenePatchDocument::new([
             ScenePatchOperation::RemoveEntity {
                 entity: root.clone(),
-                from: ScenePlacement::current(&document, &root).unwrap(),
             },
         ]));
         assert!(!report.applied);

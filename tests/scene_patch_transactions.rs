@@ -3,8 +3,8 @@ use nara::{
     core::{ByteLimit, ItemLimit},
     diagnostic::DiagnosticValueRef,
     scene::{
-        ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        PrefabEntityTarget, SceneEntityPlacement, ScenePatchApplyLimits, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent,
     },
 };
 
@@ -41,11 +41,13 @@ fn assert_diagnostic_field(
 }
 
 fn root_last() -> ScenePlacement {
-    ScenePlacement::last(ScenePlacementOwner::Root)
+    ScenePlacement::last(ScenePlacementParent::Root)
 }
 
 fn child_last(parent: SceneEntityId) -> ScenePlacement {
-    ScenePlacement::last(ScenePlacementOwner::Parent { parent })
+    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+        parent,
+    )))
 }
 
 #[test]
@@ -71,10 +73,15 @@ fn patch_adds_component_sets_field_moves_entity_and_inverse_restores() {
             field: ComponentFieldId::new("x"),
             value: ComponentValue::I64(7),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: enemy.clone(),
-            from: root_last(),
-            to: child_last(player.clone()),
+        ScenePatchOperation::SetPlacements {
+            expected: scene.placements.clone(),
+            value: vec![
+                SceneEntityPlacement::root(player.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(enemy.clone()),
+                    child_last(player.clone()),
+                ),
+            ],
         },
     ]);
 
@@ -83,8 +90,9 @@ fn patch_adds_component_sets_field_moves_entity_and_inverse_restores() {
     assert!(report.applied);
     assert!(!report.diagnostics.has_errors());
     assert_eq!(component_value(&scene, &player).field_i64("x").unwrap(), 7);
-    assert_eq!(scene_entity(&scene, &player).children, [enemy.clone()]);
-    assert_eq!(scene.roots, [player.clone()]);
+    let hierarchy = scene.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(hierarchy.children(&player).unwrap(), [enemy.clone()]);
+    assert_eq!(hierarchy.roots(), [player.clone()]);
 
     let inverse = report.inverse.unwrap();
     let inverse_report = inverse.apply_to_scene(&mut scene, &registry);
@@ -339,28 +347,58 @@ fn whole_component_and_entity_operations_require_edit_for_every_field() {
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(player.clone())
                     .with_component(position_type_id(), readonly.clone()),
-                placement: root_last(),
             },
         ),
         (
             SceneDocument::new(
-                [player.clone()],
                 [
-                    SceneEntityRecord::new(player.clone()).with_children([child.clone()]),
+                    SceneEntityPlacement::root(player.clone()),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(child.clone()),
+                        child_last(player.clone()),
+                    ),
+                ],
+                [
+                    SceneEntityRecord::new(player.clone()),
                     SceneEntityRecord::new(child.clone())
                         .with_component(position_type_id(), readonly),
                 ],
             ),
             ScenePatchOperation::RemoveEntity {
                 entity: child.clone(),
-                from: child_last(player.clone()),
             },
         ),
     ];
 
     for (mut scene, operation) in cases {
         let original = scene.clone();
-        let report = ScenePatchDocument::new([operation]).apply_to_scene(&mut scene, &registry);
+        let placements = match &operation {
+            ScenePatchOperation::AddEntity { entity } => Some(
+                scene
+                    .placements
+                    .iter()
+                    .cloned()
+                    .chain([SceneEntityPlacement::root(entity.id.clone())])
+                    .collect(),
+            ),
+            ScenePatchOperation::RemoveEntity { entity } => Some(
+                scene
+                    .placements
+                    .iter()
+                    .filter(|entry| entry.target != PrefabEntityTarget::source(entity.clone()))
+                    .cloned()
+                    .collect(),
+            ),
+            _ => None,
+        };
+        let mut patch = ScenePatchDocument::new([operation]);
+        if let Some(value) = placements {
+            patch.operations.push(ScenePatchOperation::SetPlacements {
+                expected: scene.placements.clone(),
+                value,
+            });
+        }
+        let report = patch.apply_to_scene(&mut scene, &registry);
 
         assert!(!report.applied);
         assert_eq!(scene, original);
@@ -376,31 +414,36 @@ fn patch_combined_validation_work_budget_is_exact_and_failure_atomic() {
     let root = scene_id("root");
     let child = scene_id("child");
     let original = SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(root.clone()),
+        SceneEntityRecord::new(root.clone())
+            .with_component(position_type_id(), position_record(1, None)),
         SceneEntityRecord::new(child.clone()),
     ]);
     let patch = ScenePatchDocument::new([
-        ScenePatchOperation::MoveEntity {
-            entity: child.clone(),
-            from: root_last(),
-            to: child_last(root.clone()),
+        ScenePatchOperation::SetField {
+            entity: root.clone(),
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(2),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: child,
-            from: child_last(root),
-            to: root_last(),
+        ScenePatchOperation::SetField {
+            entity: root,
+            component: position_type_id(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("x"),
+            value: ComponentValue::I64(1),
         },
     ]);
 
     let exact_limits =
-        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(15).unwrap());
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(18).unwrap());
     let mut exact = original.clone();
     let exact_report = patch.apply_to_scene_with_limits(&mut exact, &registry, exact_limits);
     assert!(exact_report.applied);
     assert_eq!(exact, original);
 
     let rejected_limits =
-        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(14).unwrap());
+        ScenePatchApplyLimits::default().with_validation_work(ItemLimit::new(17).unwrap());
     let mut rejected = original.clone();
     let rejected_report =
         patch.apply_to_scene_with_limits(&mut rejected, &registry, rejected_limits);
@@ -435,11 +478,9 @@ fn patch_rejects_source_work_before_semantic_validation() {
         diagnostic.code().as_str(),
         "scene.patch-validation-work-budget-exceeded"
     );
-    assert_diagnostic_field(
-        diagnostic,
-        "budget-kind",
-        DiagnosticFieldClass::Public,
-        DiagnosticValueRef::Identifier("structural-items"),
+    assert_eq!(
+        diagnostic.summary().as_str(),
+        "Source declarations exceed the replay data or depth budget"
     );
     assert!(
         !report
@@ -463,18 +504,19 @@ fn patch_validation_value_budget_bounds_repeated_large_payload_work() {
         ),
         SceneEntityRecord::new(child.clone()),
     ]);
-    let patch = ScenePatchDocument::new([
-        ScenePatchOperation::MoveEntity {
-            entity: child.clone(),
-            from: root_last(),
-            to: child_last(root.clone()),
-        },
-        ScenePatchOperation::MoveEntity {
-            entity: child,
-            from: child_last(root),
-            to: root_last(),
-        },
-    ]);
+    let mut patch = ScenePatchDocument::set_placement(
+        &original.placements,
+        PrefabEntityTarget::source(child),
+        child_last(root),
+    );
+    let moved = match &patch.operations[0] {
+        ScenePatchOperation::SetPlacements { value, .. } => value.clone(),
+        _ => unreachable!("set_placement constructs a complete vector replacement"),
+    };
+    patch.operations.push(ScenePatchOperation::SetPlacements {
+        expected: moved,
+        value: original.placements.clone(),
+    });
 
     let exact_limits = ScenePatchApplyLimits::default().with_validation_value_bytes(
         ByteLimit::new(per_validation_bytes.saturating_mul(3)).unwrap(),
@@ -560,31 +602,51 @@ fn field_patch_rejects_an_unmigrated_target_record() {
 }
 
 #[test]
-fn remove_entity_removes_subtree_and_inverse_restores_exact_document() {
+fn explicit_subtree_removal_batch_and_inverse_restore_exact_document() {
     let registry = test_registry();
     let root = scene_id("root");
     let child = scene_id("root/child");
     let grandchild = scene_id("root/child/grandchild");
     let mut scene = SceneDocument::new(
-        [root.clone()],
+        [
+            SceneEntityPlacement::root(root.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child.clone()),
+                child_last(root.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(grandchild.clone()),
+                child_last(child.clone()),
+            ),
+        ],
         [
             SceneEntityRecord::new(root.clone())
-                .with_children([child.clone()])
                 .with_component(position_type_id(), position_record(1, None)),
-            SceneEntityRecord::new(child.clone()).with_children([grandchild.clone()]),
+            SceneEntityRecord::new(child.clone()),
             SceneEntityRecord::new(grandchild.clone()),
         ],
     );
     let original = scene.clone();
 
-    let report = ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-        entity: root.clone(),
-        from: root_last(),
-    }])
+    let report = ScenePatchDocument::new([
+        ScenePatchOperation::RemoveEntity {
+            entity: root.clone(),
+        },
+        ScenePatchOperation::RemoveEntity {
+            entity: child.clone(),
+        },
+        ScenePatchOperation::RemoveEntity {
+            entity: grandchild.clone(),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: vec![],
+        },
+    ])
     .apply_to_scene(&mut scene, &registry);
 
     assert!(report.applied);
-    assert!(scene.roots.is_empty());
+    assert!(scene.placements.is_empty());
     assert!(scene.entities.is_empty());
 
     let inverse = report
@@ -592,7 +654,15 @@ fn remove_entity_removes_subtree_and_inverse_restores_exact_document() {
         .expect("successful subtree removal must produce an inverse");
     assert!(matches!(
         inverse.operations.as_slice(),
-        [ScenePatchOperation::RestoreEntity { descendants, .. }] if descendants.len() == 2
+        [
+            ScenePatchOperation::SetPlacements { expected, value },
+            ScenePatchOperation::RestoreEntity { entity: restored_grandchild },
+            ScenePatchOperation::RestoreEntity { entity: restored_child },
+            ScenePatchOperation::RestoreEntity { entity: restored_root },
+        ] if expected.is_empty() && value == &original.placements
+            && restored_root == scene_entity(&original, &root)
+            && restored_child == scene_entity(&original, &child)
+            && restored_grandchild == scene_entity(&original, &grandchild)
     ));
     let stale_inverse = inverse.clone();
     let inverse_report = inverse.apply_to_scene(&mut scene, &registry);
@@ -604,7 +674,7 @@ fn remove_entity_removes_subtree_and_inverse_restores_exact_document() {
         .expect("successful restore must produce a redo patch")
         .apply_to_scene(&mut scene, &registry);
     assert!(redo_report.applied);
-    assert!(scene.roots.is_empty());
+    assert!(scene.placements.is_empty());
     assert!(scene.entities.is_empty());
 
     let second_inverse_report = redo_report
@@ -619,12 +689,24 @@ fn remove_entity_removes_subtree_and_inverse_restores_exact_document() {
     let stale_report = stale_inverse.apply_to_scene(&mut recreated, &registry);
     assert!(!stale_report.applied);
     assert_eq!(recreated, recreated_before);
-    assert!(
-        stale_report
-            .diagnostics
-            .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-duplicate-entity" })
-    );
+    assert!(stale_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-placement-context-mismatch"
+    }));
+    let duplicate = ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
+        entity: scene_entity(&original, &root).clone(),
+    }]);
+    let duplicate_report = duplicate.apply_to_scene(&mut recreated, &registry);
+    assert!(!duplicate_report.applied);
+    assert_eq!(recreated, recreated_before);
+    assert!(duplicate_report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-duplicate-entity"
+            && diagnostic_has_field(
+                diagnostic,
+                "operation-index",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(0),
+            )
+    }));
 }
 
 #[test]
@@ -633,31 +715,75 @@ fn subtree_remove_and_restore_share_the_same_validation_work_budget() {
     let ids = (0..6)
         .map(|index| scene_id(&format!("node-{index}")))
         .collect::<Vec<_>>();
-    let records = ids
-        .iter()
-        .enumerate()
-        .map(|(index, id)| {
-            let record = SceneEntityRecord::new(id.clone());
-            match ids.get(index + 1) {
-                Some(child) => record.with_children([child.clone()]),
-                None => record,
-            }
-        })
-        .collect::<Vec<_>>();
-    let original = SceneDocument::new([ids[0].clone()], records);
+    let records = ids.iter().cloned().map(SceneEntityRecord::new);
+    let placements = std::iter::once(SceneEntityPlacement::root(ids[0].clone())).chain(
+        ids.windows(2).map(|pair| {
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(pair[1].clone()),
+                child_last(pair[0].clone()),
+            )
+        }),
+    );
+    let original = SceneDocument::new(placements, records);
+    // Source plus all six record changes and the final vector replacement cost 71 items.
     let limits = ScenePatchApplyLimits::default()
-        .with_validation_work(ItemLimit::new(14).expect("test limit is non-zero"));
+        .with_validation_work(ItemLimit::new(71).expect("test limit is non-zero"));
     let mut scene = original.clone();
 
-    let removed = ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-        entity: ids[0].clone(),
-        from: root_last(),
-    }])
-    .apply_to_scene_with_limits(&mut scene, &registry, limits);
+    let patch = ScenePatchDocument::new(
+        ids.iter()
+            .cloned()
+            .map(|entity| ScenePatchOperation::RemoveEntity { entity })
+            .chain([ScenePatchOperation::SetPlacements {
+                expected: original.placements.clone(),
+                value: vec![],
+            }]),
+    );
+    let short = limits.with_validation_work(ItemLimit::new(70).unwrap());
+    let rejected = patch.apply_to_scene_with_limits(&mut scene, &registry, short);
+    assert!(!rejected.applied);
+    assert_eq!(scene, original);
+    assert!(rejected.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            && diagnostic_has_field(
+                diagnostic,
+                "observed",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(71),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "maximum",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(70),
+            )
+    }));
+    let removed = patch.apply_to_scene_with_limits(&mut scene, &registry, limits);
 
     assert!(removed.applied, "{:?}", removed.diagnostics);
-    let inverse = removed.inverse.expect("removal must produce one restore");
-    assert_eq!(inverse.operations.len(), 1);
+    let inverse = removed
+        .inverse
+        .expect("removal must retain every record and placement");
+    assert_eq!(inverse.operations.len(), 7);
+    let empty = scene.clone();
+    let rejected = inverse.apply_to_scene_with_limits(&mut scene, &registry, short);
+    assert!(!rejected.applied);
+    assert_eq!(scene, empty);
+    assert!(rejected.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
+            && diagnostic_has_field(
+                diagnostic,
+                "observed",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(71),
+            )
+            && diagnostic_has_field(
+                diagnostic,
+                "maximum",
+                DiagnosticFieldClass::Public,
+                DiagnosticValueRef::Unsigned(70),
+            )
+    }));
     let restored = inverse.apply_to_scene_with_limits(&mut scene, &registry, limits);
     assert!(restored.applied, "{:?}", restored.diagnostics);
     assert_eq!(scene, original);
@@ -671,23 +797,32 @@ fn invalid_restore_entity_closure_is_failure_atomic() {
     let missing = scene_id("missing");
     let mut scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(existing)]);
     let original = scene.clone();
-    let patch = ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
-        entity: SceneEntityRecord::new(restored).with_children([missing]),
-        descendants: Vec::new(),
-        placement: root_last(),
-    }]);
+    let mut placements = scene.placements.clone();
+    placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::source(restored.clone()),
+        child_last(missing),
+    ));
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::RestoreEntity {
+            entity: SceneEntityRecord::new(restored),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: scene.placements.clone(),
+            value: placements,
+        },
+    ]);
 
     let report = patch.apply_to_scene(&mut scene, &registry);
 
     assert!(!report.applied);
     assert_eq!(scene, original);
     assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.dangling-child"
+        diagnostic.code().as_str() == "scene.invalid-placement-target"
             && diagnostic_has_field(
                 diagnostic,
                 "operation-index",
                 DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Unsigned(0),
+                DiagnosticValueRef::Unsigned(1),
             )
     }));
 }
@@ -700,9 +835,20 @@ fn ordered_insert_anchors_and_inverse_preserve_exact_order() {
     let a = scene_id("alpha/a");
     let c = scene_id("alpha/c");
     let original = SceneDocument::new(
-        [alpha.clone(), omega.clone()],
         [
-            SceneEntityRecord::new(alpha.clone()).with_children([a.clone(), c.clone()]),
+            SceneEntityPlacement::root(alpha.clone()),
+            SceneEntityPlacement::root(omega.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(a.clone()),
+                child_last(alpha.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(c.clone()),
+                child_last(alpha.clone()),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(alpha.clone()),
             SceneEntityRecord::new(omega.clone()),
             SceneEntityRecord::new(a.clone()),
             SceneEntityRecord::new(c.clone()),
@@ -716,28 +862,57 @@ fn ordered_insert_anchors_and_inverse_preserve_exact_order() {
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(middle.clone()),
-            placement: ScenePlacement::before(ScenePlacementOwner::Root, omega.clone()),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(b.clone()),
-            placement: ScenePlacement::before(
-                ScenePlacementOwner::Parent {
-                    parent: alpha.clone(),
-                },
-                c.clone(),
-            ),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(between.clone()),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, middle.clone()),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(first.clone()),
-            placement: ScenePlacement::first(ScenePlacementOwner::Root),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(d.clone()),
-            placement: child_last(alpha.clone()),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: original
+                .placements
+                .iter()
+                .cloned()
+                .chain([
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(middle.clone()),
+                        ScenePlacement::before(
+                            ScenePlacementParent::Root,
+                            PrefabEntityTarget::source(omega.clone()),
+                        ),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(b.clone()),
+                        ScenePlacement::before(
+                            ScenePlacementParent::Entity(PrefabEntityTarget::source(alpha.clone())),
+                            PrefabEntityTarget::source(c.clone()),
+                        ),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(between.clone()),
+                        ScenePlacement::after(
+                            ScenePlacementParent::Root,
+                            PrefabEntityTarget::source(middle.clone()),
+                        ),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(first.clone()),
+                        ScenePlacement::first(ScenePlacementParent::Root),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(d.clone()),
+                        child_last(alpha.clone()),
+                    ),
+                ])
+                .collect(),
         },
     ]);
     let mut scene = original.clone();
@@ -745,8 +920,12 @@ fn ordered_insert_anchors_and_inverse_preserve_exact_order() {
     let report = patch.apply_to_scene(&mut scene, &registry);
 
     assert!(report.applied, "{:?}", report.diagnostics);
-    assert_eq!(scene.roots, [first, alpha.clone(), middle, between, omega,]);
-    assert_eq!(scene_entity(&scene, &alpha).children, [a, b, c, d]);
+    let hierarchy = scene.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(
+        hierarchy.roots(),
+        [first, alpha.clone(), middle, between, omega]
+    );
+    assert_eq!(hierarchy.children(&alpha).unwrap(), [a, b, c, d]);
     let changed = scene.clone();
 
     let inverse_report = report
@@ -775,11 +954,37 @@ fn ordered_moves_reorder_across_owners_and_inverse_exactly() {
     let c = scene_id("left/c");
     let d = scene_id("right/d");
     let e = scene_id("right/e");
+    let left_owner = ScenePlacementParent::Entity(PrefabEntityTarget::source(left.clone()));
+    let right_owner = ScenePlacementParent::Entity(PrefabEntityTarget::source(right.clone()));
     let original = SceneDocument::new(
-        [left.clone(), right.clone(), loose.clone()],
         [
-            SceneEntityRecord::new(left.clone()).with_children([a.clone(), b.clone(), c.clone()]),
-            SceneEntityRecord::new(right.clone()).with_children([d.clone(), e.clone()]),
+            SceneEntityPlacement::root(left.clone()),
+            SceneEntityPlacement::root(right.clone()),
+            SceneEntityPlacement::root(loose.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(a.clone()),
+                child_last(left.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(b.clone()),
+                child_last(left.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(c.clone()),
+                child_last(left.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(d.clone()),
+                child_last(right.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(e.clone()),
+                child_last(right.clone()),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(left.clone()),
+            SceneEntityRecord::new(right.clone()),
             SceneEntityRecord::new(loose.clone()),
             SceneEntityRecord::new(a.clone()),
             SceneEntityRecord::new(b.clone()),
@@ -788,42 +993,29 @@ fn ordered_moves_reorder_across_owners_and_inverse_exactly() {
             SceneEntityRecord::new(e.clone()),
         ],
     );
-    let left_owner = ScenePlacementOwner::Parent {
-        parent: left.clone(),
-    };
-    let right_owner = ScenePlacementOwner::Parent {
-        parent: right.clone(),
-    };
-    let patch = ScenePatchDocument::new([
-        ScenePatchOperation::MoveEntity {
-            entity: c.clone(),
-            from: ScenePlacement::after(left_owner.clone(), b.clone()),
-            to: ScenePlacement::first(left_owner.clone()),
-        },
-        ScenePatchOperation::MoveEntity {
-            entity: b.clone(),
-            from: ScenePlacement::after(left_owner.clone(), a.clone()),
-            to: ScenePlacement::after(right_owner.clone(), e.clone()),
-        },
-        ScenePatchOperation::MoveEntity {
-            entity: loose.clone(),
-            from: ScenePlacement::after(ScenePlacementOwner::Root, right.clone()),
-            to: ScenePlacement::before(ScenePlacementOwner::Root, right.clone()),
-        },
-        ScenePatchOperation::MoveEntity {
-            entity: d.clone(),
-            from: ScenePlacement::first(right_owner.clone()),
-            to: ScenePlacement::after(left_owner.clone(), a.clone()),
-        },
-    ]);
+    let mut placements = original.placements.clone();
+    placements[5].placement = ScenePlacement::first(left_owner.clone());
+    placements[4].placement =
+        ScenePlacement::after(right_owner, PrefabEntityTarget::source(e.clone()));
+    placements[2].placement = ScenePlacement::before(
+        ScenePlacementParent::Root,
+        PrefabEntityTarget::source(right.clone()),
+    );
+    placements[6].placement =
+        ScenePlacement::after(left_owner, PrefabEntityTarget::source(a.clone()));
+    let patch = ScenePatchDocument::new([ScenePatchOperation::SetPlacements {
+        expected: original.placements.clone(),
+        value: placements,
+    }]);
     let mut scene = original.clone();
 
     let report = patch.apply_to_scene(&mut scene, &registry);
 
     assert!(report.applied, "{:?}", report.diagnostics);
-    assert_eq!(scene.roots, [left.clone(), loose, right.clone()]);
-    assert_eq!(scene_entity(&scene, &left).children, [c, a, d]);
-    assert_eq!(scene_entity(&scene, &right).children, [e, b]);
+    let hierarchy = scene.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(hierarchy.roots(), [left.clone(), loose, right.clone()]);
+    assert_eq!(hierarchy.children(&left).unwrap(), [c, a, d]);
+    assert_eq!(hierarchy.children(&right).unwrap(), [e, b]);
 
     let inverse_report = report
         .inverse
@@ -840,19 +1032,58 @@ fn later_operations_can_anchor_to_earlier_candidate_changes() {
     let first = scene_id("first");
     let second = scene_id("second");
     let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(root.clone())]);
+    let with_first = vec![
+        original.placements[0].clone(),
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(first.clone()),
+            ScenePlacement::after(
+                ScenePlacementParent::Root,
+                PrefabEntityTarget::source(root.clone()),
+            ),
+        ),
+    ];
+    let mut with_second = with_first.clone();
+    with_second.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::source(second.clone()),
+        ScenePlacement::after(
+            ScenePlacementParent::Root,
+            PrefabEntityTarget::source(first.clone()),
+        ),
+    ));
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(first.clone()),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: with_first.clone(),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(second.clone()),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, first.clone()),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: root.clone(),
-            from: ScenePlacement::first(ScenePlacementOwner::Root),
-            to: ScenePlacement::after(ScenePlacementOwner::Root, second.clone()),
+        ScenePatchOperation::SetPlacements {
+            expected: with_first,
+            value: with_second.clone(),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: with_second,
+            value: vec![
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(root.clone()),
+                    ScenePlacement::after(
+                        ScenePlacementParent::Root,
+                        PrefabEntityTarget::source(second.clone()),
+                    ),
+                ),
+                SceneEntityPlacement::root(first.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(second.clone()),
+                    ScenePlacement::after(
+                        ScenePlacementParent::Root,
+                        PrefabEntityTarget::source(first.clone()),
+                    ),
+                ),
+            ],
         },
     ]);
     let mut scene = original.clone();
@@ -860,7 +1091,10 @@ fn later_operations_can_anchor_to_earlier_candidate_changes() {
     let report = patch.apply_to_scene(&mut scene, &registry);
 
     assert!(report.applied, "{:?}", report.diagnostics);
-    assert_eq!(scene.roots, [first, second, root]);
+    assert_eq!(
+        scene.local_hierarchy(Default::default()).unwrap().roots(),
+        [first, second, root]
+    );
     let inverse_report = report
         .inverse
         .expect("candidate-relative operations must produce an inverse")
@@ -878,69 +1112,95 @@ fn invalid_ordered_placement_contexts_reject_the_whole_batch() {
     let parent = scene_id("parent");
     let other = scene_id("parent/other");
     let source = SceneDocument::new(
-        [root.clone(), sibling.clone(), parent.clone()],
         [
-            SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
+            SceneEntityPlacement::root(root.clone()),
+            SceneEntityPlacement::root(sibling.clone()),
+            SceneEntityPlacement::root(parent.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child.clone()),
+                child_last(root.clone()),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(other.clone()),
+                child_last(parent.clone()),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(root.clone()),
             SceneEntityRecord::new(child.clone()),
             SceneEntityRecord::new(sibling.clone()),
-            SceneEntityRecord::new(parent.clone()).with_children([other.clone()]),
+            SceneEntityRecord::new(parent.clone()),
             SceneEntityRecord::new(other),
         ],
     );
+    let mut stale = source.placements.clone();
+    stale[0].placement = ScenePlacement::first(ScenePlacementParent::Root);
     let cases = [
         (
-            ScenePatchOperation::MoveEntity {
-                entity: sibling.clone(),
-                from: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
-                to: ScenePlacement::before(ScenePlacementOwner::Root, sibling.clone()),
-            },
-            "scene.patch-placement-self-anchor",
+            ScenePatchDocument::set_placement(
+                &source.placements,
+                PrefabEntityTarget::source(sibling.clone()),
+                ScenePlacement::before(
+                    ScenePlacementParent::Root,
+                    PrefabEntityTarget::source(sibling.clone()),
+                ),
+            ),
+            "scene.patch-local-layout-invalid",
+            false,
         ),
         (
-            ScenePatchOperation::MoveEntity {
-                entity: sibling.clone(),
-                from: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
-                to: ScenePlacement::after(ScenePlacementOwner::Root, scene_id("retired-anchor")),
-            },
-            "scene.patch-placement-anchor-missing",
+            ScenePatchDocument::set_placement(
+                &source.placements,
+                PrefabEntityTarget::source(sibling.clone()),
+                ScenePlacement::after(
+                    ScenePlacementParent::Root,
+                    PrefabEntityTarget::source(scene_id("retired-anchor")),
+                ),
+            ),
+            "scene.invalid-placement-target",
+            true,
         ),
         (
-            ScenePatchOperation::MoveEntity {
-                entity: root.clone(),
-                from: ScenePlacement::first(ScenePlacementOwner::Root),
-                to: child_last(child.clone()),
-            },
-            "scene.patch-placement-cycle",
+            ScenePatchDocument::set_placement(
+                &source.placements,
+                PrefabEntityTarget::source(root.clone()),
+                child_last(child.clone()),
+            ),
+            "scene.patch-local-layout-invalid",
+            false,
         ),
         (
-            ScenePatchOperation::MoveEntity {
-                entity: child.clone(),
-                from: ScenePlacement::first(ScenePlacementOwner::Root),
-                to: root_last(),
-            },
+            ScenePatchDocument::set_placement(
+                &stale,
+                PrefabEntityTarget::source(child.clone()),
+                root_last(),
+            ),
             "scene.patch-placement-context-mismatch",
+            true,
         ),
         (
-            ScenePatchOperation::MoveEntity {
-                entity: child.clone(),
-                from: ScenePlacement::first(ScenePlacementOwner::Parent {
-                    parent: root.clone(),
-                }),
-                to: child_last(scene_id("retired-parent")),
-            },
-            "scene.patch-placement-owner-missing",
+            ScenePatchDocument::set_placement(
+                &source.placements,
+                PrefabEntityTarget::source(child.clone()),
+                child_last(scene_id("retired-parent")),
+            ),
+            "scene.invalid-placement-target",
+            true,
         ),
     ];
 
-    for (index, (operation, code)) in cases.into_iter().enumerate() {
+    for (index, (mut patch, code, indexed)) in cases.into_iter().enumerate() {
         let temporary = scene_id(&format!("temporary-{index}"));
-        let patch = ScenePatchDocument::new([
+        let ScenePatchOperation::SetPlacements { value, .. } = &mut patch.operations[0] else {
+            unreachable!("set_placement constructs a complete vector replacement")
+        };
+        value.push(SceneEntityPlacement::root(temporary.clone()));
+        patch.operations.insert(
+            0,
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(temporary),
-                placement: root_last(),
             },
-            operation,
-        ]);
+        );
         let mut scene = source.clone();
         let report = patch.apply_to_scene(&mut scene, &registry);
 
@@ -948,12 +1208,13 @@ fn invalid_ordered_placement_contexts_reject_the_whole_batch() {
         assert_eq!(scene, source, "case {index} partially mutated the document");
         assert!(report.diagnostics.iter().any(|diagnostic| {
             diagnostic.code().as_str() == code
-                && diagnostic_has_field(
-                    diagnostic,
-                    "operation-index",
-                    DiagnosticFieldClass::Public,
-                    DiagnosticValueRef::Unsigned(1),
-                )
+                && (!indexed
+                    || diagnostic_has_field(
+                        diagnostic,
+                        "operation-index",
+                        DiagnosticFieldClass::Public,
+                        DiagnosticValueRef::Unsigned(1),
+                    ))
         }));
     }
 }
@@ -967,16 +1228,26 @@ fn anchor_removed_earlier_in_a_batch_fails_without_publication() {
     let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(root.clone())]);
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(first),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
+            entity: SceneEntityRecord::new(first.clone()),
         },
         ScenePatchOperation::RemoveEntity {
             entity: root.clone(),
-            from: ScenePlacement::first(ScenePlacementOwner::Root),
         },
         ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(tail),
-            placement: ScenePlacement::after(ScenePlacementOwner::Root, root),
+            entity: SceneEntityRecord::new(tail.clone()),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: vec![
+                SceneEntityPlacement::root(first),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(tail),
+                    ScenePlacement::after(
+                        ScenePlacementParent::Root,
+                        PrefabEntityTarget::source(root),
+                    ),
+                ),
+            ],
         },
     ]);
     let mut scene = original.clone();
@@ -986,12 +1257,12 @@ fn anchor_removed_earlier_in_a_batch_fails_without_publication() {
     assert!(!report.applied);
     assert_eq!(scene, original);
     assert!(report.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.patch-placement-anchor-missing"
+        diagnostic.code().as_str() == "scene.invalid-placement-target"
             && diagnostic_has_field(
                 diagnostic,
                 "operation-index",
                 DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Unsigned(2),
+                DiagnosticValueRef::Unsigned(3),
             )
     }));
 }

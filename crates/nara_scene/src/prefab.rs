@@ -6,7 +6,7 @@ use std::{
 };
 
 use nara_asset::{AssetRecord, AssetRef, AssetReferenceResolver, StableAssetId};
-use nara_core::{ByteLimit, ItemLimit};
+use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_diagnostic::DiagnosticReport;
 #[cfg(feature = "serde")]
 use nara_reflect::ComponentDecodeContext;
@@ -15,6 +15,9 @@ use nara_reflect::{
     ComponentValueMaterializationLimits, EntityReferenceTraversalLimits,
 };
 
+#[cfg(feature = "serde")]
+use crate::draft::ExpandedSceneEntity;
+use crate::draft::SceneDraft;
 use crate::{
     CompiledSceneDocument, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
     ScenePatchDocument, SourceDocumentBindingError, SourceDocumentKey,
@@ -42,14 +45,15 @@ pub use declaration::{
     PrefabOverlaySlot, PrefabRevert, SceneCompilationFailure, SceneCompilationFailureKind,
 };
 #[cfg(feature = "serde")]
-pub(crate) use overlay::cost::{PrefabOverlayCostError, PrefabOverlayCostKind};
+pub(crate) use overlay::cost::{PrefabOverlayCost, PrefabOverlayCostError, PrefabOverlayCostKind};
 pub(crate) use overlay::cost::{
     PrefabOverlayCostLimits, prefab_instance_cost, prefab_instance_cost_with_admission,
+    scene_placements_cost,
 };
 pub use overlay::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin,
-    PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabEntityTarget, PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim,
+    PrefabPropertyIntent,
 };
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -61,21 +65,21 @@ pub struct PrefabDocument {
         serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")
     )]
     pub inputs: std::collections::BTreeSet<nara_identity::ReferenceInputId>,
-    pub roots: Vec<SceneEntityId>,
+    pub placements: Vec<crate::SceneEntityPlacement>,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl PrefabDocument {
     #[must_use]
     pub fn new(
-        roots: impl IntoIterator<Item = SceneEntityId>,
+        placements: impl IntoIterator<Item = crate::SceneEntityPlacement>,
         entities: impl IntoIterator<Item = SceneEntityRecord>,
     ) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
         Self {
             inputs: Default::default(),
-            roots: roots.into_iter().collect(),
+            placements: placements.into_iter().collect(),
             entities,
         }
     }
@@ -84,11 +88,11 @@ impl PrefabDocument {
     #[must_use]
     pub fn from_ordered_roots(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
         let entities = entities.into_iter().collect::<Vec<_>>();
-        let roots = entities
+        let placements = entities
             .iter()
-            .map(|entity| entity.id.clone())
+            .map(|entity| crate::SceneEntityPlacement::root(entity.id.clone()))
             .collect::<Vec<_>>();
-        Self::new(roots, entities)
+        Self::new(placements, entities)
     }
 
     pub fn canonicalize(&mut self) {
@@ -98,7 +102,7 @@ impl PrefabDocument {
     #[must_use]
     pub fn instantiate(&self) -> SceneDocument {
         let mut document = SceneDocument {
-            roots: self.roots.clone(),
+            placements: self.placements.clone(),
             entities: self.entities.clone(),
         };
         document.canonicalize();
@@ -178,7 +182,7 @@ impl PrefabDocument {
             SceneCompilationOptions::default(),
             asset_resolution,
         );
-        context.compile_source_document(&self.roots, &self.entities, Some(&self.inputs))
+        context.compile_source_document(&self.placements, &self.entities, Some(&self.inputs))
     }
 }
 
@@ -216,6 +220,8 @@ impl PrefabInstantiationReport {
 pub struct PrefabInstance {
     /// A primary native Prefab source selector. Auxiliary imported products are not sources.
     pub source: AssetRef,
+    /// Chooses a forest mount or a canonical-checked source root that contributes to its anchor.
+    pub binding: PrefabInstanceBinding,
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "Option::is_none")
@@ -235,6 +241,7 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
         #[serde(deny_unknown_fields)]
         struct PrefabInstanceWire {
             source: AssetRef,
+            binding: PrefabInstanceBinding,
             #[serde(default)]
             arguments: Option<PrefabReferenceArguments>,
             #[serde(default)]
@@ -249,9 +256,51 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
         }
         Ok(Self {
             source: wire.source,
+            binding: wire.binding,
             arguments: wire.arguments,
             overrides: wire.overrides,
         })
+    }
+}
+
+/// The explicit materialization relationship between an instance and its containing anchor.
+///
+/// A root binding never depends on the current root count. Its selected source and overlay must
+/// yield exactly the named source entity as their only root, which then shares the anchor's
+/// canonical identity. Declaration scopes and nested instance slots remain distinct.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)
+)]
+pub enum PrefabInstanceBinding {
+    Forest,
+    Root {
+        base: SourceDocumentKey,
+        root: SceneEntityId,
+    },
+}
+
+impl PrefabInstance {
+    #[must_use]
+    pub const fn forest(source: AssetRef) -> Self {
+        Self {
+            source,
+            binding: PrefabInstanceBinding::Forest,
+            arguments: None,
+            overrides: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn root(source: AssetRef, base: SourceDocumentKey, root: SceneEntityId) -> Self {
+        Self {
+            source,
+            binding: PrefabInstanceBinding::Root { base, root },
+            arguments: None,
+            overrides: None,
+        }
     }
 }
 
@@ -584,6 +633,8 @@ pub struct SceneCompilationLimits {
     materialized_components: ItemLimit,
     materialized_value_nodes: ItemLimit,
     materialized_value_bytes: ByteLimit,
+    materialized_value_depth: DepthLimit,
+    source_value_limits: Option<ComponentValueMaterializationLimits>,
     resolved_instances: ItemLimit,
     overlay_declarations: ItemLimit,
     generated_identifier_bytes: ByteLimit,
@@ -605,6 +656,8 @@ impl Default for SceneCompilationLimits {
                 .expect("prefab expansion value node limit is non-zero"),
             materialized_value_bytes: ByteLimit::new(64 * 1024 * 1024)
                 .expect("prefab expansion value byte limit is non-zero"),
+            materialized_value_depth: EntityReferenceTraversalLimits::default().depth(),
+            source_value_limits: None,
             resolved_instances: ItemLimit::new(100_000)
                 .expect("prefab expansion instance limit is non-zero"),
             overlay_declarations: ItemLimit::new(100_000)
@@ -736,6 +789,18 @@ impl SceneCompilationLimits {
         self
     }
 
+    /// Complete value allowance used by diagnostic Native validation before migrations and codecs.
+    pub(crate) const fn with_materialization_limits(
+        mut self,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Self {
+        self.materialized_value_nodes = limits.nodes();
+        self.materialized_value_bytes = limits.bytes();
+        self.materialized_value_depth = limits.depth();
+        self.source_value_limits = Some(limits);
+        self
+    }
+
     #[must_use]
     pub const fn with_resolved_instances(mut self, limit: ItemLimit) -> Self {
         self.resolved_instances = limit;
@@ -770,7 +835,7 @@ impl SceneCompilationLimits {
         ComponentValueMaterializationLimits::new(
             self.materialized_value_nodes(),
             self.materialized_value_bytes(),
-            EntityReferenceTraversalLimits::default().depth(),
+            self.materialized_value_depth,
         )
     }
 }
@@ -999,7 +1064,7 @@ where
         asset_resolution,
     );
     let (candidate, failure) = context.compile_source_with_terminal(
-        &document.roots,
+        &document.placements,
         &document.entities,
         None,
         SceneCompilationContext::finish_authoring_document,
@@ -1035,8 +1100,11 @@ pub(crate) enum SelectedInstanceSource<'a> {
 #[derive(Debug)]
 pub(crate) struct SelectedInstanceFragment {
     pub(crate) roots: Vec<SceneEntityId>,
-    pub(crate) entities: Vec<SceneEntityRecord>,
+    pub(crate) entities: Vec<ExpandedSceneEntity>,
     pub(crate) provenance: crate::SceneEntityProvenanceMap,
+    pub(crate) targets: BTreeMap<PrefabEntityTarget, SceneEntityId>,
+    pub(crate) reference_targets:
+        BTreeMap<nara_identity::AuthoredEntityReference, nara_identity::EntityReference>,
 }
 
 #[cfg(feature = "serde")]
@@ -1057,6 +1125,8 @@ pub(crate) struct SelectedInstanceCompilation {
 pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
     source: SelectedInstanceSource<'_>,
     anchor: &SceneEntityId,
+    reference_queries: &[nara_identity::AuthoredEntityReference],
+    initial_reference_work: (usize, usize),
     basis: &crate::AuthoringSchemaBasis,
     options: SceneCompilationOptions,
     asset_resolution: Option<AssetReferenceResolver<'_>>,
@@ -1072,6 +1142,9 @@ where
         asset_resolution,
     );
     let result: Result<SelectedInstanceFragment, SceneCompilationFailure> = (|| {
+        context
+            .admit_terminal_work(initial_reference_work.0, initial_reference_work.1, Some(0))
+            .map_err(|()| SceneCompilationFailureKind::WorkLimit)?;
         if !context.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
             None,
@@ -1084,7 +1157,12 @@ where
         ) {
             return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
-        let output = overlay::compile::expand_selected_instance(&mut context, source, anchor)?;
+        let output = overlay::compile::expand_selected_instance(
+            &mut context,
+            source,
+            anchor,
+            reference_queries,
+        )?;
         let mut document = output.document;
         document.canonicalize();
         context.observe_authoring_omissions(&mut document);
@@ -1118,26 +1196,48 @@ where
             }
             record.contextual_defaults = defaults.values;
         }
-        context.provenance.retain(|_, origin| {
-            origin
-                .projection_path()
-                .is_some_and(|path| path.root_anchor() == anchor)
+        let root_bound = match source {
+            SelectedInstanceSource::Scene(document) => &document.entities,
+            SelectedInstanceSource::Prefab(document) => &document.entities,
+        }
+        .iter()
+        .find(|record| &record.id == anchor)
+        .and_then(|record| record.prefab.as_ref())
+        .is_some_and(|instance| matches!(instance.binding, PrefabInstanceBinding::Root { .. }));
+        context.provenance.retain(|id, origin| {
+            (root_bound && id == anchor)
+                || origin
+                    .projection_path()
+                    .is_some_and(|path| path.root_anchor() == anchor)
         });
         let record = document
             .entities
             .iter_mut()
             .find(|record| &record.id == anchor)
             .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
-        // The existing layout owner puts projected roots before ordinary local children.
-        let mut roots = std::mem::take(&mut record.children);
-        roots.retain(|id| context.provenance.contains_key(id));
+        let roots = if root_bound {
+            vec![anchor.clone()]
+        } else {
+            record
+                .children
+                .iter()
+                .filter(|id| context.provenance.contains_key(*id))
+                .cloned()
+                .collect()
+        };
         document
             .entities
             .retain(|record| context.provenance.contains_key(&record.id));
+        // Conversion also needs source routes for external projected reference endpoints.
+        // This complete table belongs to the actual containing compilation, not to a
+        // reconstruction from generated ID spelling or the selected fragment's provenance.
+        let targets = output.targets;
         Ok(SelectedInstanceFragment {
             roots,
             entities: document.entities,
             provenance: std::mem::take(&mut context.provenance),
+            targets,
+            reference_targets: output.reference_targets,
         })
     })();
     let (fragment, failure) = match result {
@@ -1549,17 +1649,17 @@ where
     }
 
     fn compile_scene_document(&mut self, document: &SceneDocument) -> SceneCompilationReport {
-        self.compile_source_document(&document.roots, &document.entities, None)
+        self.compile_source_document(&document.placements, &document.entities, None)
     }
 
     fn compile_source_document(
         &mut self,
-        roots: &[SceneEntityId],
+        placements: &[crate::SceneEntityPlacement],
         entities: &[SceneEntityRecord],
         inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
     ) -> SceneCompilationReport {
         let (candidate, failure) =
-            self.compile_source_with_terminal(roots, entities, inputs, Self::seal_document);
+            self.compile_source_with_terminal(placements, entities, inputs, Self::seal_document);
         SceneCompilationReport {
             source_upgrade_required: candidate.is_some() && self.source_upgrade_required,
             candidate,
@@ -1570,10 +1670,10 @@ where
 
     fn compile_source_with_terminal<T>(
         &mut self,
-        roots: &[SceneEntityId],
+        placements: &[crate::SceneEntityPlacement],
         entities: &[SceneEntityRecord],
         inputs: Option<&BTreeSet<nara_identity::ReferenceInputId>>,
-        terminal: impl FnOnce(&mut Self, SceneDocument) -> Option<T>,
+        terminal: impl FnOnce(&mut Self, SceneDraft) -> Option<T>,
     ) -> (Option<T>, Option<SceneCompilationFailure>) {
         if !self.reserve_provenance_bytes(
             Some(std::mem::size_of::<crate::SceneEntityProvenanceMap>()),
@@ -1582,7 +1682,8 @@ where
         ) {
             return (None, Some(SceneCompilationFailureKind::WorkLimit.into()));
         }
-        let mut expanded = match overlay::compile::expand_source(self, roots, entities, inputs) {
+        let mut expanded = match overlay::compile::expand_source(self, placements, entities, inputs)
+        {
             Ok(document) => document,
             Err(failure) => {
                 self.push_expansion_failure(&failure);
@@ -1602,7 +1703,7 @@ where
         (terminal(self, expanded), None)
     }
 
-    fn seal_document(&mut self, document: SceneDocument) -> Option<CompiledSceneDocument> {
+    fn seal_document(&mut self, document: SceneDraft) -> Option<CompiledSceneDocument> {
         let authority = self.authority;
         let limits = self.materialization_limits();
         let asset_resolution = self.asset_resolution;
@@ -1625,10 +1726,7 @@ where
     }
 
     #[cfg(feature = "serde")]
-    fn finish_authoring_document(
-        &mut self,
-        document: SceneDocument,
-    ) -> Option<ExpandedSceneDocument> {
+    fn finish_authoring_document(&mut self, document: SceneDraft) -> Option<ExpandedSceneDocument> {
         let validation = self.validate_authoring_document(&document);
         self.diagnostics.extend(validation);
         if self.diagnostics.has_errors() {
@@ -1670,7 +1768,7 @@ where
 
     fn allocate_projected_entity_ids(
         &mut self,
-        document: &SceneDocument,
+        document: &SceneDraft,
     ) -> Option<BTreeMap<SceneEntityId, SceneEntityId>> {
         let mut entity_ids = BTreeMap::new();
         for entity in &document.entities {
@@ -2027,13 +2125,16 @@ where
     }
 
     #[cfg(feature = "serde")]
-    fn validate_authoring_document(&mut self, document: &SceneDocument) -> DiagnosticReport {
+    fn validate_authoring_document(&mut self, document: &SceneDraft) -> DiagnosticReport {
         // Final values have already paid their materialized counters during lowering. This
         // guard admits validation's complete temporary copy, including IDs and record metadata,
         // against working storage rather than imposing value-only ceilings on that metadata.
         let working = self.options.limits.working_bytes();
-        let cost = crate::patch::bounded_scene_entities_source_cost(
-            &document.entities,
+        let cost = crate::patch::bounded_component_records_source_cost(
+            document
+                .entities
+                .iter()
+                .flat_map(|entity| entity.components.values()),
             crate::ScenePatchApplyLimits::default()
                 .with_validation_value_nodes(
                     ItemLimit::new((working.get() / 96).max(1))
@@ -2052,6 +2153,21 @@ where
             return DiagnosticReport::default();
         };
         if !self.reserve_raw_clone(cost, &document.roots, None, None) {
+            return DiagnosticReport::default();
+        }
+        let structure_bytes = document.entities.iter().try_fold(0usize, |bytes, entity| {
+            entity.children.iter().try_fold(
+                bytes
+                    .checked_add(std::mem::size_of::<ExpandedSceneEntity>())?
+                    .checked_add(crate::provenance::provenance_string_bytes(
+                        entity.id.as_str(),
+                    )?)?,
+                |bytes, child| {
+                    bytes.checked_add(crate::provenance::provenance_string_bytes(child.as_str())?)
+                },
+            )
+        });
+        if !self.reserve_scratch_bytes(structure_bytes, None, None) {
             return DiagnosticReport::default();
         }
         let mut context = ComponentDecodeContext::new()
@@ -2079,7 +2195,7 @@ where
     }
 
     #[cfg(feature = "serde")]
-    fn observe_authoring_omissions(&mut self, document: &mut SceneDocument) {
+    fn observe_authoring_omissions(&mut self, document: &mut SceneDraft) {
         let SchemaAuthority::Authoring(basis) = self.authority else {
             return;
         };
@@ -2223,11 +2339,7 @@ mod resolver_tests {
             document("hero"),
         );
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
-        anchor.prefab = Some(PrefabInstance {
-            source: request,
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(request));
         let report = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
 
         assert!(!report.diagnostics.has_errors());
@@ -2247,11 +2359,9 @@ mod resolver_tests {
             .freeze()
             .unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
-        anchor.prefab = Some(PrefabInstance {
-            source: AssetRef::path("prefabs/missing.ron").unwrap(),
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path("prefabs/missing.ron").unwrap(),
+        ));
         let report = SceneDocument::from_ordered_roots([anchor])
             .compile(&registry, &InMemoryPrefabSourceResolver::new());
 

@@ -366,8 +366,8 @@ fn live_export_observes_retirement_later_instances_and_nested_persistent_referen
         .entities
         .retain(|entity| entity.id != id("retired"));
     later_document
-        .roots
-        .retain(|entity| *entity != id("retired"));
+        .placements
+        .retain(|entry| entry.target != nara_scene::PrefabEntityTarget::source(id("retired")));
     let later = spawn(&bindings, &mut world, later_document, "later", None);
     let source = live_entity(&world, &first, "source");
     world.get_mut::<Name>(source).unwrap().0 = "live native name".into();
@@ -1075,6 +1075,7 @@ fn prefab_lookup_scope_is_separate_from_component_resolution_and_keeps_owner_sou
     let snapshot = InMemoryPrefabSourceResolver::new().with_prefab(request.clone(), key, prefab);
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: request,
         arguments: None,
         overrides: None,

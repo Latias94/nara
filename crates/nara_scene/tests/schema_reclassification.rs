@@ -16,8 +16,8 @@ use nara_scene::{
     AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument,
     PrefabDocumentCandidate, PreparedPrefabSchemaReclassification,
     PreparedSceneSchemaReclassification, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SchemaReclassificationWork,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, SchemaReclassificationWork,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -79,7 +79,7 @@ fn independent_consumer_recovers_scene_and_prefab_with_shared_work_and_exact_sou
             .unwrap()
             .publish(),
     );
-    let prefab_document = PrefabDocument::new(document.roots, document.entities);
+    let prefab_document = PrefabDocument::new(document.placements, document.entities);
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(&prefab_document.to_json_string().unwrap())
             .unwrap()
@@ -108,10 +108,20 @@ fn independent_consumer_recovers_scene_and_prefab_with_shared_work_and_exact_sou
         prefab.source_upgrade_required(),
         prefab.authoring_source().cloned(),
     );
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id("pending")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("pending")),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: scene_document.placements.clone(),
+            value: scene_document
+                .placements
+                .iter()
+                .cloned()
+                .chain([SceneEntityPlacement::root(id("pending"))])
+                .collect(),
+        },
+    ]);
     let scene_edit = scene
         .prepare_authoring_edit(scene.revision(), &patch)
         .unwrap();

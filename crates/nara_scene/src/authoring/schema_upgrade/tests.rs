@@ -11,8 +11,8 @@ use nara_reflect::{
 };
 
 use crate::{
-    AuthoringFieldEdit, AuthoringRecordReadiness, SceneComponentRecord, ScenePatchDocument,
-    SchemaReclassificationKind, SchemaReclassificationWork,
+    AuthoringFieldEdit, AuthoringRecordReadiness, SceneComponentRecord, SceneEntityId,
+    ScenePatchDocument, SchemaReclassificationKind, SchemaReclassificationWork,
     authoring_decode::AuthoringAdapterReceipt,
 };
 
@@ -158,7 +158,7 @@ fn scene_candidate(document: SceneDocument) -> SceneDocumentCandidate {
 }
 
 fn prefab_candidate(document: SceneDocument) -> PrefabDocumentCandidate {
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap()).unwrap()
 }
 
@@ -188,7 +188,7 @@ fn prefab(
     basis: &AuthoringSchemaBasis,
     limits: SceneFileLimits,
 ) -> PrefabAuthoringSession {
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
         PrefabDocumentCandidate::decode_json_bytes_with_limits(
             document.to_json_string().unwrap().as_bytes(),
@@ -361,7 +361,7 @@ fn prepared_checkpoint_installs_exact_future_source_then_ordinary_edit_and_undo_
             );
             assert_eq!(session.authoring_source(), Some(&old_source));
             assert!(Arc::ptr_eq(&session.shared_document(), &future_document));
-            assert_eq!(session.document().roots, original.roots);
+            assert_eq!(session.document().placements, original.placements);
             assert_eq!(session.document().entities[0].id, original.entities[0].id);
             assert_eq!(session.document().entities[1], original.entities[1]);
             // Source preparation minted no saved receipt. An old content observation cannot even
@@ -655,7 +655,7 @@ fn wrong_kind_foreign_key_unavailable_record_and_native_authority_refuse() {
     );
     let original = document(false, 7);
     let native =
-        PrefabAuthoringSession::new(PrefabDocument::new(original.roots, original.entities));
+        PrefabAuthoringSession::new(PrefabDocument::new(original.placements, original.entities));
     assert!(
         native
             .prepare_authored_schema_upgrade(
@@ -672,8 +672,9 @@ fn wrong_kind_foreign_key_unavailable_record_and_native_authority_refuse() {
 #[test]
 fn permissive_callback_and_broader_candidate_limits_cannot_replace_original_file_bounds() {
     let fixture = Fixture::new();
-    // The original direct values contain four nodes in total; the new health Record adds one.
-    let limits = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(4).unwrap());
+    // Two explicit source placements add six structural nodes to four direct value nodes.
+    // The successor health Record adds one node beyond that exact source boundary.
+    let limits = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(10).unwrap());
     each_source!(
         document(false, 7),
         &fixture.previous,
@@ -700,14 +701,14 @@ fn permissive_callback_and_broader_candidate_limits_cannot_replace_original_file
 fn the_successor_must_remain_saveable_under_original_encoded_file_limits() {
     let fixture = Fixture::new();
     let old = document(false, 7);
-    let old_prefab = PrefabDocument::new(old.roots.clone(), old.entities.clone());
+    let old_prefab = PrefabDocument::new(old.placements.clone(), old.entities.clone());
     let original_bytes = old
         .to_json_string()
         .unwrap()
         .len()
         .max(old_prefab.to_json_string().unwrap().len());
     let next = document(true, 7);
-    let next_prefab = PrefabDocument::new(next.roots.clone(), next.entities.clone());
+    let next_prefab = PrefabDocument::new(next.placements.clone(), next.entities.clone());
     assert!(next.to_json_string().unwrap().len() > original_bytes);
     assert!(next_prefab.to_json_string().unwrap().len() > original_bytes);
     let limits =

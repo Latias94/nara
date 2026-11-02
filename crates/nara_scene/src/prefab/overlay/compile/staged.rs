@@ -44,7 +44,21 @@ struct Program {
 #[derive(Debug, PartialEq, Eq)]
 struct State {
     overlay: Option<PrefabInstanceLocation>,
-    demands: Vec<(PrefabInstanceLocation, usize, usize)>,
+    demands: Vec<(DemandSite, usize, usize)>,
+    reference: Option<ReferenceDemand>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReferenceDemand {
+    reference: nara_identity::AuthoredEntityReference,
+    remaining_hops: usize,
+    lexical_source: PrefabDeclarationSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DemandSite {
+    Source(PrefabDeclarationSource),
+    Overlay(PrefabInstanceLocation),
 }
 
 struct Node {
@@ -52,11 +66,46 @@ struct Node {
     origin: PrefabEntityOrigin,
     record: Record,
     locator: SceneEntityId,
-    children: Vec<NodeId>,
     slot: Option<Site>,
     entered: Option<ScopeId>,
     opened: bool,
     programs: BTreeMap<ComponentTypeId, Program>,
+}
+
+/// Separate namespaces allow borrowed source-ID lookup without constructing an owned origin.
+#[derive(Default)]
+struct ScopeNodes {
+    source: BTreeMap<SceneEntityId, NodeId>,
+    additions: BTreeMap<SceneEntityId, NodeId>,
+}
+
+impl ScopeNodes {
+    fn source_entity(&self, entity: &SceneEntityId) -> Option<&NodeId> {
+        self.source.get(entity)
+    }
+
+    fn get(&self, origin: &PrefabEntityOrigin) -> Option<&NodeId> {
+        match origin {
+            PrefabEntityOrigin::SourceEntity(entity) => self.source_entity(entity),
+            PrefabEntityOrigin::InstanceAddition(entity) => self.additions.get(entity),
+        }
+    }
+
+    fn insert(&mut self, origin: PrefabEntityOrigin, node: NodeId) -> Option<NodeId> {
+        match origin {
+            PrefabEntityOrigin::SourceEntity(entity) => self.source.insert(entity, node),
+            PrefabEntityOrigin::InstanceAddition(entity) => self.additions.insert(entity, node),
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.source.len() + self.additions.len()
+    }
+
+    fn values(&self) -> impl Iterator<Item = &NodeId> {
+        // Preserve the derived PrefabEntityOrigin ordering: sources precede additions.
+        self.source.values().chain(self.additions.values())
+    }
 }
 
 struct Scope {
@@ -65,8 +114,10 @@ struct Scope {
     site: Option<Site>,
     anchor: Option<NodeId>,
     depth: usize,
-    nodes: BTreeMap<PrefabEntityOrigin, NodeId>,
+    nodes: ScopeNodes,
     roots: Vec<NodeId>,
+    /// Declaration facets remain addressable after their roots share an anchor's entity.
+    aliases: BTreeMap<NodeId, NodeId>,
     state: Option<State>,
     input: BTreeSet<NodeId>,
     output: BTreeSet<NodeId>,
@@ -111,15 +162,17 @@ struct Compiler<'root, 'context, 'owner, F, E> {
 #[derive(Clone, Copy)]
 pub(super) struct SourceTopology<'a> {
     pub(super) inputs: Option<&'a BTreeSet<ReferenceInputId>>,
-    pub(super) roots: &'a [SceneEntityId],
+    pub(super) placements: &'a [SceneEntityPlacement],
     pub(super) entities: &'a [SceneEntityRecord],
+    /// Witnessed containing-source references that must survive explicit source conversion.
+    pub(super) reference_queries: &'a [nara_identity::AuthoredEntityReference],
 }
 
 /// Preserves a standalone Prefab's declared input environment at the source boundary.
 pub(super) fn expand_source<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
     source: SourceTopology<'_>,
-) -> Result<SceneDocument, SceneCompilationFailure>
+) -> Result<SceneDraft, SceneCompilationFailure>
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
@@ -168,8 +221,9 @@ where
         site: None,
         anchor: None,
         depth: 0,
-        nodes: BTreeMap::new(),
+        nodes: ScopeNodes::default(),
         roots: Vec::new(),
+        aliases: BTreeMap::new(),
         state: None,
         input: BTreeSet::new(),
         output: BTreeSet::new(),
@@ -184,7 +238,9 @@ where
     loop {
         compiler.compose_programs()?;
         let mut references = compiler.materialize_components(&mut layout)?;
-        if compiler.close_reference_demands(&mut references)? {
+        if compiler.close_reference_demands(&mut references)?
+            && compiler.close_source_reference_demands()?
+        {
             return compiler.materialize(layout, references);
         }
 
@@ -216,6 +272,19 @@ where
         let Some(selected) = self.selected_anchor else {
             return true;
         };
+        if node == selected
+            && self.nodes[node].entered.is_some_and(|scope| {
+                self.scopes[scope]
+                    .site
+                    .as_ref()
+                    .and_then(|site| self.instance(site))
+                    .is_some_and(|instance| {
+                        matches!(instance.binding, crate::PrefabInstanceBinding::Root { .. })
+                    })
+            })
+        {
+            return true;
+        }
         let mut scope = self.nodes[node].scope;
         while let Some(anchor) = self.scopes[scope].anchor {
             if anchor == selected {
@@ -233,11 +302,42 @@ where
             .map_or(self.root.entities, |source| &source.document().entities)
     }
 
-    fn source_roots(&self, scope: ScopeId) -> &[SceneEntityId] {
+    fn source_placements(&self, scope: ScopeId) -> &[SceneEntityPlacement] {
         self.scopes[scope]
             .source
             .as_ref()
-            .map_or(self.root.roots, |source| &source.document().roots)
+            .map_or(self.root.placements, |source| &source.document().placements)
+    }
+
+    /// Resolves only materialized identity. Declaration lookup always retains the original facet.
+    fn canonical_node(&self, scope: ScopeId, node: NodeId) -> NodeId {
+        self.scopes[scope]
+            .aliases
+            .get(&node)
+            .copied()
+            .unwrap_or(node)
+    }
+
+    fn close_source_reference_demands(&mut self) -> Result<bool, SceneCompilationFailure> {
+        use inputs::{ReferenceResolution, ResolvedReference};
+        for query in self.root.reference_queries {
+            match self.reference_target(0, query)? {
+                ReferenceResolution::Entered => return Ok(false),
+                ReferenceResolution::Invalid { reason, .. } => return Err(reason.into()),
+                ReferenceResolution::Resolved {
+                    reference: ResolvedReference::Local(node),
+                    declaring_scope,
+                } => {
+                    if !self.scopes[declaring_scope].output.contains(&node)
+                        || !self.scopes[0].output.contains(&node)
+                    {
+                        return Err(SceneCompilationFailureKind::Reference.into());
+                    }
+                }
+                ReferenceResolution::Resolved { .. } => {}
+            }
+        }
+        Ok(true)
     }
 
     fn instance(&self, site: &Site) -> Option<&PrefabInstance> {
@@ -406,6 +506,23 @@ where
     }
 
     fn register_scope_inner(&mut self, scope: ScopeId) -> Result<(), SceneCompilationFailure> {
+        let maximum = self.context.options.limits.working_bytes().get();
+        let placement_cost = super::super::cost::scene_placements_cost(
+            self.source_placements(scope),
+            super::super::cost::PrefabOverlayCostLimits {
+                nodes: maximum / 128,
+                depth: self.context.materialization_limits().depth().get(),
+                logical_bytes: maximum,
+                ..super::super::cost::PrefabOverlayCostLimits::UNBOUNDED
+            },
+        )
+        .map_err(|_| SceneCompilationFailureKind::WorkLimit)?;
+        self.admit(
+            placement_cost
+                .nodes
+                .checked_mul(128)
+                .and_then(|bytes| bytes.checked_add(placement_cost.structural_logical_bytes)),
+        )?;
         let entities = self.source_entities(scope);
         let count = entities.len();
         let additions = self
@@ -417,11 +534,6 @@ where
                 bytes
                     .checked_add(512)?
                     .checked_add(provenance_string_bytes(entity.id.as_str())?.checked_mul(4)?)?
-                    .checked_add(entity.children.iter().try_fold(0usize, |bytes, child| {
-                        bytes
-                            .checked_add(size_of::<NodeId>())?
-                            .checked_add(provenance_string_bytes(child.as_str())?.checked_mul(2)?)
-                    })?)?
                     .checked_add(if scope == 0 && self.selected_anchor.is_some() {
                         0
                     } else {
@@ -437,35 +549,8 @@ where
             })
             .and_then(|bytes| bytes.checked_add(additions.checked_mul(512)?));
         self.admit(bytes)?;
-        let entities = self
-            .context
-            .observe_item_budget(
-                SceneCompilationBudgetKind::MaterializedEntities,
-                self.context.usage.materialized_entities,
-                count.saturating_add(additions),
-                self.context.options.limits.materialized_entities(),
-                None,
-                None,
-            )
-            .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-        let mut usage = self.context.usage;
-        usage.materialized_entities = entities;
-        if !self.context.admit_working_usage(usage, None, None) {
-            return Err(SceneCompilationFailureKind::WorkLimit.into());
-        }
-        self.context.usage = usage;
         let entities = self.source_entities(scope);
-        let document = SceneDocument {
-            roots: self.source_roots(scope).to_vec(),
-            entities: entities
-                .iter()
-                .map(|entity| {
-                    SceneEntityRecord::new(entity.id.clone())
-                        .with_children(entity.children.iter().cloned())
-                })
-                .collect(),
-        };
-        let structure = validate_scene_structure(&document);
+        let structure = validate_source_structure(self.source_placements(scope), entities);
         if structure.has_errors() {
             self.context.diagnostics.extend(structure);
             return Err(SceneCompilationFailureKind::OwnerAdmission.into());
@@ -586,33 +671,16 @@ where
                 origin,
                 record,
                 locator,
-                children: Vec::new(),
                 slot,
                 entered: None,
                 opened: false,
                 programs: BTreeMap::new(),
             });
         }
-        self.scopes[scope].roots = self
-            .source_roots(scope)
-            .iter()
-            .map(|id| self.scopes[scope].nodes[&PrefabEntityOrigin::SourceEntity(id.clone())])
-            .collect();
-        for index in 0..count {
-            let entity = &self.source_entities(scope)[index];
-            let node =
-                self.scopes[scope].nodes[&PrefabEntityOrigin::SourceEntity(entity.id.clone())];
-            self.nodes[node].children = entity
-                .children
-                .iter()
-                .map(|id| self.scopes[scope].nodes[&PrefabEntityOrigin::SourceEntity(id.clone())])
-                .collect();
-        }
-        for index in 0..additions {
-            let id = &self.overlay(scope).unwrap().additions[index].id;
-            let node = self.scopes[scope].nodes[&PrefabEntityOrigin::InstanceAddition(id.clone())];
-            self.scopes[scope].roots.push(node);
-        }
+        // These are unpublished layout seeds. Every directly owned source declaration must
+        // supply its own desired placement; canonical record sorting is never authored order.
+        self.scopes[scope].roots =
+            (self.nodes.len() - count - additions..self.nodes.len()).collect();
         if scope == 0 {
             for entity in self.root.entities {
                 if !self.context.reserve_provenance_bytes(
@@ -683,6 +751,7 @@ where
         node: NodeId,
         site: &Site,
         _key: &SourceDocumentKey,
+        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
     ) -> Result<State, SceneCompilationFailure> {
         // Only work which can still enter this slot distinguishes a finite re-entry.
         // Stable source positions, rather than arena addresses, detect actual recursion.
@@ -733,7 +802,7 @@ where
                             .all(|(hop, origin)| &hop.anchor == *origin)
                     {
                         demands.push((
-                            declaration.clone(),
+                            DemandSite::Overlay(declaration.clone()),
                             index,
                             target.through.len() - prefix.len(),
                         ));
@@ -741,12 +810,92 @@ where
                     index += 1;
                 });
             }
+            let placements = self.source_placements(current);
+            let mut count = 0usize;
+            placement_targets(placements, |_, _| count = count.saturating_add(1));
+            let source_bytes = self.scopes[current]
+                .source
+                .as_ref()
+                .map_or(Some(0), |source| source.key().checked_retained_bytes());
+            self.admit(
+                source_bytes
+                    .and_then(|bytes| {
+                        bytes.checked_add(size_of::<DemandSite>() + 3 * size_of::<usize>())
+                    })
+                    .and_then(|bytes| bytes.checked_mul(count.checked_add(1)?))
+                    .and_then(|bytes| {
+                        bytes.checked_add(self.relative_bytes(current, node)?.checked_mul(2)?)
+                    }),
+            )?;
+            let declaration = DemandSite::Source(
+                self.scopes[current]
+                    .source
+                    .as_ref()
+                    .map_or(PrefabDeclarationSource::Containing, |source| {
+                        PrefabDeclarationSource::Prefab(source.key().clone())
+                    }),
+            );
+            let relative = self
+                .relative(current, node)
+                .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+            let prefix = relative
+                .through
+                .iter()
+                .map(|hop| &hop.anchor)
+                .chain(std::iter::once(&relative.entity))
+                .collect::<Vec<_>>();
+            placement_targets(self.source_placements(current), |index, target| {
+                if target.through.len() >= prefix.len()
+                    && target
+                        .through
+                        .iter()
+                        .zip(&prefix)
+                        .all(|(hop, origin)| &hop.anchor == *origin)
+                {
+                    demands.push((
+                        declaration.clone(),
+                        index,
+                        target.through.len() - prefix.len(),
+                    ));
+                }
+            });
             let Some(anchor) = self.scopes[current].anchor else {
                 break;
             };
             current = self.nodes[anchor].scope;
         }
-        Ok(State { overlay, demands })
+        let reference = if let Some((reference, remaining_hops, lexical_scope)) = reference {
+            self.admit(
+                inputs::authored_clone_bytes(reference)
+                    .and_then(|bytes| bytes.checked_add(size_of::<ReferenceDemand>()))
+                    .and_then(|bytes| {
+                        bytes.checked_add(
+                            self.scopes[lexical_scope]
+                                .source
+                                .as_ref()
+                                .map_or(Some(0), |source| source.key().checked_retained_bytes())?,
+                        )
+                    }),
+            )?;
+            let lexical_source = self.scopes[lexical_scope]
+                .source
+                .as_ref()
+                .map_or(PrefabDeclarationSource::Containing, |source| {
+                    PrefabDeclarationSource::Prefab(source.key().clone())
+                });
+            Some(ReferenceDemand {
+                reference: reference.clone(),
+                remaining_hops,
+                lexical_source,
+            })
+        } else {
+            None
+        };
+        Ok(State {
+            overlay,
+            demands,
+            reference,
+        })
     }
 
     fn reserve_occurrence(
@@ -822,6 +971,24 @@ where
     }
 
     fn open_slot(&mut self, node: NodeId) -> Result<Option<ScopeId>, SceneCompilationFailure> {
+        self.open_slot_with_reference(node, None)
+    }
+
+    fn open_reference_slot(
+        &mut self,
+        node: NodeId,
+        reference: &nara_identity::AuthoredEntityReference,
+        remaining_hops: usize,
+        lexical_scope: ScopeId,
+    ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
+        self.open_slot_with_reference(node, Some((reference, remaining_hops, lexical_scope)))
+    }
+
+    fn open_slot_with_reference(
+        &mut self,
+        node: NodeId,
+        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
+    ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         if self.nodes[node].opened {
             return Ok(self.nodes[node].entered);
         }
@@ -853,7 +1020,7 @@ where
             self.nodes[node].opened = true;
             return Ok(None);
         };
-        self.open_selected_slot(node, &site)
+        self.open_selected_slot(node, &site, reference)
             .map_err(|failure| self.site_failure(&site, None, failure))
     }
 
@@ -861,6 +1028,7 @@ where
         &mut self,
         node: NodeId,
         site: &Site,
+        reference: Option<(&nara_identity::AuthoredEntityReference, usize, ScopeId)>,
     ) -> Result<Option<ScopeId>, SceneCompilationFailure> {
         self.admit(Some(512))?;
         let instance = self
@@ -988,9 +1156,15 @@ where
         {
             return Err(SceneCompilationFailureKind::SourceChanged.into());
         }
+        if let crate::PrefabInstanceBinding::Root { base, .. } =
+            &self.instance(&site).unwrap().binding
+            && base != source.key()
+        {
+            return Err(SceneCompilationFailureKind::SourceChanged.into());
+        }
         self.admit_input_arguments(site, &source)?;
         self.reserve_occurrence(node, &request, source.key())?;
-        let state = self.state(node, &site, source.key())?;
+        let state = self.state(node, &site, source.key(), reference)?;
         let mut ancestor = self.nodes[node].scope;
         while let Some(parent) = self.scopes[ancestor].anchor {
             let scope = &self.scopes[ancestor];
@@ -1042,8 +1216,9 @@ where
             site: Some(site.clone()),
             anchor: Some(node),
             depth,
-            nodes: BTreeMap::new(),
+            nodes: ScopeNodes::default(),
             roots: Vec::new(),
+            aliases: BTreeMap::new(),
             state: Some(state),
             input: BTreeSet::new(),
             output: BTreeSet::new(),
@@ -1084,23 +1259,35 @@ where
             let scope = *scanned;
             *scanned += 1;
             let mut bytes = Some(0usize);
+            placement_targets(self.source_placements(scope), |_, target| {
+                bytes = bytes.and_then(|bytes| {
+                    bytes
+                        .checked_add(target_clone_bytes(target)?)?
+                        .checked_add(size_of::<Option<PrefabOverlaySlot>>())
+                });
+            });
             if let Some(overlay) = self.overlay(scope) {
                 structural_targets(overlay, |_, target| {
                     bytes = bytes.and_then(|bytes| {
                         bytes
                             .checked_add(target_clone_bytes(target)?)?
-                            .checked_add(size_of::<PrefabOverlaySlot>())
+                            .checked_add(size_of::<Option<PrefabOverlaySlot>>())
                     });
                 });
             }
             self.admit(bytes)?;
             let mut targets = Vec::new();
+            placement_targets(self.source_placements(scope), |_, target| {
+                targets.push((None, target.clone()))
+            });
             if let Some(overlay) = self.overlay(scope) {
-                structural_targets(overlay, |slot, target| targets.push((slot, target.clone())));
+                structural_targets(overlay, |slot, target| {
+                    targets.push((Some(slot), target.clone()))
+                });
             }
             for (slot, target) in targets {
                 self.resolve(scope, &target)
-                    .map_err(|failure| self.scope_failure(scope, Some(slot), failure))?;
+                    .map_err(|failure| self.scope_failure(scope, slot, failure))?;
             }
         }
         Ok(())
@@ -1109,11 +1296,11 @@ where
     fn close_structure(
         &mut self,
         scanned: &mut usize,
-    ) -> Result<SceneDocument, SceneCompilationFailure> {
+    ) -> Result<SceneDraft, SceneCompilationFailure> {
         loop {
             self.close_demands(scanned)?;
             self.postorder.clear();
-            let document = self.layout_scope(0, &mut BTreeMap::new())?;
+            let document = self.layout_scope(0)?;
             self.admit(self.scopes[0].output.len().checked_mul(size_of::<NodeId>()))?;
             let pending = self.scopes[0]
                 .output
@@ -1125,6 +1312,26 @@ where
                 })
                 .collect::<Vec<_>>();
             if pending.is_empty() {
+                // Source facets and materialized entities differ under root binding. Their
+                // skeletons have already paid working-storage admission; this public count
+                // bounds the actual surviving hierarchy instead of inventing wrapper entities.
+                let count = self
+                    .context
+                    .observe_item_budget(
+                        SceneCompilationBudgetKind::MaterializedEntities,
+                        0,
+                        document.entities.len(),
+                        self.context.options.limits.materialized_entities(),
+                        None,
+                        None,
+                    )
+                    .ok_or(SceneCompilationFailureKind::WorkLimit)?;
+                let mut usage = self.context.usage;
+                usage.materialized_entities = count;
+                if !self.context.admit_working_usage(usage, None, None) {
+                    return Err(SceneCompilationFailureKind::WorkLimit.into());
+                }
+                self.context.usage = usage;
                 return Ok(document);
             }
             for node in pending {
@@ -1144,7 +1351,12 @@ where
             .iter()
             .map(|&node| {
                 self.relative(scope, node)
-                    .map(|target| (target, self.nodes[node].locator.clone()))
+                    .map(|target| {
+                        (
+                            target,
+                            self.nodes[self.canonical_node(scope, node)].locator.clone(),
+                        )
+                    })
                     .ok_or_else(|| SceneCompilationFailureKind::OwnerAdmission.into())
             })
             .collect()
@@ -1184,8 +1396,54 @@ where
         }
         for ordinal in 0..self.postorder.len() {
             let scope = self.postorder[ordinal];
+            self.inherit_bound_root_programs(scope)?;
             self.compose_scope_programs(scope)
                 .map_err(|failure| self.scope_failure(scope, None, failure))?;
+        }
+        Ok(())
+    }
+
+    fn inherit_bound_root_programs(
+        &mut self,
+        scope: ScopeId,
+    ) -> Result<(), SceneCompilationFailure> {
+        self.admit(
+            self.scopes[scope]
+                .nodes
+                .len()
+                .checked_mul(size_of::<NodeId>()),
+        )?;
+        let local = self.scopes[scope]
+            .nodes
+            .values()
+            .copied()
+            .collect::<Vec<_>>();
+        for anchor in local {
+            let Some(child) = self.nodes[anchor].entered else {
+                continue;
+            };
+            let Some(site) = self.scopes[child].site.as_ref() else {
+                continue;
+            };
+            let crate::PrefabInstanceBinding::Root { root, .. } =
+                &self.instance(site).unwrap().binding
+            else {
+                continue;
+            };
+            let root = *self.scopes[child]
+                .nodes
+                .source_entity(root)
+                .ok_or(SceneCompilationFailureKind::RootBinding)?;
+            if !self.selects_values(anchor) && !self.selects_values(root) {
+                continue;
+            }
+            // The root's full inner program already includes its selected instance intent.
+            // Containing-anchor records then replace complete components without changing the
+            // lexical environment retained by either contributor's program.
+            let local = std::mem::take(&mut self.nodes[anchor].programs);
+            let mut inherited = std::mem::take(&mut self.nodes[root].programs);
+            inherited.extend(local);
+            self.nodes[anchor].programs = inherited;
         }
         Ok(())
     }
@@ -1214,7 +1472,10 @@ where
         let locators = self.scopes[scope]
             .output
             .iter()
-            .map(|&node| (&self.nodes[node].locator, node))
+            .map(|&node| {
+                let node = self.canonical_node(scope, node);
+                (&self.nodes[node].locator, node)
+            })
             .collect::<BTreeMap<_, _>>();
         let overlay = self.overlay(scope).unwrap();
         let mut touched = BTreeSet::new();
@@ -1323,27 +1584,42 @@ where
         Ok(())
     }
 
-    fn layout_scope(
-        &mut self,
-        scope: ScopeId,
-        nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-    ) -> Result<SceneDocument, SceneCompilationFailure> {
-        self.layout_scope_inner(scope, nested)
+    fn layout_scope(&mut self, scope: ScopeId) -> Result<SceneDraft, SceneCompilationFailure> {
+        self.layout_scope_inner(scope)
             .map_err(|failure| self.scope_failure(scope, None, failure))
+    }
+
+    fn layout_failure(&mut self, mut failure: SceneCompilationFailure) -> SceneCompilationFailure {
+        if let Some(entity) = failure.entity.as_ref() {
+            let Some(&node) = self.locators.get(entity) else {
+                return SceneCompilationFailureKind::OwnerAdmission.into();
+            };
+            if self
+                .admit(provenance_string_bytes(
+                    self.nodes[node].origin.entity().as_str(),
+                ))
+                .is_err()
+            {
+                return SceneCompilationFailureKind::WorkLimit.into();
+            }
+            failure.entity = Some(self.nodes[node].origin.entity().clone());
+        }
+        failure
     }
 
     fn layout_scope_inner(
         &mut self,
         scope: ScopeId,
-        nested: &mut BTreeMap<SceneEntityId, Vec<SceneEntityId>>,
-    ) -> Result<SceneDocument, SceneCompilationFailure> {
+    ) -> Result<SceneDraft, SceneCompilationFailure> {
+        self.admit(self.scopes[scope].nodes.len().checked_mul(1024))?;
         let local = self.scopes[scope]
             .nodes
             .values()
             .copied()
             .collect::<Vec<_>>();
-        self.admit(local.len().checked_mul(1024))?;
-        let mut document = SceneDocument {
+        self.scopes[scope].aliases.clear();
+        self.scopes[scope].input.clear();
+        let mut document = SceneDraft {
             roots: self.scopes[scope]
                 .roots
                 .iter()
@@ -1352,47 +1628,109 @@ where
             entities: Vec::new(),
         };
         for node in local {
-            let mut record = SceneEntityRecord::new(self.nodes[node].locator.clone());
+            let mut record = ExpandedSceneEntity::new(self.nodes[node].locator.clone());
+            self.scopes[scope].input.insert(node);
             if let Some(child) = self.nodes[node].entered {
-                let child = self.layout_scope(child, nested)?;
-                record.children.extend(child.roots.iter().cloned());
-                nested.insert(record.id.clone(), child.roots);
-                document.entities.extend(child.entities);
-            }
-            record.children.extend(
-                self.nodes[node]
-                    .children
+                let mut fragment = self.layout_scope(child)?;
+                self.admit(self.scopes[child].output.len().checked_mul(512))?;
+                let bound_root = match &self
+                    .instance(self.scopes[child].site.as_ref().unwrap())
+                    .unwrap()
+                    .binding
+                {
+                    crate::PrefabInstanceBinding::Forest => None,
+                    crate::PrefabInstanceBinding::Root { root, .. } => {
+                        let root = self.scopes[child]
+                            .nodes
+                            .source_entity(root)
+                            .copied()
+                            .ok_or(SceneCompilationFailureKind::RootBinding)?;
+                        if fragment.roots.len() != 1
+                            || fragment.roots.first() != Some(&self.nodes[root].locator)
+                        {
+                            return Err(self.scope_failure(
+                                child,
+                                None,
+                                SceneCompilationFailureKind::RootBinding.into(),
+                            ));
+                        }
+                        Some(root)
+                    }
+                };
+                if let Some(root) = bound_root {
+                    let index = fragment
+                        .entities
+                        .iter()
+                        .position(|entity| entity.id == self.nodes[root].locator)
+                        .ok_or(SceneCompilationFailureKind::RootBinding)?;
+                    let root_record = fragment.entities.remove(index);
+                    record.children = root_record.children;
+                    self.scopes[scope].aliases.insert(root, node);
+                } else {
+                    record.children = fragment.roots;
+                }
+                // A chain of root bindings keeps every declaration address while normalizing
+                // all materialized aliases to the outermost anchor in this source's layout.
+                let facets = self.scopes[child]
+                    .output
                     .iter()
-                    .map(|child| self.nodes[*child].locator.clone()),
-            );
+                    .map(|&facet| (facet, self.canonical_node(child, facet)))
+                    .collect::<Vec<_>>();
+                for (facet, canonical) in facets {
+                    let canonical = if Some(canonical) == bound_root {
+                        node
+                    } else {
+                        canonical
+                    };
+                    if canonical != facet {
+                        self.scopes[scope].aliases.insert(facet, canonical);
+                    }
+                    self.scopes[scope].input.insert(facet);
+                }
+                document.entities.extend(fragment.entities);
+            }
             document.entities.push(record);
         }
-        let input = document
-            .entities
+        let bytes = self.scopes[scope]
+            .input
             .iter()
-            .map(|record| self.locators[&record.id])
-            .collect::<BTreeSet<_>>();
-        self.admit(input.len().checked_mul(256))?;
-        self.scopes[scope].input = input;
-        if let Some(overlay) = self.overlay(scope) {
-            let _ = overlay;
-            let bytes = self.scopes[scope]
-                .input
-                .iter()
-                .try_fold(0usize, |bytes, &node| {
-                    bytes
-                        .checked_add(self.relative_bytes(scope, node)?)?
-                        .checked_add(256)
-                });
-            self.admit(bytes)?;
-            let overlay = self.overlay(scope).unwrap();
-            let mut targets = BTreeMap::new();
-            for &node in &self.scopes[scope].input {
-                if let Some(target) = self.relative(scope, node) {
-                    targets.insert(target, self.nodes[node].locator.clone());
-                }
+            .try_fold(0usize, |bytes, &node| {
+                bytes
+                    .checked_add(self.relative_bytes(scope, node)?)?
+                    .checked_add(provenance_string_bytes(
+                        self.nodes[self.canonical_node(scope, node)]
+                            .locator
+                            .as_str(),
+                    )?)?
+                    .checked_add(1024)
+            });
+        self.admit(bytes)?;
+        let mut targets = BTreeMap::new();
+        for &node in &self.scopes[scope].input {
+            if let Some(target) = self.relative(scope, node) {
+                targets.insert(
+                    target,
+                    self.nodes[self.canonical_node(scope, node)].locator.clone(),
+                );
             }
-            layout::apply_layout(&mut document, &mut targets, overlay, nested)?;
+        }
+        // Both owners use one desired-layout kernel. The source's own declarations can place
+        // local children among inherited siblings before the containing instance's intent.
+        layout::apply_layout(
+            &mut document,
+            &mut targets,
+            self.source_placements(scope),
+            None,
+        )
+        .map_err(|failure| self.layout_failure(failure))?;
+        if let Some(overlay) = self.overlay(scope) {
+            layout::apply_layout(
+                &mut document,
+                &mut targets,
+                &overlay.placements,
+                Some(overlay),
+            )
+            .map_err(|failure| self.layout_failure(failure))?;
         }
         let membership = document
             .entities
@@ -1403,7 +1741,9 @@ where
             .input
             .iter()
             .copied()
-            .filter(|node| membership.contains(&self.nodes[*node].locator))
+            .filter(|node| {
+                membership.contains(&self.nodes[self.canonical_node(scope, *node)].locator)
+            })
             .collect();
         self.postorder.push(scope);
         Ok(document)
@@ -1420,18 +1760,9 @@ fn structural_targets(
     for (index, target) in overlay.suppressions.iter().enumerate() {
         visit(PrefabOverlaySlot::Suppression { index }, target);
     }
-    for (index, placement) in overlay.placements.iter().enumerate() {
-        let slot = PrefabOverlaySlot::Placement { index };
-        visit(slot, &placement.target);
-        if let PrefabPlacementParent::Entity(target) = &placement.parent {
-            visit(slot, target);
-        }
-        if let PrefabPlacementSlot::Before(target) | PrefabPlacementSlot::After(target) =
-            &placement.slot
-        {
-            visit(slot, target);
-        }
-    }
+    placement_targets(&overlay.placements, |index, target| {
+        visit(PrefabOverlaySlot::Placement { index }, target)
+    });
     for (index, component) in overlay.components.iter().enumerate() {
         match component {
             PrefabComponentIntent::Set { target, .. }
@@ -1439,6 +1770,23 @@ fn structural_targets(
             | PrefabComponentIntent::Properties { target, .. } => {
                 visit(PrefabOverlaySlot::Component { index }, target)
             }
+        }
+    }
+}
+
+fn placement_targets(
+    placements: &[SceneEntityPlacement],
+    mut visit: impl FnMut(usize, &PrefabEntityTarget),
+) {
+    for (index, declaration) in placements.iter().enumerate() {
+        visit(index, &declaration.target);
+        if let ScenePlacementParent::Entity(parent) = &declaration.placement.parent {
+            visit(index, parent);
+        }
+        if let ScenePlacementSlot::Before(sibling) | ScenePlacementSlot::After(sibling) =
+            &declaration.placement.slot
+        {
+            visit(index, sibling);
         }
     }
 }

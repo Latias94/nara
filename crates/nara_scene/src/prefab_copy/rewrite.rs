@@ -19,8 +19,8 @@ use nara_reflect::{
 use super::{CopyBudget, CopyMapping, PrefabCopyError, PrefabCopySchemaError};
 use crate::{
     AuthoringSchemaBasis, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
-    PrefabInstance, PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent,
-    SceneComponentRecord,
+    PrefabInstance, PrefabInstanceBinding, PrefabPropertyIntent, SceneComponentRecord,
+    SceneEntityPlacement, ScenePlacementParent, ScenePlacementSlot,
 };
 
 pub(super) fn copy_document(
@@ -30,6 +30,9 @@ pub(super) fn copy_document(
     mapping: &CopyMapping<'_>,
     budget: &mut CopyBudget,
 ) -> Result<(), PrefabCopyError> {
+    for placement in &mut document.placements {
+        copy_placement(placement, source, mapping, budget)?;
+    }
     for entity in &mut document.entities {
         for (component, record) in &mut entity.components {
             copy_record(component, record, source, basis, mapping, budget)?;
@@ -189,6 +192,9 @@ fn copy_instance(
         return Err(PrefabCopyError::AuxiliaryPrefabSource { source });
     }
     instance.source = mapping.asset(&instance.source, source, budget)?;
+    if let PrefabInstanceBinding::Root { base, .. } = &mut instance.binding {
+        mapping.key(base, source, budget)?;
+    }
     if let Some(arguments) = &mut instance.arguments {
         mapping.key(&mut arguments.base, source, budget)?;
         for reference in arguments.values.values_mut() {
@@ -289,17 +295,27 @@ fn copy_instance(
         }
     }
     for placement in &mut overlay.placements {
-        copy_target(&mut placement.target, source, mapping, budget)?;
-        if let PrefabPlacementParent::Entity(target) = &mut placement.parent {
-            copy_target(target, source, mapping, budget)?;
-        }
-        if let PrefabPlacementSlot::Before(target) | PrefabPlacementSlot::After(target) =
-            &mut placement.slot
-        {
-            copy_target(target, source, mapping, budget)?;
-        }
+        copy_placement(placement, source, mapping, budget)?;
     }
     for target in &mut overlay.suppressions {
+        copy_target(target, source, mapping, budget)?;
+    }
+    Ok(())
+}
+
+fn copy_placement(
+    declaration: &mut SceneEntityPlacement,
+    source: usize,
+    mapping: &CopyMapping<'_>,
+    budget: &mut CopyBudget,
+) -> Result<(), PrefabCopyError> {
+    copy_target(&mut declaration.target, source, mapping, budget)?;
+    if let ScenePlacementParent::Entity(target) = &mut declaration.placement.parent {
+        copy_target(target, source, mapping, budget)?;
+    }
+    if let ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) =
+        &mut declaration.placement.slot
+    {
         copy_target(target, source, mapping, budget)?;
     }
     Ok(())

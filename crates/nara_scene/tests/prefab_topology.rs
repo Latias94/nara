@@ -22,8 +22,8 @@ use nara_reflect::{
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SourceDocumentKey,
+    ResolvedPrefabSource, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
+    SceneEntityRecord, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -32,11 +32,7 @@ fn scene_id(value: &str) -> SceneEntityId {
 
 fn anchor(source: AssetRef) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source,
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(source));
     anchor
 }
 
@@ -198,18 +194,27 @@ fn assert_raw_source_rejected(prefab: PrefabDocument, code: &str) {
 #[test]
 fn raw_prefab_dangling_root_rejects_expansion_and_spawn_without_mutation() {
     assert_raw_source_rejected(
-        PrefabDocument::new([scene_id("missing")], []),
-        "scene.dangling-root",
+        PrefabDocument::new([SceneEntityPlacement::root(scene_id("missing"))], []),
+        "scene.invalid-placement-target",
     );
 }
 
 #[test]
 fn raw_prefab_dangling_child_rejects_expansion_and_spawn_without_mutation() {
     assert_raw_source_rejected(
-        PrefabDocument::from_ordered_roots([
-            SceneEntityRecord::new(scene_id("root")).with_children([scene_id("missing")])
-        ]),
-        "scene.dangling-child",
+        PrefabDocument::new(
+            [
+                SceneEntityPlacement::root(scene_id("root")),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(scene_id("missing")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        scene_id("root"),
+                    ))),
+                ),
+            ],
+            [SceneEntityRecord::new(scene_id("root"))],
+        ),
+        "scene.invalid-placement-target",
     );
 }
 
@@ -217,7 +222,7 @@ fn raw_prefab_dangling_child_rejects_expansion_and_spawn_without_mutation() {
 fn raw_prefab_duplicate_id_rejects_expansion_and_spawn_without_mutation() {
     assert_raw_source_rejected(
         PrefabDocument::new(
-            [scene_id("root")],
+            [SceneEntityPlacement::root(scene_id("root"))],
             [
                 SceneEntityRecord::new(scene_id("root")),
                 SceneEntityRecord::new(scene_id("root")),
@@ -231,13 +236,26 @@ fn raw_prefab_duplicate_id_rejects_expansion_and_spawn_without_mutation() {
 fn raw_prefab_placement_cycle_rejects_expansion_and_spawn_without_mutation() {
     assert_raw_source_rejected(
         PrefabDocument::new(
-            [],
             [
-                SceneEntityRecord::new(scene_id("first")).with_children([scene_id("second")]),
-                SceneEntityRecord::new(scene_id("second")).with_children([scene_id("first")]),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(scene_id("first")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        scene_id("second"),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(scene_id("second")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        scene_id("first"),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(scene_id("first")),
+                SceneEntityRecord::new(scene_id("second")),
             ],
         ),
-        "scene.placement-cycle",
+        "scene.prefab-compilation-failed",
     );
 }
 
@@ -254,10 +272,10 @@ fn nested_raw_prefab_is_checked_before_projection() {
         .with_prefab(
             inner,
             prefab_source::key("topology.inner"),
-            PrefabDocument::new([scene_id("missing")], []),
+            PrefabDocument::new([SceneEntityPlacement::root(scene_id("missing"))], []),
         );
     let document = SceneDocument::from_ordered_roots([anchor(outer)]);
-    assert_rejected_without_mutation(&document, &resolver, "scene.dangling-root");
+    assert_rejected_without_mutation(&document, &resolver, "scene.invalid-placement-target");
 }
 
 #[test]
@@ -267,7 +285,8 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
         source.clone(),
         prefab_source::key("topology.many-missing"),
         PrefabDocument::new(
-            (0..1_024).map(|index| scene_id(&format!("missing_{index}"))),
+            (0..1_024)
+                .map(|index| SceneEntityPlacement::root(scene_id(&format!("missing_{index}")))),
             [],
         ),
     );
@@ -276,7 +295,7 @@ fn raw_prefab_topology_diagnostics_preserve_bounded_loss_accounting() {
     let expansion = document.compile(&registry, &resolver);
 
     assert!(expansion.candidate.is_none());
-    assert_bounded_errors(&expansion.diagnostics, "scene.dangling-root");
+    assert_bounded_errors(&expansion.diagnostics, "scene.invalid-placement-target");
     assert_eq!(expansion.diagnostics.stats().observed_errors(), 1_024);
     assert!(expansion.diagnostics.stats().evicted_entries() > 0);
 }

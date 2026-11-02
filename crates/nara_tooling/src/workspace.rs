@@ -1203,8 +1203,11 @@ impl EditorWorkspace {
                     PrefabCompositionCommand::RemoveComponent { entity, component } => {
                         SceneCompositionCommand::RemoveComponent { entity, component }
                     }
-                    PrefabCompositionCommand::MoveEntity { entity, to } => {
-                        SceneCompositionCommand::MoveEntity { entity, to }
+                    PrefabCompositionCommand::MoveEntity { target, to } => {
+                        SceneCompositionCommand::MoveEntity { target, to }
+                    }
+                    PrefabCompositionCommand::RevertPlacement { target } => {
+                        SceneCompositionCommand::RevertPlacement { target }
                     }
                     PrefabCompositionCommand::RemoveEntity { entity } => {
                         SceneCompositionCommand::RemoveEntity { entity }
@@ -1476,15 +1479,7 @@ impl EditorWorkspace {
                 report
             }
             EditorDocumentSlot::Prefab(slot) => {
-                if !matches!(
-                    &command,
-                    SceneInspectorCommand::SetField { .. }
-                        | SceneInspectorCommand::RemoveField { .. }
-                        | SceneInspectorCommand::SetAssetRefField { .. }
-                ) {
-                    return authoring_command_error_report(active_document, document);
-                }
-                let patch = match command.to_patch(&slot.session.document().instantiate()) {
+                let patch = match command.to_prefab_patch(slot.session.document()) {
                     Ok(patch) => patch,
                     Err(diagnostic) => {
                         let mut report = report_for_prefab_slot(document, active_document, slot);
@@ -1656,19 +1651,68 @@ impl EditorWorkspace {
                 .apply_authoring_entity_creation(document, base_revision, entity_kind, placement)
                 .unwrap_or_else(|report| report);
         }
-        if let (
-            EditorDocumentSlot::Prefab(prefab),
-            SceneCompositionCommand::MoveEntity { entity, to },
-        ) = (&*slot, &command)
-            && to.matches_current_prefab(prefab.session.document(), entity)
-        {
-            let mut report = report_for_document(document, active_document, slot);
-            report.applied = false;
-            report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp {
-                entity: entity.clone(),
-            });
-            return report;
+        if let EditorDocumentSlot::Prefab(prefab) = &*slot {
+            let placements = &prefab.session.document().placements;
+            let unchanged = match &command {
+                SceneCompositionCommand::MoveEntity { target, to }
+                    if placements
+                        .iter()
+                        .any(|entry| &entry.target == target && &entry.placement == to) =>
+                {
+                    Some(target)
+                }
+                SceneCompositionCommand::RevertPlacement { target }
+                    if !target.through.is_empty()
+                        && !placements.iter().any(|entry| &entry.target == target) =>
+                {
+                    Some(target)
+                }
+                _ => None,
+            };
+            if let Some(target) = unchanged {
+                let mut report = report_for_document(document, active_document, slot);
+                report.applied = false;
+                report.prefab_composition_outcome = Some(PrefabCompositionOutcome::NoOp {
+                    target: target.clone(),
+                });
+                return report;
+            }
         }
+        let mut prefab_outcome = if kind == EditorDocumentKind::Prefab {
+            match &command {
+                SceneCompositionCommand::MoveEntity { target, .. } => {
+                    Some(PrefabCompositionOutcome::Moved {
+                        target: target.clone(),
+                    })
+                }
+                SceneCompositionCommand::RevertPlacement { target } => {
+                    Some(PrefabCompositionOutcome::PlacementReverted {
+                        target: target.clone(),
+                    })
+                }
+                SceneCompositionCommand::RemoveEntity { entity } => {
+                    Some(PrefabCompositionOutcome::Removed {
+                        entity: entity.clone(),
+                        selection: None,
+                    })
+                }
+                SceneCompositionCommand::AddComponent { entity, component } => {
+                    Some(PrefabCompositionOutcome::ComponentAdded {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                    })
+                }
+                SceneCompositionCommand::RemoveComponent { entity, component } => {
+                    Some(PrefabCompositionOutcome::ComponentRemoved {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                    })
+                }
+                SceneCompositionCommand::CreateEntity { .. } => None,
+            }
+        } else {
+            None
+        };
         let source = match &*slot {
             EditorDocumentSlot::Scene(slot) => {
                 GenericCompositionDocument::Scene(slot.session.document())
@@ -1718,32 +1762,12 @@ impl EditorWorkspace {
                 slot.selection_mut().select_entity(entity.clone());
             }
             if kind == EditorDocumentKind::Prefab {
-                report.prefab_composition_outcome = match &prepared.patch().operations[0] {
-                    nara_scene::ScenePatchOperation::MoveEntity { entity, .. } => {
-                        Some(PrefabCompositionOutcome::Moved {
-                            entity: entity.clone(),
-                        })
-                    }
-                    nara_scene::ScenePatchOperation::RemoveEntity { entity, .. } => {
-                        Some(PrefabCompositionOutcome::Removed {
-                            entity: entity.clone(),
-                            selection: slot.selection().top_entity().cloned(),
-                        })
-                    }
-                    nara_scene::ScenePatchOperation::AddComponent {
-                        entity, component, ..
-                    } => Some(PrefabCompositionOutcome::ComponentAdded {
-                        entity: entity.clone(),
-                        component: component.clone(),
-                    }),
-                    nara_scene::ScenePatchOperation::RemoveComponent { entity, component } => {
-                        Some(PrefabCompositionOutcome::ComponentRemoved {
-                            entity: entity.clone(),
-                            component: component.clone(),
-                        })
-                    }
-                    _ => None,
-                };
+                if let Some(PrefabCompositionOutcome::Removed { selection, .. }) =
+                    &mut prefab_outcome
+                {
+                    *selection = slot.selection().top_entity().cloned();
+                }
+                report.prefab_composition_outcome = prefab_outcome;
             }
         }
         report
@@ -3503,10 +3527,10 @@ mod tests {
         ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        AuthoringDocumentSource, PrefabDocument, PrefabDocumentCandidate,
+        AuthoringDocumentSource, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
         SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentRecord,
-        SceneDocumentCandidate, SceneEntityRecord, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePatchOperation,
+        ScenePlacement, ScenePlacementParent,
     };
 
     use crate::{
@@ -3772,7 +3796,7 @@ mod tests {
                 .unwrap()
                 .next
                 .unwrap();
-            assert!(apply_patch(&mut workspace, &registry, a, add_entity_patch("new-a")).applied);
+            assert!(add_entity(&mut workspace, &registry, a, "new-a").applied);
             assert!(workspace.activate_document(a).applied);
             let before_a = facts(&workspace, a);
             let before_b = facts(&workspace, b);
@@ -3783,7 +3807,7 @@ mod tests {
             );
             assert_eq!(facts(&workspace, a), before_a);
             assert_eq!(facts(&workspace, b), before_b);
-            assert!(apply_patch(&mut workspace, &registry, b, add_entity_patch("new-b")).applied);
+            assert!(add_entity(&mut workspace, &registry, b, "new-b").applied);
             let edited_b = facts(&workspace, b);
             assert_eq!(
                 workspace.query_document_entities(resume(cursor.clone(), 1, 1)),
@@ -3927,7 +3951,7 @@ mod tests {
         );
         let create = || SceneCompositionCommand::CreateEntity {
             kind: SceneCompositionEntityKind::Empty,
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            placement: ScenePlacement::last(ScenePlacementParent::Root),
         };
         assert!(compose(&mut workspace, &registry, document, create()).applied);
         let first = workspace
@@ -3982,7 +4006,7 @@ mod tests {
                 document,
                 SceneCompositionCommand::CreateEntity {
                     kind: SceneCompositionEntityKind::Empty,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             )
             .applied
@@ -4000,7 +4024,9 @@ mod tests {
                 .unwrap()
                 .session()
                 .document()
-                .roots,
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots(),
             [root.clone()]
         );
 
@@ -4042,7 +4068,7 @@ mod tests {
                 document,
                 SceneCompositionCommand::CreateEntity {
                     kind: SceneCompositionEntityKind::ColoredSprite,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             )
             .applied
@@ -4078,10 +4104,10 @@ mod tests {
                 &registry,
                 document,
                 SceneCompositionCommand::MoveEntity {
-                    entity: sprite.clone(),
-                    to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                        parent: root.clone(),
-                    }),
+                    target: PrefabEntityTarget::source(sprite.clone()),
+                    to: ScenePlacement::last(ScenePlacementParent::Entity(
+                        PrefabEntityTarget::source(root.clone())
+                    )),
                 },
             )
             .applied
@@ -4095,9 +4121,20 @@ mod tests {
             .entities;
         assert_eq!(
             rows.iter()
-                .map(|row| (&row.id, row.parent.as_ref(), row.depth))
-                .collect::<Vec<_>>(),
-            vec![(&root, None, 0), (&sprite, Some(&root), 1)]
+                .map(|row| (&row.id, row.placement.clone()))
+                .collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([
+                (
+                    &root,
+                    Some(ScenePlacement::last(ScenePlacementParent::Root))
+                ),
+                (
+                    &sprite,
+                    Some(ScenePlacement::last(ScenePlacementParent::Entity(
+                        PrefabEntityTarget::source(root.clone())
+                    )))
+                ),
+            ])
         );
 
         assert!(
@@ -4135,7 +4172,7 @@ mod tests {
             document,
             SceneCompositionCommand::CreateEntity {
                 kind: SceneCompositionEntityKind::ColoredSprite,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         );
         assert!(!unavailable.applied);
@@ -4162,7 +4199,7 @@ mod tests {
                 document,
                 SceneCompositionCommand::CreateEntity {
                     kind: SceneCompositionEntityKind::Empty,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             )
             .applied
@@ -4221,7 +4258,7 @@ mod tests {
             document,
             PrefabCompositionCommand::CreateEntity {
                 draft: draft.clone(),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         );
         assert!(created.applied);
@@ -4237,7 +4274,9 @@ mod tests {
                 .unwrap()
                 .session()
                 .document()
-                .roots,
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots(),
             [existing, first.clone()]
         );
         assert_eq!(
@@ -4257,9 +4296,9 @@ mod tests {
             document,
             PrefabCompositionCommand::CreateEntity {
                 draft: draft.clone(),
-                placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: entity_id("missing-parent"),
-                }),
+                placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                    PrefabEntityTarget::source(entity_id("missing-parent")),
+                )),
             },
         );
         assert!(!rejected.applied);
@@ -4270,7 +4309,7 @@ mod tests {
                 base_revision: initial_revision,
                 command: PrefabCompositionCommand::CreateEntity {
                     draft: draft.clone(),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             },
         );
@@ -4286,7 +4325,7 @@ mod tests {
             document,
             PrefabCompositionCommand::CreateEntity {
                 draft,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         );
         assert!(second.applied);
@@ -4320,10 +4359,30 @@ mod tests {
         let child = entity_id("first/child");
         let second = entity_id("second");
         let original = PrefabDocument::new(
-            [root.clone()],
             [
-                SceneEntityRecord::new(root.clone()).with_children([first.clone(), second.clone()]),
-                SceneEntityRecord::new(first.clone()).with_children([child.clone()]),
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(first.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        first.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(second.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(root.clone()),
+                SceneEntityRecord::new(first.clone()),
                 SceneEntityRecord::new(child.clone()),
                 SceneEntityRecord::new(second.clone()),
             ],
@@ -4347,10 +4406,10 @@ mod tests {
             &registry,
             document,
             PrefabCompositionCommand::MoveEntity {
-                entity: second.clone(),
-                to: ScenePlacement::first(ScenePlacementOwner::Parent {
-                    parent: root.clone(),
-                }),
+                target: PrefabEntityTarget::source(second.clone()),
+                to: ScenePlacement::first(ScenePlacementParent::Entity(
+                    PrefabEntityTarget::source(root.clone()),
+                )),
             },
         );
         assert!(moved.applied);
@@ -4386,20 +4445,17 @@ mod tests {
             &registry,
             document,
             PrefabCompositionCommand::MoveEntity {
-                entity: second.clone(),
-                to: ScenePlacement::after(
-                    ScenePlacementOwner::Parent {
-                        parent: root.clone(),
-                    },
-                    first.clone(),
-                ),
+                target: PrefabEntityTarget::source(second.clone()),
+                to: ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    root.clone(),
+                ))),
             },
         );
         assert!(!no_op.applied);
         assert_eq!(
             no_op.prefab_composition_outcome,
             Some(PrefabCompositionOutcome::NoOp {
-                entity: second.clone()
+                target: PrefabEntityTarget::source(second.clone())
             })
         );
         assert_eq!(
@@ -4470,12 +4526,7 @@ mod tests {
             .unwrap();
         let document = opened.opened_document.unwrap();
 
-        let edited = apply_patch(
-            &mut workspace,
-            &registry,
-            document,
-            add_entity_patch("dirty"),
-        );
+        let edited = add_entity(&mut workspace, &registry, document, "dirty");
         assert!(edited.applied);
 
         let close = workspace.apply_command(
@@ -4505,26 +4556,10 @@ mod tests {
         let document = opened.opened_document.unwrap();
         let stale = authority.capture(&workspace, document).unwrap();
 
-        assert!(
-            apply_patch(
-                &mut workspace,
-                &registry,
-                document,
-                add_entity_patch("captured")
-            )
-            .applied
-        );
+        assert!(add_entity(&mut workspace, &registry, document, "captured").applied);
         let captured_revision = workspace.scene(document).unwrap().revision();
         let accepted_checkpoint = authority.capture(&workspace, document).unwrap();
-        assert!(
-            apply_patch(
-                &mut workspace,
-                &registry,
-                document,
-                add_entity_patch("later")
-            )
-            .applied
-        );
+        assert!(add_entity(&mut workspace, &registry, document, "later").applied);
 
         let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
         let accepted = authority.commit(
@@ -4588,7 +4623,15 @@ mod tests {
                 .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
                     document,
                     base_revision: initial.revision,
-                    patch: add_entity_patch("added"),
+                    patch: add_entity_patch(
+                        "added",
+                        &workspace
+                            .scene(document)
+                            .unwrap()
+                            .session()
+                            .document()
+                            .placements
+                    ),
                 })
                 .applied
         );
@@ -4821,7 +4864,7 @@ mod tests {
                 entity: Some(enemy.clone()),
             },
         );
-        apply_patch(&mut workspace, &registry, first, add_entity_patch("prop"));
+        add_entity(&mut workspace, &registry, first, "prop");
 
         let first_slot = workspace.scene(first).unwrap();
         let second_slot = workspace.scene(second).unwrap();
@@ -4899,7 +4942,15 @@ mod tests {
             checkpoint.source_binding().unwrap().locator(),
             "prefabs/reference-ui.prefab.json"
         );
-        assert!(checkpoint.prefab().unwrap().roots.is_empty());
+        assert!(
+            checkpoint
+                .prefab()
+                .unwrap()
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -5019,7 +5070,9 @@ mod tests {
                 .unwrap()
                 .session()
                 .document()
-                .roots
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots()
                 .len(),
             1
         );
@@ -5130,7 +5183,7 @@ mod tests {
             EditorWorkspaceCommand::ApplyScenePatch {
                 document: missing,
                 base_revision,
-                patch: add_entity_patch("wrong"),
+                patch: add_entity_patch("wrong", &[]),
             },
         );
         assert!(!wrong_document.applied);
@@ -5147,7 +5200,15 @@ mod tests {
                     EditorWorkspaceCommand::ApplyScenePatch {
                         document,
                         base_revision,
-                        patch: add_entity_patch("accepted"),
+                        patch: add_entity_patch(
+                            "accepted",
+                            &workspace
+                                .scene(document)
+                                .unwrap()
+                                .session()
+                                .document()
+                                .placements
+                        ),
                     },
                 )
                 .applied
@@ -5165,7 +5226,15 @@ mod tests {
             EditorWorkspaceCommand::ApplyScenePatch {
                 document,
                 base_revision,
-                patch: add_entity_patch("stale"),
+                patch: add_entity_patch(
+                    "stale",
+                    &workspace
+                        .scene(document)
+                        .unwrap()
+                        .session()
+                        .document()
+                        .placements,
+                ),
             },
         );
         assert!(!stale.applied);
@@ -5238,19 +5307,9 @@ mod tests {
         let first = open_scene(&mut workspace, "first", SceneDocument::default());
         let second = open_scene(&mut workspace, "second", SceneDocument::default());
 
-        apply_patch(
-            &mut workspace,
-            &registry,
-            first,
-            add_entity_patch("first_entity"),
-        );
+        add_entity(&mut workspace, &registry, first, "first_entity");
         let stale_second = workspace.scene(second).unwrap().revision();
-        apply_patch(
-            &mut workspace,
-            &registry,
-            second,
-            add_entity_patch("second_entity"),
-        );
+        add_entity(&mut workspace, &registry, second, "second_entity");
         workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SetActiveDocument { document: first },
@@ -5300,15 +5359,19 @@ mod tests {
             &registry,
             document,
             SceneInspectorCommand::MoveEntity {
-                entity: last.clone(),
-                to: ScenePlacement::first(ScenePlacementOwner::Root),
+                target: PrefabEntityTarget::source(last.clone()),
+                to: ScenePlacement::first(ScenePlacementParent::Root),
             },
         );
 
         assert!(moved.applied, "{:?}", moved.diagnostics);
         let slot = workspace.scene(document).unwrap();
         assert_eq!(
-            slot.session().document().roots,
+            slot.session()
+                .document()
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots(),
             [last.clone(), first, middle]
         );
         assert_eq!(slot.session().history_status().undo_depth, 1);
@@ -5326,7 +5389,9 @@ mod tests {
                 .unwrap()
                 .session()
                 .document()
-                .roots,
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots(),
             [last, entity_id("first"), entity_id("middle")]
         );
     }
@@ -5363,12 +5428,7 @@ mod tests {
             EditorExternalReloadState::Clean
         );
 
-        apply_patch(
-            &mut workspace,
-            &registry,
-            document,
-            add_entity_patch("dirty"),
-        );
+        add_entity(&mut workspace, &registry, document, "dirty");
         workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::MarkExternalChanged { document },
@@ -5941,11 +6001,36 @@ mod tests {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity)])
     }
 
-    fn add_entity_patch(id: &str) -> ScenePatchDocument {
-        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(entity_id(id)),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }])
+    fn add_entity_patch(id: &str, placements: &[SceneEntityPlacement]) -> ScenePatchDocument {
+        let mut value = placements.to_vec();
+        value.push(SceneEntityPlacement::root(entity_id(id)));
+        ScenePatchDocument::new([
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(entity_id(id)),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: placements.to_vec(),
+                value,
+            },
+        ])
+    }
+
+    fn add_entity(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistrySnapshot,
+        document: EditorDocumentId,
+        id: &str,
+    ) -> EditorWorkspaceCommandReport {
+        let patch = add_entity_patch(
+            id,
+            &workspace
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .placements,
+        );
+        apply_patch(workspace, registry, document, patch)
     }
 
     fn set_transform_x_patch(entity: &str, value: f64) -> ScenePatchDocument {

@@ -54,6 +54,10 @@ root, placement and inline-reference replacement; value relocation alone does no
   canonical effective entity without a wrapper. Declaration facets and instance slots stay
   distinct from effective root aliases. Expanded content retains inherited source-entity or
   explicit instance-addition origin; visual parentage never transfers declaration ownership.
+  The complete declaration explicitly stores `PrefabInstanceBinding::Forest` or a named
+  `Root { base, root }`; neither source decoding nor compilation infers binding from root count.
+  A root pin is checked against the actually selected canonical source before the effective
+  single-root predicate. It remains part of dormant declarations and exact history snapshots.
 - Scene projection exposes private instance-local materialization locators. They are not durable
   source identities; UI, session, semantics, selection and persistence keys must not parse or
   extend their generated encoding.
@@ -66,6 +70,17 @@ root, placement and inline-reference replacement; value relocation alone does no
   They retain property pins, component intent, complete additions, desired placement, suppression
   and optional-instance pins in typed source/addition target namespaces. Exact Scene patches remain
   revision-bound source edits and inverse history; they are not durable inheritance intent.
+- Scene and Prefab source hierarchy is an ordered set of `SceneEntityPlacement` declarations,
+  using the same target, desired parent and sibling slot grammar as overlay placement. Each
+  directly owned source entity has exactly one placement; inherited targets can have explicit
+  source pins. Source records do not store an additional children list. Exact transactions
+  compare complete placement vectors and retain the complete inverse order. Raw source
+  preservation need not resolve projected targets; effective compilation alone proves their
+  actual canonical bases, normalized aliases, parentage and order.
+- A source-local hierarchy query observes direct declarations through the same layout kernel,
+  under an explicit finite allowance. It neither opens Prefabs nor interprets components, and
+  refuses projected targets instead of approximating them from declaration or record order.
+  Its result is an observation, with no effective-compilation or Native activation authority.
 - Select complete instance declarations from inner to outer before resolving their nested sources.
   A complete replacement can repair a missing old nested source without requesting it. Traversing
   a nested target separately requires its per-hop canonical base. Compile ordinary component,

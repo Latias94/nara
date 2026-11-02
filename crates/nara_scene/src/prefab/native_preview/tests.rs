@@ -205,12 +205,13 @@ fn assert_flat_values(
     source: &SceneDocument,
     basis: &AuthoringSchemaBasis,
 ) {
-    assert_eq!(preview.roots(), source.roots.as_slice());
+    // These fixtures declare one direct root. Layout itself belongs to the real compiler.
+    assert_eq!(preview.roots(), [id("root")]);
     assert_eq!(preview.entities().len(), source.entities.len());
     assert_eq!(preview.canonical_provenance().len(), source.entities.len());
     for (compiled, source) in preview.entities().iter().zip(&source.entities) {
         assert_eq!(compiled.id(), &source.id);
-        assert_eq!(compiled.children(), source.children.as_slice());
+        assert!(compiled.children().is_empty());
         assert_eq!(compiled.components().len(), source.components.len());
         for (component, record) in &source.components {
             let compiled = &compiled.components()[component];
@@ -465,11 +466,7 @@ fn projected_report(
         SceneEntityRecord::new(id("native-child")).with_component(native_id(), record()),
     ]));
     let mut anchor = SceneEntityRecord::new(id("prefab-instance"));
-    anchor.prefab = Some(PrefabInstance {
-        source: source.clone(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(source.clone()));
     try_compile_authoring_scene_with_loader(
         &SceneDocument::from_ordered_roots([anchor]),
         basis,

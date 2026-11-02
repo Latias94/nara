@@ -3,9 +3,9 @@ use nara_ecs::World;
 use nara_reflect::ComponentRegistryBuilder;
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
-    PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PrefabSourceResolver, SceneDocument, SceneEntityId, SceneEntityRecord,
-    SceneEntitySource, SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind,
+    PrefabInstance, PrefabOverlay, PrefabProjectionStep, PrefabSourceResolver, SceneDocument,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneEntitySource, SceneOccurrenceKey,
+    ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -15,6 +15,7 @@ fn id(value: &str) -> SceneEntityId {
 fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(name));
     record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source,
         arguments: None,
         overrides: None,
@@ -148,13 +149,13 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
     inner_overlay
         .additions
         .push(PrefabAddition::new(id("inner-added")));
-    inner_overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("inner-added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    inner_overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("inner-added")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let mut nested = PrefabAddition::new(id("nested-added"));
     nested.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: inner_request.clone(),
         arguments: None,
         overrides: Some(inner_overlay),
@@ -167,11 +168,10 @@ fn nested_instance_additions_preserve_tagged_provenance_through_public_spawn() {
             .clone(),
     );
     outer_overlay.additions.push(nested);
-    outer_overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("nested-added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    outer_overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("nested-added")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let anchors = ["outer", "other-outer"].map(|name| {
         let mut record = anchor(name, outer_request.clone());
         record.prefab.as_mut().unwrap().overrides = Some(outer_overlay.clone());

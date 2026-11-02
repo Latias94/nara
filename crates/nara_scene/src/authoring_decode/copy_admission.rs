@@ -41,7 +41,7 @@ impl AuthoringSchemaBasis {
             };
             classify_source_document_impl(
                 AuthoringSourceParts {
-                    roots: &document.roots,
+                    placements: &document.placements,
                     entities: &document.entities,
                     inputs: Some(&document.inputs),
                 },

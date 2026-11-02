@@ -18,8 +18,8 @@ use nara::{
     },
     render::DisplayRect,
     scene::{
-        PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord,
+        PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SceneComponentRecord,
+        SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind, EditorFrameModel,
@@ -146,11 +146,9 @@ impl InteractionProject {
                 ),
             );
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("prefab-anchor").unwrap());
-        anchor.prefab = Some(PrefabInstance {
-            source: AssetRef::path("ordinary.prefab.json").unwrap(),
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path("ordinary.prefab.json").unwrap(),
+        ));
         fs::write(
             root.join("worlds/entry.scene.json"),
             SceneDocument::from_ordered_roots([anchor, preserved.clone()])
@@ -455,11 +453,22 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
         assert_eq!(interaction.selected_value(), None);
         interaction.click("Undo");
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(42)));
+        let edited_manifest = interaction
+            .application
+            .active_authoring_unavailable_record_manifest()
+            .unwrap();
+        assert_eq!(edited_manifest.entries(), original_manifest.entries());
         assert_eq!(
-            interaction
-                .application
-                .active_authoring_unavailable_record_manifest(),
-            Some(original_manifest.clone())
+            edited_manifest.record_count(),
+            original_manifest.record_count()
+        );
+        assert_eq!(
+            edited_manifest.overlay_target_count(),
+            original_manifest.overlay_target_count()
+        );
+        assert_eq!(
+            edited_manifest.overlay_declarations().collect::<Vec<_>>(),
+            original_manifest.overlay_declarations().collect::<Vec<_>>()
         );
 
         interaction.click("Save");
@@ -470,6 +479,27 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
         );
         assert!(!saved.workspace().document(document).unwrap().dirty);
         let bytes = fs::read(project.source(kind)).unwrap();
+        let saved_placements = match kind {
+            EditorDocumentKind::Scene => {
+                SceneDocumentCandidate::decode_json_bytes(&bytes)
+                    .unwrap()
+                    .into_composition_source()
+                    .unwrap()
+                    .placements
+            }
+            EditorDocumentKind::Prefab => {
+                PrefabDocumentCandidate::decode_json_bytes(&bytes)
+                    .unwrap()
+                    .into_composition_source()
+                    .unwrap()
+                    .placements
+            }
+            EditorDocumentKind::Extension(_) => unreachable!("the fixture edits Scene and Prefab"),
+        };
+        assert_eq!(
+            edited_manifest.source_placements(),
+            saved_placements.as_slice()
+        );
         let stored: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         let stored = stored["payload"]["entities"]
             .as_array()
@@ -497,7 +527,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
             interaction
                 .application
                 .active_authoring_unavailable_record_manifest(),
-            Some(original_manifest)
+            Some(edited_manifest)
         );
         interaction.click("Dismiss persistence result");
     }

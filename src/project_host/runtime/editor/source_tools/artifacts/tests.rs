@@ -80,10 +80,7 @@ mod session {
     use nara_fs::{
         CapabilityRights, HostCapabilityOptions, RelativeComponent, RelativePath, TrustMode,
     };
-    use nara_scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
-    };
+    use nara_scene::{SceneEntityId, SceneEntityRecord};
     use nara_tasks::TaskReturnState;
     use nara_tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorPersistenceAction,
@@ -599,10 +596,10 @@ mod session {
             assert_eq!(before.phase, Phase::Unavailable);
             let document = editor.workspace.active_document().unwrap();
             let basis = editor.document_query_basis(document).unwrap();
-            let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(SceneEntityId::new("ordinary-edit").unwrap()),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }]);
+            let patch = crate::scene_test_support::add_root_entity_patch(
+                &editor.workspace.scene(document).unwrap().session().document().placements,
+                SceneEntityRecord::new(SceneEntityId::new("ordinary-edit").unwrap()),
+            );
             let prepared = editor.prepare_authoring_edit(&basis, &patch).unwrap();
             assert!(matches!(editor.commit_authoring_edit(prepared), EditorActionOutcome::Workspace(report) if report.applied));
             let revision = editor.document_query_basis(document).unwrap().revision;

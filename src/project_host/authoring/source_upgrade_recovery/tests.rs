@@ -378,10 +378,12 @@ fn member(path: &str, kind: SourceDocumentKind, saved: i64, working: i64) -> Mem
         let document = document(health, next);
         match kind {
             SourceDocumentKind::Scene => document.to_json_string().unwrap().into_bytes(),
-            SourceDocumentKind::Prefab => PrefabDocument::new(document.roots, document.entities)
-                .to_ron_string()
-                .unwrap()
-                .into_bytes(),
+            SourceDocumentKind::Prefab => {
+                PrefabDocument::new(document.placements, document.entities)
+                    .to_ron_string()
+                    .unwrap()
+                    .into_bytes()
+            }
         }
     };
     MemberFixture {
@@ -422,7 +424,7 @@ fn ordinary_large_json_and_ron_strings_roundtrip_under_default_shared_limits() {
                     .into_composition_source()
                     .unwrap();
                 SceneDocument {
-                    roots: prefab.roots,
+                    placements: prefab.placements,
                     entities: prefab.entities,
                 }
             }
@@ -438,10 +440,12 @@ fn ordinary_large_json_and_ron_strings_roundtrip_under_default_shared_limits() {
             );
             match member.key.kind() {
                 SourceDocumentKind::Scene => source.to_json_string().unwrap().into_bytes(),
-                SourceDocumentKind::Prefab => PrefabDocument::new(source.roots, source.entities)
-                    .to_ron_string()
-                    .unwrap()
-                    .into_bytes(),
+                SourceDocumentKind::Prefab => {
+                    PrefabDocument::new(source.placements, source.entities)
+                        .to_ron_string()
+                        .unwrap()
+                        .into_bytes()
+                }
             }
         };
         let old = encode(&member.old);

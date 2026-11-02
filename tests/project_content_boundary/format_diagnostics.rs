@@ -14,7 +14,7 @@ enum Failure {
     EnginePrerelease,
     EngineBuild,
     EnginePrereleaseAndBuild,
-    MissingRoots,
+    MissingPlacements,
     RecordParent,
     RonAttribute,
     RonCharacter,
@@ -28,7 +28,7 @@ const FAILURES: [Failure; 11] = [
     Failure::EnginePrerelease,
     Failure::EngineBuild,
     Failure::EnginePrereleaseAndBuild,
-    Failure::MissingRoots,
+    Failure::MissingPlacements,
     Failure::RecordParent,
     Failure::RonAttribute,
     Failure::RonCharacter,
@@ -43,7 +43,7 @@ impl Failure {
             Self::EnginePrerelease | Self::EngineBuild | Self::EnginePrereleaseAndBuild => {
                 "engine-version-too-old"
             }
-            Self::MissingRoots | Self::RecordParent => "legacy-placement-shape",
+            Self::MissingPlacements | Self::RecordParent => "payload-invalid",
             Self::RonAttribute | Self::RonCharacter => "syntax-invalid",
             Self::HeaderType => "header-invalid",
             Self::PayloadType => "payload-invalid",
@@ -66,7 +66,7 @@ impl Failure {
                 format_version: 1,
                 engine_min_version: "0.1.0",
                 generator: (name: "test", version: "0.1.0"),
-                payload: (roots: [], entities: []),
+                payload: (placements: [], entities: []),
             )"#
             );
             return match self {
@@ -83,7 +83,7 @@ impl Failure {
             "format_version": 1,
             "engine_min_version": "0.1.0",
             "generator": {"name": "test", "version": "0.1.0"},
-            "payload": {"roots": [], "entities": []},
+            "payload": {"placements": [], "entities": []},
         });
         match self {
             Self::UnknownKind => source["kind"] = serde_json::json!(PRIVATE_KIND),
@@ -102,11 +102,19 @@ impl Failure {
                 source["engine_min_version"] =
                     serde_json::json!(format!("999.2.3-{PRIVATE_PRERELEASE}+{PRIVATE_BUILD}"));
             }
-            Self::MissingRoots => {
-                source["payload"].as_object_mut().unwrap().remove("roots");
+            Self::MissingPlacements => {
+                source["payload"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("placements");
             }
             Self::RecordParent => {
-                source["payload"]["roots"] = serde_json::json!(["private_entity_sentinel"]);
+                source["payload"]["placements"] = serde_json::json!([{
+                    "target": {"through": [], "entity": {
+                        "kind": "source_entity", "entity": "private_entity_sentinel"
+                    }},
+                    "placement": {"parent": {"kind": "root"}, "slot": {"kind": "last"}}
+                }]);
                 source["payload"]["entities"] = serde_json::json!([
                     {"id": "private_entity_sentinel", "parent": "private_parent_sentinel"}
                 ]);
@@ -116,7 +124,7 @@ impl Failure {
         serde_json::to_vec(&source).unwrap()
     }
 
-    fn assert_diagnostic(self, diagnostic: &Diagnostic, prefab: bool, ordinary_open: bool) {
+    fn assert_diagnostic(self, diagnostic: &Diagnostic, prefab: bool) {
         assert_public(
             diagnostic,
             "reason",
@@ -159,30 +167,18 @@ impl Failure {
                     DiagnosticValueRef::Identifier("0.1.0"),
                 );
             }
-            Self::MissingRoots | Self::RecordParent => {
-                let index = diagnostic
-                    .fields()
-                    .iter()
-                    .find(|field| field.key().as_str() == "entity_index");
-                if matches!(self, Self::RecordParent) {
-                    assert_public(diagnostic, "entity_index", DiagnosticValueRef::Unsigned(0));
-                } else {
-                    assert!(index.is_none());
-                }
-                let summary = diagnostic.summary().as_str();
-                assert!(summary.contains("ordered roots"), "{diagnostic:?}");
-                assert!(summary.contains("parent-owned children"), "{diagnostic:?}");
-                assert!(
-                    summary.contains("sibling order cannot be inferred"),
-                    "{diagnostic:?}"
+            Self::MissingPlacements | Self::RecordParent => {
+                assert_public(
+                    diagnostic,
+                    "encoding",
+                    DiagnosticValueRef::Identifier("json"),
                 );
-                if ordinary_open {
-                    let detail = if matches!(self, Self::MissingRoots) {
-                        "missing ordered roots"
-                    } else {
-                        "record-owned parent"
-                    };
-                    assert!(summary.contains(detail), "{diagnostic:?}");
+                for key in ["line", "column"] {
+                    assert!(diagnostic.fields().iter().any(|field| {
+                        field.key().as_str() == key
+                            && field.class() == DiagnosticFieldClass::Public
+                            && matches!(field.value(), DiagnosticValueRef::Unsigned(value) if value > 0)
+                    }), "{diagnostic:?}");
                 }
             }
             Self::RonAttribute | Self::RonCharacter | Self::HeaderType | Self::PayloadType => {
@@ -279,18 +275,12 @@ fn check_format_diagnostics_redact_private_metadata_and_preserve_failure_classes
                 .iter()
                 .next()
                 .unwrap();
-            let code = match (prefab, failure) {
-                (false, Failure::MissingRoots | Failure::RecordParent) => {
-                    "project.content.scene-legacy-placement-shape"
-                }
-                (true, Failure::MissingRoots | Failure::RecordParent) => {
-                    "project.content.prefab-legacy-placement-shape"
-                }
-                (false, _) => "project.content.scene-format-invalid",
-                (true, _) => "project.content.prefab-format-invalid",
+            let code = match prefab {
+                false => "project.content.scene-format-invalid",
+                true => "project.content.prefab-format-invalid",
             };
             assert_eq!(diagnostic.code().as_str(), code, "{failure:?}: {error:?}");
-            failure.assert_diagnostic(diagnostic, prefab, false);
+            failure.assert_diagnostic(diagnostic, prefab);
         }
     }
 }
@@ -428,7 +418,7 @@ fn ordinary_open_format_diagnostics_redact_private_metadata_and_preserve_failure
                 })
                 .last()
                 .expect("ordinary Open must retain the format diagnostic");
-            failure.assert_diagnostic(diagnostic, prefab, true);
+            failure.assert_diagnostic(diagnostic, prefab);
         }
     }
 }

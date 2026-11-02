@@ -6,8 +6,8 @@ use crate::{
         borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source,
     },
     AuthoringDocumentReadiness, AuthoringDocumentSource, PrefabDocumentCandidate,
-    SceneComponentRecord, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SceneFileLimits, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneComponentRecord, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
+    SceneEntityRecord, SceneFileLimits, ScenePatchOperation,
 };
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
@@ -86,7 +86,7 @@ fn scene(basis: &AuthoringSchemaBasis) -> SceneAuthoringSession {
 
 fn prefab(basis: &AuthoringSchemaBasis) -> PrefabAuthoringSession {
     let document = document();
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_bytes_with_limits(
             document.to_json_string().unwrap().as_bytes(),
@@ -188,10 +188,18 @@ fn views_and_commit_bind_reject_the_same_edited_revision() {
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
-        let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(SceneEntityId::new("newer").unwrap()),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]);
+        let entity = SceneEntityId::new("newer").unwrap();
+        let mut value = session.document().placements.clone();
+        value.push(SceneEntityPlacement::root(entity.clone()));
+        let patch = ScenePatchDocument::new([
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(entity),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: session.document().placements.clone(),
+                value,
+            },
+        ]);
         assert!(session.apply_authoring_patch(&patch).applied);
         let source = session.shared_document();
         let rejected_view = borrow(&session, &prepared).unwrap_err();

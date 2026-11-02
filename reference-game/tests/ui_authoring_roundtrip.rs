@@ -66,7 +66,7 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
             patch.apply_to_scene(&mut document, loaded.plan.schema_validation().snapshot());
         assert!(report.applied, "typed prefab patch must apply: {report:#?}");
 
-        let edited = PrefabDocument::new(document.roots, document.entities);
+        let edited = PrefabDocument::new(document.placements, document.entities);
         format!(
             "{}\n",
             edited

@@ -17,6 +17,140 @@ fn parameterized() -> PrefabDocument {
 }
 
 #[test]
+fn root_bindings_source_placements_and_dormant_declarations_copy_the_exact_mapped_keys() {
+    let mut q = PrefabDocument::new(
+        [
+            SceneEntityPlacement::root(id("root")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("d1")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("d2")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("root")),
+            SceneEntityRecord::new(id("d1")),
+            SceneEntityRecord::new(id("d2")),
+        ],
+    );
+    q.inputs.insert(input());
+    let selected = |entity: &str| PrefabEntityTarget {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+            expected_base: key("q"),
+        }],
+        entity: PrefabEntityOrigin::SourceEntity(id(entity)),
+    };
+    let mut declaration = PrefabInstance::root(reference("q"), key("q"), id("root"));
+    declaration.arguments = Some(PrefabReferenceArguments {
+        base: key("q"),
+        values: [(
+            input(),
+            EntityReference::Authored {
+                reference: AuthoredEntityReference::input(input()),
+            },
+        )]
+        .into(),
+    });
+    let mut overlay = PrefabOverlay::new(key("q"));
+    overlay.instances.push(PrefabInstanceClaim {
+        target: PrefabEntityTarget::source(id("dormant")),
+        value: Some(PrefabInstance::root(reference("q"), key("q"), id("root"))),
+    });
+    declaration.overrides = Some(overlay);
+    let mut anchor = SceneEntityRecord::new(id("anchor"));
+    anchor.prefab = Some(declaration);
+    let mut p = PrefabDocument::new(
+        [
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("b")),
+                ScenePlacement::before(
+                    ScenePlacementParent::Entity(PrefabEntityTarget::source(id("anchor"))),
+                    selected("d2"),
+                ),
+            ),
+            SceneEntityPlacement::new(
+                selected("d1"),
+                ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
+        [anchor, SceneEntityRecord::new(id("b"))],
+    );
+    p.inputs.insert(input());
+    let request =
+        PrefabCopyRequest::new(vec![mapped_source("p", p.clone()), mapped_source("q", q)]);
+    let prepared = request
+        .prepare(&basis(), PrefabCopyLimits::default())
+        .unwrap();
+    assert_eq!(request.sources[0].document, p);
+    let copied = prepared.sources()[0].document();
+    assert_eq!(copied.inputs, p.inputs);
+    assert_eq!(copied.placements.len(), p.placements.len());
+    assert_eq!(copied.placements[0], p.placements[0]);
+    assert_eq!(copied.placements[1].target, p.placements[1].target);
+    let ScenePlacementSlot::Before(sibling) = &copied.placements[1].placement.slot else {
+        panic!("source sibling placement is retained");
+    };
+    assert_eq!(sibling.through[0].expected_base, key("copied-q"));
+    assert_eq!(
+        copied.placements[2].target.through[0].expected_base,
+        key("copied-q")
+    );
+    let declaration = copied
+        .entities
+        .iter()
+        .find(|entity| entity.id == id("anchor"))
+        .unwrap()
+        .prefab
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        declaration.binding,
+        crate::PrefabInstanceBinding::Root {
+            base: key("copied-q"),
+            root: id("root")
+        }
+    );
+    assert_eq!(declaration.source, reference("copied-q"));
+    assert_eq!(
+        declaration.arguments.as_ref().unwrap().base,
+        key("copied-q")
+    );
+    assert_eq!(
+        declaration.arguments.as_ref().unwrap().values,
+        p.entities[0]
+            .prefab
+            .as_ref()
+            .unwrap()
+            .arguments
+            .as_ref()
+            .unwrap()
+            .values
+    );
+    let dormant = declaration.overrides.as_ref().unwrap().instances[0]
+        .value
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        dormant.binding,
+        crate::PrefabInstanceBinding::Root {
+            base: key("copied-q"),
+            root: id("root")
+        }
+    );
+}
+
+#[test]
 fn parameterized_source_copy_needs_no_mount_arguments() {
     let document = parameterized();
     let request = PrefabCopyRequest::new(vec![mapped_source("q", document.clone())]);
@@ -46,10 +180,9 @@ fn parameterized_source_copy_needs_no_mount_arguments() {
     let target = report
         .candidate()
         .unwrap()
-        .document()
-        .entities
+        .entities()
         .iter()
-        .find_map(|entity| entity.components.get(&component("Link")))
+        .find_map(|entity| entity.components().get(&component("Link")))
         .unwrap();
     assert_eq!(target.value, link("b").value);
 }
@@ -102,11 +235,10 @@ fn copied_parent_supplies_each_actual_child_occurrences_input() {
     let candidate = report.candidate().unwrap();
     let origins = candidate.provenance();
     let targets: Vec<_> = candidate
-        .document()
-        .entities
+        .entities()
         .iter()
         .filter_map(|entity| {
-            let record = entity.components.get(&component("Link"))?;
+            let record = entity.components().get(&component("Link"))?;
             let Some(ComponentValue::EntityReference(EntityReference::SceneLocal {
                 entity: target,
             })) = record.value.get("target")
@@ -115,7 +247,10 @@ fn copied_parent_supplies_each_actual_child_occurrences_input() {
             };
             assert_eq!(origins[target].local_entity_id(), &id("b"));
             assert_eq!(
-                origins[&entity.id].projection_path().unwrap().root_anchor(),
+                origins[entity.id()]
+                    .projection_path()
+                    .unwrap()
+                    .root_anchor(),
                 origins[target].projection_path().unwrap().root_anchor(),
             );
             Some(target.clone())
@@ -215,7 +350,10 @@ fn cyclic_source_closure_is_copied_and_only_the_chosen_mount_is_compiled() {
 #[test]
 fn source_structure_and_direct_local_reference_failures_still_refuse_copying() {
     for document in [
-        PrefabDocument::new([id("missing")], [SceneEntityRecord::new(id("root"))]),
+        PrefabDocument::new(
+            [SceneEntityPlacement::root(id("missing"))],
+            [SceneEntityRecord::new(id("root"))],
+        ),
         PrefabDocument::from_ordered_roots([
             SceneEntityRecord::new(id("root")).with_component(component("Link"), link("missing"))
         ]),

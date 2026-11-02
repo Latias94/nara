@@ -10,9 +10,7 @@ use std::{
 
 use nara_core::ItemLimit;
 use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
-use nara_scene::{
-    SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-};
+use nara_scene::SceneEntityId;
 use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspaceCommand};
 
 use super::*;
@@ -135,10 +133,25 @@ impl Fixture {
                     .unwrap()
             };
             let document = report.opened_document.unwrap();
-            let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(SceneEntityId::new("working").unwrap()),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }]);
+            let placements = if kind == SourceDocumentKind::Scene {
+                &workspace
+                    .scene(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .placements
+            } else {
+                &workspace
+                    .prefab(document)
+                    .unwrap()
+                    .session()
+                    .document()
+                    .placements
+            };
+            let patch = crate::scene_test_support::add_root_entity_patch(
+                placements,
+                SceneEntityRecord::new(SceneEntityId::new("working").unwrap()),
+            );
             let base_revision = workspace.document_revision(document).unwrap();
             let report = workspace.apply_authoring_command(if kind == SourceDocumentKind::Scene {
                 EditorWorkspaceCommand::ApplyScenePatch {

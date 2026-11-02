@@ -14,10 +14,11 @@ use super::*;
 use crate::{
     __private::AuthoringAdapterReceipt, PrefabAddition, PrefabComponentIntent,
     PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments,
-    ResolvedPrefabSource, SceneCompilationFailureKind, SceneComponentRecord, SceneDocument,
-    SceneEntityId, SceneEntityRecord, SourceDocumentOrigin,
+    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim,
+    PrefabPropertyIntent, PrefabReferenceArguments, ResolvedPrefabSource,
+    SceneCompilationFailureKind, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    ScenePlacementSlot, SourceDocumentOrigin,
 };
 
 #[path = "tests/inline.rs"]
@@ -198,6 +199,7 @@ fn mapped_source(name: &str, document: PrefabDocument) -> PrefabCopySource {
 fn instance(name: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
         source: reference(name),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: overlay,
     }
@@ -257,12 +259,8 @@ fn through(name: &str) -> PrefabEntityTarget {
         entity: PrefabEntityOrigin::SourceEntity(id(name)),
     }
 }
-fn root_placement(target: PrefabEntityTarget) -> PrefabPlacement {
-    PrefabPlacement {
-        target,
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    }
+fn root_placement(target: PrefabEntityTarget) -> SceneEntityPlacement {
+    SceneEntityPlacement::new(target, ScenePlacement::last(ScenePlacementParent::Root))
 }
 fn property(name: &str, value: ComponentValue) -> PrefabPropertyClaim {
     PrefabPropertyClaim {
@@ -273,15 +271,18 @@ fn property(name: &str, value: ComponentValue) -> PrefabPropertyClaim {
 
 fn nested_fixture() -> PrefabCopyRequest {
     let leaf = PrefabDocument::new(
-        [id("leaf-root")],
+        std::iter::once(SceneEntityPlacement::root(id("leaf-root"))).chain(
+            ["a", "b", "c", "hidden", "claim-anchor"].map(|name| {
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(id(name)),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        id("leaf-root"),
+                    ))),
+                )
+            }),
+        ),
         [
-            SceneEntityRecord::new(id("leaf-root")).with_children([
-                id("a"),
-                id("b"),
-                id("c"),
-                id("hidden"),
-                id("claim-anchor"),
-            ]),
+            SceneEntityRecord::new(id("leaf-root")),
             SceneEntityRecord::new(id("a"))
                 .with_component(component("Assets"), assets())
                 .with_component(component("Number"), number())
@@ -349,21 +350,24 @@ fn nested_fixture() -> PrefabCopyRequest {
         target: through("a"),
         component: component("Marker"),
     });
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Entity(through("leaf-root")),
-        slot: PrefabPlacementSlot::After(through("b")),
-    });
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("before-added")),
-        parent: PrefabPlacementParent::Entity(through("leaf-root")),
-        slot: PrefabPlacementSlot::Before(through("b")),
-    });
-    overlay.placements.push(PrefabPlacement {
-        target: through("c"),
-        parent: PrefabPlacementParent::Entity(through("leaf-root")),
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added")),
+        ScenePlacement::after(
+            ScenePlacementParent::Entity(through("leaf-root")),
+            through("b"),
+        ),
+    ));
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("before-added")),
+        ScenePlacement::before(
+            ScenePlacementParent::Entity(through("leaf-root")),
+            through("b"),
+        ),
+    ));
+    overlay.placements.push(SceneEntityPlacement::new(
+        through("c"),
+        ScenePlacement::last(ScenePlacementParent::Entity(through("leaf-root"))),
+    ));
     overlay.suppressions.push(through("hidden"));
     let outer = PrefabDocument::from_ordered_roots([anchor("host", "middle", Some(overlay))]);
     PrefabCopyRequest::new(vec![
@@ -396,7 +400,7 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
             result.destination_reference(),
             &source.destination_reference
         );
-        assert_eq!(result.document.roots, original.roots);
+        assert_eq!(result.document.placements, original.placements);
         assert_eq!(
             result
                 .document
@@ -494,11 +498,11 @@ fn production_preparation_copies_complete_nested_overlay_closure() {
         if !placement.target.through.is_empty() {
             check(&placement.target);
         }
-        if let PrefabPlacementParent::Entity(target) = &placement.parent {
+        if let ScenePlacementParent::Entity(target) = &placement.placement.parent {
             check(target);
         }
-        if let PrefabPlacementSlot::Before(target) | PrefabPlacementSlot::After(target) =
-            &placement.slot
+        if let ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) =
+            &placement.placement.slot
         {
             check(target);
         }

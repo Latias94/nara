@@ -27,8 +27,9 @@ use nara_reflect::{
     ComponentValue,
 };
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabInstance, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneEntitySource,
+    InMemoryPrefabSourceResolver, PrefabDocument, PrefabEntityTarget, PrefabInstance,
+    SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneEntitySource,
+    ScenePlacement, ScenePlacementParent,
 };
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
@@ -4894,13 +4895,8 @@ fn scene_id(value: &str) -> SceneEntityId {
 fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
     SceneEntityRecord {
         id: scene_id(id),
-        children: Vec::new(),
         components: BTreeMap::new(),
-        prefab: Some(PrefabInstance {
-            arguments: None,
-            source,
-            overrides: None,
-        }),
+        prefab: Some(PrefabInstance::forest(source)),
     }
 }
 
@@ -5073,9 +5069,17 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
                 .enumerate()
             {
                 let document = SceneDocument::new(
-                    [scene_id("root")],
                     [
-                        SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
+                        SceneEntityPlacement::root(scene_id("root")),
+                        SceneEntityPlacement::new(
+                            PrefabEntityTarget::source(scene_id("retry")),
+                            ScenePlacement::last(ScenePlacementParent::Entity(
+                                PrefabEntityTarget::source(scene_id("root")),
+                            )),
+                        ),
+                    ],
+                    [
+                        SceneEntityRecord::new(scene_id("root")),
                         SceneEntityRecord::new(scene_id("retry")),
                     ],
                 );
@@ -5320,9 +5324,17 @@ fn persistent_rebuild_keeps_keys_but_not_runtime_or_unpresented_behavior_authori
             }
             let registry = nara_reflect::component_registry(world).unwrap().clone();
             let document = SceneDocument::new(
-                [scene_id("root")],
                 [
-                    SceneEntityRecord::new(scene_id("root")).with_children([scene_id("retry")]),
+                    SceneEntityPlacement::root(scene_id("root")),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(scene_id("retry")),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(scene_id("root")),
+                        )),
+                    ),
+                ],
+                [
+                    SceneEntityRecord::new(scene_id("root")),
                     SceneEntityRecord::new(scene_id("retry")),
                 ],
             );

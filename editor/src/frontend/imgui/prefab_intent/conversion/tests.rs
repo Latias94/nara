@@ -434,11 +434,7 @@ fn committed_terminal_displays_the_actual_public_source_receipt() {
         .unwrap(),
     );
     let mut anchor = SceneEntityRecord::new(id("original-anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: source_ref,
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(source_ref));
     let document = SceneDocument::from_ordered_roots([anchor]);
     let published = SceneDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
         .unwrap()

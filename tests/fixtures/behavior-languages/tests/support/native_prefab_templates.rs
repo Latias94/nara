@@ -110,7 +110,6 @@ fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [Pref
     child.inputs.insert(input.clone());
     let mut nested = named("nested", "Middle");
     nested.prefab = Some(PrefabInstance {
-        source: references[2].clone(),
         arguments: Some(PrefabReferenceArguments {
             base: keys[2].clone(),
             values: BTreeMap::from([(
@@ -121,6 +120,7 @@ fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [Pref
             )]),
         }),
         overrides: None,
+        ..PrefabInstance::forest(references[2].clone())
     });
     let mut middle = PrefabDocument::from_ordered_roots([nested]);
     middle.inputs.insert(input.clone());
@@ -142,7 +142,6 @@ fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [Pref
     });
     let mut entry = named("entry", ORIGINAL_NAME);
     entry.prefab = Some(PrefabInstance {
-        source: references[1].clone(),
         arguments: Some(PrefabReferenceArguments {
             base: keys[1].clone(),
             // This unused parameter still belongs to the complete source. Copying must
@@ -168,6 +167,7 @@ fn documents(keys: &[SourceDocumentKey; 3], references: &[AssetRef; 3]) -> [Pref
             )]),
         }),
         overrides: Some(overlay),
+        ..PrefabInstance::forest(references[1].clone())
     });
     [PrefabDocument::from_ordered_roots([entry]), middle, child]
 }
@@ -265,11 +265,9 @@ fn native_release(stable_input: bool) -> PreparedEditorSourceToolRelease {
         (serde_json::to_vec(&invalid).unwrap(), "content"),
     );
     let mut external = named("external", "External dependency");
-    external.prefab = Some(PrefabInstance {
-        source: AssetRef::path("unbound.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    external.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("unbound.prefab.json").unwrap(),
+    ));
     payloads.insert(
         "samples/external.prefab.json".into(),
         (

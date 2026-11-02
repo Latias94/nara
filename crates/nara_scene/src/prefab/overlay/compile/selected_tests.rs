@@ -8,6 +8,7 @@ use std::{
 
 use nara_asset::AssetRef;
 use nara_core::{ByteLimit, ItemLimit};
+use nara_diagnostic::DiagnosticValueRef;
 use nara_identity::{
     AuthoredEntityReference, AuthoredReferenceTarget, EntityReference, PersistentRuntimeId,
     PersistentRuntimeNamespaceId, PersistentRuntimeReference,
@@ -24,11 +25,11 @@ use crate::{
     __private::AuthoringAdapterReceipt,
     AuthoringRecordReadiness, AuthoringSchemaBasis, PrefabAddition, PrefabComponentIntent,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
-    PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, ResolvedPrefabSource,
-    SceneCompilationFailureKind, SceneCompilationLimits, SceneCompilationOptions,
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey,
-    SourceDocumentKind,
+    PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
+    ResolvedPrefabSource, SceneCompilationFailureKind, SceneCompilationLimits,
+    SceneCompilationOptions, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    SourceDocumentKey, SourceDocumentKind,
     prefab::{
         AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
         SelectedInstanceSource, try_compile_authoring_scene_with_loader,
@@ -167,19 +168,14 @@ fn data(value: &str) -> SceneEntityRecord {
 fn anchor(value: &str, source: &str, overlay: Option<PrefabOverlay>) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(value));
     entity.prefab = Some(PrefabInstance {
-        source: request(source),
-        arguments: None,
         overrides: overlay,
+        ..PrefabInstance::forest(request(source))
     });
     entity
 }
 
-fn placement(target: PrefabEntityTarget, parent: PrefabPlacementParent) -> PrefabPlacement {
-    PrefabPlacement {
-        target,
-        parent,
-        slot: PrefabPlacementSlot::Last,
-    }
+fn placement(target: PrefabEntityTarget, parent: ScenePlacementParent) -> SceneEntityPlacement {
+    SceneEntityPlacement::new(target, ScenePlacement::last(parent))
 }
 
 fn authored(reference: AuthoredEntityReference) -> ComponentValue {
@@ -229,27 +225,29 @@ impl Fixture {
             );
             branch_overlay.placements.push(placement(
                 PrefabEntityTarget::addition(id("badge")),
-                PrefabPlacementParent::Entity(PrefabEntityTarget::source(id("socket"))),
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(id("socket"))),
             ));
             branch_overlay.additions.push(badge);
             let mut graft = PrefabAddition::new(id("graft"));
-            graft.prefab = Some(PrefabInstance {
-                source: request("leaf"),
-                arguments: None,
-                overrides: None,
-            });
+            graft.prefab = Some(PrefabInstance::forest(request("leaf")));
             branch_overlay.placements.push(placement(
                 PrefabEntityTarget::addition(id("graft")),
-                PrefabPlacementParent::Root,
+                ScenePlacementParent::Root,
             ));
             branch_overlay.additions.push(graft);
             branch_overlay
         };
 
         let base = PrefabDocument::new(
-            [id("host"), id("other")],
             [
-                data("host").with_children([id("socket"), id("left"), id("right")]),
+                SceneEntityPlacement::root(id("host")),
+                SceneEntityPlacement::root(id("other")),
+                crate::tests::child_placement(id("socket"), id("host")),
+                crate::tests::child_placement(id("left"), id("host")),
+                crate::tests::child_placement(id("right"), id("host")),
+            ],
+            [
+                data("host"),
                 SceneEntityRecord::new(id("socket")),
                 anchor("left", "branch", Some(branch_overlay("left"))),
                 anchor("right", "branch", Some(branch_overlay("right"))),
@@ -285,7 +283,7 @@ impl Fixture {
         );
         overlay.placements.push(placement(
             PrefabEntityTarget::addition(id("extra")),
-            PrefabPlacementParent::Root,
+            ScenePlacementParent::Root,
         ));
         overlay.additions.push(extra);
         overlay.components.push(PrefabComponentIntent::Properties {
@@ -300,12 +298,18 @@ impl Fixture {
         // Physical movement does not change the mixed typed ownership path.
         overlay.placements.push(placement(
             nested_target("leaf"),
-            PrefabPlacementParent::Entity(PrefabEntityTarget::source(id("host"))),
+            ScenePlacementParent::Entity(PrefabEntityTarget::source(id("host"))),
         ));
         let scene = SceneDocument::new(
-            [id("A"), id("0_B"), id("prefab_0")],
             [
-                anchor("A", "base", Some(overlay)).with_children([id("A_child"), id("skeleton_0")]),
+                SceneEntityPlacement::root(id("A")),
+                SceneEntityPlacement::root(id("0_B")),
+                SceneEntityPlacement::root(id("prefab_0")),
+                crate::tests::child_placement(id("A_child"), id("A")),
+                crate::tests::child_placement(id("skeleton_0"), id("A")),
+            ],
+            [
+                anchor("A", "base", Some(overlay)),
                 anchor("A_child", "independent", None),
                 SceneEntityRecord::new(id("skeleton_0")),
                 anchor("0_B", "unrelated", None),
@@ -366,6 +370,8 @@ impl Fixture {
         let report = try_compile_selected_authoring_instance_with_loader(
             SelectedInstanceSource::Scene(&self.scene),
             &id("A"),
+            &[],
+            (0, 0),
             basis,
             SceneCompilationOptions::default().with_limits(limits),
             None,
@@ -479,9 +485,8 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     )
     .unwrap();
     assert!(full.candidate().is_some(), "{full:?}");
-    let candidate = full.candidate().unwrap();
-    let document = candidate.document();
-    let provenance = candidate.provenance();
+    let document = full.candidate().unwrap();
+    let provenance = document.provenance();
     let mut remap = BTreeMap::new();
     for entity in &fixture.scene.entities {
         remap.insert(entity.id.clone(), entity.id.clone());
@@ -497,38 +502,43 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
     assert_eq!(fragment.provenance.len(), fragment.entities.len());
     assert_eq!(fragment.roots.len(), 3);
     let full_anchor = document
-        .entities
+        .entities()
         .iter()
-        .find(|record| record.id == id("A"))
+        .find(|record| record.id() == &id("A"))
         .unwrap();
     assert_eq!(
-        full_anchor.children[..fragment.roots.len()]
+        full_anchor.children()[..fragment.roots.len()]
             .iter()
             .map(|child| remap[child].clone())
             .collect::<Vec<_>>(),
         fragment.roots,
     );
     assert_eq!(
-        full_anchor.children[fragment.roots.len()..],
+        full_anchor.children()[fragment.roots.len()..],
         [id("A_child"), id("skeleton_0")],
     );
     for selected_entity in &fragment.entities {
-        let origin = &fragment.provenance[&selected_entity.id];
+        let origin = &fragment.provenance[selected_entity.id()];
         let (full_id, _) = provenance
             .iter()
             .find(|(_, actual)| *actual == origin)
             .unwrap();
-        let mut expected = document
-            .entities
+        let expected = document
+            .entities()
             .iter()
-            .find(|entity| &entity.id == full_id)
-            .unwrap()
-            .clone();
-        expected.id = selected_entity.id.clone();
-        for child in &mut expected.children {
-            *child = remap[child].clone();
-        }
-        for payload in expected.components.values_mut() {
+            .find(|entity| entity.id() == full_id)
+            .unwrap();
+        assert_eq!(&remap[expected.id()], selected_entity.id());
+        assert_eq!(
+            expected
+                .children()
+                .iter()
+                .map(|child| remap[child].clone())
+                .collect::<Vec<_>>(),
+            selected_entity.children(),
+        );
+        let mut expected_components = expected.components().clone();
+        for payload in expected_components.values_mut() {
             let plan = plan_declared_entity_references::<Infallible>(
                 &schema(),
                 &payload.value,
@@ -548,8 +558,8 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
             })
             .unwrap();
         }
-        let mut actual = selected_entity.clone();
-        for payload in actual.components.values_mut() {
+        let mut actual_components = selected_entity.components().clone();
+        for payload in actual_components.values_mut() {
             assert!(
                 payload
                     .contextual_defaults
@@ -559,7 +569,7 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
             // This comparison covers its effective values and ordered projection.
             payload.contextual_defaults.clear();
         }
-        assert_eq!(expected, actual);
+        assert_eq!(expected_components, actual_components);
         assert!(
             origin
                 .projection_path()
@@ -570,18 +580,18 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
                 .scene
                 .entities
                 .iter()
-                .any(|entity| entity.id == selected_entity.id)
+                .any(|entity| &entity.id == selected_entity.id())
         );
     }
     let components = fragment
         .entities
         .iter()
-        .map(|entity| entity.components.len())
+        .map(|entity| entity.components().len())
         .sum::<usize>();
     assert_eq!(components, 10);
     for entity in &fragment.entities {
-        for payload in entity.components.values() {
-            let score = if fragment.provenance[&entity.id].local_entity_id() == &id("host") {
+        for payload in entity.components().values() {
+            let score = if fragment.provenance[entity.id()].local_entity_id() == &id("host") {
                 42
             } else {
                 7
@@ -630,11 +640,16 @@ fn selected_semantics_match_full_values_order_references_assets_and_typed_ancest
 fn nominal_prefab_input_uses_its_actual_topology_without_instantiating_a_scene() {
     let fixture = Fixture::new();
     let basis = basis();
-    let prefab = PrefabDocument::new(fixture.scene.roots.clone(), fixture.scene.entities.clone());
+    let prefab = PrefabDocument::new(
+        fixture.scene.placements.clone(),
+        fixture.scene.entities.clone(),
+    );
     let before = prefab.clone();
     let from_prefab = try_compile_selected_authoring_instance_with_loader(
         SelectedInstanceSource::Prefab(&prefab),
         &id("A"),
+        &[],
+        (0, 0),
         &basis,
         Default::default(),
         None,
@@ -711,7 +726,7 @@ fn selected_unavailable_survivor_keeps_an_omission_with_its_typed_owner() {
                 .is_some()
         );
         assert!(fragment.entities.iter().any(|entity| {
-            entity.id == fact.entity && !entity.components.contains_key(&unknown)
+            entity.id() == &fact.entity && !entity.components().contains_key(&unknown)
         }));
     }
     assert!(
@@ -735,6 +750,8 @@ fn every_opened_selected_scope_requires_the_exact_shared_basis() {
         let report = try_compile_selected_authoring_instance_with_loader(
             SelectedInstanceSource::Scene(&fixture.scene),
             &id("A"),
+            &[],
+            (0, 0),
             &basis,
             Default::default(),
             None,
@@ -766,6 +783,8 @@ fn selection_rejects_non_instance_or_projected_locators_without_loading() {
         let report = try_compile_selected_authoring_instance_with_loader(
             SelectedInstanceSource::Scene(&fixture.scene),
             &id(selected),
+            &[],
+            (0, 0),
             &basis,
             Default::default(),
             None,
@@ -813,6 +832,8 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     let report = try_compile_selected_authoring_instance_with_loader(
         SelectedInstanceSource::Scene(&fixture.scene),
         &id("A"),
+        &[],
+        (0, 0),
         &basis,
         Default::default(),
         None,
@@ -829,6 +850,8 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     let error = try_compile_selected_authoring_instance_with_loader(
         SelectedInstanceSource::Scene(&fixture.scene),
         &id("A"),
+        &[],
+        (0, 0),
         &basis,
         Default::default(),
         None,
@@ -966,7 +989,7 @@ fn only_retained_selected_references_open_a_structurally_suppressed_dependency()
                     .unwrap()
                     .entities
                     .iter()
-                    .all(|entity| entity.components.is_empty())
+                    .all(|entity| entity.components().is_empty())
             );
         } else if mode == "repaired" {
             assert_success(&report);
@@ -985,11 +1008,11 @@ fn only_retained_selected_references_open_a_structurally_suppressed_dependency()
             let host = fragment
                 .entities
                 .iter()
-                .find(|entity| fragment.provenance[&entity.id].local_entity_id() == &id("host"))
+                .find(|entity| fragment.provenance[entity.id()].local_entity_id() == &id("host"))
                 .unwrap();
             assert_eq!(
-                host.components[&component()].value.get("target"),
-                Some(&local(host.id.as_str()))
+                host.components()[&component()].value.get("target"),
+                Some(&local(host.id().as_str()))
             );
         } else {
             assert!(report.fragment.is_none());
@@ -1034,7 +1057,7 @@ fn selected_invalid_values_layout_and_final_reference_survival_are_not_output_fi
             if case == "layout" {
                 overlay.placements.push(placement(
                     PrefabEntityTarget::source(id("host")),
-                    PrefabPlacementParent::Entity(PrefabEntityTarget::source(id("socket"))),
+                    ScenePlacementParent::Entity(PrefabEntityTarget::source(id("socket"))),
                 ));
             } else {
                 // host's complete default still refers to socket after socket is removed.
@@ -1054,7 +1077,7 @@ fn selected_invalid_values_layout_and_final_reference_survival_are_not_output_fi
 }
 
 #[test]
-fn containing_shells_count_against_the_existing_entity_cap_without_copying_raw_values() {
+fn final_surviving_shells_and_root_bindings_share_the_entity_cap_without_copying_raw_values() {
     let basis = basis();
     let mut fixture = Fixture::new();
     fixture.sources.insert(
@@ -1082,24 +1105,75 @@ fn containing_shells_count_against_the_existing_entity_cap_without_copying_raw_v
             record(ComponentValue::String("x".repeat(128 * 1024))),
         );
     }
-    let before = fixture.scene.clone();
-    for allowed in [5, 6] {
-        let limits = SceneCompilationLimits::default()
-            .with_materialized_entities(ItemLimit::new(allowed).unwrap())
-            .with_materialized_components(ItemLimit::new(1).unwrap())
-            .with_materialized_value_nodes(ItemLimit::new(1).unwrap())
-            .with_materialized_value_bytes(ByteLimit::new(1).unwrap())
-            .with_resolved_instances(ItemLimit::new(1).unwrap());
-        let (report, reads) = fixture.selected(&basis, limits);
-        assert_eq!(reads, [request("base")]);
-        if allowed == 6 {
-            assert_success(&report);
-            assert_eq!(report.fragment.unwrap().entities.len(), 1);
-            assert!(report.omissions.is_empty());
-        } else {
-            assert!(report.fragment.is_none());
-            assert!(report.budget_failed);
+    for root_bound in [false, true] {
+        if root_bound {
+            let anchor = fixture
+                .scene
+                .entities
+                .iter_mut()
+                .find(|entity| entity.id == id("A"))
+                .unwrap();
+            anchor.prefab = Some(PrefabInstance::root(
+                request("base"),
+                key("base"),
+                id("selected"),
+            ));
+            // The merged anchor is selected value demand; only the other shells stay opaque.
+            anchor.components.clear();
         }
-        assert_eq!(fixture.scene, before);
+        let final_count = fixture.scene.entities.len() + usize::from(!root_bound);
+        let before = fixture.scene.clone();
+        for allowed in [final_count - 1, final_count] {
+            let limits = SceneCompilationLimits::default()
+                .with_materialized_entities(ItemLimit::new(allowed).unwrap())
+                .with_materialized_components(ItemLimit::new(1).unwrap())
+                .with_materialized_value_nodes(ItemLimit::new(1).unwrap())
+                .with_materialized_value_bytes(ByteLimit::new(1).unwrap())
+                .with_resolved_instances(ItemLimit::new(1).unwrap());
+            let (report, reads) = fixture.selected(&basis, limits);
+            assert_eq!(reads, [request("base")]);
+            if allowed == final_count {
+                assert_success(&report);
+                let fragment = report.fragment.unwrap();
+                assert_eq!(fragment.entities.len(), 1);
+                assert_eq!(fragment.provenance.len(), 1);
+                assert_eq!(fragment.roots, [fragment.entities[0].id().clone()]);
+                if root_bound {
+                    assert_eq!(fragment.entities[0].id(), &id("A"));
+                    assert!(fragment.provenance[&id("A")].projection_path().is_none());
+                }
+                assert!(report.omissions.is_empty());
+            } else {
+                assert!(report.fragment.is_none());
+                assert!(report.budget_failed);
+                assert_eq!(
+                    report.failure.as_ref().unwrap().reason(),
+                    &SceneCompilationFailureKind::WorkLimit,
+                );
+                let diagnostic = report
+                    .diagnostics
+                    .iter()
+                    .find(|diagnostic| {
+                        diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded"
+                    })
+                    .unwrap();
+                for (name, value) in [
+                    (
+                        "budget-kind",
+                        DiagnosticValueRef::Identifier("materialized-entities"),
+                    ),
+                    ("observed", DiagnosticValueRef::Unsigned(final_count as u64)),
+                    ("maximum", DiagnosticValueRef::Unsigned(allowed as u64)),
+                ] {
+                    assert!(
+                        diagnostic.fields().iter().any(|field| {
+                            field.key().as_str() == name && field.value() == value
+                        }),
+                        "{diagnostic:?}"
+                    );
+                }
+            }
+            assert_eq!(fixture.scene, before);
+        }
     }
 }

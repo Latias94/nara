@@ -638,11 +638,12 @@ fn nested_durable_references_preserve_values_across_residency_and_default_matrix
             let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
                 prefab_source.clone(),
                 key,
-                PrefabDocument::new(document.roots.clone(), document.entities.clone()),
+                PrefabDocument::new(document.placements.clone(), document.entities.clone()),
             );
             let anchors = ["first", "second"].map(|id| {
                 let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
                 anchor.prefab = Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     source: prefab_source.clone(),
                     arguments: None,
                     overrides: None,

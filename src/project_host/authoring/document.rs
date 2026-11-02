@@ -591,20 +591,9 @@ pub(crate) enum AuthoringDocumentAdmissionError {
 impl AuthoringDocumentAdmissionError {
     pub(crate) fn diagnostic(&self) -> Diagnostic {
         if let Self::Document(AuthoringDocumentDataError::Format(error)) = self {
-            let summary = match error {
-                SceneFormatError::LegacyPlacementShape {
-                    entity_index: Some(_),
-                } => {
-                    "Rewrite the legacy document with ordered roots and parent-owned children; remove record-owned parent fields because sibling order cannot be inferred"
-                }
-                SceneFormatError::LegacyPlacementShape { entity_index: None } => {
-                    "Rewrite the legacy document with ordered roots and parent-owned children; add the missing ordered roots because sibling order cannot be inferred"
-                }
-                _ => "Editor document source format is invalid",
-            };
             return crate::scene_format_diagnostic::scene_format_diagnostic(
                 self.code(),
-                summary,
+                "Editor document source format is invalid",
                 error,
             );
         }

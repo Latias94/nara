@@ -1,8 +1,8 @@
 use super::*;
 use nara_scene::{
     PrefabAddition, PrefabDeclarationError, PrefabDeclarationLimits, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceClaim, PrefabInstancePath, PrefabInstancePathSegment,
-    PrefabOverlay, PrefabRevert, SourceDocumentKey, SourceDocumentKind,
+    PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim, PrefabInstancePath,
+    PrefabInstancePathSegment, PrefabOverlay, PrefabRevert, SourceDocumentKey, SourceDocumentKind,
 };
 
 fn root_path() -> PrefabInstancePath {
@@ -22,6 +22,7 @@ fn source_document() -> SceneDocument {
         .push(PrefabEntityTarget::source(entity_id("inherited")));
     let mut addition = PrefabAddition::new(entity_id("nested"));
     addition.prefab = Some(PrefabInstance {
+        binding: PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("prefabs/nested.prefab.json").unwrap(),
         overrides: Some(PrefabOverlay::new(base)),
@@ -33,6 +34,7 @@ fn source_document() -> SceneDocument {
     });
     let mut anchor = SceneEntityRecord::new(entity_id("anchor"));
     anchor.prefab = Some(PrefabInstance {
+        binding: PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         overrides: Some(overlay),
@@ -75,7 +77,7 @@ fn open_document(
         EditorDocumentKind::Prefab => {
             let path = format!("prefabs/{title}.prefab.json");
             let published = PrefabDocumentCandidate::decode_json_bytes(
-                PrefabDocument::new(source.roots, source.entities)
+                PrefabDocument::new(source.placements, source.entities)
                     .to_json_string()
                     .unwrap()
                     .as_bytes(),

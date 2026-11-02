@@ -7,17 +7,31 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "main-camera",
-      "player-anchor",
-      "gem-left",
-      "gem-middle",
-      "gem-right"
+    "placements": [
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "main-camera" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "player-anchor" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "gem-left" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "gem-middle" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "gem-right" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      }
     ],
     "entities": [
       {
         "id": "main-camera",
-        "children": [],
         "components": {
           "nara.render.Camera2d": {
             "version": 1,
@@ -94,7 +108,6 @@
       },
       {
         "id": "player-anchor",
-        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -110,12 +123,12 @@
             "kind": "path",
             "value": "player.prefab.json"
           },
+          "binding": { "kind": "forest" },
           "overrides": null
         }
       },
       {
         "id": "gem-left",
-        "children": [],
         "components": {
           "collect-game.Collectible": {
             "version": 2,
@@ -231,7 +244,6 @@
       },
       {
         "id": "gem-middle",
-        "children": [],
         "components": {
           "collect-game.Collectible": {
             "version": 2,
@@ -347,7 +359,6 @@
       },
       {
         "id": "gem-right",
-        "children": [],
         "components": {
           "collect-game.Collectible": {
             "version": 2,

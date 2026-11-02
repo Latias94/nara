@@ -12,6 +12,10 @@ use nara::{
     project_host::{EditorUiAuthoringFrame, TrustedCompiledEditorProjectIntent},
     reflect::ComponentValue,
     render::DisplayRect,
+    scene::{
+        PrefabDocumentCandidate, PrefabEntityTarget, SceneEntityId, SceneEntityPlacement,
+        ScenePlacement, ScenePlacementParent,
+    },
     tooling::EditorPersistenceResult,
     ui::__private::{
         UiAuthoringCanvasProjection, UiAuthoringDimensionKind, UiAuthoringFieldValue,
@@ -775,13 +779,6 @@ fn check_preserved_source(
             .ok_or("an original source record has no identity")?
             .to_owned();
         match id.as_str() {
-            "ui-root" => {
-                let children = record["children"]
-                    .as_array_mut()
-                    .ok_or("the original UI root has no children")?;
-                // The dialog's first admitted placement inserts before the root's first child.
-                children.insert(0, serde_json::Value::String(created.to_owned()));
-            }
             "image-node" => {
                 let mut node: ComponentValue =
                     serde_json::from_value(record["components"]["nara.ui.UiNode"]["value"].clone())
@@ -823,12 +820,43 @@ fn check_preserved_source(
     if components.len() != 2
         || !components.contains_key("nara.ui.UiNode")
         || !components.contains_key("nara.ui.UiVisual")
-        || created_record["children"]
-            .as_array()
-            .is_none_or(|children| !children.is_empty())
     {
         return Err("the created Image has an unexpected component or child recipe".to_owned());
     }
+    let hierarchy = PrefabDocumentCandidate::decode_json_bytes(
+        &serde_json::to_vec(stored).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?
+    .into_composition_source()
+    .map_err(|error| error.to_string())?
+    .local_hierarchy(Default::default())
+    .map_err(|error| format!("saved UI local hierarchy: {error:?}"))?;
+    let created_id = SceneEntityId::new(created).map_err(|error| error.to_string())?;
+    if hierarchy.children(&created_id) != Some(&[][..]) {
+        return Err("the created Image unexpectedly owns local children".to_owned());
+    }
+    // Save emits the canonical typed route, including a default empty `through` list that
+    // hand-authored fixtures may omit. Compare complete intent after ordinary source decoding.
+    let original_source = PrefabDocumentCandidate::decode_json_bytes(
+        &serde_json::to_vec(original).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?
+    .into_composition_source()
+    .map_err(|error| error.to_string())?;
+    expected["payload"]["placements"] =
+        serde_json::to_value(original_source.placements).map_err(|error| error.to_string())?;
+    expected["payload"]["placements"]
+        .as_array_mut()
+        .ok_or("the original UI source has no placement declarations")?
+        .push(
+            serde_json::to_value(SceneEntityPlacement::new(
+                PrefabEntityTarget::source(created_id),
+                ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    SceneEntityId::new("ui-root").unwrap(),
+                ))),
+            ))
+            .map_err(|error| error.to_string())?,
+        );
     let visual: ComponentValue =
         serde_json::from_value(created_record["components"]["nara.ui.UiVisual"]["value"].clone())
             .map_err(|error| error.to_string())?;
@@ -857,7 +885,7 @@ fn check_preserved_source(
     // Records were checked above; retaining their saved order isolates all remaining source fields.
     expected["payload"]["entities"] = stored["payload"]["entities"].clone();
     if expected != *stored {
-        return Err("Save changed unrelated UI source metadata or roots".to_owned());
+        return Err("Save changed unrelated UI source metadata or placements".to_owned());
     }
     Ok(())
 }

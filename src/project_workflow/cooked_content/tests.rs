@@ -586,7 +586,10 @@ fn failed_scene_cook_preserves_the_source_and_prior_builder_members() {
         Err(CookedContentError::Runtime(RuntimeContentError::Scene(_)))
     ));
     assert_eq!(document, before);
-    assert_eq!(compiled.document().roots(), document.roots.as_slice());
+    assert_eq!(
+        compiled.document().roots(),
+        [SceneEntityId::new("unknown-component").unwrap()],
+    );
     assert_eq!(
         compiled.document().entities()[0].components()
             [&ComponentTypeId::new("nara.test.UnselectedComponent")]

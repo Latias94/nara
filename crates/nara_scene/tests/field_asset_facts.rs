@@ -109,6 +109,7 @@ fn document(components: impl IntoIterator<Item = PrefabComponentIntent>) -> Scen
     let mut overlay = PrefabOverlay::new(prefab_source::key("assets.base"));
     overlay.components.extend(components);
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("base.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -124,6 +125,7 @@ fn field_dependencies_include_nested_declarations_and_exposed_defaults_without_f
             .components
             .push(field("image", asset(name), ComponentSchemaVersion::ONE));
         PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: AssetRef::path("nested.prefab.json").unwrap(),
             arguments: None,
             overrides: Some(overlay),
@@ -197,7 +199,7 @@ fn field_dependencies_include_nested_declarations_and_exposed_defaults_without_f
             .collect::<Vec<_>>(),
         expected
     );
-    let prefab = PrefabDocument::new(document.roots, document.entities);
+    let prefab = PrefabDocument::new(document.placements, document.entities);
     let published =
         PrefabDocumentCandidate::decode_ron_bytes(prefab.to_ron_string().unwrap().as_bytes())
             .unwrap()

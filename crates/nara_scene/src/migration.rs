@@ -95,15 +95,8 @@ fn canonicalize_patch(
             ScenePatchOperation::AddEntity { entity, .. } => {
                 changed |= canonicalize_entity(entity, registry, budget)?;
             }
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                ..
-            } => {
+            ScenePatchOperation::RestoreEntity { entity } => {
                 changed |= canonicalize_entity(entity, registry, budget)?;
-                for descendant in descendants {
-                    changed |= canonicalize_entity(descendant, registry, budget)?;
-                }
             }
             ScenePatchOperation::AddComponent {
                 entity,
@@ -176,7 +169,7 @@ fn canonicalize_patch(
             }
             ScenePatchOperation::RemoveEntity { .. }
             | ScenePatchOperation::RemoveComponent { .. }
-            | ScenePatchOperation::MoveEntity { .. } => {}
+            | ScenePatchOperation::SetPlacements { .. } => {}
         }
     }
     Ok(changed)
@@ -738,7 +731,6 @@ fn post_migration_format_error(error: SceneFormatError) -> SceneFilePublicationE
         SceneFormatError::Header { .. } => "header",
         SceneFormatError::Contract(_) => "contract",
         SceneFormatError::PatchFormatVersion { .. } => "patch-version",
-        SceneFormatError::LegacyPlacementShape { .. } => "legacy-placement-shape",
         SceneFormatError::Payload { .. } => "payload",
         SceneFormatError::Budget(_) => "domain-budget",
         SceneFormatError::Encode { .. } => "encode",
@@ -836,6 +828,7 @@ mod overlay_snapshot_tests {
 
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
+            binding: crate::PrefabInstanceBinding::Forest,
             source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
             arguments: None,
             overrides: Some(overlay),

@@ -7,14 +7,357 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "reference-hud",
-      "terminal-overlay"
+    "placements": [
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "reference-hud"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "terminal-overlay"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "health-fill"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "health-track"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "health-label"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "health-track"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "health-track"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "reference-hud"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "wave-status"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "reference-hud"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "score-status"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "reference-hud"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "movement-status"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "reference-hud"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "autofire-status"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "reference-hud"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "modal-dim"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-overlay"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "terminal-panel"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-overlay"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "outcome-label"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-panel"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "run-summary"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-panel"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "retry-button"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-panel"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      },
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "input-hint"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "entity",
+            "target": {
+              "through": [],
+              "entity": {
+                "kind": "source_entity",
+                "entity": "terminal-panel"
+              }
+            }
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      }
     ],
     "entities": [
       {
         "id": "autofire-status",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -214,7 +557,6 @@
       },
       {
         "id": "health-fill",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -447,7 +789,6 @@
       },
       {
         "id": "health-label",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -647,10 +988,6 @@
       },
       {
         "id": "health-track",
-        "children": [
-          "health-fill",
-          "health-label"
-        ],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -883,7 +1220,6 @@
       },
       {
         "id": "input-hint",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -1083,7 +1419,6 @@
       },
       {
         "id": "modal-dim",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -1316,7 +1651,6 @@
       },
       {
         "id": "movement-status",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -1516,7 +1850,6 @@
       },
       {
         "id": "outcome-label",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -1716,13 +2049,6 @@
       },
       {
         "id": "reference-hud",
-        "children": [
-          "health-track",
-          "wave-status",
-          "score-status",
-          "movement-status",
-          "autofire-status"
-        ],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -2097,7 +2423,6 @@
       },
       {
         "id": "retry-button",
-        "children": [],
         "components": {
           "nara.ui.UiButton": {
             "version": 1,
@@ -2402,7 +2727,6 @@
       },
       {
         "id": "run-summary",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -2602,7 +2926,6 @@
       },
       {
         "id": "score-status",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -2802,10 +3125,6 @@
       },
       {
         "id": "terminal-overlay",
-        "children": [
-          "modal-dim",
-          "terminal-panel"
-        ],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -2953,12 +3272,6 @@
       },
       {
         "id": "terminal-panel",
-        "children": [
-          "outcome-label",
-          "run-summary",
-          "retry-button",
-          "input-hint"
-        ],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -3191,7 +3504,6 @@
       },
       {
         "id": "wave-status",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,

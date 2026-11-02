@@ -343,11 +343,9 @@ fn assets_that_complete_the_catalogue_reconcile_already_expanded_prefab_metadata
         SceneEntityRecord::new(scene_id("local")),
     ]));
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("enemy.prefab.json").unwrap(),
+    ));
     project.write_scene_source(&SceneDocument::from_ordered_roots([
         anchor,
         persisted_tilemap(Some(path), Some(0)),
@@ -974,11 +972,7 @@ fn stable_native_identity_rejects_two_prefab_paths_with_one_identity() {
     project.write_scene_source(&SceneDocument::from_ordered_roots(
         paths.into_iter().enumerate().map(|(index, path)| {
             let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
-            anchor.prefab = Some(PrefabInstance {
-                source: AssetRef::path(path).unwrap(),
-                arguments: None,
-                overrides: None,
-            });
+            anchor.prefab = Some(PrefabInstance::forest(AssetRef::path(path).unwrap()));
             anchor
         }),
     ));
@@ -1054,11 +1048,7 @@ fn later_stable_prefab_reference_retains_metadata_for_an_already_loaded_path() {
     );
     project.write_prefab_meta("a.prefab.json", stable_id);
     let mut nested = SceneEntityRecord::new(scene_id("nested"));
-    nested.prefab = Some(PrefabInstance {
-        source: AssetRef::StableId(stable_id),
-        arguments: None,
-        overrides: None,
-    });
+    nested.prefab = Some(PrefabInstance::forest(AssetRef::StableId(stable_id)));
     project.write_prefab(
         "c.prefab.json",
         &PrefabDocument::from_ordered_roots([nested]),
@@ -1069,11 +1059,7 @@ fn later_stable_prefab_reference_retains_metadata_for_an_already_loaded_path() {
             .enumerate()
             .map(|(index, path)| {
                 let mut anchor = SceneEntityRecord::new(scene_id(&format!("anchor-{index}")));
-                anchor.prefab = Some(PrefabInstance {
-                    source: AssetRef::path(path).unwrap(),
-                    arguments: None,
-                    overrides: None,
-                });
+                anchor.prefab = Some(PrefabInstance::forest(AssetRef::path(path).unwrap()));
                 anchor
             }),
     ));
@@ -1203,7 +1189,6 @@ requested = ["runtime-2d", "runtime-ui"]
     let root_id = scene_id("ui-root");
     let image_id = scene_id("ui-image");
     let root_record = SceneEntityRecord::new(root_id.clone())
-        .with_children([image_id.clone()])
         .with_component(
             ComponentTypeId::new("nara.ui.UiRoot"),
             encoded_component(registry, &world, root_source, "nara.ui.UiRoot"),
@@ -1212,7 +1197,7 @@ requested = ["runtime-2d", "runtime-ui"]
             ComponentTypeId::new("nara.ui.UiNode"),
             encoded_component(registry, &world, root_source, "nara.ui.UiNode"),
         );
-    let image_record = SceneEntityRecord::new(image_id)
+    let image_record = SceneEntityRecord::new(image_id.clone())
         .with_component(
             ComponentTypeId::new("nara.ui.UiNode"),
             encoded_component(registry, &world, image_source, "nara.ui.UiNode"),
@@ -1221,7 +1206,18 @@ requested = ["runtime-2d", "runtime-ui"]
             ComponentTypeId::new("nara.ui.UiVisual"),
             encoded_component(registry, &world, image_source, "nara.ui.UiVisual"),
         );
-    project.write_prefab_source(&PrefabDocument::new([root_id], [root_record, image_record]));
+    project.write_prefab_source(&PrefabDocument::new(
+        [
+            nara::scene::SceneEntityPlacement::root(root_id.clone()),
+            nara::scene::SceneEntityPlacement::new(
+                nara::scene::PrefabEntityTarget::source(image_id),
+                nara::scene::ScenePlacement::last(nara::scene::ScenePlacementParent::Entity(
+                    nara::scene::PrefabEntityTarget::source(root_id),
+                )),
+            ),
+        ],
+        [root_record, image_record],
+    ));
 
     let snapshot = ProjectContentLoader::new(root)
         .unwrap()

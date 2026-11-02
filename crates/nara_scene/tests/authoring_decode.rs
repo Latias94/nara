@@ -19,12 +19,11 @@ use nara_scene::{
     AuthoringRecordReadiness, AuthoringSessionAuthorityError, AuthoringSessionReplacementError,
     PrefabAddition, PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
-    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim,
-    PrefabPropertyIntent, SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER,
-    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SceneEntityRecord, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
-    ScenePlacement, ScenePlacementOwner, UnavailableRecordManifestEntry,
-    UnavailableValuePathSegment,
+    PrefabPropertyClaim, PrefabPropertyIntent, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
+    SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    SceneFormatError, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementParent, UnavailableRecordManifestEntry, UnavailableValuePathSegment,
 };
 
 const OWNER: &str = "nara.scene.hierarchy.components";
@@ -122,23 +121,53 @@ fn generic_insertion_tracks_unknown_placement_and_undo_restores_it_exactly() {
     let mut session = SceneAuthoringSession::from_published_authoring_document(published);
     let manifest = session.unavailable_record_manifest().unwrap().clone();
     let before = session.document().clone();
-    let prepend =
-        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+    let prepend = session.apply_authoring_patch(&ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("prepended")),
-            placement: ScenePlacement::first(ScenePlacementOwner::Root),
-        }]));
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: before.placements.clone(),
+            value: before
+                .placements
+                .iter()
+                .cloned()
+                .chain([SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(scene_id("prepended")),
+                    ScenePlacement::first(ScenePlacementParent::Root),
+                )])
+                .collect(),
+        },
+    ]));
     assert!(prepend.applied, "{:?}", prepend.diagnostics);
     assert_ne!(session.unavailable_record_manifest(), Some(&manifest));
+    assert_preserved_manifest(
+        session.unavailable_record_manifest().unwrap(),
+        &manifest,
+        &session.document().placements,
+    );
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &before);
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
-    let append =
-        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+    let append = session.apply_authoring_patch(&ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("appended")),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]));
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: before.placements.clone(),
+            value: before
+                .placements
+                .iter()
+                .cloned()
+                .chain([SceneEntityPlacement::root(scene_id("appended"))])
+                .collect(),
+        },
+    ]));
     assert!(append.applied, "{:?}", append.diagnostics);
-    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert_preserved_manifest(
+        session.unavailable_record_manifest().unwrap(),
+        &manifest,
+        &session.document().placements,
+    );
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &before);
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
@@ -156,14 +185,24 @@ fn generic_composition_preserves_unavailable_records_and_round_trips_history() {
     let manifest = published.unavailable_manifest().clone();
     let mut session = SceneAuthoringSession::from_published_authoring_document(published);
     let created = scene_id("created");
-    let create =
-        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+    let create = session.apply_authoring_patch(&ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(created.clone()),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]));
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: document.placements.clone(),
+            value: document
+                .placements
+                .iter()
+                .cloned()
+                .chain([SceneEntityPlacement::root(created.clone())])
+                .collect(),
+        },
+    ]));
     assert!(create.applied, "{:?}", create.diagnostics);
     assert_eq!(session.history_status().undo_depth, 1);
-    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    let created_manifest = session.unavailable_record_manifest().unwrap().clone();
+    assert_preserved_manifest(&created_manifest, &manifest, &session.document().placements);
 
     let add = session.apply_authoring_patch(&ScenePatchDocument::new([
         ScenePatchOperation::AddComponent {
@@ -178,15 +217,45 @@ fn generic_composition_preserves_unavailable_records_and_round_trips_history() {
     ]));
     assert!(add.applied, "{:?}", add.diagnostics);
     let accepted = session.document().clone();
-    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&created_manifest)
+    );
     assert!(session.undo_authoring().applied);
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&created_manifest)
+    );
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &document);
     assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
     assert!(session.redo_authoring().applied);
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&created_manifest)
+    );
     assert!(session.redo_authoring().applied);
     assert_eq!(session.document(), &accepted);
-    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&created_manifest)
+    );
+}
+
+fn assert_preserved_manifest(
+    actual: &nara_scene::UnavailableRecordManifest,
+    before: &nara_scene::UnavailableRecordManifest,
+    placements: &[SceneEntityPlacement],
+) {
+    assert_eq!(actual.record_count(), before.record_count());
+    assert_eq!(actual.overlay_target_count(), before.overlay_target_count());
+    assert_eq!(actual.total_count(), before.total_count());
+    assert_eq!(actual.entries(), before.entries());
+    assert_eq!(
+        actual.overlay_declarations().collect::<Vec<_>>(),
+        before.overlay_declarations().collect::<Vec<_>>(),
+    );
+    assert_eq!(actual.source_placements(), placements);
 }
 
 #[test]
@@ -224,6 +293,7 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
         .with_owner(owner),
     });
     source_entity.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: nested_source.clone(),
         arguments: None,
         overrides: Some(overlay),
@@ -469,7 +539,7 @@ fn authoring_transaction_bounds_forward_and_inverse_values_before_publication() 
 #[test]
 fn cross_component_prefab_authoring_transaction_undo_restores_every_target() {
     let (bundle, adapter, document, patch) = cross_component_authoring_fixture();
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     let published =
         PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -692,11 +762,10 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
         .with_owner(persistent_owner("nara.project.behavior")),
     );
     overrides.additions.push(addition);
-    overrides.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(added.clone()),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overrides.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(added.clone()),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     overrides
         .components
         .push(PrefabComponentIntent::Properties {
@@ -710,7 +779,6 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
         });
     let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord {
         id: anchor,
-        children: Vec::new(),
         components: BTreeMap::from([(
             unknown,
             SceneComponentRecord::new(
@@ -720,6 +788,7 @@ fn prefab_unknown_records_and_target_barriers_round_trip_semantically() {
             .with_owner(persistent_owner("nara.project.behavior")),
         )]),
         prefab: Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
             arguments: None,
             overrides: Some(overrides),

@@ -8,7 +8,7 @@ use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, Trus
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::{
     AuthoringDocumentSource, AuthoringSchemaBasis, SceneDocument, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    ScenePatchDocument, ScenePatchOperation,
 };
 use nara_tasks::TaskPoolConfig;
 use nara_tooling::EditorWorkspace;
@@ -53,7 +53,7 @@ impl ReopenFixture {
         )
         .unwrap();
         let persisted = SceneEntityId::new("persisted-entity").unwrap();
-        let from = ScenePlacement::current(opened.session.document(), &persisted).unwrap();
+        let placements = opened.session.document().placements.clone();
         let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
         let document = workspace
             .open_scene_session("current.scene.json", opened.session)
@@ -71,15 +71,17 @@ impl ReopenFixture {
                     document,
                     base_revision: workspace.scene(document).unwrap().revision(),
                     patch: ScenePatchDocument::new([
-                        ScenePatchOperation::RemoveEntity {
-                            entity: persisted,
-                            from,
-                        },
+                        ScenePatchOperation::RemoveEntity { entity: persisted },
                         ScenePatchOperation::AddEntity {
                             entity: SceneEntityRecord::new(
                                 SceneEntityId::new("working-entity").unwrap(),
                             ),
-                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                        },
+                        ScenePatchOperation::SetPlacements {
+                            expected: placements,
+                            value: vec![nara_scene::SceneEntityPlacement::root(
+                                SceneEntityId::new("working-entity").unwrap(),
+                            )],
                         },
                     ]),
                 })

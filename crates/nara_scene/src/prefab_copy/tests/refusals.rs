@@ -144,6 +144,7 @@ fn auxiliary_prefab_source_cannot_be_copied_into_a_primary_alias() {
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: product(old, false),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: None,
     });

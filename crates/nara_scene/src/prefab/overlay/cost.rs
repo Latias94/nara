@@ -7,11 +7,13 @@ use nara_reflect::{
 };
 
 use super::{
-    PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyIntent,
+    PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay, PrefabPropertyIntent,
 };
 use crate::provenance::{CostScratchAdmission, reserve_cost_scratch};
-use crate::{PrefabInstance, SceneComponentRecord, SourceDocumentKey, SourceDocumentOrigin};
+use crate::{
+    PrefabInstance, PrefabInstanceBinding, SceneComponentRecord, SceneEntityPlacement,
+    ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey, SourceDocumentOrigin,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct PrefabOverlayCost {
@@ -121,6 +123,16 @@ pub(crate) fn prefab_overlay_cost(
     CostWalker::new(limits, None).walk(Frame::Overlay(overlay, 1))
 }
 
+/// Uses the same raw target accounting for source and overlay placement declarations.
+pub(crate) fn scene_placements_cost(
+    placements: &[SceneEntityPlacement],
+    limits: PrefabOverlayCostLimits,
+) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
+    let mut walker = CostWalker::new(limits, None);
+    walker.placements(placements, 1)?;
+    Ok(walker.cost)
+}
+
 // Iterator frames keep auxiliary storage proportional to nesting, rather than fan-out.
 enum Frame<'a> {
     Instance(&'a PrefabInstance, usize),
@@ -169,6 +181,13 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     // Preserve the exact patch owner's AssetRef wire-value convention:
                     // map keys, kind spelling and payload, without formatting/copying it.
                     self.bytes(crate::patch::asset_ref_value_size(&instance.source).1)?;
+                    self.node(depth.saturating_add(1))?;
+                    self.bytes(1)?;
+                    if let PrefabInstanceBinding::Root { base, root } = &instance.binding {
+                        self.source(base, depth.saturating_add(2))?;
+                        self.node(depth.saturating_add(2))?;
+                        self.bytes(root.as_str().len())?;
+                    }
                     if let Some(arguments) = &instance.arguments {
                         self.node(depth.saturating_add(1))?;
                         self.declarations(1)?;
@@ -201,31 +220,12 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     )?;
                     self.declarations(overlay.instances.len())?;
                     self.declarations(overlay.components.len())?;
-                    self.declarations(overlay.placements.len())?;
                     self.declarations(overlay.suppressions.len())?;
-                    add(
-                        &mut self.cost.placements,
-                        overlay.placements.len(),
-                        self.limits.placements,
-                        PrefabOverlayCostKind::Placements,
-                    )?;
                     let child_depth = depth.saturating_add(1);
                     for component in &overlay.components {
                         self.component(component, child_depth)?;
                     }
-                    for placement in &overlay.placements {
-                        self.node(child_depth)?;
-                        self.target(&placement.target, child_depth)?;
-                        if let PrefabPlacementParent::Entity(target) = &placement.parent {
-                            self.target(target, child_depth)?;
-                        }
-                        if let PrefabPlacementSlot::Before(target)
-                        | PrefabPlacementSlot::After(target) = &placement.slot
-                        {
-                            self.target(target, child_depth)?;
-                        }
-                        self.bytes(2)?;
-                    }
+                    self.placements(&overlay.placements, child_depth)?;
                     for target in &overlay.suppressions {
                         self.target(target, child_depth)?;
                     }
@@ -357,6 +357,35 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
             self.node(depth.saturating_add(1))?;
             self.bytes(hop.anchor.entity().as_str().len().saturating_add(1))?;
             self.source(&hop.expected_base, depth.saturating_add(2))?;
+        }
+        Ok(())
+    }
+
+    fn placements(
+        &mut self,
+        placements: &[SceneEntityPlacement],
+        depth: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        self.declarations(placements.len())?;
+        add(
+            &mut self.cost.placements,
+            placements.len(),
+            self.limits.placements,
+            PrefabOverlayCostKind::Placements,
+        )?;
+        for declaration in placements {
+            self.node(depth)?;
+            self.target(&declaration.target, depth.saturating_add(1))?;
+            self.node(depth.saturating_add(1))?;
+            if let ScenePlacementParent::Entity(target) = &declaration.placement.parent {
+                self.target(target, depth.saturating_add(2))?;
+            }
+            if let ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) =
+                &declaration.placement.slot
+            {
+                self.target(target, depth.saturating_add(2))?;
+            }
+            self.bytes(2)?;
         }
         Ok(())
     }
@@ -562,7 +591,7 @@ mod tests {
     use super::*;
     use crate::{
         PrefabComponentSetMode, PrefabEntityOrigin, PrefabInstanceClaim, PrefabInstanceHop,
-        PrefabPlacement, PrefabPropertyClaim, SceneEntityId, SourceDocumentKind,
+        PrefabPropertyClaim, SceneEntityId, ScenePlacement, SourceDocumentKind,
     };
 
     fn key(name: &str) -> SourceDocumentKey {
@@ -577,6 +606,7 @@ mod tests {
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
+            binding: PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: Some(overlay),
         }
@@ -612,11 +642,10 @@ mod tests {
                 }),
             ),
         });
-        overlay.placements.push(PrefabPlacement {
-            target: target.clone(),
-            parent: PrefabPlacementParent::Entity(target.clone()),
-            slot: PrefabPlacementSlot::After(target.clone()),
-        });
+        overlay.placements.push(SceneEntityPlacement::new(
+            target.clone(),
+            ScenePlacement::after(ScenePlacementParent::Entity(target.clone()), target.clone()),
+        ));
         overlay.components.push(PrefabComponentIntent::Properties {
             target,
             component: ComponentTypeId::new("test.property"),
@@ -636,6 +665,115 @@ mod tests {
             }],
         });
         instance(overlay)
+    }
+
+    #[test]
+    fn source_and_overlay_placements_share_complete_target_and_location_costs() {
+        let target = PrefabEntityTarget {
+            through: vec![PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("anchor").unwrap()),
+                expected_base: key("selected-base"),
+            }],
+            entity: PrefabEntityOrigin::InstanceAddition(SceneEntityId::new("added").unwrap()),
+        };
+        let placements = [SceneEntityPlacement::new(
+            target.clone(),
+            ScenePlacement::before(ScenePlacementParent::Entity(target.clone()), target),
+        )];
+        let cost = scene_placements_cost(&placements, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
+        let mut overlay = PrefabOverlay::new(key("base"));
+        let empty = prefab_overlay_cost(&overlay, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
+        overlay.placements.extend(placements.clone());
+        let complete = prefab_overlay_cost(&overlay, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
+        assert_eq!(complete.nodes - empty.nodes, cost.nodes);
+        assert_eq!(
+            complete.logical_bytes() - empty.logical_bytes(),
+            cost.logical_bytes()
+        );
+        assert_eq!(complete.placements, cost.placements);
+        assert_eq!(cost.value_cost, ComponentValueCost::ZERO);
+        let exact = PrefabOverlayCostLimits {
+            nodes: cost.nodes,
+            depth: cost.depth,
+            declarations: cost.declarations,
+            placements: cost.placements,
+            logical_bytes: cost.logical_bytes(),
+            ..PrefabOverlayCostLimits::UNBOUNDED
+        };
+        assert_eq!(scene_placements_cost(&placements, exact), Ok(cost));
+        for (limits, kind) in [
+            (
+                PrefabOverlayCostLimits {
+                    nodes: cost.nodes - 1,
+                    ..exact
+                },
+                PrefabOverlayCostKind::Nodes,
+            ),
+            (
+                PrefabOverlayCostLimits {
+                    depth: cost.depth - 1,
+                    ..exact
+                },
+                PrefabOverlayCostKind::Depth,
+            ),
+            (
+                PrefabOverlayCostLimits {
+                    declarations: 0,
+                    ..exact
+                },
+                PrefabOverlayCostKind::Declarations,
+            ),
+            (
+                PrefabOverlayCostLimits {
+                    placements: 0,
+                    ..exact
+                },
+                PrefabOverlayCostKind::Placements,
+            ),
+            (
+                PrefabOverlayCostLimits {
+                    logical_bytes: cost.logical_bytes() - 1,
+                    ..exact
+                },
+                PrefabOverlayCostKind::LogicalBytes,
+            ),
+        ] {
+            assert_eq!(
+                scene_placements_cost(&placements, limits).unwrap_err().kind,
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn dormant_instance_root_bindings_are_bounded_raw_metadata() {
+        let mut declaration = sample();
+        let forest =
+            prefab_instance_cost(&declaration, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
+        declaration.overrides.as_mut().unwrap().instances[0]
+            .value
+            .as_mut()
+            .unwrap()
+            .binding = PrefabInstanceBinding::Root {
+            base: key("dormant-root-source"),
+            root: SceneEntityId::new("specified-root").unwrap(),
+        };
+        let bound = prefab_instance_cost(&declaration, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
+        assert!(bound.nodes > forest.nodes);
+        assert!(bound.logical_bytes() > forest.logical_bytes());
+        assert_eq!(bound.value_cost, forest.value_cost);
+        assert_eq!(
+            prefab_instance_cost(
+                &declaration,
+                PrefabOverlayCostLimits {
+                    logical_bytes: bound.logical_bytes() - 1,
+                    ..PrefabOverlayCostLimits::UNBOUNDED
+                }
+            )
+            .unwrap_err()
+            .kind,
+            PrefabOverlayCostKind::LogicalBytes
+        );
     }
 
     #[test]

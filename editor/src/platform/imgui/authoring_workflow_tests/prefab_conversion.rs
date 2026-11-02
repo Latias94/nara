@@ -4,8 +4,9 @@ use nara::{
     asset::AssetRef,
     render_wgpu::WgpuSubmittedImageReceipt,
     scene::{
-        PrefabDeclarationLimits, PrefabDocument, PrefabInstance, PrefabInstancePath, SceneDocument,
-        SceneEntityId, SceneEntityRecord,
+        PrefabDeclarationLimits, PrefabDocument, PrefabEntityTarget, PrefabInstance,
+        PrefabInstancePath, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+        ScenePlacement, ScenePlacementParent,
     },
     sprite_render::__private::{SpriteInstance, SpriteMaterialKey},
     tooling::{
@@ -73,12 +74,40 @@ fn id(value: &str) -> SceneEntityId {
 
 fn linked(entity: &str, source: &str) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(entity));
-    record.prefab = Some(PrefabInstance {
-        source: AssetRef::path(source).unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    record.prefab = Some(PrefabInstance::forest(AssetRef::path(source).unwrap()));
     record
+}
+
+fn child_placement(entity: &str, parent: &str) -> SceneEntityPlacement {
+    SceneEntityPlacement::new(
+        PrefabEntityTarget::source(id(entity)),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            id(parent),
+        ))),
+    )
+}
+
+fn local_hierarchy(
+    source: &serde_json::Value,
+    kind: EditorDocumentKind,
+) -> Result<nara::scene::SourceLocalSceneHierarchy, String> {
+    let bytes = serde_json::to_vec(source).map_err(|error| error.to_string())?;
+    match kind {
+        EditorDocumentKind::Scene => nara::scene::SceneDocumentCandidate::decode_json_bytes(&bytes)
+            .map_err(|error| error.to_string())?
+            .into_composition_source()
+            .map_err(|error| error.to_string())?
+            .local_hierarchy(Default::default()),
+        EditorDocumentKind::Prefab => {
+            nara::scene::PrefabDocumentCandidate::decode_json_bytes(&bytes)
+                .map_err(|error| error.to_string())?
+                .into_composition_source()
+                .map_err(|error| error.to_string())?
+                .local_hierarchy(Default::default())
+        }
+        EditorDocumentKind::Extension(_) => return Err("unsupported fixture source kind".into()),
+    }
+    .map_err(|error| format!("source local hierarchy: {error:?}"))
 }
 
 fn configure(project: &Path) -> Result<(), String> {
@@ -87,10 +116,8 @@ fn configure(project: &Path) -> Result<(), String> {
         serde_json::from_value(record(&startup, "image-source")?.clone())
             .map_err(|error| error.to_string())?;
     sprite.id = id("source-sprite");
-    sprite.children = vec![id("source-child")];
     let mut leaf = sprite.clone();
     leaf.id = id("leaf-sprite");
-    leaf.children.clear();
     for (record, x) in [(&mut sprite, -32.0), (&mut leaf, 32.0)] {
         let transform = record
             .components
@@ -117,7 +144,11 @@ fn configure(project: &Path) -> Result<(), String> {
     let transform_type = nara::reflect::ComponentTypeId::new(TRANSFORM);
     let preserved_transform = sprite.components[&transform_type].clone();
     let assembly = PrefabDocument::new(
-        [id("source-sprite"), id("nested-source")],
+        [
+            SceneEntityPlacement::root(id("source-sprite")),
+            SceneEntityPlacement::root(id("nested-source")),
+            child_placement("source-child", "source-sprite"),
+        ],
         [
             sprite,
             SceneEntityRecord::new(id("source-child")),
@@ -125,12 +156,15 @@ fn configure(project: &Path) -> Result<(), String> {
         ],
     );
     let anchor = linked(ANCHOR, "assembly.prefab.json")
-        .with_children([id(CHILD)])
         .with_component(transform_type.clone(), preserved_transform.clone());
     let local =
         SceneEntityRecord::new(id(CHILD)).with_component(transform_type, preserved_transform);
     let prefab = PrefabDocument::new(
-        [id(ANCHOR), id(OTHER)],
+        [
+            SceneEntityPlacement::root(id(ANCHOR)),
+            SceneEntityPlacement::root(id(OTHER)),
+            child_placement(CHILD, ANCHOR),
+        ],
         [
             anchor.clone(),
             local.clone(),
@@ -138,7 +172,11 @@ fn configure(project: &Path) -> Result<(), String> {
         ],
     );
     let scene = SceneDocument::new(
-        [id(ANCHOR), id(OTHER)],
+        [
+            SceneEntityPlacement::root(id(ANCHOR)),
+            SceneEntityPlacement::root(id(OTHER)),
+            child_placement(CHILD, ANCHOR),
+        ],
         [anchor, local, linked(OTHER, "ordinary.prefab.json")],
     );
     for (path, text) in [
@@ -177,7 +215,7 @@ struct RenderedSpriteInput {
     pixels: Vec<u8>,
 }
 
-type Hierarchy = Vec<(String, Option<String>, bool)>;
+type PlacementIntents = Vec<(String, Option<ScenePlacement>, bool)>;
 
 impl AuthoringWorkflow<'_> {
     fn conversion_control(&mut self, label: &str) -> Result<(), String> {
@@ -212,13 +250,13 @@ impl AuthoringWorkflow<'_> {
         Err(format!("conversion widget {label:?} remained clipped"))
     }
 
-    fn conversion_hierarchy(&self) -> Result<Hierarchy, String> {
+    fn conversion_placement_intents(&self) -> Result<PlacementIntents, String> {
         let frame = self.frame()?;
         let scene = frame
             .workspace()
             .active_scene
             .as_ref()
-            .ok_or("the conversion source has no hierarchy")?;
+            .ok_or("the conversion source has no placement observations")?;
         Ok(scene
             .editor
             .inspector
@@ -227,7 +265,7 @@ impl AuthoringWorkflow<'_> {
             .map(|row| {
                 (
                     row.id.as_str().to_owned(),
-                    row.parent.as_ref().map(|parent| parent.as_str().to_owned()),
+                    row.placement.clone(),
                     row.has_prefab,
                 )
             })
@@ -398,7 +436,7 @@ impl AuthoringWorkflow<'_> {
         }
         let document = active.document;
         self.conversion_control(&format!("entity:{ANCHOR}"))?;
-        let before_tree = self.conversion_hierarchy()?;
+        let before_intents = self.conversion_placement_intents()?;
         let before_pixels = self.conversion_render_inputs()?;
         self.conversion_control("Inspector tab: Prefab Intent")?;
         self.conversion_control("Prefab Intent: Refresh declarations")?;
@@ -434,7 +472,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
             let frame = self.frame()?;
             if frame.prefab_conversion() != &review_view
-                || self.conversion_hierarchy()? != before_tree
+                || self.conversion_placement_intents()? != before_intents
                 || self.history()? != 0
                 || self.dirty()?
                 || self.native.scene.submitted != Some(displayed)
@@ -501,7 +539,7 @@ impl AuthoringWorkflow<'_> {
         let child = local("source-child")?;
         let nested = local("nested-source")?;
         let leaf = local("leaf-sprite")?;
-        let expected_tree = vec![
+        let expected_parents = vec![
             (ANCHOR.to_owned(), None, false),
             (sprite.clone(), Some(ANCHOR.to_owned()), false),
             (child, Some(sprite.clone()), false),
@@ -509,8 +547,26 @@ impl AuthoringWorkflow<'_> {
             (leaf, Some(nested.clone()), false),
             (CHILD.to_owned(), Some(ANCHOR.to_owned()), false),
             (OTHER.to_owned(), None, true),
-        ];
-        if self.conversion_hierarchy()? != expected_tree
+        ]
+        .into_iter()
+        .map(|(entity, parent, has_prefab)| {
+            let parent = parent.map_or(ScenePlacementParent::Root, |parent| {
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(id(&parent)))
+            });
+            (entity, (parent, has_prefab))
+        })
+        .collect::<BTreeMap<_, _>>();
+        let converted_intents = self.conversion_placement_intents()?;
+        let actual_parents = converted_intents
+            .iter()
+            .map(|(entity, placement, has_prefab)| {
+                let placement = placement
+                    .as_ref()
+                    .ok_or("a converted local record has no source placement")?;
+                Ok((entity.clone(), (placement.parent.clone(), *has_prefab)))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        if actual_parents != expected_parents
             || self.history()? != 1
             || !self.dirty()?
             || read_source(&source)? != original
@@ -540,7 +596,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.conversion_control("Undo")?;
         self.expect_conversion_link(document, Some(&original_link))?;
-        if self.conversion_hierarchy()? != before_tree
+        if self.conversion_placement_intents()? != before_intents
             || self.history()? != 0
             || self.dirty()?
             || self.conversion_render_inputs()? != before_pixels
@@ -549,7 +605,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.conversion_control("Redo")?;
         self.expect_conversion_link(document, None)?;
-        if self.conversion_hierarchy()? != expected_tree
+        if self.conversion_placement_intents()? != converted_intents
             || self.history()? != 1
             || !self.dirty()?
             || self.conversion_render_inputs()? != before_pixels
@@ -568,11 +624,14 @@ impl AuthoringWorkflow<'_> {
             return Err("the actual converted source did not Save cleanly".into());
         }
         let saved = read_source(&source)?;
-        if saved["payload"]["roots"] != original["payload"]["roots"]
+        let saved_hierarchy = local_hierarchy(&saved, kind)?;
+        let original_hierarchy = local_hierarchy(&original, kind)?;
+        if saved_hierarchy.roots() != original_hierarchy.roots()
             || record(&saved, CHILD)? != record(&original, CHILD)?
             || record(&saved, OTHER)? != record(&original, OTHER)?
             || record(&saved, ANCHOR)?["components"] != record(&original, ANCHOR)?["components"]
-            || record(&saved, ANCHOR)?["children"] != serde_json::json!([sprite, nested, CHILD])
+            || saved_hierarchy.children(&id(ANCHOR))
+                != Some(&[id(&sprite), id(&nested), id(CHILD)][..])
             || record(&saved, ANCHOR)?.get("prefab").is_some()
         {
             return Err(
@@ -591,7 +650,7 @@ impl AuthoringWorkflow<'_> {
         if !matches!(
             self.frame()?.persistence().result(),
             Some(EditorPersistenceResult::Opened { .. })
-        ) || self.conversion_hierarchy()? != expected_tree
+        ) || self.conversion_placement_intents()? != converted_intents
             || self.history()? != 0
             || self.dirty()?
             || read_source(&source)? != saved

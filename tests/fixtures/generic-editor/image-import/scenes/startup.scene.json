@@ -7,15 +7,13 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "ui-anchor"
-    ],
+    "placements": [{"target":{"entity":{"kind":"source_entity","entity":"ui-anchor"}},"placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}}],
     "entities": [
       {
         "id": "ui-anchor",
-        "children": [],
         "components": {},
         "prefab": {
+          "binding": {"kind":"forest"},
           "source": {
             "kind": "path",
             "value": "ui.prefab.json"

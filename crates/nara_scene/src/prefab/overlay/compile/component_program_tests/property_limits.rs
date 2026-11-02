@@ -332,10 +332,9 @@ fn authoring_property_expansion_accepts_large_admitted_values_and_reports_real_b
     let values = report
         .candidate()
         .unwrap()
-        .document()
-        .entities
+        .entities()
         .iter()
-        .filter_map(|entity| entity.components.get(&large_component()))
+        .filter_map(|entity| entity.components().get(&large_component()))
         .collect::<Vec<_>>();
     let [record] = values.as_slice() else {
         panic!("expected exactly one retained authoring component")

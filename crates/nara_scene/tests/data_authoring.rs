@@ -131,7 +131,7 @@ fn data_adapter_edits_scene_and_prefab_without_native_preview_or_unavailable_mut
     assert_eq!(reopened.document(), &accepted);
     assert_eq!(reopened.unavailable_manifest(), &manifest);
 
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -237,7 +237,7 @@ fn optional_null_scalar_edits_have_reversible_scene_and_prefab_history() {
     assert!(scene.redo_authoring().applied);
     assert_eq!(scene.document(), &accepted);
 
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()

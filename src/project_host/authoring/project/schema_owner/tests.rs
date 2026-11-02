@@ -16,8 +16,7 @@ use nara_scene::{
     __private::{borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source},
     PrefabAuthoringSession, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
     PrefabOverlay, SceneAuthoringSession, SceneCompilationFailureKind, SceneComponentRecord,
-    SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-    SchemaReclassificationWork,
+    SceneEntityId, ScenePatchDocument, ScenePatchOperation, SchemaReclassificationWork,
 };
 use nara_tasks::{TaskPoolConfig, TaskPools};
 
@@ -142,11 +141,11 @@ fn publish_owner(
     owner.attach(accepted).unwrap()
 }
 
-fn add_entity(id: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new(id).unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }])
+fn add_entity(placements: &[nara_scene::SceneEntityPlacement], id: &str) -> ScenePatchDocument {
+    crate::scene_test_support::add_root_entity_patch(
+        placements,
+        SceneEntityRecord::new(SceneEntityId::new(id).unwrap()),
+    )
 }
 
 fn finish_source_index(
@@ -183,7 +182,7 @@ fn saved_project_and_dirty_scene_keep_distinct_roots_and_rebuild_the_actual_sour
     .unwrap();
     assert!(
         scene
-            .apply_authoring_patch(&add_entity("dirty-current"))
+            .apply_authoring_patch(&add_entity(&scene.document().placements, "dirty-current"))
             .applied
     );
     let dirty_document = scene.shared_document();
@@ -286,7 +285,11 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
     .unwrap();
     let mut scene =
         SceneAuthoringSession::from_published_authoring_document(incumbent.fork_startup_scene());
-    assert!(scene.apply_authoring_patch(&add_entity("saved-b")).applied);
+    assert!(
+        scene
+            .apply_authoring_patch(&add_entity(&scene.document().placements, "saved-b"))
+            .applied
+    );
     let saved_b = scene.document().clone();
     let bytes_b = saved_b.to_json_string().unwrap();
     let file = incumbent
@@ -310,7 +313,11 @@ fn saved_startup_is_reread_as_b_while_the_incumbent_retains_a_and_the_scene_is_d
     let current_source = original
         .with_persistence_observation(identity, parent, digest)
         .unwrap();
-    assert!(scene.apply_authoring_patch(&add_entity("dirty-c")).applied);
+    assert!(
+        scene
+            .apply_authoring_patch(&add_entity(&scene.document().placements, "dirty-c"))
+            .applied
+    );
     let dirty_c = scene.shared_document();
     let revision_c = scene.revision();
     let (mut owner, mut publication) = prepare_owner(&incumbent);
@@ -374,6 +381,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
     let project = independent_project();
     let mut root = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
     root.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
@@ -398,7 +406,7 @@ fn prepared_project_selects_the_dirty_prefab_arc_and_revision_without_disk_previ
     );
     assert!(
         session
-            .apply_authoring_patch(&add_entity("dirty-prefab"))
+            .apply_authoring_patch(&add_entity(&session.document().placements, "dirty-prefab"))
             .applied
     );
     let dirty = session.shared_document();
@@ -736,6 +744,7 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
         let project = independent_project();
         let anchor_id = SceneEntityId::new("anchor").unwrap();
         let plain = PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("outer.prefab.json").unwrap(),
             overrides: None,
@@ -770,6 +779,7 @@ fn preserved_history_can_expose_a_composition_conflict_and_redo_its_exact_source
                 .with_owner(installed_owner().owner_id().clone()),
             });
             PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: plain.source.clone(),
                 overrides: Some(overlay),
@@ -940,6 +950,7 @@ fn saved_project_receipt_preserves_a_source_admitted_current_composition_conflic
     let project = independent_project();
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,

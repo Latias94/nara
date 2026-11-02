@@ -18,8 +18,9 @@ use nara::{
         PersistentComponentSchemaOwnerId,
     },
     scene::{
-        PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, SceneComponentRecord,
+        SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
@@ -56,11 +57,9 @@ fn trusted_project_opens_ordinary_prefab_through_source_navigation() {
     .unwrap();
     let anchor = SceneEntityId::new("ordinary-anchor").unwrap();
     let mut record = SceneEntityRecord::new(anchor.clone());
-    record.prefab = Some(nara::scene::PrefabInstance {
-        source: nara::asset::AssetRef::path("ordinary.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    record.prefab = Some(nara::scene::PrefabInstance::forest(
+        nara::asset::AssetRef::path("ordinary.prefab.json").unwrap(),
+    ));
     fs::write(
         project.source(EditorDocumentKind::Scene),
         SceneDocument::from_ordered_roots([record])
@@ -212,20 +211,33 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
     let basis = app.document_query_basis(document).unwrap();
     let history = model.editor.inspector.history;
     let source = fs::read(project.source(EditorDocumentKind::Prefab)).unwrap();
+    let placements = PrefabDocumentCandidate::decode_json_bytes(&source)
+        .unwrap()
+        .into_composition_source()
+        .unwrap()
+        .placements;
+    let add_root = |name| {
+        let entity = SceneEntityId::new(name).unwrap();
+        let mut value = placements.clone();
+        value.push(SceneEntityPlacement::root(entity.clone()));
+        ScenePatchDocument::new([
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(entity),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: placements.clone(),
+                value,
+            },
+        ])
+    };
     assert!(matches!(
-        app.prepare_authoring_edit(
-            &basis,
-            &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(SceneEntityId::new("unqualified-ui-node").unwrap()),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }])
-        ),
+        app.prepare_authoring_edit(&basis, &add_root("unqualified-ui-node")),
         Err(nara::project_host::EditorEditPreparationError::StructureContractMismatch { .. })
     ));
     let commands = [
         PrefabCompositionCommand::CreateEntity {
             draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            placement: ScenePlacement::last(ScenePlacementParent::Root),
         },
         PrefabCompositionCommand::AddComponent {
             entity: SceneEntityId::new("ui-root").unwrap(),
@@ -236,8 +248,8 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
             component: ComponentTypeId::new("nara.ui.UiRoot"),
         },
         PrefabCompositionCommand::MoveEntity {
-            entity: SceneEntityId::new("ui-root").unwrap(),
-            to: ScenePlacement::last(ScenePlacementOwner::Root),
+            target: PrefabEntityTarget::source(SceneEntityId::new("ui-root").unwrap()),
+            to: ScenePlacement::last(ScenePlacementParent::Root),
         },
         PrefabCompositionCommand::RemoveEntity {
             entity: SceneEntityId::new("ui-root").unwrap(),
@@ -265,12 +277,7 @@ fn ordinary_prefab_composition_cannot_bypass_specialized_ui_structure_admission(
             EditorDocumentMutation::ApplyPrefabPatch {
                 document,
                 base_revision: revision,
-                patch: nara::scene::ScenePatchDocument::new([
-                    nara::scene::ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(SceneEntityId::new("bypass").unwrap()),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    },
-                ]),
+                patch: add_root("bypass"),
             },
         )),
     );
@@ -338,7 +345,7 @@ fn empty_documents_offer_catalog_templates_before_any_component_exists() {
                 base_revision: model.revision,
                 command: SceneCompositionCommand::CreateEntity {
                     kind: SceneCompositionEntityKind::Empty,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             },
             EditorDocumentKind::Prefab => EditorDocumentMutation::ComposePrefab {
@@ -346,7 +353,7 @@ fn empty_documents_offer_catalog_templates_before_any_component_exists() {
                 base_revision: model.revision,
                 command: PrefabCompositionCommand::CreateEntity {
                     draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             },
             EditorDocumentKind::Extension(_) => {
@@ -417,7 +424,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
                 base_revision: model.revision,
                 command: SceneCompositionCommand::CreateEntity {
                     kind: SceneCompositionEntityKind::Empty,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             },
             EditorDocumentKind::Prefab => EditorDocumentMutation::ComposePrefab {
@@ -425,7 +432,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
                 base_revision: model.revision,
                 command: PrefabCompositionCommand::CreateEntity {
                     draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             },
             EditorDocumentKind::Extension(_) => {
@@ -441,10 +448,23 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
             created.editor.inspector.selected_entity.as_ref(),
             Some(&entity)
         );
+        let created_manifest = app.active_authoring_unavailable_record_manifest().unwrap();
+        assert_eq!(created_manifest.entries(), original_manifest.entries());
         assert_eq!(
-            app.active_authoring_unavailable_record_manifest(),
-            Some(original_manifest.clone())
+            created_manifest.record_count(),
+            original_manifest.record_count()
         );
+        assert_eq!(
+            created_manifest.overlay_target_count(),
+            original_manifest.overlay_target_count()
+        );
+        assert_eq!(
+            created_manifest.overlay_declarations().collect::<Vec<_>>(),
+            original_manifest.overlay_declarations().collect::<Vec<_>>()
+        );
+        let mut expected_placements = original_manifest.source_placements().to_vec();
+        expected_placements.push(SceneEntityPlacement::root(entity.clone()));
+        assert_eq!(created_manifest.source_placements(), expected_placements);
 
         compose_component(&mut app, kind, entity.clone(), CUSTOM, true);
         let added = frame(&app);
@@ -524,7 +544,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
             );
             assert_eq!(
                 app.active_authoring_unavailable_record_manifest(),
-                Some(original_manifest.clone())
+                Some(created_manifest.clone())
             );
         }
 
@@ -561,7 +581,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
         );
         assert_eq!(
             app.active_authoring_unavailable_record_manifest(),
-            Some(original_manifest.clone())
+            Some(created_manifest.clone())
         );
 
         if let nara::tooling::EditorPersistenceView::Terminal { attempt, .. } =
@@ -618,7 +638,7 @@ fn ordinary_scene_and_prefab_create_custom_components_without_project_execution(
         );
         assert_eq!(
             app.active_authoring_unavailable_record_manifest(),
-            Some(original_manifest)
+            Some(created_manifest)
         );
         let document = frame(&app)
             .workspace()

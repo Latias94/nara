@@ -3289,31 +3289,23 @@ fn decode_prefab_candidate(
 }
 
 fn map_scene_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
-    let (code, summary) = match &error {
-        SceneFormatError::LegacyPlacementShape { .. } => (
-            "project.content.scene-legacy-placement-shape",
-            "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
-        ),
-        _ => (
-            "project.content.scene-format-invalid",
-            "Project scene format is invalid",
-        ),
-    };
-    map_format_error(path, "scene", code, summary, &error)
+    map_format_error(
+        path,
+        "scene",
+        "project.content.scene-format-invalid",
+        "Project scene format is invalid",
+        &error,
+    )
 }
 
 fn map_prefab_format_error(path: &str, error: SceneFormatError) -> ProjectContentError {
-    let (code, summary) = match &error {
-        SceneFormatError::LegacyPlacementShape { .. } => (
-            "project.content.prefab-legacy-placement-shape",
-            "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
-        ),
-        _ => (
-            "project.content.prefab-format-invalid",
-            "Project prefab format is invalid",
-        ),
-    };
-    map_format_error(path, "prefab", code, summary, &error)
+    map_format_error(
+        path,
+        "prefab",
+        "project.content.prefab-format-invalid",
+        "Project prefab format is invalid",
+        &error,
+    )
 }
 
 fn map_format_error(
@@ -4102,9 +4094,9 @@ mod tests {
     };
     use nara_scene::{
         PrefabAddition, PrefabComponentIntent, PrefabDocument, PrefabEntityTarget, PrefabInstance,
-        PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-        PrefabPlacementSlot, SceneComponentBindings, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        PrefabInstanceClaim, PrefabOverlay, SceneComponentBindings, SceneComponentRecord,
+        SceneDocument, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
+        ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
     };
 
     use crate::project_host::{
@@ -4861,6 +4853,7 @@ mod tests {
             .unwrap();
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new(local).unwrap());
             anchor.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::Product(
                     AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).unwrap(),
@@ -4889,13 +4882,19 @@ mod tests {
             snapshot
                 .prefabs()
                 .iter()
-                .any(|prefab| prefab.document().roots[0].as_str() == "asset-prefab")
+                .any(|prefab| prefab.document().placements
+                    == [nara_scene::SceneEntityPlacement::root(
+                        SceneEntityId::new("asset-prefab").unwrap()
+                    ),])
         );
         assert!(
             snapshot
                 .prefabs()
                 .iter()
-                .any(|prefab| prefab.document().roots[0].as_str() == "prefab-prefab")
+                .any(|prefab| prefab.document().placements
+                    == [nara_scene::SceneEntityPlacement::root(
+                        SceneEntityId::new("prefab-prefab").unwrap()
+                    ),])
         );
         let rebound = snapshot
             .prepare_editor_startup_scene(
@@ -5294,6 +5293,7 @@ mod tests {
             }
             let mut anchor = SceneEntityRecord::new(id("host"));
             anchor.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path("p.prefab.json").unwrap(),
                 overrides: Some(overlay),
@@ -5402,10 +5402,9 @@ requested = ["runtime-2d"]
             );
             let mut obsolete = PrefabOverlay::new(key("missing-q"));
             obsolete.additions.push(discarded);
-            obsolete.placements.push(PrefabPlacement {
+            obsolete.placements.push(SceneEntityPlacement {
                 target: PrefabEntityTarget::addition(id("unavailable")),
-                parent: PrefabPlacementParent::Root,
-                slot: PrefabPlacementSlot::Last,
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             });
             let mut nested = SceneEntityRecord::new(id("n")).with_component(
                 ComponentTypeId::new("nara.sprite.Sprite"),
@@ -5449,6 +5448,7 @@ requested = ["runtime-2d"]
                 ),
             );
             nested.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path("missing-q.prefab.json").unwrap(),
                 overrides: Some(obsolete),
@@ -5459,6 +5459,7 @@ requested = ["runtime-2d"]
             overlay.instances.push(PrefabInstanceClaim {
                 target: PrefabEntityTarget::source(id("n")),
                 value: Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     arguments: None,
                     source: AssetRef::path("r.prefab.json").unwrap(),
                     overrides: None,
@@ -5471,6 +5472,7 @@ requested = ["runtime-2d"]
             let scene = SceneDocument::from_ordered_roots(["outer-a", "outer-b"].map(|name| {
                 let mut anchor = SceneEntityRecord::new(id(name));
                 anchor.prefab = Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     arguments: None,
                     source: AssetRef::path("p.prefab.json").unwrap(),
                     overrides: Some(overlay.clone()),

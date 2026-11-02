@@ -263,13 +263,19 @@ fn trusted_editor_play_travels_b_then_same_a_without_losing_preview_generation_o
     assert_eq!(commits[0].path, "b.scene.json");
     // Ready supplies the canonical expanded document, including schema defaults absent from the
     // authored fixture. The plugin compares that complete target to CurrentScene after commit.
-    assert_eq!(commits[0].prepared_source.roots, b.roots);
-    assert_eq!(commits[0].committed.entity_ids(), b.roots.as_slice());
+    assert_eq!(commits[0].prepared_source.roots, [b.entities[0].id.clone()]);
+    assert_eq!(
+        commits[0].committed.entity_ids(),
+        [b.entities[0].id.clone()]
+    );
     assert_eq!(commits[0].prepared_source.entities.len(), 1);
     assert_eq!(commits[0].prepared_source.entities[0], b.entities[0].id);
     assert_eq!(commits[1].path, "startup.scene.json");
-    assert_eq!(commits[1].prepared_source.roots, a.roots);
-    assert_eq!(commits[1].committed.entity_ids(), a.roots.as_slice());
+    assert_eq!(commits[1].prepared_source.roots, [a.entities[0].id.clone()]);
+    assert_eq!(
+        commits[1].committed.entity_ids(),
+        [a.entities[0].id.clone()]
+    );
     assert_eq!(commits[1].prepared_source.entities.len(), 1);
     assert_eq!(commits[1].prepared_source.entities[0], a.entities[0].id);
     assert_eq!(commits[1].expected, commits[0].committed);

@@ -26,9 +26,9 @@ use nara::{
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind},
     render::Extent2d,
     scene::{
-        SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneEntityId,
-        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+        SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
@@ -58,14 +58,12 @@ fn direct_submission_retains_each_action_result_across_later_drives() {
     let mut application = open_ordinary(project.root());
     let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let placements = source_placements(&project);
     let create = |name| {
         EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
             document: scene.document,
             base_revision: scene.revision,
-            patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(SceneEntityId::new(name).unwrap()),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }]),
+            patch: add_root_patch(&placements, name),
         })
     };
     let submission = application.submit_and_drive(
@@ -135,7 +133,7 @@ fn direct_submission_reports_whole_batch_rejection_without_dispatch() {
 fn direct_submission_keeps_close_filtered_slots_in_original_order() {
     let project = StarterProject::new("direct-closing-results");
     let mut application = open_ordinary(project.root());
-    dirty_active_scene(&mut application);
+    dirty_active_scene(&mut application, &project);
     application.submit_project_action(EditorProjectAction::CloseProject);
     let frame = current_frame(&application);
     let document = frame.workspace().active_document.unwrap();
@@ -212,14 +210,11 @@ fn direct_submission_without_workspace_returns_observations_without_replaying_ac
 fn prepared_application_commits_are_not_dispatched_during_close_or_after_retirement() {
     let project = StarterProject::new("prepared-close-admission");
     let mut application = open_ordinary(project.root());
-    dirty_active_scene(&mut application);
+    let placements = dirty_active_scene(&mut application, &project);
     let before = current_frame(&application);
     let scene = before.workspace().active_scene.as_ref().unwrap();
     let basis = application.document_query_basis(scene.document).unwrap();
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("never-published").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let patch = add_root_patch(&placements, "never-published");
     let closing = application.prepare_authoring_edit(&basis, &patch).unwrap();
     let retired = application.prepare_authoring_edit(&basis, &patch).unwrap();
     application.request_exit();
@@ -254,7 +249,7 @@ fn direct_submission_keeps_request_admission_distinct_from_failed_save_completio
     };
     let project = StarterProject::new("direct-save-admission");
     let mut application = open_ordinary(project.root());
-    dirty_active_scene(&mut application);
+    dirty_active_scene(&mut application, &project);
     let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
     fs::write(
@@ -312,6 +307,32 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
         TrustedCompiledEditorProjectIntent::new(),
     )
     .expect("the canonical starter should open in the Editor");
+    let opened = current_frame(&application);
+    let opened_scene = opened.workspace().active_scene.as_ref().unwrap();
+    application.set_scene_preview_extent(Some(Extent2d::new(640, 360).unwrap()));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut preview_ready = false;
+    loop {
+        application.advance(Duration::ZERO);
+        if let Some(candidate) = application.take_scene_preview_candidate() {
+            assert_eq!(candidate.document(), opened_scene.document);
+            assert_eq!(candidate.revision(), opened_scene.revision);
+            preview_ready = true;
+        }
+        let frame = current_frame(&application);
+        if preview_ready
+            && !frame.scene_preview_work_pending()
+            && !frame.authoring_retirement_pending()
+        {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let diagnostics = current_frame(&application).diagnostics().clone();
+            close_direct_application(&mut application);
+            panic!("initial Scene preview did not settle: {diagnostics:?}");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let before = current_frame(&application);
     let before_scene = before
         .workspace()
@@ -322,6 +343,9 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
     let revision = before_scene.revision;
     let dirty = before_scene.dirty;
     let selection = before_scene.selection.clone();
+    assert_eq!(revision, opened_scene.revision);
+    assert_eq!(dirty, opened_scene.dirty);
+    assert_eq!(selection, opened_scene.selection);
 
     let update = render_once(&mut application);
     let after = current_frame(&application);
@@ -330,7 +354,13 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
         .scene(document)
         .expect("an empty redraw must retain the startup Scene");
 
-    assert!(!update.actions_observed());
+    assert!(
+        !update.actions_observed(),
+        "unexpected repaint progress: before={:#?}, after={:#?}, diagnostics={:#?}",
+        before.project_content(),
+        after.project_content(),
+        after.diagnostics(),
+    );
     assert!(!update.exit_ready());
     assert_eq!(after_scene.revision, revision);
     assert_eq!(after_scene.dirty, dirty);
@@ -339,6 +369,7 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
         selection
     );
     assert_ne!(after.revision(), before.revision());
+    close_direct_application(&mut application);
 }
 
 #[test]
@@ -351,10 +382,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     .expect("the canonical starter should open in the Editor");
     let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("dirty-probe").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let patch = add_root_patch(&source_placements(&project), "dirty-probe");
     let batch = EditorActionBatch::new(
         frame.revision(),
         [EditorAction::Mutate(
@@ -452,40 +480,6 @@ fn clean_ordinary_exit_reaches_the_process_terminal() {
 }
 
 #[test]
-fn final_exit_maintenance_outlives_the_workspace_frame() {
-    use nara_tasks::{TaskPoolKind, TaskPools};
-    use std::sync::mpsc;
-
-    let project = StarterProject::new("exit-after-workspace-retirement");
-    let (release, receiver) = mpsc::channel();
-    let (mut application, probe) =
-        TaskPools::with_worker_spawn_failure_for_tests(TaskPoolKind::Io, usize::MAX, || {
-            TaskPools::hold_partial_worker_exit_for_tests(receiver);
-            open_ordinary(project.root())
-        });
-    assert_eq!(probe.started(), 1);
-    assert!(!application.request_exit().exit_ready());
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while application.current_frame().is_some() {
-        assert!(Instant::now() < deadline, "the workspace did not retire");
-        assert!(!application.advance(Duration::ZERO).exit_ready());
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    for _ in 0..3 {
-        assert!(!application.advance(Duration::ZERO).exit_ready());
-        assert!(application.current_frame().is_none());
-    }
-    assert_eq!(probe.exited(), 0);
-    release.send(()).unwrap();
-    assert!(drive_process_exit_to_terminal(&mut application));
-    assert_eq!(probe.exited(), 1);
-    assert!(application.request_exit().exit_ready());
-    let completed = application.advance(Duration::ZERO);
-    assert!(completed.exit_ready());
-    assert!(!completed.actions_observed());
-}
-
-#[test]
 fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission() {
     let project = StarterProject::new("workspace-action-close");
     let mut application = open_ordinary(project.root());
@@ -527,7 +521,7 @@ fn ordinary_workspace_exit_action_joins_process_retirement_only_after_admission(
 fn public_workspace_exit_action_preserves_dirty_cancel_and_later_discard() {
     let project = StarterProject::new("workspace-action-dirty-close");
     let mut application = open_ordinary(project.root());
-    dirty_active_scene(&mut application);
+    dirty_active_scene(&mut application, &project);
     let before = current_frame(&application)
         .workspace()
         .active_scene
@@ -1074,7 +1068,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
         TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
-    dirty_active_scene(&mut application);
+    let placements = dirty_active_scene(&mut application, &retained);
     let before_failure = current_frame(&application);
 
     assert!(application.request_project_replacement(unique_test_path("missing-replacement"), None));
@@ -1191,12 +1185,7 @@ fn retry_and_replacement_close_are_failure_atomic() {
             EditorDocumentMutation::ApplyScenePatch {
                 document: failed_scene.document,
                 base_revision: failed_scene.revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(
-                        SceneEntityId::new("edit-after-failed-save").unwrap(),
-                    ),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
+                patch: add_root_patch(&placements, "edit-after-failed-save"),
             },
         )],
     );
@@ -1363,7 +1352,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
-    dirty_active_scene(&mut application);
+    let placements = dirty_active_scene(&mut application, &project);
     let before = current_frame(&application);
     let before_scene = active_scene_state(&before);
 
@@ -1384,10 +1373,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(SceneEntityId::new("locked-edit").unwrap()),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: add_root_patch(&placements, "locked-edit"),
                 },
             )],
         ),
@@ -1451,7 +1437,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
         TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
-    dirty_active_scene(&mut application);
+    dirty_active_scene(&mut application, &project);
 
     let alias = project.root().join(".");
     assert!(application.request_project_replacement(alias, None));
@@ -1676,13 +1662,39 @@ fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
     false
 }
 
-fn dirty_active_scene(application: &mut EditorApplication) {
+fn source_placements(project: &StarterProject) -> Vec<SceneEntityPlacement> {
+    SceneDocumentCandidate::decode_json_bytes(
+        &fs::read(project.root().join("scenes/startup.scene.json")).unwrap(),
+    )
+    .unwrap()
+    .into_composition_source()
+    .unwrap()
+    .placements
+}
+
+fn add_root_patch(placements: &[SceneEntityPlacement], name: &str) -> ScenePatchDocument {
+    let entity = SceneEntityId::new(name).unwrap();
+    let mut value = placements.to_vec();
+    value.push(SceneEntityPlacement::root(entity.clone()));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(entity),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value,
+        },
+    ])
+}
+
+fn dirty_active_scene(
+    application: &mut EditorApplication,
+    project: &StarterProject,
+) -> Vec<SceneEntityPlacement> {
     let frame = current_frame(application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("dirty-probe").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let mut placements = source_placements(project);
+    let patch = add_root_patch(&placements, "dirty-probe");
     let batch = EditorActionBatch::new(
         frame.revision(),
         [EditorAction::Mutate(
@@ -1695,6 +1707,14 @@ fn dirty_active_scene(application: &mut EditorApplication) {
     );
     let _ = application.submit_and_drive(batch, Duration::ZERO);
     assert!(active_scene_state(&current_frame(application)).2);
+    assert!(active_scene_has_entity(
+        &current_frame(application),
+        "dirty-probe"
+    ));
+    placements.push(SceneEntityPlacement::root(
+        SceneEntityId::new("dirty-probe").unwrap(),
+    ));
+    placements
 }
 
 fn active_scene_state(

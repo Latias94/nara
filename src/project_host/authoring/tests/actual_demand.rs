@@ -102,6 +102,7 @@ impl ActualDemandProject {
         });
         let mut nested = SceneEntityRecord::new(entity("n"));
         nested.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("q.prefab.json").unwrap(),
             overrides: Some(stale),
@@ -115,6 +116,7 @@ impl ActualDemandProject {
         outer.instances.push(PrefabInstanceClaim {
             target: PrefabEntityTarget::source(entity("n")),
             value: Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path("r.prefab.json").unwrap(),
                 overrides: None,
@@ -127,6 +129,7 @@ impl ActualDemandProject {
         let scene = SceneDocument::from_ordered_roots(["first", "second"].map(|name| {
             let mut anchor = SceneEntityRecord::new(entity(name));
             anchor.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path("p.prefab.json").unwrap(),
                 overrides: Some(outer.clone()),
@@ -292,13 +295,12 @@ fn selected_repair_captures_p_and_r_once_without_reading_q_or_suppressed_asset_i
         assert!(compiled.omissions().is_empty());
         assert!(compiled.effective_asset_references().is_empty());
         let expanded = compiled.into_parts().candidate.unwrap();
-        assert_eq!(expanded.document().entities.len(), 8);
+        assert_eq!(expanded.entities().len(), 8);
         assert!(
             expanded
-                .document()
-                .entities
+                .entities()
                 .iter()
-                .all(|entity| entity.components.is_empty())
+                .all(|entity| entity.components().is_empty())
         );
         // Save/Reopen keeps raw declarations and reproduces standalone classification on demand.
         fs::write(
@@ -608,10 +610,9 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
         assert!(!compiled.diagnostics().has_errors());
         let expanded = compiled.into_parts().candidate.unwrap();
         let values = expanded
-            .document()
-            .entities
+            .entities()
             .iter()
-            .filter_map(|record| record.components.get(&component()))
+            .filter_map(|record| record.components().get(&component()))
             .collect::<Vec<_>>();
         assert_eq!(values.len(), if replace { 2 } else { 0 });
         assert!(values.iter().all(|record| {
@@ -674,7 +675,7 @@ fn complete_outer_repair_skips_bad_available_source_values_but_standalone_open_s
 #[test]
 fn raw_dependency_capture_rejects_invalid_local_hierarchy_before_value_selection() {
     let mut fixture = ActualDemandProject::new(asset_schema_bundle(owner(), component()));
-    fixture.p.roots[0] = entity("missing-local-root");
+    fixture.p.placements[0].target = PrefabEntityTarget::source(entity("missing-local-root"));
     fixture.write_documents();
     let error = match fixture
         .prepare(Box::new([]), Default::default())
@@ -692,7 +693,7 @@ fn raw_dependency_capture_rejects_invalid_local_hierarchy_before_value_selection
         source
             .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == "scene.dangling-root")
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.invalid-placement-target")
     );
 }
 

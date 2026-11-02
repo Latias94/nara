@@ -222,7 +222,7 @@ macro_rules! observe_session {
             assert!(report.applied, "{:?}", report.diagnostics);
             assert_ne!(session.revision(), revision);
             assert_eq!(session.document().entities.len(), POPULATION);
-            assert_eq!(session.document().roots, baseline.roots);
+            assert_eq!(session.document().placements, baseline.placements);
             assert_eq!(
                 session.document().entities[0].components[&component]
                     .value
@@ -315,7 +315,7 @@ fn scalar_edit_and_snapshot_requested_allocations() {
         document.clone()
     );
 
-    let prefab = PrefabDocument::new(document.roots, document.entities);
+    let prefab = PrefabDocument::new(document.placements, document.entities);
     let published = PrefabDocumentCandidate::decode_json_bytes_with_limits(
         prefab.to_json_string().unwrap().as_bytes(),
         limits,

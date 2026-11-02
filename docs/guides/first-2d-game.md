@@ -202,8 +202,13 @@ The ordinary external lane does not supply Pause or Step.
 ### Arrange an ordinary Scene or Prefab
 
 Use `+ Root` or `+ Child` to insert an empty entity, then add components whose schema provides a
-creation template. Use `Up`/`Down` for sibling order and `Parent` to move the selected entity to
-another parent or the root. Reparenting retains authored local component values; it does not
+creation template. Use `Order` to declare First, Last, Before or After, and `Parent` to select
+another parent or the root. The source list shows each declaration's desired placement; record
+order is not the expanded hierarchy. Invalid final parent or sibling relationships are refused.
+Deleting a source-local branch preserves the remaining local sibling order, including placements
+that previously referred to the removed sibling. Repair that needs an inherited child sequence
+requires its actual source context; the local command refuses that case.
+Reparenting retains authored local component values; it does not
 compensate a world-space transform. Add the appropriate Transform2d components when constructing
 a runtime transform chain, and run Check before Play.
 

@@ -961,7 +961,7 @@ fn scene_bytes(
     admit: &mut Admission<'_>,
 ) -> Result<Option<usize>, ScenePatchReport> {
     super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state.file_limits(),
         |bytes| admit("source-retention-scan", bytes),
@@ -974,7 +974,7 @@ fn prefab_bytes(
     admit: &mut Admission<'_>,
 ) -> Result<Option<usize>, ScenePatchReport> {
     super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        &document.roots,
+        &document.placements,
         &document.entities,
         state.file_limits(),
         |bytes| admit("source-retention-scan", bytes),

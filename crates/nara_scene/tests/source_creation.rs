@@ -4,8 +4,9 @@ use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
 use nara_scene::{
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneEntityId, ScenePlacement, ScenePlacementOwner, register_scene_components,
+    PrefabAuthoringSession, PrefabDocument, PrefabEntityTarget, SceneAuthoringSession,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement, ScenePlacement,
+    ScenePlacementParent, register_scene_components,
 };
 
 fn registry() -> ComponentRegistrySnapshot {
@@ -73,7 +74,7 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
         )])
     };
     let database = ProjectAssetDatabase::default();
-    let placement = ScenePlacement::last(ScenePlacementOwner::Root);
+    let placement = ScenePlacement::last(ScenePlacementParent::Root);
     let mut scene = SceneAuthoringSession::new(SceneDocument::default());
     assert!(
         scene
@@ -113,7 +114,10 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
             )
             .applied
     );
-    assert_eq!(scene.document().roots, [entity.clone()]);
+    assert_eq!(
+        scene.document().placements,
+        [SceneEntityPlacement::root(entity.clone())]
+    );
     // Even empty creation must validate the database-bound records already in the source.
     assert!(
         scene
@@ -165,26 +169,35 @@ fn native_creation_keeps_project_database_codec_admission_for_both_source_kinds(
             )
             .applied
     );
-    assert_eq!(prefab.document().roots, [prefab_entity]);
+    assert_eq!(
+        prefab.document().placements,
+        [SceneEntityPlacement::root(prefab_entity)]
+    );
 }
 
 #[test]
 fn native_source_owners_create_and_replay_the_exact_returned_identity() {
     let registry = registry();
-    let placement = ScenePlacement::last(ScenePlacementOwner::Root);
+    let placement = ScenePlacement::last(ScenePlacementParent::Root);
     let mut scene = SceneAuthoringSession::new(SceneDocument::default());
     let created = scene
         .create_entity_with_registry(scene.revision(), &registry, placement.clone(), components())
         .unwrap();
     let first = created.entity().clone();
     assert!(created.report().applied);
-    assert_eq!(scene.document().roots, [first.clone()]);
+    assert_eq!(
+        scene.document().placements,
+        [SceneEntityPlacement::root(first.clone())]
+    );
     assert!(first.as_str().len() <= 22);
     assert_eq!(scene.document().entities[0].components.len(), 1);
     assert!(scene.undo(&registry).applied);
     assert!(scene.document().entities.is_empty());
     assert!(scene.redo(&registry).applied);
-    assert_eq!(scene.document().roots, [first.clone()]);
+    assert_eq!(
+        scene.document().placements,
+        [SceneEntityPlacement::root(first.clone())]
+    );
     let (_, report) = created.into_parts();
     assert!(report.applied);
 
@@ -194,11 +207,17 @@ fn native_source_owners_create_and_replay_the_exact_returned_identity() {
         .unwrap();
     let second = created.entity().clone();
     assert_ne!(first, second);
-    assert_eq!(prefab.document().roots, [second.clone()]);
+    assert_eq!(
+        prefab.document().placements,
+        [SceneEntityPlacement::root(second.clone())]
+    );
     assert!(prefab.undo(&registry).applied);
     assert!(prefab.document().entities.is_empty());
     assert!(prefab.redo(&registry).applied);
-    assert_eq!(prefab.document().roots, [second]);
+    assert_eq!(
+        prefab.document().placements,
+        [SceneEntityPlacement::root(second)]
+    );
 }
 
 #[test]
@@ -213,7 +232,7 @@ fn native_creation_refuses_stale_basis_and_final_placement_without_publication()
             .create_entity_with_registry(
                 revision.next(),
                 &registry,
-                ScenePlacement::last(ScenePlacementOwner::Root),
+                ScenePlacement::last(ScenePlacementParent::Root),
                 components(),
             )
             .is_err()
@@ -223,9 +242,9 @@ fn native_creation_refuses_stale_basis_and_final_placement_without_publication()
             .create_entity_with_registry(
                 revision,
                 &registry,
-                ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: SceneEntityId::new("missing").unwrap(),
-                }),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    SceneEntityId::new("missing").unwrap(),
+                ))),
                 components(),
             )
             .is_err()
@@ -239,7 +258,7 @@ fn native_creation_refuses_stale_basis_and_final_placement_without_publication()
             .create_entity_with_registry(
                 revision,
                 &registry,
-                ScenePlacement::last(ScenePlacementOwner::Root),
+                ScenePlacement::last(ScenePlacementParent::Root),
                 components(),
             )
             .is_ok()

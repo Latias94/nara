@@ -13,6 +13,7 @@ mod component_bindings;
 mod data_components;
 mod diagnostics;
 mod document;
+mod draft;
 mod export;
 #[cfg(feature = "serde")]
 mod format;
@@ -20,6 +21,7 @@ mod format;
 mod migration;
 mod occurrence;
 mod patch;
+mod placement;
 mod prefab;
 #[cfg(feature = "serde")]
 mod prefab_copy;
@@ -30,6 +32,7 @@ mod runtime_hierarchy;
 mod runtime_scene;
 mod scene_components;
 mod schema_authority;
+mod source_hierarchy;
 mod spawn;
 mod validation;
 
@@ -88,6 +91,7 @@ pub use component_bindings::{
 };
 pub use data_components::{SceneDataComponentError, SceneDataComponents};
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
+pub use draft::ExpandedSceneEntity;
 pub use export::{
     SceneExportOptions, SceneExportOutput, SceneExportRemap, SceneExportReport, export_scene,
     export_scene_with_asset_resolution, export_scene_with_options,
@@ -105,20 +109,20 @@ pub use nara_identity::{
     SpawnedSceneInstance,
 };
 pub use occurrence::{SceneOccurrenceKey, SceneOccurrenceKeyError, SceneOccurrenceLimits};
-pub use patch::{
-    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
-    ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+pub use patch::{ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport};
+pub use placement::{
+    SceneEntityPlacement, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };
 pub use prefab::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDeclarationSource, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstance, PrefabInstanceClaim, PrefabInstanceHop, PrefabInstanceLocation,
-    PrefabInstancePath, PrefabInstancePathSegment, PrefabInstantiationReport, PrefabOverlay,
-    PrefabOverlaySlot, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert,
-    PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
-    SceneCompilationFailure, SceneCompilationFailureKind, SceneCompilationLimits,
-    SceneCompilationOptions, SceneCompilationReport, SceneCompilationWorkingSet,
+    PrefabInstance, PrefabInstanceBinding, PrefabInstanceClaim, PrefabInstanceHop,
+    PrefabInstanceLocation, PrefabInstancePath, PrefabInstancePathSegment,
+    PrefabInstantiationReport, PrefabOverlay, PrefabOverlaySlot, PrefabPropertyClaim,
+    PrefabPropertyIntent, PrefabReferenceArguments, PrefabRevert, PrefabSourceResolver,
+    ResolvedPrefabSource, SceneCompilationBudgetKind, SceneCompilationFailure,
+    SceneCompilationFailureKind, SceneCompilationLimits, SceneCompilationOptions,
+    SceneCompilationReport, SceneCompilationWorkingSet,
 };
 #[cfg(feature = "serde")]
 pub use prefab_copy::{
@@ -132,6 +136,7 @@ pub use provenance::{
 pub use runtime_scene::{
     RuntimeSceneCandidate, RuntimeSceneDocumentCandidate, RuntimeSceneError, RuntimeSceneLimits,
 };
+pub use source_hierarchy::SourceLocalSceneHierarchy;
 /// Provisional APIs for advanced product integrations.
 ///
 /// These contracts have a real reference-game consumer but are not ordinary scene-authoring

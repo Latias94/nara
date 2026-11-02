@@ -663,6 +663,7 @@ fn held_play_io_does_not_block_authoring_prefab_edit_save_and_reopen() {
     let anchor_id = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut anchor = SceneEntityRecord::new(anchor_id.clone());
     anchor.prefab = Some(nara_scene::PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("shared.prefab.json").unwrap(),
         overrides: None,

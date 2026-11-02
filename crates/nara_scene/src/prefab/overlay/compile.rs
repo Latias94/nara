@@ -2,21 +2,22 @@
 
 use super::{
     PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityOrigin, PrefabEntityTarget,
-    PrefabInstanceHop, PrefabOverlay, PrefabPlacementParent, PrefabPlacementSlot,
-    SceneCompilationFailureKind, layout,
+    PrefabInstanceHop, PrefabOverlay, SceneCompilationFailureKind, layout,
 };
+use crate::draft::{ExpandedSceneEntity, SceneDraft};
 use crate::{
     PrefabDeclarationSource, PrefabInstance, PrefabInstanceLocation, PrefabInstancePath,
     PrefabInstancePathSegment, PrefabOverlaySlot, PrefabProjectionPath, PrefabProjectionStep,
-    ResolvedPrefabSource, SceneCompilationFailure, SceneDocument, SceneEntityId,
-    SceneEntityProvenance, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    ResolvedPrefabSource, SceneCompilationFailure, SceneEntityId, SceneEntityPlacement,
+    SceneEntityProvenance, SceneEntityRecord, ScenePlacementParent, ScenePlacementSlot,
+    SourceDocumentKey, SourceDocumentKind,
     diagnostics::{
         error as diagnostic_error, usize_to_u64, with_asset_ref, with_public_locator,
         with_public_u64,
     },
     prefab::{SceneCompilationBudgetKind, SceneCompilationContext},
     provenance::provenance_entry_bytes,
-    validation::validate_scene_structure,
+    validation::validate_source_structure,
 };
 
 #[cfg(test)]
@@ -32,8 +33,15 @@ mod staged;
 /// Flat values and source-only default snapshots have different consumers. Only selected
 /// source conversion requests the latter; Native admission never receives these declarations.
 pub(crate) struct StagedSceneOutput {
-    pub(crate) document: SceneDocument,
+    pub(crate) document: SceneDraft,
     pub(crate) source_defaults: Vec<MaterializedSourceDefaults>,
+    #[cfg(feature = "serde")]
+    pub(crate) targets: std::collections::BTreeMap<PrefabEntityTarget, SceneEntityId>,
+    #[cfg(feature = "serde")]
+    pub(crate) reference_targets: std::collections::BTreeMap<
+        nara_identity::AuthoredEntityReference,
+        nara_identity::EntityReference,
+    >,
 }
 
 pub(crate) struct MaterializedSourceDefaults {
@@ -49,10 +57,10 @@ mod selected_tests;
 
 pub(crate) fn expand_source<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     inputs: Option<&std::collections::BTreeSet<nara_identity::ReferenceInputId>>,
-) -> Result<SceneDocument, SceneCompilationFailure>
+) -> Result<SceneDraft, SceneCompilationFailure>
 where
     F: FnMut(
         &nara_asset::AssetRef,
@@ -62,9 +70,10 @@ where
     staged::expand_source(
         context,
         staged::SourceTopology {
-            roots,
+            placements,
             entities,
             inputs,
+            reference_queries: &[],
         },
     )
 }
@@ -74,6 +83,7 @@ pub(crate) fn expand_selected_instance<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
     source: crate::prefab::SelectedInstanceSource<'_>,
     anchor: &SceneEntityId,
+    reference_queries: &[nara_identity::AuthoredEntityReference],
 ) -> Result<StagedSceneOutput, SceneCompilationFailure>
 where
     F: FnMut(
@@ -81,14 +91,14 @@ where
         &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let (roots, entities, inputs) = match source {
+    let (placements, entities, inputs) = match source {
         crate::prefab::SelectedInstanceSource::Scene(document) => (
-            document.roots.as_slice(),
+            document.placements.as_slice(),
             document.entities.as_slice(),
             None,
         ),
         crate::prefab::SelectedInstanceSource::Prefab(document) => (
-            document.roots.as_slice(),
+            document.placements.as_slice(),
             document.entities.as_slice(),
             Some(&document.inputs),
         ),
@@ -96,9 +106,10 @@ where
     staged::expand_selected(
         context,
         staged::SourceTopology {
-            roots,
+            placements,
             entities,
             inputs,
+            reference_queries,
         },
         anchor,
     )
@@ -131,6 +142,7 @@ where
                 SceneCompilationFailureKind::MissingTarget => "missing-target",
                 SceneCompilationFailureKind::DuplicateIntent => "duplicate-intent",
                 SceneCompilationFailureKind::Placement => "placement",
+                SceneCompilationFailureKind::RootBinding => "root-binding",
                 SceneCompilationFailureKind::Component => "component",
                 SceneCompilationFailureKind::Reference => "reference",
                 SceneCompilationFailureKind::OwnerAdmission => "owner-admission",
@@ -140,6 +152,17 @@ where
         if let Some(location) = &failure.location {
             diagnostic =
                 with_public_locator(diagnostic, "entity-id", location.path.anchor.as_str());
+        }
+        if let Some(entity) = &failure.entity {
+            diagnostic = with_public_locator(
+                diagnostic,
+                if failure.location.is_some() {
+                    "cycle-entity-id"
+                } else {
+                    "entity-id"
+                },
+                entity.as_str(),
+            );
         }
         self.diagnostics.push(diagnostic);
     }

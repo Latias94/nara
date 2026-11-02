@@ -340,9 +340,11 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             .find(|candidate| {
                 candidate.parent() == &ui_root
                     && matches!(
-                        &candidate.placement().anchor,
-                        nara::scene::ScenePlacementAnchor::After { sibling }
-                            if sibling.as_str() == "modal-dim"
+                        &candidate.placement().slot,
+                        nara::scene::ScenePlacementSlot::After(sibling)
+                            if sibling == &nara::scene::PrefabEntityTarget::source(
+                                SceneEntityId::new("modal-dim").unwrap(),
+                            )
                     )
             })
             .expect("the created Image must have one explicit alternate order")
@@ -364,7 +366,8 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         EditorActionOutcome::Workspace(report)
             if matches!(
                 &report.prefab_composition_outcome,
-                Some(PrefabCompositionOutcome::Moved { entity }) if entity == &created
+                Some(PrefabCompositionOutcome::Moved { target })
+                    if target == &nara::scene::PrefabEntityTarget::source(created.clone())
             )
     ));
     let moved = editor.drive_editor_frame(Duration::ZERO);
@@ -981,7 +984,7 @@ fn seed_modal_image(project: &ReferenceProjectCopy) {
         ),
         ("radii", radii),
     ]);
-    let encoded = PrefabDocument::new(prefab.roots, prefab.entities)
+    let encoded = PrefabDocument::new(prefab.placements, prefab.entities)
         .to_json_string()
         .expect("the source edit must use the canonical Prefab writer");
     fs::write(

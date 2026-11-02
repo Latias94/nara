@@ -502,10 +502,10 @@ fn application_preparation_checks_the_retained_schema_admission_before_lowering_
             captured.schema.as_ref().unwrap().schema(&component),
             independent.schema(&component)
         );
-        let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(id("schema-basis-candidate")),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]);
+        let patch = add_root_patch(
+            &saved_placements(&project.root.join(source)),
+            "schema-basis-candidate",
+        );
         let edits = [AuthoringPropertyEdit {
             entity: id("anchor"),
             component,
@@ -515,7 +515,7 @@ fn application_preparation_checks_the_retained_schema_admission_before_lowering_
         }];
         let mut draft = app.begin_authoring_construction(&captured).unwrap();
         draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         for schema in [None, Some(independent)] {
             let wrong_schema = EditorDocumentQueryBasis {

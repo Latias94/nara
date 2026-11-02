@@ -1,7 +1,8 @@
 use nara::{
     prelude::*,
     scene::{
-        ScenePatchDocumentCandidate, ScenePlacement, ScenePlacementOwner, register_scene_components,
+        PrefabEntityTarget, ScenePatchDocumentCandidate, ScenePlacement, ScenePlacementParent,
+        register_scene_components,
     },
     sprite::register_sprite_components,
     transform::register_transform_components,
@@ -25,7 +26,7 @@ fn main() {
         SceneEntityRecord::new(enemy.clone()),
     ]);
     let original = scene.clone();
-    let patch = ScenePatchDocument::new([
+    let mut patch = ScenePatchDocument::new([
         ScenePatchOperation::AddComponent {
             entity: player.clone(),
             component: transform_id(),
@@ -38,14 +39,17 @@ fn main() {
             field: ComponentFieldId::new("material.image"),
             asset_ref: AssetRef::path("textures/player.png").unwrap(),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: enemy.clone(),
-            from: ScenePlacement::last(ScenePlacementOwner::Root),
-            to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: player.clone(),
-            }),
-        },
     ]);
+    patch.operations.extend(
+        ScenePatchDocument::set_placement(
+            &scene.placements,
+            PrefabEntityTarget::source(enemy.clone()),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                player.clone(),
+            ))),
+        )
+        .operations,
+    );
 
     let json = patch.to_json_string().unwrap();
     let ron = patch.to_ron_string().unwrap();
@@ -59,13 +63,9 @@ fn main() {
     let report = from_json.apply_to_scene(&mut scene, &registry);
     assert!(report.applied);
     assert!(!report.diagnostics.has_errors());
-    let player_record = scene
-        .entities
-        .iter()
-        .find(|entity| entity.id == player)
-        .unwrap();
-    assert_eq!(player_record.children, [enemy.clone()]);
-    assert_eq!(scene.roots, [player.clone()]);
+    let hierarchy = scene.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(hierarchy.children(&player).unwrap(), [enemy.clone()]);
+    assert_eq!(hierarchy.roots(), [player.clone()]);
 
     let inverse = report.inverse.unwrap();
     let undo = inverse.apply_to_scene(&mut scene, &registry);

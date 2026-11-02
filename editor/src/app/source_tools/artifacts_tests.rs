@@ -25,10 +25,7 @@ use nara::{
         ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
         ComponentValue, ComponentValueKind,
     },
-    scene::{
-        PrefabDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-        ScenePlacement, ScenePlacementOwner,
-    },
+    scene::PrefabDocument,
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
         EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
@@ -743,12 +740,11 @@ fn unavailable_artifact_inventory_does_not_gate_unrelated_source_save_and_close(
                 EditorDocumentMutation::ApplyScenePatch {
                     document,
                     base_revision: basis.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("ordinary-saved-source").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: crate::app::named_root_patch(
+                        &application,
+                        document,
+                        "ordinary-saved-source",
+                    ),
                 },
             )],
         ),

@@ -11,8 +11,9 @@ use nara_reflect::{
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringFieldEdit, AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate,
-    SceneAuthoringHistoryUsage, SceneComponentRecord, SceneEntityId, SceneEntityRecord,
-    ScenePlacement, ScenePlacementOwner, UnavailableRecordManifest,
+    PrefabEntityTarget, SceneAuthoringHistoryUsage, SceneComponentRecord, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    UnavailableRecordManifest,
 };
 
 use crate::{
@@ -191,9 +192,9 @@ fn create(
             base_revision,
             command: PrefabCompositionCommand::CreateEntity {
                 draft: PrefabCompositionEntityDraft::new(components).unwrap(),
-                placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: id("anchor"),
-                }),
+                placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                    PrefabEntityTarget::source(id("anchor")),
+                )),
             },
         },
     )
@@ -248,13 +249,12 @@ fn source_prefab_recipe_creates_exact_data_records_in_one_history_entry() {
     );
 
     let mut expected = before.source.as_ref().clone();
-    expected
-        .entities
-        .iter_mut()
-        .find(|record| record.id == id("anchor"))
-        .unwrap()
-        .children
-        .push(entity.clone());
+    expected.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::source(entity.clone()),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            id("anchor"),
+        ))),
+    ));
     let mut created = SceneEntityRecord::new(entity.clone());
     created.components = desired
         .into_iter()
@@ -264,7 +264,11 @@ fn source_prefab_recipe_creates_exact_data_records_in_one_history_entry() {
     expected.canonicalize();
     let after = snapshot(&workspace, document);
     assert_eq!(after.source.as_ref(), &expected);
-    assert_eq!(after.unavailable, before.unavailable);
+    assert_eq!(after.unavailable.entries(), before.unavailable.entries());
+    assert_eq!(
+        after.unavailable.source_placements(),
+        after.source.placements
+    );
     assert_eq!(after.selection.top_entity(), Some(&entity));
     assert_eq!(after.selection.len(), 1);
     assert_eq!(report.revision, Some(after.tab.revision));
@@ -286,7 +290,7 @@ fn source_prefab_recipe_creates_exact_data_records_in_one_history_entry() {
     let redone = snapshot(&workspace, document);
     assert_eq!(redone.source, after.source);
     assert_eq!(redone.content, after.content);
-    assert_eq!(redone.unavailable, before.unavailable);
+    assert_eq!(redone.unavailable, after.unavailable);
     assert_eq!(redone.tab.history.undo_depth, 1);
     assert_eq!(redone.tab.history.redo_depth, 0);
     assert_eq!(redone.history_usage.records, 1);
@@ -314,9 +318,24 @@ fn empty_source_prefab_recipe_creates_an_empty_entity_and_replays_exactly() {
         after.source.entities.len(),
         before.source.entities.len() + 1
     );
-    assert_eq!(after.source.roots, before.source.roots);
+    assert_eq!(
+        after
+            .source
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        before
+            .source
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+    );
     assert_eq!(after.selection.top_entity(), Some(&entity));
-    assert_eq!(after.unavailable, before.unavailable);
+    assert_eq!(after.unavailable.entries(), before.unavailable.entries());
+    assert_eq!(
+        after.unavailable.source_placements(),
+        after.source.placements
+    );
     assert_eq!(after.tab.history.undo_depth, 1);
     assert_eq!(after.history_usage.records, 1);
 

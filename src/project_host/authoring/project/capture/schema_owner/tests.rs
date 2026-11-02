@@ -10,8 +10,7 @@ use nara_reflect::{
 use nara_scene::{
     __private::{borrow_prepared_prefab_schema_source, borrow_prepared_scene_schema_source},
     PrefabAuthoringSession, PrefabInstance, SceneAuthoringSession, SceneComponentRecord,
-    SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, SchemaReclassificationWork,
+    SceneEntityId, SceneEntityRecord, SchemaReclassificationWork,
 };
 
 use super::super::tests::observe_owner_source;
@@ -58,6 +57,7 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let project = independent_project();
     let mut startup = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
     startup.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: None,
@@ -115,11 +115,15 @@ fn actual_capture_uses_prepared_dirty_prefab_and_attaches_only_the_same_nominal_
     let mut prefab_session = PrefabAuthoringSession::from_published_authoring_document(
         prefab.publish_document().unwrap(),
     );
-    let dirty = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("unsaved").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let dirty = crate::scene_test_support::add_root_entity_patch(
+        &prefab_session.document().placements,
+        SceneEntityRecord::new(SceneEntityId::new("unsaved").unwrap()),
+    );
     assert!(prefab_session.apply_authoring_patch(&dirty).applied);
+    let dirty = crate::scene_test_support::add_root_entity_patch(
+        &scene.document().placements,
+        SceneEntityRecord::new(SceneEntityId::new("unsaved").unwrap()),
+    );
     assert!(scene.apply_authoring_patch(&dirty).applied);
     let original_prefab = prefab_session.shared_document();
     let old_basis = scene.authoring_schema_basis().unwrap();

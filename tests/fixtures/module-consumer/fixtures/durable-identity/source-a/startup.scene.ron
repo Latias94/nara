@@ -4,23 +4,28 @@
     engine_min_version: "0.1.0",
     generator: (name: "durable-identity-consumer", version: "0.0.0"),
     payload: (
-        roots: ["actor-instance", "shared-instance"],
+        placements: [
+            (target: (entity: (kind: "source_entity", entity: "actor-instance")),
+             placement: (parent: (kind: root), slot: (kind: last))),
+            (target: (entity: (kind: "source_entity", entity: "shared-instance")),
+             placement: (parent: (kind: root), slot: (kind: last))),
+        ],
         entities: [
             (
                 id: "actor-instance",
-                children: [],
                 components: {},
                 prefab: Some((
                     source: (kind: "path", value: "source-a/actor.prefab.ron"),
+                    binding: (kind: "forest"),
                     overrides: None,
                 )),
             ),
             (
                 id: "shared-instance",
-                children: [],
                 components: {},
                 prefab: Some((
                     source: (kind: "path", value: "source-b/shared.prefab.ron"),
+                    binding: (kind: "forest"),
                     overrides: None,
                 )),
             ),

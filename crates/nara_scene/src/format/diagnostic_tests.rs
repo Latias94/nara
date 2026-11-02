@@ -18,7 +18,7 @@ fn valid_ron_syntax_with_wrong_field_types_retains_the_decode_stage() {
         format_version: 1,
         engine_min_version: "0.1.0",
         generator: (name: "test", version: "0.1.0"),
-        payload: (roots: [], entities: []),
+        payload: (placements: [], entities: []),
     )"#;
     for (source, header) in [
         (

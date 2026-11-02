@@ -3,9 +3,9 @@ use nara::{
     prelude::*,
     reflect::ComponentValueKind,
     scene::{
-        PrefabAuthoringSession, PrefabDocument, SceneAuthoringHistoryLimits,
-        SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        PrefabAuthoringSession, PrefabDocument, PrefabEntityTarget, SceneAuthoringHistoryLimits,
+        SceneAuthoringHistoryStatus, SceneEntityPlacement, ScenePatchDocument, ScenePatchOperation,
+        ScenePlacement, ScenePlacementParent,
     },
 };
 
@@ -124,7 +124,14 @@ fn prefab_authoring_session_keeps_prefab_source_kind_and_history_identity() {
     let patch = set_label_patch(&retry, "Try Again");
 
     assert!(session.apply_patch(&patch, &registry).applied);
-    assert_eq!(session.document().roots, vec![retry.clone()]);
+    assert_eq!(
+        session
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [retry.clone()]
+    );
     assert_eq!(session.document().entities.len(), 1);
     assert_eq!(
         session
@@ -142,7 +149,14 @@ fn prefab_authoring_session_keeps_prefab_source_kind_and_history_identity() {
     assert_eq!(session.history_status().redo_depth, 1);
     assert!(session.redo(&registry).applied);
     assert_eq!(session.history_status().undo_depth, 1);
-    assert_eq!(session.document().roots, vec![retry]);
+    assert_eq!(
+        session
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [retry]
+    );
 }
 
 #[test]
@@ -152,13 +166,18 @@ fn prefab_authoring_session_applies_ordered_structure_and_roundtrips_history() {
     let existing = scene_id("existing");
     let loose = scene_id("loose");
     let added = scene_id("added");
-    let root_owner = ScenePlacementOwner::Parent {
-        parent: root.clone(),
-    };
+    let root_owner = ScenePlacementParent::Entity(PrefabEntityTarget::source(root.clone()));
     let original = PrefabDocument::new(
-        [root.clone(), loose.clone()],
         [
-            SceneEntityRecord::new(root.clone()).with_children([existing.clone()]),
+            SceneEntityPlacement::root(root.clone()),
+            SceneEntityPlacement::root(loose.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(existing.clone()),
+                ScenePlacement::last(root_owner.clone()),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(root.clone()),
             SceneEntityRecord::new(existing.clone()),
             SceneEntityRecord::new(loose.clone()),
         ],
@@ -169,16 +188,26 @@ fn prefab_authoring_session_applies_ordered_structure_and_roundtrips_history() {
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(added.clone()),
-            placement: ScenePlacement::after(root_owner.clone(), existing.clone()),
-        },
-        ScenePatchOperation::MoveEntity {
-            entity: loose.clone(),
-            from: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
-            to: ScenePlacement::after(root_owner.clone(), added.clone()),
         },
         ScenePatchOperation::RemoveEntity {
             entity: existing.clone(),
-            from: ScenePlacement::first(root_owner),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: vec![
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(loose.clone()),
+                    ScenePlacement::after(
+                        root_owner.clone(),
+                        PrefabEntityTarget::source(added.clone()),
+                    ),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(added.clone()),
+                    ScenePlacement::first(root_owner),
+                ),
+            ],
         },
     ]);
 
@@ -188,15 +217,21 @@ fn prefab_authoring_session_applies_ordered_structure_and_roundtrips_history() {
     assert!(report.inverse.as_ref().unwrap().operations.iter().any(
         |operation| matches!(operation, ScenePatchOperation::RestoreEntity { entity, .. } if entity.id == existing)
     ));
-    assert_eq!(session.document().roots, [root.clone()]);
     assert_eq!(
         session
             .document()
-            .entities
-            .iter()
-            .find(|entity| entity.id == root)
+            .local_hierarchy(Default::default())
             .unwrap()
-            .children,
+            .roots(),
+        [root.clone()]
+    );
+    assert_eq!(
+        session
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .children(&root)
+            .unwrap(),
         [added.clone(), loose.clone()]
     );
     assert!(
@@ -246,9 +281,17 @@ fn prefab_structural_cycle_rejects_without_publishing_partial_state() {
     let child = scene_id("child");
     let temporary = scene_id("temporary");
     let original = PrefabDocument::new(
-        [root.clone()],
         [
-            SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
+            SceneEntityPlacement::root(root.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child.clone()),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    root.clone(),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(root.clone()),
             SceneEntityRecord::new(child.clone()),
         ],
     );
@@ -259,13 +302,20 @@ fn prefab_structural_cycle_rejects_without_publishing_partial_state() {
     let usage = session.history_usage();
     let patch = ScenePatchDocument::new([
         ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(temporary),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            entity: SceneEntityRecord::new(temporary.clone()),
         },
-        ScenePatchOperation::MoveEntity {
-            entity: root.clone(),
-            from: ScenePlacement::first(ScenePlacementOwner::Root),
-            to: ScenePlacement::last(ScenePlacementOwner::Parent { parent: child }),
+        ScenePatchOperation::SetPlacements {
+            expected: original.placements.clone(),
+            value: vec![
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(root.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        child,
+                    ))),
+                ),
+                original.placements[1].clone(),
+                SceneEntityPlacement::root(temporary),
+            ],
         },
     ]);
 
@@ -276,7 +326,7 @@ fn prefab_structural_cycle_rejects_without_publishing_partial_state() {
         report
             .diagnostics
             .iter()
-            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-placement-cycle" })
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-local-layout-invalid" })
     );
     assert_eq!(session.document(), &original);
     assert_eq!(session.revision(), revision);
@@ -500,11 +550,16 @@ fn oversized_history_records_reject_before_document_publication() {
         &ScenePatchDocument::new([
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(scene_id("first")),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
             },
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(scene_id("second")),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: vec![],
+                value: vec![
+                    SceneEntityPlacement::root(scene_id("first")),
+                    SceneEntityPlacement::root(scene_id("second")),
+                ],
             },
         ]),
         &registry,
@@ -521,9 +576,18 @@ fn oversized_history_records_reject_before_document_publication() {
         scene_id("child-c"),
     ];
     let subtree = SceneDocument::new(
-        [root.clone()],
+        std::iter::once(SceneEntityPlacement::root(root.clone())).chain(children.iter().map(
+            |child| {
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                )
+            },
+        )),
         [
-            SceneEntityRecord::new(root.clone()).with_children(children.clone()),
+            SceneEntityRecord::new(root.clone()),
             SceneEntityRecord::new(children[0].clone()),
             SceneEntityRecord::new(children[1].clone()),
             SceneEntityRecord::new(children[2].clone()),
@@ -536,10 +600,15 @@ fn oversized_history_records_reject_before_document_publication() {
     let before_revision = structural.revision();
 
     let report = structural.apply_patch(
-        &ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-            entity: root,
-            from: ScenePlacement::first(ScenePlacementOwner::Root),
-        }]),
+        &ScenePatchDocument::new(
+            std::iter::once(root)
+                .chain(children)
+                .map(|entity| ScenePatchOperation::RemoveEntity { entity })
+                .chain([ScenePatchOperation::SetPlacements {
+                    expected: before_document.placements.clone(),
+                    value: vec![],
+                }]),
+        ),
         &registry,
     );
 
@@ -560,22 +629,33 @@ fn authoring_session_undo_redo_preserve_exact_root_order() {
         SceneEntityRecord::new(middle.clone()),
         SceneEntityRecord::new(last.clone()),
     ]);
-    let patch = ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
-        entity: last.clone(),
-        from: ScenePlacement::after(ScenePlacementOwner::Root, middle.clone()),
-        to: ScenePlacement::first(ScenePlacementOwner::Root),
-    }]);
+    let patch = ScenePatchDocument::set_placement(
+        &original.placements,
+        PrefabEntityTarget::source(last.clone()),
+        ScenePlacement::first(ScenePlacementParent::Root),
+    );
     let mut session = SceneAuthoringSession::new(original.clone());
 
     assert!(session.apply_patch(&patch, &registry).applied);
     assert_eq!(
-        session.document().roots,
+        session
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
         [last.clone(), first.clone(), middle.clone()]
     );
     assert!(session.undo(&registry).applied);
     assert_eq!(session.document(), &original);
     assert!(session.redo(&registry).applied);
-    assert_eq!(session.document().roots, [last, first, middle]);
+    assert_eq!(
+        session
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [last, first, middle]
+    );
 }
 
 #[test]

@@ -20,10 +20,10 @@ use nara_reflect::{
 use nara_scene::{
     PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument,
     PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
-    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent, PrefabReferenceArguments,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    SourceDocumentKey, SourceDocumentKind,
+    PrefabInstanceClaim, PrefabInstanceHop, PrefabOverlay, PrefabPropertyClaim,
+    PrefabPropertyIntent, PrefabReferenceArguments, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
+    ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
 };
 
 const UNKNOWN: &str = "unavailable.enemy.Opaque";
@@ -81,7 +81,6 @@ fn deep_target(name: &str) -> PrefabEntityTarget {
 
 fn instance(name: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
-        source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
         arguments: Some(PrefabReferenceArguments {
             base: key(name),
             values: [
@@ -96,6 +95,7 @@ fn instance(name: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
             .into(),
         }),
         overrides: overlay,
+        ..PrefabInstance::forest(AssetRef::path(format!("{name}.prefab.json")).unwrap())
     }
 }
 
@@ -337,17 +337,18 @@ fn fixture(next: bool) -> SceneDocument {
             record(next, 16, 16000, 1),
         ),
     ];
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Entity(deep_target("parent")),
-        slot: PrefabPlacementSlot::Before(target("dormant")),
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added")),
+        ScenePlacement::before(
+            ScenePlacementParent::Entity(deep_target("parent")),
+            target("dormant"),
+        ),
+    ));
     // The command must visit declarations that are hidden by this suppression.
     overlay.suppressions.push(target("dormant"));
     overlay.suppressions.push(target("dormant-set"));
 
     let mut direct = SceneEntityRecord::new(id("direct"))
-        .with_children([id("child")])
         .with_component(component(), record(next, 105, 105000, 10))
         .with_component(ComponentTypeId::new(UNKNOWN), unknown_record());
     direct.prefab = Some(instance("base", Some(overlay.clone())));
@@ -355,13 +356,23 @@ fn fixture(next: bool) -> SceneDocument {
     repeated.prefab = Some(instance("base", Some(overlay)));
     // Explicitly different ownership is not this project's EnemyStats, despite its type ID.
     let child = SceneEntityRecord::new(id("child")).with_component(component(), unknown_record());
-    SceneDocument::new([id("repeated"), id("direct")], [direct, child, repeated])
+    SceneDocument::new(
+        [
+            SceneEntityPlacement::root(id("repeated")),
+            SceneEntityPlacement::root(id("direct")),
+            SceneEntityPlacement::new(
+                target("child"),
+                ScenePlacement::last(ScenePlacementParent::Entity(target("direct"))),
+            ),
+        ],
+        [direct, child, repeated],
+    )
 }
 
 fn prefab(scene: &SceneDocument) -> PrefabDocument {
     PrefabDocument {
         inputs: [input("opaque-input"), input("unused-parameter")].into(),
-        roots: scene.roots.clone(),
+        placements: scene.placements.clone(),
         entities: scene.entities.clone(),
     }
 }
@@ -589,9 +600,9 @@ fn real_json_and_ron_wire_fixtures_preserve_unknown_declarations_through_the_pro
 fn the_plan_preserves_noncanonical_storage_order_instead_of_rebuilding_topology() {
     let mut source = fixture(false);
     let mut expected = fixture(true);
-    source.roots.reverse();
+    source.placements.reverse();
     source.entities.reverse();
-    expected.roots.reverse();
+    expected.placements.reverse();
     expected.entities.reverse();
     assert_eq!(plan_scene(&source).unwrap().into_document(), expected);
     assert_eq!(

@@ -1,7 +1,7 @@
 //! Classification reuse for the source owner's complete forward conversion.
 //!
-//! The closed transaction preserves every existing direct record and every other declaration.
-//! Its new records are complete compiler output: localization only changes typed entity IDs.
+//! The closed transaction preserves untouched direct records and every other declaration.
+//! Changed records are the merged anchor or explicit reference localization.
 //! Reuse those prior admissions instead of reinterpreting unchanged values and defaults.
 
 use nara_reflect::ComponentValueKind;
@@ -29,14 +29,45 @@ pub(super) fn classify_conversion_document(
             "Conversion requires its exact source-owned forward transaction",
         ));
     };
+    if patch
+        .operations
+        .iter()
+        .skip(1)
+        .any(|operation| matches!(operation, ScenePatchOperation::SetPrefabInstance { .. }))
+    {
+        // A changed external declaration needs its complete nested inventory. Reuse the
+        // ordinary source classifier, including dormant claims and hidden defaults.
+        return super::reclassification::classify_with_admission(
+            document,
+            state,
+            &state.schema_basis(),
+            &mut |phase, bytes| work.reserve(phase, bytes),
+        );
+    }
     work.reserve("classification-snapshot", state.checked_retained_bytes())?;
     work::copying("classification-snapshot");
     let mut next = state.clone();
-    next.record_facts.retain(|fact| {
-        !matches!(
-            &fact.location,
-            AuthoringRecordLocation::OverlayComponent { anchor: owner, .. } if owner == anchor
-        )
+    let changed = patch
+        .operations
+        .iter()
+        .filter_map(|operation| match operation {
+            ScenePatchOperation::AddComponent {
+                entity, component, ..
+            }
+            | ScenePatchOperation::ReplaceComponent {
+                entity, component, ..
+            }
+            | ScenePatchOperation::RemoveComponent { entity, component } => {
+                Some((entity, component))
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    next.record_facts.retain(|fact| match &fact.location {
+        AuthoringRecordLocation::OverlayComponent { anchor: owner, .. } => owner != anchor,
+        AuthoringRecordLocation::EntityComponent { entity } => {
+            !changed.contains(&(entity, &fact.component))
+        }
     });
     next.overlay_asset_references.remove(anchor);
     next.unavailable_manifest.overlays.remove(anchor);
@@ -49,8 +80,16 @@ pub(super) fn classify_conversion_document(
     });
 
     // This is the existing placement owner, with its actual borrowed clone cost admitted first.
-    work.reserve("placement-index", placement_index_bytes(document))?;
-    let placements = crate::patch::authoring_entity_placements(&document.roots, &document.entities);
+    work.reserve(
+        "placement-index",
+        super::reclassification::placement_index_bytes(document),
+    )?;
+    let placements = crate::patch::authoring_entity_placements(&document.placements);
+    work.reserve(
+        "source-placements",
+        retention::source_placements_bytes(&document.placements),
+    )?;
+    next.unavailable_manifest.source_placements = document.placements.clone();
     for entry in &mut next.unavailable_manifest.entries {
         let (entity, placement) = match entry {
             UnavailableRecordManifestEntry::Record(record) => match &record.location {
@@ -113,13 +152,37 @@ pub(super) fn classify_conversion_document(
             .map_err(publication_report)?;
     }
     for operation in patch.operations.iter().skip(1) {
-        let ScenePatchOperation::AddEntity { entity, .. } = operation else {
-            return Err(structure::authoring_structure_rejection(
-                "Conversion can classify only its complete added local records",
-            ));
-        };
-        for (component, record) in &entity.components {
-            classify_materialized_record(&entity.id, component, record, &mut context, work)?;
+        match operation {
+            ScenePatchOperation::AddEntity { entity } => {
+                for (component, record) in &entity.components {
+                    classify_materialized_record(
+                        &entity.id,
+                        component,
+                        record,
+                        &mut context,
+                        work,
+                    )?;
+                }
+            }
+            ScenePatchOperation::AddComponent {
+                entity,
+                component,
+                value,
+            }
+            | ScenePatchOperation::ReplaceComponent {
+                entity,
+                component,
+                value,
+            } => {
+                classify_materialized_record(entity, component, value, &mut context, work)?;
+            }
+            ScenePatchOperation::SetPlacements { .. }
+            | ScenePatchOperation::RemoveComponent { .. } => {}
+            _ => {
+                return Err(structure::authoring_structure_rejection(
+                    "Conversion can classify only its complete localized source transaction",
+                ));
+            }
         }
     }
     if !context.record_facts.is_empty() {
@@ -133,15 +196,26 @@ pub(super) fn classify_conversion_document(
         next.record_facts.reserve_exact(context.record_facts.len());
         next.record_facts.extend(context.record_facts);
     }
-    // Stable ordering preserves direct-component and nested declaration order within each owner.
+    // Direct components follow the source map, before its unchanged nested declarations.
     work.reserve(
         "classification-fact-order",
         next.record_facts
             .len()
             .checked_mul(size_of::<AuthoringRecordFact>()),
     )?;
-    next.record_facts
-        .sort_by(|left, right| fact_owner(left).cmp(fact_owner(right)));
+    next.record_facts.sort_by(|left, right| {
+        fact_owner(left).cmp(fact_owner(right)).then_with(|| {
+            match (&left.location, &right.location) {
+                (
+                    AuthoringRecordLocation::EntityComponent { .. },
+                    AuthoringRecordLocation::EntityComponent { .. },
+                ) => left.component.cmp(&right.component),
+                (AuthoringRecordLocation::EntityComponent { .. }, _) => std::cmp::Ordering::Less,
+                (_, AuthoringRecordLocation::EntityComponent { .. }) => std::cmp::Ordering::Greater,
+                _ => std::cmp::Ordering::Equal,
+            }
+        })
+    });
     next.direct_record_facts.clear();
     for (index, fact) in next.record_facts.iter().enumerate() {
         if let AuthoringRecordLocation::EntityComponent { entity } = &fact.location {
@@ -230,10 +304,23 @@ fn classify_materialized_record(
         ));
     }
     let schema = &entry.schema;
+    let effective = {
+        let mut admission = |phase, bytes| {
+            work.reserve(phase, bytes)
+                .map_err(|report| AuthoringDocumentPublicationError::new(report.diagnostics))
+        };
+        super::reclassification::effective_value(
+            schema,
+            record,
+            context.limits,
+            &mut Some(&mut admission),
+        )
+        .map_err(publication_report)?
+    };
     let limits = reference_traversal_limits(context.limits.component_materialization_limits());
     let plan = plan_declared_entity_references_with_admission::<(), _>(
         schema,
-        &record.value,
+        effective.as_ref(),
         limits,
         |_, _, bytes| work.reserve("classification-reference-plan", Some(bytes)),
     )
@@ -244,7 +331,7 @@ fn classify_materialized_record(
         ),
     })?;
     let mut missing = false;
-    plan.visit(&record.value, |_, reference| {
+    plan.visit(effective.as_ref(), |_, reference| {
         missing |= matches!(reference, EntityReference::SceneLocal { entity } if !context.namespace.contains(entity));
         Ok::<_, ()>(())
     }).map_err(|_| structure::authoring_structure_rejection(
@@ -264,7 +351,7 @@ fn classify_materialized_record(
         collect_declared_effective_asset_references_with_admission(
             schema,
             record.version,
-            &record.value,
+            effective.as_ref(),
             nara_reflect::EntityReferenceTraversalLimits::new(
                 limits.nodes(),
                 limits.bytes(),
@@ -314,38 +401,4 @@ fn classify_materialized_record(
         schema_declared_asset_references: references,
     });
     Ok(())
-}
-
-fn placement_index_bytes(document: &SceneDocument) -> Option<usize> {
-    let mut bytes = size_of::<BTreeMap<SceneEntityId, crate::ScenePlacement>>();
-    for (parent, siblings) in std::iter::once((None, document.roots.as_slice())).chain(
-        document
-            .entities
-            .iter()
-            .map(|entity| (Some(&entity.id), entity.children.as_slice())),
-    ) {
-        if let Some(parent) = parent {
-            bytes =
-                bytes.checked_add(crate::provenance::provenance_string_bytes(parent.as_str())?)?;
-        }
-        for (index, entity) in siblings.iter().enumerate() {
-            bytes = bytes
-                .checked_add(
-                    size_of::<SceneEntityId>()
-                        + size_of::<crate::ScenePlacement>()
-                        + 6 * size_of::<usize>(),
-                )?
-                .checked_add(crate::provenance::provenance_string_bytes(entity.as_str())?)?;
-            if let Some(parent) = parent {
-                bytes = bytes
-                    .checked_add(crate::provenance::provenance_string_bytes(parent.as_str())?)?;
-            }
-            if index > 0 {
-                bytes = bytes.checked_add(crate::provenance::provenance_string_bytes(
-                    siblings[index - 1].as_str(),
-                )?)?;
-            }
-        }
-    }
-    Some(bytes)
 }

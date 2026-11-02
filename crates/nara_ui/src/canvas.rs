@@ -502,7 +502,10 @@ pub enum UiAuthoringCanvasCompileError {
 
 #[cfg(test)]
 mod tests {
-    use nara_scene::{PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord};
+    use nara_scene::{
+        PrefabDocument, PrefabEntityTarget, SceneComponentRecord, SceneEntityId,
+        SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+    };
     use nara_ui_kernel::{
         UiColor, UiPoint, UiRect, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
     };
@@ -511,6 +514,15 @@ mod tests {
 
     fn id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).unwrap()
+    }
+
+    fn child_placement(entity: &SceneEntityId, parent: &SceneEntityId) -> SceneEntityPlacement {
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(entity.clone()),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                parent.clone(),
+            ))),
+        )
     }
 
     fn insert(
@@ -533,7 +545,7 @@ mod tests {
         let child_id = id("child");
         let root = insert(
             insert(
-                SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+                SceneEntityRecord::new(root_id.clone()),
                 UiAuthoringComponentKind::Root,
                 codec::encode_root(&crate::UiRoot::default()),
             ),
@@ -551,7 +563,13 @@ mod tests {
             UiAuthoringComponentKind::Visual,
             codec::encode_visual(&crate::UiVisual::solid(UiColor::rgba(0.2, 0.4, 0.8, 1.0))),
         );
-        let prefab = PrefabDocument::new([root_id.clone()], [root, child]);
+        let prefab = PrefabDocument::new(
+            [
+                SceneEntityPlacement::root(root_id.clone()),
+                child_placement(&child_id, &root_id),
+            ],
+            [root, child],
+        );
         let projection = crate::authoring_model::project_prefab_authoring(&prefab).unwrap();
         let logical_size = UiSize::new(320.0, 180.0).unwrap();
         let request = UiAuthoringCanvasCompileRequest::new(
@@ -775,7 +793,7 @@ mod tests {
                 )
             };
             let root = insert(
-                node("root", UiStyle::fill()).with_children([id("node"), id("button")]),
+                node("root", UiStyle::fill()),
                 UiAuthoringComponentKind::Root,
                 codec::encode_root(&crate::UiRoot::new(UiLayer::Base)),
             );
@@ -792,10 +810,16 @@ mod tests {
                     .unwrap(),
                 ),
             );
-            let projection = crate::authoring_model::project_prefab_authoring(
-                &PrefabDocument::new([id("root")], [root, child, button]),
-            )
-            .unwrap();
+            let projection =
+                crate::authoring_model::project_prefab_authoring(&PrefabDocument::new(
+                    [
+                        SceneEntityPlacement::root(id("root")),
+                        child_placement(&id("node"), &id("root")),
+                        child_placement(&id("button"), &id("root")),
+                    ],
+                    [root, child, button],
+                ))
+                .unwrap();
             let mut scratch = server.clone();
             let mut assets = ComponentDecodeContext::with_asset_server(&mut scratch);
             if let Some(database) = &database {

@@ -291,6 +291,16 @@ where
                 }
             }
         }
+        // Source-conversion queries share this discovery round. No stale value or query may
+        // reject before another witnessed reference opens a scope and requires recomposition.
+        for query in self.root.reference_queries {
+            if matches!(
+                self.reference_target(0, query)?,
+                ReferenceResolution::Entered
+            ) {
+                return Ok(false);
+            }
+        }
         for (node, components) in programs {
             for (component, programs) in components {
                 for (path, origin) in programs.value.origins.iter_mut().chain(

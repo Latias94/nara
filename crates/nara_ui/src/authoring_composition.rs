@@ -8,8 +8,8 @@ use std::{
 use nara_asset::AssetRef;
 use nara_reflect::{ComponentTypeId, ComponentValue};
 use nara_scene::{
-    SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePlacement, ScenePlacementAnchor,
-    ScenePlacementOwner,
+    PrefabEntityOrigin, PrefabEntityTarget, SceneComponentRecord, SceneEntityId, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };
 use nara_ui_kernel::{
     UiActionId, UiAlign, UiBrush, UiColor, UiColorRole, UiDimension, UiEdges, UiFlexDirection,
@@ -429,9 +429,8 @@ impl UiAuthoringProjection {
             if excluded.contains(parent.entity()) {
                 continue;
             }
-            let owner = ScenePlacementOwner::Parent {
-                parent: parent.entity().clone(),
-            };
+            let placement_parent =
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(parent.entity().clone()));
             let source = self
                 .source_node(parent.entity())
                 .ok_or(UiStructureRejection::ParentNotProjected)?;
@@ -440,7 +439,7 @@ impl UiAuthoringProjection {
                 &mut resolved,
                 moving,
                 parent.entity(),
-                ScenePlacement::first(owner.clone()),
+                ScenePlacement::first(placement_parent.clone()),
                 current.as_ref(),
             );
             for sibling in source.children.iter().filter(|sibling| {
@@ -454,7 +453,10 @@ impl UiAuthoringProjection {
                     &mut resolved,
                     moving,
                     parent.entity(),
-                    ScenePlacement::before(owner.clone(), sibling.clone()),
+                    ScenePlacement::before(
+                        placement_parent.clone(),
+                        PrefabEntityTarget::source(sibling.clone()),
+                    ),
                     current.as_ref(),
                 );
                 self.push_placement_candidate(
@@ -462,7 +464,10 @@ impl UiAuthoringProjection {
                     &mut resolved,
                     moving,
                     parent.entity(),
-                    ScenePlacement::after(owner.clone(), sibling.clone()),
+                    ScenePlacement::after(
+                        placement_parent.clone(),
+                        PrefabEntityTarget::source(sibling.clone()),
+                    ),
                     current.as_ref(),
                 );
             }
@@ -471,7 +476,7 @@ impl UiAuthoringProjection {
                 &mut resolved,
                 moving,
                 parent.entity(),
-                ScenePlacement::last(owner),
+                ScenePlacement::last(placement_parent),
                 current.as_ref(),
             );
         }
@@ -584,9 +589,11 @@ impl UiAuthoringProjection {
         moving: Option<&SceneEntityId>,
         placement: &ScenePlacement,
     ) -> Result<ResolvedPlacement, UiStructureRejection> {
-        let ScenePlacementOwner::Parent { parent } = &placement.owner else {
+        let ScenePlacementParent::Entity(parent) = &placement.parent else {
             return Err(UiStructureRejection::InvalidPlacementOwner);
         };
+        let parent =
+            direct_source_entity(parent).ok_or(UiStructureRejection::InvalidPlacementOwner)?;
         let parent_source = self
             .source_node(parent)
             .filter(|source| source.projected)
@@ -603,10 +610,12 @@ impl UiAuthoringProjection {
             .filter(|candidate| moving != Some(*candidate))
             .cloned()
             .collect::<Vec<_>>();
-        let index = match &placement.anchor {
-            ScenePlacementAnchor::First => 0,
-            ScenePlacementAnchor::Last => siblings.len(),
-            ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
+        let index = match &placement.slot {
+            ScenePlacementSlot::First => 0,
+            ScenePlacementSlot::Last => siblings.len(),
+            ScenePlacementSlot::Before(sibling) | ScenePlacementSlot::After(sibling) => {
+                let sibling = direct_source_entity(sibling)
+                    .ok_or(UiStructureRejection::InvalidSiblingAnchor)?;
                 if !self
                     .source_node(sibling)
                     .is_some_and(|source| source.projected)
@@ -617,7 +626,7 @@ impl UiAuthoringProjection {
                     .iter()
                     .position(|candidate| candidate == sibling)
                     .ok_or(UiStructureRejection::InvalidSiblingAnchor)?;
-                if matches!(&placement.anchor, ScenePlacementAnchor::Before { .. }) {
+                if matches!(&placement.slot, ScenePlacementSlot::Before(_)) {
                     anchor_index
                 } else {
                     anchor_index.saturating_add(1)
@@ -669,6 +678,13 @@ impl From<UiAuthoringStructuralReadOnlyReason> for UiStructureRejection {
 struct ResolvedPlacement {
     parent: SceneEntityId,
     insertion_index: usize,
+}
+
+fn direct_source_entity(target: &PrefabEntityTarget) -> Option<&SceneEntityId> {
+    match &target.entity {
+        PrefabEntityOrigin::SourceEntity(entity) if target.through.is_empty() => Some(entity),
+        _ => None,
+    }
 }
 
 fn current_resolved_placement(
@@ -1083,7 +1099,7 @@ fn ascii_suffix(value: &str, maximum: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use nara_reflect::ComponentSchemaVersion;
-    use nara_scene::{PrefabDocument, SceneEntityRecord};
+    use nara_scene::{PrefabDocument, SceneEntityPlacement, SceneEntityRecord};
     use nara_ui_kernel::UiLayer;
 
     use super::*;
@@ -1101,23 +1117,17 @@ mod tests {
         .unwrap()
     }
 
-    fn entity_from_recipe(
-        entity: SceneEntityId,
-        children: impl IntoIterator<Item = SceneEntityId>,
-    ) -> SceneEntityRecord {
+    fn entity_from_recipe(entity: SceneEntityId) -> SceneEntityRecord {
         let recipe = build_recipe(&UiCreateParameters::Container, None).unwrap();
-        let mut record = SceneEntityRecord::new(entity).with_children(children);
+        let mut record = SceneEntityRecord::new(entity);
         for (component, value) in recipe.components().iter() {
             record = record.with_component(component.clone(), value.clone());
         }
         record
     }
 
-    fn root_entity(
-        entity: SceneEntityId,
-        children: impl IntoIterator<Item = SceneEntityId>,
-    ) -> SceneEntityRecord {
-        let record = entity_from_recipe(entity, children);
+    fn root_entity(entity: SceneEntityId) -> SceneEntityRecord {
+        let record = entity_from_recipe(entity);
         let root = UiRoot::new(UiLayer::Base);
         record.with_component(
             UiAuthoringComponentKind::Root.component_type(),
@@ -1125,6 +1135,15 @@ mod tests {
                 ComponentSchemaVersion::ONE,
                 codec::encode_root(&root).unwrap(),
             ),
+        )
+    }
+
+    fn child_placement(entity: &SceneEntityId, parent: &SceneEntityId) -> SceneEntityPlacement {
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(entity.clone()),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                parent.clone(),
+            ))),
         )
     }
 
@@ -1286,13 +1305,19 @@ mod tests {
         let moving = id("moving");
         let descendant = id("moving/descendant");
         let prefab = PrefabDocument::new(
-            [root.clone()],
             [
-                root_entity(root.clone(), [container.clone()]),
-                entity_from_recipe(container.clone(), [before.clone(), moving.clone()]),
-                entity_from_recipe(before.clone(), []),
-                entity_from_recipe(moving.clone(), [descendant.clone()]),
-                entity_from_recipe(descendant.clone(), []),
+                SceneEntityPlacement::root(root.clone()),
+                child_placement(&container, &root),
+                child_placement(&before, &container),
+                child_placement(&moving, &container),
+                child_placement(&descendant, &moving),
+            ],
+            [
+                root_entity(root.clone()),
+                entity_from_recipe(container.clone()),
+                entity_from_recipe(before.clone()),
+                entity_from_recipe(moving.clone()),
+                entity_from_recipe(descendant.clone()),
             ],
         );
         let projection = crate::authoring_model::project_prefab_authoring(&prefab).unwrap();
@@ -1314,8 +1339,9 @@ mod tests {
         assert!(candidates.iter().any(|candidate| {
             candidate.parent() == &container
                 && matches!(
-                    &candidate.placement().anchor,
-                    ScenePlacementAnchor::After { sibling } if sibling == &before
+                    &candidate.placement().slot,
+                    ScenePlacementSlot::After(sibling)
+                        if sibling == &PrefabEntityTarget::source(before.clone())
                 )
                 && candidate.is_current()
         }));
@@ -1336,9 +1362,9 @@ mod tests {
                 .prepare_structure(
                     &UiStructureIntent::Move {
                         target: moving.clone(),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                            parent: container.clone(),
-                        }),
+                        placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(container.clone()),
+                        )),
                     },
                     None,
                 )
@@ -1350,14 +1376,78 @@ mod tests {
                 &UiStructureIntent::Create {
                     parameters: UiCreateParameters::Container,
                     placement: ScenePlacement::after(
-                        ScenePlacementOwner::Parent { parent: container },
-                        id("missing-anchor"),
+                        ScenePlacementParent::Entity(PrefabEntityTarget::source(container)),
+                        PrefabEntityTarget::source(id("missing-anchor")),
                     ),
                 },
                 None,
             ),
             Err(UiStructureRejection::InvalidSiblingAnchor)
         );
+    }
+
+    #[test]
+    fn source_local_placement_choices_refuse_routes_and_addition_origins() {
+        let root = id("root");
+        let child = id("child");
+        let prefab = PrefabDocument::new(
+            [
+                SceneEntityPlacement::root(root.clone()),
+                child_placement(&child, &root),
+            ],
+            [root_entity(root.clone()), entity_from_recipe(child.clone())],
+        );
+        let projection = crate::authoring_model::project_prefab_authoring(&prefab).unwrap();
+        let base = nara_scene::SourceDocumentKey::named(
+            "f9ab807a-c61e-4c92-bfee-b6fa153b8efc".parse().unwrap(),
+            "ui.nested",
+            nara_scene::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let through = vec![nara_scene::PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(root.clone()),
+            expected_base: base,
+        }];
+        for (parent, sibling) in [
+            (
+                PrefabEntityTarget::addition(root.clone()),
+                PrefabEntityTarget::addition(child.clone()),
+            ),
+            (
+                PrefabEntityTarget {
+                    through: through.clone(),
+                    entity: PrefabEntityOrigin::SourceEntity(root.clone()),
+                },
+                PrefabEntityTarget {
+                    through,
+                    entity: PrefabEntityOrigin::SourceEntity(child.clone()),
+                },
+            ),
+        ] {
+            assert_eq!(
+                projection.prepare_structure(
+                    &UiStructureIntent::Create {
+                        parameters: UiCreateParameters::Container,
+                        placement: ScenePlacement::last(ScenePlacementParent::Entity(parent)),
+                    },
+                    None,
+                ),
+                Err(UiStructureRejection::InvalidPlacementOwner),
+            );
+            assert_eq!(
+                projection.prepare_structure(
+                    &UiStructureIntent::Create {
+                        parameters: UiCreateParameters::Container,
+                        placement: ScenePlacement::after(
+                            ScenePlacementParent::Entity(PrefabEntityTarget::source(root.clone())),
+                            sibling,
+                        ),
+                    },
+                    None,
+                ),
+                Err(UiStructureRejection::InvalidSiblingAnchor),
+            );
+        }
     }
 
     #[test]
@@ -1369,13 +1459,19 @@ mod tests {
         let nested_root = id("nested-root");
         let hidden_record = SceneEntityRecord::new(hidden.clone());
         let prefab = PrefabDocument::new(
-            [root.clone()],
             [
-                root_entity(root, [omitted_owner.clone(), nested_owner.clone()]),
-                entity_from_recipe(omitted_owner.clone(), [hidden.clone()]),
+                SceneEntityPlacement::root(root.clone()),
+                child_placement(&omitted_owner, &root),
+                child_placement(&nested_owner, &root),
+                child_placement(&hidden, &omitted_owner),
+                child_placement(&nested_root, &nested_owner),
+            ],
+            [
+                root_entity(root),
+                entity_from_recipe(omitted_owner.clone()),
                 hidden_record,
-                entity_from_recipe(nested_owner.clone(), [nested_root.clone()]),
-                root_entity(nested_root, []),
+                entity_from_recipe(nested_owner.clone()),
+                root_entity(nested_root),
             ],
         );
         let projection = crate::authoring_model::project_prefab_authoring(&prefab).unwrap();

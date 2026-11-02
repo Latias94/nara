@@ -107,7 +107,6 @@ pub(super) fn project_reference_bindings(
 }
 
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
-const VALUE_NODE_RETAINED_BYTES: usize = 32;
 const AUTHORING_RECORD_RETAINED_OVERHEAD: usize = 64;
 const DEGRADED_ISSUE_RETAINED_BYTES: usize = 128;
 
@@ -2002,76 +2001,16 @@ trait AuthoringDocumentMetrics {
 
 impl AuthoringDocumentMetrics for SceneDocument {
     fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        document_retained_bytes(size_of::<Self>(), &self.roots, &self.entities)
+        crate::scene_retention::scene_retained_bytes(self)
+            .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
     }
 }
 
 impl AuthoringDocumentMetrics for PrefabDocument {
     fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        checked_sum([
-            document_retained_bytes(size_of::<Self>(), &self.roots, &self.entities)?,
-            crate::scene_retention::reference_inputs_retained_bytes(&self.inputs)
-                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-        ])
+        crate::scene_retention::prefab_retained_bytes(self)
+            .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
     }
-}
-
-fn document_retained_bytes(
-    base: usize,
-    roots: &[nara_scene::SceneEntityId],
-    entities: &[SceneEntityRecord],
-) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    let mut total = checked_sum([
-        base,
-        checked_product(roots.len(), size_of::<nara_scene::SceneEntityId>())?,
-        checked_product(entities.len(), size_of::<SceneEntityRecord>())?,
-    ])?;
-    for root in roots {
-        checked_add_to(&mut total, root.as_str().len())?;
-    }
-    for entity in entities {
-        checked_add_to(&mut total, entity_retained_bytes(entity)?)?;
-    }
-    Ok(total)
-}
-
-fn entity_retained_bytes(
-    entity: &SceneEntityRecord,
-) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    let mut total = checked_sum([
-        entity.id.as_str().len(),
-        checked_product(
-            entity.children.len(),
-            size_of::<nara_scene::SceneEntityId>(),
-        )?,
-        checked_product(
-            entity.components.len(),
-            size_of::<nara_scene::SceneComponentRecord>(),
-        )?,
-    ])?;
-    for child in &entity.children {
-        checked_add_to(&mut total, child.as_str().len())?;
-    }
-    for (component, record) in &entity.components {
-        let cost = record.value.cost();
-        checked_add_to(
-            &mut total,
-            checked_sum([
-                component.as_str().len(),
-                record.owner().map_or(0, |owner| owner.as_str().len()),
-                cost.logical_bytes(),
-                checked_product(cost.nodes(), VALUE_NODE_RETAINED_BYTES)?,
-                crate::scene_retention::contextual_defaults_retained_bytes(
-                    &record.contextual_defaults,
-                )
-                .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-            ])?,
-        )?;
-    }
-    if let Some(prefab) = &entity.prefab {
-        checked_add_to(&mut total, prefab_instance_retained_bytes(prefab)?)?;
-    }
-    Ok(total)
 }
 
 fn prefab_instance_retained_bytes(

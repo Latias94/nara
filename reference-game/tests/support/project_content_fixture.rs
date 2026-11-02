@@ -25,7 +25,8 @@ use nara::{
     scene::{
         PrefabComponentIntent, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
         PrefabPropertyClaim, PrefabPropertyIntent, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+        SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+        SourceDocumentKey, SourceDocumentKind,
     },
 };
 use nara_reference_game::{
@@ -242,7 +243,6 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let second_anchor = enemy_anchor("enemy-anchor-2", Some((9.0, 5)), registry);
     let third_anchor = enemy_anchor("enemy-anchor-3", Some((13.0, 9)), registry);
     let player = SceneEntityRecord::new(scene_id("player"))
-        .with_children([scene_id("player-weapon")])
         .with_component(
             sprite_id.clone(),
             SceneComponentRecord::new(
@@ -299,16 +299,23 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
     let mut ui = SceneEntityRecord::new(scene_id("reference-ui"));
     ui.prefab = Some(PrefabInstance {
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
+        binding: nara::scene::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: None,
     });
     SceneDocument::new(
         [
-            scene_id("enemy-anchor"),
-            scene_id("enemy-anchor-2"),
-            scene_id("enemy-anchor-3"),
-            scene_id("player"),
-            scene_id("reference-ui"),
+            SceneEntityPlacement::root(scene_id("enemy-anchor")),
+            SceneEntityPlacement::root(scene_id("enemy-anchor-2")),
+            SceneEntityPlacement::root(scene_id("enemy-anchor-3")),
+            SceneEntityPlacement::root(scene_id("player")),
+            SceneEntityPlacement::root(scene_id("reference-ui")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(scene_id("player-weapon")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    scene_id("player"),
+                ))),
+            ),
         ],
         [anchor, second_anchor, third_anchor, player, weapon, ui],
     )
@@ -354,6 +361,7 @@ fn enemy_anchor(
     );
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("enemy.prefab.json").unwrap(),
+        binding: nara::scene::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides,
     });

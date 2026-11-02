@@ -95,12 +95,15 @@ fn fresh_custom_project_check_builds_before_strict_admission_and_does_not_start_
         serde_json::from_slice(&fs::read(project.join("scenes/startup.scene.json")).unwrap())
             .unwrap();
     scene["payload"]["entities"].as_array_mut().unwrap().push(serde_json::json!({
-        "id":"pulse", "children":[], "components":{"studio.pulse.Pulse":{"version":1,"value":{"type":"map","value":{"value":{"type":"i64","value":41}}}}}
+        "id":"pulse", "components":{"studio.pulse.Pulse":{"version":1,"value":{"type":"map","value":{"value":{"type":"i64","value":41}}}}}
     }));
-    scene["payload"]["roots"]
+    scene["payload"]["placements"]
         .as_array_mut()
         .unwrap()
-        .push(serde_json::json!("pulse"));
+        .push(serde_json::json!({
+            "target":{"entity":{"kind":"source_entity","entity":"pulse"}},
+            "placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}
+        }));
     install_caption_source(&project, &mut scene);
     fs::write(
         project.join("scenes/startup.scene.json"),
@@ -574,14 +577,17 @@ fn install_caption_source(project: &Path, scene: &mut serde_json::Value) {
         .as_array_mut()
         .unwrap()
         .push(serde_json::json!({
-            "id":"caption", "children":[], "components":{"studio.caption.Caption":{
+            "id":"caption", "components":{"studio.caption.Caption":{
                 "version":1, "value":caption.__encode_persistent_component().unwrap()
             }}
         }));
-    scene["payload"]["roots"]
+    scene["payload"]["placements"]
         .as_array_mut()
         .unwrap()
-        .push(serde_json::json!("caption"));
+        .push(serde_json::json!({
+            "target":{"entity":{"kind":"source_entity","entity":"caption"}},
+            "placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}
+        }));
 }
 
 fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
@@ -635,11 +641,9 @@ fn install_declared_second_scene(project: &Path) -> nara::scene::SceneDocument {
         ComponentTypeId::new("nara.transform.Transform2d"),
         identity_transform_record(),
     );
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::path("second.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("second.prefab.json").unwrap(),
+    ));
     let scene = SceneDocument::from_ordered_roots([anchor]);
     fs::write(
         project.join("scenes/second.scene.json"),

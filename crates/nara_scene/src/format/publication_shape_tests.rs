@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ScenePlacement, ScenePlacementOwner};
+use crate::{SceneEntityPlacement, ScenePlacement, ScenePlacementParent};
 use nara_asset::AssetRef;
 use nara_core::SerdeShapeError;
 use nara_identity::{
@@ -40,13 +40,14 @@ fn borrowed_publication_shape_admits_each_retained_chunk_before_copying() {
     let mut scene = document(ComponentValue::String("x".repeat(4096)), false);
     scene.entities[0].prefab = Some(crate::PrefabInstance {
         source: AssetRef::path("base.prefab.json").unwrap(),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: Some(crate::PrefabOverlay::new(
             crate::tests::named_prefab_source_key("buffer-admission"),
         )),
     });
     scene.canonicalize();
-    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
     for maximum in [0, 128, 2048] {
         for prefab_kind in [false, true] {
             let mut retained = 0usize;
@@ -91,10 +92,10 @@ fn certified<T: SceneFilePayload>(payload: &T, limits: SceneFileLimits) -> bool 
     envelope
         .payload()
         .entity_document()
-        .is_some_and(|(roots, entities)| {
+        .is_some_and(|(placements, entities)| {
             publication_shape::certifies_entity_document(
                 &envelope,
-                roots,
+                placements,
                 entities,
                 envelope.payload().reference_inputs(),
                 limits.shape(),
@@ -118,7 +119,7 @@ fn json_format_error_accessors_expose_only_safe_parser_facts() {
         nara_core::ByteLimit::new(64).unwrap(),
     ));
     let shaped = SceneDocumentCandidate::decode_json_bytes_with_limits(
-        br#"{"kind":"scene","format_version":2,"engine_min_version":"0.1.0","generator":{"name":"test","version":"0.1.0"},"payload":{"roots":[],"entities":[],"private-document-sentinel":"xxxxxxxxx"}}"#,
+        br#"{"kind":"scene","format_version":2,"engine_min_version":"0.1.0","generator":{"name":"test","version":"0.1.0"},"payload":{"placements":[],"entities":[],"private-document-sentinel":"xxxxxxxxx"}}"#,
         limits,
     ).unwrap_err();
     assert!(!shaped.is_syntax_error());
@@ -171,7 +172,7 @@ fn publication_shape_certificate_matches_full_oracle_for_supported_wire_values()
     for value in values {
         for declared_owner in [false, true] {
             let scene = document(value.clone(), declared_owner);
-            let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
             assert!(certified(&scene, SceneFileLimits::default()), "{value:?}");
             assert!(certified(&prefab, SceneFileLimits::default()), "{value:?}");
             equivalent(&scene, SceneFileLimits::default());
@@ -192,7 +193,7 @@ fn publication_shape_certificate_preserves_each_shape_and_exact_encoding_boundar
         ]),
         true,
     );
-    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
     shape_boundaries(&scene);
     shape_boundaries(&prefab);
 }
@@ -227,7 +228,7 @@ fn publication_shape_certificate_proves_reference_forms_against_the_complete_ora
     ] {
         for declared_owner in [false, true] {
             let scene = document(value.clone(), declared_owner);
-            let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
             assert!(certified(&scene, SceneFileLimits::default()), "{value:?}");
             assert!(certified(&prefab, SceneFileLimits::default()), "{value:?}");
             shape_boundaries(&scene);
@@ -285,13 +286,14 @@ fn inline_source_key_origins_defaults_and_arguments_match_the_complete_shape_ora
                 .insert(nara_reflect::ComponentFieldId::new("reference"), value);
             scene.entities[0].prefab = Some(PrefabInstance {
                 source: AssetRef::path("base.prefab.json").unwrap(),
+                binding: crate::PrefabInstanceBinding::Forest,
                 arguments: Some(crate::PrefabReferenceArguments {
                     base: key.clone(),
                     values: BTreeMap::from([(input.clone(), reference)]),
                 }),
                 overrides: None,
             });
-            let mut prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+            let mut prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
             prefab.inputs.insert(input.clone());
 
             assert!(certified(&scene, SceneFileLimits::default()));
@@ -359,10 +361,47 @@ fn shape_boundaries<T: SceneFilePayload>(payload: &T) {
 }
 
 #[test]
+fn desired_placement_routes_and_root_bindings_match_both_complete_shape_oracles() {
+    let base = crate::tests::named_prefab_source_key("placement-base");
+    let routed = crate::PrefabEntityTarget {
+        through: vec![crate::PrefabInstanceHop {
+            anchor: crate::PrefabEntityOrigin::SourceEntity(id("parent")),
+            expected_base: base.clone(),
+        }],
+        entity: crate::PrefabEntityOrigin::InstanceAddition(id("inherited")),
+    };
+    let mut scene = document(ComponentValue::Null, false);
+    scene.entities[0].prefab = Some(PrefabInstance {
+        source: AssetRef::path("source.prefab.json").unwrap(),
+        binding: crate::PrefabInstanceBinding::Root {
+            base,
+            root: id("specified-root"),
+        },
+        arguments: None,
+        overrides: None,
+    });
+    for slot in [
+        crate::ScenePlacementSlot::First,
+        crate::ScenePlacementSlot::Last,
+        crate::ScenePlacementSlot::Before(routed.clone()),
+        crate::ScenePlacementSlot::After(routed.clone()),
+    ] {
+        scene.placements[1].placement = ScenePlacement {
+            parent: ScenePlacementParent::Entity(routed.clone()),
+            slot,
+        };
+        assert!(certified(&scene, SceneFileLimits::default()));
+        equivalent(&scene, SceneFileLimits::default());
+    }
+    shape_boundaries(&scene);
+}
+
+#[test]
 fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_values() {
     let mut embedded = document(ComponentValue::Null, false);
     embedded.entities[0].prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: Some(crate::PrefabOverlay {
             components: vec![crate::PrefabComponentIntent::Properties {
@@ -383,7 +422,7 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
             ))
         }),
     });
-    let prefab = PrefabDocument::new(embedded.roots.clone(), embedded.entities.clone());
+    let prefab = PrefabDocument::new(embedded.placements.clone(), embedded.entities.clone());
     assert!(!certified(&embedded, SceneFileLimits::default()));
     assert!(!certified(&prefab, SceneFileLimits::default()));
     assert!(reference(&embedded, SceneFileLimits::default()).is_ok());
@@ -394,7 +433,6 @@ fn publication_shape_certificate_falls_back_without_rejecting_valid_unsupported_
     encoded_boundaries(&prefab);
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(id("new")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
     }]);
     assert!(!certified(&patch, SceneFileLimits::default()));
     assert!(reference(&patch, SceneFileLimits::default()).is_ok());
@@ -425,7 +463,7 @@ fn publication_shape_certificate_depth_cutoff_is_fallback_not_a_new_limit() {
             value = ComponentValue::List(vec![value]);
         }
         let scene = document(value, false);
-        let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+        let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
         let base = SceneFileLimits::default();
         let shape = base.shape();
         let limits = base.with_shape(SerdeShapeLimits::new(
@@ -481,10 +519,17 @@ fn document(value: ComponentValue, declared_owner: bool) -> SceneDocument {
     }
     // Deliberately unsorted records: the existing canonical envelope remains the encoding owner.
     SceneDocument {
-        roots: vec![id("parent")],
+        placements: vec![
+            SceneEntityPlacement::root(id("parent")),
+            SceneEntityPlacement::new(
+                crate::PrefabEntityTarget::source(id("child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(
+                    crate::PrefabEntityTarget::source(id("parent")),
+                )),
+            ),
+        ],
         entities: vec![
             SceneEntityRecord::new(id("parent"))
-                .with_children([id("child")])
                 .with_component(ComponentTypeId::new("test.Value"), record),
             SceneEntityRecord::new(id("child")),
         ],

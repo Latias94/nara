@@ -8,9 +8,9 @@ use super::{
     SceneAuthoringSession, creation::allocate_entity_id, history_error_report, property,
 };
 use crate::{
-    AuthoringSchemaBasis, PrefabDocument, SceneDocument, SceneEntityId, SceneEntityRecord,
-    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
-    ScenePlacement, ScenePlacementOwner,
+    AuthoringSchemaBasis, PrefabDocument, PrefabEntityTarget, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePatchApplyLimits, ScenePatchDocument,
+    ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementParent,
     authoring_decode::{
         AuthoringComponentTemplate, AuthoringDocumentState, MAX_AUTHORING_EDIT_OPERATIONS,
         MAX_AUTHORING_FIELD_LOGICAL_BYTES, MAX_AUTHORING_FIELD_VALUE_NODES,
@@ -123,6 +123,11 @@ impl AuthoringConstructionDraft {
         placement: impl Into<ConstructionPlacement>,
     ) -> Result<LocalConstructionEntity, ScenePatchReport> {
         self.admit_declaration()?;
+        if self.entities.is_empty()
+            && self.components.len() + self.writes.len() + 2 > MAX_AUTHORING_EDIT_OPERATIONS
+        {
+            return Err(rejected());
+        }
         let placement = placement.into();
         match &placement {
             ConstructionPlacement::Source(_) => {}
@@ -188,7 +193,10 @@ impl AuthoringConstructionDraft {
     }
 
     fn admit_declaration(&self) -> Result<(), ScenePatchReport> {
-        if self.entities.len() + self.components.len() + self.writes.len()
+        if self.entities.len()
+            + self.components.len()
+            + self.writes.len()
+            + usize::from(!self.entities.is_empty())
             >= MAX_AUTHORING_EDIT_OPERATIONS
         {
             return Err(rejected());
@@ -377,7 +385,7 @@ macro_rules! construction_session {
                 }
                 let (patch, entities) = lower(
                     draft,
-                    &self.document.roots,
+                    &self.document.placements,
                     &self.document.entities,
                     state,
                     self.history.limits,
@@ -419,7 +427,7 @@ construction_session!(
 
 fn lower(
     draft: &AuthoringConstructionDraft,
-    roots: &[SceneEntityId],
+    original_placements: &[SceneEntityPlacement],
     original: &[SceneEntityRecord],
     state: &AuthoringDocumentState,
     history_limits: SceneAuthoringHistoryLimits,
@@ -444,37 +452,52 @@ fn lower(
         entities.entities.push(entity);
     }
     let mut operations = Vec::new();
-    let mut placements = BTreeMap::<SceneEntityId, ScenePlacementOwner>::new();
+    let mut parents = BTreeMap::<SceneEntityId, ScenePlacementParent>::new();
+    let mut placements = original_placements.to_vec();
     for (index, placement) in draft.entities.iter().enumerate() {
         let placement = match placement {
             ConstructionPlacement::Source(placement) => placement.clone(),
-            ConstructionPlacement::ChildOf(parent) => {
-                ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: entities.resolve(parent)?,
-                })
-            }
+            ConstructionPlacement::ChildOf(parent) => ScenePlacement::last(
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(entities.resolve(parent)?)),
+            ),
             ConstructionPlacement::Before(sibling) | ConstructionPlacement::After(sibling) => {
                 let sibling = entities.resolve(sibling)?;
-                let owner = match placements.entry(sibling.clone()) {
+                let parent = match parents.entry(sibling.clone()) {
                     std::collections::btree_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::btree_map::Entry::Vacant(entry) => entry
                         .insert(
-                            crate::patch::placement_owner(roots, original, &sibling)
+                            original_placements
+                                .iter()
+                                .find(|entry| {
+                                    entry.target == PrefabEntityTarget::source(sibling.clone())
+                                })
+                                .map(|entry| entry.placement.parent.clone())
                                 .ok_or_else(rejected)?,
                         )
                         .clone(),
                 };
                 match placement {
-                    ConstructionPlacement::Before(_) => ScenePlacement::before(owner, sibling),
-                    _ => ScenePlacement::after(owner, sibling),
+                    ConstructionPlacement::Before(_) => {
+                        ScenePlacement::before(parent, PrefabEntityTarget::source(sibling))
+                    }
+                    _ => ScenePlacement::after(parent, PrefabEntityTarget::source(sibling)),
                 }
             }
         };
         let entity = entities.entities[index].clone();
-        placements.insert(entity.clone(), placement.owner.clone());
+        parents.insert(entity.clone(), placement.parent.clone());
+        placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(entity.clone()),
+            placement,
+        ));
         operations.push(ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(entity),
-            placement,
+        });
+    }
+    if !draft.entities.is_empty() {
+        operations.push(ScenePatchOperation::SetPlacements {
+            expected: original_placements.to_vec(),
+            value: placements,
         });
     }
     let mut templates = Vec::with_capacity(draft.components.len());

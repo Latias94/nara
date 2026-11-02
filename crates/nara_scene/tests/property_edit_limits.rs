@@ -284,7 +284,7 @@ fn prefab_property_edits_reuse_the_nominal_owner_and_existing_inverse() {
         AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
             .unwrap();
     let document = document();
-    let prefab = PrefabDocument::new(document.roots, document.entities);
+    let prefab = PrefabDocument::new(document.placements, document.entities);
     let mut session = PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -334,7 +334,7 @@ fn scene_and_prefab_range_rejections_retain_safe_root_diagnostics_without_map_ke
         AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
             .unwrap();
     let source = document();
-    let original = PrefabDocument::new(source.roots, source.entities);
+    let original = PrefabDocument::new(source.placements, source.entities);
     let prefab = PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_bytes(original.to_json_string().unwrap().as_bytes())
             .unwrap()

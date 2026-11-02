@@ -295,7 +295,7 @@ fn closed_prefab(
     nara_scene::ScenePatchReport,
 > {
     let source = padded_source(1024 * 1024);
-    let source = PrefabDocument::new(source.roots, source.entities);
+    let source = PrefabDocument::new(source.placements, source.entities);
     let candidate = PrefabDocumentCandidate::decode_json_bytes_with_limits(
         source.to_json_string().unwrap().as_bytes(),
         SceneFileLimits::default(),

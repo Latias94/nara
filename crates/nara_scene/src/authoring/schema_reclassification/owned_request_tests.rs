@@ -3,7 +3,7 @@ use crate::SchemaReclassificationKind::DeclarationExtension;
 use crate::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
     PrefabDocumentCandidate, SceneComponentRecord, SceneDocumentCandidate, SceneEntityId,
-    SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneEntityPlacement, SceneEntityRecord, ScenePatchOperation,
 };
 use nara_asset::AssetRef;
 use nara_reflect::{
@@ -92,7 +92,7 @@ fn scene(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> SceneAuthori
 }
 
 fn prefab(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> PrefabAuthoringSession {
-    let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
             .unwrap()
@@ -135,11 +135,18 @@ macro_rules! each_source {
     }};
 }
 
-fn add(name: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }])
+fn add(placements: &[SceneEntityPlacement], name: &str) -> ScenePatchDocument {
+    let mut value = placements.to_vec();
+    value.push(SceneEntityPlacement::root(id(name)));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id(name)),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value,
+        },
+    ])
 }
 
 // The debug value includes the complete private scope/footprint; addresses additionally prove
@@ -224,10 +231,18 @@ fn worker_preparation_shares_frozen_source_and_preserves_both_real_history_branc
     each_source!(&document(), &previous, |session, make, other, Candidate| {
         let initial = session.document().clone();
         let initial_content = session.content_state();
-        assert!(session.apply_authoring_patch(&add("first")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "first"))
+                .applied
+        );
         let first = session.document().clone();
         let first_content = session.content_state();
-        assert!(session.apply_authoring_patch(&add("second")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "second"))
+                .applied
+        );
         let second = session.document().clone();
         let second_content = session.content_state();
         assert!(session.undo_authoring().applied);
@@ -303,7 +318,11 @@ fn frozen_requests_survive_edit_reopen_undo_and_basis_changes_but_cannot_commit(
     let next = successor();
     for change in ["edit", "reopen", "undo", "basis"] {
         each_source!(&document(), &previous, |session, make, other, Candidate| {
-            assert!(session.apply_authoring_patch(&add("first")).applied);
+            assert!(
+                session
+                    .apply_authoring_patch(&add(&session.document().placements, "first"))
+                    .applied
+            );
             let frozen = source_snapshot!(session);
             let revision = session.revision();
             let mut work = SchemaReclassificationWork::default();
@@ -314,7 +333,11 @@ fn frozen_requests_survive_edit_reopen_undo_and_basis_changes_but_cannot_commit(
                 .capture_schema_reclassification(&next, &DeclarationExtension, &mut work, ticket)
                 .unwrap();
             match change {
-                "edit" => assert!(session.apply_authoring_patch(&add("later")).applied),
+                "edit" => assert!(
+                    session
+                        .apply_authoring_patch(&add(&session.document().placements, "later"))
+                        .applied
+                ),
                 "reopen" => {
                     let candidate =
                         Candidate::decode_json_str(&session.document().to_json_string().unwrap())
@@ -436,7 +459,11 @@ fn retained_tickets_and_owned_requests_require_their_original_allowance_source_a
         let ticket = session
             .retain_schema_reclassification_source(&mut work)
             .unwrap();
-        assert!(session.apply_authoring_patch(&add("new-revision")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "new-revision"))
+                .applied
+        );
         let current = source_snapshot!(session);
         let usage = work.usage();
         assert_rejected(
@@ -454,8 +481,16 @@ fn observed_capture_and_proof_budgets_refuse_before_history_copy_or_publication(
     let previous = previous();
     let next = successor();
     each_source!(&document(), &previous, |session, make, other, Candidate| {
-        assert!(session.apply_authoring_patch(&add("first")).applied);
-        assert!(session.apply_authoring_patch(&add("second")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "first"))
+                .applied
+        );
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "second"))
+                .applied
+        );
         assert!(session.undo_authoring().applied);
         let before = source_snapshot!(session);
         let original_state = session.authority.published_shared().unwrap();
@@ -569,7 +604,7 @@ fn invalid_successors_and_native_sources_refuse_without_additional_usage() {
     }
     native_refuses!(SceneAuthoringSession::new(document()));
     native_refuses!(PrefabAuthoringSession::new(PrefabDocument::new(
-        document().roots,
+        document().placements,
         document().entities,
     )));
 }
@@ -584,7 +619,11 @@ fn frozen_history_still_rejects_a_dangling_undo_after_reopen_clears_live_history
         },
     ));
     each_source!(&document, &previous, |session, make, other, Candidate| {
-        assert!(session.apply_authoring_patch(&add("later")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "later"))
+                .applied
+        );
         assert_eq!(session.history_status().undo_depth, 1);
         let frozen_revision = session.revision();
         let mut work = SchemaReclassificationWork::default();

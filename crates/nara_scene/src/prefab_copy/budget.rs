@@ -350,17 +350,19 @@ mod tests {
     }
 
     #[test]
-    fn input_declarations_and_roots_use_the_preclone_document_allowance() {
+    fn input_declarations_and_placements_use_the_preclone_document_allowance() {
         let mut document = PrefabDocument::default();
-        document.roots.push(SceneEntityId::new("root").unwrap());
+        document.placements.push(crate::SceneEntityPlacement::root(
+            SceneEntityId::new("root").unwrap(),
+        ));
         document.inputs.extend([
             ReferenceInputId::new("left").unwrap(),
             ReferenceInputId::new("right").unwrap(),
         ]);
         let limits = |raw| PrefabCopyLimits::new(raw, 100, 10_000, 100, 10_000).unwrap();
-        CopyBudget::new(limits(4)).document(&document).unwrap();
+        CopyBudget::new(limits(6)).document(&document).unwrap();
         assert!(matches!(
-            CopyBudget::new(limits(3)).document(&document),
+            CopyBudget::new(limits(5)).document(&document),
             Err(PrefabCopyError::BudgetExceeded)
         ));
 
@@ -402,6 +404,7 @@ mod tests {
         let mut entity = SceneEntityRecord::new(SceneEntityId::new("root").unwrap());
         entity.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/leaf.prefab.json").unwrap(),
+            binding: crate::PrefabInstanceBinding::Forest,
             arguments: Some(PrefabReferenceArguments {
                 base: key(),
                 values: [(
@@ -417,12 +420,12 @@ mod tests {
         let document = PrefabDocument::from_ordered_roots([entity]);
         let mut observed = CopyBudget::new(PrefabCopyLimits::default());
         observed.document(&document).unwrap();
-        // Root/document/entity/instance/arguments/base/map/entry plus the two-node input.
-        assert_eq!(observed.raw_nodes, 10);
+        // Placement/document/entity/binding/instance/arguments/base/map/entry and input.
+        assert_eq!(observed.raw_nodes, 13);
         let limits = |raw| PrefabCopyLimits::new(raw, 100, 10_000, 1_000, 100_000).unwrap();
-        CopyBudget::new(limits(10)).document(&document).unwrap();
+        CopyBudget::new(limits(13)).document(&document).unwrap();
         assert!(matches!(
-            CopyBudget::new(limits(9)).document(&document),
+            CopyBudget::new(limits(12)).document(&document),
             Err(PrefabCopyError::BudgetExceeded)
         ));
     }

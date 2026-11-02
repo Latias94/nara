@@ -139,6 +139,34 @@ fn assert_code(report: &DiagnosticReport, code: &str) {
     );
 }
 
+fn assert_materialized_node_limit(
+    report: &DiagnosticReport,
+    observed: u64,
+    maximum: u64,
+    entity: &str,
+) {
+    use nara_diagnostic::DiagnosticValueRef;
+    let diagnostic = report
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "scene.prefab-expansion-budget-exceeded")
+        .unwrap_or_else(|| panic!("expected shared compiler budget refusal: {report:?}"));
+    let field = |name: &str| {
+        diagnostic
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == name)
+            .unwrap()
+            .value()
+    };
+    assert_eq!(
+        field("budget-kind"),
+        DiagnosticValueRef::Identifier("materialized-value-nodes")
+    );
+    assert_eq!(field("observed"), DiagnosticValueRef::Unsigned(observed));
+    assert_eq!(field("maximum"), DiagnosticValueRef::Unsigned(maximum));
+    assert_eq!(field("entity-id"), DiagnosticValueRef::Identifier(entity));
+}
+
 #[test]
 fn exact_selection_and_witness_ignore_container_and_input_order_but_not_readmission() {
     let native = native();
@@ -375,10 +403,9 @@ fn validation_requires_explicit_data_owner_current_version_and_one_aggregate_all
         .get_mut(&component)
         .unwrap()
         .version = ComponentSchemaVersion::new(2).unwrap();
-    assert!(
-        bindings
-            .validate_scene(&changed, None, Default::default())
-            .has_errors()
+    assert_code(
+        &bindings.validate_scene(&changed, None, Default::default()),
+        "scene.unsupported-component-version",
     );
 
     let limits = ComponentValueMaterializationLimits::new(
@@ -398,15 +425,14 @@ fn validation_requires_explicit_data_owner_current_version_and_one_aggregate_all
             ComponentValue::String("Root".into()),
         ),
     )]);
-    assert_code(
-        &bindings.validate_scene(&mixed, None, limits),
-        "scene.invalid-component-payload",
-    );
+    assert_materialized_node_limit(&bindings.validate_scene(&mixed, None, limits), 3, 2, "root");
     let across_entities =
         SceneDocument::from_ordered_roots([score_entity("one"), score_entity("two")]);
-    assert_code(
+    assert_materialized_node_limit(
         &bindings.validate_scene(&across_entities, None, limits),
-        "scene.invalid-component-payload",
+        4,
+        2,
+        "two",
     );
 }
 
@@ -458,7 +484,13 @@ fn validation_closes_default_references_over_scene_entities_and_optional_asset_m
     let root = SceneEntityRecord::new(id("root")).with_component(
         ComponentTypeId::new("game.References"),
         SceneComponentRecord::new(ComponentSchemaVersion::ONE, empty_value())
-            .with_owner(owner.owner_id().clone()),
+            .with_owner(owner.owner_id().clone())
+            .with_contextual_default(
+                ComponentFieldId::new("target"),
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("target"),
+                }),
+            ),
     );
     let document =
         SceneDocument::from_ordered_roots([root.clone(), SceneEntityRecord::new(id("target"))]);
@@ -493,7 +525,7 @@ fn validation_closes_default_references_over_scene_entities_and_optional_asset_m
             Some(database.resolver(&nara_asset::AssetPathScope::ROOT)),
             Default::default(),
         ),
-        "scene.local-reference-invalid",
+        "scene.prefab-entity-reference-rewrite-failed",
     );
     assert_eq!(document, before);
 }
@@ -531,6 +563,7 @@ mod files {
             .with_owner(owner_id("missing.owner")),
         );
         root.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: AssetRef::path("prefabs/selection.ron").unwrap(),
             arguments: None,
             overrides: Some(overlay),
@@ -546,7 +579,10 @@ mod files {
 
     #[test]
     fn composition_source_rejects_invalid_local_structure_after_bounded_decode() {
-        let document = SceneDocument::new([id("missing")], [SceneEntityRecord::new(id("present"))]);
+        let document = SceneDocument::new(
+            [nara_scene::SceneEntityPlacement::root(id("missing"))],
+            [SceneEntityRecord::new(id("present"))],
+        );
         for candidate in [
             SceneDocumentCandidate::decode_json_str(&document.to_json_string().unwrap()).unwrap(),
             SceneDocumentCandidate::decode_ron_str(&document.to_ron_string().unwrap()).unwrap(),

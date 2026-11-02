@@ -94,6 +94,7 @@ fn conversion_fixture() -> (SceneDocument, AuthoringSchemaBasis, ResolvedPrefabS
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(PrefabInstance {
         source: AssetRef::path("prefabs/asset-budget.prefab.json").unwrap(),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: None,
     });
@@ -224,7 +225,7 @@ fn scene_conversion_at_64_value_nodes_matches_full_classification_save_and_reope
 #[test]
 fn prefab_conversion_at_64_value_nodes_matches_full_classification_save_and_reopen() {
     let (scene, basis, resolved) = conversion_fixture();
-    let document = PrefabDocument::new(scene.roots, scene.entities);
+    let document = PrefabDocument::new(scene.placements, scene.entities);
     let limits = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(64).unwrap());
     let source = AuthoringDocumentSource::new(
         AssetRef::path("prefabs/asset-budget-source.prefab.json").unwrap(),
@@ -293,10 +294,10 @@ fn prefab_conversion_at_64_value_nodes_matches_full_classification_save_and_reop
 
 #[test]
 fn default_asset_references_still_enforce_aggregate_node_and_byte_quotas() {
-    let basis = asset_basis(3, true);
-    for (limits, admitted) in [
+    for (limits, admitted, reference_count) in [
         (
-            SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(16).unwrap()),
+            SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(26).unwrap()),
+            5,
             5,
         ),
         (
@@ -304,8 +305,10 @@ fn default_asset_references_still_enforce_aggregate_node_and_byte_quotas() {
                 .with_component_value_nodes(ItemLimit::new(64).unwrap())
                 .with_component_value_bytes(ByteLimit::new(256).unwrap()),
             3,
+            3,
         ),
     ] {
+        let basis = asset_basis(reference_count, true);
         for count in [admitted, admitted + 1] {
             let document = SceneDocument::from_ordered_roots((0..count).map(|index| {
                 SceneEntityRecord::new(id(&format!("entity{index}")))
@@ -325,7 +328,7 @@ fn default_asset_references_still_enforce_aggregate_node_and_byte_quotas() {
             if count == admitted {
                 assert_eq!(
                     result.unwrap().schema_declared_asset_references().count(),
-                    count * 3,
+                    count * reference_count,
                 );
             } else {
                 assert!(result.unwrap_err().diagnostics().iter().any(|diagnostic| {

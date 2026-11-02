@@ -15,8 +15,9 @@ use crate::{
     AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringRecordReadiness,
     PrefabComponentIntent, PrefabComponentSetMode, PrefabDocumentCandidate, PrefabEntityTarget,
     PrefabInstance, PrefabOverlay, ResolvedPrefabSource, SceneComponentRecord,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchOperation, ScenePlacement,
-    ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, SourceDocumentKey,
+    SourceDocumentKind,
     authoring::{
         SceneAuthoringContentState, SceneAuthoringHistoryCost, SceneAuthoringHistoryEntry,
         SceneAuthoringHistoryLimits,
@@ -124,7 +125,7 @@ fn scene(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> SceneAuthori
 }
 
 fn prefab(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> PrefabAuthoringSession {
-    let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
             .unwrap()
@@ -220,11 +221,18 @@ macro_rules! assert_source_unchanged {
     }};
 }
 
-fn add(name: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }])
+fn add(placements: &[SceneEntityPlacement], name: &str) -> ScenePatchDocument {
+    let mut value = placements.to_vec();
+    value.push(SceneEntityPlacement::root(id(name)));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id(name)),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value,
+        },
+    ])
 }
 
 fn work_with_limits(work: usize, retained: usize) -> SchemaReclassificationWork {
@@ -271,10 +279,18 @@ fn recovery_preserves_source_and_both_history_branches_without_rebuilding_entrie
         );
         let initial = session.document().clone();
         let initial_content = session.content_state();
-        assert!(session.apply_authoring_patch(&add("first")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "first"))
+                .applied
+        );
         let first = session.document().clone();
         let first_content = session.content_state();
-        assert!(session.apply_authoring_patch(&add("second")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "second"))
+                .applied
+        );
         let second = session.document().clone();
         let second_content = session.content_state();
         assert!(session.undo_authoring().applied);
@@ -350,27 +366,51 @@ fn owner_created_restore_entity_is_proved_as_history_and_remains_replayable() {
         true,
     );
     let document = SceneDocument::new(
-        [id("root"), id("tail")],
         [
-            SceneEntityRecord::new(id("root")).with_children([id("child")]),
+            SceneEntityPlacement::root(id("root")),
+            SceneEntityPlacement::root(id("tail")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("root")),
             SceneEntityRecord::new(id("child"))
                 .with_component(ComponentTypeId::new(EXISTING), record(11, EXISTING_OWNER)),
             SceneEntityRecord::new(id("tail")),
         ],
     );
-    let remove = ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-        entity: id("root"),
-        from: ScenePlacement::first(ScenePlacementOwner::Root),
-    }]);
+    let remove = ScenePatchDocument::new([
+        ScenePatchOperation::RemoveEntity { entity: id("root") },
+        ScenePatchOperation::RemoveEntity {
+            entity: id("child"),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: document.placements.clone(),
+            value: vec![SceneEntityPlacement::root(id("tail"))],
+        },
+    ]);
     each_source!(&document, &previous, |session| {
         let original = session.document().clone();
         let original_content = session.content_state();
         let report = session.apply_authoring_patch(&remove);
         assert!(report.applied, "{:?}", report.diagnostics);
-        assert!(matches!(
-            &session.history.undo_stack.back().unwrap().patch.operations[0],
-            ScenePatchOperation::RestoreEntity { descendants, .. } if descendants.len() == 1
-        ));
+        assert_eq!(
+            session
+                .history
+                .undo_stack
+                .back()
+                .unwrap()
+                .patch
+                .operations
+                .iter()
+                .filter(|operation| matches!(operation, ScenePatchOperation::RestoreEntity { .. }))
+                .count(),
+            2
+        );
         let deleted = session.document().clone();
         let before = source_snapshot!(session);
         let prepared = session
@@ -412,6 +452,7 @@ fn declaration(malformed: bool) -> PrefabInstance {
         record: value,
     });
     PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/reclassification-base.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -471,7 +512,7 @@ fn dormant_malformed_overlay_history_remains_replayable_on_either_branch() {
             // Dormant declarations remain source data. Malformed overlay rejection belongs to
             // the Host's actual-demand compilation workflow, not source reclassification.
             let current = SceneDocument::new(
-                session.document().roots.clone(),
+                session.document().placements.clone(),
                 session.document().entities.clone(),
             );
             let mut clean = scene(&current, &previous);
@@ -576,15 +617,16 @@ fn public_add_entity_history_rejects_reclassification_when_undo_reveals_a_dangli
             session.authoring_readiness(),
             Some(AuthoringDocumentReadiness::Degraded)
         );
-        let added = session.apply_authoring_patch(&add("later"));
+        let added = session.apply_authoring_patch(&add(&session.document().placements, "later"));
         assert!(added.applied, "{:?}", added.diagnostics);
         assert!(matches!(
             added.inverse.as_ref().unwrap().operations.as_slice(),
-            [ScenePatchOperation::RemoveEntity { entity, .. }] if entity == &id("later")
+            [ScenePatchOperation::SetPlacements { expected, value }, ScenePatchOperation::RemoveEntity { entity }]
+                if entity == &id("later") && expected.len() == value.len() + 1
         ));
         assert_eq!(session.history_status().undo_depth, 1);
         let current = SceneDocument::new(
-            session.document().roots.clone(),
+            session.document().placements.clone(),
             session.document().entities.clone(),
         );
         // The same current bytes pass the complete source proof without retained history.
@@ -636,7 +678,7 @@ fn public_add_entity_history_rejects_reclassification_when_undo_reveals_a_dangli
         // Rejection leaves the real history usable under its original unknown-schema basis.
         let undone = session.undo_authoring();
         assert!(undone.applied, "{:?}", undone.diagnostics);
-        assert_eq!(session.document().roots, document.roots);
+        assert_eq!(session.document().placements, document.placements);
         assert_eq!(session.document().entities, document.entities);
         assert!(session.redo_authoring().applied);
         assert_eq!(session.document(), before.0.as_ref());
@@ -697,13 +739,20 @@ fn edit_and_schema_candidates_reject_stale_revision_and_independently_admitted_e
                 &mut SchemaReclassificationWork::default(),
             )
             .unwrap();
-        assert!(session.apply_authoring_patch(&add("newer")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "newer"))
+                .applied
+        );
         let before = source_snapshot!(session);
         assert!(session.commit_schema_reclassification(stale).is_err());
         assert_source_unchanged!(session, before);
 
         let old_edit = session
-            .prepare_authoring_edit(session.revision(), &add("old-edit"))
+            .prepare_authoring_edit(
+                session.revision(),
+                &add(&session.document().placements, "old-edit"),
+            )
             .unwrap();
         let old_schema = session
             .prepare_schema_reclassification(
@@ -812,7 +861,7 @@ fn duplicate_candidates_and_candidates_from_another_source_cannot_publish() {
     first_prefab = first_prefab
         .try_reopen_authoring_candidate(
             PrefabDocumentCandidate::decode_json_str(
-                &PrefabDocument::new(document().roots, document().entities)
+                &PrefabDocument::new(document().placements, document().entities)
                     .to_json_string()
                     .unwrap(),
             )
@@ -830,7 +879,10 @@ fn successful_recovery_invalidates_old_edits_even_when_source_revision_stays_equ
     let next = successor();
     each_source!(&document(), &previous, |session| {
         let edit = session
-            .prepare_authoring_edit(session.revision(), &add("stale-edit"))
+            .prepare_authoring_edit(
+                session.revision(),
+                &add(&session.document().placements, "stale-edit"),
+            )
             .unwrap();
         let before = source_snapshot!(session);
         let prepared = session
@@ -864,7 +916,10 @@ fn many_tiny_edits_charge_cumulative_work_separately_from_peak_retention() {
         .value = ComponentValue::String("x".repeat(24 * 1024));
     each_source!(&document, &previous, |session| {
         for index in 0..16 {
-            let report = session.apply_authoring_patch(&add(&format!("tiny-{index}")));
+            let report = session.apply_authoring_patch(&add(
+                &session.document().placements,
+                &format!("tiny-{index}"),
+            ));
             assert!(report.applied, "{:?}", report.diagnostics);
         }
         let before = source_snapshot!(session);
@@ -1073,7 +1128,11 @@ fn tiny_limits_and_discarded_candidates_never_change_semantic_owner_state() {
     let previous = empty_basis();
     let next = successor();
     each_source!(&document(), &previous, |session| {
-        assert!(session.apply_authoring_patch(&add("retained")).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, "retained"))
+                .applied
+        );
         let before = source_snapshot!(session);
         let facts = session.authoring_record_facts().unwrap().to_vec();
         let manifest = session.unavailable_record_manifest().unwrap().clone();
@@ -1114,7 +1173,11 @@ fn retained_edges_must_keep_their_original_cost_on_both_stacks() {
     for undo_branch in [true, false] {
         each_source!(&document(), &previous, |session| {
             for name in ["first", "second", "third"] {
-                assert!(session.apply_authoring_patch(&add(name)).applied);
+                assert!(
+                    session
+                        .apply_authoring_patch(&add(&session.document().placements, name))
+                        .applied
+                );
             }
             assert!(session.undo_authoring().applied);
             let stack = if undo_branch {
@@ -1148,7 +1211,11 @@ fn proof_runs_every_real_edge_in_both_directions_and_checks_exact_source_and_inv
     let previous = empty_basis();
     let mut session = scene(&document(), &previous);
     for name in ["first", "second", "third"] {
-        assert!(session.apply_authoring_patch(&add(name)).applied);
+        assert!(
+            session
+                .apply_authoring_patch(&add(&session.document().placements, name))
+                .applied
+        );
     }
     assert!(session.undo_authoring().applied);
     assert_eq!(session.history_status().undo_depth, 2);
@@ -1171,7 +1238,7 @@ fn proof_runs_every_real_edge_in_both_directions_and_checks_exact_source_and_inv
                 // Inject corruption only after the actual owner kernel executed the reverse edge.
                 if index == 1 {
                     match fault {
-                        1 => prepared.document.roots.reverse(),
+                        1 => prepared.document.placements.reverse(),
                         2 => prepared.report.inverse = Some(ScenePatchDocument::default()),
                         _ => {}
                     }
@@ -1216,7 +1283,11 @@ fn all_sources_bind_before_infallible_commits_and_a_later_bind_failure_publishes
     let third_candidate = third
         .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
         .unwrap();
-    assert!(third.apply_authoring_patch(&add("newer")).applied);
+    assert!(
+        third
+            .apply_authoring_patch(&add(&third.document().placements, "newer"))
+            .applied
+    );
     let first_before = source_snapshot!(first);
     let second_before = source_snapshot!(second);
     let third_before = source_snapshot!(third);
@@ -1268,6 +1339,7 @@ fn real_complete_prefab_conversion_history_reclassifies_without_fabricated_footp
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     let request_source = AssetRef::path("prefabs/conversion-base.json").unwrap();
     anchor.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: request_source.clone(),
         arguments: None,
         overrides: None,
@@ -1356,8 +1428,10 @@ fn native_sessions_have_no_reclassification_authority() {
             .is_err()
     );
     assert_eq!(work.usage(), SchemaReclassificationUsage::default());
-    let native =
-        PrefabAuthoringSession::new(PrefabDocument::new(document().roots, document().entities));
+    let native = PrefabAuthoringSession::new(PrefabDocument::new(
+        document().placements,
+        document().entities,
+    ));
     assert!(
         native
             .prepare_schema_reclassification(&next, &DeclarationExtension, &mut work)
@@ -1435,7 +1509,11 @@ fn retained_incumbent_requires_its_original_source_revision_and_kind() {
     let retained = first
         .retain_schema_reclassification_source(&mut work)
         .unwrap();
-    assert!(first.apply_authoring_patch(&add("later")).applied);
+    assert!(
+        first
+            .apply_authoring_patch(&add(&first.document().placements, "later"))
+            .applied
+    );
     let before = work.usage();
     assert!(
         first

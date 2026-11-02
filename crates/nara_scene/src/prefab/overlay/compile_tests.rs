@@ -17,8 +17,9 @@ use nara_reflect::{
 use super::*;
 use crate::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabInstanceClaim,
-    PrefabPlacement, PrefabSourceResolver, SceneCompilationLimits, SceneCompilationOptions,
-    SceneCompilationReport, SceneComponentRecord, register_scene_components,
+    PrefabSourceResolver, SceneCompilationLimits, SceneCompilationOptions, SceneCompilationReport,
+    SceneComponentRecord, SceneDocument, SceneEntityPlacement, ScenePlacement,
+    ScenePlacementParent, register_scene_components,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -83,9 +84,8 @@ fn registry_with_value_shape(value_shape: ComponentValueShape) -> ComponentRegis
 
 fn instance(source: &str, overrides: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
-        source: request(source),
-        arguments: None,
         overrides,
+        ..PrefabInstance::forest(request(source))
     }
 }
 
@@ -109,12 +109,8 @@ fn inside(anchor: &str, base: &str, terminal: PrefabEntityOrigin) -> PrefabEntit
     }
 }
 
-fn root(target: PrefabEntityTarget) -> PrefabPlacement {
-    PrefabPlacement {
-        target,
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    }
+fn root(target: PrefabEntityTarget) -> SceneEntityPlacement {
+    SceneEntityPlacement::new(target, ScenePlacement::last(ScenePlacementParent::Root))
 }
 
 fn add_component(target: PrefabEntityTarget, component: &str) -> PrefabComponentIntent {
@@ -424,11 +420,11 @@ fn component_additions_across_layers_share_one_cumulative_count() {
 #[test]
 fn ancestor_suppression_skips_unused_sources_but_rescues_keep_demand() {
     let p = PrefabDocument::new(
-        [id("parent")],
         [
-            SceneEntityRecord::new(id("parent")).with_children([id("n")]),
-            anchor("n", "q", None),
+            SceneEntityPlacement::root(id("parent")),
+            crate::tests::child_placement(id("n"), id("parent")),
         ],
+        [SceneEntityRecord::new(id("parent")), anchor("n", "q", None)],
     );
     let sources = InMemoryPrefabSourceResolver::new()
         .with_prefab(request("p"), key("p"), p)
@@ -479,9 +475,12 @@ fn ancestor_suppression_skips_unused_sources_but_rescues_keep_demand() {
 #[test]
 fn outer_suppression_demand_is_applied_inside_the_reached_source() {
     let r = PrefabDocument::new(
-        [id("parent")],
         [
-            SceneEntityRecord::new(id("parent")).with_children([id("bad")]),
+            SceneEntityPlacement::root(id("parent")),
+            crate::tests::child_placement(id("bad"), id("parent")),
+        ],
+        [
+            SceneEntityRecord::new(id("parent")),
             anchor("bad", "missing", None),
         ],
     );
@@ -638,11 +637,7 @@ fn loading_snapshot_includes_the_suspended_source_clone_and_derived_indexes() {
 fn a_large_deferred_request_is_admitted_before_clone_and_loader_entry() {
     let oversized = AssetRef::path(format!("{}.ron", "x".repeat(1024 * 1024))).unwrap();
     let mut nested = SceneEntityRecord::new(id("n"));
-    nested.prefab = Some(PrefabInstance {
-        source: oversized,
-        arguments: None,
-        overrides: None,
-    });
+    nested.prefab = Some(PrefabInstance::forest(oversized));
     let sources = InMemoryPrefabSourceResolver::new().with_prefab(
         request("p"),
         key("p"),
@@ -869,15 +864,14 @@ fn missing_source_and_depth_diagnostics_keep_their_locators_and_limits() {
 #[test]
 fn outer_suppression_after_a_cross_instance_move_does_not_request_the_discarded_instance() {
     let mut inner = PrefabOverlay::new(key("p"));
-    inner.placements.push(PrefabPlacement {
-        target: inside("a", "a", PrefabEntityOrigin::SourceEntity(id("q"))),
-        parent: PrefabPlacementParent::Entity(inside(
+    inner.placements.push(SceneEntityPlacement::new(
+        inside("a", "a", PrefabEntityOrigin::SourceEntity(id("q"))),
+        ScenePlacement::last(ScenePlacementParent::Entity(inside(
             "b",
             "b",
             PrefabEntityOrigin::SourceEntity(id("r")),
-        )),
-        slot: PrefabPlacementSlot::Last,
-    });
+        ))),
+    ));
     let mut outer = PrefabOverlay::new(key("t"));
     outer
         .suppressions

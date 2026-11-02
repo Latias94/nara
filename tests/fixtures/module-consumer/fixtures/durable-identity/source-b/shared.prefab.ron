@@ -4,10 +4,12 @@
     engine_min_version: "0.1.0",
     generator: (name: "durable-identity-consumer", version: "0.0.0"),
     payload: (
-        roots: ["opaque/shared"],
+        placements: [
+            (target: (entity: (kind: "source_entity", entity: "opaque/shared")),
+             placement: (parent: (kind: root), slot: (kind: last))),
+        ],
         entities: [(
             id: "opaque/shared",
-            children: [],
             components: {
                 "nara.scene.Name": (version: 1, value: (type: "string", value: "Shared")),
             },

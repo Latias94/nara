@@ -41,6 +41,7 @@ fn write_metadata(
 fn prefab_scene(stable_id: StableAssetId) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::StableId(stable_id),
         overrides: None,
@@ -124,6 +125,7 @@ fn primary_product_prefab_preserves_location_identity_on_fresh_and_cached_loads(
                         SceneEntityId::new(format!("anchor-{index}")).unwrap(),
                     );
                     anchor.prefab = Some(PrefabInstance {
+                        binding: nara_scene::PrefabInstanceBinding::Forest,
                         arguments: None,
                         source: reference,
                         overrides: None,

@@ -15,7 +15,7 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, resolve_component_property,
 };
 use nara_scene::{
-    ConstructionEntity, LocalConstructionEntity, ScenePlacement, ScenePlacementOwner,
+    ConstructionEntity, LocalConstructionEntity, ScenePlacement, ScenePlacementParent,
 };
 use nara_tasks::{
     TaskDomainKey, TaskHandle, TaskPoolKind, TaskReturnState, TaskSpawnRequest, TaskTerminal,
@@ -1048,7 +1048,7 @@ impl EditorProjectSession {
         let created = match &invocation.intent {
             EditorSourceToolIntent::Spawn { .. } => Some(
                 draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                    .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                     .map_err(|_| EditorSourceToolError::Draft)?,
             ),
             _ => None,

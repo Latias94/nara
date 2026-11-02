@@ -12,11 +12,11 @@ use nara_identity::WorldIdentityDomain;
 use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
     PrefabAddition, PrefabDocument, PrefabEntityTarget, PrefabInstance, PrefabOverlay,
-    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep,
-    PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind, SceneCompilationLimits,
-    SceneCompilationOptions, SceneDocument, SceneEntityId, SceneEntityProvenance,
-    SceneEntityProvenanceMap, SceneEntityRecord, SceneEntitySource, SourceDocumentKey,
-    SourceDocumentKind, SourceDocumentOrigin,
+    PrefabProjectionStep, PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationBudgetKind,
+    SceneCompilationLimits, SceneCompilationOptions, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityProvenance, SceneEntityProvenanceMap, SceneEntityRecord,
+    SceneEntitySource, ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    SourceDocumentOrigin,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -53,15 +53,15 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
     inner_overlay
         .additions
         .push(PrefabAddition::new(id("added_leaf")));
-    inner_overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added_leaf")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    inner_overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added_leaf")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let mut nested = anchor("nested", inner.clone());
     nested.prefab.as_mut().unwrap().overrides = Some(inner_overlay.clone());
     let mut reused = PrefabAddition::new(id("reused"));
     reused.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: inner.clone(),
         arguments: None,
         overrides: Some(inner_overlay),
@@ -76,21 +76,20 @@ fn instance_addition_origin_survives_nested_anchors_suppression_and_runtime_publ
         PrefabAddition::new(id("restored_child")),
     ];
     overrides.placements = vec![
-        PrefabPlacement {
-            target: PrefabEntityTarget::addition(id("reused")),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::Last,
-        },
-        PrefabPlacement {
-            target: PrefabEntityTarget::addition(id("restored")),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::Last,
-        },
-        PrefabPlacement {
-            target: PrefabEntityTarget::addition(id("restored_child")),
-            parent: PrefabPlacementParent::Entity(PrefabEntityTarget::addition(id("restored"))),
-            slot: PrefabPlacementSlot::Last,
-        },
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(id("reused")),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ),
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(id("restored")),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ),
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(id("restored_child")),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::addition(
+                id("restored"),
+            ))),
+        ),
     ];
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
@@ -203,11 +202,10 @@ fn addition_origin_typed_path_and_source_stack_are_admitted_before_copying() {
     let mut host = anchor("host", source.clone());
     let mut overlay = PrefabOverlay::new(key.clone());
     overlay.additions.push(PrefabAddition::new(id("local")));
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("local")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("local")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     host.prefab.as_mut().unwrap().overrides = Some(overlay);
     let scene = SceneDocument::from_ordered_roots([host]);
     let before_path = size_of::<SceneEntityProvenanceMap>()
@@ -243,11 +241,7 @@ fn addition_origin_typed_path_and_source_stack_are_admitted_before_copying() {
 
 fn anchor(name: &str, source: AssetRef) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
-    entity.prefab = Some(PrefabInstance {
-        source,
-        arguments: None,
-        overrides: None,
-    });
+    entity.prefab = Some(PrefabInstance::forest(source));
     entity
 }
 
@@ -271,7 +265,7 @@ fn rejected_file_publication_preserves_all_aliases_and_canonical_documents() {
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(path.clone(), original.clone(), valid.clone())
         .with_prefab(alias.clone(), original.clone(), valid);
-    let invalid = PrefabDocument::new([id("missing")], [])
+    let invalid = PrefabDocument::new([SceneEntityPlacement::root(id("missing"))], [])
         .to_json_string()
         .unwrap();
     let registry = registry();
@@ -298,12 +292,9 @@ fn rejected_file_publication_preserves_all_aliases_and_canonical_documents() {
                 )
             };
             let error = result.unwrap_err();
-            assert!(
-                error
-                    .diagnostics()
-                    .iter()
-                    .any(|diagnostic| { diagnostic.code().as_str() == "scene.dangling-root" })
-            );
+            assert!(error.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "scene.invalid-placement-target"
+            }));
             assert_eq!(candidate_resolver, resolver);
             let first = candidate_resolver.resolve_prefab(&path).unwrap();
             let second = candidate_resolver.resolve_prefab(&alias).unwrap();
@@ -548,7 +539,7 @@ fn long_source_keys_are_admitted_before_stack_clones_and_source_materialization(
         // Invalid source structure must remain unvisited when the active source cannot fit.
         let mut source = AliasedSource::new(PrefabDocument {
             inputs: Default::default(),
-            roots: vec![id("missing")],
+            placements: vec![SceneEntityPlacement::root(id("missing"))],
             entities: vec![],
         });
         source.key = key;
@@ -740,7 +731,9 @@ fn default_provenance_rejection_before_source_binding_preserves_world_and_identi
 
     // Short requests and IDs isolate the repeated 2 KiB canonical ProjectLocation keys.
     // The default depth/entity/value/identifier budgets all permit this finite source tree.
-    let sources = SourceChain::new(30, 1_200);
+    // A wide shallow source isolates the provenance ceiling from the independent working
+    // allocations required to retain each declaring layer's complete placement index.
+    let sources = SourceChain::new(2, 16_000);
     let scene = SceneDocument::from_ordered_roots([anchor("outer", sources.0[0].0.clone())]);
     let rejected = (scene).compile(&registry, &sources);
     assert!(rejected.candidate.is_none());

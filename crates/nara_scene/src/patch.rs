@@ -1,6 +1,5 @@
 #[cfg(feature = "serde")]
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
 use nara_core::{ByteLimit, ItemLimit};
@@ -13,17 +12,14 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityRecord,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, SceneComponentRecord,
+    SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
     diagnostics::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
     provenance::{CostScratchAdmission, reserve_cost_scratch},
-    validation::{
-        preflight_authoring_scene_with_context_at_operation,
-        validate_patch_intermediate_scene_with_limits,
-    },
+    validation::preflight_authoring_scene_with_context_at_operation,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -309,23 +305,31 @@ impl ScenePatchDocument {
                 });
             }
             validation_work = observed;
-            let validation = if operation_index + 1 == self.operations.len() {
+            if operation_index + 1 == self.operations.len() {
                 scratch.canonicalize();
-                validate(&scratch, registry, Some(operation_index))
+                let validation = validate(&scratch, registry, Some(operation_index));
+                if validation.has_errors() {
+                    return Err(ScenePatchReport {
+                        applied: false,
+                        inverse: None,
+                        diagnostics: validation,
+                    });
+                }
+                validate_document_edit_topology(&scratch)?;
             } else {
-                validate_patch_intermediate_scene_with_limits(
-                    &scratch.instantiate(),
+                let diagnostics = crate::validation::validate_patch_record_shapes(
+                    &scratch.entities,
                     registry,
                     operation_index,
                     limits.materialization_limits(),
-                )
-            };
-            if validation.has_errors() {
-                return Err(ScenePatchReport {
-                    applied: false,
-                    inverse: None,
-                    diagnostics: validation,
-                });
+                );
+                if diagnostics.has_errors() {
+                    return Err(ScenePatchReport {
+                        applied: false,
+                        inverse: None,
+                        diagnostics,
+                    });
+                }
             }
             inverse_groups.push(inverse);
         }
@@ -449,7 +453,7 @@ impl ScenePatchDocument {
             }));
         }
 
-        if bounded_scene_entities_source_cost(&document.entities, limits).is_none() {
+        if bounded_scene_source_cost(document, limits).is_none() {
             return Err(Box::new(source_cost_rejection()));
         }
         let source_work = scene_validation_work(document);
@@ -514,19 +518,12 @@ impl Default for ScenePatchDocument {
     )
 )]
 pub enum ScenePatchOperation {
-    AddEntity {
-        entity: SceneEntityRecord,
-        placement: ScenePlacement,
-    },
-    RemoveEntity {
-        entity: SceneEntityId,
-        from: ScenePlacement,
-    },
-    RestoreEntity {
-        entity: SceneEntityRecord,
-        descendants: Vec<SceneEntityRecord>,
-        placement: ScenePlacement,
-    },
+    /// Inserts one source declaration. The transaction supplies its placement separately.
+    AddEntity { entity: SceneEntityRecord },
+    /// Removes one declaration, without inferring a subtree from desired layout intent.
+    RemoveEntity { entity: SceneEntityId },
+    /// Restores one complete source record through owner-created inverse history.
+    RestoreEntity { entity: SceneEntityRecord },
     AddComponent {
         entity: SceneEntityId,
         component: ComponentTypeId,
@@ -554,10 +551,10 @@ pub enum ScenePatchOperation {
         component_version: ComponentSchemaVersion,
         field: ComponentFieldId,
     },
-    MoveEntity {
-        entity: SceneEntityId,
-        from: ScenePlacement,
-        to: ScenePlacement,
+    /// Replaces exact source intent, including declaration order and optional inherited pins.
+    SetPlacements {
+        expected: Vec<SceneEntityPlacement>,
+        value: Vec<SceneEntityPlacement>,
     },
     SetAssetRefField {
         entity: SceneEntityId,
@@ -575,128 +572,70 @@ pub enum ScenePatchOperation {
     },
 }
 
-/// The ordered collection that owns one entity's placement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(rename_all = "snake_case", deny_unknown_fields)
-)]
-pub enum ScenePlacementOwner {
-    Root,
-    Parent { parent: SceneEntityId },
-}
-
-/// A stable insertion point within one ordered placement owner.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(rename_all = "snake_case", deny_unknown_fields)
-)]
-pub enum ScenePlacementAnchor {
-    First,
-    Last,
-    Before { sibling: SceneEntityId },
-    After { sibling: SceneEntityId },
-}
-
-/// A stable root-or-parent owner plus an insertion anchor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct ScenePlacement {
-    pub owner: ScenePlacementOwner,
-    pub anchor: ScenePlacementAnchor,
-}
-
-impl ScenePlacement {
+impl ScenePatchDocument {
+    /// Pins one desired location in its existing declaration slot, or appends a new inherited pin.
+    /// This constructs source intent; the ordinary transaction admits the complete result.
     #[must_use]
-    pub const fn first(owner: ScenePlacementOwner) -> Self {
-        Self {
-            owner,
-            anchor: ScenePlacementAnchor::First,
+    pub fn set_placement(
+        placements: &[SceneEntityPlacement],
+        target: PrefabEntityTarget,
+        placement: ScenePlacement,
+    ) -> Self {
+        let mut value = placements.to_vec();
+        if let Some(declaration) = value.iter_mut().find(|entry| entry.target == target) {
+            declaration.placement = placement;
+        } else {
+            value.push(SceneEntityPlacement::new(target, placement));
         }
+        Self::new([ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value,
+        }])
     }
 
-    #[must_use]
-    pub const fn last(owner: ScenePlacementOwner) -> Self {
-        Self {
-            owner,
-            anchor: ScenePlacementAnchor::Last,
+    /// Removes an optional inherited source placement without changing the remaining ordinals.
+    /// A directly owned entity must retain its explicit placement.
+    pub fn revert_placement(
+        placements: &[SceneEntityPlacement],
+        target: &PrefabEntityTarget,
+    ) -> Result<Self, Diagnostic> {
+        if target.through.is_empty() && matches!(target.entity, PrefabEntityOrigin::SourceEntity(_))
+        {
+            return Err(diagnostic_error(
+                "scene.patch-local-placement-required",
+                "A directly owned source entity requires an explicit placement",
+            ));
         }
-    }
-
-    #[must_use]
-    pub fn before(owner: ScenePlacementOwner, sibling: SceneEntityId) -> Self {
-        Self {
-            owner,
-            anchor: ScenePlacementAnchor::Before { sibling },
-        }
-    }
-
-    #[must_use]
-    pub fn after(owner: ScenePlacementOwner, sibling: SceneEntityId) -> Self {
-        Self {
-            owner,
-            anchor: ScenePlacementAnchor::After { sibling },
-        }
-    }
-
-    /// Returns the entity's current stable placement in a validated document.
-    #[must_use]
-    pub fn current(document: &SceneDocument, entity: &SceneEntityId) -> Option<Self> {
-        placement_for_entity(document, entity)
-    }
-
-    /// Returns the entity's current stable placement in a validated Prefab source.
-    #[must_use]
-    pub fn current_prefab(document: &PrefabDocument, entity: &SceneEntityId) -> Option<Self> {
-        placement_for_entity(document, entity)
-    }
-
-    /// Reports whether this placement names the entity's exact current Prefab position.
-    #[must_use]
-    pub fn matches_current_prefab(
-        &self,
-        document: &PrefabDocument,
-        entity: &SceneEntityId,
-    ) -> bool {
-        placement_matches(document, entity, self)
+        Ok(Self::new([ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value: placements
+                .iter()
+                .filter(|entry| &entry.target != target)
+                .cloned()
+                .collect(),
+        }]))
     }
 }
 
 #[cfg(feature = "serde")]
-pub(crate) fn authoring_entity_placements<'a>(
-    roots: &[SceneEntityId],
-    entities: impl IntoIterator<Item = &'a SceneEntityRecord>,
+pub(crate) fn authoring_entity_placements(
+    declarations: &[SceneEntityPlacement],
 ) -> BTreeMap<SceneEntityId, ScenePlacement> {
-    let owners = std::iter::once((ScenePlacementOwner::Root, roots)).chain(
-        entities.into_iter().map(|entity| {
-            (
-                ScenePlacementOwner::Parent {
-                    parent: entity.id.clone(),
-                },
-                entity.children.as_slice(),
-            )
-        }),
-    );
-    let mut placements = BTreeMap::new();
-    for (owner, siblings) in owners {
-        for (index, entity) in siblings.iter().enumerate() {
-            let placement = if index == 0 {
-                ScenePlacement::first(owner.clone())
-            } else {
-                ScenePlacement::after(owner.clone(), siblings[index - 1].clone())
-            };
-            placements.insert(entity.clone(), placement);
-        }
-    }
-    placements
+    declarations
+        .iter()
+        .filter_map(|declaration| match &declaration.target.entity {
+            PrefabEntityOrigin::SourceEntity(entity) if declaration.target.through.is_empty() => {
+                Some((entity.clone(), declaration.placement.clone()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 enum ValueCostNode<'a> {
+    Scene(&'a SceneDocument, usize),
     Prefab(&'a PrefabDocument, usize),
+    Placements(&'a [SceneEntityPlacement], usize),
     Entity(&'a SceneEntityRecord, usize),
     Instance(&'a PrefabInstance, usize),
     Entities(std::slice::Iter<'a, SceneEntityRecord>, usize),
@@ -749,7 +688,36 @@ pub(crate) fn bounded_scene_entities_source_cost(
     )
 }
 
-/// Admits nominal Prefab storage, including its independent declared inputs and ordered roots.
+/// Admits complete source storage, including its independently ordered placement declarations.
+pub(crate) fn bounded_scene_source_cost(
+    document: &SceneDocument,
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    tree_cost(ValueCostNode::Scene(document, 1), Some(limits), None)
+}
+
+/// Admits borrowed component records without requiring an authored entity representation.
+/// Flat compiler drafts admit their entity IDs and hierarchy storage separately.
+pub(crate) fn bounded_component_records_source_cost<'a>(
+    records: impl IntoIterator<Item = &'a SceneComponentRecord>,
+    limits: ScenePatchApplyLimits,
+) -> Option<ScenePatchCost> {
+    let mut cost = ScenePatchCost::default();
+    let mut admission = None;
+    for record in records {
+        cost.operation_count = cost.operation_count.saturating_add(1);
+        add_patch_record_cost(&mut cost, record, 1, Some(limits), &mut admission)?;
+        if cost.operation_count > limits.validation_work().get()
+            || cost.value_cost.nodes() > limits.validation_value_nodes().get()
+            || cost.logical_bytes() > limits.validation_value_bytes().get()
+        {
+            return None;
+        }
+    }
+    Some(cost)
+}
+
+/// Admits nominal Prefab storage, including its independent declared inputs and placements.
 pub(crate) fn bounded_prefab_source_cost(
     document: &PrefabDocument,
     limits: ScenePatchApplyLimits,
@@ -846,37 +814,48 @@ fn tree_cost(
     let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
+            ValueCostNode::Scene(document, depth) => {
+                admit_data_depth(depth, limits)?;
+                cost.operation_count = cost.operation_count.saturating_add(1);
+                reserve_cost_scratch(&mut pending, 2, &mut admission)?;
+                pending.push(ValueCostNode::Entities(document.entities.iter(), depth));
+                pending.push(ValueCostNode::Placements(&document.placements, depth));
+            }
             ValueCostNode::Prefab(document, depth) => {
                 admit_data_depth(depth, limits)?;
                 cost.operation_count = cost
                     .operation_count
                     .saturating_add(1)
-                    .saturating_add(document.roots.len())
                     .saturating_add(document.inputs.len());
                 if limits
                     .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
                 {
                     return None;
                 }
-                for root in &document.roots {
-                    cost.structural_logical_bytes = cost
-                        .structural_logical_bytes
-                        .saturating_add(root.as_str().len());
-                }
                 for input in &document.inputs {
                     cost.structural_logical_bytes = cost
                         .structural_logical_bytes
                         .saturating_add(input.as_str().len());
                 }
-                reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+                reserve_cost_scratch(&mut pending, 2, &mut admission)?;
                 pending.push(ValueCostNode::Entities(document.entities.iter(), depth));
+                pending.push(ValueCostNode::Placements(&document.placements, depth));
+            }
+            ValueCostNode::Placements(placements, depth) => {
+                admit_data_depth(depth, limits)?;
+                let allowance = declaration_cost_allowance(cost, depth, limits)?;
+                let placements =
+                    crate::prefab::scene_placements_cost(placements, allowance).ok()?;
+                cost.operation_count = cost.operation_count.saturating_add(placements.nodes);
+                cost.structural_logical_bytes = cost
+                    .structural_logical_bytes
+                    .saturating_add(placements.structural_logical_bytes);
             }
             ValueCostNode::Entity(entity, depth) => {
                 admit_data_depth(depth, limits)?;
                 cost.operation_count = cost
                     .operation_count
                     .saturating_add(1)
-                    .saturating_add(entity.children.len())
                     .saturating_add(entity.components.len());
                 if limits
                     .is_some_and(|limits| cost.operation_count > limits.validation_work().get())
@@ -886,9 +865,6 @@ fn tree_cost(
                 cost.structural_logical_bytes = cost
                     .structural_logical_bytes
                     .saturating_add(entity.id.as_str().len())
-                    .saturating_add(entity.children.iter().fold(0usize, |bytes, child| {
-                        bytes.saturating_add(child.as_str().len())
-                    }))
                     .saturating_add(entity.components.keys().fold(0usize, |bytes, component| {
                         bytes.saturating_add(component.as_str().len())
                     }));
@@ -902,27 +878,7 @@ fn tree_cost(
             }
             ValueCostNode::Instance(instance, depth) => {
                 admit_data_depth(depth, limits)?;
-                let mut allowance = crate::prefab::PrefabOverlayCostLimits::UNBOUNDED;
-                if let Some(limits) = limits {
-                    allowance.depth = ComponentValueMaterializationLimits::default()
-                        .depth()
-                        .get()
-                        .checked_sub(depth)?
-                        .checked_add(1)?;
-                    allowance.nodes = limits
-                        .validation_work()
-                        .get()
-                        .checked_sub(cost.operation_count)?;
-                    allowance.value_nodes = limits
-                        .validation_value_nodes()
-                        .get()
-                        .checked_sub(cost.value_cost.nodes())?;
-                    allowance.value_bytes = limits
-                        .validation_value_bytes()
-                        .get()
-                        .checked_sub(cost.logical_bytes())?;
-                    allowance.logical_bytes = allowance.value_bytes;
-                }
+                let allowance = declaration_cost_allowance(cost, depth, limits)?;
                 let instance_cost = if let Some(admit) = admission.as_deref_mut() {
                     crate::prefab::prefab_instance_cost_with_admission(instance, allowance, admit)
                         .ok()??
@@ -955,27 +911,17 @@ fn tree_cost(
             }
             ValueCostNode::Operations(mut operations, depth) => {
                 if let Some(operation) = operations.next() {
-                    // One continuation plus at most two owned payload frames (RestoreEntity
-                    // or the expected/value sides of SetPrefabInstance).
+                    // One continuation plus at most two owned payload frames for an exact
+                    // placement-vector or instance-declaration replacement.
                     reserve_cost_scratch(&mut pending, 3, &mut admission)?;
                     pending.push(ValueCostNode::Operations(operations, depth));
                     match operation {
-                        ScenePatchOperation::AddEntity { entity, placement } => {
-                            add_placement_cost(&mut cost, placement);
+                        ScenePatchOperation::AddEntity { entity }
+                        | ScenePatchOperation::RestoreEntity { entity } => {
                             pending.push(ValueCostNode::Entity(entity, depth + 1));
                         }
-                        ScenePatchOperation::RestoreEntity {
-                            entity,
-                            descendants,
-                            placement,
-                        } => {
-                            add_placement_cost(&mut cost, placement);
-                            pending.push(ValueCostNode::Entity(entity, depth + 1));
-                            pending.push(ValueCostNode::Entities(descendants.iter(), depth + 1));
-                        }
-                        ScenePatchOperation::RemoveEntity { entity, from } => {
+                        ScenePatchOperation::RemoveEntity { entity } => {
                             add_scene_entity_id_cost(&mut cost, entity);
-                            add_placement_cost(&mut cost, from);
                         }
                         ScenePatchOperation::AddComponent {
                             entity,
@@ -1017,10 +963,9 @@ fn tree_cost(
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
                         }
-                        ScenePatchOperation::MoveEntity { entity, from, to } => {
-                            add_scene_entity_id_cost(&mut cost, entity);
-                            add_placement_cost(&mut cost, from);
-                            add_placement_cost(&mut cost, to);
+                        ScenePatchOperation::SetPlacements { expected, value } => {
+                            pending.push(ValueCostNode::Placements(expected, depth + 1));
+                            pending.push(ValueCostNode::Placements(value, depth + 1));
                         }
                         ScenePatchOperation::SetAssetRefField {
                             entity,
@@ -1189,8 +1134,8 @@ mod bounded_cost_tests {
     use super::*;
     use crate::{
         PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode, PrefabEntityTarget,
-        PrefabInstanceClaim, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-        PrefabPlacementSlot, SourceDocumentKey, SourceDocumentKind,
+        PrefabInstanceBinding, PrefabInstanceClaim, PrefabOverlay, ScenePlacementParent,
+        SourceDocumentKey, SourceDocumentKind,
     };
 
     fn source_key() -> SourceDocumentKey {
@@ -1205,6 +1150,7 @@ mod bounded_cost_tests {
     fn deep_declaration(depth: usize, through_entities: bool) -> PrefabInstance {
         let mut declaration = PrefabInstance {
             source: AssetRef::path("p").unwrap(),
+            binding: PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: None,
         };
@@ -1215,11 +1161,10 @@ mod bounded_cost_tests {
                 let mut addition = PrefabAddition::new(id.clone());
                 addition.prefab = Some(declaration);
                 overlay.additions.push(addition);
-                overlay.placements.push(PrefabPlacement {
-                    target: PrefabEntityTarget::addition(id),
-                    parent: PrefabPlacementParent::Root,
-                    slot: PrefabPlacementSlot::Last,
-                });
+                overlay.placements.push(SceneEntityPlacement::new(
+                    PrefabEntityTarget::addition(id),
+                    ScenePlacement::last(ScenePlacementParent::Root),
+                ));
             } else {
                 overlay.instances.push(PrefabInstanceClaim {
                     target: PrefabEntityTarget::source(id),
@@ -1228,6 +1173,7 @@ mod bounded_cost_tests {
             }
             declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
+                binding: PrefabInstanceBinding::Forest,
                 arguments: None,
                 overrides: Some(overlay),
             };
@@ -1255,8 +1201,9 @@ mod bounded_cost_tests {
                 let patch = set_instance(deep_declaration(128, through_entities), expected_side);
                 // This input fits every count/byte ceiling; semantic depth alone rejects it.
                 let cost = scene_patch_cost(&patch);
-                assert!(cost.operation_count() < 1024);
-                assert!(cost.logical_bytes() < 64 * 1024);
+                let limits = ScenePatchApplyLimits::default();
+                assert!(cost.operation_count() < limits.validation_work().get());
+                assert!(cost.logical_bytes() < limits.validation_value_bytes().get());
                 assert!(
                     bounded_scene_patch_cost(&patch, ScenePatchApplyLimits::default()).is_none()
                 );
@@ -1275,19 +1222,20 @@ mod bounded_cost_tests {
             let mut overlay = PrefabOverlay::new(source_key());
             overlay.additions = vec![PrefabAddition::new(root.clone()), addition];
             overlay.placements = vec![
-                PrefabPlacement {
-                    target: PrefabEntityTarget::addition(root.clone()),
-                    parent: PrefabPlacementParent::Root,
-                    slot: PrefabPlacementSlot::Last,
-                },
-                PrefabPlacement {
-                    target: PrefabEntityTarget::addition(child),
-                    parent: PrefabPlacementParent::Entity(PrefabEntityTarget::addition(root)),
-                    slot: PrefabPlacementSlot::Last,
-                },
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::addition(root.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Root),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::addition(child),
+                    ScenePlacement::last(ScenePlacementParent::Entity(
+                        PrefabEntityTarget::addition(root),
+                    )),
+                ),
             ];
             let declaration = PrefabInstance {
                 source: AssetRef::path("p").unwrap(),
+                binding: PrefabInstanceBinding::Forest,
                 arguments: None,
                 overrides: Some(overlay),
             };
@@ -1370,8 +1318,9 @@ mod bounded_cost_tests {
             let entities = std::slice::from_ref(&entity);
             let unbounded = tree_cost(ValueCostNode::Entities(entities.iter(), 1), None, None)
                 .expect("unbounded source accounting completes");
-            assert!(unbounded.operation_count() < 1024);
-            assert!(unbounded.logical_bytes() < 64 * 1024);
+            let limits = ScenePatchApplyLimits::default();
+            assert!(unbounded.operation_count() < limits.validation_work().get());
+            assert!(unbounded.logical_bytes() < limits.validation_value_bytes().get());
             assert_eq!(unbounded.value_cost(), ComponentValueCost::ZERO);
             assert!(
                 bounded_scene_entities_source_cost(entities, ScenePatchApplyLimits::default())
@@ -1392,24 +1341,24 @@ mod bounded_cost_tests {
         entity.prefab = Some(deep_declaration(1, true));
         let entities = [entity];
         let limits = ScenePatchApplyLimits::default()
-            .with_validation_work(ItemLimit::new(9).unwrap())
+            .with_validation_work(ItemLimit::new(12).unwrap())
             .with_validation_value_nodes(ItemLimit::new(2).unwrap())
-            .with_validation_value_bytes(ByteLimit::new(77).unwrap());
+            .with_validation_value_bytes(ByteLimit::new(79).unwrap());
         let cost = bounded_scene_entities_source_cost(&entities, limits).unwrap();
-        assert_eq!(cost.operation_count(), 9);
+        assert_eq!(cost.operation_count(), 12);
         assert_eq!(cost.value_cost().nodes(), 2);
         assert_eq!(cost.value_cost().logical_bytes(), 4);
         // Entity/component IDs (2), payload (4), canonical base (38), addition ID (1),
-        // placement target/tags (4), and two AssetRef wire payloads (14 each).
-        assert_eq!(cost.logical_bytes(), 2 + 4 + 38 + 1 + 4 + 2 * 14);
+        // placement target/tags (4), explicit Forest bindings (2), and two AssetRef payloads.
+        assert_eq!(cost.logical_bytes(), 2 + 4 + 38 + 1 + 4 + 2 + 2 * 14);
         assert_eq!(
             cost.value_cost(),
             scene_entities_source_value_cost(&entities)
         );
         for insufficient in [
-            limits.with_validation_work(ItemLimit::new(8).unwrap()),
+            limits.with_validation_work(ItemLimit::new(11).unwrap()),
             limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
-            limits.with_validation_value_bytes(ByteLimit::new(76).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(78).unwrap()),
         ] {
             assert!(bounded_scene_entities_source_cost(&entities, insufficient).is_none());
         }
@@ -1578,7 +1527,8 @@ mod bounded_cost_tests {
             assert!(report.diagnostics.iter().any(|diagnostic| {
                 diagnostic.code().as_str() == "scene.patch-validation-work-budget-exceeded"
             }));
-            let prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
+            let prefab =
+                PrefabDocument::new(original.placements.clone(), original.entities.clone());
             let rejected = patch.prepare_to_prefab_with_validator(&prefab, &registry, |_, _, _| {
                 panic!("input must be admitted before source validation")
             });
@@ -1645,11 +1595,10 @@ mod bounded_cost_tests {
                     let mut addition = PrefabAddition::new(id.clone());
                     addition.components.insert(component.clone(), value);
                     overlay.additions.push(addition);
-                    overlay.placements.push(PrefabPlacement {
-                        target: PrefabEntityTarget::addition(id.clone()),
-                        parent: PrefabPlacementParent::Root,
-                        slot: PrefabPlacementSlot::Last,
-                    });
+                    overlay.placements.push(SceneEntityPlacement::new(
+                        PrefabEntityTarget::addition(id.clone()),
+                        ScenePlacement::last(ScenePlacementParent::Root),
+                    ));
                 } else {
                     overlay.components.push(PrefabComponentIntent::Set {
                         mode: PrefabComponentSetMode::Add,
@@ -1660,6 +1609,7 @@ mod bounded_cost_tests {
                 }
                 PrefabInstance {
                     source: AssetRef::path("p").unwrap(),
+                    binding: PrefabInstanceBinding::Forest,
                     arguments: None,
                     overrides: Some(overlay),
                 }
@@ -1682,15 +1632,17 @@ mod bounded_cost_tests {
                 );
                 assert_eq!(
                     claimed.logical_bytes(),
-                    // Both forms retain the 14-byte source claim and 38-byte base claim.
-                    // Added entity/placement uses one more structural byte than component Set.
-                    1 + snapshots * if whole_entity { 73 } else { 72 },
+                    // Both retain a 14-byte source claim, one-byte Forest binding and
+                    // 38-byte base. Complete desired parent/slot metadata belongs to additions.
+                    1 + snapshots * if whole_entity { 74 } else { 73 },
                 );
                 assert_eq!(claimed.value_cost().nodes(), snapshots);
                 assert_eq!(claimed.value_cost().logical_bytes(), 0);
                 assert_eq!(
                     claimed.operation_count(),
-                    1 + snapshots * if whole_entity { 8 } else { 7 },
+                    // Instance + binding + overlay + base, then either Set/target/record/value
+                    // or addition/record/value and the three-node desired placement.
+                    1 + snapshots * if whole_entity { 10 } else { 8 },
                 );
                 let limits = ScenePatchApplyLimits::default()
                     .with_validation_work(ItemLimit::new(claimed.operation_count()).unwrap())
@@ -1716,33 +1668,46 @@ mod bounded_cost_tests {
     fn structural_replay_cost_has_exact_independent_inclusive_ceilings() {
         let root = SceneEntityId::new("r").unwrap();
         let child = SceneEntityId::new("c").unwrap();
-        let patch = ScenePatchDocument::new([ScenePatchOperation::RestoreEntity {
-            entity: SceneEntityRecord::new(root)
-                .with_children([child.clone()])
-                .with_component(
+        let patch = ScenePatchDocument::new([
+            ScenePatchOperation::RestoreEntity {
+                entity: SceneEntityRecord::new(root.clone()).with_component(
                     ComponentTypeId::new("game.Note"),
                     SceneComponentRecord::new(
                         ComponentSchemaVersion::ONE,
                         ComponentValue::map([("v", ComponentValue::String("abc".into()))]),
                     ),
                 ),
-            descendants: vec![SceneEntityRecord::new(child)],
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }]);
+            },
+            ScenePatchOperation::RestoreEntity {
+                entity: SceneEntityRecord::new(child.clone()),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: Vec::new(),
+                value: vec![
+                    SceneEntityPlacement::root(root.clone()),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(child),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(root),
+                        )),
+                    ),
+                ],
+            },
+        ]);
         let limits = ScenePatchApplyLimits::default()
-            .with_validation_work(ItemLimit::new(5).unwrap())
+            .with_validation_work(ItemLimit::new(13).unwrap())
             .with_validation_value_nodes(ItemLimit::new(2).unwrap())
-            .with_validation_value_bytes(ByteLimit::new(16).unwrap());
+            .with_validation_value_bytes(ByteLimit::new(25).unwrap());
         let cost = bounded_scene_patch_cost(&patch, limits).unwrap();
-        assert_eq!(cost.operation_count(), 5);
+        assert_eq!(cost.operation_count(), 13);
         assert_eq!(cost.value_cost().nodes(), 2);
         assert_eq!(cost.value_cost().logical_bytes(), 4);
-        assert_eq!(cost.logical_bytes(), 16);
+        assert_eq!(cost.logical_bytes(), 25);
         assert_eq!(cost, scene_patch_cost(&patch));
         for insufficient in [
-            limits.with_validation_work(ItemLimit::new(4).unwrap()),
+            limits.with_validation_work(ItemLimit::new(12).unwrap()),
             limits.with_validation_value_nodes(ItemLimit::new(1).unwrap()),
-            limits.with_validation_value_bytes(ByteLimit::new(15).unwrap()),
+            limits.with_validation_value_bytes(ByteLimit::new(24).unwrap()),
         ] {
             assert!(bounded_scene_patch_cost(&patch, insufficient).is_none());
         }
@@ -1767,16 +1732,33 @@ fn add_component_field_id_cost(cost: &mut ScenePatchCost, field: &ComponentField
         .saturating_add(field.as_str().len());
 }
 
-fn add_placement_cost(cost: &mut ScenePatchCost, placement: &ScenePlacement) {
-    if let ScenePlacementOwner::Parent { parent } = &placement.owner {
-        add_scene_entity_id_cost(cost, parent);
+fn declaration_cost_allowance(
+    cost: ScenePatchCost,
+    depth: usize,
+    limits: Option<ScenePatchApplyLimits>,
+) -> Option<crate::prefab::PrefabOverlayCostLimits> {
+    let mut allowance = crate::prefab::PrefabOverlayCostLimits::UNBOUNDED;
+    if let Some(limits) = limits {
+        allowance.depth = ComponentValueMaterializationLimits::default()
+            .depth()
+            .get()
+            .checked_sub(depth)?
+            .checked_add(1)?;
+        allowance.nodes = limits
+            .validation_work()
+            .get()
+            .checked_sub(cost.operation_count)?;
+        allowance.value_nodes = limits
+            .validation_value_nodes()
+            .get()
+            .checked_sub(cost.value_cost.nodes())?;
+        allowance.value_bytes = limits
+            .validation_value_bytes()
+            .get()
+            .checked_sub(cost.logical_bytes())?;
+        allowance.logical_bytes = allowance.value_bytes;
     }
-    match &placement.anchor {
-        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
-            add_scene_entity_id_cost(cost, sibling)
-        }
-        ScenePlacementAnchor::First | ScenePlacementAnchor::Last => {}
-    }
+    Some(allowance)
 }
 
 pub(crate) struct PreparedScenePatch {
@@ -1912,10 +1894,9 @@ impl ScenePatchValidationBudgetKind {
 fn scene_validation_work(document: &SceneDocument) -> SceneValidationWork {
     SceneValidationWork {
         structural_items: document.entities.iter().fold(
-            1_usize.saturating_add(document.roots.len()),
+            1_usize.saturating_add(document.placements.len()),
             |work, entity| {
                 work.saturating_add(1)
-                    .saturating_add(entity.children.len())
                     .saturating_add(entity.components.len())
             },
         ),
@@ -1926,10 +1907,9 @@ fn scene_validation_work(document: &SceneDocument) -> SceneValidationWork {
 fn prefab_validation_work(document: &PrefabDocument) -> SceneValidationWork {
     SceneValidationWork {
         structural_items: document.entities.iter().fold(
-            1_usize.saturating_add(document.roots.len()),
+            1_usize.saturating_add(document.placements.len()),
             |work, entity| {
                 work.saturating_add(1)
-                    .saturating_add(entity.children.len())
                     .saturating_add(entity.components.len())
             },
         ),
@@ -2059,17 +2039,26 @@ fn validate_applied_operation(
     }
     *validation_work = observed;
 
-    let validation = if final_operation {
-        document.canonicalize();
-        validate(document, registry, Some(operation_index))
-    } else {
-        validate_patch_intermediate_scene_with_limits(
-            document,
+    // Record insertion/removal and the placement-vector replacement form one source transaction.
+    // Its private intermediate states need not satisfy the final one-placement-per-local rule.
+    if !final_operation {
+        let diagnostics = crate::validation::validate_patch_record_shapes(
+            &document.entities,
             registry,
             operation_index,
             limits.materialization_limits(),
-        )
-    };
+        );
+        if diagnostics.has_errors() {
+            return Err(Box::new(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            }));
+        }
+        return Ok(());
+    }
+    document.canonicalize();
+    let validation = validate(document, registry, Some(operation_index));
     if validation.has_errors() {
         return Err(Box::new(ScenePatchReport {
             applied: false,
@@ -2077,8 +2066,35 @@ fn validate_applied_operation(
             diagnostics: validation,
         }));
     }
+    validate_source_edit_topology(document).map_err(Box::new)?;
 
     Ok(())
+}
+
+/// Exact source transactions reject a provably invalid local closure without opening Prefabs.
+/// Raw source admission establishes grammar/preservation; it need not establish effective layout.
+/// Routed intent remains source-preserving and requires actual compilation for effective validity.
+pub(crate) fn validate_source_edit_topology(
+    document: &SceneDocument,
+) -> Result<(), ScenePatchReport> {
+    validate_document_edit_topology(document)
+}
+
+fn validate_document_edit_topology<D: EntityDocument>(
+    document: &D,
+) -> Result<(), ScenePatchReport> {
+    document.validate_local_layout_constraints().map_err(|_| {
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic_error(
+            "scene.patch-local-layout-invalid",
+            "The complete local source layout must satisfy the shared hierarchy rules",
+        ));
+        ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics,
+        }
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -2157,63 +2173,15 @@ pub(crate) fn apply_authoring_structure_operation(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     match operation {
-        ScenePatchOperation::AddEntity { entity, placement } => {
-            prepare_entity_placement(document, entity, placement, operation_index)?;
-            let insertion =
-                resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-            document.entities.push(entity.clone());
-            insert_placed_entity(document, &entity.id, insertion);
-            Ok(vec![ScenePatchOperation::RemoveEntity {
-                entity: entity.id.clone(),
-                from: placement.clone(),
-            }])
+        ScenePatchOperation::AddEntity { entity }
+        | ScenePatchOperation::RestoreEntity { entity } => {
+            insert_entity_record(document, entity, operation_index)
         }
-        ScenePatchOperation::RemoveEntity { entity, from } => {
-            let removed =
-                prepare_subtree_removal_with(document, entity, from, operation_index, |_| Ok(()))?;
-            remove_subtree_records(document, &removed);
-            let mut removed = removed.into_iter();
-            let entity = removed.next().expect("prepared subtree contains its root");
-            let descendants = removed.collect::<Vec<_>>();
-            if entity.components.is_empty() && entity.children.is_empty() && entity.prefab.is_none()
-            {
-                Ok(vec![ScenePatchOperation::AddEntity {
-                    entity,
-                    placement: from.clone(),
-                }])
-            } else {
-                Ok(vec![ScenePatchOperation::RestoreEntity {
-                    entity,
-                    descendants,
-                    placement: from.clone(),
-                }])
-            }
+        ScenePatchOperation::RemoveEntity { entity } => {
+            remove_entity_record(document, entity, operation_index)
         }
-        ScenePatchOperation::RestoreEntity {
-            entity,
-            descendants,
-            placement,
-        } => {
-            prepare_entity_restoration_with(
-                document,
-                entity,
-                descendants,
-                placement,
-                operation_index,
-                |_| Ok(()),
-            )?;
-            let insertion =
-                resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-            document.entities.push(entity.clone());
-            document.entities.extend(descendants.iter().cloned());
-            insert_placed_entity(document, &entity.id, insertion);
-            Ok(vec![ScenePatchOperation::RemoveEntity {
-                entity: entity.id.clone(),
-                from: placement.clone(),
-            }])
-        }
-        ScenePatchOperation::MoveEntity { entity, from, to } => {
-            move_entity(document, entity, from, to, operation_index)
+        ScenePatchOperation::SetPlacements { expected, value } => {
+            set_placements(document, expected, value, operation_index)
         }
         ScenePatchOperation::AddComponent {
             entity,
@@ -2223,12 +2191,24 @@ pub(crate) fn apply_authoring_structure_operation(
         ScenePatchOperation::RemoveComponent { entity, component } => {
             remove_component_record(document, entity, component, operation_index)
         }
+        ScenePatchOperation::ReplaceComponent {
+            entity,
+            component,
+            value,
+        } => replace_component_record(document, entity, component, value, operation_index),
         ScenePatchOperation::SetPrefabInstance {
             entity,
             expected,
             value,
         } => set_prefab_instance(document, entity, expected, value, operation_index),
-        _ => unreachable!("the authoring owner admits only its finite structure vocabulary"),
+        _ => Err(patch_diagnostic(
+            operation_index,
+            "scene.authoring-structure-operation-unsupported",
+            "The operation is not part of the admitted authoring structure vocabulary",
+            None,
+            None,
+            None,
+        )),
     }
 }
 
@@ -2277,24 +2257,13 @@ fn apply_non_component_operation<D: EntityDocument>(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     match operation {
-        ScenePatchOperation::AddEntity { entity, placement } => {
-            add_entity(document, registry, entity, placement, operation_index)
+        ScenePatchOperation::AddEntity { entity }
+        | ScenePatchOperation::RestoreEntity { entity } => {
+            add_entity(document, registry, entity, operation_index)
         }
-        ScenePatchOperation::RemoveEntity { entity, from } => {
-            remove_entity(document, registry, entity, from, operation_index)
+        ScenePatchOperation::RemoveEntity { entity } => {
+            remove_entity(document, registry, entity, operation_index)
         }
-        ScenePatchOperation::RestoreEntity {
-            entity,
-            descendants,
-            placement,
-        } => restore_entity(
-            document,
-            registry,
-            entity,
-            descendants,
-            placement,
-            operation_index,
-        ),
         ScenePatchOperation::AddComponent { .. }
         | ScenePatchOperation::RemoveComponent { .. }
         | ScenePatchOperation::ReplaceComponent { .. } => Err(patch_diagnostic(
@@ -2337,8 +2306,8 @@ fn apply_non_component_operation<D: EntityDocument>(
             field,
             operation_index,
         ),
-        ScenePatchOperation::MoveEntity { entity, from, to } => {
-            move_entity(document, entity, from, to, operation_index)
+        ScenePatchOperation::SetPlacements { expected, value } => {
+            set_placements(document, expected, value, operation_index)
         }
         ScenePatchOperation::SetAssetRefField {
             entity,
@@ -2405,63 +2374,27 @@ fn add_entity<D: EntityDocument>(
     document: &mut D,
     registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityRecord,
-    placement: &ScenePlacement,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    prepare_entity_insertion(document, registry, entity, placement, operation_index)?;
-    let insertion = resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-    document.entities_mut().push(entity.clone());
-    insert_placed_entity(document, &entity.id, insertion);
-    Ok(vec![ScenePatchOperation::RemoveEntity {
-        entity: entity.id.clone(),
-        from: placement.clone(),
-    }])
+    for component in entity.components.keys() {
+        require_whole_component_edit(registry, &entity.id, component, operation_index)?;
+    }
+    insert_entity_record(document, entity, operation_index)
 }
 
 fn remove_entity<D: EntityDocument>(
     document: &mut D,
     registry: &ComponentRegistrySnapshot,
     entity: &SceneEntityId,
-    from: &ScenePlacement,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    let removed = prepare_subtree_removal(document, registry, entity, from, operation_index)?;
-    remove_subtree_records(document, &removed);
-    let mut removed = removed.into_iter();
-    let entity = removed
-        .next()
-        .expect("a prepared subtree removal always contains its root");
-    Ok(vec![ScenePatchOperation::RestoreEntity {
-        entity,
-        descendants: removed.collect(),
-        placement: from.clone(),
-    }])
-}
-
-fn restore_entity<D: EntityDocument>(
-    document: &mut D,
-    registry: &ComponentRegistrySnapshot,
-    entity: &SceneEntityRecord,
-    descendants: &[SceneEntityRecord],
-    placement: &ScenePlacement,
-    operation_index: usize,
-) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    prepare_entity_restoration(
-        document,
-        registry,
-        entity,
-        descendants,
-        placement,
-        operation_index,
-    )?;
-    let insertion = resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-    document.entities_mut().push(entity.clone());
-    document.entities_mut().extend(descendants.iter().cloned());
-    insert_placed_entity(document, &entity.id, insertion);
-    Ok(vec![ScenePatchOperation::RemoveEntity {
-        entity: entity.id.clone(),
-        from: placement.clone(),
-    }])
+    for component in entity_mut(document, entity, operation_index)?
+        .components
+        .keys()
+    {
+        require_whole_component_edit(registry, entity, component, operation_index)?;
+    }
+    remove_entity_record(document, entity, operation_index)
 }
 
 fn add_component<D: EntityDocument>(
@@ -2545,18 +2478,28 @@ fn replace_component<D: EntityDocument>(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     require_whole_component_edit(registry, entity, component, operation_index)?;
+    replace_component_record(document, entity, component, value, operation_index)
+}
+
+fn replace_component_record<D: EntityDocument>(
+    document: &mut D,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    value: &SceneComponentRecord,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     let record = entity_mut(document, entity, operation_index)?;
-    let Some(previous) = record.components.insert(component.clone(), value.clone()) else {
-        record.components.remove(component);
-        return Err(patch_diagnostic(
+    let previous = record.components.get_mut(component).ok_or_else(|| {
+        patch_diagnostic(
             operation_index,
             "scene.patch-missing-component",
             "patch replaces a component that does not exist",
             Some(entity),
             Some(component),
             None,
-        ));
-    };
+        )
+    })?;
+    let previous = std::mem::replace(previous, value.clone());
     Ok(vec![ScenePatchOperation::ReplaceComponent {
         entity: entity.clone(),
         component: component.clone(),
@@ -2772,445 +2715,67 @@ fn remove_field_value<D: EntityDocument>(
     Ok(previous)
 }
 
-fn move_entity<D: EntityDocument>(
+fn insert_entity_record<D: EntityDocument + ?Sized>(
     document: &mut D,
-    entity: &SceneEntityId,
-    from: &ScenePlacement,
-    to: &ScenePlacement,
+    entity: &SceneEntityRecord,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
-    entity_mut(document, entity, operation_index)?;
-    if !placement_matches(document, entity, from) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-context-mismatch",
-            "patch source placement does not match the current entity context",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    let insertion = resolve_insertion(document, entity, to, true, operation_index)?;
-    detach_entity(document, entity);
-    insert_placed_entity(document, entity, insertion);
-    Ok(vec![ScenePatchOperation::MoveEntity {
-        entity: entity.clone(),
-        from: to.clone(),
-        to: from.clone(),
-    }])
-}
-
-#[derive(Clone)]
-struct ResolvedInsertion {
-    owner: ScenePlacementOwner,
-    index: usize,
-}
-
-fn prepare_entity_insertion<D: EntityDocument + ?Sized>(
-    document: &D,
-    registry: &ComponentRegistrySnapshot,
-    entity: &SceneEntityRecord,
-    placement: &ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    prepare_entity_placement(document, entity, placement, operation_index)?;
-    for component in entity.components.keys() {
-        require_whole_component_edit(registry, &entity.id, component, operation_index)?;
-    }
-    Ok(())
-}
-
-fn prepare_entity_placement<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityRecord,
-    placement: &ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
     if find_entity(document, &entity.id).is_some() {
         return Err(patch_diagnostic(
             operation_index,
             "scene.patch-duplicate-entity",
-            "patch adds an entity that already exists",
+            "Patch inserts a source entity that already exists",
             Some(&entity.id),
             None,
             None,
         ));
     }
-    if !entity.children.is_empty() {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-add-entity-has-children",
-            "patch adds an entity with children; use explicit placement operations",
-            Some(&entity.id),
-            None,
-            None,
-        ));
-    }
-    validate_placement_owner(document, &entity.id, placement, operation_index)
+    document.entities_mut().push(entity.clone());
+    Ok(vec![ScenePatchOperation::RemoveEntity {
+        entity: entity.id.clone(),
+    }])
 }
 
-fn prepare_subtree_removal<D: EntityDocument + ?Sized>(
-    document: &D,
-    registry: &ComponentRegistrySnapshot,
-    entity: &SceneEntityId,
-    from: &ScenePlacement,
-    operation_index: usize,
-) -> Result<Vec<SceneEntityRecord>, Diagnostic> {
-    prepare_subtree_removal_with(document, entity, from, operation_index, |record| {
-        for component in record.components.keys() {
-            require_whole_component_edit(registry, &record.id, component, operation_index)?;
-        }
-        Ok(())
-    })
-}
-
-fn prepare_subtree_removal_with<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityId,
-    from: &ScenePlacement,
-    operation_index: usize,
-    mut admit_record: impl FnMut(&SceneEntityRecord) -> Result<(), Diagnostic>,
-) -> Result<Vec<SceneEntityRecord>, Diagnostic> {
-    if find_entity(document, entity).is_none() {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-missing-entity",
-            "patch removes an entity that does not exist",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    if !placement_matches(document, entity, from) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-context-mismatch",
-            "patch removal placement does not match the current entity context",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-
-    let mut removed = Vec::new();
-    let mut pending = vec![entity.clone()];
-    let mut seen = BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let record_index = find_entity(document, &id)
-            .expect("validated subtree entity must remain in the source document");
-        let record = &document.entities()[record_index];
-        admit_record(record)?;
-        pending.extend(record.children.iter().rev().cloned());
-        removed.push(record.clone());
-    }
-    Ok(removed)
-}
-
-fn prepare_entity_restoration<D: EntityDocument + ?Sized>(
-    document: &D,
-    registry: &ComponentRegistrySnapshot,
-    entity: &SceneEntityRecord,
-    descendants: &[SceneEntityRecord],
-    placement: &ScenePlacement,
-    operation_index: usize,
-) -> Result<(), Diagnostic> {
-    prepare_entity_restoration_with(
-        document,
-        entity,
-        descendants,
-        placement,
-        operation_index,
-        |record| {
-            for component in record.components.keys() {
-                require_whole_component_edit(registry, &record.id, component, operation_index)?;
-            }
-            Ok(())
-        },
-    )
-}
-
-fn prepare_entity_restoration_with<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityRecord,
-    descendants: &[SceneEntityRecord],
-    placement: &ScenePlacement,
-    operation_index: usize,
-    mut admit_record: impl FnMut(&SceneEntityRecord) -> Result<(), Diagnostic>,
-) -> Result<(), Diagnostic> {
-    let mut restored_ids = BTreeSet::new();
-    for record in std::iter::once(entity).chain(descendants) {
-        if !restored_ids.insert(record.id.clone()) {
-            return Err(patch_diagnostic(
-                operation_index,
-                "scene.patch-restore-duplicate-entity",
-                "patch restores the same entity more than once",
-                Some(&record.id),
-                None,
-                None,
-            ));
-        }
-        if find_entity(document, &record.id).is_some() {
-            return Err(patch_diagnostic(
-                operation_index,
-                "scene.patch-duplicate-entity",
-                "patch restores an entity that already exists",
-                Some(&record.id),
-                None,
-                None,
-            ));
-        }
-        admit_record(record)?;
-    }
-    validate_placement_owner(document, &entity.id, placement, operation_index)
-}
-
-fn remove_subtree_records<D: EntityDocument + ?Sized>(
+fn remove_entity_record<D: EntityDocument + ?Sized>(
     document: &mut D,
-    removed: &[SceneEntityRecord],
-) {
-    let removed_ids = removed
-        .iter()
-        .map(|record| record.id.clone())
-        .collect::<BTreeSet<_>>();
-    document
-        .entities_mut()
-        .retain(|record| !removed_ids.contains(&record.id));
-    document
-        .roots_mut()
-        .retain(|root| !removed_ids.contains(root));
-    for record in document.entities_mut() {
-        record.children.retain(|child| !removed_ids.contains(child));
-    }
-}
-
-fn validate_placement_owner<D: EntityDocument + ?Sized>(
-    document: &D,
     entity: &SceneEntityId,
-    placement: &ScenePlacement,
     operation_index: usize,
-) -> Result<(), Diagnostic> {
-    let ScenePlacementOwner::Parent { parent } = &placement.owner else {
-        return Ok(());
-    };
-    if parent == entity {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-self-parent",
-            "patch places an entity beneath itself",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    if find_entity(document, parent).is_none() {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-owner-missing",
-            "patch placement owner does not exist",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    if descendant_of(document, parent, entity) {
-        return Err(patch_diagnostic(
-            operation_index,
-            "scene.patch-placement-cycle",
-            "patch placement would create a cycle",
-            Some(entity),
-            None,
-            None,
-        ));
-    }
-    Ok(())
-}
-
-fn resolve_insertion<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityId,
-    placement: &ScenePlacement,
-    remove_entity_first: bool,
-    operation_index: usize,
-) -> Result<ResolvedInsertion, Diagnostic> {
-    validate_placement_owner(document, entity, placement, operation_index)?;
-    let mut siblings = siblings_for_owner(document, &placement.owner).ok_or_else(|| {
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    let index = find_entity(document, entity).ok_or_else(|| {
         patch_diagnostic(
             operation_index,
-            "scene.patch-placement-owner-missing",
-            "patch placement owner does not exist",
+            "scene.patch-missing-entity",
+            "Patch removes a source entity that does not exist",
             Some(entity),
             None,
             None,
         )
     })?;
-    if remove_entity_first {
-        siblings.retain(|sibling| sibling != entity);
-    }
-
-    let index = match &placement.anchor {
-        ScenePlacementAnchor::First => 0,
-        ScenePlacementAnchor::Last => siblings.len(),
-        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling }
-            if sibling == entity =>
-        {
-            return Err(patch_diagnostic(
-                operation_index,
-                "scene.patch-placement-self-anchor",
-                "patch placement cannot use the moving entity as its anchor",
-                Some(entity),
-                None,
-                None,
-            ));
-        }
-        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
-            let Some(anchor_index) = siblings.iter().position(|candidate| candidate == sibling)
-            else {
-                return Err(patch_diagnostic(
-                    operation_index,
-                    "scene.patch-placement-anchor-missing",
-                    "patch placement anchor is missing, retired, or belongs to another owner",
-                    Some(entity),
-                    None,
-                    None,
-                ));
-            };
-            if matches!(placement.anchor, ScenePlacementAnchor::Before { .. }) {
-                anchor_index
-            } else {
-                anchor_index.saturating_add(1)
-            }
-        }
-    };
-    Ok(ResolvedInsertion {
-        owner: placement.owner.clone(),
-        index,
-    })
+    let entity = document.entities_mut().remove(index);
+    Ok(vec![ScenePatchOperation::RestoreEntity { entity }])
 }
 
-fn placement_for_entity<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityId,
-) -> Option<ScenePlacement> {
-    let owner = placement_owner(document.roots(), document.entities(), entity)?;
-    let siblings = siblings_for_owner(document, &owner)?;
-    let index = siblings.iter().position(|candidate| candidate == entity)?;
-    let anchor = if index == 0 {
-        ScenePlacementAnchor::First
-    } else {
-        ScenePlacementAnchor::After {
-            sibling: siblings[index - 1].clone(),
-        }
-    };
-    Some(ScenePlacement { owner, anchor })
-}
-
-fn placement_matches<D: EntityDocument + ?Sized>(
-    document: &D,
-    entity: &SceneEntityId,
-    placement: &ScenePlacement,
-) -> bool {
-    let Some(owner) = placement_owner(document.roots(), document.entities(), entity) else {
-        return false;
-    };
-    if owner != placement.owner {
-        return false;
-    }
-    let Some(siblings) = siblings_for_owner(document, &owner) else {
-        return false;
-    };
-    let Some(index) = siblings.iter().position(|candidate| candidate == entity) else {
-        return false;
-    };
-    match &placement.anchor {
-        ScenePlacementAnchor::First => index == 0,
-        ScenePlacementAnchor::Last => index + 1 == siblings.len(),
-        ScenePlacementAnchor::Before { sibling } => siblings.get(index + 1) == Some(sibling),
-        ScenePlacementAnchor::After { sibling } => {
-            index > 0 && siblings.get(index - 1) == Some(sibling)
-        }
-    }
-}
-
-pub(crate) fn placement_owner(
-    roots: &[SceneEntityId],
-    entities: &[SceneEntityRecord],
-    entity: &SceneEntityId,
-) -> Option<ScenePlacementOwner> {
-    if roots.contains(entity) {
-        return Some(ScenePlacementOwner::Root);
-    }
-    entities.iter().find_map(|record| {
-        record
-            .children
-            .contains(entity)
-            .then(|| ScenePlacementOwner::Parent {
-                parent: record.id.clone(),
-            })
-    })
-}
-
-fn siblings_for_owner<D: EntityDocument + ?Sized>(
-    document: &D,
-    owner: &ScenePlacementOwner,
-) -> Option<Vec<SceneEntityId>> {
-    match owner {
-        ScenePlacementOwner::Root => Some(document.roots().to_vec()),
-        ScenePlacementOwner::Parent { parent } => document
-            .entities()
-            .iter()
-            .find(|record| &record.id == parent)
-            .map(|record| record.children.clone()),
-    }
-}
-
-fn descendant_of<D: EntityDocument + ?Sized>(
-    document: &D,
-    candidate: &SceneEntityId,
-    ancestor: &SceneEntityId,
-) -> bool {
-    let mut pending = vec![ancestor.clone()];
-    while let Some(parent) = pending.pop() {
-        let Some(record) = document
-            .entities()
-            .iter()
-            .find(|record| record.id == parent)
-        else {
-            continue;
-        };
-        if record.children.contains(candidate) {
-            return true;
-        }
-        pending.extend(record.children.iter().cloned());
-    }
-    false
-}
-
-fn detach_entity<D: EntityDocument + ?Sized>(document: &mut D, entity: &SceneEntityId) {
-    document.roots_mut().retain(|root| root != entity);
-    for record in document.entities_mut() {
-        record.children.retain(|child| child != entity);
-    }
-}
-
-fn insert_placed_entity<D: EntityDocument + ?Sized>(
+fn set_placements<D: EntityDocument + ?Sized>(
     document: &mut D,
-    entity: &SceneEntityId,
-    insertion: ResolvedInsertion,
-) {
-    match insertion.owner {
-        ScenePlacementOwner::Root => document.roots_mut().insert(insertion.index, entity.clone()),
-        ScenePlacementOwner::Parent { parent } => {
-            let record = document
-                .entities_mut()
-                .iter_mut()
-                .find(|record| record.id == parent)
-                .expect("resolved placement owner must remain in the unpublished document");
-            record.children.insert(insertion.index, entity.clone());
-        }
+    expected: &[SceneEntityPlacement],
+    value: &[SceneEntityPlacement],
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    if document.placements() != expected {
+        return Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-placement-context-mismatch",
+            "Placement mutation requires the exact prior source declarations and order",
+            None,
+            None,
+            None,
+        ));
     }
+    let previous = std::mem::replace(document.placements_mut(), value.to_vec());
+    Ok(vec![ScenePatchOperation::SetPlacements {
+        expected: value.to_vec(),
+        value: previous,
+    }])
 }
 
 fn set_asset_ref_field<D: EntityDocument>(
@@ -3270,19 +2835,24 @@ fn set_asset_ref_field<D: EntityDocument>(
 }
 
 trait EntityDocument {
-    fn roots(&self) -> &[SceneEntityId];
-    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId>;
+    fn placements(&self) -> &[SceneEntityPlacement];
+    fn placements_mut(&mut self) -> &mut Vec<SceneEntityPlacement>;
     fn entities(&self) -> &[SceneEntityRecord];
     fn entities_mut(&mut self) -> &mut Vec<SceneEntityRecord>;
+    fn validate_local_layout_constraints(&self) -> Result<(), crate::SceneCompilationFailureKind>;
 }
 
 impl EntityDocument for SceneDocument {
-    fn roots(&self) -> &[SceneEntityId] {
-        &self.roots
+    fn validate_local_layout_constraints(&self) -> Result<(), crate::SceneCompilationFailureKind> {
+        self.validate_local_layout_constraints()
     }
 
-    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId> {
-        &mut self.roots
+    fn placements(&self) -> &[SceneEntityPlacement] {
+        &self.placements
+    }
+
+    fn placements_mut(&mut self) -> &mut Vec<SceneEntityPlacement> {
+        &mut self.placements
     }
 
     fn entities(&self) -> &[SceneEntityRecord] {
@@ -3295,12 +2865,16 @@ impl EntityDocument for SceneDocument {
 }
 
 impl EntityDocument for PrefabDocument {
-    fn roots(&self) -> &[SceneEntityId] {
-        &self.roots
+    fn validate_local_layout_constraints(&self) -> Result<(), crate::SceneCompilationFailureKind> {
+        self.validate_local_layout_constraints()
     }
 
-    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId> {
-        &mut self.roots
+    fn placements(&self) -> &[SceneEntityPlacement] {
+        &self.placements
+    }
+
+    fn placements_mut(&mut self) -> &mut Vec<SceneEntityPlacement> {
+        &mut self.placements
     }
 
     fn entities(&self) -> &[SceneEntityRecord] {

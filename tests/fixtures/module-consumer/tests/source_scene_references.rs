@@ -622,6 +622,7 @@ fn prefab_overlay_collects_only_the_effective_door_scene_target() {
     });
     let mut authored = document(A, &[]);
     authored.entities[0].prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::Product(
             AssetProductRef::new(prefab_id, ImportedProductId::PRIMARY).unwrap(),
         ),
@@ -720,7 +721,9 @@ fn required_scene_changes_startup_digest_but_unrelated_declared_scene_does_not()
     let revision = initial.revision();
     drop(initial);
     let mut unrelated = document(C, &[]);
-    unrelated.roots.push(id("unrelated-edit"));
+    unrelated
+        .placements
+        .push(nara_scene::SceneEntityPlacement::root(id("unrelated-edit")));
     unrelated
         .entities
         .push(SceneEntityRecord::new(id("unrelated-edit")));
@@ -737,7 +740,9 @@ fn required_scene_changes_startup_digest_but_unrelated_declared_scene_does_not()
     );
     drop(after_unrelated);
     let mut dependent = document(B, &[A]);
-    dependent.roots.push(id("dependent-edit"));
+    dependent
+        .placements
+        .push(nara_scene::SceneEntityPlacement::root(id("dependent-edit")));
     dependent
         .entities
         .push(SceneEntityRecord::new(id("dependent-edit")));

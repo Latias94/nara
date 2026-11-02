@@ -80,14 +80,6 @@ pub(crate) fn scene_format_diagnostic(
             let diagnostic = number(diagnostic, "observed_version", u64::from(*observed));
             number(diagnostic, "supported_version", u64::from(*expected))
         }
-        SceneFormatError::LegacyPlacementShape { entity_index } => {
-            let diagnostic = identifier(diagnostic, "reason", "legacy-placement-shape");
-            if let Some(index) = entity_index {
-                number(diagnostic, "entity_index", usize_to_u64(*index))
-            } else {
-                diagnostic
-            }
-        }
         SceneFormatError::Budget(error) => budget(
             diagnostic,
             match error.kind {
@@ -314,7 +306,7 @@ mod tests {
             format_version: 1,
             engine_min_version: "0.1.0",
             generator: (name: "test", version: "0.1.0"),
-            payload: (roots: [], entities: []),
+            payload: (placements: [], entities: []),
         )"#
         .to_owned();
         for (source, reason) in [

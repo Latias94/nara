@@ -11,6 +11,7 @@ pub enum SceneCompilationFailureKind {
     MissingTarget,
     DuplicateIntent,
     Placement,
+    RootBinding,
     Component,
     Reference,
     OwnerAdmission,
@@ -117,6 +118,7 @@ pub struct SceneCompilationFailure {
     pub(crate) reason: SceneCompilationFailureKind,
     pub(crate) location: Option<PrefabInstanceLocation>,
     pub(crate) slot: Option<PrefabOverlaySlot>,
+    pub(crate) entity: Option<SceneEntityId>,
 }
 
 impl SceneCompilationFailure {
@@ -142,6 +144,7 @@ impl From<SceneCompilationFailureKind> for SceneCompilationFailure {
             reason,
             location: None,
             slot: None,
+            entity: None,
         }
     }
 }

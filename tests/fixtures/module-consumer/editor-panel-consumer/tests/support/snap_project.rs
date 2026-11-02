@@ -63,10 +63,18 @@ pub fn transform(position: [f64; 2]) -> SceneComponentRecord {
 
 pub fn scene(position: [f64; 2]) -> SceneDocument {
     SceneDocument::new(
-        [id("parent"), id("untouched")],
+        [
+            nara::scene::SceneEntityPlacement::root(id("parent")),
+            nara::scene::SceneEntityPlacement::root(id("untouched")),
+            nara::scene::SceneEntityPlacement::new(
+                nara::scene::PrefabEntityTarget::source(id("actor")),
+                nara::scene::ScenePlacement::last(nara::scene::ScenePlacementParent::Entity(
+                    nara::scene::PrefabEntityTarget::source(id("parent")),
+                )),
+            ),
+        ],
         [
             SceneEntityRecord::new(id("parent"))
-                .with_children([id("actor")])
                 .with_component(ComponentTypeId::new(TRANSFORM), transform([101.0, -203.0])),
             SceneEntityRecord::new(id("actor"))
                 .with_component(ComponentTypeId::new(TRANSFORM), transform(position))

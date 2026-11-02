@@ -5,6 +5,8 @@ mod diagnostic_tests;
 mod publication_shape;
 #[cfg(test)]
 mod publication_shape_tests;
+#[cfg(test)]
+mod source_placement_tests;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -29,11 +31,12 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
     PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport, ScenePlacementParent,
     patch::ScenePatchDocumentWire,
     prefab::{
-        PrefabOverlayCostError, PrefabOverlayCostKind, PrefabOverlayCostLimits,
-        prefab_instance_cost,
+        PrefabOverlayCost, PrefabOverlayCostError, PrefabOverlayCostKind, PrefabOverlayCostLimits,
+        prefab_instance_cost, scene_placements_cost,
     },
 };
 
@@ -324,9 +327,6 @@ pub enum SceneFormatError {
         observed: u32,
         expected: u32,
     },
-    LegacyPlacementShape {
-        entity_index: Option<usize>,
-    },
     Payload {
         encoding: SceneFileEncoding,
         source: Box<dyn Error + Send + Sync>,
@@ -363,19 +363,6 @@ impl Display for SceneFormatError {
                 formatter,
                 "scene patch format version is {observed}, expected {expected}"
             ),
-            Self::LegacyPlacementShape { entity_index } => {
-                if let Some(entity_index) = entity_index {
-                    write!(
-                        formatter,
-                        "persistent entity document uses the removed record-owned parent shape at entity index {entity_index}; rewrite it with document roots and parent-owned children because sibling order cannot be inferred"
-                    )?;
-                } else {
-                    formatter.write_str(
-                        "persistent entity document is missing its ordered roots; rewrite it with document roots and parent-owned children because sibling order cannot be inferred",
-                    )?;
-                }
-                Ok(())
-            }
             Self::Payload { encoding, source } => {
                 write!(
                     formatter,
@@ -403,9 +390,7 @@ impl Error for SceneFormatError {
             | Self::Metadata(source) => Some(source.as_ref()),
             Self::Contract(error) => Some(error),
             Self::Budget(error) => Some(error),
-            Self::EncodedBytesExceeded { .. }
-            | Self::PatchFormatVersion { .. }
-            | Self::LegacyPlacementShape { .. } => None,
+            Self::EncodedBytesExceeded { .. } | Self::PatchFormatVersion { .. } => None,
         }
     }
 }
@@ -493,7 +478,6 @@ impl SceneFormatError {
             Self::EncodedBytesExceeded { .. }
             | Self::Contract(_)
             | Self::PatchFormatVersion { .. }
-            | Self::LegacyPlacementShape { .. }
             | Self::Budget(_)
             | Self::Encode { .. }
             | Self::Metadata(_) => None,
@@ -756,9 +740,8 @@ impl Error for SceneFilePublicationError {}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SceneDocumentWire {
-    #[serde(default)]
-    roots: OrderedRootsField,
-    entities: Vec<SceneEntityRecordWire>,
+    placements: Vec<SceneEntityPlacement>,
+    entities: Vec<SceneEntityRecord>,
 }
 
 #[derive(Deserialize)]
@@ -766,85 +749,8 @@ struct SceneDocumentWire {
 struct PrefabDocumentWire {
     #[serde(default)]
     inputs: BTreeSet<nara_identity::ReferenceInputId>,
-    #[serde(default)]
-    roots: OrderedRootsField,
-    entities: Vec<SceneEntityRecordWire>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SceneEntityRecordWire {
-    id: SceneEntityId,
-    #[serde(default)]
-    children: Vec<SceneEntityId>,
-    #[serde(default)]
-    components: BTreeMap<nara_reflect::ComponentTypeId, SceneComponentRecord>,
-    #[serde(default)]
-    prefab: Option<PrefabInstance>,
-    #[serde(default, rename = "parent")]
-    legacy_parent: LegacyParentField,
-}
-
-#[derive(Default)]
-struct LegacyParentField {
-    present: bool,
-}
-
-#[derive(Default)]
-struct OrderedRootsField {
-    value: Option<Vec<SceneEntityId>>,
-}
-
-impl<'de> Deserialize<'de> for OrderedRootsField {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self {
-            value: Some(Vec::<SceneEntityId>::deserialize(deserializer)?),
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for LegacyParentField {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
-        Ok(Self { present: true })
-    }
-}
-
-impl SceneEntityRecordWire {
-    fn into_record(self, entity_index: usize) -> Result<SceneEntityRecord, SceneFormatError> {
-        if self.legacy_parent.present {
-            return Err(SceneFormatError::LegacyPlacementShape {
-                entity_index: Some(entity_index),
-            });
-        }
-        Ok(SceneEntityRecord {
-            id: self.id,
-            children: self.children,
-            components: self.components,
-            prefab: self.prefab,
-        })
-    }
-}
-
-fn document_wire_parts(
-    roots: OrderedRootsField,
-    entities: Vec<SceneEntityRecordWire>,
-) -> Result<(Vec<SceneEntityId>, Vec<SceneEntityRecord>), SceneFormatError> {
-    let entities = entities
-        .into_iter()
-        .enumerate()
-        .map(|(entity_index, entity)| entity.into_record(entity_index))
-        .collect::<Result<Vec<_>, _>>()?;
-    let Some(roots) = roots.value else {
-        return Err(SceneFormatError::LegacyPlacementShape { entity_index: None });
-    };
-    Ok((roots, entities))
+    placements: Vec<SceneEntityPlacement>,
+    entities: Vec<SceneEntityRecord>,
 }
 
 trait SceneFilePayload: Clone + Serialize {
@@ -857,7 +763,7 @@ trait SceneFilePayload: Clone + Serialize {
     fn validate_contract(&self) -> Result<(), SceneFormatError>;
     fn validate_budget(&self, limits: SceneFileLimits) -> Result<(), SceneFileBudgetError>;
 
-    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
+    fn entity_document(&self) -> Option<(&[SceneEntityPlacement], &[SceneEntityRecord])> {
         None
     }
 
@@ -872,8 +778,10 @@ impl SceneFilePayload for SceneDocument {
     const KIND: &'static str = SCENE_KIND;
 
     fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
-        let (roots, entities) = document_wire_parts(wire.roots, wire.entities)?;
-        Ok(Self { roots, entities })
+        Ok(Self {
+            placements: wire.placements,
+            entities: wire.entities,
+        })
     }
 
     fn canonicalize_payload(&mut self) {
@@ -888,8 +796,8 @@ impl SceneFilePayload for SceneDocument {
         validate_scene_value_budget(self, limits)
     }
 
-    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
-        Some((&self.roots, &self.entities))
+    fn entity_document(&self) -> Option<(&[SceneEntityPlacement], &[SceneEntityRecord])> {
+        Some((&self.placements, &self.entities))
     }
 }
 
@@ -899,11 +807,10 @@ impl SceneFilePayload for PrefabDocument {
     const KIND: &'static str = PREFAB_KIND;
 
     fn from_wire(wire: Self::Wire) -> Result<Self, SceneFormatError> {
-        let (roots, entities) = document_wire_parts(wire.roots, wire.entities)?;
         Ok(Self {
             inputs: wire.inputs,
-            roots,
-            entities,
+            placements: wire.placements,
+            entities: wire.entities,
         })
     }
 
@@ -928,11 +835,11 @@ impl SceneFilePayload for PrefabDocument {
         for input in &self.inputs {
             counts.observe_structural_bytes(input.as_str().len(), limits)?;
         }
-        counts.observe_entities(&self.roots, &self.entities, limits)
+        counts.observe_entities(&self.placements, &self.entities, limits)
     }
 
-    fn entity_document(&self) -> Option<(&[SceneEntityId], &[SceneEntityRecord])> {
-        Some((&self.roots, &self.entities))
+    fn entity_document(&self) -> Option<(&[SceneEntityPlacement], &[SceneEntityRecord])> {
+        Some((&self.placements, &self.entities))
     }
 
     fn reference_inputs(&self) -> Option<&BTreeSet<nara_identity::ReferenceInputId>> {
@@ -1036,7 +943,7 @@ pub(crate) fn validate_scene_value_budget(
     document: &SceneDocument,
     limits: SceneFileLimits,
 ) -> Result<(), SceneFileBudgetError> {
-    SceneFileCounts::validate_entities(&document.roots, &document.entities, limits)
+    SceneFileCounts::validate_entities(&document.placements, &document.entities, limits)
 }
 
 pub(crate) fn validate_prefab_publication_shape(
@@ -1254,19 +1161,14 @@ impl PrefabDocumentCandidate {
     /// does not establish standalone publishability or editable source state.
     #[doc(hidden)]
     pub fn into_composition_source(self) -> Result<PrefabDocument, SceneFilePublicationError> {
-        let document = SceneDocument {
-            roots: self.document.roots,
-            entities: self.document.entities,
-        };
-        let diagnostics = crate::validation::validate_scene_structure(&document);
+        let diagnostics = crate::validation::validate_source_structure(
+            &self.document.placements,
+            &self.document.entities,
+        );
         if diagnostics.has_errors() {
             return Err(SceneFilePublicationError::new(diagnostics));
         }
-        Ok(PrefabDocument {
-            inputs: self.document.inputs,
-            roots: document.roots,
-            entities: document.entities,
-        })
+        Ok(self.document)
     }
 
     pub(crate) fn into_authoring_parts(self) -> (PrefabDocument, SceneFileLimits) {
@@ -1381,10 +1283,10 @@ fn validate_publication_shape<T: SceneFilePayload>(
     let certified = envelope
         .payload()
         .entity_document()
-        .is_some_and(|(roots, entities)| {
+        .is_some_and(|(placements, entities)| {
             publication_shape::certifies_entity_document(
                 &envelope,
-                roots,
+                placements,
                 entities,
                 envelope.payload().reference_inputs(),
                 limits.shape(),
@@ -1407,15 +1309,17 @@ fn validate_publication_shape_with_admission<T: SceneFilePayload, E>(
     // The owning caller has already ordered its candidate. Shape checks borrow it;
     // serializing an envelope does not require a second canonical document copy.
     let envelope = publication_envelope(payload, T::KIND).map_err(Format)?;
-    let certified = payload.entity_document().is_some_and(|(roots, entities)| {
-        publication_shape::certifies_entity_document(
-            &envelope,
-            roots,
-            entities,
-            payload.reference_inputs(),
-            limits.shape(),
-        )
-    });
+    let certified = payload
+        .entity_document()
+        .is_some_and(|(placements, entities)| {
+            publication_shape::certifies_entity_document(
+                &envelope,
+                placements,
+                entities,
+                payload.reference_inputs(),
+                limits.shape(),
+            )
+        });
     let mut refusal = None;
     let mut admit = |bytes| {
         admission(bytes).map_err(|error| {
@@ -1705,9 +1609,9 @@ fn finish_decode<T: SceneFilePayload>(
     mut payload: T,
     limits: SceneFileLimits,
 ) -> Result<T, SceneFormatError> {
-    payload.canonicalize_payload();
     payload.validate_contract()?;
     payload.validate_budget(limits)?;
+    payload.canonicalize_payload();
     Ok(payload)
 }
 
@@ -1794,27 +1698,24 @@ struct SceneFileCounts {
 
 impl SceneFileCounts {
     fn validate_entities(
-        roots: &[SceneEntityId],
+        placements: &[SceneEntityPlacement],
         entities: &[SceneEntityRecord],
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
-        Self::default().observe_entities(roots, entities, limits)
+        Self::default().observe_entities(placements, entities, limits)
     }
 
     fn observe_entities(
         &mut self,
-        roots: &[SceneEntityId],
+        placements: &[SceneEntityPlacement],
         entities: &[SceneEntityRecord],
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
-        self.observe_placements(roots.len(), limits)?;
-        for root in roots {
-            self.observe_structural_bytes(root.as_str().len(), limits)?;
-        }
+        self.observe_source_placements(placements, limits)?;
         for entity in entities {
             self.observe_entity(entity, limits)?;
         }
-        validate_placement_depth(roots, entities, limits)?;
+        validate_placement_depth(placements, limits)?;
         Ok(())
     }
 
@@ -1837,11 +1738,7 @@ impl SceneFileCounts {
             limits.entities(),
             SceneFileBudgetKind::Entities,
         )?;
-        self.observe_placements(entity.children.len(), limits)?;
         self.observe_structural_bytes(entity.id.as_str().len(), limits)?;
-        for child in &entity.children {
-            self.observe_structural_bytes(child.as_str().len(), limits)?;
-        }
         self.observe_diagnostic_source(limits)?;
         increase(
             &mut self.components,
@@ -1867,6 +1764,12 @@ impl SceneFileCounts {
         prefab: &PrefabInstance,
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
+        let cost = prefab_instance_cost(prefab, self.declaration_limits(limits))
+            .map_err(|error| self.overlay_budget_error(error, limits))?;
+        self.observe_declaration_cost(cost, limits)
+    }
+
+    fn declaration_limits(&self, limits: SceneFileLimits) -> PrefabOverlayCostLimits {
         let used_nodes = self
             .component_value_cost
             .nodes()
@@ -1875,7 +1778,7 @@ impl SceneFileCounts {
             .component_value_cost
             .logical_bytes()
             .saturating_add(self.structural_logical_bytes);
-        let overlay_limits = PrefabOverlayCostLimits {
+        PrefabOverlayCostLimits {
             nodes: limits
                 .component_value_nodes()
                 .get()
@@ -1908,9 +1811,14 @@ impl SceneFileCounts {
                 .component_value_bytes()
                 .get()
                 .saturating_sub(used_bytes),
-        };
-        let cost = prefab_instance_cost(prefab, overlay_limits)
-            .map_err(|error| self.overlay_budget_error(error, limits))?;
+        }
+    }
+
+    fn observe_declaration_cost(
+        &mut self,
+        cost: PrefabOverlayCost,
+        limits: SceneFileLimits,
+    ) -> Result<(), SceneFileBudgetError> {
         self.entities = self.entities.saturating_add(cost.entities);
         self.placements = self.placements.saturating_add(cost.placements);
         self.components = self.components.saturating_add(cost.components);
@@ -2001,19 +1909,14 @@ impl SceneFileCounts {
             )?;
             self.observe_diagnostic_source(limits)?;
             match operation {
-                ScenePatchOperation::AddEntity { entity, .. } => {
-                    self.observe_placements(1, limits)?;
+                ScenePatchOperation::AddEntity { entity }
+                | ScenePatchOperation::RestoreEntity { entity } => {
                     self.observe_entity(entity, limits)?;
                 }
-                ScenePatchOperation::RestoreEntity {
-                    entity,
-                    descendants,
-                    ..
-                } => {
-                    self.observe_placements(1, limits)?;
-                    self.observe_entity(entity, limits)?;
-                    for descendant in descendants {
-                        self.observe_entity(descendant, limits)?;
+                ScenePatchOperation::SetPlacements { expected, value } => {
+                    for declarations in [expected, value] {
+                        self.observe_source_placements(declarations, limits)?;
+                        validate_placement_depth(declarations, limits)?;
                     }
                 }
                 ScenePatchOperation::AddComponent { value, .. }
@@ -2039,13 +1942,8 @@ impl SceneFileCounts {
                         self.observe_prefab_instance(prefab, limits)?;
                     }
                 }
-                ScenePatchOperation::RemoveEntity { .. } => {
-                    self.observe_placements(1, limits)?;
-                }
-                ScenePatchOperation::MoveEntity { .. } => {
-                    self.observe_placements(2, limits)?;
-                }
-                ScenePatchOperation::RemoveComponent { .. }
+                ScenePatchOperation::RemoveEntity { .. }
+                | ScenePatchOperation::RemoveComponent { .. }
                 | ScenePatchOperation::RemoveField { .. }
                 | ScenePatchOperation::SetAssetRefField { .. } => {}
             }
@@ -2065,17 +1963,14 @@ impl SceneFileCounts {
         )
     }
 
-    fn observe_placements(
+    fn observe_source_placements(
         &mut self,
-        amount: usize,
+        placements: &[SceneEntityPlacement],
         limits: SceneFileLimits,
     ) -> Result<(), SceneFileBudgetError> {
-        increase(
-            &mut self.placements,
-            amount,
-            limits.placements(),
-            SceneFileBudgetKind::Placements,
-        )
+        let cost = scene_placements_cost(placements, self.declaration_limits(limits))
+            .map_err(|error| self.overlay_budget_error(error, limits))?;
+        self.observe_declaration_cost(cost, limits)
     }
 
     fn observe_component_value(
@@ -2157,20 +2052,28 @@ impl SceneFileCounts {
 }
 
 fn validate_placement_depth(
-    roots: &[SceneEntityId],
-    entities: &[SceneEntityRecord],
+    placements: &[SceneEntityPlacement],
     limits: SceneFileLimits,
 ) -> Result<(), SceneFileBudgetError> {
-    let children = entities
-        .iter()
-        .map(|entity| (&entity.id, entity.children.as_slice()))
-        .collect::<BTreeMap<_, _>>();
+    // Only contiguous source-local parent links are known here. Projected target survival,
+    // aliases and the depth of their effective hierarchy belong to the shared compiler.
+    let mut children = BTreeMap::<&SceneEntityId, Vec<&SceneEntityId>>::new();
+    let mut pending = Vec::new();
+    for declaration in placements {
+        let Some(entity) = source_local_target(&declaration.target) else {
+            continue;
+        };
+        let parent = match &declaration.placement.parent {
+            ScenePlacementParent::Root => None,
+            ScenePlacementParent::Entity(target) => source_local_target(target),
+        };
+        if let Some(parent) = parent {
+            children.entry(parent).or_default().push(entity);
+        } else {
+            pending.push((entity, 1_usize));
+        }
+    }
     let mut visited = BTreeSet::<&SceneEntityId>::new();
-    let mut pending = roots
-        .iter()
-        .rev()
-        .map(|root| (root, 1_usize))
-        .collect::<Vec<_>>();
     while let Some((entity, depth)) = pending.pop() {
         if depth > limits.placement_depth().get() {
             return Err(SceneFileBudgetError {
@@ -2187,11 +2090,20 @@ fn validate_placement_depth(
                 children
                     .iter()
                     .rev()
-                    .map(|child| (child, depth.saturating_add(1))),
+                    .map(|child| (*child, depth.saturating_add(1))),
             );
         }
     }
     Ok(())
+}
+
+fn source_local_target(target: &crate::PrefabEntityTarget) -> Option<&SceneEntityId> {
+    match &target.entity {
+        crate::PrefabEntityOrigin::SourceEntity(entity) if target.through.is_empty() => {
+            Some(entity)
+        }
+        _ => None,
+    }
 }
 
 fn increase(
@@ -2238,6 +2150,7 @@ mod overlay_storage_tests {
     fn instance(overlay: PrefabOverlay) -> PrefabInstance {
         PrefabInstance {
             source: AssetRef::Path(AssetPath::new("missing.prefab.json").unwrap()),
+            binding: crate::PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: Some(overlay),
         }
@@ -2249,7 +2162,7 @@ mod overlay_storage_tests {
             SceneEntityRecord::new(SceneEntityId::new("z").unwrap()),
             SceneEntityRecord::new(SceneEntityId::new("a").unwrap()),
         ]);
-        let prefab = PrefabDocument::new(source.roots.clone(), source.entities.clone());
+        let prefab = PrefabDocument::new(source.placements.clone(), source.entities.clone());
         for encoding in [SceneFileEncoding::Json, SceneFileEncoding::Ron] {
             let scene_bytes = match encoding {
                 SceneFileEncoding::Json => source.to_json_string().unwrap(),
@@ -2353,7 +2266,7 @@ mod overlay_storage_tests {
             let canonical = candidate.canonicalize(&registry).unwrap();
             assert_eq!(canonical.document(), &document);
         }
-        let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+        let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
         for candidate in [
             PrefabDocumentCandidate::decode_json_str(&prefab.to_json_string().unwrap()).unwrap(),
             PrefabDocumentCandidate::decode_ron_str(&prefab.to_ron_string().unwrap()).unwrap(),

@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
 };
 
 use nara_asset::{AssetRef, AssetReferenceResolver};
@@ -13,8 +13,10 @@ use nara_reflect::{
 };
 use nara_scene::{
     AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, PrefabAuthoringSession,
-    SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, SceneAuthoringHistoryStatus,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, ScenePatchDocument, ScenePatchOperation, ScenePatchReport,
+    ScenePlacement,
 };
 
 use crate::{diagnostic, snapshot::WorldIdentitySnapshot};
@@ -69,7 +71,7 @@ impl SceneInspectorState {
         )
     }
 
-    /// Uses the same persistent tree and scalar Inspector for an independent Prefab source.
+    /// Uses the same source declaration list and scalar Inspector for an independent Prefab.
     #[must_use]
     pub fn prefab_model_with_selection(
         &self,
@@ -108,27 +110,20 @@ impl SceneInspectorState {
         })
     }
 
-    /// Applies a field mutation admitted for a generically published authoring
+    /// Applies a source mutation admitted for a generically published authoring
     /// document. The session reclassifies the candidate and proves preservation before commit.
     pub fn apply_authoring_command(
         &self,
         session: &mut SceneAuthoringSession,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
-        if !matches!(
-            &command,
-            SceneInspectorCommand::SetField { .. }
-                | SceneInspectorCommand::RemoveField { .. }
-                | SceneInspectorCommand::SetAssetRefField { .. }
-        ) {
-            return inspector_authoring_command_error_report();
-        }
-        let entity = command.target_entity().clone();
-        if !document_has_entity(session.document(), &entity) {
+        if let Some(entity) = command.target_entity()
+            && !document_has_entity(session.document(), entity)
+        {
             return inspector_entity_error_report(
                 "tooling.inspector-missing-entity",
                 "inspector command targets an entity that is not in the authoring document",
-                &entity,
+                entity,
             );
         }
         let patch = match command.to_patch(session.document()) {
@@ -163,7 +158,16 @@ impl SceneInspectorState {
                 component_version,
                 ..
             } => (entity, component, component_version),
-            _ => unreachable!("the authoring command kind was checked before conversion"),
+            SceneInspectorCommand::MoveEntity { .. }
+            | SceneInspectorCommand::RevertPlacement { .. } => {
+                let patch_report = session.apply_authoring_patch(&patch);
+                return SceneInspectorCommandReport {
+                    applied: patch_report.applied,
+                    patch: Some(patch),
+                    patch_report: Some(patch_report.clone()),
+                    diagnostics: patch_report.diagnostics,
+                };
+            }
         };
         let Some(record) = session
             .document()
@@ -203,12 +207,13 @@ impl SceneInspectorState {
         command: SceneInspectorCommand,
         mut apply_patch: impl FnMut(&mut SceneAuthoringSession, &ScenePatchDocument) -> ScenePatchReport,
     ) -> SceneInspectorCommandReport {
-        let entity = command.target_entity().clone();
-        if !document_has_entity(session.document(), &entity) {
+        if let Some(entity) = command.target_entity()
+            && !document_has_entity(session.document(), entity)
+        {
             return inspector_entity_error_report(
                 "tooling.inspector-missing-entity",
                 "inspector command targets an entity that is not in the authoring document",
-                &entity,
+                entity,
             );
         }
 
@@ -265,8 +270,8 @@ pub struct SceneComponentCompositionCapability {
 pub struct SceneInspectorEntityRow {
     pub id: SceneEntityId,
     pub name: Option<String>,
-    pub parent: Option<SceneEntityId>,
-    pub depth: usize,
+    /// Authored intent, not an effective hierarchy position or sibling ordinal.
+    pub placement: Option<ScenePlacement>,
     pub inspectable_component_count: usize,
     pub has_prefab: bool,
     pub selected: bool,
@@ -276,7 +281,7 @@ pub struct SceneInspectorEntityRow {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneInspectorEntityView {
     pub id: SceneEntityId,
-    pub parent: Option<SceneEntityId>,
+    pub placement: Option<ScenePlacement>,
     pub has_prefab: bool,
     pub components: Vec<SceneInspectorComponentView>,
 }
@@ -389,23 +394,48 @@ pub enum SceneInspectorCommand {
         asset_ref: AssetRef,
     },
     MoveEntity {
-        entity: SceneEntityId,
+        target: PrefabEntityTarget,
         to: ScenePlacement,
+    },
+    RevertPlacement {
+        target: PrefabEntityTarget,
     },
 }
 
 impl SceneInspectorCommand {
+    /// Returns a direct source target; routed inherited targets never become containing-local IDs.
     #[must_use]
-    pub fn target_entity(&self) -> &SceneEntityId {
+    pub fn target_entity(&self) -> Option<&SceneEntityId> {
         match self {
             Self::SetField { entity, .. }
             | Self::RemoveField { entity, .. }
-            | Self::SetAssetRefField { entity, .. }
-            | Self::MoveEntity { entity, .. } => entity,
+            | Self::SetAssetRefField { entity, .. } => Some(entity),
+            Self::MoveEntity { target, .. } | Self::RevertPlacement { target } => {
+                match &target.entity {
+                    PrefabEntityOrigin::SourceEntity(entity) if target.through.is_empty() => {
+                        Some(entity)
+                    }
+                    _ => None,
+                }
+            }
         }
     }
 
     pub fn to_patch(&self, document: &SceneDocument) -> Result<ScenePatchDocument, Diagnostic> {
+        self.to_patch_with_placements(&document.placements)
+    }
+
+    pub fn to_prefab_patch(
+        &self,
+        document: &PrefabDocument,
+    ) -> Result<ScenePatchDocument, Diagnostic> {
+        self.to_patch_with_placements(&document.placements)
+    }
+
+    fn to_patch_with_placements(
+        &self,
+        placements: &[SceneEntityPlacement],
+    ) -> Result<ScenePatchDocument, Diagnostic> {
         let operation = match self {
             Self::SetField {
                 entity,
@@ -444,21 +474,15 @@ impl SceneInspectorCommand {
                 field: field.clone(),
                 asset_ref: asset_ref.clone(),
             },
-            Self::MoveEntity { entity, to } => {
-                let Some(from) = ScenePlacement::current(document, entity) else {
-                    return Err(diagnostic::with_entity(
-                        diagnostic::error(
-                            "tooling.inspector-placement-missing",
-                            "inspector move target has no validated document placement",
-                        ),
-                        entity,
-                    ));
-                };
-                ScenePatchOperation::MoveEntity {
-                    entity: entity.clone(),
-                    from,
-                    to: to.clone(),
-                }
+            Self::MoveEntity { target, to } => {
+                return Ok(ScenePatchDocument::set_placement(
+                    placements,
+                    target.clone(),
+                    to.clone(),
+                ));
+            }
+            Self::RevertPlacement { target } => {
+                return ScenePatchDocument::revert_placement(placements, target);
             }
         };
         Ok(ScenePatchDocument::new([operation]))
@@ -532,7 +556,7 @@ impl SceneInspectorCommand {
             | Self::SetAssetRefField {
                 entity, component, ..
             } => Some((entity, component)),
-            Self::MoveEntity { .. } => None,
+            Self::MoveEntity { .. } | Self::RevertPlacement { .. } => None,
         }
     }
 }
@@ -553,7 +577,7 @@ enum InspectorSession<'a> {
 
 #[derive(Clone, Copy)]
 struct InspectorDocument<'a> {
-    roots: &'a [SceneEntityId],
+    placements: &'a [SceneEntityPlacement],
     entities: &'a [nara_scene::SceneEntityRecord],
 }
 
@@ -561,11 +585,11 @@ impl<'a> InspectorSession<'a> {
     fn document(self) -> InspectorDocument<'a> {
         match self {
             Self::Scene(session) => InspectorDocument {
-                roots: &session.document().roots,
+                placements: &session.document().placements,
                 entities: &session.document().entities,
             },
             Self::Prefab(session) => InspectorDocument {
-                roots: &session.document().roots,
+                placements: &session.document().placements,
                 entities: &session.document().entities,
             },
         }
@@ -641,18 +665,25 @@ fn build_inspector_model(
             "registry-free inspector projection requires a published authoring document",
         ));
     }
-    let entity_by_id = document
-        .entities
+    let placements = document
+        .placements
         .iter()
-        .map(|entity| (entity.id.as_str(), entity))
+        .filter_map(|entry| match &entry.target.entity {
+            PrefabEntityOrigin::SourceEntity(entity) if entry.target.through.is_empty() => {
+                Some((entity.as_str(), &entry.placement))
+            }
+            _ => None,
+        })
         .collect::<HashMap<_, _>>();
     let mut selected_record = None;
-    let entities = ordered_scene_entities(document, &entity_by_id)
-        .into_iter()
-        .map(|(entity, parent, depth)| {
+    let entities = document
+        .entities
+        .iter()
+        .map(|entity| {
+            let placement = placements.get(entity.id.as_str()).copied();
             let selected = selected_entity == Some(&entity.id);
             if selected {
-                selected_record = Some((entity, parent));
+                selected_record = Some((entity, placement));
             }
             SceneInspectorEntityRow {
                 id: entity.id.clone(),
@@ -662,8 +693,7 @@ fn build_inspector_model(
                     .filter(|record| record.version == ComponentSchemaVersion::ONE)
                     .and_then(|record| record.value.as_str())
                     .map(str::to_owned),
-                parent: parent.cloned(),
-                depth,
+                placement: placement.cloned(),
                 inspectable_component_count: inspectable_component_count(
                     session,
                     entity,
@@ -680,10 +710,10 @@ fn build_inspector_model(
         .collect::<Vec<_>>();
 
     let selected_entity_view = match (selected_entity, selected_record) {
-        (Some(_), Some((entity, parent))) => Some(build_entity_view(
+        (Some(_), Some((entity, placement))) => Some(build_entity_view(
             session,
             entity,
-            parent,
+            placement,
             registry,
             &authoring_record_facts,
             &mut diagnostics,
@@ -789,7 +819,7 @@ fn inspectable_component_count(
 fn build_entity_view(
     session: InspectorSession<'_>,
     entity: &nara_scene::SceneEntityRecord,
-    parent: Option<&SceneEntityId>,
+    placement: Option<&ScenePlacement>,
     registry: Option<&ComponentRegistrySnapshot>,
     authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
     diagnostics: &mut DiagnosticReport,
@@ -947,45 +977,10 @@ fn build_entity_view(
 
     SceneInspectorEntityView {
         id: entity.id.clone(),
-        parent: parent.cloned(),
+        placement: placement.cloned(),
         has_prefab: entity.prefab.is_some(),
         components,
     }
-}
-
-fn ordered_scene_entities<'document>(
-    document: InspectorDocument<'document>,
-    entity_by_id: &HashMap<&'document str, &'document nara_scene::SceneEntityRecord>,
-) -> Vec<(
-    &'document nara_scene::SceneEntityRecord,
-    Option<&'document SceneEntityId>,
-    usize,
-)> {
-    let mut pending = document
-        .roots
-        .iter()
-        .rev()
-        .map(|root| (root, None, 0usize))
-        .collect::<Vec<_>>();
-    let mut ordered = Vec::with_capacity(document.entities.len());
-    let mut visited = HashSet::with_capacity(document.entities.len());
-    while let Some((id, parent, depth)) = pending.pop() {
-        if !visited.insert(id.as_str()) {
-            continue;
-        }
-        let Some(entity) = entity_by_id.get(id.as_str()).copied() else {
-            continue;
-        };
-        ordered.push((entity, parent, depth));
-        pending.extend(
-            entity
-                .children
-                .iter()
-                .rev()
-                .map(|child| (child, Some(&entity.id), depth.saturating_add(1))),
-        );
-    }
-    ordered
 }
 
 fn build_component_view(
@@ -1196,20 +1191,6 @@ fn inspector_entity_error_report(
     diagnostics.push(diagnostic::with_entity(
         diagnostic::error(code, summary),
         entity,
-    ));
-    SceneInspectorCommandReport {
-        applied: false,
-        patch: None,
-        patch_report: None,
-        diagnostics,
-    }
-}
-
-fn inspector_authoring_command_error_report() -> SceneInspectorCommandReport {
-    let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(diagnostic::error(
-        "tooling.inspector-authoring-command-unsupported",
-        "generically published authoring documents only accept preservation-safe field edits",
     ));
     SceneInspectorCommandReport {
         applied: false,
@@ -1577,45 +1558,55 @@ mod tests {
     }
 
     #[test]
-    fn traversal_follows_ordered_roots_and_children() {
+    fn source_rows_expose_desired_locations_without_claiming_effective_hierarchy() {
+        use nara_scene::ScenePlacementParent;
         let root = scene_id("root");
         let child = scene_id("root/child");
         let grandchild = scene_id("root/child/grandchild");
         let sibling_root = scene_id("sibling-root");
+        let child_placement = ScenePlacement::first(ScenePlacementParent::Entity(
+            PrefabEntityTarget::source(root.clone()),
+        ));
         let document = SceneDocument::new(
-            [root.clone(), sibling_root.clone()],
             [
-                SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
-                SceneEntityRecord::new(child.clone()).with_children([grandchild.clone()]),
+                SceneEntityPlacement::root(sibling_root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(grandchild.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        child.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    child_placement.clone(),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(root.clone()),
+                SceneEntityRecord::new(child.clone()),
                 SceneEntityRecord::new(grandchild.clone()),
                 SceneEntityRecord::new(sibling_root.clone()),
             ],
         );
 
-        let entity_by_id = document
-            .entities
-            .iter()
-            .map(|entity| (entity.id.as_str(), entity))
-            .collect::<HashMap<_, _>>();
-        let observed = ordered_scene_entities(
-            InspectorDocument {
-                roots: &document.roots,
-                entities: &document.entities,
-            },
-            &entity_by_id,
-        )
-        .into_iter()
-        .map(|(entity, parent, depth)| (entity.id.clone(), parent.cloned(), depth))
-        .collect::<Vec<_>>();
-
+        let session = SceneAuthoringSession::new(document);
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
+        let model = SceneInspectorState::new().model_with_selection(
+            &session,
+            &registry,
+            Some(&child),
+            None,
+        );
         assert_eq!(
-            observed,
-            vec![
-                (root.clone(), None, 0),
-                (child.clone(), Some(root), 1),
-                (grandchild, Some(child), 2),
-                (sibling_root, None, 0),
-            ]
+            model.entities.iter().map(|row| &row.id).collect::<Vec<_>>(),
+            vec![&root, &child, &grandchild, &sibling_root]
+        );
+        assert_eq!(
+            model.selected_entity_view.unwrap().placement,
+            Some(child_placement)
         );
     }
 }

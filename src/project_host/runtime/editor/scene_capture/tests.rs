@@ -228,6 +228,7 @@ fn open_capability(root: &Path) -> DirectoryCapability {
 fn anchor(id: &str, path: &str) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
     record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path(path).unwrap(),
         overrides: None,

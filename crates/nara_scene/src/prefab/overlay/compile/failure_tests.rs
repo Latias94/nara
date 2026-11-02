@@ -1,6 +1,7 @@
 //! Failures retain established source ownership without inventing repair targets.
 
 use super::*;
+use crate::SceneDocument;
 
 fn sources() -> InMemoryPrefabSourceResolver {
     InMemoryPrefabSourceResolver::new()
@@ -198,9 +199,13 @@ fn invalid_loaded_source_structure_has_no_instance_repair_location() {
     let sources = sources().with_prefab(
         request("p"),
         key("p"),
-        PrefabDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("n")).with_children([id("missing")])
-        ]),
+        PrefabDocument::new(
+            [
+                SceneEntityPlacement::root(id("n")),
+                crate::tests::child_placement(id("missing"), id("n")),
+            ],
+            [SceneEntityRecord::new(id("n"))],
+        ),
     );
     let report = scene("p", None).compile(&registry(), &sources);
     let failure = report.failure.as_ref().expect("typed source refusal");

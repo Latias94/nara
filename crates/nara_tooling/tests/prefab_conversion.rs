@@ -9,10 +9,12 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, ResolvedPrefabSource,
-    SceneAuthoringContentState, SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
+    PrefabInstanceBinding, ResolvedPrefabSource, SceneAuthoringContentState,
+    SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    SourceDocumentKey, SourceDocumentKind,
 };
 use nara_tooling::{
     EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
@@ -99,7 +101,7 @@ fn open_document(
         }
         EditorDocumentKind::Prefab => {
             let path = format!("prefabs/{name}.prefab.json");
-            let document = PrefabDocument::new(document.roots, document.entities);
+            let document = PrefabDocument::new(document.placements, document.entities);
             let published =
                 PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
                     .unwrap()
@@ -195,9 +197,10 @@ impl Fixture {
             )
             .unwrap(),
         );
-        let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("local")]);
+        let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(PrefabInstance {
             source: source_ref(),
+            binding: PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: None,
         });
@@ -207,7 +210,16 @@ impl Fixture {
             kind,
             "conversion",
             SceneDocument::new(
-                [id("anchor"), id("peer")],
+                [
+                    SceneEntityPlacement::root(id("anchor")),
+                    SceneEntityPlacement::root(id("peer")),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(id("local")),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(id("anchor")),
+                        )),
+                    ),
+                ],
                 [
                     anchor,
                     SceneEntityRecord::new(id("local")),
@@ -422,7 +434,14 @@ fn non_active_scene_and_prefab_conversion_review_commits_the_same_mapping_and_on
             .find(|entity| entity.id == id("anchor"))
             .unwrap();
         assert!(anchor.prefab.is_none());
-        assert_eq!(anchor.children, [localized, id("local")]);
+        assert_eq!(
+            reviewed
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .children(&anchor.id)
+                .unwrap(),
+            [localized, id("local")]
+        );
         let mut reads = Vec::new();
         let receipt = fixture
             .workspace

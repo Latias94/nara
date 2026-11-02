@@ -96,7 +96,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     .publish();
     assert_eq!(reopened.document(), &accepted);
     let prefab = PrefabDocument::new(
-        reopened.document().roots.clone(),
+        reopened.document().placements.clone(),
         reopened.document().entities.clone(),
     );
     let prefab_source = AssetRef::path(PREFAB_PATH).unwrap();
@@ -111,6 +111,7 @@ fn nested_component_survives_inspector_save_prefab_remap_and_export() {
     let anchors = ["first", "second"].map(|id| {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: prefab_source.clone(),
             arguments: None,
             overrides: None,

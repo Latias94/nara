@@ -11,7 +11,8 @@ use nara_core::ItemLimit;
 
 use super::LocalizedPrefabEntity;
 use crate::{
-    SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchApplyLimits, ScenePatchDocument,
+    SceneEntityPlacement, SceneEntityRecord, SceneFileLimits, ScenePatchApplyLimits,
+    ScenePatchDocument,
     patch::{
         ScenePatchCost, bounded_scene_entities_source_cost,
         bounded_scene_entities_source_cost_with_admission, bounded_scene_patch_cost,
@@ -21,27 +22,27 @@ use crate::{
 };
 
 pub(crate) fn document_dynamic_bytes(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
 ) -> Option<usize> {
     let cost = bounded_scene_entities_source_cost(entities, source_cost_limits(limits)?)?;
-    document_bytes_from_cost(roots, cost)
+    document_bytes_from_cost(placements, cost, limits)
 }
 
 /// Admits raw walk scratch independently of the returned ownership bound.
 pub(crate) fn document_dynamic_bytes_with_admission<E>(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
     admit: impl FnMut(Option<usize>) -> Result<(), E>,
 ) -> Result<Option<usize>, E> {
-    let Some(limits) = source_cost_limits(limits) else {
+    let Some(cost_limits) = source_cost_limits(limits) else {
         return Ok(None);
     };
     Ok(
-        bounded_scene_entities_source_cost_with_admission(entities, limits, admit)?
-            .and_then(|cost| document_bytes_from_cost(roots, cost)),
+        bounded_scene_entities_source_cost_with_admission(entities, cost_limits, admit)?
+            .and_then(|cost| document_bytes_from_cost(placements, cost, limits)),
     )
 }
 
@@ -61,16 +62,28 @@ fn source_cost_limits(limits: SceneFileLimits) -> Option<ScenePatchApplyLimits> 
     )
 }
 
-fn document_bytes_from_cost(roots: &[SceneEntityId], cost: ScenePatchCost) -> Option<usize> {
-    let bytes = cost
-        .operation_count()
+fn document_bytes_from_cost(
+    placements: &[SceneEntityPlacement],
+    cost: ScenePatchCost,
+    limits: SceneFileLimits,
+) -> Option<usize> {
+    let placement_cost = crate::prefab::scene_placements_cost(
+        placements,
+        crate::prefab::PrefabOverlayCostLimits {
+            nodes: limits.shape().nodes().get(),
+            depth: limits.shape().depth().get(),
+            declarations: limits.placements().get(),
+            placements: limits.placements().get(),
+            ..crate::prefab::PrefabOverlayCostLimits::UNBOUNDED
+        },
+    )
+    .ok()?;
+    cost.operation_count()
+        .checked_add(placement_cost.nodes)?
         .checked_mul(512)?
         .checked_add(cost.value_cost().nodes().checked_mul(96)?)?
         .checked_add(cost.logical_bytes())?
-        .checked_add(roots.len().checked_mul(size_of::<SceneEntityId>())?)?;
-    roots.iter().try_fold(bytes, |bytes, root| {
-        bytes.checked_add(provenance_string_bytes(root.as_str())?)
-    })
+        .checked_add(placement_cost.logical_bytes())
 }
 
 pub(crate) fn patch_dynamic_bytes(patch: &ScenePatchDocument) -> Option<usize> {
@@ -188,7 +201,7 @@ mod tests {
         document: &SceneDocument,
         basis: &AuthoringSchemaBasis,
     ) -> PrefabAuthoringSession {
-        let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+        let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
         PrefabAuthoringSession::from_published_authoring_document(
             PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
                 .unwrap()
@@ -465,6 +478,7 @@ mod tests {
         let footprint = super::super::PrefabConversionFootprint::new(
             &id("anchor"),
             &[],
+            &patch,
             scene.history_limits().max_entry_logical_bytes(),
         )
         .unwrap();

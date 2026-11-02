@@ -23,8 +23,8 @@ use nara_reflect::{
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabInstance, SceneAuthoringContentState,
     SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityRecord, ScenePlacement,
+    ScenePlacementParent,
 };
 use nara_tasks::TaskReturnObserver;
 use nara_tooling::{
@@ -144,8 +144,9 @@ impl Project {
         if stable {
             project.write_metadata(BASE, AssetSourceKind::Prefab);
         }
-        let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("local")]);
+        let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: if stable {
                 AssetRef::StableId(stable_id())
@@ -155,7 +156,15 @@ impl Project {
             overrides: None,
         });
         let document = SceneDocument::new(
-            vec![id("anchor")],
+            vec![
+                nara_scene::SceneEntityPlacement::root(id("anchor")),
+                nara_scene::SceneEntityPlacement::new(
+                    nara_scene::PrefabEntityTarget::source(id("local")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(
+                        nara_scene::PrefabEntityTarget::source(id("anchor")),
+                    )),
+                ),
+            ],
             vec![anchor, SceneEntityRecord::new(id("local"))],
         );
         project.write_source(SCENE, &document);
@@ -182,7 +191,7 @@ impl Project {
 
     fn write_source(&self, path: &str, document: &SceneDocument) {
         let bytes = if path.ends_with(".prefab.json") {
-            PrefabDocument::new(document.roots.clone(), document.entities.clone())
+            PrefabDocument::new(document.placements.clone(), document.entities.clone())
                 .to_json_string()
                 .unwrap()
         } else {
@@ -500,10 +509,21 @@ fn acknowledge(editor: &mut EditorProjectSession, operation: EditorPrefabConvers
 
 fn edit(editor: &mut EditorProjectSession, document: EditorDocumentId, name: &str) {
     let base_revision = editor.document_query_basis(document).unwrap().revision;
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let placements = if let Some(scene) = editor.workspace.scene(document) {
+        &scene.session().document().placements
+    } else {
+        &editor
+            .workspace
+            .prefab(document)
+            .unwrap()
+            .session()
+            .document()
+            .placements
+    };
+    let patch = crate::scene_test_support::add_root_entity_patch(
+        placements,
+        SceneEntityRecord::new(id(name)),
+    );
     let action = if editor.workspace.scene(document).is_some() {
         EditorDocumentMutation::ApplyScenePatch {
             document,
@@ -787,7 +807,38 @@ fn scene_and_prefab_conversion_publish_only_after_review_and_round_trip_one_hist
             .find(|row| row.id == id("anchor"))
             .unwrap();
         assert!(anchor.prefab.is_none());
-        assert_eq!(anchor.children.last(), Some(&id("local")));
+        let basis = if let Some(scene) = editor.workspace.scene(document) {
+            scene.session().authoring_schema_basis()
+        } else {
+            editor
+                .workspace
+                .prefab(document)
+                .unwrap()
+                .session()
+                .authoring_schema_basis()
+        }
+        .unwrap();
+        let expanded = nara_scene::__private::try_compile_authoring_scene_with_loader(
+            &after.document,
+            &basis,
+            Default::default(),
+            None,
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+        assert!(
+            !expanded.diagnostics().has_errors(),
+            "{:?}",
+            expanded.diagnostics(),
+        );
+        let expanded_anchor = expanded
+            .candidate()
+            .unwrap()
+            .entities()
+            .iter()
+            .find(|entity| entity.id() == &id("anchor"))
+            .unwrap();
+        assert_eq!(expanded_anchor.children().last(), Some(&id("local")));
         assert_eq!(
             after.document.entities.len(),
             before.document.entities.len() + 3
@@ -853,7 +904,7 @@ fn scene_and_prefab_conversion_publish_only_after_review_and_round_trip_one_hist
             after.document.to_json_string().unwrap()
         } else {
             PrefabDocument::new(
-                after.document.roots.clone(),
+                after.document.placements.clone(),
                 after.document.entities.clone(),
             )
             .to_json_string()

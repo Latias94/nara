@@ -3792,7 +3792,7 @@ mod tests {
             let mut draft = editor.begin_authoring_construction(&basis).unwrap();
             let local = draft
                 .create_entity(nara_scene::ScenePlacement::last(
-                    nara_scene::ScenePlacementOwner::Root,
+                    nara_scene::ScenePlacementParent::Root,
                 ))
                 .unwrap();
             if !contains_ui {

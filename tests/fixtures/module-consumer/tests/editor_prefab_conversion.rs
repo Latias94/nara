@@ -22,8 +22,9 @@ use nara_reflect::{
     ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabInstancePath,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstance,
+    PrefabInstancePath, SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
 };
 use nara_tooling::{
     CommittedEditorPrefabConversion, EditorAction, EditorActionBatch, EditorActionOutcome,
@@ -67,13 +68,25 @@ fn record(entity: SceneEntityId, amount: u64) -> SceneEntityRecord {
 }
 
 fn original() -> SceneDocument {
-    let mut anchor = record(id("anchor"), 10).with_children([id("local")]);
+    let mut anchor = record(id("anchor"), 10);
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("base.prefab.json").unwrap(),
         arguments: None,
         overrides: None,
     });
-    SceneDocument::new([id("anchor")], [anchor, record(id("local"), 20)])
+    SceneDocument::new(
+        [
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
+        [anchor, record(id("local"), 20)],
+    )
 }
 
 fn base(amount: u64) -> PrefabDocument {
@@ -148,7 +161,7 @@ impl Project {
         fs::write(root.join(SCENE), original().to_json_string().unwrap()).unwrap();
         fs::write(
             root.join(PREFAB),
-            PrefabDocument::new(original().roots, original().entities)
+            PrefabDocument::new(original().placements, original().entities)
                 .to_json_string()
                 .unwrap(),
         )
@@ -313,7 +326,7 @@ fn basis(editor: &EditorProjectSession, document: EditorDocumentId) -> EditorDoc
 struct SourceState {
     tab: EditorDocumentTabModel,
     selection: EditorSelectionSet,
-    tree: Vec<(SceneEntityId, Option<SceneEntityId>)>,
+    placements: Vec<SceneEntityPlacement>,
     records: Vec<(SceneEntityId, u64)>,
     instance: Option<PrefabInstance>,
 }
@@ -366,13 +379,11 @@ fn state(editor: &EditorProjectSession, document: EditorDocumentId) -> SourceSta
     SourceState {
         tab: frame.workspace().document(document).unwrap().clone(),
         selection: active.selection.clone(),
-        tree: active
-            .editor
-            .inspector
-            .entities
-            .iter()
-            .map(|row| (row.id.clone(), row.parent.clone()))
-            .collect(),
+        placements: editor
+            .active_authoring_unavailable_record_manifest()
+            .expect("the generic source retains its complete placement declarations")
+            .source_placements()
+            .to_vec(),
         records,
         instance: declaration.instance,
     }
@@ -570,9 +581,29 @@ fn expected_document(receipt: &CommittedEditorPrefabConversion) -> SceneDocument
         assert_ne!(entity, &id("local"));
     }
     SceneDocument::new(
-        [id("anchor")],
         [
-            record(id("anchor"), 10).with_children([left.clone(), right.clone(), id("local")]),
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(left.clone()),
+                ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(right.clone()),
+                ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
+        [
+            record(id("anchor"), 10),
             record(id("local"), 20),
             record(left, 100),
             record(right, 101),
@@ -649,19 +680,22 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
         }
         let after = state(&editor, document);
         let expected = expected_document(&receipt);
-        let expected_tree = std::iter::once((id("anchor"), None))
-            .chain(
-                expected
-                    .entities
-                    .iter()
-                    .find(|row| row.id == id("anchor"))
-                    .unwrap()
-                    .children
-                    .iter()
-                    .map(|child| (child.clone(), Some(id("anchor")))),
-            )
-            .collect::<Vec<_>>();
-        assert_eq!(after.tree, expected_tree);
+        let hierarchy = expected.local_hierarchy(Default::default()).unwrap();
+        let localized = |name: &str| {
+            receipt
+                .entities()
+                .iter()
+                .find(|row| row.provenance().local_entity_id() == &id(name))
+                .unwrap()
+                .entity()
+                .clone()
+        };
+        let expected_children = [localized("leaf-0"), localized("leaf-1"), id("local")];
+        assert_eq!(
+            hierarchy.children(&id("anchor")).unwrap(),
+            expected_children
+        );
+        assert_eq!(after.placements, expected.placements);
         assert_eq!(
             after.records,
             expected
@@ -694,14 +728,14 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
 
         replay(&mut editor, document, true);
         let undone = state(&editor, document);
-        assert_eq!(undone.tree, before.tree);
+        assert_eq!(undone.placements, before.placements);
         assert_eq!(undone.records, before.records);
         assert_eq!(undone.instance, before.instance);
         assert_eq!(undone.selection, before.selection);
         history(&undone, 0, 1, false);
         replay(&mut editor, document, false);
         let redone = state(&editor, document);
-        assert_eq!(redone.tree, after.tree);
+        assert_eq!(redone.placements, after.placements);
         assert_eq!(redone.records, after.records);
         assert_eq!(redone.instance, after.instance);
         assert_eq!(redone.selection, after.selection);
@@ -725,7 +759,7 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
                     .unwrap()
                     .to_json_string()
                     .unwrap(),
-                PrefabDocument::new(expected.roots, expected.entities)
+                PrefabDocument::new(expected.placements, expected.entities)
                     .to_json_string()
                     .unwrap(),
             )
@@ -738,7 +772,7 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
         // Reopen must replace an unsaved Undo with the actual saved converted source.
         replay(&mut editor, document, true);
         let unsaved = state(&editor, document);
-        assert_eq!(unsaved.tree, before.tree);
+        assert_eq!(unsaved.placements, before.placements);
         assert_eq!(unsaved.records, before.records);
         assert_eq!(unsaved.instance, before.instance);
         history(&unsaved, 0, 1, true);
@@ -759,7 +793,7 @@ fn public_host_scene_and_prefab_conversion_survive_history_save_and_real_reopen(
         };
         assert_eq!(saved_digest, reopened_digest);
         let reopened = state(&editor, document);
-        assert_eq!(reopened.tree, after.tree);
+        assert_eq!(reopened.placements, after.placements);
         assert_eq!(reopened.records, after.records);
         assert_eq!(reopened.instance, after.instance);
         assert_ne!(

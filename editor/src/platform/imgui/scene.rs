@@ -345,7 +345,10 @@ mod binding_tests {
     use dear_imgui_rs::ConfigFlags;
     use nara::{
         asset::AssetRef,
-        scene::{PrefabDocument, PrefabInstance, SceneEntityId, SceneEntityRecord},
+        scene::{
+            PrefabDocument, PrefabEntityTarget, PrefabInstance, SceneDocumentCandidate,
+            SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+        },
         tooling::{
             EditorActionBatch, EditorDocumentId, EditorDocumentKind, EditorWorkspaceIntent,
             EditorWorkspaceIntentAction,
@@ -383,20 +386,20 @@ mod binding_tests {
     fn run_binding_test(canvas_priority: bool) {
         let project = UiProject::new();
         let source = project.0.join("scenes/startup.scene.json");
-        let mut scene: serde_json::Value =
-            serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
-        let entities = scene["payload"]["entities"].as_array_mut().unwrap();
-        let sprite = entities
-            .iter()
-            .position(|entity| entity["id"] == "image-source")
-            .expect("the fixture has a real Sprite source");
-        let mut inherited: SceneEntityRecord =
-            serde_json::from_value(entities.remove(sprite)).unwrap();
-        inherited.id = SceneEntityId::new("ordinary").unwrap();
-        scene["payload"]["roots"]
-            .as_array_mut()
+        let mut scene = SceneDocumentCandidate::decode_json_bytes(&fs::read(&source).unwrap())
             .unwrap()
-            .retain(|root| root != "image-source");
+            .into_composition_source()
+            .unwrap();
+        let sprite = scene
+            .entities
+            .iter()
+            .position(|entity| entity.id.as_str() == "image-source")
+            .expect("the fixture has a real Sprite source");
+        let mut inherited = scene.entities.remove(sprite);
+        inherited.id = SceneEntityId::new("ordinary").unwrap();
+        scene.placements.retain(|entry| {
+            entry.target != PrefabEntityTarget::source(SceneEntityId::new("image-source").unwrap())
+        });
         fs::write(
             project.0.join("prefabs/ordinary.prefab.json"),
             PrefabDocument::from_ordered_roots([inherited])
@@ -405,25 +408,16 @@ mod binding_tests {
         )
         .unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("ordinary-anchor").unwrap());
-        anchor.prefab = Some(PrefabInstance {
-            source: AssetRef::path("ordinary.prefab.json").unwrap(),
-            arguments: None,
-            overrides: Default::default(),
-        });
-        scene["payload"]["roots"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::to_value(&anchor.id).unwrap());
-        scene["payload"]["entities"]
-            .as_array_mut()
-            .unwrap()
-            .push(serde_json::to_value(anchor).unwrap());
-        fs::write(source, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
-        fs::write(
-            project.0.join("scenes/other.scene.json"),
-            serde_json::to_vec_pretty(&scene).unwrap(),
-        )
-        .unwrap();
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path("ordinary.prefab.json").unwrap(),
+        ));
+        scene
+            .placements
+            .push(SceneEntityPlacement::root(anchor.id.clone()));
+        scene.entities.push(anchor);
+        let encoded = scene.to_json_string().unwrap();
+        fs::write(source, &encoded).unwrap();
+        fs::write(project.0.join("scenes/other.scene.json"), encoded).unwrap();
 
         let mut builder = EventLoop::builder();
         builder.with_any_thread(true);
@@ -983,7 +977,7 @@ mod binding_tests {
             prefab: EditorDocumentId,
         ) -> Result<(), String> {
             use nara::{
-                scene::{ScenePlacement, ScenePlacementOwner},
+                scene::{ScenePlacement, ScenePlacementParent},
                 tooling::{
                     EditorDocumentMutation, PrefabCompositionCommand, PrefabCompositionEntityDraft,
                 },
@@ -1057,7 +1051,7 @@ mod binding_tests {
                         base_revision: revision,
                         command: PrefabCompositionCommand::CreateEntity {
                             draft: PrefabCompositionEntityDraft::new(Default::default()).unwrap(),
-                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                            placement: ScenePlacement::last(ScenePlacementParent::Root),
                         },
                     }
                 } else {
@@ -1209,7 +1203,7 @@ mod binding_tests {
             document: EditorDocumentId,
         ) -> Result<(), String> {
             use nara::{
-                scene::{ScenePlacement, ScenePlacementOwner},
+                scene::{ScenePlacement, ScenePlacementParent},
                 tooling::{
                     EditorDocumentMutation, SceneCompositionCommand, SceneCompositionEntityKind,
                 },
@@ -1296,7 +1290,7 @@ mod binding_tests {
                             base_revision,
                             command: SceneCompositionCommand::CreateEntity {
                                 kind: SceneCompositionEntityKind::Empty,
-                                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                                placement: ScenePlacement::last(ScenePlacementParent::Root),
                             },
                         }
                     };

@@ -214,6 +214,7 @@ fn custom_scene_policy_and_original_picking_batches_survive_content_refresh() {
     }
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(nara_scene::PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: nara_asset::AssetRef::path("p.json").unwrap(),
         overrides: Default::default(),

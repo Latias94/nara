@@ -347,7 +347,9 @@ fn native_codec_rejects_compiled_component_without_replacing_the_last_good_proje
             ),
         ),
     );
-    invalid.roots.push(scene_id("zz-invalid"));
+    invalid
+        .placements
+        .push(crate::SceneEntityPlacement::root(scene_id("zz-invalid")));
 
     // The String satisfies the Schema. The receiving Visibility codec owns its allowed values.
     let candidate = bound_scene(&fixture.registry, invalid);

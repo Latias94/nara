@@ -397,6 +397,7 @@ fn schema_default_introduces_scene_demand_and_discarded_prefab_overlay_does_not(
     });
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         overrides: Some(overlay),

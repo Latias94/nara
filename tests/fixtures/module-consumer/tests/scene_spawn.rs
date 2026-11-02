@@ -37,7 +37,11 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
         .unwrap()
         .bind_source(source_key.clone());
     assert_eq!(candidate.source_key(), &source_key);
-    assert_eq!(candidate.document().roots(), published.document().roots);
+    let hierarchy = published
+        .document()
+        .local_hierarchy(Default::default())
+        .unwrap();
+    assert_eq!(candidate.document().roots(), hierarchy.roots());
     assert_eq!(
         candidate.document().entities().len(),
         published.document().entities.len()
@@ -49,7 +53,7 @@ fn committed_scene_fixture_parses_validates_and_spawns() {
         .zip(&published.document().entities)
     {
         assert_eq!(entity.id(), &authored.id);
-        assert_eq!(entity.children(), authored.children);
+        assert_eq!(entity.children(), hierarchy.children(&authored.id).unwrap());
         assert_eq!(entity.components().len(), authored.components.len());
         for (component, record) in entity.components() {
             let authored = &authored.components[component];

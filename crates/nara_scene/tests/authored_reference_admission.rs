@@ -9,7 +9,6 @@ use std::sync::{
 };
 
 use nara_core::{ByteLimit, DepthLimit, ItemLimit};
-use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::{Component, World};
 use nara_identity::{AuthoredEntityReference, EntityLookup, EntityReference, ReferenceInputId};
 use nara_reflect::{
@@ -128,25 +127,40 @@ fn batch(value: ComponentValue, separate_entities: bool) -> SceneDocument {
 }
 
 #[test]
-fn native_batch_rejects_later_authored_values_and_defaults_before_first_codec() {
+fn source_batch_rejects_unresolved_final_references_before_first_native_codec() {
     for separate_entities in [false, true] {
-        for value in [
-            ComponentValue::map([("target", authored())]),
-            ComponentValue::map([("target", input())]),
-            ComponentValue::Map(Default::default()),
+        for (value, code) in [
+            (
+                ComponentValue::map([("target", authored())]),
+                "scene.prefab-entity-reference-rewrite-failed",
+            ),
+            (
+                ComponentValue::map([("target", input())]),
+                "scene.prefab-input-undeclared",
+            ),
+            (
+                ComponentValue::Map(Default::default()),
+                "scene.prefab-entity-reference-rewrite-failed",
+            ),
         ] {
             let (registry, calls) = registry(link_schema(authored()));
-            let document = batch(value, separate_entities);
+            let mut document = batch(value, separate_entities);
+            document
+                .entities
+                .iter_mut()
+                .find_map(|entity| entity.components.get_mut(&last_id()))
+                .unwrap()
+                .contextual_defaults
+                .insert(ComponentFieldId::new("target"), authored());
             let before = document.clone();
             let diagnostics = document.validate(&registry);
             assert!(diagnostics.has_errors(), "{diagnostics:?}");
-            assert!(diagnostics.iter().any(|diagnostic| {
-                diagnostic.fields().iter().any(|field| {
-                    field.key().as_str() == "codec-error-kind"
-                        && field.value()
-                            == DiagnosticValueRef::Identifier("unresolved-authored-reference")
-                })
-            }));
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code().as_str() == code),
+                "{diagnostics:?}"
+            );
             assert_eq!(calls.load(Ordering::SeqCst), 0);
             assert_eq!(document, before);
         }
@@ -160,7 +174,13 @@ fn explicit_null_or_flat_reference_hides_authored_default() {
         ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("a") }),
     ] {
         let (registry, calls) = registry(link_schema(authored()));
-        let document = batch(ComponentValue::map([("target", value)]), false);
+        let mut document = batch(ComponentValue::map([("target", value)]), false);
+        document.entities[0]
+            .components
+            .get_mut(&last_id())
+            .unwrap()
+            .contextual_defaults
+            .insert(ComponentFieldId::new("target"), authored());
         let diagnostics = document.validate(&registry);
         assert!(!diagnostics.has_errors(), "{diagnostics:?}");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -168,7 +188,7 @@ fn explicit_null_or_flat_reference_hides_authored_default() {
 }
 
 #[test]
-fn native_rejects_contextual_default_metadata_even_when_effective_values_are_flat() {
+fn compiled_native_batch_omits_hidden_contextual_defaults_and_preserves_source_metadata() {
     for value in [
         ComponentValue::Null,
         ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("a") }),
@@ -183,8 +203,8 @@ fn native_rejects_contextual_default_metadata_even_when_effective_values_are_fla
             .insert(ComponentFieldId::new("target"), input());
         let before = document.clone();
         let diagnostics = document.validate(&registry);
-        assert!(diagnostics.has_errors(), "{diagnostics:?}");
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(!diagnostics.has_errors(), "{diagnostics:?}");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(document, before);
     }
 }
@@ -669,8 +689,12 @@ fn source_round_trip_preserves_hidden_contextual_defaults_and_selects_actual_ove
             assert_eq!(published.document(), &document);
             assert_eq!(calls.load(Ordering::SeqCst), codec_calls);
             let diagnostics = published.document().validate(&registry);
-            assert!(diagnostics.has_errors(), "{diagnostics:?}");
-            assert_eq!(calls.load(Ordering::SeqCst), codec_calls);
+            assert_eq!(
+                !diagnostics.has_errors(),
+                codec_calls != 0,
+                "{diagnostics:?}"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), codec_calls * 2);
         }
     }
 }

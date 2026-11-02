@@ -1,6 +1,6 @@
 use super::*;
 use crate::advanced::*;
-use crate::tests::{scene_occurrence, scene_source_key};
+use crate::tests::{child_placement, scene_occurrence, scene_source_key};
 
 use nara_app::App;
 use nara_core::ItemLimit;
@@ -212,9 +212,12 @@ fn product_replacement_commits_one_coherent_scene_generation() {
     let root_id = scene_id("root");
     let child_id = scene_id("root/child");
     let document = SceneDocument::new(
-        [root_id.clone()],
         [
-            SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+            SceneEntityPlacement::root(root_id.clone()),
+            child_placement(child_id.clone(), root_id.clone()),
+        ],
+        [
+            SceneEntityRecord::new(root_id.clone()),
             SceneEntityRecord::new(child_id.clone()),
         ],
     );
@@ -674,9 +677,12 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     let root = scene_id("root");
     let child = scene_id("root/child");
     let document = SceneDocument::new(
-        [root.clone()],
         [
-            SceneEntityRecord::new(root).with_children([child.clone()]),
+            SceneEntityPlacement::root(root.clone()),
+            child_placement(child.clone(), root.clone()),
+        ],
+        [
+            SceneEntityRecord::new(root),
             SceneEntityRecord::new(child.clone()),
         ],
     );
@@ -1049,11 +1055,7 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
     let outer = AssetRef::path("prefabs/outer.ron").unwrap();
     let inner = AssetRef::path("prefabs/inner.ron").unwrap();
     let mut branch = SceneEntityRecord::new(scene_id("branch"));
-    branch.prefab = Some(PrefabInstance {
-        source: inner.clone(),
-        arguments: None,
-        overrides: None,
-    });
+    branch.prefab = Some(PrefabInstance::forest(inner.clone()));
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(
             outer.clone(),
@@ -1066,11 +1068,7 @@ fn expanded_candidate_keeps_nested_source_paths_through_spawn_and_product_replac
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("leaf"))]),
         );
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: outer.clone(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(outer.clone()));
     let expansion = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
     let candidate = expansion.candidate.unwrap().bind_source(scene_source_key(
@@ -1155,11 +1153,7 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("projected"))]),
     );
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());
-    anchor.prefab = Some(PrefabInstance {
-        source: prefab_source,
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(prefab_source));
     let expansion =
         SceneDocument::from_ordered_roots([anchor]).compile(&fixture.registry, &resolver);
     assert!(!expansion.diagnostics.has_errors());
@@ -1214,11 +1208,9 @@ fn expanded_candidate_source_observer_rejects_before_publication_and_preserves_o
 fn unresolved_prefab_is_rejected_by_compilation_before_activation() {
     let fixture = ReplacementFixture::new();
     let mut anchor = SceneEntityRecord::new(fixture.target.clone());
-    anchor.prefab = Some(PrefabInstance {
-        source: nara_asset::AssetRef::path("prefabs/unresolved.ron").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(
+        nara_asset::AssetRef::path("prefabs/unresolved.ron").unwrap(),
+    ));
     let before_entities = fixture.entity_ids();
     let before_stats = fixture.world.resource::<WorldIdentityDomain>().stats();
     let old_source = fixture

@@ -127,7 +127,7 @@ fn sessions_with(
             .publish(),
         limits,
     );
-    let prefab = PrefabDocument::new(document.roots, document.entities);
+    let prefab = PrefabDocument::new(document.placements, document.entities);
     let prefab = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()

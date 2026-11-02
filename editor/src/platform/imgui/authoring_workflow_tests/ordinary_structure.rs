@@ -1,6 +1,9 @@
 use super::*;
 use nara::reflect::{ComponentSchemaVersion, ComponentTypeId, PersistentComponentSchemaOwnerId};
-use nara::scene::{SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord};
+use nara::scene::{
+    PrefabEntityTarget, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent,
+};
 
 #[test]
 #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -71,7 +74,7 @@ impl ApplicationHandler for StructureApplication {
 }
 
 impl AuthoringWorkflow<'_> {
-    fn structural_tree(&self) -> Result<Vec<(String, Option<String>)>, String> {
+    fn structural_intents(&self) -> Result<Vec<(String, Option<ScenePlacement>)>, String> {
         let frame = self.frame()?;
         Ok(frame
             .workspace()
@@ -82,12 +85,7 @@ impl AuthoringWorkflow<'_> {
             .inspector
             .entities
             .iter()
-            .map(|row| {
-                (
-                    row.id.as_str().to_owned(),
-                    row.parent.as_ref().map(|parent| parent.as_str().to_owned()),
-                )
-            })
+            .map(|row| (row.id.as_str().to_owned(), row.placement.clone()))
             .collect())
     }
 
@@ -117,42 +115,62 @@ impl AuthoringWorkflow<'_> {
         let child = self.selected_id()?;
         self.click("+ Root")?;
         let last = self.selected_id()?;
-        let before_order = self.structural_tree()?;
-        self.click("Up")?;
-        if self.structural_tree()? == before_order {
-            return Err("Up did not reorder the real root".into());
+        let before_order = self.structural_intents()?;
+        self.click("Order")?;
+        self.click("order:First")?;
+        if self.structural_intents()? == before_order {
+            return Err("First did not update the desired root order".into());
         }
-        self.click("Down")?;
-        if self.structural_tree()? != before_order {
-            return Err("Down did not restore root order".into());
+        self.click("Order")?;
+        self.click("order:Last")?;
+        if self.structural_intents()? != before_order {
+            return Err("Last did not restore the exact root placement declaration".into());
         }
 
         self.click(&format!("entity:{child}"))?;
         self.click("Parent")?;
         self.click("parent:root")?;
-        if !self.structural_tree()?.contains(&(child.clone(), None)) {
+        if !self.structural_intents()?.contains(&(
+            child.clone(),
+            Some(ScenePlacement::last(ScenePlacementParent::Root)),
+        )) {
             return Err("Parent Root did not detach the child".into());
         }
         self.click("Parent")?;
         self.click(&format!("parent:{parent}"))?;
-        let arranged = self.structural_tree()?;
-        if !arranged.contains(&(child.clone(), Some(parent.clone()))) {
+        let arranged = self.structural_intents()?;
+        if !arranged.contains(&(
+            child.clone(),
+            Some(ScenePlacement::last(ScenePlacementParent::Entity(
+                PrefabEntityTarget::source(
+                    SceneEntityId::new(&parent).map_err(|error| error.to_string())?,
+                ),
+            ))),
+        )) {
             return Err("Parent did not reattach the child".into());
         }
         self.click("Remove Entity")?;
         self.click("Confirm removal")?;
-        if self.structural_tree()?.iter().any(|(id, _)| id == &child) {
+        if self
+            .structural_intents()?
+            .iter()
+            .any(|(id, _)| id == &child)
+        {
             return Err("Confirm removal did not delete the selected child".into());
         }
         if self.selected_id()? != parent {
             return Err("deletion did not select the surviving parent".into());
         }
         self.click("Undo")?;
-        if self.structural_tree()? != arranged {
+        if self.structural_intents()? != arranged {
             return Err("Undo did not restore the exact structural tree".into());
         }
         self.click("Redo")?;
-        if self.structural_tree()?.iter().any(|(id, _)| id == &child) {
+        if self
+            .structural_intents()?
+            .iter()
+            .any(|(id, _)| id == &child)
+        {
             return Err("Redo did not repeat structural deletion".into());
         }
         self.click("Undo")?;
@@ -176,7 +194,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("the structural Reopen did not complete".into());
         }
-        if self.structural_tree()? != arranged {
+        if self.structural_intents()? != arranged {
             return Err("Reopen changed saved parent/order/identity".into());
         }
         if !arranged.iter().any(|(id, _)| id == &last) {

@@ -86,7 +86,10 @@ fn creation_metadata_direct_and_owned_keep_source_and_real_creation_history() {
             assert_eq!(session.history_status().undo_depth, 2);
             assert_eq!(session.history_status().redo_depth, 1);
             let stale_edit = session
-                .prepare_authoring_edit(session.revision(), &add("stale-edit"))
+                .prepare_authoring_edit(
+                    session.revision(),
+                    &add(&session.document().placements, "stale-edit"),
+                )
                 .unwrap();
             let before = source_snapshot!(session);
             let mut work = SchemaReclassificationWork::default();
@@ -116,7 +119,7 @@ fn creation_metadata_direct_and_owned_keep_source_and_real_creation_history() {
             assert_eq!(session.document(), &first);
             assert_eq!(session.content_state(), first_content);
             assert!(session.undo_authoring().applied);
-            assert_eq!(session.document().roots, source().roots);
+            assert_eq!(session.document().placements, source().placements);
             assert_eq!(session.document().entities, source().entities);
             // History restores the actual V1-created value, even though public creation
             // now requires V2's different complete initial value.

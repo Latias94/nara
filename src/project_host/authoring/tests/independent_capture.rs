@@ -1,6 +1,7 @@
 //! Independent Scene capture follows the working document without widening startup custody.
 
 use std::{
+    mem::size_of,
     thread,
     time::{Duration, Instant},
 };
@@ -108,6 +109,7 @@ fn component() -> ComponentTypeId {
 
 fn instance(name: &str) -> PrefabInstance {
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
         overrides: None,
@@ -613,10 +615,37 @@ fn unsaved_exact_instance_replacement_changes_the_capture_and_undo_restores_it()
         &["leaf.prefab.json", "outer.prefab.json"],
         &["leaf.png", "outer.png"],
     );
-    assert_eq!(restored.usage(), before.usage());
+    // prepare refunds the shared root input charged by charge_capture_inputs. compile_root
+    // retains one conservative copy reservation measured from that input before cloning it.
+    // Undo restores equal values, but its rebuilt Vecs need not retain the original capacities.
+    let source_vector_bytes = |document: &SceneDocument| {
+        document.placements.capacity() * size_of::<nara_scene::SceneEntityPlacement>()
+            + document.entities.capacity() * size_of::<SceneEntityRecord>()
+    };
+    let mut expected_usage = before.usage();
+    expected_usage.retained_candidate_bytes = expected_usage
+        .retained_candidate_bytes
+        .checked_sub(source_vector_bytes(&original))
+        .and_then(|bytes| bytes.checked_add(source_vector_bytes(session.document())))
+        .unwrap();
+    assert_eq!(restored.usage(), expected_usage);
     assert_eq!(
         restored.source_facts().collect::<Vec<_>>(),
         before.source_facts().collect::<Vec<_>>(),
+    );
+
+    let repeated = snapshot
+        .capture_scene_from_bound_source(&source, &session, &[])
+        .unwrap();
+    assert_closure(
+        &repeated,
+        &["leaf.prefab.json", "outer.prefab.json"],
+        &["leaf.png", "outer.png"],
+    );
+    assert_eq!(repeated.usage(), restored.usage());
+    assert_eq!(
+        repeated.source_facts().collect::<Vec<_>>(),
+        restored.source_facts().collect::<Vec<_>>(),
     );
     assert_eq!(fs::read(project.root.join(SECOND_SCENE)).unwrap(), disk);
 }

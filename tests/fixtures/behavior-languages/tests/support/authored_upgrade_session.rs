@@ -82,9 +82,8 @@ fn source_key(path: &str, kind: SourceDocumentKind) -> SourceDocumentKey {
 
 fn linked(path: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
-        source: AssetRef::path(path).unwrap(),
-        arguments: None,
         overrides: overlay,
+        ..PrefabInstance::forest(AssetRef::path(path).unwrap())
     }
 }
 
@@ -154,11 +153,10 @@ fn scene_document(next: bool, dirty: bool) -> SceneDocument {
     ));
     added.prefab = Some(linked("leaf.prefab.json", Some(beneath_addition)));
     outer.additions.push(added);
-    outer.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    outer.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let mut first = SceneEntityRecord::new(id("first-instance"));
     first.prefab = Some(linked("enemy.prefab.json", Some(outer.clone())));
     let mut second = SceneEntityRecord::new(id("second-instance"));

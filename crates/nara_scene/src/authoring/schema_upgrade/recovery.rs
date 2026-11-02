@@ -24,7 +24,7 @@ pub fn validate_authored_upgrade_scene_transition(
 ) -> Result<(), ScenePatchReport> {
     work.begin_step()?;
     let result = (|| {
-        admit_original(&original.roots, &original.entities, limits, work)?;
+        admit_original(&original.placements, &original.entities, limits, work)?;
         let state = classify_original(
             original,
             source,
@@ -59,7 +59,7 @@ pub fn validate_authored_upgrade_prefab_transition(
 ) -> Result<(), ScenePatchReport> {
     work.begin_step()?;
     let result = (|| {
-        admit_original(&original.roots, &original.entities, limits, work)?;
+        admit_original(&original.placements, &original.entities, limits, work)?;
         work.reserve(
             "authored-upgrade-recovery-projection",
             Some(size_of::<SceneDocument>()),
@@ -86,7 +86,7 @@ pub fn validate_authored_upgrade_prefab_transition(
 }
 
 fn admit_original(
-    roots: &[SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
     work: &mut AuthoredSchemaUpgradeWork,
@@ -94,7 +94,7 @@ fn admit_original(
     // Bound the complete dormant/raw tree before the recursive classifier. This also admits
     // the full dynamic copy for a Prefab projection before instantiate allocates anything.
     crate::authoring_decode::schema_upgrade::admit_authored_upgrade_document(
-        roots,
+        placements,
         entities,
         limits,
         &mut |stage, bytes| work.reserve(stage, bytes),

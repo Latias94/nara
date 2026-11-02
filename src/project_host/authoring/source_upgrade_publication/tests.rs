@@ -360,7 +360,7 @@ fn member(path: &'static str, kind: SourceDocumentKind, value: Option<i64>) -> M
         };
         match kind {
             SourceDocumentKind::Scene => scene.to_json_string().unwrap().into_bytes(),
-            SourceDocumentKind::Prefab => PrefabDocument::new(scene.roots, scene.entities)
+            SourceDocumentKind::Prefab => PrefabDocument::new(scene.placements, scene.entities)
                 .to_ron_string()
                 .unwrap()
                 .into_bytes(),

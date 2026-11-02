@@ -97,12 +97,14 @@ fn release(stable_source: bool) -> PreparedEditorSourceToolRelease {
         }],
     });
     outer.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: reference(1, stable_source),
         overrides: Some(overlay),
     });
     let mut child = SceneEntityRecord::new(id("nested"));
     child.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: reference(2, stable_source),
         overrides: None,

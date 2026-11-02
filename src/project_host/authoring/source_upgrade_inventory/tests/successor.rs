@@ -433,13 +433,13 @@ fn source(path: &str, kind: SourceDocumentKind, next: bool) -> Vec<u8> {
         (SourceDocumentKind::Scene, false) => document.to_json_string().unwrap().into_bytes(),
         (SourceDocumentKind::Scene, true) => document.to_ron_string().unwrap().into_bytes(),
         (SourceDocumentKind::Prefab, false) => {
-            PrefabDocument::new(document.roots, document.entities)
+            PrefabDocument::new(document.placements, document.entities)
                 .to_json_string()
                 .unwrap()
                 .into_bytes()
         }
         (SourceDocumentKind::Prefab, true) => {
-            PrefabDocument::new(document.roots, document.entities)
+            PrefabDocument::new(document.placements, document.entities)
                 .to_ron_string()
                 .unwrap()
                 .into_bytes()

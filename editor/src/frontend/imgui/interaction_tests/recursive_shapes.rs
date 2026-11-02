@@ -294,11 +294,19 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
             ComponentValue::map([("second", ComponentValue::String("after".into()))])
         );
         assert_eq!(history(&interaction), initial_history + 5);
+        let edited_manifest = interaction
+            .application
+            .active_authoring_unavailable_record_manifest()
+            .unwrap();
+        assert_eq!(edited_manifest.entries(), manifest.entries());
+        assert_eq!(edited_manifest.record_count(), manifest.record_count());
         assert_eq!(
-            interaction
-                .application
-                .active_authoring_unavailable_record_manifest(),
-            Some(manifest.clone())
+            edited_manifest.overlay_target_count(),
+            manifest.overlay_target_count()
+        );
+        assert_eq!(
+            edited_manifest.overlay_declarations().collect::<Vec<_>>(),
+            manifest.overlay_declarations().collect::<Vec<_>>()
         );
 
         interaction.click("Save");
@@ -307,6 +315,28 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
             interaction.frame().persistence().result(),
             Some(EditorPersistenceResult::Saved { .. })
         ));
+        let bytes = fs::read(project.source(kind)).unwrap();
+        let saved_placements = match kind {
+            EditorDocumentKind::Scene => {
+                SceneDocumentCandidate::decode_json_bytes(&bytes)
+                    .unwrap()
+                    .into_composition_source()
+                    .unwrap()
+                    .placements
+            }
+            EditorDocumentKind::Prefab => {
+                PrefabDocumentCandidate::decode_json_bytes(&bytes)
+                    .unwrap()
+                    .into_composition_source()
+                    .unwrap()
+                    .placements
+            }
+            EditorDocumentKind::Extension(_) => unreachable!("the fixture edits Scene and Prefab"),
+        };
+        assert_eq!(
+            edited_manifest.source_placements(),
+            saved_placements.as_slice()
+        );
         interaction.click("Dismiss persistence result");
         interaction.click("Reopen");
         interaction.settle_persistence();
@@ -325,7 +355,7 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
             interaction
                 .application
                 .active_authoring_unavailable_record_manifest(),
-            Some(manifest)
+            Some(edited_manifest)
         );
         interaction.click("Dismiss persistence result");
     }

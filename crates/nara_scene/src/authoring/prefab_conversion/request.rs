@@ -47,7 +47,7 @@ impl<E: Error + 'static> Error for PrefabConversionError<E> {
     }
 }
 
-/// One complete projected occurrence and its newly allocated persistent source ID.
+/// One complete selected occurrence and its persistent source ID after localization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalizedPrefabEntity {
     pub(super) provenance: SceneEntityProvenance,
@@ -121,10 +121,25 @@ macro_rules! conversion_owner {
                     .checked_add(std::mem::size_of::<$document>())?
                     .checked_add(8 * std::mem::size_of::<usize>())?
                     .checked_add(retention::document_dynamic_bytes(
-                        &self.document.roots,
+                        &self.document.placements,
                         &self.document.entities,
                         self.state.file_limits(),
                     )?)?
+                    .checked_add(match SelectedInstanceSource::$kind(&self.document) {
+                        SelectedInstanceSource::Scene(_) => Some(0),
+                        SelectedInstanceSource::Prefab(document) => {
+                            document.inputs.iter().try_fold(0usize, |bytes, input| {
+                                bytes
+                                    .checked_add(
+                                        std::mem::size_of::<nara_identity::ReferenceInputId>()
+                                            + 6 * std::mem::size_of::<usize>(),
+                                    )?
+                                    .checked_add(crate::provenance::provenance_string_bytes(
+                                        input.as_str(),
+                                    )?)
+                            })
+                        }
+                    }?)?
                     .checked_add(self.state.checked_retained_bytes()?)?
                     .checked_add(crate::provenance::provenance_string_bytes(
                         self.anchor.as_str(),
@@ -172,6 +187,7 @@ macro_rules! conversion_owner {
                     &self.anchor,
                     &basis,
                     self.history,
+                    self.state.file_limits(),
                     self.options,
                     asset_resolution,
                     loader,

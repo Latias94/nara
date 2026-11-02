@@ -922,7 +922,8 @@ fn inspector_field_target(
             field,
             ..
         } => (entity, component, *component_version, field),
-        SceneInspectorCommand::MoveEntity { .. } => return None,
+        SceneInspectorCommand::MoveEntity { .. }
+        | SceneInspectorCommand::RevertPlacement { .. } => return None,
     };
     Some(EditorFieldTarget::new(
         document,

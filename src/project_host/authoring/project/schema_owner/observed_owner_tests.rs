@@ -3,8 +3,7 @@ use std::{fs, sync::Arc};
 use nara_core::ByteLimit;
 use nara_reflect::{AuthoringSchemaBundleOwner, ComponentSchemaOwnerChange};
 use nara_scene::{
-    __private::borrow_prepared_scene_schema_source, SceneEntityId, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SchemaReclassificationWork,
+    __private::borrow_prepared_scene_schema_source, SceneEntityId, SchemaReclassificationWork,
 };
 
 use super::owned_input_tests::{installed_owner, open_project};
@@ -46,10 +45,10 @@ fn observed_successor_reprepares_dirty_source_and_attaches_without_another_write
     // Keep the actual original publication alive separately from reconciliation preparation.
     let (evidence, published_leaf) = accepted.into_parts();
     let bytes = fs::read(project.root.join(BUNDLE)).unwrap();
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("after-publication").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let patch = crate::scene_test_support::add_root_entity_patch(
+        &scene.document().placements,
+        SceneEntityRecord::new(SceneEntityId::new("after-publication").unwrap()),
+    );
     assert!(scene.apply_authoring_patch(&patch).applied);
     let revision = scene.revision();
     let content = scene.content_state();

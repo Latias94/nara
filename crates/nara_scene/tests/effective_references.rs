@@ -42,6 +42,13 @@ fn local_target() -> EntityReference {
 }
 
 fn registry(omit_default_on_encode: bool) -> ComponentRegistrySnapshot {
+    registry_with_extra_fields(omit_default_on_encode, [])
+}
+
+fn registry_with_extra_fields(
+    omit_default_on_encode: bool,
+    fields: impl IntoIterator<Item = ComponentFieldSchema>,
+) -> ComponentRegistrySnapshot {
     let mut field = ComponentFieldSchema::required(
         ComponentFieldId::new("target"),
         "Target",
@@ -53,7 +60,8 @@ fn registry(omit_default_on_encode: bool) -> ComponentRegistrySnapshot {
     field.default_value = Some(ComponentValue::EntityReference(local_target()));
     let schema = ComponentSchema::new(component_id(), "Default link", ComponentSchemaVersion::ONE)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
-        .with_fields([field]);
+        .with_fields([field])
+        .with_fields(fields);
     let mut registry = nara_reflect::ComponentRegistryBuilder::new();
     registry
         .register_persistent_component_with_codec::<DefaultLink, _, _>(
@@ -193,6 +201,7 @@ fn repeated_prefabs_remap_default_local_reference_and_preserve_source_omission()
     let document = SceneDocument::from_ordered_roots(["left", "right"].map(|anchor| {
         let mut entity = SceneEntityRecord::new(scene_id(anchor));
         entity.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: source.clone(),
             arguments: None,
             overrides: None,
@@ -434,7 +443,21 @@ fn export_scene_with_limits(
 #[cfg(feature = "serde")]
 #[test]
 fn scene_file_value_limits_survive_canonical_publish() {
-    let registry = registry(false);
+    // Five Null defaults add six effective nodes (list plus elements) without payload bytes.
+    // This keeps publication cost larger than the now-explicit source placement declarations.
+    let registry = registry_with_extra_fields(
+        false,
+        [ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("padding"),
+            "Padding",
+            ComponentFieldPath::from_fields(["padding"]),
+            nara_reflect::ComponentValueShape::list(nara_reflect::ComponentValueShape::optional(
+                nara_reflect::ComponentValueShape::scalar(ComponentValueKind::U64),
+            )),
+            ComponentValue::List(vec![ComponentValue::Null; 5]),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)],
+    );
     let mut document = linked_scene(true);
     document.entities[0]
         .components
@@ -446,26 +469,71 @@ fn scene_file_value_limits_survive_canonical_publish() {
             ComponentValue::EntityReference(local_target()),
         );
     let bytes = document.to_json_string().unwrap();
-    // The raw map, contextual entry and its reference consume three nodes; publication must
-    // also admit the reference supplied to the effective map.
+    // Two placement/target/location declarations (6), the raw map (1) and retained
+    // contextual entry/reference (2) total nine raw nodes. Publication retains the contextual
+    // map/reference (2) plus an effective map/target/list/five Nulls (8): ten nodes.
+    let raw_nodes = 2 * 3 + 1 + 2;
+    let effective_nodes = 2 + 1 + 1 + 1 + 5;
+    // Both root IDs occur in placement targets and entity records; root tags cost three bytes
+    // per placement. The remaining bytes belong to the component ID, record metadata,
+    // contextual field name and its SceneLocal reference. This is the exact raw byte cost.
+    let raw_bytes = 2 * ("source".len() + "target".len())
+        + 2 * 3
+        + component_id().as_str().len()
+        + 5
+        + "target".len()
+        + "target".len();
+    assert_eq!((raw_nodes, effective_nodes, raw_bytes), (9, 10, 68));
     let tight = SceneFileLimits::default()
-        .with_component_value_nodes(ItemLimit::new(3).unwrap())
-        .with_component_value_bytes(ByteLimit::new(64).unwrap());
+        .with_component_value_nodes(ItemLimit::new(raw_nodes).unwrap())
+        .with_component_value_bytes(ByteLimit::new(raw_bytes).unwrap());
+    for (limits, kind, observed, maximum) in [
+        (
+            tight.with_component_value_nodes(ItemLimit::new(raw_nodes - 1).unwrap()),
+            nara_scene::SceneFileBudgetKind::ComponentValueNodes,
+            raw_nodes,
+            raw_nodes - 1,
+        ),
+        (
+            tight.with_component_value_bytes(ByteLimit::new(raw_bytes - 1).unwrap()),
+            nara_scene::SceneFileBudgetKind::ComponentValueBytes,
+            raw_bytes,
+            raw_bytes - 1,
+        ),
+    ] {
+        let nara_scene::SceneFormatError::Budget(error) =
+            SceneDocumentCandidate::decode_json_bytes_with_limits(bytes.as_bytes(), limits)
+                .unwrap_err()
+        else {
+            panic!("raw source must reject exactly one missing node or byte");
+        };
+        assert_eq!(
+            (error.kind, error.observed, error.maximum),
+            (kind, observed, maximum)
+        );
+    }
     let candidate = SceneDocumentCandidate::decode_json_bytes_with_limits(bytes.as_bytes(), tight)
         .unwrap()
         .canonicalize(&registry)
         .unwrap();
-    assert!(candidate.publish(&registry).is_err());
+    let rejected = candidate.publish(&registry).unwrap_err();
+    assert!(
+        rejected
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.invalid-component-payload" }),
+        "{:?}",
+        rejected.diagnostics()
+    );
 
-    let wide = SceneFileLimits::default()
-        .with_component_value_nodes(ItemLimit::new(4).unwrap())
-        .with_component_value_bytes(ByteLimit::new(64).unwrap());
+    let wide = tight.with_component_value_nodes(ItemLimit::new(effective_nodes).unwrap());
     let published = SceneDocumentCandidate::decode_json_bytes_with_limits(bytes.as_bytes(), wide)
         .unwrap()
         .canonicalize(&registry)
         .unwrap()
-        .publish(&registry);
-    assert!(published.is_ok());
+        .publish(&registry)
+        .unwrap();
+    assert_eq!(published.document(), &document);
 }
 
 fn scene_source_key(name: &str) -> nara_scene::SourceDocumentKey {

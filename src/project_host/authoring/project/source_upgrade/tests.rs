@@ -427,7 +427,7 @@ fn encoded(index: usize, working: bool, next: bool) -> Vec<u8> {
         ),
     ]);
     if index == 2 {
-        PrefabDocument::new(document.roots, document.entities)
+        PrefabDocument::new(document.placements, document.entities)
             .to_json_string()
             .unwrap()
             .into_bytes()

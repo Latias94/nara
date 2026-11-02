@@ -35,6 +35,7 @@ fn ui_prefab_revert_uses_source_owner_proof_and_keeps_one_undo() {
             ui_node_record("flow", "percent", 1.0, "percent", 1.0),
         );
     record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("ui.prefab.json").unwrap(),
         overrides: Some(overlay),

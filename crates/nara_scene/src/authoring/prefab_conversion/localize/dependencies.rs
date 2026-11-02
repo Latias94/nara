@@ -10,11 +10,10 @@ use nara_core::{ByteLimit, ItemLimit};
 
 use super::PrefabConversionError;
 use crate::{
-    AuthoringSchemaBasis, PrefabDocument, ResolvedPrefabSource, SceneEntityId,
-    ScenePatchApplyLimits, ScenePatchReport, SourceDocumentKey, SourceDocumentKind,
-    authoring::history_error_report, patch::bounded_scene_entities_source_cost,
-    prefab::SceneCompilationWorkingSet, provenance::provenance_asset_ref_bytes,
-    schema_authority::SchemaAuthority,
+    AuthoringSchemaBasis, PrefabDocument, ResolvedPrefabSource, ScenePatchApplyLimits,
+    ScenePatchReport, SourceDocumentKey, SourceDocumentKind, authoring::history_error_report,
+    patch::bounded_prefab_source_cost, prefab::SceneCompilationWorkingSet,
+    provenance::provenance_asset_ref_bytes, schema_authority::SchemaAuthority,
 };
 
 /// Retains each canonical body once, including dependencies with no surviving entities.
@@ -22,7 +21,7 @@ use crate::{
 /// The logical model includes the container, snapshot handles, both retained canonical
 /// keys, request bindings and index overhead. Body costs use the compiler's raw-copy
 /// model: 512 bytes per structural work item, 96 per value node, content bytes and
-/// root identifiers. Shared bodies are charged once here even though cloning their
+/// placement declarations and inputs. Shared bodies are charged once here even though cloning their
 /// immutable handles does not copy them. This is not an allocator or RSS bound;
 /// loader caches, decoding and file/metadata evidence retain their existing owners.
 #[derive(Debug)]
@@ -172,16 +171,11 @@ impl CapturedPrefabSources {
 fn snapshot_bytes(source: &ResolvedPrefabSource, maximum: usize) -> Option<usize> {
     let document = source.document();
     let key_bytes = source.key().checked_retained_bytes()?;
-    let root_headers = document
-        .roots
-        .len()
-        .checked_mul(size_of::<SceneEntityId>().checked_add(2 * size_of::<usize>())?)?;
     let metadata = size_of::<ResolvedPrefabSource>()
         .checked_add(size_of::<PrefabDocument>())?
         .checked_add(6 * size_of::<usize>())?
         // One map key and the key retained inside the actual source snapshot.
-        .checked_add(key_bytes.checked_mul(2)?)?
-        .checked_add(root_headers)?;
+        .checked_add(key_bytes.checked_mul(2)?)?;
     if metadata > maximum {
         return None;
     }
@@ -196,7 +190,7 @@ fn snapshot_bytes(source: &ResolvedPrefabSource, maximum: usize) -> Option<usize
         .with_validation_value_bytes(ByteLimit::new(
             maximum.min(defaults.validation_value_bytes().get()),
         )?);
-    let cost = bounded_scene_entities_source_cost(&document.entities, limits)?;
+    let cost = bounded_prefab_source_cost(document, limits)?;
     let bytes = metadata
         .checked_add(cost.operation_count().checked_mul(512)?)?
         .checked_add(cost.value_cost().nodes().checked_mul(96)?)?
@@ -205,12 +199,7 @@ fn snapshot_bytes(source: &ResolvedPrefabSource, maximum: usize) -> Option<usize
     if bytes > maximum {
         return None;
     }
-    document.roots.iter().try_fold(bytes, |bytes, root| {
-        // The identifier/string headers were admitted above before visiting any roots.
-        bytes
-            .checked_add(root.as_str().len())
-            .filter(|bytes| *bytes <= maximum)
-    })
+    Some(bytes)
 }
 
 fn request_binding_bytes(request: &AssetRef, key: &SourceDocumentKey) -> Option<usize> {
@@ -249,9 +238,8 @@ mod tests {
     use crate::{
         __private::AuthoringAdapterReceipt,
         PrefabInstance, SceneCompilationOptions, SceneComponentRecord, SceneDocument,
-        SceneEntityRecord,
+        SceneEntityId, SceneEntityRecord,
         prefab::{SelectedInstanceSource, try_compile_selected_authoring_instance_with_loader},
-        provenance::provenance_string_bytes,
     };
 
     const MAXIMUM: usize = 1024 * 1024;
@@ -323,14 +311,17 @@ mod tests {
         let mut record = SceneEntityRecord::new(anchor.clone());
         record.prefab = Some(PrefabInstance {
             source: request("base"),
+            binding: crate::PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: None,
         });
-        let scene = SceneDocument::new([anchor.clone()], [record]);
+        let scene = SceneDocument::from_ordered_roots([record]);
         let mut captured = None;
         try_compile_selected_authoring_instance_with_loader(
             SelectedInstanceSource::Scene(&scene),
             &anchor,
+            &[],
+            (0, 0),
             basis,
             SceneCompilationOptions::default(),
             None,
@@ -734,18 +725,21 @@ mod tests {
     }
 
     #[test]
-    fn root_copies_and_value_nodes_contribute_to_the_snapshot_model() {
+    fn placement_declarations_and_value_nodes_contribute_to_the_snapshot_model() {
         let basis = make_basis();
         let empty = source(&Arc::new(PrefabDocument::default()), &basis, "canonical");
         let root = SceneEntityId::new("root").unwrap();
         let rooted = source(
-            &Arc::new(PrefabDocument::new([root.clone()], [])),
+            &Arc::new(PrefabDocument::new(
+                [crate::SceneEntityPlacement::root(root.clone())],
+                [],
+            )),
             &basis,
             "canonical",
         );
         assert_eq!(
             snapshot_bytes(&rooted, MAXIMUM).unwrap() - snapshot_bytes(&empty, MAXIMUM).unwrap(),
-            size_of::<SceneEntityId>() + provenance_string_bytes(root.as_str()).unwrap()
+            3 * 512 + root.as_str().len() + 3
         );
         let scalar = source(&make_document(ComponentValue::Null), &basis, "canonical");
         let list = source(

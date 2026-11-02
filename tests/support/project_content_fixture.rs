@@ -85,11 +85,7 @@ requested = ["runtime-2d"]
             ComponentTypeId::new("nara.transform.Transform2d"),
             identity_transform_record(),
         );
-        anchor.prefab = Some(PrefabInstance {
-            source,
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(source));
         let scene = SceneDocument::from_ordered_roots([anchor]);
         let image = AssetRef::path("textures/player.png").unwrap();
         let enemy = SceneEntityRecord::new(scene_id("enemy"))

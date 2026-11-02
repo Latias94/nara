@@ -17,8 +17,8 @@ use nara::{
     asset::AssetRef,
     reflect::{ComponentFieldId, ComponentTypeId, ComponentValue},
     scene::{
-        PrefabDocumentCandidate, SceneDocumentCandidate, SceneEntityId, ScenePlacement,
-        ScenePlacementOwner,
+        PrefabDocumentCandidate, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
+        ScenePlacement, ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentKind, EditorDocumentMutation,
@@ -374,7 +374,7 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
         let unavailable = application
             .active_authoring_unavailable_record_manifest()
             .unwrap();
-        let placement = ScenePlacement::last(ScenePlacementOwner::Root);
+        let placement = ScenePlacement::last(ScenePlacementParent::Root);
         let create = match kind {
             EditorDocumentKind::Scene => EditorDocumentMutation::ComposeScene {
                 document,
@@ -620,16 +620,15 @@ fn prove_external_creation_composition(root: &Path, baseline_player_x: f64) {
             Some(unavailable.clone())
         );
         let mut expected = original;
-        expected["payload"]["roots"]
+        expected["payload"]["placements"]
             .as_array_mut()
             .unwrap()
-            .push(Value::from(entity.as_str()));
+            .push(serde_json::to_value(SceneEntityPlacement::root(entity.clone())).unwrap());
         expected["payload"]["entities"]
             .as_array_mut()
             .unwrap()
             .push(serde_json::json!({
                 "id": entity.as_str(),
-                "children": [],
                 "components": {
                     COLLECTIBLE: { "version": 2, "owner": "collect-game", "value": {
                         "type": "map", "value": { "radius": { "type": "f64", "value": 23.5 } }

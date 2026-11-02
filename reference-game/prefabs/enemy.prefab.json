@@ -7,13 +7,28 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "enemy"
+    "placements": [
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "enemy"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      }
     ],
     "entities": [
       {
         "id": "enemy",
-        "children": [],
         "components": {
           "nara.sprite.Sprite": {
             "version": 1,

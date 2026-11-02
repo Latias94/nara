@@ -12,8 +12,8 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringEntityView,
     AuthoringPropertyValue, AuthoringReadError, AuthoringRecordReadiness, PrefabAuthoringSession,
     PrefabDocument, PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -359,7 +359,6 @@ fn read_indexes_follow_only_published_commit_undo_redo_and_reopen() {
     let (mut scene, mut prefab) = sessions();
     let invalid = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(id("populated")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
     }]);
     assert!(
         scene
@@ -379,10 +378,17 @@ fn read_indexes_follow_only_published_commit_undo_redo_and_reopen() {
         prefab.authoring_entity_view(&id("populated")).unwrap(),
         &prefab.document().entities[1],
     );
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id("added")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let mut placements = scene.document().placements.clone();
+    placements.push(SceneEntityPlacement::root(id("added")));
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("added")),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: scene.document().placements.clone(),
+            value: placements,
+        },
+    ]);
     let scene_prepared = scene
         .prepare_authoring_edit(scene.revision(), &patch)
         .unwrap();

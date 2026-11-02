@@ -16,9 +16,8 @@ use nara_reflect::{
 
 use super::reference_program::{ComponentReferencePrograms, ReferenceProgram, ReferencePrograms};
 use super::{Compiler, Program, Record, instance_from_inputs};
-use crate::diagnostics::{
-    error as diagnostic_error, with_codec_error, with_migration_error, with_public_locator,
-};
+use crate::diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator};
+use crate::draft::SceneDraft;
 use crate::prefab::overlay::{components, properties};
 use crate::prefab::{
     PrefabReferenceRemapError, SceneCompilationBudgetKind, SceneCompilationWorkingSet,
@@ -26,8 +25,7 @@ use crate::prefab::{
 use crate::provenance::provenance_string_bytes;
 use crate::{
     PrefabComponentIntent, PrefabOverlaySlot, PrefabPropertyIntent, ResolvedPrefabSource,
-    SceneCompilationFailure, SceneCompilationFailureKind, SceneComponentRecord, SceneDocument,
-    SceneEntityId,
+    SceneCompilationFailure, SceneCompilationFailureKind, SceneComponentRecord, SceneEntityId,
 };
 
 impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
@@ -36,7 +34,7 @@ where
 {
     pub(super) fn materialize_components(
         &mut self,
-        document: &mut SceneDocument,
+        document: &mut SceneDraft,
     ) -> Result<ReferencePrograms, SceneCompilationFailure> {
         let mut references = BTreeMap::new();
 
@@ -162,6 +160,15 @@ where
 
         let limits = self.value_program_limits();
         let admitted = (|| {
+            // A diagnostic source caller may impose an explicit pre-migration input quota.
+            // Ordinary compilation instead bounds authored syntax by working storage because
+            // a resolved reference can be smaller than the canonical route that authored it.
+            if let Some(source_limits) = self.context.options.limits.source_value_limits {
+                validate_value_materialization_budget(&original.value, source_limits)?;
+                for default in original.contextual_defaults.values() {
+                    validate_value_materialization_budget(default, source_limits)?;
+                }
+            }
             let cost = bounded_value_cost(&original.value, limits)?;
             for default in original.contextual_defaults.values() {
                 validate_value_materialization_budget(default, limits)?;
@@ -211,21 +218,13 @@ where
             let migrated = match authority.migrate_owned(component, &record, value) {
                 Ok(migrated) => migrated,
                 Err(error) => {
-                    self.context.diagnostics.push(with_migration_error(
-                        with_public_locator(
-                            with_public_locator(
-                                diagnostic_error(
-                                    "scene.prefab-component-migration-failed",
-                                    "Prefab component migration failed before publication",
-                                ),
-                                "entity-id",
-                                entity.as_str(),
-                            ),
-                            "component-id",
+                    self.context.diagnostics.push(
+                        crate::validation::component_migration_diagnostic(
+                            entity.as_str(),
                             component.as_str(),
+                            &error,
                         ),
-                        &error,
-                    ));
+                    );
                     return Err(SceneCompilationFailureKind::Component.into());
                 }
             };

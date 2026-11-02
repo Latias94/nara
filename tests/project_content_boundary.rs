@@ -48,11 +48,7 @@ fn stable_id_prefab_references_survive_source_rename() {
     )
     .unwrap();
     let mut anchor = SceneEntityRecord::new(scene_id("enemy-anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::StableId(stable_id),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(AssetRef::StableId(stable_id)));
     let scene = SceneDocument::from_ordered_roots([anchor]);
     std::fs::write(
         project.path().join("scenes/startup.scene.json"),
@@ -434,11 +430,9 @@ fn cyclic_prefab_closure_rejects_without_requeue_or_partial_publication() {
     let project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = project.candidate_plan_and_root();
     let mut cyclic = SceneEntityRecord::new(scene_id("cycle"));
-    cyclic.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    cyclic.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("enemy.prefab.json").unwrap(),
+    ));
     project.write_prefab_source(&PrefabDocument::from_ordered_roots([cyclic]));
     let loader = ProjectContentLoader::new(root).unwrap();
 
@@ -548,8 +542,9 @@ fn ordinary_check_preserves_safe_scene_and_prefab_format_reasons() {
 }
 
 #[test]
-fn legacy_scene_parent_shape_reports_an_actionable_bounded_diagnostic() {
+fn legacy_scene_parent_shape_reports_a_bounded_format_diagnostic() {
     let project = TestProject::with_prefab_startup();
+    // Keep the former source shape only as an explicit rejection control.
     project.write_scene_bytes(
         br#"{
             "kind":"scene",
@@ -570,20 +565,20 @@ fn legacy_scene_parent_shape_reports_an_actionable_bounded_diagnostic() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_legacy_placement_diagnostic(
+    assert_rejected_source_placement_shape(
         &error,
-        "project.content.scene-legacy-placement-shape",
-        "Rewrite the legacy scene with ordered roots and parent-owned children; sibling order cannot be inferred",
+        "project.content.scene-format-invalid",
+        "Project scene format is invalid",
         "scene",
         "startup.scene.json",
-        1,
     );
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
 #[test]
-fn legacy_prefab_parent_shape_reports_an_actionable_bounded_diagnostic() {
+fn legacy_prefab_parent_shape_reports_a_bounded_format_diagnostic() {
     let project = TestProject::with_prefab_startup();
+    // Keep the former source shape only as an explicit rejection control.
     project.write_prefab_bytes(
         "enemy.prefab.json",
         br#"{
@@ -602,34 +597,32 @@ fn legacy_prefab_parent_shape_reports_an_actionable_bounded_diagnostic() {
 
     let error = loader.load(&candidate, &plan).unwrap_err();
 
-    assert_legacy_placement_diagnostic(
+    assert_rejected_source_placement_shape(
         &error,
-        "project.content.prefab-legacy-placement-shape",
-        "Rewrite the legacy prefab with ordered roots and parent-owned children; sibling order cannot be inferred",
+        "project.content.prefab-format-invalid",
+        "Project prefab format is invalid",
         "prefab",
         "enemy.prefab.json",
-        0,
     );
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 
-fn assert_legacy_placement_diagnostic(
+fn assert_rejected_source_placement_shape(
     error: &ProjectContentError,
     code: &str,
     summary: &str,
     source_key: &str,
     source_path: &str,
-    entity_index: u64,
 ) {
     assert_eq!(error.kind(), ProjectContentErrorKind::SceneFormat);
     let diagnostic = error.diagnostics().iter().next().unwrap();
     assert_eq!(diagnostic.code().as_str(), code);
     assert_eq!(diagnostic.summary().as_str(), summary);
-    assert_eq!(diagnostic.fields().len(), 3);
+    assert_eq!(diagnostic.fields().len(), 5);
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == "reason"
             && field.class() == DiagnosticFieldClass::Public
-            && field.value() == DiagnosticValueRef::Identifier("legacy-placement-shape")
+            && field.value() == DiagnosticValueRef::Identifier("payload-invalid")
     }));
     assert!(diagnostic.fields().iter().any(|field| {
         field.key().as_str() == source_key
@@ -637,10 +630,18 @@ fn assert_legacy_placement_diagnostic(
             && field.value() == DiagnosticValueRef::Identifier(source_path)
     }));
     assert!(diagnostic.fields().iter().any(|field| {
-        field.key().as_str() == "entity_index"
+        field.key().as_str() == "encoding"
             && field.class() == DiagnosticFieldClass::Public
-            && field.value() == DiagnosticValueRef::Unsigned(entity_index)
+            && field.value() == DiagnosticValueRef::Identifier("json")
     }));
+    for key in ["line", "column"] {
+        assert!(diagnostic.fields().iter().any(|field| {
+            field.key().as_str() == key
+                && field.class() == DiagnosticFieldClass::Public
+                && matches!(field.value(), DiagnosticValueRef::Unsigned(value) if value > 0)
+        }));
+    }
+    assert!(!format!("{diagnostic:?}").contains("legacy-root"));
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -713,13 +714,20 @@ fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
         )
     };
     let transform_id = ComponentTypeId::new("nara.transform.Transform2d");
+    let placements = [
+        nara::scene::SceneEntityPlacement::root(scene_id("parent")),
+        nara::scene::SceneEntityPlacement::new(
+            nara::scene::PrefabEntityTarget::source(scene_id("child")),
+            nara::scene::ScenePlacement::last(nara::scene::ScenePlacementParent::Entity(
+                nara::scene::PrefabEntityTarget::source(scene_id("parent")),
+            )),
+        ),
+    ];
     let parent = SceneEntityRecord::new(scene_id("parent"))
-        .with_children([scene_id("child")])
         .with_component(transform_id.clone(), transform_record(10.0, 20.0));
     let child = SceneEntityRecord::new(scene_id("child"))
         .with_component(transform_id.clone(), transform_record(3.0, 4.0));
-    transform_project
-        .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
+    transform_project.write_scene_source(&SceneDocument::new(placements.clone(), [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let compiled = snapshot.compiled_scene();
@@ -740,18 +748,15 @@ fn parented_transform_loads_while_inherited_visibility_remains_fail_closed() {
 
     let visibility_project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = visibility_project.candidate_plan_and_root();
-    let parent = SceneEntityRecord::new(scene_id("parent"))
-        .with_children([scene_id("child")])
-        .with_component(
-            ComponentTypeId::new("nara.scene.Visibility"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::String("hidden".to_owned()),
-            ),
-        );
+    let parent = SceneEntityRecord::new(scene_id("parent")).with_component(
+        ComponentTypeId::new("nara.scene.Visibility"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String("hidden".to_owned()),
+        ),
+    );
     let child = SceneEntityRecord::new(scene_id("child"));
-    visibility_project
-        .write_scene_source(&SceneDocument::new([scene_id("parent")], [parent, child]));
+    visibility_project.write_scene_source(&SceneDocument::new(placements, [parent, child]));
     let loader = ProjectContentLoader::new(root).unwrap();
     let error = loader.load(&candidate, &plan).unwrap_err();
     assert_eq!(

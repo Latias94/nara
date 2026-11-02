@@ -13,7 +13,7 @@ fn write_documents(project: &CompositionProject, document: SceneDocument) {
     .unwrap();
     fs::write(
         project.source(EditorDocumentKind::Prefab),
-        PrefabDocument::new(document.roots, document.entities)
+        PrefabDocument::new(document.placements, document.entities)
             .to_json_string()
             .unwrap(),
     )
@@ -59,8 +59,8 @@ fn compose(app: &mut EditorApplication, command: SceneCompositionCommand) {
             document: scene.document,
             base_revision: scene.revision,
             command: match command {
-                SceneCompositionCommand::MoveEntity { entity, to } => {
-                    PrefabCompositionCommand::MoveEntity { entity, to }
+                SceneCompositionCommand::MoveEntity { target, to } => {
+                    PrefabCompositionCommand::MoveEntity { target, to }
                 }
                 SceneCompositionCommand::RemoveEntity { entity } => {
                     PrefabCompositionCommand::RemoveEntity { entity }
@@ -104,6 +104,26 @@ fn tree(app: &EditorApplication) -> Vec<SceneInspectorEntityRow> {
         .inspector
         .entities
         .clone()
+}
+
+fn saved_hierarchy(
+    project: &CompositionProject,
+    kind: EditorDocumentKind,
+) -> nara::scene::SourceLocalSceneHierarchy {
+    let bytes = fs::read(project.source(kind)).unwrap();
+    let document = match kind {
+        EditorDocumentKind::Scene => nara::scene::SceneDocumentCandidate::decode_json_bytes(&bytes)
+            .unwrap()
+            .into_composition_source()
+            .unwrap(),
+        EditorDocumentKind::Prefab => PrefabDocumentCandidate::decode_json_bytes(&bytes)
+            .unwrap()
+            .into_composition_source()
+            .unwrap()
+            .instantiate(),
+        EditorDocumentKind::Extension(_) => unreachable!("nominal source fixture"),
+    };
+    document.local_hierarchy(Default::default()).unwrap()
 }
 
 fn save_and_reopen(app: &mut EditorApplication) {
@@ -218,10 +238,10 @@ fn ordinary_scene_and_prefab_move_unknown_records_restore_exact_history_and_reop
         compose(
             &mut app,
             SceneCompositionCommand::MoveEntity {
-                entity: id("unavailable"),
-                to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: id("parent-a"),
-                }),
+                target: PrefabEntityTarget::source(id("unavailable")),
+                to: ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("parent-a"),
+                ))),
             },
         );
         assert_eq!(
@@ -229,8 +249,10 @@ fn ordinary_scene_and_prefab_move_unknown_records_restore_exact_history_and_reop
                 .iter()
                 .find(|row| row.id == id("unavailable"))
                 .unwrap()
-                .parent,
-            Some(id("parent-a"))
+                .placement,
+            Some(ScenePlacement::last(ScenePlacementParent::Entity(
+                PrefabEntityTarget::source(id("parent-a")),
+            )))
         );
         let moved_tree = tree(&app);
         let moved_manifest = app.active_authoring_unavailable_record_manifest().unwrap();
@@ -253,15 +275,28 @@ fn ordinary_scene_and_prefab_move_unknown_records_restore_exact_history_and_reop
         compose(
             &mut app,
             SceneCompositionCommand::MoveEntity {
-                entity: id("parent-b"),
-                to: ScenePlacement::first(ScenePlacementOwner::Root),
+                target: PrefabEntityTarget::source(id("parent-b")),
+                to: ScenePlacement::first(ScenePlacementParent::Root),
             },
         );
-        assert_eq!(tree(&app)[0].id, id("parent-b"));
+        assert_eq!(
+            tree(&app)
+                .iter()
+                .find(|row| row.id == id("parent-b"))
+                .unwrap()
+                .placement,
+            Some(ScenePlacement::first(ScenePlacementParent::Root))
+        );
         let arranged = tree(&app);
         let manifest = app.active_authoring_unavailable_record_manifest().unwrap();
         save_and_reopen(&mut app);
         assert_eq!(tree(&app), arranged);
+        let hierarchy = saved_hierarchy(&project, kind);
+        assert_eq!(hierarchy.roots(), [id("parent-b"), id("parent-a")]);
+        assert_eq!(
+            hierarchy.children(&id("parent-a")).unwrap(),
+            [id("unavailable")]
+        );
         assert_eq!(
             app.active_authoring_unavailable_record_manifest(),
             Some(manifest)
@@ -295,11 +330,25 @@ fn ordinary_complete_scene_and_prefab_delete_subtree_restore_records_and_parent_
         write_documents(
             &project,
             SceneDocument::new(
-                [id("parent"), id("loose")],
                 [
-                    SceneEntityRecord::new(id("parent")).with_children([id("child")]),
+                    SceneEntityPlacement::root(id("parent")),
+                    SceneEntityPlacement::root(id("loose")),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(id("child")),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(id("parent")),
+                        )),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(id("grandchild")),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(id("child")),
+                        )),
+                    ),
+                ],
+                [
+                    SceneEntityRecord::new(id("parent")),
                     SceneEntityRecord::new(id("child"))
-                        .with_children([id("grandchild")])
                         .with_component(ComponentTypeId::new(CUSTOM), component),
                     SceneEntityRecord::new(id("grandchild")),
                     SceneEntityRecord::new(id("loose")),
@@ -339,7 +388,7 @@ fn ordinary_complete_scene_and_prefab_delete_subtree_restore_records_and_parent_
         let removed = tree(&app);
         assert_eq!(
             removed.iter().map(|row| row.id.clone()).collect::<Vec<_>>(),
-            [id("parent"), id("loose")]
+            [id("loose"), id("parent")]
         );
         assert_eq!(
             frame(&app)
@@ -356,11 +405,11 @@ fn ordinary_complete_scene_and_prefab_delete_subtree_restore_records_and_parent_
         assert_eq!(
             restored
                 .iter()
-                .map(|row| (&row.id, &row.parent))
+                .map(|row| (&row.id, &row.placement))
                 .collect::<Vec<_>>(),
             original
                 .iter()
-                .map(|row| (&row.id, &row.parent))
+                .map(|row| (&row.id, &row.placement))
                 .collect::<Vec<_>>()
         );
         dispatch(
@@ -379,10 +428,13 @@ fn ordinary_complete_scene_and_prefab_delete_subtree_restore_records_and_parent_
                 .iter()
                 .map(|row| row.id.clone())
                 .collect::<Vec<_>>(),
-            [id("parent"), id("loose")]
+            [id("loose"), id("parent")]
         );
         save_and_reopen(&mut app);
         assert_eq!(tree(&app).len(), 2);
+        let hierarchy = saved_hierarchy(&project, kind);
+        assert_eq!(hierarchy.roots(), [id("parent"), id("loose")]);
+        assert!(hierarchy.children(&id("parent")).unwrap().is_empty());
         close(&mut app);
     }
 }

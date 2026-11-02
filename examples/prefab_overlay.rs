@@ -45,13 +45,11 @@ fn main() {
             }],
         });
     let declaration = PrefabInstance {
-        source: source.clone(),
-        arguments: None,
         overrides: Some(overrides),
+        ..PrefabInstance::forest(source.clone())
     };
     let scene = SceneDocument::from_ordered_roots([SceneEntityRecord {
         id: scene_id("enemy"),
-        children: Vec::new(),
         components: Default::default(),
         prefab: Some(declaration.clone()),
     }]);

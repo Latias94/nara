@@ -3,6 +3,9 @@
 #[path = "support/editor_action_driver.rs"]
 mod editor_action_driver;
 
+#[path = "support/source_placement.rs"]
+mod source_placement;
+
 #[path = "support/editor_interaction_cost_measurement.rs"]
 mod interaction_cost_measurement;
 #[path = "support/editor_responsiveness_measurement.rs"]
@@ -39,8 +42,9 @@ use nara::{
     },
     reflect::AuthoringSchemaBundle,
     scene::{
-        SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        SceneAuthoringSession, SceneDocument, SceneDocumentCandidate, SceneEntityId,
+        SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument, ScenePlacement,
+        ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionOutcome, EditorCloseDecision, EditorDocumentMutation,
@@ -84,7 +88,7 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
             base_revision,
             command: SceneCompositionCommand::CreateEntity {
                 kind: SceneCompositionEntityKind::ColoredSprite,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         })],
     );
@@ -198,8 +202,11 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
         .scene(document)
         .unwrap()
         .revision;
-    let later_patch =
-        add_entity_patch_at("later", ScenePlacement::first(ScenePlacementOwner::Root));
+    let later_patch = add_entity_patch_at(
+        &[SceneEntityPlacement::root(scene_id("captured"))],
+        "later",
+        ScenePlacement::first(ScenePlacementParent::Root),
+    );
     let outcomes = editor_driver::dispatch(
         &mut editor,
         [
@@ -378,7 +385,23 @@ fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
         .iter()
         .map(|entity| entity.id.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["later", "captured"]);
+    assert_eq!(ids, ["captured", "later"]);
+    let persisted =
+        SceneDocumentCandidate::decode_json_bytes(&fs::read(project.scene_path()).unwrap())
+            .unwrap()
+            .into_composition_source()
+            .unwrap();
+    assert_eq!(
+        persisted
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [scene_id("later"), scene_id("captured")],
+    );
+    assert_eq!(
+        reopened.editor.inspector.entities[1].placement,
+        Some(ScenePlacement::first(ScenePlacementParent::Root)),
+    );
 }
 
 #[test]
@@ -1159,14 +1182,15 @@ fn current_scene_model(
 }
 
 fn add_entity_patch(id: &str) -> ScenePatchDocument {
-    add_entity_patch_at(id, ScenePlacement::last(ScenePlacementOwner::Root))
+    add_entity_patch_at(&[], id, ScenePlacement::last(ScenePlacementParent::Root))
 }
 
-fn add_entity_patch_at(id: &str, placement: ScenePlacement) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(scene_id(id)),
-        placement,
-    }])
+fn add_entity_patch_at(
+    placements: &[SceneEntityPlacement],
+    id: &str,
+    placement: ScenePlacement,
+) -> ScenePatchDocument {
+    source_placement::add_entity_patch(placements, SceneEntityRecord::new(scene_id(id)), placement)
 }
 
 fn scene_id(id: &str) -> SceneEntityId {

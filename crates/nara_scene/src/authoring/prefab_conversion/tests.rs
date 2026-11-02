@@ -11,9 +11,10 @@ use nara_reflect::{
 use super::*;
 use crate::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringSchemaBasis,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocumentCandidate, SceneEntityRecord, authoring::AuthoringHistoryScope,
+    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    PrefabInstance, SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord,
+    SceneDocumentCandidate, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
+    ScenePlacementParent, authoring::AuthoringHistoryScope,
 };
 
 pub(super) fn id(name: &str) -> SceneEntityId {
@@ -63,13 +64,14 @@ pub(super) fn admit_schema(schema: ComponentSchema) -> AuthoringSchemaBasis {
 pub(super) fn instance(name: &str) -> PrefabInstance {
     PrefabInstance {
         source: AssetRef::path(format!("prefabs/{name}.prefab.json")).unwrap(),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: None,
     }
 }
 
 pub(super) fn original() -> SceneDocument {
-    let mut anchor = SceneEntityRecord::new(id("anchor")).with_children([id("local-child")]);
+    let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(instance("base"));
     anchor.components.insert(
         ComponentTypeId::new("test.Unavailable"),
@@ -79,7 +81,19 @@ pub(super) fn original() -> SceneDocument {
     child.prefab = Some(instance("missing-child"));
     let mut other = SceneEntityRecord::new(id("other"));
     other.prefab = Some(instance("missing-unrelated"));
-    SceneDocument::new([id("anchor"), id("other")], [anchor, child, other])
+    SceneDocument::new(
+        [
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::root(id("other")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local-child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
+        [anchor, child, other],
+    )
 }
 
 fn patch() -> ScenePatchDocument {
@@ -101,18 +115,31 @@ fn patch() -> ScenePatchDocument {
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(id("localized-root")).with_component(component(), value),
-            placement: ScenePlacement::before(
-                ScenePlacementOwner::Parent {
-                    parent: id("anchor"),
-                },
-                id("local-child"),
-            ),
         },
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(id("localized-leaf")),
-            placement: ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: id("localized-root"),
-            }),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: original().placements.clone(),
+            value: original()
+                .placements
+                .into_iter()
+                .chain([
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(id("localized-root")),
+                        ScenePlacement::before(
+                            ScenePlacementParent::Entity(PrefabEntityTarget::source(id("anchor"))),
+                            PrefabEntityTarget::source(id("local-child")),
+                        ),
+                    ),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(id("localized-leaf")),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(id("localized-root")),
+                        )),
+                    ),
+                ])
+                .collect(),
         },
     ])
 }
@@ -122,6 +149,7 @@ fn scope() -> AuthoringHistoryScope {
         PrefabConversionFootprint::new(
             &id("anchor"),
             &[id("localized-root"), id("localized-leaf")],
+            &patch(),
             SceneAuthoringHistoryLimits::default().max_entry_logical_bytes(),
         )
         .unwrap(),
@@ -185,14 +213,20 @@ fn source_owned_footprint_replays_complete_records_with_unrelated_links_and_unav
             assert_eq!(retained, original);
         }
     }
-    assert_eq!(reviewed.roots, before.roots);
+    assert_eq!(
+        &reviewed.placements[..before.placements.len()],
+        before.placements.as_slice()
+    );
     let anchor = session
         .document()
         .entities
         .iter()
         .find(|record| record.id == id("anchor"))
         .unwrap();
-    assert_eq!(anchor.children, [id("localized-root"), id("local-child")]);
+    assert_eq!(
+        session.document().placements.len(),
+        before.placements.len() + 2
+    );
     assert!(anchor.prefab.is_none());
     let accepted_state = session.content_state();
     let admitted_usage = session.history_usage();
@@ -228,7 +262,7 @@ fn source_owned_footprint_replays_complete_records_with_unrelated_links_and_unav
 #[test]
 fn prefab_source_uses_the_same_scoped_history_without_a_scene_publication() {
     let source = original();
-    let document = PrefabDocument::new(source.roots, source.entities);
+    let document = PrefabDocument::new(source.placements, source.entities);
     let published = PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
         .unwrap()
         .admit_authoring_with_basis(
@@ -269,9 +303,6 @@ fn scope_refuses_foreign_records_mixed_directions_and_partial_entity_sets() {
     let mut mixed = patch();
     mixed.operations[1] = ScenePatchOperation::RemoveEntity {
         entity: id("localized-root"),
-        from: ScenePlacement::last(ScenePlacementOwner::Parent {
-            parent: id("anchor"),
-        }),
     };
     for invalid in [foreign, partial, mixed] {
         let rejected = session
@@ -358,6 +389,7 @@ fn an_empty_localized_projection_still_has_one_exact_source_history_entry() {
         PrefabConversionFootprint::new(
             &id("anchor"),
             &[],
+            &patch,
             session.history_limits().max_entry_logical_bytes(),
         )
         .unwrap(),

@@ -58,7 +58,7 @@ impl PreparedSceneAuthoringEdit {
         let candidate = &self.candidate;
         std::mem::size_of::<Self>()
             .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
-                &candidate.document.roots,
+                &candidate.document.placements,
                 &candidate.document.entities,
                 candidate.state.file_limits(),
             )?)?
@@ -242,7 +242,7 @@ impl PreparedPrefabAuthoringEdit {
         let candidate = &self.candidate;
         std::mem::size_of::<Self>()
             .checked_add(super::prefab_conversion::retention::document_dynamic_bytes(
-                &candidate.document.roots,
+                &candidate.document.placements,
                 &candidate.document.entities,
                 candidate.state.file_limits(),
             )?)?

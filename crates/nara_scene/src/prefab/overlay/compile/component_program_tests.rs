@@ -20,10 +20,10 @@ use crate::{
     CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop,
-    PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
-    SceneCompilationLimits, SceneCompilationOptions, SceneCompilationReport, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent,
+    PrefabSourceResolver, SceneCompilationLimits, SceneCompilationOptions, SceneCompilationReport,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
 };
 
 #[derive(nara_ecs::Component)]
@@ -130,9 +130,8 @@ fn registry(native: bool) -> ComponentRegistrySnapshot {
 
 fn instance(base: &str, overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
-        source: request(base),
-        arguments: None,
         overrides: overlay,
+        ..PrefabInstance::forest(request(base))
     }
 }
 
@@ -156,11 +155,10 @@ fn fixture() -> InMemoryPrefabSourceResolver {
 }
 
 fn add(overlay: &mut PrefabOverlay, addition: PrefabAddition) {
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(addition.id.clone()),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(addition.id.clone()),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     overlay.additions.push(addition);
 }
 
@@ -679,7 +677,8 @@ fn deferred_reference_metadata_does_not_inflate_a_one_byte_final_local_id() {
         .find(|record| record.id == id("a"))
         .unwrap();
     assert_eq!(compiled.id(), &source.id);
-    assert_eq!(compiled.children(), source.children.as_slice());
+    let hierarchy = document.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(compiled.children(), hierarchy.children(&source.id).unwrap());
     assert!(compiled.components().is_empty());
     assert!(source.components.is_empty());
     let refused = expand(

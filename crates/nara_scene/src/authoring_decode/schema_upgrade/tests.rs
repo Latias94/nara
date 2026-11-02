@@ -177,6 +177,7 @@ fn document(next: bool) -> SceneDocument {
     let mut nested = PrefabOverlay::new(base());
     nested.components = vec![properties(next, false), properties(next, true)];
     let nested = PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("nested.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(nested),
@@ -195,6 +196,7 @@ fn document(next: bool) -> SceneDocument {
     let mut root = SceneEntityRecord::new(id("root"))
         .with_component(ComponentTypeId::new(COMPONENT), record(next));
     root.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("outer.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -501,7 +503,7 @@ fn armor_unknown_data_and_topology_changes_are_outside_the_upgrade() {
                     .unwrap()
                     .value = ComponentValue::String("changed".into())
             }
-            _ => candidate.roots.reverse(),
+            _ => candidate.placements.reverse(),
         }
         assert!(prepare(&original, &candidate, &upgrade).is_err());
     }

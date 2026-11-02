@@ -114,7 +114,14 @@ fn selected_scene_content_is_truthful_without_granting_startup_or_delivery_autho
             &ProjectPath::new("spare.scene.json").unwrap(),
         )
         .unwrap();
-    assert_eq!(spare.scene().roots, [scene_id("spare")]);
+    assert_eq!(
+        spare
+            .scene()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [scene_id("spare")]
+    );
     assert!(spare.startup_content_closure().is_none());
     drop(spare);
     let delivery = loader.load_delivery(&candidate, &plan).unwrap();
@@ -403,7 +410,11 @@ fn changed_second_scene_produces_a_new_delivery_without_mutating_retained_facts(
     changed
         .entities
         .push(SceneEntityRecord::new(scene_id("later-second-object")));
-    changed.roots.push(scene_id("later-second-object"));
+    changed
+        .placements
+        .push(nara::scene::SceneEntityPlacement::root(scene_id(
+            "later-second-object",
+        )));
     fs::write(
         project.path().join("scenes").join(SECOND_SCENE),
         changed.to_json_string().unwrap(),
@@ -676,11 +687,7 @@ fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
         ComponentTypeId::new("nara.transform.Transform2d"),
         identity_transform_record(),
     );
-    entity.prefab = Some(PrefabInstance {
-        source,
-        arguments: None,
-        overrides: None,
-    });
+    entity.prefab = Some(PrefabInstance::forest(source));
     entity
 }
 

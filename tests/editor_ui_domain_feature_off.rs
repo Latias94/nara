@@ -18,7 +18,7 @@ use nara::{
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
-        ScenePlacement, ScenePlacementOwner,
+        ScenePlacement, ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentKind,
@@ -153,7 +153,7 @@ fn feature_off_editor_preserves_ui_structure_gate_for_retained_data_catalogs() {
     let basis = editor.document_query_basis(document).unwrap();
     let mut draft = editor.begin_authoring_construction(&basis).unwrap();
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     assert!(
         matches!(editor.prepare_authoring_construction(&basis, &draft),

@@ -8,8 +8,7 @@ use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, Trus
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::{
     AuthoringDocumentSource, AuthoringSchemaBasis, SceneAuthoringSession, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
 };
 use nara_tasks::{TaskPoolConfig, TaskTerminal};
 use nara_tooling::{EditorPersistenceAuthority, EditorWorkspace};
@@ -75,12 +74,15 @@ impl SaveFixture {
                 .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
                     document,
                     base_revision: workspace.scene(document).unwrap().revision(),
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("captured-entity").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: crate::scene_test_support::add_root_entity_patch(
+                        &workspace
+                            .scene(document)
+                            .unwrap()
+                            .session()
+                            .document()
+                            .placements,
+                        SceneEntityRecord::new(SceneEntityId::new("captured-entity").unwrap(),),
+                    ),
                 })
                 .applied
         );

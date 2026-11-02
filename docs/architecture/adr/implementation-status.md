@@ -66,8 +66,14 @@ passes1629 tests across Reflect, Scene, Tooling and UI, including contextual con
 export reopen. The [complete compiled prerequisite](../../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md)
 adds Root/public repairs, independent module281 and ReferenceGame179, real language/tool consumers,
 actual cooked Host/Player delivery, selected Windows/DX12 trajectories, minimal configurations,
-rustdoc negatives and correctness Clippy. Root/placement and complete extraction/recovery implementation
-remain unfinished. The generic value-tree and record-owned sidecar alternatives retain their
+rustdoc negatives and correctness Clippy. Root/placement production replacement now has its
+[scoped qualification](../../knowledge/engineering/verification/2026-11/2026-11-02T121917Z-explicit-root-binding-and-source-placement-production-qualification-0eada24ff287416bbfe94ccf511d2380.md):
+source declarations, explicit forest/root binding, the shared layout kernel, private flat
+observations, exact placement history and root-bound conversion pass owner/public, independent
+module, real Transform/Native, language/tool, cooked Player and selected Windows/DX12 consumers.
+Semantic subtree deletion repairs affected surviving sibling pins through the Tooling owner.
+Complete extraction correspondence and project publication/recovery are still unfinished.
+The generic value-tree and record-owned sidecar alternatives retain their
 comparison rationale in the plan; scoped prerequisite evidence does not establish complete CP2.
 
 The [November 2 follow-up review](../../audits/2026-11-02-refactor-follow-up-review.md) adds concrete

@@ -286,6 +286,7 @@ contract = "desktop-supervised-play/v1"
                     SceneEntityId::new(format!("instance-{index}")).unwrap(),
                 );
                 entity.prefab = Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     arguments: None,
                     source: reference.clone(),
                     overrides: Default::default(),

@@ -57,14 +57,15 @@ impl Fixture {
             )
             .with_owner(PersistentComponentSchemaOwnerId::try_new(PACKAGE_A).unwrap()),
         );
-        let prefab = PrefabDocument::from_ordered_roots(scene.entities.clone());
+        let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
         let mut anchor = SceneEntityRecord::new(id("instance"));
-        anchor.prefab = Some(PrefabInstance {
-            source: AssetRef::path("enemy.prefab.json").unwrap(),
-            arguments: None,
-            overrides: None,
-        });
-        scene = SceneDocument::from_ordered_roots(scene.entities.into_iter().chain([anchor]));
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path("enemy.prefab.json").unwrap(),
+        ));
+        scene
+            .placements
+            .push(nara_scene::SceneEntityPlacement::root(anchor.id.clone()));
+        scene = SceneDocument::new(scene.placements, scene.entities.into_iter().chain([anchor]));
         let project = Project::new(&builtins, &scene, "json");
         fs::write(project.root().join(SECOND), scene.to_json_string().unwrap()).unwrap();
         fs::write(
@@ -990,11 +991,7 @@ fn csharp_installed_creation_metadata_captures_selected_dirty_prefab_instead_of_
     fixture.admit_v1(&mut editor);
     let startup = editor.current_frame().workspace().active_document.unwrap();
     let prefab = open_source(&mut editor, PREFAB);
-    let missing = PrefabInstance {
-        source: AssetRef::path("missing-on-disk.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    };
+    let missing = PrefabInstance::forest(AssetRef::path("missing-on-disk.prefab.json").unwrap());
     set_instance(&mut editor, prefab, None, Some(missing.clone()));
     save(&mut editor, prefab);
     let broken_disk = fixture.bytes(PREFAB);

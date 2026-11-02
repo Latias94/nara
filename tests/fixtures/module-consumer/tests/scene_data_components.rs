@@ -547,10 +547,11 @@ fn source_attach_edit_undo_save_reopen_then_runtime_replace_and_retire() {
 fn disk_prefab_occurrences_export_current_membership_and_retire_independently() {
     let definition = Definition::new();
     let prefab_scene = actors(2);
-    let prefab = PrefabDocument::new(prefab_scene.roots, prefab_scene.entities);
+    let prefab = PrefabDocument::new(prefab_scene.placements, prefab_scene.entities);
     let anchor = |name| {
         let mut entity = named(name, name);
         entity.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: AssetRef::path(PREFAB).unwrap(),
             arguments: None,
             overrides: None,

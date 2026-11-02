@@ -1,6 +1,9 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 
-use crate::{SceneDocument, SceneEntityProvenanceMap, SourceDocumentKey};
+use crate::{
+    SceneEntityId, SceneEntityProvenanceMap, SourceDocumentKey,
+    draft::{ExpandedSceneEntity, SceneDraft},
+};
 
 /// One immutable authoring observation and its complete document-relative provenance.
 ///
@@ -28,16 +31,14 @@ use crate::{SceneDocument, SceneEntityProvenanceMap, SourceDocumentKey};
 /// ```
 #[derive(Debug, PartialEq)]
 pub struct ExpandedSceneDocument {
-    document: Arc<SceneDocument>,
+    document: SceneDraft,
     provenance: SceneEntityProvenanceMap,
 }
 
 impl ExpandedSceneDocument {
     /// Transfers an exclusive compiler result without constructing another source copy.
-    pub(crate) fn into_compiler_parts(self) -> (SceneDocument, SceneEntityProvenanceMap) {
-        let document = Arc::try_unwrap(self.document)
-            .expect("a move-only compiler observation owns its document exclusively");
-        (document, self.provenance)
+    pub(crate) fn into_compiler_parts(self) -> (SceneDraft, SceneEntityProvenanceMap) {
+        (self.document, self.provenance)
     }
 
     /// Filters only component presentation in an exclusively owned compiler result.
@@ -49,8 +50,7 @@ impl ExpandedSceneDocument {
             Item = (&'a crate::SceneEntityId, &'a nara_reflect::ComponentTypeId),
         >,
     ) -> Self {
-        let document = Arc::get_mut(&mut self.document)
-            .expect("a move-only compiler result owns its document allocation exclusively");
+        let document = &mut self.document;
         for (entity, component) in removals {
             if let Ok(index) = document
                 .entities
@@ -63,20 +63,38 @@ impl ExpandedSceneDocument {
     }
 
     pub(crate) fn from_compilation(
-        document: SceneDocument,
+        document: SceneDraft,
         provenance: SceneEntityProvenanceMap,
     ) -> Result<Self, InvalidSceneProvenance> {
         validate_scene_provenance(&document, &provenance)?;
         Ok(Self {
-            document: Arc::new(document),
+            document,
             provenance,
         })
     }
 
-    /// Returns the exact immutable expanded document.
+    /// Borrows the ordered roots of this expanded observation.
     #[must_use]
-    pub fn document(&self) -> &SceneDocument {
-        &self.document
+    pub fn roots(&self) -> &[SceneEntityId] {
+        &self.document.roots
+    }
+
+    /// Allocation capacity retained by this observation, for its Host's storage allowance.
+    #[must_use]
+    pub fn roots_capacity(&self) -> usize {
+        self.document.roots.capacity()
+    }
+
+    /// Borrows expanded records in entity-ID order.
+    #[must_use]
+    pub fn entities(&self) -> &[ExpandedSceneEntity] {
+        &self.document.entities
+    }
+
+    /// Allocation capacity retained by the entity container, independent of its live length.
+    #[must_use]
+    pub fn entities_capacity(&self) -> usize {
+        self.document.entities.capacity()
     }
 
     /// Returns the source ownership associated with every materialized record.
@@ -125,7 +143,7 @@ impl<'a> SceneMaterializationInput<'a> {
 pub(crate) struct InvalidSceneProvenance;
 
 pub(crate) fn validate_scene_provenance(
-    document: &SceneDocument,
+    document: &SceneDraft,
     provenance: &SceneEntityProvenanceMap,
 ) -> Result<(), InvalidSceneProvenance> {
     validate_provenance_entries(
@@ -175,11 +193,18 @@ fn validate_provenance_entries<'a>(
 mod tests {
     use super::*;
     use crate::SceneEntityProvenance;
-    use crate::{PrefabProjectionPath, SceneEntityId, SceneEntityRecord, SourceDocumentKind};
+    use crate::{PrefabProjectionPath, SceneDocument, SceneEntityRecord, SourceDocumentKind};
     use nara_asset::AssetRef;
 
     fn id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).unwrap()
+    }
+
+    fn draft(ids: &[&str]) -> SceneDraft {
+        SceneDraft::new(
+            ids.iter().map(|value| id(value)),
+            ids.iter().map(|value| ExpandedSceneEntity::new(id(value))),
+        )
     }
 
     fn scene_source_key(name: &str) -> SourceDocumentKey {
@@ -193,15 +218,17 @@ mod tests {
 
     #[test]
     fn exclusive_authoring_observation_moves_its_original_storage_back_to_the_compiler() {
-        let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("local"))]);
+        let document = draft(&["local"]);
         let origin = SceneEntityProvenance::local(id("local"));
         let expanded = ExpandedSceneDocument::from_compilation(
             document,
             [(id("local"), origin.clone())].into_iter().collect(),
         )
         .unwrap();
-        let entities = expanded.document().entities.as_ptr();
+        let roots = expanded.roots().as_ptr();
+        let entities = expanded.entities().as_ptr();
         let (document, provenance) = expanded.into_compiler_parts();
+        assert_eq!(document.roots.as_ptr(), roots);
         assert_eq!(document.entities.as_ptr(), entities);
         assert_eq!(provenance[&id("local")], origin);
     }
@@ -246,11 +273,7 @@ mod tests {
             PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("source"))]),
         );
         let mut anchor = SceneEntityRecord::new(id("anchor"));
-        anchor.prefab = Some(PrefabInstance {
-            source: request,
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(request));
         let report = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
         assert!(!report.diagnostics.has_errors());
         let expanded = report.candidate.unwrap();
@@ -287,24 +310,18 @@ mod tests {
 
     #[test]
     fn expansion_document_rejects_incomplete_rekeyed_and_swapped_sources() {
-        let document = SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("left")),
-            SceneEntityRecord::new(id("right")),
-        ]);
-        let original = ExpandedSceneDocument::from_compilation(
-            document.clone(),
-            document
-                .entities
-                .iter()
-                .map(|entity| {
-                    (
-                        entity.id.clone(),
-                        SceneEntityProvenance::local(entity.id.clone()),
-                    )
-                })
-                .collect(),
-        )
-        .unwrap();
+        let document = draft(&["left", "right"]);
+        let provenance = document
+            .entities
+            .iter()
+            .map(|entity| {
+                (
+                    entity.id.clone(),
+                    SceneEntityProvenance::local(entity.id.clone()),
+                )
+            })
+            .collect();
+        let original = ExpandedSceneDocument::from_compilation(document, provenance).unwrap();
         let provenance = original.provenance();
         let mut missing = provenance.clone();
         missing.remove(&id("left"));
@@ -321,7 +338,7 @@ mod tests {
         .collect();
         for invalid in [missing, extra, rekeyed, swapped] {
             assert_eq!(
-                ExpandedSceneDocument::from_compilation(document.clone(), invalid),
+                ExpandedSceneDocument::from_compilation(draft(&["left", "right"]), invalid),
                 Err(InvalidSceneProvenance)
             );
         }
@@ -329,10 +346,6 @@ mod tests {
 
     #[test]
     fn expansion_document_admits_only_consistent_projected_source_paths() {
-        let document = SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("anchor")),
-            SceneEntityRecord::new(id("prefab_0")),
-        ]);
         let path = PrefabProjectionPath::new(id("anchor")).with_step(
             AssetRef::path("prefabs/source.ron").unwrap(),
             crate::tests::prefab_source_key(&AssetRef::path("prefabs/source.ron").unwrap()),
@@ -348,7 +361,11 @@ mod tests {
         .into_iter()
         .collect::<SceneEntityProvenanceMap>();
         assert!(
-            ExpandedSceneDocument::from_compilation(document.clone(), provenance.clone()).is_ok()
+            ExpandedSceneDocument::from_compilation(
+                draft(&["anchor", "prefab_0"]),
+                provenance.clone(),
+            )
+            .is_ok()
         );
         let mut stale = provenance.clone();
         stale.insert(
@@ -356,7 +373,7 @@ mod tests {
             SceneEntityProvenance::projected(id("stale"), path),
         );
         assert_eq!(
-            ExpandedSceneDocument::from_compilation(document.clone(), stale),
+            ExpandedSceneDocument::from_compilation(draft(&["anchor", "prefab_0"]), stale),
             Err(InvalidSceneProvenance)
         );
         let mut missing_anchor = provenance;
@@ -372,7 +389,7 @@ mod tests {
             ),
         );
         assert_eq!(
-            ExpandedSceneDocument::from_compilation(document, missing_anchor),
+            ExpandedSceneDocument::from_compilation(draft(&["anchor", "prefab_0"]), missing_anchor),
             Err(InvalidSceneProvenance)
         );
     }
@@ -390,11 +407,7 @@ mod tests {
                 PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id(source_id))]),
             );
             let mut anchor = SceneEntityRecord::new(id("anchor"));
-            anchor.prefab = Some(PrefabInstance {
-                source,
-                arguments: None,
-                overrides: None,
-            });
+            anchor.prefab = Some(PrefabInstance::forest(source));
             SceneDocument::from_ordered_roots([anchor])
                 .compile(&registry, &resolver)
                 .candidate

@@ -82,6 +82,7 @@ fn instance(
     overlay: Option<PrefabOverlay>,
 ) -> PrefabInstance {
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source(name),
         arguments: argument.map(|argument| PrefabReferenceArguments {
             base: key(name),

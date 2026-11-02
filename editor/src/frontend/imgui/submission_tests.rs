@@ -3,8 +3,8 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
 use dear_imgui_rs::{ConfigFlags, Context, Ui};
 use nara::{
     scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        PrefabInstance, SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentQueryBasis,
@@ -85,9 +85,12 @@ fn authoring_basis(harness: &Harness) -> EditorDocumentQueryBasis {
 }
 
 fn prepared_panel_patch() -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(SceneEntityId::new("panel-prepared").unwrap()),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    ScenePatchDocument::new([ScenePatchOperation::SetPrefabInstance {
+        entity: SceneEntityId::new("prefab-anchor").unwrap(),
+        expected: Some(PrefabInstance::forest(
+            nara::asset::AssetRef::path("ordinary.prefab.json").unwrap(),
+        )),
+        value: None,
     }])
 }
 
@@ -474,14 +477,14 @@ fn a_workspace_panel_can_retain_and_drop_preparation_for_a_nonactive_source_with
         assert_eq!(edit.inverse().operations.len(), 1);
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let construction = context
             .prepare_authoring_construction(&basis, &draft)
             .unwrap();
         assert!(construction.entity(&local).is_some());
-        assert_eq!(construction.patch().operations.len(), 1);
-        assert_eq!(construction.inverse().operations.len(), 1);
+        assert_eq!(construction.patch().operations.len(), 2);
+        assert_eq!(construction.inverse().operations.len(), 2);
         *captured.borrow_mut() = Some((edit, construction));
     }));
     drop(harness.draw());
@@ -513,7 +516,7 @@ fn panel_preparation_checks_the_complete_schema_basis_before_lowering_any_edit()
         .begin_authoring_construction(&basis)
         .unwrap();
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     assert!(basis.schema.take().is_some());
     let before = harness.application.current_frame().unwrap();
@@ -688,7 +691,7 @@ fn panel_construction_delivers_the_owner_mapping_and_supports_a_followup_propert
     harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         draft
             .add_component(
@@ -793,7 +796,7 @@ fn panel_queue_refusal_preserves_both_owned_candidates_without_a_commit_callback
         let edit = context.prepare_authoring_edit(&basis, &patch).unwrap();
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let construction = context
             .prepare_authoring_construction(&basis, &draft)
@@ -822,8 +825,8 @@ fn panel_queue_refusal_preserves_both_owned_candidates_without_a_commit_callback
         assert_eq!(construction.document(), basis.document);
         assert_eq!(construction.base_revision(), basis.revision);
         assert_eq!(construction.entity(&local), Some(&entity));
-        assert_eq!(construction.patch().operations.len(), 1);
-        assert_eq!(construction.inverse().operations.len(), 1);
+        assert_eq!(construction.patch().operations.len(), 2);
+        assert_eq!(construction.inverse().operations.len(), 2);
         *captured.borrow_mut() = Some((edit, construction));
     }));
     let candidate = harness.draw();
@@ -949,7 +952,7 @@ fn the_same_capacity_refused_construction_keeps_its_preview_mapping_on_retry() {
     harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let construction = context
             .prepare_authoring_construction(&basis, &draft)
@@ -1053,7 +1056,7 @@ fn queue_both_prepared_candidates(
             .unwrap();
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let construction = context
             .prepare_authoring_construction(&basis, &draft)
@@ -1286,12 +1289,11 @@ fn closing_filter_refuses_both_candidates_around_an_allowed_close_resolution() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: basis.document,
                     base_revision: basis.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("closing-baseline").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: crate::app::named_root_patch(
+                        &harness.application,
+                        basis.document,
+                        "closing-baseline",
+                    ),
                 },
             )],
         ),
@@ -1307,7 +1309,7 @@ fn closing_filter_refuses_both_candidates_around_an_allowed_close_resolution() {
             .unwrap();
         let mut draft = context.begin_authoring_construction(&basis).unwrap();
         draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let construction = context
             .prepare_authoring_construction(&basis, &draft)
@@ -1528,12 +1530,8 @@ impl Harness {
     }
 
     fn close_dirty_document(&mut self) -> nara::tooling::EditorDocumentId {
-        use nara::{
-            scene::{
-                SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-                ScenePlacement, ScenePlacementOwner,
-            },
-            tooling::{EditorDocumentMutation, EditorWorkspaceIntent, EditorWorkspaceIntentAction},
+        use nara::tooling::{
+            EditorDocumentMutation, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
         };
         let frame = self.application.current_frame().unwrap();
         let scene = frame.workspace().active_scene.as_ref().unwrap();
@@ -1544,12 +1542,11 @@ impl Harness {
                     EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
                         document: scene.document,
                         base_revision: scene.revision,
-                        patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                            entity: SceneEntityRecord::new(
-                                SceneEntityId::new("dispatch-dirty").unwrap(),
-                            ),
-                            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                        }]),
+                        patch: crate::app::named_root_patch(
+                            &self.application,
+                            scene.document,
+                            "dispatch-dirty",
+                        ),
                     }),
                     EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
                         EditorWorkspaceIntent::CloseDocument {

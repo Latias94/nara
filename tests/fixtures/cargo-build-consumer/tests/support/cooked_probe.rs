@@ -215,12 +215,15 @@ fn live(world: &World, scene: u8) -> SpawnedSceneInstance {
 
 fn assert_compiled_scene(document: &engine::scene::CompiledSceneDocument, scene: u8) {
     let expected = super::document(scene);
-    assert_eq!(document.roots(), expected.roots);
+    let hierarchy = expected
+        .local_hierarchy(Default::default())
+        .expect("the fixture's declared source placements form a complete local hierarchy");
+    assert_eq!(document.roots(), hierarchy.roots());
     assert_eq!(document.entities().len(), expected.entities.len());
     assert_eq!(document.canonical_provenance().len(), expected.entities.len());
     for (entity, source) in document.entities().iter().zip(&expected.entities) {
         assert_eq!(entity.id(), &source.id);
-        assert_eq!(entity.children(), source.children);
+        assert_eq!(entity.children(), hierarchy.children(&source.id).unwrap());
         assert_eq!(entity.components().len(), source.components.len());
         for (component, record) in entity.components() {
             let source = &source.components[component];

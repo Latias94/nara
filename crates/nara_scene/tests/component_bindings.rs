@@ -182,6 +182,7 @@ fn data_node(name: &str) -> SceneEntityRecord {
 fn anchor(name: &str, prefab: &str, overrides: Option<PrefabOverlay>) -> SceneEntityRecord {
     let mut entity = SceneEntityRecord::new(id(name));
     entity.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source(prefab),
         arguments: None,
         overrides,
@@ -195,9 +196,26 @@ fn leaf_prefab() -> PrefabDocument {
 
 fn outer_prefab() -> PrefabDocument {
     PrefabDocument::new(
-        [id("node")],
         [
-            data_node("node").with_children([id("socket"), id("nested")]),
+            nara_scene::SceneEntityPlacement::root(id("node")),
+            nara_scene::SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("socket")),
+                nara_scene::ScenePlacement::last(nara_scene::ScenePlacementParent::Entity(
+                    PrefabEntityTarget::source(id("node")),
+                )),
+            ),
+            nara_scene::SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("nested")),
+                nara_scene::ScenePlacement::after(
+                    nara_scene::ScenePlacementParent::Entity(PrefabEntityTarget::source(id(
+                        "node",
+                    ))),
+                    PrefabEntityTarget::source(id("socket")),
+                ),
+            ),
+        ],
+        [
+            data_node("node"),
             SceneEntityRecord::new(id("socket")),
             anchor("nested", "leaf", None),
         ],
@@ -499,6 +517,7 @@ fn mixed_loader_acquires_only_selected_nested_sources_and_preserves_its_error_ty
     overlay.instances.push(PrefabInstanceClaim {
         target: PrefabEntityTarget::source(id("nested")),
         value: Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: source("replacement"),
             arguments: None,
             overrides: None,

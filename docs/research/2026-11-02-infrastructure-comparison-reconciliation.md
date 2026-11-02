@@ -22,13 +22,16 @@ the current working tree. [Compiled storage](../../crates/nara_scene/src/compile
 fields, borrowed accessors and no public source constructor. Native reception checks a complete
 batch before codecs and does not migrate values or fill receiving defaults. The
 [owner/public cohort](../knowledge/engineering/verification/2026-11/2026-11-02T053411Z-compiled-scene-owners-and-reviewed-transition-corrections-pass-current-public-cohort-e8f7d20e3e2b49d5b086ce2100f1b9b2.md)
-passes 1,629 tests. The current independent module workspace also passes 281 tests, with four
-existing skips. The all-feature Reference Game workspace passes 179 tests without skips. Remaining
-compiled integration gates are still in progress; these results do not complete CP2 extraction.
+passes 1,629 tests at that checkpoint, with an independent module281 and Reference Game179.
+The [closed compiled prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md)
+is qualified. Its subsequent
+[root-binding/source-placement prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T121917Z-explicit-root-binding-and-source-placement-production-qualification-0eada24ff287416bbfe94ccf511d2380.md)
+adds independent module290, affected game/tool/Player consumers and selected native trajectories.
+Their exact scopes and earlier failures remain in those records; complete CP2 extraction is open.
 
 The preceding review's F2, F3 and F4 corrections are committed locally as `080852c`, `d6dccbc`
-and `349921f`. F1 conversion and the related live-export correction belong to the current
-compiled unit. Conversion preserves the original hidden lexical defaults; live export establishes
+and `349921f`. F1 conversion and the related live-export correction are qualified within the
+closed compiled unit. Conversion preserves the original hidden lexical defaults; live export establishes
 a new flattened source context from lowered effective values. Those contracts are distinct in
 [ADR0006](../architecture/adr/0006-scene-and-prefab-data-model.md) and
 [ADR0038](../architecture/adr/0038-scene-prefab-authoring-identity-and-provenance.md).
@@ -43,7 +46,7 @@ Remote CI has not run. Enrollment, local execution and remote qualification rema
 
 | Study recommendation | Receiving decision | Owning implementation and acceptance |
 | --- | --- | --- |
-| C1: source/compiled separation and complete extraction | Retain the selected direction and finish the current prerequisite. Do not restart the closed-storage design. | R5 and the [CP2 plan](../plans/2026-11-02-prefab-extraction-plan.md): root binding, source placements, complete occurrence correspondence, affected dirty/closed sources, publication and recovery remain open. |
+| C1: source/compiled separation and complete extraction | Retain the qualified compiled and root/placement prerequisites. Do not restart their closed-storage design. | R5 and the [CP2 plan](../plans/2026-11-02-prefab-extraction-plan.md): complete occurrence correspondence, affected dirty/closed sources, publication and recovery remain open. |
 | C2: pose and execution | Retain R4c/R10's real solver/animation and executor comparison. Add the shared temporal interleaving below. | Keep narrow command Ack separate from whole-tick success under ADR0057 until an explicit successor is selected. No universal scheduler or replacement ECS. |
 | C3: View/material meaning | Preserve qualified typed programs, policies, stock composition and output custody. Extend their existing temporal consumer. | R9 owns captured time, effect-specific history compatibility and durable material generations; binding ABI compatibility alone does not preserve accumulated pixels. |
 | C4: custom Editor interaction | Preserve R1/R11's Nara-drawn Inspector, closed-panel command and two-owner coexistence consumers. Add explicit draft-history transitions. | Buffer Undo/Redo, document Undo, Escape and focus loss must preserve explicit Apply and conflict recovery. Reuse the current semantic owner; do not embed another engine's UI runtime. |

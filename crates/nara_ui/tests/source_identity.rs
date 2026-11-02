@@ -6,9 +6,9 @@ use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use nara_reflect::{ComponentRegistryBuilder, ComponentRegistryPlugin, component_registry};
 use nara_scene::{
     CompiledSceneCandidate, InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument,
-    PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, PrefabProjectionStep, PrefabSourceResolver, SceneDocument, SceneEntityId,
-    SceneEntityRecord, SceneEntitySource, SourceDocumentKey,
+    PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabProjectionStep, PrefabSourceResolver,
+    SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, SceneEntitySource,
+    ScenePlacement, ScenePlacementParent, SourceDocumentKey,
 };
 use nara_ui::{
     UiAdapterDiagnostics, UiNode, UiPlugin, UiRoot, UiStyle, UiSurfaceEndpoint, UiSurfaceSlot,
@@ -107,9 +107,17 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
 
     let local = |name| SceneEntityId::new(name).unwrap();
     let prefab = PrefabDocument::new(
-        [local("root")],
         [
-            SceneEntityRecord::new(local("root")).with_children([local("label")]),
+            SceneEntityPlacement::root(local("root")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(local("label")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    local("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(local("root")),
             SceneEntityRecord::new(local("label")),
         ],
     );
@@ -127,11 +135,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
     let leaf = AssetRef::path("prefabs/leaf.ron").unwrap();
     let nested = |name, request: AssetRef| {
         let mut anchor = SceneEntityRecord::new(local(name));
-        anchor.prefab = Some(PrefabInstance {
-            source: request,
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(request));
         anchor
     };
     let outer = PrefabDocument::from_ordered_roots([
@@ -157,11 +161,7 @@ fn canonical_prefab_alias_rebuild_preserves_keys_but_a_containing_source_switch_
     .into_iter()
     .map(|(request, containing)| {
         let mut anchor = SceneEntityRecord::new(local("anchor"));
-        anchor.prefab = Some(PrefabInstance {
-            source: request,
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(request));
         let expanded = SceneDocument::from_ordered_roots([anchor]).compile(&registry, &resolver);
         assert!(!expanded.diagnostics.has_errors());
         expanded
@@ -600,9 +600,8 @@ fn prefab_anchor(
 ) -> SceneEntityRecord {
     let mut anchor = SceneEntityRecord::new(local_id(id));
     anchor.prefab = Some(PrefabInstance {
-        source,
-        arguments: None,
         overrides,
+        ..PrefabInstance::forest(source)
     });
     anchor
 }
@@ -619,18 +618,13 @@ fn replace_roots_with_additions(
 ) -> PrefabOverlay {
     let mut overlay = PrefabOverlay::new(base);
     for entity in entities {
-        assert!(
-            entity.children.is_empty(),
-            "fixture additions are flat roots"
-        );
         overlay
             .suppressions
             .push(PrefabEntityTarget::source(entity.id.clone()));
-        overlay.placements.push(PrefabPlacement {
-            target: PrefabEntityTarget::addition(entity.id.clone()),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::Last,
-        });
+        overlay.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(entity.id.clone()),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
         overlay.additions.push(PrefabAddition {
             id: entity.id,
             components: entity.components,

@@ -7,18 +7,35 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "camera",
-      "explorer",
-      "checkpoint",
-      "gem-near",
-      "gem-far",
-      "portal"
+    "placements": [
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "camera" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "explorer" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "checkpoint" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "gem-near" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "gem-far" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      },
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "portal" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      }
     ],
     "entities": [
       {
         "id": "camera",
-        "children": [],
         "components": {
           "nara.transform.Transform2d": {
             "version": 1,
@@ -95,7 +112,6 @@
       },
       {
         "id": "explorer",
-        "children": [],
         "components": {
           "two-level-game.ObjectRole": {
             "version": 1,
@@ -198,7 +214,6 @@
       },
       {
         "id": "checkpoint",
-        "children": [],
         "components": {
           "two-level-game.ObjectRole": {
             "version": 1,
@@ -301,7 +316,6 @@
       },
       {
         "id": "gem-near",
-        "children": [],
         "components": {
           "two-level-game.ObjectRole": {
             "version": 1,
@@ -417,7 +431,6 @@
       },
       {
         "id": "gem-far",
-        "children": [],
         "components": {
           "two-level-game.ObjectRole": {
             "version": 1,
@@ -533,7 +546,6 @@
       },
       {
         "id": "portal",
-        "children": [],
         "components": {
           "two-level-game.ObjectRole": {
             "version": 1,

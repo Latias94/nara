@@ -16,7 +16,7 @@ use nara::{
         DisplayMapping2d, DisplayRect, DisplayScale, Extent2d, RenderFrameSourceGeneration,
         RenderFrameTarget, RenderImagePacket,
     },
-    scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementOwner},
+    scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementParent},
     tooling::{
         EditorAction, EditorActionOutcome, EditorDocumentId, EditorDocumentMutation,
         SceneCompositionCommand, SceneCompositionEntityKind,
@@ -208,7 +208,7 @@ fn add_sprite(editor: &mut EditorProjectSession) -> (EditorDocumentId, SceneEnti
             base_revision,
             command: SceneCompositionCommand::CreateEntity {
                 kind: SceneCompositionEntityKind::ColoredSprite,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         })],
     );
@@ -334,11 +334,29 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
             assert!(editor_driver::apply_workspace_command(&mut editor, command).applied);
             present(&mut editor, &mut toolkit);
         }
-        assert!(super::apply_scene_patch(
+        let frame = editor.current_frame();
+        let outcomes = editor_driver::dispatch(
             &mut editor,
-            document,
-            super::add_entity_patch("extra")
-        ));
+            [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+                document,
+                base_revision: frame.workspace().scene(document).unwrap().revision,
+                command: SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::Empty,
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
+                },
+            })],
+        );
+        assert!(matches!(&outcomes[0], EditorActionOutcome::Workspace(report) if report.applied));
+        let extra = editor
+            .drive_editor_frame(Duration::ZERO)
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .selection
+            .top_entity()
+            .unwrap()
+            .clone();
         present(&mut editor, &mut toolkit);
         assert!(matches!(
             editor_driver::request_persistence(
@@ -352,10 +370,17 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
         assert!(
             matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == document)
         );
+        let saved = nara::scene::SceneDocumentCandidate::decode_json_bytes(
+            &std::fs::read(project.scene_path()).unwrap(),
+        )
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+        assert!(saved.entities.iter().any(|entity| entity.id == extra));
         assert!(
-            std::fs::read_to_string(project.scene_path())
-                .unwrap()
-                .contains("\"extra\"")
+            saved
+                .placements
+                .contains(&nara::scene::SceneEntityPlacement::root(extra.clone()))
         );
         let attempt = editor
             .current_frame()
@@ -382,6 +407,19 @@ fn public_edit_history_save_reopen_and_close_keep_one_preview_producer_and_fresh
             matches!(editor_driver::drive_persistence_until_result(&mut editor).persistence().result(), Some(EditorPersistenceResult::Opened { document: opened, .. }) if opened == document)
         );
         present(&mut editor, &mut toolkit);
+        assert!(
+            editor
+                .current_frame()
+                .workspace()
+                .active_scene
+                .as_ref()
+                .unwrap()
+                .editor
+                .inspector
+                .entities
+                .iter()
+                .any(|entity| entity.id == extra)
+        );
         assert!(
             !editor
                 .current_frame()

@@ -1,5 +1,7 @@
 use super::*;
 
+mod deletion;
+
 #[test]
 fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_action_basis() {
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
@@ -9,10 +11,31 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
         let peer = entity_id("peer");
         let destination = entity_id("destination");
         let original = SceneDocument::new(
-            [root.clone(), destination.clone()],
             [
-                SceneEntityRecord::new(root.clone()).with_children([moving.clone(), peer.clone()]),
-                SceneEntityRecord::new(moving.clone()).with_children([child.clone()]),
+                SceneEntityPlacement::root(root.clone()),
+                SceneEntityPlacement::root(destination.clone()),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(moving.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(peer.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        root.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(child.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        moving.clone(),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(root.clone()),
+                SceneEntityRecord::new(moving.clone()),
                 SceneEntityRecord::new(child.clone()),
                 SceneEntityRecord::new(peer),
                 SceneEntityRecord::new(destination.clone()),
@@ -45,7 +68,7 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
                     "structure",
                     EditorDocumentSourceBinding::new("prefabs/structure.prefab.json"),
                     PrefabDocumentCandidate::decode_json_bytes(
-                        PrefabDocument::new(original.roots.clone(), original.entities.clone())
+                        PrefabDocument::new(original.placements.clone(), original.entities.clone())
                             .to_json_string()
                             .unwrap()
                             .as_bytes(),
@@ -78,10 +101,10 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
         );
         let baseline = workspace.document_revision(document).unwrap();
         let move_command = SceneCompositionCommand::MoveEntity {
-            entity: moving.clone(),
-            to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: destination.clone(),
-            }),
+            target: PrefabEntityTarget::source(moving.clone()),
+            to: ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                destination.clone(),
+            ))),
         };
         let moved = workspace.apply_authoring_command(command(
             document,
@@ -103,7 +126,7 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
             assert_eq!(
                 moved.prefab_composition_outcome,
                 Some(PrefabCompositionOutcome::Moved {
-                    entity: moving.clone()
+                    target: PrefabEntityTarget::source(moving.clone())
                 })
             );
         }
@@ -130,7 +153,7 @@ fn generic_scene_and_prefab_structure_preserve_selection_history_and_exact_actio
             assert_eq!(
                 no_op.prefab_composition_outcome,
                 Some(PrefabCompositionOutcome::NoOp {
-                    entity: moving.clone()
+                    target: PrefabEntityTarget::source(moving.clone())
                 })
             );
             assert_eq!(
@@ -204,8 +227,8 @@ fn command(
             document,
             base_revision,
             command: match command {
-                SceneCompositionCommand::MoveEntity { entity, to } => {
-                    PrefabCompositionCommand::MoveEntity { entity, to }
+                SceneCompositionCommand::MoveEntity { target, to } => {
+                    PrefabCompositionCommand::MoveEntity { target, to }
                 }
                 SceneCompositionCommand::RemoveEntity { entity } => {
                     PrefabCompositionCommand::RemoveEntity { entity }

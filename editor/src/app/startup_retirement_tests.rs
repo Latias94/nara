@@ -154,10 +154,12 @@ fn healthy_open_host_final_exit_waits_in_every_shell_state_and_stays_irreversibl
             assert!(!application.advance(Duration::ZERO).exit_ready());
             std::thread::sleep(Duration::from_millis(1));
         }
+        assert!(application.current_frame().is_none(), "{origin}");
         for _ in 0..3 {
             assert!(application.has_pending_exit());
             assert!(application.project_open_retirement_pending());
             assert!(!application.advance(Duration::ZERO).exit_ready());
+            assert!(application.current_frame().is_none(), "{origin}");
         }
         assert_eq!(probe.exited(), 0);
         release.send(()).unwrap();
@@ -180,6 +182,9 @@ fn healthy_open_host_final_exit_waits_in_every_shell_state_and_stays_irreversibl
         application.native_shell_ready();
         assert_eq!(application.state(), state);
         assert_eq!(application.open_host_tasks_close_report(), report);
+        let completed = application.advance(Duration::ZERO);
+        assert!(completed.exit_ready());
+        assert!(!completed.actions_observed());
     }
 }
 
@@ -194,13 +199,7 @@ fn exit_before_native_ready_cannot_rearm_the_launch_request() {
 
 #[test]
 fn dirty_exit_cancel_keeps_healthy_startup_facilities_available() {
-    use nara::{
-        scene::{
-            SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-            ScenePlacement, ScenePlacementOwner,
-        },
-        tooling::{EditorCloseDecision, EditorDocumentMutation},
-    };
+    use nara::tooling::{EditorCloseDecision, EditorDocumentMutation};
 
     let (mut application, release, probe) = held_startup_application();
     let request = application.state.workspace().unwrap().request.clone();
@@ -213,12 +212,11 @@ fn dirty_exit_cancel_keeps_healthy_startup_facilities_available() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("cancel-host-close").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: super::named_root_patch(
+                        &application,
+                        scene.document,
+                        "cancel-host-close",
+                    ),
                 },
             )],
         ),

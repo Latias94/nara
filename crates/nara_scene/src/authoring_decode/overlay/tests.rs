@@ -33,6 +33,7 @@ fn component() -> ComponentTypeId {
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
         source: asset("prefabs/base.prefab.json"),
+        binding: crate::PrefabInstanceBinding::Forest,
         arguments: None,
         overrides: Some(overlay),
     }
@@ -653,7 +654,7 @@ fn source_transactions_preserve_both_snapshot_sides_through_scene_and_prefab_his
         PublishedAuthoringPrefabDocument {
             document: Arc::new(PrefabDocument {
                 inputs: Default::default(),
-                roots: document.roots.clone(),
+                placements: document.placements.clone(),
                 entities: document.entities.clone(),
             }),
             state: Arc::new(prefab_state),

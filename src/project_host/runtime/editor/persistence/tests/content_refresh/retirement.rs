@@ -103,8 +103,10 @@ fn successful_prefab_refresh_retains_predecessor_and_gates_the_next_saved_genera
             .unwrap()
             .session()
             .document()
-            .roots,
-        vec![SceneEntityId::new("queued-q").unwrap()]
+            .placements,
+        vec![nara_scene::SceneEntityPlacement::root(
+            SceneEntityId::new("queued-q").unwrap(),
+        )]
     );
 
     // This one-shot hook is consumed only after another real Runtime has been constructed.
@@ -283,8 +285,10 @@ fn final_custody_refusal_preserves_incumbent_catalog_and_save_reopen_through_can
             .unwrap()
             .session()
             .document()
-            .roots,
-        vec![SceneEntityId::new("saved-q").unwrap()]
+            .placements,
+        vec![nara_scene::SceneEntityPlacement::root(
+            SceneEntityId::new("saved-q").unwrap(),
+        )]
     );
     for _ in 0..4 {
         assert!(

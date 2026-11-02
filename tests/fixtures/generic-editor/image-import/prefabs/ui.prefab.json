@@ -7,15 +7,13 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "ui-root"
+    "placements": [
+      {"target":{"entity":{"kind":"source_entity","entity":"ui-root"}},"placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}},
+      {"target":{"entity":{"kind":"source_entity","entity":"image-node"}},"placement":{"parent":{"kind":"entity","target":{"entity":{"kind":"source_entity","entity":"ui-root"}}},"slot":{"kind":"last"}}}
     ],
     "entities": [
       {
         "id": "ui-root",
-        "children": [
-          "image-node"
-        ],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,
@@ -163,7 +161,6 @@
       },
       {
         "id": "image-node",
-        "children": [],
         "components": {
           "nara.ui.UiNode": {
             "version": 1,

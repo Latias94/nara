@@ -1,7 +1,7 @@
 use nara::{
     advanced_prelude::*,
     scene::SceneAuthoringHistoryStatus,
-    scene::{ScenePlacement, ScenePlacementOwner},
+    scene::{PrefabEntityTarget, SceneEntityPlacement, ScenePlacement, ScenePlacementParent},
     tooling_prelude::*,
 };
 
@@ -29,9 +29,15 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let player = scene_id("player");
     let child = scene_id("player/child");
     let document = SceneDocument::new(
-        [player.clone()],
         [
-            labeled_entity(player.clone(), "Player").with_children([child.clone()]),
+            SceneEntityPlacement::root(player.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child.clone()),
+                child_last(&player),
+            ),
+        ],
+        [
+            labeled_entity(player.clone(), "Player"),
             SceneEntityRecord::new(child.clone()),
         ],
     );
@@ -62,7 +68,7 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
             && row.live_locator.is_some()
     }));
     assert!(model.entities.iter().any(|row| {
-        row.id == child && row.parent.as_ref() == Some(&player) && row.live_locator.is_some()
+        row.id == child && row.placement == Some(child_last(&player)) && row.live_locator.is_some()
     }));
 
     let entity_view = model.selected_entity_view.unwrap();
@@ -162,19 +168,29 @@ fn inspector_projects_defaulted_field_without_mutating_raw_undo_history() {
 }
 
 #[test]
-fn inspector_tree_uses_canonical_root_and_child_order_with_depth() {
+fn inspector_reports_authored_placements_and_local_hierarchy_preserves_order() {
     let registry = test_registry();
     let z_root = scene_id("z-root");
     let a_root = scene_id("a-root");
     let z_second = scene_id("z-root/z-second");
     let z_first = scene_id("z-root/z-first");
     let session = SceneAuthoringSession::new(SceneDocument::new(
-        [z_root.clone(), a_root.clone()],
+        [
+            SceneEntityPlacement::root(z_root.clone()),
+            SceneEntityPlacement::root(a_root.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(z_second.clone()),
+                child_last(&z_root),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(z_first.clone()),
+                child_last(&z_root),
+            ),
+        ],
         [
             SceneEntityRecord::new(a_root.clone()),
             SceneEntityRecord::new(z_first.clone()),
-            SceneEntityRecord::new(z_root.clone())
-                .with_children([z_second.clone(), z_first.clone()]),
+            SceneEntityRecord::new(z_root.clone()),
             SceneEntityRecord::new(z_second.clone()),
         ],
     ));
@@ -183,18 +199,30 @@ fn inspector_tree_uses_canonical_root_and_child_order_with_depth() {
     let rows = model
         .entities
         .iter()
-        .map(|row| (row.id.clone(), row.parent.clone(), row.depth))
+        .map(|row| (row.id.clone(), row.placement.clone()))
         .collect::<Vec<_>>();
 
     assert_eq!(
         rows,
         [
-            (z_root.clone(), None, 0),
-            (z_second, Some(z_root.clone()), 1),
-            (z_first, Some(z_root), 1),
-            (a_root, None, 0),
+            (
+                a_root.clone(),
+                Some(ScenePlacement::last(ScenePlacementParent::Root))
+            ),
+            (
+                z_root.clone(),
+                Some(ScenePlacement::last(ScenePlacementParent::Root))
+            ),
+            (z_first.clone(), Some(child_last(&z_root))),
+            (z_second.clone(), Some(child_last(&z_root))),
         ]
     );
+    let hierarchy = session
+        .document()
+        .local_hierarchy(Default::default())
+        .unwrap();
+    assert_eq!(hierarchy.roots(), [z_root.clone(), a_root]);
+    assert_eq!(hierarchy.children(&z_root).unwrap(), [z_second, z_first]);
 }
 
 #[test]
@@ -312,13 +340,23 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
     let middle = scene_id("middle");
     let last = scene_id("last");
     let original = SceneDocument::new(
-        [parent.clone()],
         [
-            SceneEntityRecord::new(parent.clone()).with_children([
-                first.clone(),
-                middle.clone(),
-                last.clone(),
-            ]),
+            SceneEntityPlacement::root(parent.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(first.clone()),
+                child_last(&parent),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(middle.clone()),
+                child_last(&parent),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(last.clone()),
+                child_last(&parent),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(parent.clone()),
             SceneEntityRecord::new(first.clone()),
             SceneEntityRecord::new(middle.clone()),
             SceneEntityRecord::new(last.clone()),
@@ -331,10 +369,10 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
         &mut session,
         &registry,
         SceneInspectorCommand::MoveEntity {
-            entity: last.clone(),
-            to: ScenePlacement::first(ScenePlacementOwner::Parent {
-                parent: parent.clone(),
-            }),
+            target: PrefabEntityTarget::source(last.clone()),
+            to: ScenePlacement::first(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                parent.clone(),
+            ))),
         },
     );
 
@@ -344,11 +382,10 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
     assert_eq!(
         session
             .document()
-            .entities
-            .iter()
-            .find(|entity| entity.id == parent)
+            .local_hierarchy(Default::default())
             .unwrap()
-            .children,
+            .children(&parent)
+            .unwrap(),
         [last.clone(), first, middle]
     );
 
@@ -358,11 +395,10 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
     assert_eq!(
         session
             .document()
-            .entities
-            .iter()
-            .find(|entity| entity.id == parent)
+            .local_hierarchy(Default::default())
             .unwrap()
-            .children,
+            .children(&parent)
+            .unwrap(),
         [last, scene_id("first"), scene_id("middle")]
     );
 }
@@ -694,6 +730,12 @@ fn labeled_entity(id: SceneEntityId, label: &str) -> SceneEntityRecord {
 
 fn field<'a>(fields: &'a [SceneInspectorFieldView], id: &str) -> &'a SceneInspectorFieldView {
     fields.iter().find(|field| field.id.as_str() == id).unwrap()
+}
+
+fn child_last(parent: &SceneEntityId) -> ScenePlacement {
+    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+        parent.clone(),
+    )))
 }
 
 fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {

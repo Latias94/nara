@@ -26,7 +26,8 @@ The scene model is also where several core decisions meet:
 
 nara scenes and prefabs are **dimension-neutral ECS data documents**.
 
-They store stable scene-local entity identities, component data, hierarchy relationship components, asset handles, and prefab references. They do not store runtime `Entity` values.
+They store stable scene-local entity identities, component data, desired hierarchy placements,
+asset references and Prefab declarations. They do not store Runtime `Entity` values.
 
 ```mermaid
 flowchart TD
@@ -43,15 +44,17 @@ Initial principles:
 
 - `SceneEntityId` is stable within a scene or prefab document.
 - Runtime `Entity` values are created during instantiation and stored only in an instantiate-time map.
-- Hierarchy is represented by components such as `Parent`, `Children`, and `Name`; there is no runtime `Node` base type.
+- Authored hierarchy uses ordered typed placement declarations. The compiled result has ordered
+  roots and children, projected to Runtime components such as `Parent` and `Children`; there is
+  no Runtime `Node` base type. `Name` is an ordinary persistent component.
 - Scene files are component-based, not 2D-specific or 3D-specific.
 - JSON and RON should both be supported by the data model: JSON for AI/tooling interoperability, RON for Rust-native readability.
 - Prefab nesting should be supported by the model, but complex override workflows can be phased in after the core instantiate path.
 
 ### Persistent Component Composition
 
-After prefab expansion, the explicit stable-`ComponentTypeId` records on each
-`SceneEntityRecord` are the complete durable persistent-component composition for that entity.
+After Prefab compilation, the explicit stable-`ComponentTypeId` records on each
+`CompiledSceneEntity` are the complete persistent-component composition for that entity.
 Scene loading must not infer an omitted persistent component from a Rust-local ECS requirement.
 
 Bevy required-component declarations, component lifecycle hooks, and observers remain runtime ECS
@@ -274,8 +277,8 @@ SceneComponentRecord
 
 PrefabInstance
   source: AssetRef
-  topology: explicit forest mount or specified root binding
-  inputs: source-bound reference arguments
+  binding: Forest or Root { base: SourceDocumentKey, root: SceneEntityId }
+  arguments: optional source-bound reference arguments
   overrides: optional PrefabOverlay
 
 Compiled Scene
@@ -288,8 +291,8 @@ Authoring compilation correspondence
   retained by the source owner, not stored as extra Runtime identities
 ```
 
-The exact syntax follows the owning implementation. The implementation ledger distinguishes the
-selected replacement from the incumbent roots/children source format while CP2 is in progress.
+The exact syntax follows the owning implementation. The implementation ledger distinguishes
+source representation, compiler and complete extraction qualification while CP2 is in progress.
 
 Representation rules:
 

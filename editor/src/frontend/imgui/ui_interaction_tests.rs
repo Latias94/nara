@@ -129,11 +129,9 @@ impl UiProject {
         )
         .unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("ui-anchor").unwrap());
-        anchor.prefab = Some(PrefabInstance {
-            source: AssetRef::path("ui.prefab.json").unwrap(),
-            arguments: None,
-            overrides: None,
-        });
+        anchor.prefab = Some(PrefabInstance::forest(
+            AssetRef::path("ui.prefab.json").unwrap(),
+        ));
         // A real startup Sprite loads this catalog image through the trusted project's normal bootstrap.
         let sprite = SceneEntityRecord::new(SceneEntityId::new("image-source").unwrap())
             .with_component(

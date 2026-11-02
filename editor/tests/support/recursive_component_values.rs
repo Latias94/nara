@@ -100,10 +100,15 @@ fn prepare(project: &CompositionProject) {
             .as_array_mut()
             .unwrap()
             .push(serde_json::to_value(entity).unwrap());
-        document["payload"]["roots"]
+        document["payload"]["placements"]
             .as_array_mut()
             .unwrap()
-            .push(serde_json::Value::String("editable".into()));
+            .push(
+                serde_json::to_value(nara::scene::SceneEntityPlacement::root(
+                    SceneEntityId::new("editable").unwrap(),
+                ))
+                .unwrap(),
+            );
         fs::write(project.source(kind), serde_json::to_vec(&document).unwrap()).unwrap();
     }
 }

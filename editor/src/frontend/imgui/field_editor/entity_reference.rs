@@ -11,8 +11,8 @@ pub(in crate::frontend::imgui) fn show(
     let selected = text.strip_prefix("scene-local:").unwrap_or(text);
     let selected_label = rows
         .iter()
-        .position(|row| row.id.as_str() == selected)
-        .map(|index| entity_label(rows, index));
+        .find(|row| row.id.as_str() == selected)
+        .map(entity_label);
     let preview = selected_label.as_deref().unwrap_or_else(|| {
         if text.is_empty() {
             "Choose an entity"
@@ -47,67 +47,41 @@ pub(in crate::frontend::imgui) fn show(
     }
 }
 
-fn entity_label(rows: &[SceneInspectorEntityRow], index: usize) -> String {
-    let selected = &rows[index];
-    let name = |row: &SceneInspectorEntityRow| {
-        row.name
-            .as_deref()
-            .filter(|name| !name.is_empty())
-            .unwrap_or(row.id.as_str())
-            .to_owned()
-    };
-    let mut path = vec![name(selected)];
-    let mut depth = selected.depth;
-    for row in rows[..index].iter().rev() {
-        if row.depth < depth {
-            path.push(name(row));
-            depth = row.depth;
-        }
-        if depth == 0 {
-            break;
-        }
-    }
-    path.reverse();
-    format!("{} [{}]", path.join(" / "), selected.id)
+fn entity_label(row: &SceneInspectorEntityRow) -> String {
+    let name = row
+        .name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(row.id.as_str());
+    format!("{name} [{}]", row.id)
 }
 
 fn choices(rows: &[SceneInspectorEntityRow]) -> Vec<(&str, String)> {
-    let mut path = Vec::new();
     rows.iter()
-        .map(|row| {
-            path.truncate(row.depth);
-            path.push(
-                row.name
-                    .as_deref()
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or(row.id.as_str()),
-            );
-            (
-                row.id.as_str(),
-                format!("{} [{}]", path.join(" / "), row.id),
-            )
-        })
+        .map(|row| (row.id.as_str(), entity_label(row)))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nara::scene::SceneEntityId;
+    use nara::scene::{
+        PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop, SceneEntityId, ScenePlacement,
+        ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
+    };
 
     #[test]
-    fn duplicate_names_keep_hierarchy_and_exact_source_identity() {
+    fn duplicate_names_keep_exact_source_identity_independently_of_placement_and_row_order() {
         let rows = [
-            ("room", Some("Room"), 0),
-            ("door-a", Some("Door"), 1),
-            ("door-b", Some("Door"), 1),
-            ("root", None, 0),
+            ("room", Some("Room")),
+            ("door-a", Some("Door")),
+            ("door-b", Some("Door")),
+            ("root", None),
         ]
-        .map(|(id, name, depth)| SceneInspectorEntityRow {
+        .map(|(id, name)| SceneInspectorEntityRow {
             id: SceneEntityId::new(id).unwrap(),
             name: name.map(str::to_owned),
-            parent: (depth == 1).then(|| SceneEntityId::new("room").unwrap()),
-            depth,
+            placement: Some(ScenePlacement::last(ScenePlacementParent::Root)),
             inspectable_component_count: 0,
             has_prefab: false,
             selected: false,
@@ -117,13 +91,36 @@ mod tests {
             choices(&rows),
             vec![
                 ("room", "Room [room]".to_owned()),
-                ("door-a", "Room / Door [door-a]".to_owned()),
-                ("door-b", "Room / Door [door-b]".to_owned()),
+                ("door-a", "Door [door-a]".to_owned()),
+                ("door-b", "Door [door-b]".to_owned()),
                 ("root", "root [root]".to_owned()),
             ]
         );
         for (index, (_, label)) in choices(&rows).iter().enumerate() {
-            assert_eq!(&entity_label(&rows, index), label);
+            assert_eq!(&entity_label(&rows[index]), label);
+        }
+        let mut moved = rows.clone();
+        moved[1].placement = Some(ScenePlacement::first(ScenePlacementParent::Entity(
+            PrefabEntityTarget::source(SceneEntityId::new("room").unwrap()),
+        )));
+        moved[2].placement = Some(ScenePlacement::last(ScenePlacementParent::Entity(
+            PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("room").unwrap()),
+                    expected_base: SourceDocumentKey::named(
+                        "f9ab807a-c61e-4c92-bfee-b6fa153b8efc".parse().unwrap(),
+                        "root-bound-source",
+                        SourceDocumentKind::Prefab,
+                    )
+                    .unwrap(),
+                }],
+                entity: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("root").unwrap()),
+            },
+        )));
+        moved.reverse();
+        for row in &moved {
+            let original = rows.iter().find(|original| original.id == row.id).unwrap();
+            assert_eq!(entity_label(row), entity_label(original));
         }
     }
 }

@@ -1822,6 +1822,7 @@ mod tests {
             }
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
             anchor.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::Path(AssetPath::new("p.prefab.json").unwrap()),
                 overrides: None,
@@ -1986,6 +1987,7 @@ mod tests {
             overlay
         };
         let declaration = |name: &str, overrides| PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
             overrides,
@@ -2245,6 +2247,7 @@ mod tests {
             overlay.components = components;
             overlay.instances = instances;
             PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 arguments: None,
                 source: AssetRef::path(format!("{name}.prefab.json")).unwrap(),
                 overrides: Some(overlay),
@@ -2577,6 +2580,7 @@ mod tests {
         let stable_id = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::StableId(stable_id),
             overrides: None,
@@ -2709,9 +2713,9 @@ mod tests {
         let startup = SceneDocument::from_ordered_roots([
             SceneEntityRecord {
                 id: SceneEntityId::new("first").unwrap(),
-                children: Vec::new(),
                 components: Default::default(),
                 prefab: Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     arguments: None,
                     source: shared_prefab.clone(),
                     overrides: None,
@@ -2719,9 +2723,9 @@ mod tests {
             },
             SceneEntityRecord {
                 id: SceneEntityId::new("second").unwrap(),
-                children: Vec::new(),
                 components: Default::default(),
                 prefab: Some(PrefabInstance {
+                    binding: nara_scene::PrefabInstanceBinding::Forest,
                     arguments: None,
                     source: shared_prefab,
                     overrides: None,

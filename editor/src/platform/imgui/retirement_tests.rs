@@ -5,10 +5,6 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use dear_imgui_rs::{ConfigFlags, ContextLifecycle};
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
-    scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
-    },
     tooling::{
         EditorAction, EditorCloseDecision, EditorDocumentMutation, EditorWorkspaceIntentPhase,
     },
@@ -365,13 +361,11 @@ fn dirty_active_scene(
                 EditorDocumentMutation::ApplyScenePatch {
                     document,
                     base_revision: revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("unsaved-close-probe")
-                                .map_err(|error| format!("{error:?}"))?,
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: crate::app::named_root_patch(
+                        application,
+                        document,
+                        "unsaved-close-probe",
+                    ),
                 },
             )],
         ),

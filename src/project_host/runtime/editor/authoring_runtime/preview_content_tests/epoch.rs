@@ -18,7 +18,7 @@ use nara_reflect::{ComponentFieldId, ComponentRegistrySnapshot, ComponentTypeId,
 use nara_render::RenderFrameSourceGeneration;
 use nara_scene::{
     SceneComponentRecord, SceneEntityId, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    ScenePatchOperation,
 };
 use nara_transform::Transform2d;
 
@@ -308,18 +308,32 @@ fn tiny_claim_budget_survives_repeated_edits_history_and_structural_publication(
         }
 
         let retained = SceneEntityId::new("retained").unwrap();
-        let placement = ScenePlacement::current(source.document(), &retained).unwrap();
-        for operation in [
-            ScenePatchOperation::RemoveEntity {
-                entity: retained,
-                from: placement,
-            },
-            ScenePatchOperation::AddEntity {
-                entity: entity(&registry, "retained"),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            },
-        ] {
-            let report = source.apply_patch(&ScenePatchDocument::new([operation]), &registry);
+        for remove in [true, false] {
+            let placements = &source.document().placements;
+            let patch = if remove {
+                ScenePatchDocument::new([
+                    ScenePatchOperation::RemoveEntity {
+                        entity: retained.clone(),
+                    },
+                    ScenePatchOperation::SetPlacements {
+                        expected: placements.clone(),
+                        value: placements
+                            .iter()
+                            .filter(|declaration| {
+                                declaration.target
+                                    != nara_scene::PrefabEntityTarget::source(retained.clone())
+                            })
+                            .cloned()
+                            .collect(),
+                    },
+                ])
+            } else {
+                crate::scene_test_support::add_root_entity_patch(
+                    placements,
+                    entity(&registry, "retained"),
+                )
+            };
+            let report = source.apply_patch(&patch, &registry);
             assert!(report.applied, "{:?}", report.diagnostics);
             assert!(!report.diagnostics.has_errors());
             let next = observe(&mut runtime, &source);

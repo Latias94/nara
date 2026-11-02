@@ -324,9 +324,17 @@ fn late_hierarchy_observer_rejects_before_scene_target_allocation() {
     let registry = registry(&runs, &drops, false);
     let source = candidate(&registry, "tree", &[]).source_key().clone();
     let compilation = SceneDocument {
-        roots: vec![id("parent")],
+        placements: vec![
+            nara_scene::SceneEntityPlacement::root(id("parent")),
+            nara_scene::SceneEntityPlacement::new(
+                nara_scene::PrefabEntityTarget::source(id("child")),
+                nara_scene::ScenePlacement::last(nara_scene::ScenePlacementParent::Entity(
+                    nara_scene::PrefabEntityTarget::source(id("parent")),
+                )),
+            ),
+        ],
         entities: vec![
-            SceneEntityRecord::new(id("parent")).with_children([id("child")]),
+            SceneEntityRecord::new(id("parent")),
             SceneEntityRecord::new(id("child")),
         ],
     }

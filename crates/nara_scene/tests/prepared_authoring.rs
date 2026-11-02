@@ -10,13 +10,30 @@ use nara_reflect::{
 };
 use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, ConstructionPlacement,
-    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, SceneAuthoringHistoryLimits,
-    SceneAuthoringSession, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 
 fn id(name: &str) -> SceneEntityId {
     SceneEntityId::new(name).unwrap()
+}
+
+fn assert_preserved_manifest(
+    actual: &nara_scene::UnavailableRecordManifest,
+    before: &nara_scene::UnavailableRecordManifest,
+    placements: &[SceneEntityPlacement],
+) {
+    assert_eq!(actual.record_count(), before.record_count());
+    assert_eq!(actual.overlay_target_count(), before.overlay_target_count());
+    assert_eq!(actual.total_count(), before.total_count());
+    assert_eq!(actual.entries(), before.entries());
+    assert_eq!(
+        actual.overlay_declarations().collect::<Vec<_>>(),
+        before.overlay_declarations().collect::<Vec<_>>(),
+    );
+    assert_eq!(actual.source_placements(), placements);
 }
 
 fn open(document: &SceneDocument) -> SceneAuthoringSession {
@@ -57,11 +74,24 @@ fn adapters(bundle: &AuthoringSchemaBundle) -> Vec<AuthoringAdapterReceipt> {
         .collect()
 }
 
-fn add(names: &[&str]) -> ScenePatchDocument {
-    ScenePatchDocument::new(names.iter().map(|name| ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }))
+fn add(placements: &[SceneEntityPlacement], names: &[&str]) -> ScenePatchDocument {
+    let mut value = placements.to_vec();
+    value.extend(
+        names
+            .iter()
+            .map(|name| SceneEntityPlacement::root(id(name))),
+    );
+    let mut operations = names
+        .iter()
+        .map(|name| ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id(name)),
+        })
+        .collect::<Vec<_>>();
+    operations.push(ScenePatchOperation::SetPlacements {
+        expected: placements.to_vec(),
+        value,
+    });
+    ScenePatchDocument::new(operations)
 }
 
 #[test]
@@ -72,18 +102,22 @@ fn prepared_construction_is_unpublished_until_one_commit_and_one_undo() {
     let content = session.content_state();
     let history = session.history_status();
     let prepared = session
-        .prepare_authoring_edit(revision, &add(&["first", "second"]))
+        .prepare_authoring_edit(revision, &add(&document.placements, &["first", "second"]))
         .unwrap();
     assert_eq!(session.document(), &document);
     assert_eq!(session.revision(), revision);
     assert_eq!(session.content_state(), content);
     assert_eq!(session.history_status(), history);
     assert_eq!(
-        prepared.document().roots,
+        prepared
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
         [id("existing"), id("first"), id("second")]
     );
-    assert_eq!(prepared.patch().operations.len(), 2);
-    assert_eq!(prepared.inverse().operations.len(), 2);
+    assert_eq!(prepared.patch().operations.len(), 3);
+    assert_eq!(prepared.inverse().operations.len(), 3);
     let expected = prepared.document().clone();
     let report = session.commit_authoring_edit(prepared);
     assert!(report.applied, "{:?}", report.diagnostics);
@@ -105,7 +139,7 @@ fn dropping_a_prepared_edit_does_not_mutate_the_owner() {
     let history = session.history_status();
     drop(
         session
-            .prepare_authoring_edit(revision, &add(&["discarded"]))
+            .prepare_authoring_edit(revision, &add(&document.placements, &["discarded"]))
             .unwrap(),
     );
     assert_eq!(session.document(), &document);
@@ -120,19 +154,33 @@ fn published_source_creation_owns_identity_without_widening_native_admission() {
     let mut scene = open(&document);
     let revision = scene.revision();
     let created = scene
-        .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     let generated = created.entity().clone();
     assert_ne!(generated, id("existing"));
-    assert_eq!(scene.document().roots, [id("existing"), generated.clone()]);
+    assert_eq!(
+        scene
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
+        [id("existing"), generated.clone()]
+    );
     assert_eq!(scene.history_status().undo_depth, 1);
     assert!(scene.undo_authoring().applied);
     assert_eq!(scene.document(), &document);
     assert!(scene.redo_authoring().applied);
-    assert_eq!(scene.document().roots[1], generated);
+    assert_eq!(
+        scene
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots()[1],
+        generated
+    );
     assert!(
         scene
-            .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementOwner::Root),)
+            .create_authoring_entity(revision, ScenePlacement::last(ScenePlacementParent::Root),)
             .is_err()
     );
 
@@ -144,7 +192,7 @@ fn published_source_creation_owns_identity_without_widening_native_admission() {
             .create_entity_with_registry(
                 scene.revision(),
                 &registry,
-                ScenePlacement::last(ScenePlacementOwner::Root),
+                ScenePlacement::last(ScenePlacementParent::Root),
                 Default::default(),
             )
             .is_err()
@@ -154,7 +202,7 @@ fn published_source_creation_owns_identity_without_widening_native_admission() {
         native
             .create_authoring_entity(
                 native.revision(),
-                ScenePlacement::last(ScenePlacementOwner::Root),
+                ScenePlacement::last(ScenePlacementParent::Root),
             )
             .is_err()
     );
@@ -166,7 +214,7 @@ fn prepared_edits_reject_foreign_and_changed_owners_without_publication() {
     let mut first = open(&document);
     let mut other = open(&document);
     let foreign = first
-        .prepare_authoring_edit(first.revision(), &add(&["foreign"]))
+        .prepare_authoring_edit(first.revision(), &add(&document.placements, &["foreign"]))
         .unwrap();
     let other_revision = other.revision();
     let rejected = other.commit_authoring_edit(foreign);
@@ -176,9 +224,13 @@ fn prepared_edits_reject_foreign_and_changed_owners_without_publication() {
     assert_eq!(other.history_status().undo_depth, 0);
 
     let stale = first
-        .prepare_authoring_edit(first.revision(), &add(&["stale"]))
+        .prepare_authoring_edit(first.revision(), &add(&document.placements, &["stale"]))
         .unwrap();
-    assert!(first.apply_authoring_patch(&add(&["accepted"])).applied);
+    assert!(
+        first
+            .apply_authoring_patch(&add(&document.placements, &["accepted"]))
+            .applied
+    );
     let accepted = first.document().clone();
     let accepted_revision = first.revision();
     let accepted_history = first.history_status();
@@ -196,7 +248,7 @@ fn the_last_invalid_construction_operation_publishes_nothing() {
     let history = session.history_status();
     assert!(
         session
-            .prepare_authoring_edit(revision, &add(&["first", "existing"]))
+            .prepare_authoring_edit(revision, &add(&document.placements, &["first", "existing"]))
             .is_err()
     );
     assert_eq!(session.document(), &document);
@@ -255,11 +307,12 @@ fn link_bundle() -> AuthoringSchemaBundle {
 }
 
 fn linked_construction(
+    placements: &[SceneEntityPlacement],
     template: nara_scene::SceneComponentRecord,
     amount: u64,
 ) -> ScenePatchDocument {
     let component = ComponentTypeId::new("game.Link");
-    let mut patch = add(&["first", "second"]);
+    let mut patch = add(placements, &["first", "second"]);
     for entity in ["first", "second"] {
         patch.operations.push(ScenePatchOperation::AddComponent {
             entity: id(entity),
@@ -374,7 +427,7 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
             ),
         )]);
     let scene = open_with_bundle(&original, &bundle, SceneAuthoringHistoryLimits::default());
-    let prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
+    let prefab = PrefabDocument::new(original.placements.clone(), original.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -397,7 +450,7 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
                 .begin_authoring_construction(session.revision())
                 .unwrap();
             let local = invalid
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .unwrap();
             invalid.add_component(&local, inventory.clone()).unwrap();
             invalid
@@ -430,7 +483,7 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
                 .begin_authoring_construction(session.revision())
                 .unwrap();
             let first = draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .unwrap();
             let second = draft
                 .create_entity(ConstructionPlacement::ChildOf((&first).into()))
@@ -508,7 +561,8 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
             let result = session.commit_authoring_construction(prepared).unwrap();
             assert_eq!(result.entity(&first), Some(&first_id));
             assert_eq!(result.entity(&second), Some(&second_id));
-            assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+            let accepted_manifest = session.unavailable_record_manifest().unwrap().clone();
+            assert_preserved_manifest(&accepted_manifest, &manifest, &expected.placements);
             assert_eq!(session.history_status().undo_depth, 1);
             for (entity, target) in [
                 (&first_id, &first_id),
@@ -535,9 +589,13 @@ fn retained_construction_shares_existing_and_staged_keyed_properties_in_both_sou
             }
             assert!(session.undo_authoring().applied);
             assert_eq!(session.document(), &before);
+            assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
             assert!(session.redo_authoring().applied);
             assert_eq!(session.document(), &expected);
-            assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+            assert_eq!(
+                session.unavailable_record_manifest(),
+                Some(&accepted_manifest)
+            );
         }};
     }
     qualify!(scene);
@@ -554,7 +612,7 @@ fn retained_construction_resolves_local_handles_once_and_commits_one_history_ent
     let template = session.authoring_initial_component(&component).unwrap();
     let mut draft = session.begin_authoring_construction(revision).unwrap();
     let first = draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     let second = draft
         .create_entity(ConstructionPlacement::ChildOf((&first).into()))
@@ -582,17 +640,20 @@ fn retained_construction_resolves_local_handles_once_and_commits_one_history_ent
     assert_ne!(first_id, second_id);
     assert_ne!(first_id, id("existing"));
     assert_eq!(
-        prepared.document().roots,
+        prepared
+            .document()
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots(),
         [id("existing"), first_id.clone()]
     );
     assert_eq!(
         prepared
             .document()
-            .entities
-            .iter()
-            .find(|record| record.id == first_id)
+            .local_hierarchy(Default::default())
             .unwrap()
-            .children,
+            .children(&first_id)
+            .unwrap(),
         [second_id.clone()]
     );
     for operation in &prepared.patch().operations {
@@ -644,10 +705,10 @@ fn retained_construction_rejects_foreign_handles_and_stale_commits_without_poiso
         .begin_authoring_construction(session.revision())
         .unwrap();
     let local_first = first
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     let local_second = second
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     assert_ne!(local_first, local_second);
     assert!(
@@ -698,14 +759,21 @@ fn retained_construction_rejects_foreign_handles_and_stale_commits_without_poiso
 fn retained_construction_resolves_existing_and_local_sibling_owners_in_declaration_order() {
     let existing = id("existing");
     let child = id("child");
-    let mut root = SceneEntityRecord::new(existing.clone());
-    root.children.push(child.clone());
+    let root = SceneEntityRecord::new(existing.clone());
     let scene = SceneDocument::new(
-        vec![existing.clone()],
+        vec![
+            SceneEntityPlacement::root(existing.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child.clone()),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    existing.clone(),
+                ))),
+            ),
+        ],
         vec![root, SceneEntityRecord::new(child.clone())],
     );
     let session = open(&scene);
-    let prefab = PrefabDocument::new(scene.roots.clone(), scene.entities.clone());
+    let prefab = PrefabDocument::new(scene.placements.clone(), scene.entities.clone());
     let bundle = AuthoringSchemaBundle::new([]).unwrap();
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
@@ -747,21 +815,23 @@ fn retained_construction_resolves_existing_and_local_sibling_owners_in_declarati
                 .unwrap();
             let prepared = session.prepare_authoring_construction(&draft).unwrap();
             assert_eq!(
-                prepared.document().roots,
+                prepared
+                    .document()
+                    .local_hierarchy(Default::default())
+                    .unwrap()
+                    .roots(),
                 [
                     prepared.entity(&before_root).unwrap().clone(),
                     existing.clone(),
                     prepared.entity(&after_root).unwrap().clone()
                 ]
             );
-            let parent = prepared
+            let hierarchy = prepared
                 .document()
-                .entities
-                .iter()
-                .find(|record| record.id == existing)
+                .local_hierarchy(Default::default())
                 .unwrap();
             assert_eq!(
-                parent.children,
+                hierarchy.children(&existing).unwrap(),
                 [
                     prepared.entity(&before_local).unwrap().clone(),
                     prepared.entity(&before_child).unwrap().clone(),
@@ -788,9 +858,9 @@ fn retained_construction_last_invalid_write_and_raw_write_limit_preserve_source(
     let bundle = link_bundle();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("existing"))]);
     let component = ComponentTypeId::new("game.Link");
-    // One entity and one component share the construction allowance with every raw write.
-    let raw_write_limit = nara_scene::MAX_AUTHORING_EDIT_OPERATIONS - 2;
-    assert_eq!(raw_write_limit, 254);
+    // Entity, exact placements and component creation each consume one operation.
+    let raw_write_limit = nara_scene::MAX_AUTHORING_EDIT_OPERATIONS - 3;
+    assert_eq!(raw_write_limit, 253);
     for (write_count, last_amount) in [
         (raw_write_limit - 1, 256),
         (raw_write_limit, 256),
@@ -805,7 +875,7 @@ fn retained_construction_last_invalid_write_and_raw_write_limit_preserve_source(
         let history = session.history_status();
         let mut draft = session.begin_authoring_construction(revision).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         draft.add_component(&local, component.clone()).unwrap();
         for _ in 1..write_count {
@@ -853,7 +923,7 @@ fn retained_construction_last_invalid_write_and_raw_write_limit_preserve_source(
 
         let prepared = result.unwrap();
         let created = prepared.entity(&local).unwrap().clone();
-        assert_eq!(prepared.patch().operations.len(), 3);
+        assert_eq!(prepared.patch().operations.len(), 4);
         let expected = prepared.document().clone();
         let record = expected
             .entities
@@ -913,7 +983,7 @@ fn retained_construction_admits_aggregate_template_copy_before_materialization()
     let mut draft = session.begin_authoring_construction(revision).unwrap();
     for _ in 0..2 {
         let entity = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         draft.add_component(&entity, component.clone()).unwrap();
     }
@@ -1050,7 +1120,7 @@ fn retained_construction_charges_resolved_local_bytes_before_overwritten_roots_c
             .begin_authoring_construction(session.revision())
             .unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         draft.add_component(&local, component.clone()).unwrap();
         draft
@@ -1123,23 +1193,35 @@ fn mixed_construction_uses_final_validation_and_retains_unknown_records_in_both_
     let revision = session.revision();
     assert!(
         session
-            .prepare_authoring_edit(revision, &linked_construction(template.clone(), 256))
+            .prepare_authoring_edit(
+                revision,
+                &linked_construction(&document.placements, template.clone(), 256)
+            )
             .is_err()
     );
     assert_eq!(session.document(), &document);
     assert_eq!(session.revision(), revision);
     assert_eq!(session.history_status().undo_depth, 0);
     let prepared = session
-        .prepare_authoring_edit(revision, &linked_construction(template.clone(), 7))
+        .prepare_authoring_edit(
+            revision,
+            &linked_construction(&document.placements, template.clone(), 7),
+        )
         .unwrap();
     let accepted = prepared.document().clone();
     assert!(session.commit_authoring_edit(prepared).applied);
     assert_eq!(session.history_status().undo_depth, 1);
-    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    let accepted_manifest = session.unavailable_record_manifest().unwrap().clone();
+    assert_preserved_manifest(&accepted_manifest, &manifest, &accepted.placements);
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &document);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
     assert!(session.redo_authoring().applied);
     assert_eq!(session.document(), &accepted);
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&accepted_manifest)
+    );
     let reopened = session
         .try_reopen_authoring_candidate(
             SceneDocumentCandidate::decode_json_bytes(
@@ -1149,8 +1231,12 @@ fn mixed_construction_uses_final_validation_and_retains_unknown_records_in_both_
         )
         .unwrap();
     assert_eq!(reopened.document(), &accepted);
+    assert_eq!(
+        reopened.unavailable_record_manifest(),
+        Some(&accepted_manifest)
+    );
 
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -1164,23 +1250,53 @@ fn mixed_construction_uses_final_validation_and_retains_unknown_records_in_both_
             .unwrap()
             .publish();
     let mut session = PrefabAuthoringSession::from_published_authoring_document(published);
+    let prefab_manifest = session.unavailable_record_manifest().unwrap().clone();
     let revision = session.revision();
     assert!(
         session
-            .prepare_authoring_edit(revision, &linked_construction(template.clone(), 256))
+            .prepare_authoring_edit(
+                revision,
+                &linked_construction(&document.placements, template.clone(), 256)
+            )
             .is_err()
     );
     let prepared = session
-        .prepare_authoring_edit(revision, &linked_construction(template, 7))
+        .prepare_authoring_edit(
+            revision,
+            &linked_construction(&document.placements, template, 7),
+        )
         .unwrap();
     let accepted = prepared.document().clone();
     assert_eq!(session.document(), &prefab);
     assert!(session.commit_authoring_edit(prepared).applied);
     assert_eq!(session.document(), &accepted);
+    let accepted_manifest = session.unavailable_record_manifest().unwrap().clone();
+    assert_preserved_manifest(&accepted_manifest, &prefab_manifest, &accepted.placements);
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &prefab);
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&prefab_manifest)
+    );
     assert!(session.redo_authoring().applied);
     assert_eq!(session.document(), &accepted);
+    assert_eq!(
+        session.unavailable_record_manifest(),
+        Some(&accepted_manifest)
+    );
+    let reopened = session
+        .try_reopen_authoring_candidate(
+            PrefabDocumentCandidate::decode_json_bytes(
+                accepted.to_json_string().unwrap().as_bytes(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(reopened.document(), &accepted);
+    assert_eq!(
+        reopened.unavailable_record_manifest(),
+        Some(&accepted_manifest)
+    );
 }
 
 #[test]
@@ -1191,7 +1307,7 @@ fn history_refusal_and_reopen_reject_before_publication() {
     let revision = session.revision();
     assert!(
         session
-            .prepare_authoring_edit(revision, &add(&["oversized-inverse"]))
+            .prepare_authoring_edit(revision, &add(&document.placements, &["oversized-inverse"]))
             .is_err()
     );
     assert_eq!(session.document(), &document);
@@ -1200,7 +1316,7 @@ fn history_refusal_and_reopen_reject_before_publication() {
 
     let mut draft = session.begin_authoring_construction(revision).unwrap();
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     assert!(session.prepare_authoring_construction(&draft).is_err());
     assert_eq!(session.document(), &document);
@@ -1209,13 +1325,16 @@ fn history_refusal_and_reopen_reject_before_publication() {
 
     let session = open(&document);
     let prepared = session
-        .prepare_authoring_edit(session.revision(), &add(&["old-incarnation"]))
+        .prepare_authoring_edit(
+            session.revision(),
+            &add(&document.placements, &["old-incarnation"]),
+        )
         .unwrap();
     let mut draft = session
         .begin_authoring_construction(session.revision())
         .unwrap();
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     let old_construction = session.prepare_authoring_construction(&draft).unwrap();
     let mut reopened = session
@@ -1248,25 +1367,35 @@ fn history_refusal_and_reopen_reject_before_publication() {
 #[test]
 fn mixed_operation_budget_is_independent_of_the_field_write_budget() {
     let session = open(&SceneDocument::default());
-    let operations = (0..=nara_scene::MAX_AUTHORING_EDIT_OPERATIONS)
+    // One exact placement replacement shares the same operation budget as entity creation.
+    let entity_count = nara_scene::MAX_AUTHORING_EDIT_OPERATIONS - 1;
+    let mut operations = (0..entity_count)
         .map(|index| ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(id(&format!("entity-{index}"))),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
         })
         .collect::<Vec<_>>();
-    let accepted = ScenePatchDocument::new(
-        operations[..nara_scene::MAX_AUTHORING_EDIT_OPERATIONS]
-            .iter()
-            .cloned(),
+    operations.push(ScenePatchOperation::SetPlacements {
+        expected: Vec::new(),
+        value: (0..entity_count)
+            .map(|index| SceneEntityPlacement::root(id(&format!("entity-{index}"))))
+            .collect(),
+    });
+    let accepted = ScenePatchDocument::new(operations.clone());
+    assert_eq!(
+        accepted.operations.len(),
+        nara_scene::MAX_AUTHORING_EDIT_OPERATIONS
     );
     let prepared = session
         .prepare_authoring_edit(session.revision(), &accepted)
         .unwrap();
-    assert_eq!(
-        prepared.document().entities.len(),
-        nara_scene::MAX_AUTHORING_EDIT_OPERATIONS
-    );
+    assert_eq!(prepared.document().entities.len(), entity_count);
     drop(prepared);
+    operations.push(ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(id("one-too-many")),
+    });
+    if let ScenePatchOperation::SetPlacements { value, .. } = &mut operations[entity_count] {
+        value.push(SceneEntityPlacement::root(id("one-too-many")));
+    }
     assert!(
         session
             .prepare_authoring_edit(session.revision(), &ScenePatchDocument::new(operations))
@@ -1294,10 +1423,10 @@ fn retained_construction_bounds_declarations_and_coalesced_property_roots_togeth
         draft
             .add_component(id("existing"), component.clone())
             .unwrap();
-        let entity_count = operation_limit - 1 - write_count;
+        let entity_count = operation_limit - 2 - write_count;
         for _ in 0..entity_count - 1 {
             draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .unwrap();
         }
         let mut last_amount = 1;
@@ -1318,7 +1447,7 @@ fn retained_construction_bounds_declarations_and_coalesced_property_roots_togeth
         let one_short = session.prepare_authoring_construction(&draft).unwrap();
         assert_eq!(
             one_short.patch().operations.len(),
-            entity_count + field_roots
+            entity_count + field_roots + 1
         );
         assert!(std::sync::Arc::ptr_eq(&before, &session.shared_document()));
         assert_eq!(session.document(), &document);
@@ -1328,11 +1457,11 @@ fn retained_construction_bounds_declarations_and_coalesced_property_roots_togeth
         drop(one_short);
 
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         assert!(
             draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .is_err()
         );
         assert!(draft.add_component(&local, component.clone()).is_err());
@@ -1350,12 +1479,19 @@ fn retained_construction_bounds_declarations_and_coalesced_property_roots_togeth
         let prepared = session.prepare_authoring_construction(&draft).unwrap();
         assert_eq!(
             prepared.patch().operations.len(),
-            entity_count + 1 + field_roots
+            entity_count + 2 + field_roots
         );
         let created = prepared.entity(&local).unwrap().clone();
         let expected = prepared.document().clone();
         assert_eq!(expected.entities.len(), entity_count + 1);
-        assert_eq!(expected.roots.len(), entity_count + 1);
+        assert_eq!(
+            expected
+                .local_hierarchy(Default::default())
+                .unwrap()
+                .roots()
+                .len(),
+            entity_count + 1
+        );
         let existing = expected
             .entities
             .iter()
@@ -1418,7 +1554,7 @@ fn mixed_edits_reject_an_unreplayable_field_inverse_before_either_kind_publishes
                 ComponentValue::map([("text", ComponentValue::String("x".repeat(70_000)))]),
             ),
         )]);
-    let mut patch = add(&["extra"]);
+    let mut patch = add(&document.placements, &["extra"]);
     patch.operations.push(ScenePatchOperation::SetField {
         entity: id("existing"),
         component,
@@ -1432,7 +1568,7 @@ fn mixed_edits_reject_an_unreplayable_field_inverse_before_either_kind_publishes
     assert_eq!(session.document(), &document);
     assert_eq!(session.revision(), revision);
     assert_eq!(session.history_status().undo_depth, 0);
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -1518,19 +1654,26 @@ fn mixed_removal_and_forward_reference_transactions_replay_exactly_for_both_kind
     };
     let document = SceneDocument::from_ordered_roots([record("existing")]);
     for removal in [
-        ScenePatchOperation::RemoveComponent {
+        vec![ScenePatchOperation::RemoveComponent {
             entity: id("existing"),
             component: component.clone(),
-        },
-        ScenePatchOperation::RemoveEntity {
-            entity: id("existing"),
-            from: ScenePlacement::current(&document, &id("existing")).unwrap(),
-        },
+        }],
+        vec![
+            ScenePatchOperation::RemoveEntity {
+                entity: id("existing"),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: document.placements.clone(),
+                value: Vec::new(),
+            },
+        ],
     ] {
         assert_both_kind_roundtrip(
             &document,
             &bundle,
-            &ScenePatchDocument::new([field("amount", ComponentValue::U64(2)), removal]),
+            &ScenePatchDocument::new(
+                std::iter::once(field("amount", ComponentValue::U64(2))).chain(removal),
+            ),
         );
     }
     assert_both_kind_roundtrip(
@@ -1545,7 +1688,12 @@ fn mixed_removal_and_forward_reference_transactions_replay_exactly_for_both_kind
             ),
             ScenePatchOperation::AddEntity {
                 entity: SceneEntityRecord::new(id("later")),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: document.placements.clone(),
+                value: ["existing", "later"]
+                    .map(|entity| SceneEntityPlacement::root(id(entity)))
+                    .to_vec(),
             },
         ]),
     );
@@ -1557,7 +1705,10 @@ fn mixed_removal_and_forward_reference_transactions_replay_exactly_for_both_kind
         &ScenePatchDocument::new([
             ScenePatchOperation::RemoveEntity {
                 entity: id("victim"),
-                from: ScenePlacement::current(&document, &id("victim")).unwrap(),
+            },
+            ScenePatchOperation::SetPlacements {
+                expected: document.placements.clone(),
+                value: vec![SceneEntityPlacement::root(id("existing"))],
             },
             field(
                 "target",
@@ -1586,7 +1737,7 @@ fn assert_both_kind_roundtrip(
     assert!(scene.redo_authoring().applied);
     assert_eq!(scene.document(), &expected);
 
-    let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -1625,7 +1776,7 @@ fn explicit_construction_prepare_and_commit_cost_observation() {
         let template = session
             .authoring_initial_component(&ComponentTypeId::new("game.Link"))
             .unwrap();
-        let patch = linked_construction(template, 7);
+        let patch = linked_construction(&document.placements, template, 7);
         let start = Instant::now();
         let prepared = session
             .prepare_authoring_edit(session.revision(), black_box(&patch))
@@ -1685,10 +1836,10 @@ fn retained_construction_prepare_and_commit_cost_comparison() {
                     .begin_authoring_construction(session.revision())
                     .unwrap();
                 let first = draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                    .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                     .unwrap();
                 let second = draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                    .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                     .unwrap();
                 for local in [&first, &second] {
                     draft.add_component(local, component.clone()).unwrap();
@@ -1731,6 +1882,7 @@ fn retained_construction_prepare_and_commit_cost_comparison() {
                 (prepare, commit)
             } else {
                 let patch = linked_construction(
+                    &document.placements,
                     session.authoring_initial_component(&component).unwrap(),
                     7,
                 );

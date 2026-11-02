@@ -11,10 +11,10 @@ use nara_reflect::{
 use nara_scene::{
     AuthoringDocumentSource, AuthoringRecordLocation, PrefabAddition, PrefabAuthoringSession,
     PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate,
-    PrefabEntityTarget, PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-    PrefabPlacementSlot, SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, UnavailableRecordManifestEntry,
+    PrefabEntityTarget, PrefabInstance, PrefabOverlay, SceneAuthoringHistoryLimits,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, UnavailableRecordManifestEntry,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -26,13 +26,13 @@ fn instance(name: &str, additions: usize) -> PrefabInstance {
     for index in 0..additions {
         let entity = id(&format!("addition_{index}"));
         overlay.additions.push(PrefabAddition::new(entity.clone()));
-        overlay.placements.push(PrefabPlacement {
-            target: PrefabEntityTarget::addition(entity),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::Last,
-        });
+        overlay.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(entity),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
     }
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path(format!("prefabs/{name}.prefab.json")).unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -69,7 +69,6 @@ fn open(document: &SceneDocument, limits: SceneAuthoringHistoryLimits) -> SceneA
 fn document(declaration: Option<PrefabInstance>) -> SceneDocument {
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = declaration;
-    anchor.children.push(id("local_child"));
     // Unrelated unavailable data remains a preservation obligation during instance editing.
     anchor.components.insert(
         ComponentTypeId::new("missing.Opaque"),
@@ -79,7 +78,15 @@ fn document(declaration: Option<PrefabInstance>) -> SceneDocument {
         ),
     );
     SceneDocument::new(
-        [id("anchor")],
+        [
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local_child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
         [anchor, SceneEntityRecord::new(id("local_child"))],
     )
 }
@@ -88,7 +95,7 @@ fn document(declaration: Option<PrefabInstance>) -> SceneDocument {
 fn prefab_source_preparation_retains_exact_instance_inverse_and_local_records() {
     let original = instance("unresolved", 2);
     let document = document(Some(original.clone()));
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let bundle = AuthoringSchemaBundle::new([]).unwrap();
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
@@ -189,15 +196,16 @@ fn declaration_replacement_repairs_only_its_overlay_and_restores_the_exact_manif
     );
     let overlay = original.overrides.as_mut().unwrap();
     overlay.additions.push(added);
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("unavailable")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("unavailable")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     let mut document = document(Some(original.clone()));
     let mut other = SceneEntityRecord::new(id("other-anchor"));
     other.prefab = Some(original.clone());
-    document.roots.push(other.id.clone());
+    document
+        .placements
+        .push(SceneEntityPlacement::root(other.id.clone()));
     document.entities.push(other);
     for replacement in [None, Some(instance("base", 0))] {
         let mut session = open(&document, Default::default());
@@ -237,11 +245,24 @@ fn declaration_replacement_repairs_only_its_overlay_and_restores_the_exact_manif
             },
             ScenePatchOperation::RemoveEntity {
                 entity: id("other-anchor"),
-                from: ScenePlacement::last(ScenePlacementOwner::Root),
             },
         ] {
             let mut guarded = patch.clone();
+            let removes_entity = matches!(&operation, ScenePatchOperation::RemoveEntity { .. });
             guarded.operations.push(operation);
+            if removes_entity {
+                guarded.operations.push(ScenePatchOperation::SetPlacements {
+                    expected: document.placements.clone(),
+                    value: document
+                        .placements
+                        .iter()
+                        .filter(|entry| {
+                            entry.target != PrefabEntityTarget::source(id("other-anchor"))
+                        })
+                        .cloned()
+                        .collect(),
+                });
+            }
             let rejected = session
                 .prepare_authoring_edit(revision, &guarded)
                 .unwrap_err();
@@ -381,6 +402,7 @@ fn complete_snapshot_owner_bytes_have_an_inclusive_history_ceiling() {
             ),
     });
     let declaration = PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("p").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -389,16 +411,33 @@ fn complete_snapshot_owner_bytes_have_an_inclusive_history_ceiling() {
     anchor.prefab = Some(declaration.clone());
     let document = SceneDocument::from_ordered_roots([anchor]);
     let patch = ScenePatchDocument::new([set("a", Some(declaration.clone()), Some(declaration))]);
-    // Target "a" plus both snapshots: source wire-value claim (14), Named base (37 + 7),
-    // component intent/mode (2), target "e" with origin (2), component "c" (1),
-    // record version/owner flag (5), owner "test.owner" (10). Null has no payload bytes.
-    for bytes in [157, 156] {
-        let limits = SceneAuthoringHistoryLimits::new(8, 32, 64, 1024, 16, 64, bytes).unwrap();
+    // Each snapshot owns instance/binding/overlay/base/Set/target/record/value: eight work nodes.
+    // Its bytes are source wire value (13 + path), Forest tag (1), Named base (37 + name),
+    // intent/mode (2), target origin/ID (2), component ID (1), version/owner flag (5),
+    // and owner text (10). The Null value has no payload bytes.
+    let snapshot_bytes = (13 + "p".len())
+        + 1
+        + (37 + "history".len())
+        + 2
+        + (1 + "e".len())
+        + "c".len()
+        + 5
+        + "test.owner".len();
+    let exact_bytes = "a".len() + 2 * snapshot_bytes;
+    let exact_operations = 1 + 2 * 8;
+    assert_eq!((exact_operations, exact_bytes), (17, 159));
+    for (operations, bytes, accepted) in [
+        (exact_operations, exact_bytes, true),
+        (exact_operations - 1, exact_bytes, false),
+        (exact_operations, exact_bytes - 1, false),
+    ] {
+        let limits =
+            SceneAuthoringHistoryLimits::new(8, 32, 64, 1024, operations, 64, bytes).unwrap();
         let session = open(&document, limits);
         let revision = session.revision();
         let result = session.prepare_authoring_edit(revision, &patch);
-        if bytes == 157 {
-            assert!(result.is_ok());
+        if accepted {
+            assert!(result.is_ok(), "{result:?}");
         } else {
             assert!(result.is_err());
         }

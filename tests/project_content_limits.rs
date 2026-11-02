@@ -391,17 +391,13 @@ fn load_with_limits(
 
 fn two_prefabs(project: &TestProject) {
     let mut enemy = SceneEntityRecord::new(scene_id("enemy-anchor"));
-    enemy.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    enemy.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("enemy.prefab.json").unwrap(),
+    ));
     let mut bonus = SceneEntityRecord::new(scene_id("bonus-anchor"));
-    bonus.prefab = Some(PrefabInstance {
-        source: AssetRef::path("bonus.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    bonus.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("bonus.prefab.json").unwrap(),
+    ));
     let shared_image = SceneEntityRecord::new(scene_id("bonus"))
         .with_component(
             ComponentTypeId::new("nara.transform.Transform2d"),
@@ -449,16 +445,12 @@ fn two_images(project: &TestProject) {
 
 fn duplicate_prefab_edges(project: &TestProject) {
     let mut left = SceneEntityRecord::new(scene_id("left"));
-    left.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    left.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("enemy.prefab.json").unwrap(),
+    ));
     let mut right = SceneEntityRecord::new(scene_id("right"));
-    right.prefab = Some(PrefabInstance {
-        source: AssetRef::path("enemy.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    right.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("enemy.prefab.json").unwrap(),
+    ));
     project.write_scene_source(&SceneDocument::from_ordered_roots([left, right]));
 }

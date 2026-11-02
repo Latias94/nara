@@ -7,13 +7,15 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "main-camera"
+    "placements": [
+      {
+        "target": { "through": [], "entity": { "kind": "source_entity", "entity": "main-camera" } },
+        "placement": { "parent": { "kind": "root" }, "slot": { "kind": "last" } }
+      }
     ],
     "entities": [
       {
         "id": "main-camera",
-        "children": [],
         "components": {
           "nara.render.Camera2d": {
             "version": 1,

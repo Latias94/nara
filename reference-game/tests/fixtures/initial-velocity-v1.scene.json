@@ -7,13 +7,28 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "player"
+    "placements": [
+      {
+        "target": {
+          "through": [],
+          "entity": {
+            "kind": "source_entity",
+            "entity": "player"
+          }
+        },
+        "placement": {
+          "parent": {
+            "kind": "root"
+          },
+          "slot": {
+            "kind": "last"
+          }
+        }
+      }
     ],
     "entities": [
       {
         "id": "player",
-        "children": [],
         "components": {
           "reference_game.InitialVelocity2d": {
             "version": 1,

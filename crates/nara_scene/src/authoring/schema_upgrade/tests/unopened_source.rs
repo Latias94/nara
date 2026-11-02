@@ -19,7 +19,7 @@ fn scene_input(document: SceneDocument, limits: SceneFileLimits) -> SceneDocumen
 fn prefab_input(document: SceneDocument, limits: SceneFileLimits) -> PrefabDocumentCandidate {
     let document = PrefabDocument {
         inputs: Default::default(),
-        roots: document.roots,
+        placements: document.placements,
         entities: document.entities,
     };
     PrefabDocumentCandidate::decode_json_bytes_with_limits(
@@ -53,7 +53,9 @@ macro_rules! each_unopened_source {
 
 fn known_document() -> SceneDocument {
     let mut document = document(false, 7);
-    document.roots.retain(|id| id == &entity());
+    document
+        .placements
+        .retain(|entry| entry.target == PrefabEntityTarget::source(entity()));
     document.entities.retain(|record| record.id == entity());
     document
 }
@@ -112,12 +114,14 @@ fn dormant_document() -> SceneDocument {
     outer.instances.push(PrefabInstanceClaim {
         target,
         value: Some(PrefabInstance {
+            binding: crate::PrefabInstanceBinding::Forest,
             source: AssetRef::path("prefabs/not-read.prefab.json").unwrap(),
             arguments: None,
             overrides: Some(nested),
         }),
     });
     document.entities[0].prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/not-present.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(outer),
@@ -129,7 +133,7 @@ fn dormant_document() -> SceneDocument {
 fn unopened_prefab_admission_preserves_declared_inputs_through_the_scene_projection() {
     let fixture = Fixture::new();
     let scene = known_document();
-    let mut document = PrefabDocument::new(scene.roots, scene.entities);
+    let mut document = PrefabDocument::new(scene.placements, scene.entities);
     document
         .inputs
         .insert(nara_identity::ReferenceInputId::new("external-target").unwrap());
@@ -161,7 +165,7 @@ fn factories_retain_known_originals_and_tokens_prepare_without_readmitting_them(
             &mut work,
         )
         .unwrap();
-        assert_eq!(session.document().roots, original.roots);
+        assert_eq!(session.document().placements, original.placements);
         assert_eq!(session.document().entities, original.entities);
         assert_eq!(session.authoring_source(), Some(&source));
         assert_eq!(
@@ -192,7 +196,8 @@ fn factories_retain_known_originals_and_tokens_prepare_without_readmitting_them(
         assert!(Arc::ptr_eq(&retained.work, &work.identity));
         let before = snapshot!(session);
         let mut next = document(true, 7);
-        next.roots.retain(|id| id == &entity());
+        next.placements
+            .retain(|entry| entry.target == PrefabEntityTarget::source(entity()));
         next.entities.retain(|record| record.id == entity());
         let prepared = session
             .prepare_authored_upgrade_with_retained_source(
@@ -229,7 +234,7 @@ fn factories_preserve_unavailable_and_nested_dormant_inventory_losslessly() {
             &mut work,
         )
         .unwrap();
-        assert_eq!(session.document().roots, document.roots);
+        assert_eq!(session.document().placements, document.placements);
         assert_eq!(session.document().entities, document.entities);
         assert_eq!(session.authoring_source(), Some(&source));
         assert_eq!(
@@ -364,7 +369,7 @@ fn factory_keeps_exactly_one_incumbent_after_classifier_scratch_ends() {
         )
         .unwrap();
         let raw = crate::authoring::prefab_conversion::retention::document_dynamic_bytes(
-            &document.roots,
+            &document.placements,
             &document.entities,
             limits,
         )
@@ -422,7 +427,8 @@ fn structural_refusal_returns_no_session_and_releases_only_its_step_scratch() {
             ByteLimit::new(measured.usage().peak_retained_bytes).unwrap(),
         ));
         let mut invalid = document.clone();
-        invalid.roots[0] = SceneEntityId::new("missing-root").unwrap();
+        invalid.placements[0].target =
+            PrefabEntityTarget::source(SceneEntityId::new("missing-root").unwrap());
         let refused = factory(
             input(invalid, limits),
             source.clone(),

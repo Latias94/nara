@@ -483,7 +483,7 @@ persistent IDs or copying creation-template owner/version metadata into caller-b
 ```rust,ignore
 let basis = application.document_query_basis(document)?;
 let mut draft = application.begin_authoring_construction(&basis)?;
-let first = draft.create_entity(ScenePlacement::last(ScenePlacementOwner::Root))?;
+let first = draft.create_entity(ScenePlacement::last(ScenePlacementParent::Root))?;
 let second = draft.create_entity(ConstructionPlacement::ChildOf((&first).into()))?;
 for local in [&first, &second] {
     draft.add_component(local, ComponentTypeId::new("game.Link"))?;
@@ -511,8 +511,8 @@ Appending validates bounded intent and local affinity, not the complete Schema o
 A refused append leaves earlier intent intact. After semantic preparation refusal, rebuild the
 proposal from the tool's retained user inputs; appending a correction cannot erase an earlier
 invalid write. Do not treat the draft as a second editable document or an input-buffer owner.
-Declarations plus coalesced roots share the existing 256-operation ceiling; raw property writes
-still share their independent eight-write and selector/value limits before coalescing.
+Declarations plus the exact placement replacement share the existing 256-operation ceiling;
+raw property writes still share their independent eight-write and selector/value limits before coalescing.
 
 The independent consumer covers non-active Scene/Prefab construction, exact successful IDs,
 one Undo/Redo and persistence. The separately scoped qualification also checks affected native

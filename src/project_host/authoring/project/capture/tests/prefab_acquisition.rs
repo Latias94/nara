@@ -17,6 +17,7 @@ const PREPARED_FIXTURE_BYTES: usize = 1024 * 1024;
 
 fn instance(path: &str) -> PrefabInstance {
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path(format!("{path}.prefab.json")).unwrap(),
         overrides: None,
@@ -302,6 +303,7 @@ fn finite_containing_prefab_demand_uses_the_actual_unsaved_root_working_copy() {
         SceneEntityId::new("nested").unwrap(),
     ));
     let declaration = PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: instance("outer").source,
         overrides: Some(overlay),

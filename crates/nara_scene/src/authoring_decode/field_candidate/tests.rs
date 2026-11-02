@@ -105,10 +105,13 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
                     ComponentValue::String("preserve".into()),
                 ),
             ));
-        document.roots.push(id("unknown"));
+        document
+            .placements
+            .push(SceneEntityPlacement::root(id("unknown")));
         let mut anchor = SceneEntityRecord::new(id("anchor"));
         anchor.prefab = Some(crate::PrefabInstance {
             source: asset("prefabs/base.prefab.json"),
+            binding: crate::PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: Some(crate::PrefabOverlay {
                 components: vec![crate::PrefabComponentIntent::Set {
@@ -131,7 +134,9 @@ fn fixture(kind: AuthoringDocumentKind, degraded: bool) -> (SceneDocument, Autho
             }),
         });
         document.entities.push(anchor);
-        document.roots.push(id("anchor"));
+        document
+            .placements
+            .push(SceneEntityPlacement::root(id("anchor")));
         document.canonicalize();
     }
     let source = AuthoringDocumentSource::new(asset(match kind {
@@ -499,7 +504,7 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
         let (prefab_document, state) = fixture(AuthoringDocumentKind::Prefab, degraded);
         let prefab_document = PrefabDocument {
             inputs: Default::default(),
-            roots: prefab_document.roots,
+            placements: prefab_document.placements,
             entities: prefab_document.entities,
         };
         let mut prefab = PrefabAuthoringSession::from_published_authoring_document(
@@ -609,7 +614,7 @@ fn scene_and_prefab_field_publication_keep_history_and_quota_failure_atomic() {
     let (document_prefab, state) = fixture(AuthoringDocumentKind::Prefab, true);
     let document_prefab = PrefabDocument {
         inputs: Default::default(),
-        roots: document_prefab.roots,
+        placements: document_prefab.placements,
         entities: document_prefab.entities,
     };
     let mut prefab = PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
@@ -690,7 +695,7 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
             let (document, mut state) = fixture(kind, true);
             let prefab_document = PrefabDocument {
                 inputs: Default::default(),
-                roots: document.roots.clone(),
+                placements: document.placements.clone(),
                 entities: document.entities.clone(),
             };
             let limits = if shape_axis {

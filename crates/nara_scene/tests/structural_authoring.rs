@@ -14,8 +14,8 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, PrefabAuthoringSession,
     PrefabComponentIntent, PrefabComponentSetMode, PrefabDocument, PrefabDocumentCandidate,
     PrefabEntityTarget, PrefabInstance, PrefabOverlay, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -46,10 +46,33 @@ fn scene(document: &SceneDocument, bundle: &AuthoringSchemaBundle) -> SceneAutho
 }
 
 fn removal(document: &SceneDocument, entity: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-        entity: id(entity),
-        from: ScenePlacement::current(document, &id(entity)).unwrap(),
-    }])
+    let hierarchy = document.local_hierarchy(Default::default()).unwrap();
+    let mut pending = vec![id(entity)];
+    let mut removed = Vec::new();
+    while let Some(entity) = pending.pop() {
+        pending.extend(hierarchy.children(&entity).unwrap().iter().cloned());
+        removed.push(entity);
+    }
+    let mut operations = removed
+        .iter()
+        .map(|entity| ScenePatchOperation::RemoveEntity {
+            entity: entity.clone(),
+        })
+        .collect::<Vec<_>>();
+    operations.push(ScenePatchOperation::SetPlacements {
+        expected: document.placements.clone(),
+        value: document
+            .placements
+            .iter()
+            .filter(|entry| {
+                !removed
+                    .iter()
+                    .any(|entity| entry.target == PrefabEntityTarget::source(entity.clone()))
+            })
+            .cloned()
+            .collect(),
+    });
+    ScenePatchDocument::new(operations)
 }
 
 #[test]
@@ -71,6 +94,7 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
         record: SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
     });
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -87,15 +111,13 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
     for entity in ["plain", "unknown", "anchor"] {
         let before = session.document().clone();
         let before_manifest = session.unavailable_record_manifest().unwrap().clone();
-        let moved = session.apply_authoring_patch(&ScenePatchDocument::new([
-            ScenePatchOperation::MoveEntity {
-                entity: id(entity),
-                from: ScenePlacement::current(&before, &id(entity)).unwrap(),
-                to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                    parent: id("parent"),
-                }),
-            },
-        ]));
+        let moved = session.apply_authoring_patch(&ScenePatchDocument::set_placement(
+            &before.placements,
+            PrefabEntityTarget::source(id(entity)),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id("parent"),
+            ))),
+        ));
         assert!(moved.applied, "{:?}", moved.diagnostics);
         let after = session.document().clone();
         let after_manifest = session.unavailable_record_manifest().unwrap().clone();
@@ -134,7 +156,7 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
         assert_eq!(session.unavailable_record_manifest(), Some(&after_manifest));
     }
     let published = PrefabDocumentCandidate::decode_json_bytes(
-        PrefabDocument::new(document.roots.clone(), document.entities.clone())
+        PrefabDocument::new(document.placements.clone(), document.entities.clone())
             .to_json_string()
             .unwrap()
             .as_bytes(),
@@ -151,13 +173,11 @@ fn move_preserves_unknown_payloads_and_exact_history_in_both_document_kinds() {
     let before = prefab.document().clone();
     assert!(
         prefab
-            .apply_authoring_patch(&ScenePatchDocument::new([
-                ScenePatchOperation::MoveEntity {
-                    entity: id("anchor"),
-                    from: ScenePlacement::current_prefab(&before, &id("anchor")).unwrap(),
-                    to: ScenePlacement::first(ScenePlacementOwner::Root),
-                }
-            ]))
+            .apply_authoring_patch(&ScenePatchDocument::set_placement(
+                &before.placements,
+                PrefabEntityTarget::source(id("anchor")),
+                ScenePlacement::first(ScenePlacementParent::Root),
+            ))
             .applied
     );
     assert!(prefab.undo_authoring().applied);
@@ -190,9 +210,18 @@ fn deleting_a_complete_subtree_restores_exact_records_without_component_edit_per
     )])
     .unwrap();
     let document = SceneDocument::new(
-        [id("root"), id("tail")],
         [
-            SceneEntityRecord::new(id("root")).with_children([id("child")]),
+            SceneEntityPlacement::root(id("root")),
+            SceneEntityPlacement::root(id("tail")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("root")),
             SceneEntityRecord::new(id("child")).with_component(
                 component,
                 SceneComponentRecord::new(
@@ -212,7 +241,10 @@ fn deleting_a_complete_subtree_restores_exact_records_without_component_edit_per
     assert!(session.undo_authoring().applied);
     assert_eq!(session.document(), &document);
     assert!(session.redo_authoring().applied);
-    assert_eq!(session.document().roots, [id("tail")]);
+    assert_eq!(
+        session.document().placements,
+        [SceneEntityPlacement::root(id("tail"))]
+    );
 
     let mut ordinary_restore = scene(session.document(), &bundle);
     assert!(!ordinary_restore.apply_authoring_patch(&inverse).applied);
@@ -221,7 +253,7 @@ fn deleting_a_complete_subtree_restores_exact_records_without_component_edit_per
             AuthoringAdapterReceipt::from_schema_owner(&bundle.owners()[0], &Default::default())
                 .unwrap(),
         ];
-    let prefab = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let prefab = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -308,10 +340,23 @@ fn deletion_rejects_effective_default_inbound_references_without_mutation() {
     );
 
     let mut subtree = document.clone();
-    subtree.roots = vec![id("root")];
-    subtree
-        .entities
-        .push(SceneEntityRecord::new(id("root")).with_children([id("source"), id("target")]));
+    subtree.placements = vec![
+        SceneEntityPlacement::root(id("root")),
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(id("source")),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id("root"),
+            ))),
+        ),
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(id("target")),
+            ScenePlacement::after(
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(id("root"))),
+                PrefabEntityTarget::source(id("source")),
+            ),
+        ),
+    ];
+    subtree.entities.push(SceneEntityRecord::new(id("root")));
     subtree.canonicalize();
     let mut session = scene(&subtree, &bundle);
     assert!(
@@ -331,6 +376,7 @@ fn deletion_does_not_guess_unknown_references_or_prefab_namespaces() {
         let mut blocker = SceneEntityRecord::new(id("blocker"));
         if prefab {
             blocker.prefab = Some(PrefabInstance {
+                binding: nara_scene::PrefabInstanceBinding::Forest,
                 source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
                 arguments: None,
                 overrides: None,
@@ -362,9 +408,18 @@ fn deletion_does_not_guess_unknown_references_or_prefab_namespaces() {
 #[test]
 fn move_rejects_cycles_and_stale_placement_without_history_or_payload_changes() {
     let document = SceneDocument::new(
-        [id("root"), id("tail")],
         [
-            SceneEntityRecord::new(id("root")).with_children([id("child")]),
+            SceneEntityPlacement::root(id("root")),
+            SceneEntityPlacement::root(id("tail")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("root")),
             SceneEntityRecord::new(id("child")),
             SceneEntityRecord::new(id("tail")),
         ],
@@ -373,25 +428,31 @@ fn move_rejects_cycles_and_stale_placement_without_history_or_payload_changes() 
     let mut session = scene(&document, &bundle);
     let revision = session.revision();
     let history = session.history_status();
-    for (entity, from, to) in [
+    let mut stale = document.placements.clone();
+    stale[1].placement = ScenePlacement::first(ScenePlacementParent::Root);
+    for (entity, expected, to) in [
         (
             id("root"),
-            ScenePlacement::current(&document, &id("root")).unwrap(),
-            ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: id("child"),
-            }),
+            document.placements.clone(),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id("child"),
+            ))),
         ),
         (
             id("tail"),
-            ScenePlacement::first(ScenePlacementOwner::Root),
-            ScenePlacement::last(ScenePlacementOwner::Parent { parent: id("root") }),
+            stale,
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id("root"),
+            ))),
         ),
     ] {
         assert!(
             !session
-                .apply_authoring_patch(&ScenePatchDocument::new([
-                    ScenePatchOperation::MoveEntity { entity, from, to }
-                ]))
+                .apply_authoring_patch(&ScenePatchDocument::set_placement(
+                    &expected,
+                    PrefabEntityTarget::source(entity),
+                    to,
+                ))
                 .applied
         );
         assert_eq!(session.document(), &document);

@@ -17,8 +17,8 @@ use nara_reflect::{
 
 use super::*;
 use crate::{
-    PrefabInstance, PrefabProjectionPath, SceneComponentBindings, SceneComponentRecord,
-    SceneEntityProvenance, SceneEntityRecord,
+    PrefabProjectionPath, SceneComponentBindings, SceneComponentRecord, SceneEntityProvenance,
+    draft::ExpandedSceneEntity,
 };
 
 #[derive(Component)]
@@ -87,14 +87,29 @@ fn value(target: ComponentValue) -> ComponentValue {
     ComponentValue::map([("target", target)])
 }
 
-fn entity(name: &str, target: ComponentValue) -> SceneEntityRecord {
-    SceneEntityRecord::new(id(name)).with_component(
-        component(),
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target)),
-    )
+fn entity(name: &str, target: ComponentValue) -> ExpandedSceneEntity {
+    ExpandedSceneEntity {
+        id: id(name),
+        children: Vec::new(),
+        components: [(
+            component(),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, value(target)),
+        )]
+        .into_iter()
+        .collect(),
+    }
 }
 
-fn provenance(document: &SceneDocument) -> SceneEntityProvenanceMap {
+fn flat_draft(entities: impl IntoIterator<Item = ExpandedSceneEntity>) -> SceneDraft {
+    let entities = entities.into_iter().collect::<Vec<_>>();
+    let roots = entities
+        .iter()
+        .map(|entity| entity.id.clone())
+        .collect::<Vec<_>>();
+    SceneDraft::new(roots, entities)
+}
+
+fn provenance(document: &SceneDraft) -> SceneEntityProvenanceMap {
     document
         .entities
         .iter()
@@ -107,44 +122,38 @@ fn provenance(document: &SceneDocument) -> SceneEntityProvenanceMap {
         .collect()
 }
 
-fn flat_claims(
-    document: SceneDocument,
-    origins: SceneEntityProvenanceMap,
-) -> claims::FlatSceneClaims {
+fn flat_claims(document: SceneDraft, origins: SceneEntityProvenanceMap) -> claims::FlatSceneClaims {
     claims::FlatSceneClaims {
         roots: document.roots,
         canonical_provenance: origins,
         entities: document
             .entities
             .into_iter()
-            .map(|entity| {
-                assert!(entity.prefab.is_none());
-                claims::FlatSceneEntityClaim {
-                    id: entity.id,
-                    children: entity.children,
-                    components: entity
-                        .components
-                        .into_iter()
-                        .map(|(id, record)| {
-                            assert!(record.contextual_defaults.is_empty());
-                            (
-                                id,
-                                claims::FlatSceneComponentClaim {
-                                    schema_owner: record.owner,
-                                    version: record.version,
-                                    value: record.value,
-                                },
-                            )
-                        })
-                        .collect(),
-                }
+            .map(|entity| claims::FlatSceneEntityClaim {
+                id: entity.id,
+                children: entity.children,
+                components: entity
+                    .components
+                    .into_iter()
+                    .map(|(id, record)| {
+                        assert!(record.contextual_defaults.is_empty());
+                        (
+                            id,
+                            claims::FlatSceneComponentClaim {
+                                schema_owner: record.owner,
+                                version: record.version,
+                                value: record.value,
+                            },
+                        )
+                    })
+                    .collect(),
             })
             .collect(),
     }
 }
 
 fn seal(
-    document: SceneDocument,
+    document: SceneDraft,
     registry: &ComponentRegistrySnapshot,
 ) -> Result<CompiledSceneDocument, CompiledSceneAdmissionError<Infallible>> {
     let origins = provenance(&document);
@@ -152,7 +161,7 @@ fn seal(
 }
 
 fn seal_with_provenance(
-    document: SceneDocument,
+    document: SceneDraft,
     origins: SceneEntityProvenanceMap,
     registry: &ComponentRegistrySnapshot,
 ) -> Result<CompiledSceneDocument, CompiledSceneAdmissionError<Infallible>> {
@@ -194,7 +203,7 @@ fn projected(
     )
 }
 
-fn wide_optional_fixture() -> (SceneDocument, ComponentRegistrySnapshot, Arc<AtomicUsize>) {
+fn wide_optional_fixture() -> (SceneDraft, ComponentRegistrySnapshot, Arc<AtomicUsize>) {
     let fields = (0..1024).map(|index| {
         let name = format!("field_{index}");
         ComponentFieldSchema::optional(
@@ -209,14 +218,19 @@ fn wide_optional_fixture() -> (SceneDocument, ComponentRegistrySnapshot, Arc<Ato
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields(fields);
     let (registry, calls) = registry(schema, None);
-    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id("a"))
-        .with_component(
+    let document = flat_draft([ExpandedSceneEntity {
+        id: id("a"),
+        children: Vec::new(),
+        components: [(
             component(),
             SceneComponentRecord::new(
                 ComponentSchemaVersion::ONE,
                 ComponentValue::Map(BTreeMap::new()),
             ),
-        )]);
+        )]
+        .into_iter()
+        .collect(),
+    }]);
     (document, registry, calls)
 }
 
@@ -251,7 +265,8 @@ fn admission_moves_payloads_and_preserves_order_canonical_identity_and_selected_
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
     let (registry, calls) = registry(schema, Some("game.compiled-owner"));
-    let mut root = entity("root", ComponentValue::Null).with_children([id("z"), id("a")]);
+    let mut root = entity("root", ComponentValue::Null);
+    root.children = vec![id("z"), id("a")];
     let ComponentValue::Map(fields) = &mut root.components.get_mut(&component()).unwrap().value
     else {
         unreachable!()
@@ -264,7 +279,7 @@ fn admission_moves_payloads_and_preserves_order_canonical_identity_and_selected_
         unreachable!()
     };
     let payload_pointer = payload.as_ptr();
-    let document = SceneDocument {
+    let document = SceneDraft {
         roots: vec![id("root"), id("other")],
         entities: vec![
             entity("z", ComponentValue::Null),
@@ -325,8 +340,7 @@ fn later_authored_leaves_in_declared_and_retained_values_refuse_the_complete_bat
     ] {
         let mut later = entity("z", ComponentValue::Null);
         later.components.get_mut(&component()).unwrap().value = later_value;
-        let document =
-            SceneDocument::from_ordered_roots([entity("a", ComponentValue::Null), later]);
+        let document = flat_draft([entity("a", ComponentValue::Null), later]);
         let report = diagnostics(seal(document, &registry));
         assert!(
             has_code(&report, "scene.invalid-component-payload"),
@@ -339,17 +353,19 @@ fn later_authored_leaves_in_declared_and_retained_values_refuse_the_complete_bat
 #[test]
 fn declared_local_references_must_close_over_the_complete_document() {
     let (registry, calls) = registry(schema(None), None);
-    let document = SceneDocument::from_ordered_roots([entity(
-        "a",
-        ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("b") }),
-    )]);
-    let report = diagnostics(seal(document.clone(), &registry));
+    let make_draft = || {
+        flat_draft([entity(
+            "a",
+            ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("b") }),
+        )])
+    };
+    let report = diagnostics(seal(make_draft(), &registry));
     assert!(
         has_code(&report, "scene.local-reference-invalid"),
         "{report:?}",
     );
 
-    let mut complete = document;
+    let mut complete = make_draft();
     complete.entities.push(entity("b", ComponentValue::Null));
     complete.roots.push(id("b"));
     assert!(seal(complete, &registry).is_ok());
@@ -359,21 +375,19 @@ fn declared_local_references_must_close_over_the_complete_document() {
 #[test]
 fn hierarchy_and_canonical_provenance_are_both_required() {
     let (registry, calls) = registry(schema(None), None);
-    let dangling = SceneDocument::from_ordered_roots([
-        entity("a", ComponentValue::Null).with_children([id("missing")])
-    ]);
+    let mut parent = entity("a", ComponentValue::Null);
+    parent.children.push(id("missing"));
+    let dangling = flat_draft([parent]);
     let report = diagnostics(seal(dangling, &registry));
     assert!(has_code(&report, "scene.dangling-child"), "{report:?}");
-    let cycle = SceneDocument::new(
-        Vec::<SceneEntityId>::new(),
-        [
-            entity("a", ComponentValue::Null).with_children([id("b")]),
-            entity("b", ComponentValue::Null).with_children([id("a")]),
-        ],
-    );
+    let mut left = entity("a", ComponentValue::Null);
+    left.children.push(id("b"));
+    let mut right = entity("b", ComponentValue::Null);
+    right.children.push(id("a"));
+    let cycle = SceneDraft::new([], [left, right]);
     let report = diagnostics(seal(cycle, &registry));
     assert!(has_code(&report, "scene.placement-cycle"), "{report:?}");
-    let document = SceneDocument::from_ordered_roots([entity("a", ComponentValue::Null)]);
+    let document = flat_draft([entity("a", ComponentValue::Null)]);
     let report = diagnostics(admit_draft(
         document,
         SceneEntityProvenanceMap::new(),
@@ -387,23 +401,8 @@ fn hierarchy_and_canonical_provenance_are_both_required() {
 }
 
 #[test]
-fn source_declarations_cannot_be_silently_discarded_by_the_sealer() {
+fn contextual_defaults_cannot_be_silently_discarded_by_the_sealer() {
     let (registry, calls) = registry(schema(Some(ComponentValue::Null)), None);
-    let mut with_prefab = entity("a", ComponentValue::Null);
-    with_prefab.prefab = Some(PrefabInstance {
-        source: nara_asset::AssetRef::path("prefabs/source.prefab.ron").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
-    let report = diagnostics(seal(
-        SceneDocument::from_ordered_roots([with_prefab]),
-        &registry,
-    ));
-    assert!(
-        has_code(&report, "scene.prefab-instance-unsupported"),
-        "{report:?}",
-    );
-
     let mut contextual = entity("a", ComponentValue::Null);
     contextual
         .components
@@ -411,10 +410,7 @@ fn source_declarations_cannot_be_silently_discarded_by_the_sealer() {
         .unwrap()
         .contextual_defaults
         .insert(ComponentFieldId::new("target"), authored());
-    let report = diagnostics(seal(
-        SceneDocument::from_ordered_roots([contextual]),
-        &registry,
-    ));
+    let report = diagnostics(seal(flat_draft([contextual]), &registry));
     assert!(
         has_code(&report, "scene.invalid-component-payload"),
         "{report:?}",
@@ -427,19 +423,12 @@ fn implicit_defaults_are_refused_while_explicit_null_is_retained() {
     let (registry, calls) = registry(schema(Some(ComponentValue::Null)), None);
     let mut implicit = entity("a", ComponentValue::Null);
     implicit.components.get_mut(&component()).unwrap().value = ComponentValue::Map(BTreeMap::new());
-    let report = diagnostics(seal(
-        SceneDocument::from_ordered_roots([implicit]),
-        &registry,
-    ));
+    let report = diagnostics(seal(flat_draft([implicit]), &registry));
     assert!(
         has_code(&report, "scene.compiled-incomplete-value"),
         "{report:?}",
     );
-    let explicit = seal(
-        SceneDocument::from_ordered_roots([entity("a", ComponentValue::Null)]),
-        &registry,
-    )
-    .unwrap();
+    let explicit = seal(flat_draft([entity("a", ComponentValue::Null)]), &registry).unwrap();
     assert_eq!(
         explicit.entities()[0].components()[&component()].value(),
         &value(ComponentValue::Null),
@@ -453,26 +442,20 @@ fn current_definitions_and_source_owner_claims_are_checked_before_stamping() {
     let mut claimed = entity("a", ComponentValue::Null);
     claimed.components.get_mut(&component()).unwrap().owner =
         Some(PersistentComponentSchemaOwnerId::try_new("game.other").unwrap());
-    let report = diagnostics(seal(
-        SceneDocument::from_ordered_roots([claimed]),
-        &registry,
-    ));
+    let report = diagnostics(seal(flat_draft([claimed]), &registry));
     assert!(
         has_code(&report, "scene.component-owner-mismatch"),
         "{report:?}",
     );
     let mut stale = entity("a", ComponentValue::Null);
     stale.components.get_mut(&component()).unwrap().version = ComponentSchemaVersion(2);
-    assert!(diagnostics(seal(SceneDocument::from_ordered_roots([stale]), &registry)).has_errors(),);
+    assert!(diagnostics(seal(flat_draft([stale]), &registry)).has_errors());
     let mut unknown = entity("a", ComponentValue::Null);
     let record = unknown.components.remove(&component()).unwrap();
     unknown
         .components
         .insert(ComponentTypeId::new("game.Missing"), record);
-    let report = diagnostics(seal(
-        SceneDocument::from_ordered_roots([unknown]),
-        &registry,
-    ));
+    let report = diagnostics(seal(flat_draft([unknown]), &registry));
     assert!(has_code(&report, "scene.unknown-component"), "{report:?}");
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 }
@@ -480,11 +463,7 @@ fn current_definitions_and_source_owner_claims_are_checked_before_stamping() {
 #[test]
 fn unowned_native_definitions_remain_actually_unowned() {
     let (registry, calls) = registry(schema(None), None);
-    let compiled = seal(
-        SceneDocument::from_ordered_roots([entity("a", ComponentValue::Null)]),
-        &registry,
-    )
-    .unwrap();
+    let compiled = seal(flat_draft([entity("a", ComponentValue::Null)]), &registry).unwrap();
     assert!(
         compiled.entities()[0].components()[&component()]
             .schema_owner()
@@ -511,17 +490,23 @@ fn mixed_definitions_require_the_data_owner_and_flat_data_values() {
     .unwrap();
     let bindings = SceneComponentBindings::new(native, [data_owner]).unwrap();
     let make_document = |target, claim| {
-        SceneDocument::from_ordered_roots([
+        flat_draft([
             entity("a", ComponentValue::Null),
-            SceneEntityRecord::new(id("z")).with_component(
-                data_component.clone(),
-                SceneComponentRecord {
-                    owner: claim,
-                    version: ComponentSchemaVersion::ONE,
-                    value: value(target),
-                    contextual_defaults: BTreeMap::new(),
-                },
-            ),
+            ExpandedSceneEntity {
+                id: id("z"),
+                children: Vec::new(),
+                components: [(
+                    data_component.clone(),
+                    SceneComponentRecord {
+                        owner: claim,
+                        version: ComponentSchemaVersion::ONE,
+                        value: value(target),
+                        contextual_defaults: BTreeMap::new(),
+                    },
+                )]
+                .into_iter()
+                .collect(),
+            },
         ])
     };
     for (target, claim, accepted) in [
@@ -555,15 +540,16 @@ fn mixed_definitions_require_the_data_owner_and_flat_data_values() {
 #[test]
 fn aggregate_value_limits_are_inclusive_and_exclude_identity_metadata() {
     let (registry, calls) = registry(schema(None), None);
-    let document = SceneDocument::from_ordered_roots([
-        entity("a-long-source-identity", ComponentValue::Null),
-        entity("z-another-long-source-identity", ComponentValue::Null),
-    ]);
     // Two Maps, each with the six-byte key "target" and one zero-byte Null leaf.
     for (nodes, bytes, accepted) in [(4, 12, true), (3, 12, false), (4, 11, false)] {
+        let document = flat_draft([
+            entity("a-long-source-identity", ComponentValue::Null),
+            entity("z-another-long-source-identity", ComponentValue::Null),
+        ]);
+        let origins = provenance(&document);
         let result = admit_draft(
-            document.clone(),
-            provenance(&document),
+            document,
+            origins,
             SchemaAuthority::Native(&registry),
             ComponentValueMaterializationLimits::new(
                 ItemLimit::new(nodes).unwrap(),
@@ -581,11 +567,12 @@ fn aggregate_value_limits_are_inclusive_and_exclude_identity_metadata() {
 #[test]
 fn working_admission_preserves_exact_refusals_at_the_inclusive_boundary() {
     let (registry, calls) = registry(schema(Some(ComponentValue::Null)), Some("game.selected"));
-    let document = SceneDocument::from_ordered_roots([entity("a", ComponentValue::Null)]);
+    let document = flat_draft([entity("a", ComponentValue::Null)]);
+    let origins = provenance(&document);
     let mut required = 0usize;
     admit_draft(
-        document.clone(),
-        provenance(&document),
+        document,
+        origins,
         SchemaAuthority::Native(&registry),
         ComponentValueMaterializationLimits::default(),
         None,
@@ -597,11 +584,13 @@ fn working_admission_preserves_exact_refusals_at_the_inclusive_boundary() {
     .unwrap();
     assert!(required > 0);
     for maximum in [required, required - 1] {
+        let document = flat_draft([entity("a", ComponentValue::Null)]);
+        let origins = provenance(&document);
         let mut used = 0usize;
         let refusal = "owner allowance refused";
         let result = admit_draft(
-            document.clone(),
-            provenance(&document),
+            document,
+            origins,
             SchemaAuthority::Native(&registry),
             ComponentValueMaterializationLimits::default(),
             None,
@@ -634,12 +623,14 @@ fn duplicate_canonical_addresses_refuse_identical_and_aliased_lookups() {
     let (registry, calls) = registry(schema(None), None);
     let key = prefab_key("source");
     for lookup in ["prefabs/source.ron", "aliases/source.ron"] {
-        let document = SceneDocument::new(
+        let mut anchor = ExpandedSceneEntity::new(id("anchor"));
+        anchor.children = vec![id("p0"), id("p1")];
+        let document = SceneDraft::new(
             [id("anchor")],
             [
-                SceneEntityRecord::new(id("anchor")).with_children([id("p0"), id("p1")]),
-                SceneEntityRecord::new(id("p0")),
-                SceneEntityRecord::new(id("p1")),
+                anchor,
+                ExpandedSceneEntity::new(id("p0")),
+                ExpandedSceneEntity::new(id("p1")),
             ],
         );
         let mut origins = provenance(&document);
@@ -722,8 +713,7 @@ fn distinct_repeated_nested_sources_anchors_and_step_kinds_are_admitted() {
     ]
     .into_iter()
     .collect::<SceneEntityProvenanceMap>();
-    let document =
-        SceneDocument::from_ordered_roots(origins.keys().cloned().map(SceneEntityRecord::new));
+    let document = flat_draft(origins.keys().cloned().map(ExpandedSceneEntity::new));
     let compiled = seal_with_provenance(document, origins.clone(), &registry).unwrap();
     assert_eq!(compiled.canonical_provenance(), &origins);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -767,9 +757,9 @@ fn canonical_provenance_requires_valid_prefab_keys_at_every_source_step() {
     ];
     for invalid in invalid {
         for keys in [[&invalid, &valid], [&valid, &invalid]] {
-            let document = SceneDocument::from_ordered_roots([
-                SceneEntityRecord::new(id("anchor")),
-                SceneEntityRecord::new(id("projected")),
+            let document = flat_draft([
+                ExpandedSceneEntity::new(id("anchor")),
+                ExpandedSceneEntity::new(id("projected")),
             ]);
             let mut origins = provenance(&document);
             origins.insert(
@@ -815,9 +805,9 @@ fn canonical_provenance_keeps_associated_document_keys_for_primary_products() {
         (named, auxiliary, false),
         (location, auxiliary, false),
     ] {
-        let document = SceneDocument::from_ordered_roots([
-            SceneEntityRecord::new(id("anchor")),
-            SceneEntityRecord::new(id("projected")),
+        let document = flat_draft([
+            ExpandedSceneEntity::new(id("anchor")),
+            ExpandedSceneEntity::new(id("projected")),
         ]);
         let mut origins = provenance(&document);
         origins.insert(
@@ -850,10 +840,10 @@ fn canonical_provenance_keeps_associated_document_keys_for_primary_products() {
 fn canonical_address_index_admission_precedes_duplicate_detection() {
     let (registry, calls) = registry(schema(None), None);
     let key = prefab_key("source");
-    let document = SceneDocument::from_ordered_roots([
-        SceneEntityRecord::new(id("anchor")),
-        SceneEntityRecord::new(id("p0")),
-        SceneEntityRecord::new(id("p1")),
+    let document = flat_draft([
+        ExpandedSceneEntity::new(id("anchor")),
+        ExpandedSceneEntity::new(id("p0")),
+        ExpandedSceneEntity::new(id("p1")),
     ]);
     let mut origins = provenance(&document);
     for entity in ["p0", "p1"] {
@@ -976,18 +966,22 @@ fn wide_optional_schema_with_an_empty_explicit_value_seals_without_codecs() {
 #[test]
 fn terminal_admission_preserves_reference_work_independently_of_allocated_bytes() {
     let (registry, calls) = registry(schema(None), None);
-    let document = SceneDocument::from_ordered_roots([
-        entity(
-            "a",
-            ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("b") }),
-        ),
-        SceneEntityRecord::new(id("b")),
-    ]);
+    let make_draft = || {
+        flat_draft([
+            entity(
+                "a",
+                ComponentValue::EntityReference(EntityReference::SceneLocal { entity: id("b") }),
+            ),
+            ExpandedSceneEntity::new(id("b")),
+        ])
+    };
+    let document = make_draft();
+    let origins = provenance(&document);
     let mut reference_nodes = 0usize;
     let mut reference_bytes = 0usize;
     admit_draft(
-        document.clone(),
-        provenance(&document),
+        document,
+        origins,
         SchemaAuthority::Native(&registry),
         ComponentValueMaterializationLimits::default(),
         None,
@@ -1006,10 +1000,12 @@ fn terminal_admission_preserves_reference_work_independently_of_allocated_bytes(
         (reference_nodes - 1, reference_bytes, false),
         (reference_nodes, reference_bytes - 1, false),
     ] {
+        let document = make_draft();
+        let origins = provenance(&document);
         let (mut nodes_used, mut bytes_used) = (0usize, 0usize);
         let result = admit_draft(
-            document.clone(),
-            provenance(&document),
+            document,
+            origins,
             SchemaAuthority::Native(&registry),
             ComponentValueMaterializationLimits::default(),
             None,

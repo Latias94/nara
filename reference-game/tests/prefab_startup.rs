@@ -110,7 +110,9 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert_eq!(
         ui_prefab
             .document()
-            .roots
+            .local_hierarchy(Default::default())
+            .unwrap()
+            .roots()
             .iter()
             .map(|entity| entity.as_str())
             .collect::<Vec<_>>(),

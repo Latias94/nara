@@ -19,7 +19,7 @@ use super::{
 use crate::{
     AuthoringDocumentKind, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringSchemaBasis, PrefabDocument, PrefabDocumentCandidate, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileLimits, ScenePatchReport,
+    SceneDocumentCandidate, SceneEntityRecord, SceneFileLimits, ScenePatchReport,
     SourceDocumentKey, SourceDocumentKind, UnavailableRecordManifest,
     authoring_decode::{AuthoringDocumentState, schema_upgrade::AuthoredFieldUpgrade},
 };
@@ -249,7 +249,7 @@ pub fn admit_authored_upgrade_scene_source(
 /// Admits an unopened nominal Prefab and its already-retained original-source token.
 ///
 /// This has the same complete-set and cumulative-work contract as
-/// [`admit_authored_upgrade_scene_source`]. The classifier borrows the original owned roots
+/// [`admit_authored_upgrade_scene_source`]. The classifier borrows the original owned placements
 /// and records through its Scene-shaped structural input; no document is cloned and no Scene
 /// Session is created. The returned Session, classification and token all retain Prefab kind.
 pub fn admit_authored_upgrade_prefab_source(
@@ -262,7 +262,7 @@ pub fn admit_authored_upgrade_prefab_source(
     let inputs = document.inputs;
     let inputs_bytes = crate::authoring_decode::retained_prefab_inputs_bytes(&inputs);
     let document = SceneDocument {
-        roots: document.roots,
+        placements: document.placements,
         entities: document.entities,
     };
     work.begin_step()?;
@@ -282,7 +282,7 @@ pub fn admit_authored_upgrade_prefab_source(
             PrefabAuthoringSession {
                 document: Arc::new(PrefabDocument {
                     inputs,
-                    roots: document.roots,
+                    placements: document.placements,
                     entities: document.entities,
                 }),
                 history,
@@ -306,7 +306,7 @@ fn admit_unopened_source(
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<AuthoringDocumentState, ScenePatchReport> {
     let original = super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        &document.roots,
+        &document.placements,
         &document.entities,
         limits,
         |bytes| work.reserve("authored-upgrade-source-scan", bytes),
@@ -548,7 +548,7 @@ impl SceneAuthoringSession {
         retain_incumbent(
             &self.authority,
             &self.history,
-            &self.document.roots,
+            &self.document.placements,
             &self.document.entities,
             SourceDocumentKind::Scene,
             work,
@@ -623,7 +623,7 @@ impl SceneAuthoringSession {
             upgrade,
         )?;
         admit_incumbent(
-            &self.document.roots,
+            &self.document.placements,
             &self.document.entities,
             source.state,
             &self.history,
@@ -681,7 +681,7 @@ impl PrefabAuthoringSession {
         retain_incumbent(
             &self.authority,
             &self.history,
-            &self.document.roots,
+            &self.document.placements,
             &self.document.entities,
             SourceDocumentKind::Prefab,
             work,
@@ -752,7 +752,7 @@ impl PrefabAuthoringSession {
             upgrade,
         )?;
         admit_incumbent(
-            &self.document.roots,
+            &self.document.placements,
             &self.document.entities,
             source.state,
             &self.history,
@@ -818,7 +818,7 @@ impl UpgradeSource<'_, SceneDocument> {
                 &mut |stage, bytes| work.reserve(stage, bytes),
             )?;
             let retained = prepared_retained_bytes(
-                &prepared.document.roots,
+                &prepared.document.placements,
                 &prepared.document.entities,
                 &prepared.checkpoint,
                 size_of::<PreparedSceneAuthoredSchemaUpgrade>() + size_of::<SceneDocument>(),
@@ -849,7 +849,12 @@ impl UpgradeSource<'_, SceneDocument> {
             upgrade,
         )?;
         let (candidate, _) = candidate.into_authoring_parts();
-        admit_candidate(&candidate.roots, &candidate.entities, self.state, admit)?;
+        admit_candidate(
+            &candidate.placements,
+            &candidate.entities,
+            self.state,
+            admit,
+        )?;
         admit_checkpoint_storage::<PreparedSceneAuthoredSchemaUpgrade, SceneDocument>(
             source_key, admit,
         )?;
@@ -889,7 +894,7 @@ impl UpgradeSource<'_, PrefabDocument> {
                 &mut |stage, bytes| work.reserve(stage, bytes),
             )?;
             let retained = prepared_retained_bytes(
-                &prepared.document.roots,
+                &prepared.document.placements,
                 &prepared.document.entities,
                 &prepared.checkpoint,
                 size_of::<PreparedPrefabAuthoredSchemaUpgrade>() + size_of::<PrefabDocument>(),
@@ -920,7 +925,12 @@ impl UpgradeSource<'_, PrefabDocument> {
             upgrade,
         )?;
         let (candidate, _) = candidate.into_authoring_parts();
-        admit_candidate(&candidate.roots, &candidate.entities, self.state, admit)?;
+        admit_candidate(
+            &candidate.placements,
+            &candidate.entities,
+            self.state,
+            admit,
+        )?;
         admit_checkpoint_storage::<PreparedPrefabAuthoredSchemaUpgrade, PrefabDocument>(
             source_key, admit,
         )?;
@@ -1080,14 +1090,14 @@ fn require_successor(
 }
 
 fn admit_incumbent(
-    original_roots: &[SceneEntityId],
+    original_placements: &[crate::SceneEntityPlacement],
     original_entities: &[SceneEntityRecord],
     state: &AuthoringDocumentState,
     history: &AuthoringHistory,
     admit: &mut AdmissionCallback<'_>,
 ) -> Result<usize, ScenePatchReport> {
     let original = super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        original_roots,
+        original_placements,
         original_entities,
         state.file_limits(),
         |bytes| charge(admit, "authored-upgrade-source-scan", bytes),
@@ -1124,13 +1134,13 @@ fn admit_incumbent(
 }
 
 fn admit_candidate(
-    candidate_roots: &[SceneEntityId],
+    candidate_placements: &[crate::SceneEntityPlacement],
     candidate_entities: &[SceneEntityRecord],
     state: &AuthoringDocumentState,
     admit: &mut AdmissionCallback<'_>,
 ) -> Result<(), ScenePatchReport> {
     let candidate = super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        candidate_roots,
+        candidate_placements,
         candidate_entities,
         state.file_limits(),
         |bytes| charge(admit, "authored-upgrade-candidate-scan", bytes),
@@ -1141,7 +1151,7 @@ fn admit_candidate(
 fn retain_incumbent(
     authority: &AuthoringSessionAuthority,
     history: &AuthoringHistory,
-    roots: &[SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     kind: SourceDocumentKind,
     work: &mut AuthoredSchemaUpgradeWork,
@@ -1151,7 +1161,7 @@ fn retain_incumbent(
     };
     work.begin_step()?;
     let result = (|| {
-        let bytes = admit_incumbent(roots, entities, state, history, &mut |stage, bytes| {
+        let bytes = admit_incumbent(placements, entities, state, history, &mut |stage, bytes| {
             work.reserve(stage, bytes)
         })?;
         work.retain_output(Some(bytes))?;
@@ -1162,14 +1172,14 @@ fn retain_incumbent(
 }
 
 fn prepared_retained_bytes(
-    roots: &[SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     checkpoint: &PreparedCheckpoint,
     fixed: usize,
     work: &mut AuthoredSchemaUpgradeWork,
 ) -> Result<usize, ScenePatchReport> {
     let source = super::prefab_conversion::retention::document_dynamic_bytes_with_admission(
-        roots,
+        placements,
         entities,
         checkpoint.state.file_limits(),
         |bytes| work.reserve("authored-upgrade-output-source-cost", bytes),

@@ -591,6 +591,7 @@ fn mixed_scene_and_demanded_dirty_prefabs_adopt_one_basis_without_replacing_hist
     let anchor = |id: &str, source: &str| {
         let mut anchor = SceneEntityRecord::new(SceneEntityId::new(id).unwrap());
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path(source).unwrap(),
             overrides: None,

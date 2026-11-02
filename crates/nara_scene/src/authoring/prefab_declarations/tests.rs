@@ -3,10 +3,10 @@ use std::sync::Arc;
 use super::*;
 use crate::{
     AuthoringDocumentSource, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
-    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstanceClaim, PrefabPlacement,
-    PrefabPlacementParent, PrefabPlacementSlot, PrefabPropertyClaim, PrefabPropertyIntent,
-    SceneAuthoringHistoryLimits, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-    SceneEntityId, SourceDocumentKey, SourceDocumentKind,
+    PrefabDocumentCandidate, PrefabEntityTarget, PrefabInstanceClaim, PrefabPropertyClaim,
+    PrefabPropertyIntent, SceneAuthoringHistoryLimits, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, ScenePlacement,
+    ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
 };
 use nara_asset::AssetRef;
 use nara_reflect::{
@@ -46,6 +46,7 @@ fn overlay() -> PrefabOverlay {
 
 fn instance(overlay: PrefabOverlay) -> PrefabInstance {
     PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: AssetRef::path("prefabs/base.prefab.json").unwrap(),
         arguments: None,
         overrides: Some(overlay),
@@ -87,9 +88,16 @@ fn document(declaration: Option<PrefabInstance>) -> SceneDocument {
         opaque("keep direct"),
     );
     anchor.prefab = declaration;
-    anchor.children.push(id("child"));
     SceneDocument::new(
-        [id("anchor")],
+        [
+            SceneEntityPlacement::root(id("anchor")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("anchor"),
+                ))),
+            ),
+        ],
         [anchor, SceneEntityRecord::new(id("child"))],
     )
 }
@@ -122,7 +130,7 @@ fn scene_with_history_limits(
 }
 
 fn prefab(document: &SceneDocument) -> PrefabAuthoringSession {
-    let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     let published =
         PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -350,10 +358,9 @@ fn intent_slots_remove_only_the_selected_array_entry_without_cascades() {
     original
         .components
         .push(unknown_intent("keep unless selected"));
-    original.placements.push(PrefabPlacement {
+    original.placements.push(SceneEntityPlacement {
         target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
+        placement: ScenePlacement::last(ScenePlacementParent::Root),
     });
     original
         .suppressions

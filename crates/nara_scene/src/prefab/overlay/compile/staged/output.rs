@@ -12,7 +12,7 @@ where
 {
     pub(super) fn materialize(
         &mut self,
-        mut document: SceneDocument,
+        mut document: SceneDraft,
         references: ReferencePrograms,
     ) -> Result<StagedSceneOutput, SceneCompilationFailure> {
         self.admit(self.nodes.len().checked_mul(256))?;
@@ -26,16 +26,16 @@ where
             .extend(self.root.entities.iter().map(|record| record.id.clone()));
         self.admit(document.entities.iter().try_fold(0usize, |bytes, record| {
             bytes
-                .checked_add(size_of::<SceneEntityRecord>())?
+                .checked_add(size_of::<ExpandedSceneEntity>())?
                 .checked_add(provenance_string_bytes(record.id.as_str())?.checked_mul(2)?)
         }))?;
-        let projected = SceneDocument {
+        let projected = SceneDraft {
             roots: Vec::new(),
             entities: document
                 .entities
                 .iter()
                 .filter(|record| self.nodes[self.locators[&record.id]].scope != 0)
-                .map(|record| SceneEntityRecord::new(record.id.clone()))
+                .map(|record| ExpandedSceneEntity::new(record.id.clone()))
                 .collect(),
         };
         let mut identifiers = self
@@ -47,6 +47,33 @@ where
                 self.nodes[node].locator.clone(),
                 self.nodes[node].origin.entity().clone(),
             );
+        }
+        self.admit(
+            self.scopes[0]
+                .output
+                .iter()
+                .try_fold(0usize, |bytes, &facet| {
+                    let canonical = self.canonical_node(0, facet);
+                    if facet == canonical {
+                        return Some(bytes);
+                    }
+                    bytes
+                        .checked_add(128)?
+                        .checked_add(provenance_string_bytes(self.nodes[facet].locator.as_str())?)?
+                        .checked_add(provenance_string_bytes(
+                            identifiers.get(&self.nodes[canonical].locator)?.as_str(),
+                        )?)
+                }),
+        )?;
+        for &facet in &self.scopes[0].output {
+            let canonical = self.canonical_node(0, facet);
+            if facet != canonical {
+                let id = identifiers
+                    .get(&self.nodes[canonical].locator)
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
+                    .clone();
+                identifiers.insert(self.nodes[facet].locator.clone(), id);
+            }
         }
         self.admit(
             document
@@ -158,7 +185,7 @@ where
                                 let mapped = identifiers
                                     .get(&self.nodes[*target].locator)
                                     .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
-                                if self.nodes[*target].scope != 0 {
+                                if self.nodes[self.canonical_node(0, *target)].scope != 0 {
                                     accumulate_generated_identifier_bytes(
                                         self.context.usage.generated_identifier_bytes,
                                         &mut generated,
@@ -302,9 +329,93 @@ where
         for root in &mut document.roots {
             *root = identifiers[root].clone();
         }
+        #[cfg(feature = "serde")]
+        let targets = if self.selected_anchor.is_some() {
+            let cost = self.scopes[0]
+                .output
+                .iter()
+                .try_fold(0usize, |bytes, &facet| {
+                    bytes
+                        .checked_add(self.relative_bytes(0, facet)?)?
+                        .checked_add(provenance_string_bytes(
+                            identifiers.get(&self.nodes[facet].locator)?.as_str(),
+                        )?)?
+                        .checked_add(128)
+                });
+            self.admit(cost)?;
+            let mut targets = BTreeMap::new();
+            for &facet in &self.scopes[0].output {
+                let target = self
+                    .relative(0, facet)
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                let id = identifiers
+                    .get(&self.nodes[facet].locator)
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                targets.insert(target, id.clone());
+            }
+            targets
+        } else {
+            BTreeMap::new()
+        };
+        #[cfg(feature = "serde")]
+        let mut reference_targets = BTreeMap::new();
+        #[cfg(feature = "serde")]
+        for query in self.root.reference_queries {
+            use super::inputs::ReferenceResolution;
+            let (reference, bytes) = match self.reference_target(0, query)? {
+                ReferenceResolution::Resolved {
+                    reference: ResolvedReference::Local(facet),
+                    ..
+                } => {
+                    let node = self.canonical_node(0, facet);
+                    if self.selects_values(node) || self.nodes[node].scope == 0 {
+                        let id = identifiers
+                            .get(&self.nodes[node].locator)
+                            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                        let bytes = provenance_string_bytes(id.as_str());
+                        self.admit(bytes)?;
+                        (EntityReference::SceneLocal { entity: id.clone() }, bytes)
+                    } else {
+                        let bytes = self.relative_bytes(0, node);
+                        self.admit(bytes)?;
+                        let reference = self
+                            .relative(0, node)
+                            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                        (
+                            EntityReference::Authored {
+                                reference: reference.into(),
+                            },
+                            bytes,
+                        )
+                    }
+                }
+                ReferenceResolution::Resolved {
+                    reference: ResolvedReference::Persistent(reference),
+                    ..
+                } => {
+                    let cost = reference.cost();
+                    (
+                        reference,
+                        cost.nodes()
+                            .checked_mul(96)
+                            .and_then(|bytes| bytes.checked_add(cost.logical_bytes())),
+                    )
+                }
+                _ => return Err(SceneCompilationFailureKind::OwnerAdmission.into()),
+            };
+            self.admit(
+                inputs::authored_clone_bytes(query)
+                    .and_then(|query_bytes| query_bytes.checked_add(bytes?)?.checked_add(256)),
+            )?;
+            reference_targets.insert(query.clone(), reference);
+        }
         Ok(StagedSceneOutput {
             document,
             source_defaults,
+            #[cfg(feature = "serde")]
+            targets,
+            #[cfg(feature = "serde")]
+            reference_targets,
         })
     }
 

@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use nara_reflect::ComponentRegistrySnapshot;
 use nara_scene::{
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringHistoryLimits, SceneAuthoringSession,
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-    ScenePlacement, ScenePlacementOwner,
+    PrefabAuthoringSession, PrefabDocument, PrefabEntityTarget, SceneAuthoringHistoryLimits,
+    SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 
 #[cfg(feature = "serde")]
@@ -21,11 +21,41 @@ fn id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
 
-fn add(names: &[&str]) -> ScenePatchDocument {
-    ScenePatchDocument::new(names.iter().map(|name| ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }))
+#[cfg(feature = "serde")]
+fn assert_preserved_manifest(
+    actual: &nara_scene::UnavailableRecordManifest,
+    before: &nara_scene::UnavailableRecordManifest,
+    placements: &[SceneEntityPlacement],
+) {
+    assert_eq!(actual.record_count(), before.record_count());
+    assert_eq!(actual.overlay_target_count(), before.overlay_target_count());
+    assert_eq!(actual.total_count(), before.total_count());
+    assert_eq!(actual.entries(), before.entries());
+    assert_eq!(
+        actual.overlay_declarations().collect::<Vec<_>>(),
+        before.overlay_declarations().collect::<Vec<_>>(),
+    );
+    assert_eq!(actual.source_placements(), placements);
+}
+
+fn add(placements: &[SceneEntityPlacement], names: &[&str]) -> ScenePatchDocument {
+    let mut value = placements.to_vec();
+    value.extend(
+        names
+            .iter()
+            .map(|name| SceneEntityPlacement::root(id(name))),
+    );
+    let mut operations = names
+        .iter()
+        .map(|name| ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id(name)),
+        })
+        .collect::<Vec<_>>();
+    operations.push(ScenePatchOperation::SetPlacements {
+        expected: placements.to_vec(),
+        value,
+    });
+    ScenePatchDocument::new(operations)
 }
 
 fn registry() -> ComponentRegistrySnapshot {
@@ -42,9 +72,16 @@ macro_rules! source_snapshots {
 
             fn document() -> $document {
                 <$document>::new(
-                    [id("z-root"), id("tail")],
                     [
-                        SceneEntityRecord::new(id("z-root")).with_children([id("a-child")]),
+                        SceneEntityPlacement::root(id("z-root")),
+                        SceneEntityPlacement::root(id("tail")),
+                        SceneEntityPlacement::new(
+                            PrefabEntityTarget::source(id("a-child")),
+                            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(id("z-root")))),
+                        ),
+                    ],
+                    [
+                        SceneEntityRecord::new(id("z-root")),
                         SceneEntityRecord::new(id("a-child")),
                         SceneEntityRecord::new(id("tail")),
                     ],
@@ -62,13 +99,16 @@ macro_rules! source_snapshots {
                     "engine_min_version": "0.1.0",
                     "generator": {"name": "nara", "version": "0.1.0"},
                     "payload": {
-                        "roots": ["z-root", "tail"],
+                        "placements": [
+                            {"target":{"through":[],"entity":{"kind":"source_entity","entity":"z-root"}},"placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}},
+                            {"target":{"through":[],"entity":{"kind":"source_entity","entity":"tail"}},"placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}},
+                            {"target":{"through":[],"entity":{"kind":"source_entity","entity":"a-child"}},"placement":{"parent":{"kind":"entity","target":{"through":[],"entity":{"kind":"source_entity","entity":"z-root"}}},"slot":{"kind":"last"}}}
+                        ],
                         "entities": [
                             {"id": "a-child"},
                             {"id": "tail"},
                             {
                                 "id": "z-root",
-                                "children": ["a-child"],
                                 "components": {
                                     "game.Missing": {
                                         "version": 1,
@@ -113,16 +153,16 @@ macro_rules! source_snapshots {
 
                 assert!(!session.undo(&registry).applied);
                 assert!(!session.redo(&registry).applied);
-                assert!(!session.apply_patch(&add(&["temporary", "z-root"]), &registry).applied);
+                assert!(!session.apply_patch(&add(&session.document().placements, &["temporary", "z-root"]), &registry).applied);
                 assert!(Arc::ptr_eq(&before, &session.shared_document()));
                 assert_eq!(session.revision(), initial_revision);
                 assert_eq!(session.content_state(), initial_content);
                 assert_eq!(session.history_status().undo_depth, 0);
 
-                let report = session.apply_patch(&add(&["accepted"]), &registry);
+                let report = session.apply_patch(&add(&session.document().placements, &["accepted"]), &registry);
                 assert!(report.applied, "{:?}", report.diagnostics);
                 let mut expected = original.clone();
-                expected.roots.push(id("accepted"));
+                expected.placements.push(SceneEntityPlacement::root(id("accepted")));
                 expected.entities.push(SceneEntityRecord::new(id("accepted")));
                 expected.canonicalize();
                 let accepted = session.shared_document();
@@ -183,7 +223,7 @@ macro_rules! source_snapshots {
                 let content = session.content_state();
                 let history = session.history_status();
                 let usage = session.history_usage();
-                assert!(!session.apply_patch(&add(&["too-large"]), &registry()).applied);
+                assert!(!session.apply_patch(&add(&session.document().placements, &["too-large"]), &registry()).applied);
                 assert!(Arc::ptr_eq(&snapshot, &session.shared_document()));
                 assert_eq!(snapshot.as_ref(), &document());
                 assert_eq!(session.revision(), revision);
@@ -199,7 +239,7 @@ macro_rules! source_snapshots {
                     let history = session.history_status();
                     assert!(
                         session
-                            .prepare_authoring_edit(revision, &add(&["too-large"]))
+                            .prepare_authoring_edit(revision, &add(&session.document().placements, &["too-large"]))
                             .is_err()
                     );
                     assert!(Arc::ptr_eq(&snapshot, &session.shared_document()));
@@ -229,10 +269,10 @@ macro_rules! source_snapshots {
                 assert!(Arc::ptr_eq(&before, &session.shared_document()));
 
                 let prepared = session
-                    .prepare_authoring_edit(revision, &add(&["accepted"]))
+                    .prepare_authoring_edit(revision, &add(&session.document().placements, &["accepted"]))
                     .unwrap();
                 let mut expected = original.clone();
-                expected.roots.push(id("accepted"));
+                expected.placements.push(SceneEntityPlacement::root(id("accepted")));
                 expected.entities.push(SceneEntityRecord::new(id("accepted")));
                 expected.canonicalize();
                 assert_eq!(prepared.document(), &expected);
@@ -244,6 +284,8 @@ macro_rules! source_snapshots {
                 let report = session.commit_authoring_edit(prepared);
                 assert!(report.applied, "{:?}", report.diagnostics);
                 let accepted = session.shared_document();
+                let accepted_manifest = session.unavailable_record_manifest().unwrap().clone();
+                assert_preserved_manifest(&accepted_manifest, &manifest, &accepted.placements);
                 let accepted_content = session.content_state();
                 assert!(!Arc::ptr_eq(&before, &accepted));
                 assert!(Arc::ptr_eq(&accepted, &session.shared_document()));
@@ -256,6 +298,7 @@ macro_rules! source_snapshots {
                 let undone = session.shared_document();
                 assert!(!Arc::ptr_eq(&accepted, &undone));
                 assert_eq!(undone.as_ref(), &original);
+                assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
                 assert_eq!(session.content_state(), content);
                 assert_eq!(accepted.as_ref(), &expected);
                 assert!(session.redo_authoring().applied);
@@ -264,10 +307,10 @@ macro_rules! source_snapshots {
                 assert_eq!(redone.as_ref(), &expected);
                 assert_eq!(session.content_state(), accepted_content);
                 assert_eq!(session.authoring_schema_basis(), basis);
-                assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+                assert_eq!(session.unavailable_record_manifest(), Some(&accepted_manifest));
 
                 let prepared = session
-                    .prepare_authoring_edit(session.revision(), &add(&["old-lineage"]))
+                    .prepare_authoring_edit(session.revision(), &add(&session.document().placements, &["old-lineage"]))
                     .unwrap();
                 let reopened = session.try_reopen_authoring_candidate(candidate()).unwrap();
                 assert!(Arc::ptr_eq(&redone, &session.shared_document()));
@@ -288,7 +331,7 @@ macro_rules! source_snapshots {
                 assert!(!Arc::ptr_eq(&before, &reopened_snapshot));
                 assert!(!session.commit_authoring_edit(prepared).applied);
                 assert!(Arc::ptr_eq(&reopened_snapshot, &session.shared_document()));
-                assert!(session.apply_authoring_patch(&add(&["new-lineage"])).applied);
+                assert!(session.apply_authoring_patch(&add(&session.document().placements, &["new-lineage"])).applied);
                 drop(session);
                 assert_eq!(before.as_ref(), &original);
                 assert_eq!(accepted.as_ref(), &expected);
@@ -312,16 +355,16 @@ macro_rules! source_snapshots {
                 let manifest = session.unavailable_record_manifest().unwrap().clone();
                 drop(
                     session
-                        .prepare_authoring_edit(revision, &add(&["cancelled"]))
+                        .prepare_authoring_edit(revision, &add(&session.document().placements, &["cancelled"]))
                         .unwrap(),
                 );
                 assert!(
                     session
-                        .prepare_authoring_edit(revision, &add(&["temporary", "z-root"]))
+                        .prepare_authoring_edit(revision, &add(&session.document().placements, &["temporary", "z-root"]))
                         .is_err()
                 );
                 assert!(session.replace_document(document()).is_err());
-                assert!(!session.apply_patch(&add(&["wrong-authority"]), &registry()).applied);
+                assert!(!session.apply_patch(&add(&session.document().placements, &["wrong-authority"]), &registry()).applied);
                 assert!(Arc::ptr_eq(&before, &session.shared_document()));
                 assert_eq!(before.as_ref(), &original);
                 assert_eq!(session.revision(), revision);
@@ -336,7 +379,7 @@ macro_rules! source_snapshots {
                 let other_snapshot = other.shared_document();
                 let other_revision = other.revision();
                 let foreign = session
-                    .prepare_authoring_edit(revision, &add(&["foreign"]))
+                    .prepare_authoring_edit(revision, &add(&session.document().placements, &["foreign"]))
                     .unwrap();
                 assert!(!other.commit_authoring_edit(foreign).applied);
                 assert!(Arc::ptr_eq(&other_snapshot, &other.shared_document()));
@@ -345,10 +388,12 @@ macro_rules! source_snapshots {
                 assert!(Arc::ptr_eq(&before, &session.shared_document()));
 
                 let stale = session
-                    .prepare_authoring_edit(revision, &add(&["superseded"]))
+                    .prepare_authoring_edit(revision, &add(&session.document().placements, &["superseded"]))
                     .unwrap();
-                assert!(session.apply_authoring_patch(&add(&["accepted"])).applied);
+                assert!(session.apply_authoring_patch(&add(&session.document().placements, &["accepted"])).applied);
                 let accepted = session.shared_document();
+                let accepted_manifest = session.unavailable_record_manifest().unwrap().clone();
+                assert_preserved_manifest(&accepted_manifest, &manifest, &accepted.placements);
                 let accepted_revision = session.revision();
                 let accepted_content = session.content_state();
                 let accepted_history = session.history_status();
@@ -356,7 +401,7 @@ macro_rules! source_snapshots {
                 assert!(!session.commit_authoring_edit(stale).applied);
                 assert!(
                     session
-                        .prepare_authoring_edit(revision, &add(&["old-revision"]))
+                        .prepare_authoring_edit(revision, &add(&session.document().placements, &["old-revision"]))
                         .is_err()
                 );
                 assert!(Arc::ptr_eq(&accepted, &session.shared_document()));
@@ -366,7 +411,7 @@ macro_rules! source_snapshots {
                 assert_eq!(session.history_usage(), accepted_usage);
                 assert_eq!(session.authoring_schema_basis(), basis);
                 assert_eq!(session.authoring_readiness(), readiness);
-                assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+                assert_eq!(session.unavailable_record_manifest(), Some(&accepted_manifest));
                 assert_eq!(before.as_ref(), &original);
             }
 
@@ -380,7 +425,7 @@ macro_rules! source_snapshots {
                 let content = session.content_state();
                 let mut draft = session.begin_authoring_construction(revision).unwrap();
                 let root = draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                    .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                     .unwrap();
                 let child = draft
                     .create_entity(ConstructionPlacement::ChildOf((&root).into()))
@@ -395,9 +440,15 @@ macro_rules! source_snapshots {
                 let root_id = prepared.entity(&root).unwrap().clone();
                 let child_id = prepared.entity(&child).unwrap().clone();
                 let mut expected = original.clone();
-                expected.roots.push(root_id.clone());
+                expected.placements.extend([
+                    SceneEntityPlacement::root(root_id.clone()),
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(child_id.clone()),
+                        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(root_id.clone()))),
+                    ),
+                ]);
                 expected.entities.extend([
-                    SceneEntityRecord::new(root_id.clone()).with_children([child_id.clone()]),
+                    SceneEntityRecord::new(root_id.clone()),
                     SceneEntityRecord::new(child_id.clone()),
                 ]);
                 expected.canonicalize();

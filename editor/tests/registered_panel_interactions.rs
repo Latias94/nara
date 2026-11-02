@@ -5,7 +5,10 @@
 
 use std::{fs, path::Path, time::Duration};
 
-use nara::tooling::{EditorAction, EditorActionBatch, EditorCloseDecision};
+use nara::{
+    scene::{SceneEntityId, SceneEntityPlacement},
+    tooling::{EditorAction, EditorActionBatch, EditorCloseDecision},
+};
 use nara_editor::{
     EditorApplication, EditorLaunchOptions, ImguiEditorFrontend,
     workspace::{EditorPanelPlacement, EditorPanelTarget},
@@ -34,16 +37,19 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
     let path = root.join("worlds/entry.scene.json");
     let mut scene: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     let original = scene["payload"]["entities"][0].clone();
-    let mut roots = Vec::new();
+    let mut placements = Vec::new();
     let mut entities = Vec::new();
     for index in 0..100 {
         let id = format!("scroll-probe-{index:03}");
         let mut entity = original.clone();
         entity["id"] = id.clone().into();
-        roots.push(serde_json::Value::String(id));
+        placements.push(
+            serde_json::to_value(SceneEntityPlacement::root(SceneEntityId::new(id).unwrap()))
+                .unwrap(),
+        );
         entities.push(entity);
     }
-    scene["payload"]["roots"] = roots.into();
+    scene["payload"]["placements"] = placements.into();
     scene["payload"]["entities"] = entities.into();
     fs::write(&path, serde_json::to_vec(&scene).unwrap()).unwrap();
     let mut application =

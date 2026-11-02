@@ -1043,8 +1043,12 @@ fn csharp_source_tool_review_history_save_reopen_and_public_rust_data_access() {
         let saved = project.read();
         assert_eq!(saved.entities.len(), 3);
         assert_eq!(
-            saved.roots,
-            vec![id("enemy"), id("guide"), prepared_id.clone()]
+            saved.placements,
+            vec![
+                nara_scene::SceneEntityPlacement::root(id("enemy")),
+                nara_scene::SceneEntityPlacement::root(id("guide")),
+                nara_scene::SceneEntityPlacement::root(prepared_id.clone()),
+            ]
         );
         for entity in &saved.entities {
             if let Some(stats) = entity.components.get(&kind(STATS)) {

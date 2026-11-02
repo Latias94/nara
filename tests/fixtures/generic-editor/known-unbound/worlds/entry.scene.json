@@ -7,13 +7,10 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [
-      "signal-node"
-    ],
+    "placements": [{"target":{"entity":{"kind":"source_entity","entity":"signal-node"}},"placement":{"parent":{"kind":"root"},"slot":{"kind":"last"}}}],
     "entities": [
       {
         "id": "signal-node",
-        "children": [],
         "components": {
           "nara.scene.Name": {
             "owner": "nara.scene.hierarchy.components",

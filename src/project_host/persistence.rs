@@ -1165,14 +1165,15 @@ mod tests {
                 .apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
                     document,
                     base_revision: workspace.scene(document).unwrap().revision(),
-                    patch: nara_scene::ScenePatchDocument::new([
-                        nara_scene::ScenePatchOperation::AddEntity {
-                            entity: first.entities[0].clone(),
-                            placement: nara_scene::ScenePlacement::last(
-                                nara_scene::ScenePlacementOwner::Root,
-                            ),
-                        },
-                    ]),
+                    patch: crate::scene_test_support::add_root_entity_patch(
+                        &workspace
+                            .scene(document)
+                            .unwrap()
+                            .session()
+                            .document()
+                            .placements,
+                        first.entities[0].clone(),
+                    ),
                 })
                 .applied
         );

@@ -23,9 +23,10 @@ use nara_scene::{
         try_compile_authoring_scene_with_loader,
     },
     AuthoringDocumentSource, AuthoringRecordReadiness, AuthoringSchemaBasis, ExpandedSceneDocument,
-    PrefabDocument, PrefabDocumentCandidate, PrefabInstance, PrefabProjectionStep,
-    PublishedAuthoringPrefabDocument, ResolvedPrefabSource, SceneAuthoringSession,
-    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    ExpandedSceneEntity, PrefabDocument, PrefabDocumentCandidate, PrefabEntityTarget,
+    PrefabInstance, PrefabProjectionStep, PublishedAuthoringPrefabDocument, ResolvedPrefabSource,
+    SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -110,11 +111,17 @@ fn record(target: SceneEntityId) -> SceneComponentRecord {
 
 fn prefab(record: SceneComponentRecord) -> PrefabDocument {
     PrefabDocument::new(
-        [id("root")],
         [
-            SceneEntityRecord::new(id("root"))
-                .with_children([id("target")])
-                .with_component(component(), record),
+            SceneEntityPlacement::root(id("root")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("target")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("root"),
+                ))),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("root")).with_component(component(), record),
             SceneEntityRecord::new(id("target")),
         ],
     )
@@ -135,11 +142,7 @@ fn publish_prefab(
 
 fn anchor(entity: &str, base: &str) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(entity));
-    record.prefab = Some(PrefabInstance {
-        source: source(base),
-        arguments: None,
-        overrides: None,
-    });
+    record.prefab = Some(PrefabInstance::forest(source(base)));
     record
 }
 
@@ -201,11 +204,14 @@ fn projected(candidate: &ExpandedSceneDocument, local: &str) -> SceneEntityId {
     projected.clone()
 }
 
-fn entity<'a>(document: &'a SceneDocument, entity: &SceneEntityId) -> &'a SceneEntityRecord {
+fn entity<'a>(
+    document: &'a ExpandedSceneDocument,
+    entity: &SceneEntityId,
+) -> &'a ExpandedSceneEntity {
     document
-        .entities
+        .entities()
         .iter()
-        .find(|record| &record.id == entity)
+        .find(|record| record.id() == entity)
         .expect("projected entity must exist")
 }
 
@@ -243,10 +249,13 @@ fn native_preview_loses_available_component_data_and_declared_references() {
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
     assert_ne!(target, id("target"));
-    let root_record = entity(candidate.document(), &root);
-    assert_eq!(root_record.components.len(), 1);
-    assert_eq!(root_record.components[&component()], record(target.clone()));
-    assert_eq!(root_record.children, [target]);
+    let root_record = entity(candidate, &root);
+    assert_eq!(root_record.components().len(), 1);
+    assert_eq!(
+        root_record.components()[&component()],
+        record(target.clone())
+    );
+    assert_eq!(root_record.children(), [target]);
     let references = report.effective_asset_references();
     assert_eq!(references.len(), 1);
     assert_eq!(references[0].field_id(), &ComponentFieldId::new("image"));
@@ -318,7 +327,7 @@ fn consuming_semantic_parts_preserves_data_omissions_and_effective_asset_referen
         .expect("semantic compilation must succeed");
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
-    let document_allocation = std::ptr::from_ref(candidate.document());
+    let document_allocation = candidate.entities().as_ptr();
     let omissions = report.omissions().to_vec();
     let diagnostics = report.diagnostics().clone();
     let failure = report.failure().cloned();
@@ -329,12 +338,9 @@ fn consuming_semantic_parts_preserves_data_omissions_and_effective_asset_referen
     let candidate = parts
         .candidate
         .expect("the semantic candidate moves into its parts");
+    assert_eq!(candidate.entities().as_ptr(), document_allocation);
     assert_eq!(
-        std::ptr::from_ref(candidate.document()),
-        document_allocation
-    );
-    assert_eq!(
-        entity(candidate.document(), &root).components[&component()],
+        entity(&candidate, &root).components()[&component()],
         record(target),
     );
     assert_eq!(parts.omissions, omissions);
@@ -380,7 +386,7 @@ fn unavailable_selected_record_is_an_omission_even_before_native_preview_filteri
         .candidate()
         .expect("unavailable data is reported separately");
     let root = projected(candidate, "root");
-    assert!(entity(candidate.document(), &root).components.is_empty());
+    assert!(entity(candidate, &root).components().is_empty());
     assert!(report.effective_asset_references().is_empty());
     assert_eq!(
         report.omissions(),
@@ -451,7 +457,7 @@ fn unrelated_missing_dependency_blocks_whole_document_compilation_with_a_healthy
     let root = projected(candidate, "root");
     let target = projected(candidate, "target");
     assert_eq!(
-        entity(candidate.document(), &root).components[&component()],
+        entity(candidate, &root).components()[&component()],
         record(target)
     );
 

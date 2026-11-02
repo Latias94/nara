@@ -4,7 +4,10 @@ use dear_imgui_rs::{Key, MouseButton, Ui};
 use nara::{
     project_host::EditorUiAuthoringFrame,
     render::DisplayRect,
-    scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementAnchor},
+    scene::{
+        PrefabEntityOrigin, SceneAuthoringRevision, SceneEntityId, ScenePlacement,
+        ScenePlacementSlot,
+    },
     tooling::{
         EditorAction, EditorActionOutcome, EditorActionRejection, EditorDocumentId,
         EditorGestureAction, EditorGestureCancelReason, EditorGestureStamp, EditorNavigationAction,
@@ -184,10 +187,20 @@ impl ImguiUiAuthoringPanels {
                 if let Some(outcome) = &report.prefab_composition_outcome {
                     self.focus_entity = match outcome {
                         PrefabCompositionOutcome::Created { entity }
-                        | PrefabCompositionOutcome::Moved { entity }
                         | PrefabCompositionOutcome::ComponentAdded { entity, .. }
-                        | PrefabCompositionOutcome::ComponentRemoved { entity, .. }
-                        | PrefabCompositionOutcome::NoOp { entity } => Some(entity.clone()),
+                        | PrefabCompositionOutcome::ComponentRemoved { entity, .. } => {
+                            Some(entity.clone())
+                        }
+                        PrefabCompositionOutcome::Moved { target }
+                        | PrefabCompositionOutcome::PlacementReverted { target }
+                        | PrefabCompositionOutcome::NoOp { target } => match &target.entity {
+                            PrefabEntityOrigin::SourceEntity(entity)
+                                if target.through.is_empty() =>
+                            {
+                                Some(entity.clone())
+                            }
+                            _ => None,
+                        },
                         PrefabCompositionOutcome::Removed { selection, .. } => selection.clone(),
                     };
                     self.focus_hierarchy = self.focus_entity.is_none();
@@ -913,11 +926,15 @@ fn placement_control(
     let labels = candidates
         .iter()
         .map(|candidate| {
-            let anchor = match &candidate.placement().anchor {
-                ScenePlacementAnchor::First => "first".to_owned(),
-                ScenePlacementAnchor::Last => "last".to_owned(),
-                ScenePlacementAnchor::Before { sibling } => format!("before {}", sibling.as_str()),
-                ScenePlacementAnchor::After { sibling } => format!("after {}", sibling.as_str()),
+            let anchor = match &candidate.placement().slot {
+                ScenePlacementSlot::First => "first".to_owned(),
+                ScenePlacementSlot::Last => "last".to_owned(),
+                ScenePlacementSlot::Before(sibling) => {
+                    format!("before {}", sibling.entity.entity().as_str())
+                }
+                ScenePlacementSlot::After(sibling) => {
+                    format!("after {}", sibling.entity.entity().as_str())
+                }
             };
             format!(
                 "{} / {anchor}{}",
@@ -1288,7 +1305,6 @@ mod tests {
     fn frontend_structure_observation_keeps_its_original_index_and_rejects_a_filtered_slot() {
         use super::super::submission_tests::Harness;
         use crate::workspace::EditorPanelTarget;
-        use nara::scene::ScenePatchDocument;
         use nara::tooling::{
             EditorCloseDecision, EditorDocumentMutation, EditorWorkspaceIntent,
             EditorWorkspaceIntentAction, PrefabCompositionCommand,
@@ -1324,12 +1340,11 @@ mod tests {
                 .application
                 .prepare_authoring_edit(
                     &basis,
-                    &ScenePatchDocument::new([nara::scene::ScenePatchOperation::AddEntity {
-                        entity: nara::scene::SceneEntityRecord::new(
-                            SceneEntityId::new("structure-baseline").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(nara::scene::ScenePlacementOwner::Root),
-                    }]),
+                    &crate::app::named_root_patch(
+                        &harness.application,
+                        basis.document,
+                        "structure-baseline",
+                    ),
                 )
                 .unwrap();
             harness.application.submit_and_drive(

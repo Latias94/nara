@@ -19,11 +19,13 @@ use nara_reflect::{
 };
 
 use crate::{
-    SceneComponentBindings, SceneDocument, SceneEntityId, SceneEntityRecord,
+    PrefabEntityOrigin, PrefabEntityTarget, SceneComponentBindings, SceneDocument, SceneEntityId,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacementParent, ScenePlacementSlot,
     diagnostics::{
-        error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
+        error as diagnostic_error, push_with_operation_index, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
     },
+    draft::SceneDraft,
     schema_authority::SchemaAuthority,
 };
 
@@ -73,25 +75,16 @@ enum PlacementOwner {
     Parent(SceneEntityId),
 }
 
-#[derive(Clone, Copy)]
-enum SceneValidationMode {
-    Source,
-    Native,
-    Shape,
-}
-
 struct NormalizedSceneComponent<'a> {
     id: &'a ComponentTypeId,
-    schema: &'a ComponentSchema,
     value: Cow<'a, ComponentValue>,
-    data_owner: Option<&'a nara_reflect::ComponentSchemaOwnerSnapshot>,
 }
 
 struct ScenePreflightOptions {
-    allow_prefab_instances: bool,
     operation_index: Option<usize>,
-    mode: SceneValidationMode,
     validate_local_references: bool,
+    validate_topology: bool,
+    decode_native: bool,
 }
 
 pub(crate) struct EffectiveSceneValidation {
@@ -102,7 +95,7 @@ pub(crate) struct EffectiveSceneValidation {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EffectiveValueRole {
-    Source,
+    Draft,
     Compiled,
     Runtime,
 }
@@ -123,7 +116,7 @@ struct FlatSceneComponentRef<'a> {
 /// The callback admits Schema/value/reference validation scratch and retained asset inventory;
 /// structural/default validation retains the caller's existing aggregate pre-admission.
 pub(crate) fn validate_expanded_values<E>(
-    document: &SceneDocument,
+    document: &SceneDraft,
     authority: SchemaAuthority<'_>,
     context: &mut ComponentDecodeContext<'_>,
     admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
@@ -132,12 +125,21 @@ pub(crate) fn validate_expanded_values<E>(
 }
 
 fn validate_effective_values<E>(
-    document: &SceneDocument,
+    document: &SceneDraft,
     authority: SchemaAuthority<'_>,
     context: &mut ComponentDecodeContext<'_>,
     admit_validation_work: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
-    let (placement, mut diagnostics) = validate_scene_structure_with_operation(document, None);
+    let mut diagnostics = DiagnosticReport::default();
+    let placement = validate_scene_placement(
+        &document.roots,
+        document
+            .entities
+            .iter()
+            .map(|entity| (&entity.id, entity.children.as_slice())),
+        &mut diagnostics,
+        None,
+    );
     if let Some(registry) = authority.native_snapshot() {
         if let Some(entity) = placement.as_ref().and_then(|placement| {
             first_unavailable_hierarchy_projection_entity(document, placement, registry)
@@ -157,23 +159,9 @@ fn validate_effective_values<E>(
         .iter()
         .map(|entity| &entity.id)
         .collect::<BTreeSet<_>>();
-    for entity in &document.entities {
-        if let Some(instance) = &entity.prefab {
-            diagnostics.push(with_asset_ref(
-                with_public_locator(
-                    diagnostic_error(
-                        "scene.prefab-instance-unsupported",
-                        "Prefab instances require expansion before scene spawn",
-                    ),
-                    "entity-id",
-                    entity.id.as_str(),
-                ),
-                "asset-ref",
-                &instance.source,
-            ));
-        }
-    }
-    let records = sorted_entities(document).into_iter().flat_map(|entity| {
+    let mut entities = document.entities.iter().collect::<Vec<_>>();
+    entities.sort_by(|left, right| left.id.cmp(&right.id));
+    let records = entities.into_iter().flat_map(|entity| {
         entity
             .components
             .iter()
@@ -191,7 +179,7 @@ fn validate_effective_values<E>(
         &namespace,
         authority,
         context,
-        EffectiveValueRole::Source,
+        EffectiveValueRole::Draft,
         diagnostics,
         admit_validation_work,
     )
@@ -230,7 +218,7 @@ fn validate_effective_component_values<'a, E>(
         if !authority.owner_claim_matches(
             component,
             record.schema_owner,
-            role != EffectiveValueRole::Source,
+            role != EffectiveValueRole::Draft,
         ) {
             diagnostics.push(locate(diagnostic_error(
                 "scene.component-owner-mismatch",
@@ -278,7 +266,7 @@ fn validate_effective_component_values<'a, E>(
             diagnostics.push(invalid(&ComponentCodecError::UnresolvedAuthoredReference));
             continue;
         }
-        if role != EffectiveValueRole::Source {
+        if role != EffectiveValueRole::Draft {
             let explicit = nara_reflect::__private::component_defaults_are_explicit_with_admission(
                 schema,
                 record.value,
@@ -310,7 +298,7 @@ fn validate_effective_component_values<'a, E>(
                 }
             }
         }
-        let effective = match if role == EffectiveValueRole::Source {
+        let effective = match if role == EffectiveValueRole::Draft {
             value_budget
                 .materialize(schema, record.value, None)
                 .map_err(nara_reflect::__private::EffectiveValueAdmissionError::Value)
@@ -737,76 +725,77 @@ pub(crate) fn preflight_authoring_scene_for_patch(
     )
 }
 
-pub(crate) fn validate_patch_intermediate_scene_with_limits(
-    document: &SceneDocument,
-    registry: &ComponentRegistrySnapshot,
-    operation_index: usize,
-    limits: ComponentValueMaterializationLimits,
-) -> DiagnosticReport {
-    let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
-    preflight_scene_with_context_options(
-        document,
-        registry,
-        None,
-        &mut context,
-        ScenePreflightOptions {
-            allow_prefab_instances: true,
-            operation_index: Some(operation_index),
-            mode: SceneValidationMode::Shape,
-            validate_local_references: false,
-        },
-    )
-    .1
-}
-
 pub(crate) fn preflight_scene_with_context(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    let (entities, diagnostics) = preflight_scene_with_context_options(
-        document,
-        registry,
-        None,
-        context,
-        ScenePreflightOptions {
-            allow_prefab_instances: false,
-            operation_index: None,
-            mode: SceneValidationMode::Native,
-            validate_local_references: true,
-        },
-    );
-    PreparedScene {
-        roots: document.roots.clone(),
-        entities,
-        diagnostics,
-    }
+    preflight_source_native(document, registry, None, context)
 }
 
-/// Preflights both representations through the same admission and reference-validation path.
+/// Compiles source declarations before the complete Native/data admission path.
 pub(crate) fn preflight_scene_with_context_and_bindings(
     document: &SceneDocument,
     registry: &ComponentRegistrySnapshot,
     bindings: &SceneComponentBindings,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    let (entities, diagnostics) = preflight_scene_with_context_options(
-        document,
-        registry,
-        Some(bindings),
-        context,
-        ScenePreflightOptions {
-            allow_prefab_instances: false,
-            operation_index: None,
-            mode: SceneValidationMode::Native,
-            validate_local_references: true,
-        },
-    );
-    PreparedScene {
-        roots: document.roots.clone(),
-        entities,
-        diagnostics,
+    preflight_source_native(document, registry, Some(bindings), context)
+}
+
+/// Diagnostic validation has no source loader. The ordinary compiler alone interprets authored
+/// placements, defaults and references; its closed result then crosses complete Native preflight.
+fn preflight_source_native(
+    document: &SceneDocument,
+    registry: &ComponentRegistrySnapshot,
+    bindings: Option<&SceneComponentBindings>,
+    context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
+    if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic_error(
+            "scene.component-bindings-mismatch",
+            "Scene bindings do not select the supplied native component registry",
+        ));
+        return PreparedScene {
+            roots: Vec::new(),
+            entities: Vec::new(),
+            diagnostics,
+        };
     }
+    let limits = crate::SceneCompilationLimits::default()
+        .with_materialization_limits(context.materialization_limits());
+    let options = crate::SceneCompilationOptions::default().with_limits(limits);
+    let report = match bindings {
+        Some(bindings) => bindings.try_compile_scene_with_loader(
+            document,
+            options,
+            context.asset_resolution(),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        ),
+        None => document.try_compile_with_loader(
+            registry,
+            options,
+            context.asset_resolution(),
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        ),
+    };
+    let mut report = match report {
+        Ok(report) => report,
+        Err(never) => match never {},
+    };
+    let Some(document) = report.candidate.take() else {
+        return PreparedScene {
+            roots: Vec::new(),
+            entities: Vec::new(),
+            diagnostics: report.diagnostics,
+        };
+    };
+    let mut prepared =
+        preflight_compiled_scene_with_context(&document, registry, bindings, context, false);
+    report.diagnostics.extend(prepared.diagnostics);
+    prepared.diagnostics = report.diagnostics;
+    prepared
 }
 
 pub(crate) fn preflight_authoring_scene_with_context(
@@ -823,19 +812,43 @@ pub(crate) fn preflight_authoring_scene_with_context_at_operation(
     context: &mut ComponentDecodeContext<'_>,
     operation_index: Option<usize>,
 ) -> SourceSceneValidation {
-    let (_, diagnostics) = preflight_scene_with_context_options(
-        document,
+    let diagnostics = preflight_source_values_with_context(
+        &document.placements,
+        &document.entities,
         registry,
         None,
         context,
         ScenePreflightOptions {
-            allow_prefab_instances: true,
             operation_index,
-            mode: SceneValidationMode::Source,
             validate_local_references: true,
+            validate_topology: true,
+            decode_native: true,
         },
     );
     SourceSceneValidation { diagnostics }
+}
+
+/// Intermediate exact edits retain valid component shapes without requiring complete source
+/// placement or executing a codec against a coupled field value before the batch is complete.
+pub(crate) fn validate_patch_record_shapes(
+    entities: &[SceneEntityRecord],
+    registry: &ComponentRegistrySnapshot,
+    operation_index: usize,
+    limits: ComponentValueMaterializationLimits,
+) -> DiagnosticReport {
+    preflight_source_values_with_context(
+        &[],
+        entities,
+        registry,
+        None,
+        &mut ComponentDecodeContext::new().with_materialization_limits(limits),
+        ScenePreflightOptions {
+            operation_index: Some(operation_index),
+            validate_local_references: false,
+            validate_topology: false,
+            decode_native: false,
+        },
+    )
 }
 
 pub(crate) fn preflight_authoring_scene_with_context_for_patch(
@@ -894,119 +907,158 @@ pub(crate) fn validate_effective_local_references(
 }
 
 pub(crate) fn validate_scene_structure(document: &SceneDocument) -> DiagnosticReport {
-    validate_source_structure(&document.roots, &document.entities)
+    validate_source_structure(&document.placements, &document.entities)
 }
 
 pub(crate) fn validate_source_structure(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
 ) -> DiagnosticReport {
-    validate_source_structure_with_operation(roots, entities, None).1
+    validate_source_structure_with_operation(placements, entities, None)
 }
 
-fn validate_scene_structure_with_operation(
-    document: &SceneDocument,
-    operation_index: Option<usize>,
-) -> (Option<ValidatedScenePlacement>, DiagnosticReport) {
-    validate_source_structure_with_operation(&document.roots, &document.entities, operation_index)
-}
-
+/// Checks declaration ownership without resolving routes or constructing an effective hierarchy.
+/// Canonical base predicates are syntactically admitted here; the compiler checks their actual
+/// selected sources, sibling membership, ordering and cycles when those occurrences are opened.
 fn validate_source_structure_with_operation(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     operation_index: Option<usize>,
-) -> (Option<ValidatedScenePlacement>, DiagnosticReport) {
+) -> DiagnosticReport {
     let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(
-        roots,
-        entities
-            .iter()
-            .map(|entity| (&entity.id, entity.children.as_slice())),
-        &mut diagnostics,
-        operation_index,
-    );
-    (placement, diagnostics)
+    let mut records = BTreeSet::new();
+    for entity in entities {
+        if !records.insert(&entity.id) {
+            push_placement_diagnostic(
+                &mut diagnostics,
+                operation_index,
+                "scene.duplicate-entity-id",
+                "Scene entity ID is duplicated",
+                &entity.id,
+                None,
+            );
+        }
+    }
+    let mut targets = BTreeSet::new();
+    let mut local_placements = BTreeSet::new();
+    for declaration in placements {
+        if !targets.insert(&declaration.target) {
+            push_placement_diagnostic(
+                &mut diagnostics,
+                operation_index,
+                "scene.duplicate-placement",
+                "Scene target has more than one authored placement",
+                declaration.target.entity.entity(),
+                None,
+            );
+        }
+        if declaration.target.through.is_empty()
+            && let PrefabEntityOrigin::SourceEntity(entity) = &declaration.target.entity
+        {
+            local_placements.insert(entity);
+        }
+        let parent = match &declaration.placement.parent {
+            ScenePlacementParent::Root => None,
+            ScenePlacementParent::Entity(target) => Some(target),
+        };
+        let sibling = match &declaration.placement.slot {
+            ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) => Some(target),
+            ScenePlacementSlot::First | ScenePlacementSlot::Last => None,
+        };
+        for target in std::iter::once(&declaration.target)
+            .chain(parent)
+            .chain(sibling)
+        {
+            if !source_target_is_admissible(target, &records) {
+                push_placement_diagnostic(
+                    &mut diagnostics,
+                    operation_index,
+                    "scene.invalid-placement-target",
+                    "Scene placement requires a local entity or a canonical-checked instance route",
+                    target.entity.entity(),
+                    None,
+                );
+            }
+        }
+    }
+    for entity in records {
+        if !local_placements.contains(entity) {
+            push_placement_diagnostic(
+                &mut diagnostics,
+                operation_index,
+                "scene.missing-placement",
+                "Scene entity requires exactly one authored placement",
+                entity,
+                None,
+            );
+        }
+    }
+    diagnostics
 }
 
-fn preflight_scene_with_context_options(
-    document: &SceneDocument,
+fn source_target_is_admissible(
+    target: &PrefabEntityTarget,
+    records: &BTreeSet<&SceneEntityId>,
+) -> bool {
+    let Some(first) = target.through.first() else {
+        return matches!(
+            &target.entity,
+            PrefabEntityOrigin::SourceEntity(entity) if records.contains(entity)
+        );
+    };
+    let PrefabEntityOrigin::SourceEntity(anchor) = &first.anchor else {
+        return false;
+    };
+    // An outer instance declaration can supply or replace the effective instance at this entry.
+    // Existence of that selected instance is the compiler's responsibility.
+    records.contains(anchor)
+        && target.through.iter().all(|hop| {
+            hop.expected_base.kind() == crate::SourceDocumentKind::Prefab
+                && !matches!(
+                    hop.expected_base.origin(),
+                    crate::SourceDocumentOrigin::StableAsset { stable_id }
+                        if stable_id.as_uuid().is_nil()
+                )
+        })
+}
+
+fn preflight_source_values_with_context(
+    placements: &[SceneEntityPlacement],
+    entities: &[SceneEntityRecord],
     registry: &ComponentRegistrySnapshot,
     bindings: Option<&SceneComponentBindings>,
     context: &mut ComponentDecodeContext<'_>,
     options: ScenePreflightOptions,
-) -> (Vec<PreparedSceneEntity>, DiagnosticReport) {
+) -> DiagnosticReport {
     let ScenePreflightOptions {
-        allow_prefab_instances,
         operation_index,
-        mode,
         validate_local_references,
+        validate_topology,
+        decode_native,
     } = options;
     let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
-    let (placement, mut diagnostics) =
-        validate_scene_structure_with_operation(document, operation_index);
-    let execution = registry;
-    if bindings.is_some_and(|bindings| !execution.ptr_eq(bindings.native_snapshot())) {
+    let mut diagnostics = if validate_topology {
+        validate_source_structure_with_operation(placements, entities, operation_index)
+    } else {
+        DiagnosticReport::default()
+    };
+    if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {
         diagnostics.push(diagnostic_error(
             "scene.component-bindings-mismatch",
             "Scene bindings do not select the supplied native component registry",
         ));
-        return (Vec::new(), diagnostics);
-    }
-
-    for entity in &document.entities {
-        if let Some(prefab) = &entity.prefab
-            && !allow_prefab_instances
-        {
-            push_with_operation_index(
-                &mut diagnostics,
-                with_asset_ref(
-                    with_public_locator(
-                        with_public_locator(
-                            diagnostic_error(
-                                "scene.prefab-instance-unsupported",
-                                "Prefab instances require expansion before scene spawn",
-                            ),
-                            "entity-id",
-                            entity.id.as_str(),
-                        ),
-                        "field-path",
-                        "prefab.source",
-                    ),
-                    "asset-ref",
-                    &prefab.source,
-                ),
-                operation_index,
-            );
-        }
-    }
-
-    if let Some(entity_id) = placement.as_ref().and_then(|placement| {
-        first_unavailable_hierarchy_projection_entity(document, placement, registry)
-    }) {
-        push_with_operation_index(
-            &mut diagnostics,
-            with_public_locator(
-                diagnostic_error(
-                    "scene.hierarchy-projection-unavailable",
-                    "Scene hierarchy requires a runtime projection that is not implemented",
-                ),
-                "entity-id",
-                entity_id.as_str(),
-            ),
-            operation_index,
-        );
+        return diagnostics;
     }
 
     let mut normalized_entities = Vec::new();
-    let namespace = document
-        .entities
+    let namespace = entities
         .iter()
         .map(|entity| &entity.id)
         .collect::<BTreeSet<_>>();
     let value_limits = context.materialization_limits();
     let mut value_budget = SceneValueBudget::new(value_limits);
     let traversal_limits = reference_traversal_limits(value_limits);
-    for entity in sorted_entities(document) {
+    for entity in sorted_entities(entities) {
         let mut normalized_components = Vec::new();
         for (component_id, component) in &entity.components {
             let data_owner = bindings.and_then(|bindings| bindings.data_owner(component_id));
@@ -1036,11 +1088,7 @@ fn preflight_scene_with_context_options(
                         with_public_locator(
                             diagnostic_error(
                                 "scene.component-owner-mismatch",
-                                if data_owner.is_some() {
-                                    "Persistent component owner does not match the admitted schema owner"
-                                } else {
-                                    "Persistent component owner does not match the executable schema owner"
-                                },
+                                "Persistent component owner does not match the admitted schema owner",
                             ),
                             "entity-id",
                             entity.id.as_str(),
@@ -1090,26 +1138,12 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
-            let default_overrides = if matches!(mode, SceneValidationMode::Native) {
-                None
-            } else {
-                Some(&component.contextual_defaults)
-            };
-            let defaults_validation = if let Some(defaults) = default_overrides {
-                value_budget
-                    .admit_contextual_defaults(defaults)
-                    .and_then(|()| {
-                        crate::document::validate_contextual_defaults(
-                            schema,
-                            component,
-                            value_limits,
-                        )
-                    })
-            } else if component.contextual_defaults.is_empty() {
-                Ok(())
-            } else {
-                Err(ComponentCodecError::UnresolvedAuthoredReference)
-            };
+            let default_overrides = Some(&component.contextual_defaults);
+            let defaults_validation = value_budget
+                .admit_contextual_defaults(&component.contextual_defaults)
+                .and_then(|()| {
+                    crate::document::validate_contextual_defaults(schema, component, value_limits)
+                });
             if let Err(error) = defaults_validation {
                 push_with_operation_index(
                     &mut diagnostics,
@@ -1207,11 +1241,7 @@ fn preflight_scene_with_context_options(
                 value_limits,
             ) {
                 Ok(()) => true,
-                Err(ComponentCodecError::UnresolvedAuthoredReference)
-                    if !matches!(mode, SceneValidationMode::Native) =>
-                {
-                    false
-                }
+                Err(ComponentCodecError::UnresolvedAuthoredReference) => false,
                 Err(error) => {
                     push_with_operation_index(
                         &mut diagnostics,
@@ -1327,58 +1357,27 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
-            if native_eligible && !matches!(mode, SceneValidationMode::Shape) {
+            if decode_native && native_eligible && data_owner.is_none() {
                 normalized_components.push(NormalizedSceneComponent {
                     id: component_id,
-                    schema,
                     value: effective,
-                    data_owner,
                 });
             }
         }
         normalized_entities.push((entity, normalized_components));
     }
 
-    // No codec may observe any part of a rejected Native batch. This includes later entities,
-    // data members, defaults and typed leaves inside opaque or undeclared value subtrees.
-    let batch_admitted = !diagnostics.has_errors();
-    let mut prepared_entities = Vec::new();
+    // Source validation can consult a real codec only after the complete source value batch
+    // passes. It never constructs Native entities or interprets authored placements.
+    if diagnostics.has_errors() {
+        return diagnostics;
+    }
     for (entity, components) in normalized_entities {
-        let mut prepared_components = Vec::new();
-        let mut prepared_data_components = Vec::new();
         for component in components {
-            if !batch_admitted {
-                continue;
-            }
             let component_id = component.id;
-            if let Some(owner) = component.data_owner {
-                if matches!(mode, SceneValidationMode::Native) {
-                    prepared_data_components.push(PreparedSceneDataComponent {
-                        id: component_id.clone(),
-                        owner: owner.clone(),
-                        record: crate::CompiledSceneComponent::from_admitted_data(
-                            owner.owner_id().clone(),
-                            component.schema.version(),
-                            component.value.into_owned(),
-                        ),
-                    });
-                }
-                continue;
-            }
-
-            match execution.preflight_component_with_context(
-                component_id,
-                &component.value,
-                context,
-            ) {
-                Ok(prepared) => {
-                    if matches!(mode, SceneValidationMode::Native) {
-                        prepared_components.push(PreparedSceneComponent {
-                            id: component_id.clone(),
-                            prepared,
-                        });
-                    }
-                }
+            match registry.preflight_component_with_context(component_id, &component.value, context)
+            {
+                Ok(_) => {}
                 Err(ComponentCodecError::MissingNativeBinding { .. }) => push_with_operation_index(
                     &mut diagnostics,
                     with_public_locator(
@@ -1406,18 +1405,9 @@ fn preflight_scene_with_context_options(
                 }
             }
         }
-
-        if matches!(mode, SceneValidationMode::Native) {
-            prepared_entities.push(PreparedSceneEntity {
-                id: entity.id.clone(),
-                children: entity.children.clone(),
-                components: prepared_components,
-                data_components: prepared_data_components,
-            });
-        }
     }
 
-    (prepared_entities, diagnostics)
+    diagnostics
 }
 
 /// Logical effective-value admission is shared across entities and representations. Admission
@@ -1633,7 +1623,7 @@ fn component_payload_diagnostic(
 }
 
 pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(
-    document: &'document SceneDocument,
+    document: &'document SceneDraft,
     placement: &ValidatedScenePlacement,
     registry: &ComponentRegistrySnapshot,
 ) -> Option<&'document SceneEntityId> {
@@ -1666,7 +1656,7 @@ fn first_unavailable_flat_projection<'a>(
     })
 }
 
-fn component_migration_diagnostic(
+pub(crate) fn component_migration_diagnostic(
     entity_id: &str,
     component_id: &str,
     error: &ComponentMigrationError,
@@ -1707,8 +1697,8 @@ fn component_migration_diagnostic(
     }
 }
 
-fn sorted_entities(document: &SceneDocument) -> Vec<&SceneEntityRecord> {
-    let mut entities = document.entities.iter().collect::<Vec<_>>();
+fn sorted_entities(entities: &[SceneEntityRecord]) -> Vec<&SceneEntityRecord> {
+    let mut entities = entities.iter().collect::<Vec<_>>();
     entities.sort_by(|left, right| left.id.cmp(&right.id));
     entities
 }
@@ -1915,7 +1905,7 @@ fn push_placement_diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use crate::SceneComponentRecord;
+    use crate::{SceneComponentRecord, ScenePlacement};
     use nara_ecs::Component;
     use nara_reflect::{
         ComponentFieldPath, ComponentFieldSchema, ComponentSchemaCatalog,
@@ -2021,6 +2011,139 @@ mod tests {
     }
 
     #[test]
+    fn source_structure_requires_one_placement_for_each_local_record() {
+        let entity = SceneEntityId::new("local").unwrap();
+        let record = SceneEntityRecord::new(entity.clone());
+        let placement = SceneEntityPlacement::root(entity.clone());
+        let has_code = |report: &DiagnosticReport, code: &str| {
+            report
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == code)
+        };
+        assert!(has_code(
+            &validate_source_structure(&[], std::slice::from_ref(&record)),
+            "scene.missing-placement",
+        ));
+        assert!(has_code(
+            &validate_source_structure(
+                &[placement.clone(), placement.clone()],
+                std::slice::from_ref(&record),
+            ),
+            "scene.duplicate-placement",
+        ));
+        assert!(has_code(
+            &validate_source_structure(&[placement.clone()], &[record.clone(), record.clone()]),
+            "scene.duplicate-entity-id",
+        ));
+        let mut placements = vec![placement];
+        for target in [
+            PrefabEntityTarget::source(SceneEntityId::new("absent").unwrap()),
+            PrefabEntityTarget::addition(entity),
+        ] {
+            placements.push(SceneEntityPlacement::new(
+                target,
+                ScenePlacement::last(ScenePlacementParent::Root),
+            ));
+            assert!(has_code(
+                &validate_source_structure(&placements, std::slice::from_ref(&record)),
+                "scene.invalid-placement-target",
+            ));
+            placements.pop();
+        }
+        assert!(!validate_source_structure(&placements, &[record]).has_errors());
+    }
+
+    #[test]
+    fn source_routes_require_canonical_predicates_without_effective_instance_evaluation() {
+        let anchor = SceneEntityId::new("anchor").unwrap();
+        let projected = SceneEntityId::new("projected").unwrap();
+        let record = SceneEntityRecord::new(anchor.clone());
+        let key = crate::SourceDocumentKey::named(
+            "f9ab807a-c61e-4c92-bfee-b6fa153b8efc".parse().unwrap(),
+            "prefab.source",
+            crate::SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let route = PrefabEntityTarget {
+            through: vec![crate::PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(anchor.clone()),
+                expected_base: key,
+            }],
+            entity: PrefabEntityOrigin::SourceEntity(projected),
+        };
+        // The actual instance can be supplied or replaced by effective outer intent. Admission
+        // checks the local route entry and canonical predicates without opening that occurrence.
+        assert!(record.prefab.is_none());
+        let placements = [
+            SceneEntityPlacement::root(anchor),
+            SceneEntityPlacement::new(
+                route.clone(),
+                ScenePlacement::before(ScenePlacementParent::Entity(route.clone()), route.clone()),
+            ),
+        ];
+        assert!(
+            !validate_source_structure(&placements, std::slice::from_ref(&record)).has_errors()
+        );
+
+        let mut invalid = route;
+        invalid.through[0].expected_base = crate::SourceDocumentKey::stable_asset(
+            "00000000-0000-0000-0000-000000000000".parse().unwrap(),
+            crate::SourceDocumentKind::Prefab,
+        );
+        for position in 0..3 {
+            let mut declarations = placements.clone();
+            match position {
+                0 => declarations[1].target = invalid.clone(),
+                1 => {
+                    declarations[1].placement.parent =
+                        ScenePlacementParent::Entity(invalid.clone());
+                }
+                _ => declarations[1].placement.slot = ScenePlacementSlot::After(invalid.clone()),
+            }
+            assert!(
+                validate_source_structure(&declarations, std::slice::from_ref(&record))
+                    .has_errors()
+            );
+        }
+    }
+
+    #[test]
+    fn source_validation_does_not_construct_a_hierarchy_for_native_admission() {
+        let left = SceneEntityId::new("left").unwrap();
+        let right = SceneEntityId::new("right").unwrap();
+        let document = SceneDocument::new(
+            [
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(left.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        right.clone(),
+                    ))),
+                ),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(right.clone()),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        left.clone(),
+                    ))),
+                ),
+            ],
+            [SceneEntityRecord::new(left), SceneEntityRecord::new(right)],
+        );
+        let registry = nara_reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
+        let before = document.clone();
+        assert!(
+            !preflight_authoring_scene(&document, &registry)
+                .diagnostics
+                .has_errors()
+        );
+        let native = preflight_scene(&document, &registry);
+        assert!(native.diagnostics.has_errors());
+        assert!(native.entities.is_empty());
+        assert_eq!(document, before);
+    }
+
+    #[test]
     fn native_and_data_share_aggregate_allowance_including_zero_byte_residual() {
         let (registry, bindings) = definitions(data_schema([]));
         for separate_entities in [false, true] {
@@ -2096,7 +2219,7 @@ mod tests {
             record.owner = owner;
             record.version = version;
             let prepared = prepare(&document, &registry, &bindings, limits(8, 32, 3));
-            assert!(prepared.entities[0].data_components.is_empty());
+            assert!(prepared.entities.is_empty());
             assert!(
                 prepared
                     .diagnostics
@@ -2123,8 +2246,21 @@ mod tests {
         let (registry, bindings) = definitions(schema);
         for include_target in [false, true] {
             let mut document = mixed_document(ComponentValue::Map(BTreeMap::new()), false);
+            document.entities[0]
+                .components
+                .get_mut(&data_id())
+                .unwrap()
+                .contextual_defaults
+                .insert(
+                    ComponentFieldId::new("target"),
+                    ComponentValue::EntityReference(EntityReference::SceneLocal {
+                        entity: target.clone(),
+                    }),
+                );
             if include_target {
-                document.roots.push(target.clone());
+                document
+                    .placements
+                    .push(SceneEntityPlacement::root(target.clone()));
                 document
                     .entities
                     .push(SceneEntityRecord::new(target.clone()));
@@ -2137,10 +2273,14 @@ mod tests {
                 prepared.diagnostics
             );
             if !include_target {
-                assert!(prepared.entities[0].data_components.is_empty());
-                assert!(prepared.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code().as_str() == "scene.local-reference-invalid"
-                }));
+                assert!(prepared.entities.is_empty());
+                assert!(
+                    prepared.diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
+                    }),
+                    "{:?}",
+                    prepared.diagnostics
+                );
             }
         }
     }
@@ -2174,7 +2314,7 @@ mod tests {
             &mut context,
         );
         assert!(prepared.diagnostics.has_errors());
-        assert!(prepared.entities[0].data_components.is_empty());
+        assert!(prepared.entities.is_empty());
     }
 
     #[test]
@@ -2287,7 +2427,7 @@ mod tests {
                 &mut ComponentDecodeContext::new().with_materialization_limits(limits),
             );
             assert!(prepared.diagnostics.has_errors());
-            assert!(prepared.entities[0].components.is_empty());
+            assert!(prepared.entities.is_empty());
             assert_eq!(calls.load(Ordering::SeqCst), 0);
         }
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
@@ -2312,7 +2452,7 @@ mod tests {
     }
 
     #[test]
-    fn patch_shape_mode_retains_operation_diagnostics_without_native_decode() {
+    fn source_patch_validation_retains_operation_diagnostics_before_native_decode() {
         let (registry, _) = definitions(data_schema([]));
         let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
             SceneEntityId::new("source").unwrap(),
@@ -2324,12 +2464,7 @@ mod tests {
                 ComponentValue::map([("x", ComponentValue::U64(1))]),
             ),
         )]);
-        let diagnostics = validate_patch_intermediate_scene_with_limits(
-            &document,
-            &registry,
-            7,
-            ComponentValueMaterializationLimits::default(),
-        );
+        let diagnostics = document.validate_authoring_for_patch(&registry, 7);
         assert!(diagnostics.iter().any(|diagnostic| {
             diagnostic.code().as_str() == "scene.invalid-component-payload"
                 && diagnostic
@@ -2412,8 +2547,21 @@ mod tests {
             );
             assert_eq!(calls.load(Ordering::SeqCst), 0);
         }
+        let draft = SceneDraft::new(
+            [SceneEntityId::new("source").unwrap()],
+            [crate::draft::ExpandedSceneEntity {
+                id: SceneEntityId::new("source").unwrap(),
+                children: Vec::new(),
+                components: [(
+                    native_id(),
+                    SceneComponentRecord::new(ComponentSchemaVersion::ONE, effective.clone()),
+                )]
+                .into_iter()
+                .collect(),
+            }],
+        );
         let expanded = validate_expanded_values(
-            &document,
+            &draft,
             SchemaAuthority::Native(&registry),
             &mut ComponentDecodeContext::new(),
             |_, _, _| Ok::<(), std::convert::Infallible>(()),
@@ -2438,13 +2586,6 @@ mod tests {
             record.contextual_defaults.clear();
             let source = preflight_authoring_scene(&missing_context, &registry);
             assert!(source.diagnostics.has_errors());
-            let shape = validate_patch_intermediate_scene_with_limits(
-                &missing_context,
-                &registry,
-                3,
-                ComponentValueMaterializationLimits::default(),
-            );
-            assert!(shape.has_errors());
             assert!(
                 missing_context.entities[0].components[&native_id()]
                     .contextual_defaults
@@ -2528,13 +2669,6 @@ mod tests {
                 .value = value;
             let source = preflight_authoring_scene(&invalid, &registry);
             assert!(source.diagnostics.has_errors());
-            let shape = validate_patch_intermediate_scene_with_limits(
-                &invalid,
-                &registry,
-                4,
-                ComponentValueMaterializationLimits::default(),
-            );
-            assert!(shape.has_errors());
             assert_eq!(calls.load(Ordering::SeqCst), 0);
         }
     }

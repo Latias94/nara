@@ -29,12 +29,9 @@ use nara::{
         ProjectContentMemberKind, ProjectCreationOutcome, ProjectCreationRequest, ProjectSlug,
         check_project, prepare_desktop_2d_project,
     },
-    reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{ComponentFieldId, ComponentPropertyPath, ComponentTypeId, ComponentValue},
     render::Extent2d,
-    scene::{
-        SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
-    },
+    scene::{SceneEntityId, ScenePlacement, ScenePlacementParent},
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentMutation, EditorFieldFeedbackReason,
         EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult, EditorPlayAction,
@@ -50,7 +47,6 @@ use serde_json::Value;
 mod imgui;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
-const GAME_VIEW_PROBE_ENTITY: &str = "game-view-probe";
 const SPRITE_COMPONENT: &str = "nara.sprite.Sprite";
 const TRANSFORM_COMPONENT: &str = "nara.transform.Transform2d";
 const TRANSLATION_X_FIELD: &str = "translation.x";
@@ -80,45 +76,57 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     let opened = current_frame(&application);
     let opened_scene = opened.workspace().active_scene.as_ref().unwrap();
     let document = opened_scene.document;
-    let edited = dispatch(
-        &mut application,
-        [EditorAction::Mutate(
-            EditorDocumentMutation::ApplyScenePatch {
-                document,
-                base_revision: opened_scene.revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(
-                        SceneEntityId::new(GAME_VIEW_PROBE_ENTITY).unwrap(),
-                    )
-                    .with_component(
-                        ComponentTypeId::new(TRANSFORM_COMPONENT),
-                        SceneComponentRecord::new(
-                            ComponentSchemaVersion::ONE,
-                            transform_value(0.0, 0.0),
-                        ),
-                    )
-                    .with_component(
-                        ComponentTypeId::new(SPRITE_COMPONENT),
-                        SceneComponentRecord::new(
-                            ComponentSchemaVersion::ONE,
-                            color_sprite_value(),
-                        ),
-                    ),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
-            },
-        )],
-    );
+    let basis = application.document_query_basis(document).unwrap();
+    let mut draft = application.begin_authoring_construction(&basis).unwrap();
+    let probe = draft
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
+        .unwrap();
+    for component in [TRANSFORM_COMPONENT, SPRITE_COMPONENT] {
+        draft
+            .add_component(&probe, ComponentTypeId::new(component))
+            .unwrap();
+    }
+    let sprite_properties = [
+        ("size.x", 96.0),
+        ("size.y", 96.0),
+        ("material.tint.r", 0.2),
+        ("material.tint.g", 0.7),
+        ("material.tint.b", 1.0),
+        ("material.tint.a", 1.0),
+    ];
+    for (field, value) in sprite_properties {
+        draft
+            .set_property(
+                &probe,
+                ComponentTypeId::new(SPRITE_COMPONENT),
+                ComponentPropertyPath::new(ComponentFieldId::new(field)),
+                ComponentValue::f64(value).unwrap(),
+            )
+            .unwrap();
+    }
+    let prepared = application
+        .prepare_authoring_construction(&basis, &draft)
+        .expect(
+            "the starter admits Transform and Sprite creation templates and declared properties",
+        );
+    let committed = application.commit_authoring_construction(prepared, Duration::ZERO);
+    let probe_entity = committed.entity(&probe).cloned().unwrap_or_else(|| {
+        panic!(
+            "the construction commit must publish the probe entity: {:#?}",
+            committed.submission()
+        )
+    });
+    let edited = current_frame(&application);
     let edited_scene = edited.workspace().active_scene.as_ref().unwrap();
     let edited_revision = edited_scene.revision;
-    assert!(edited_scene.dirty);
+    assert!(edited_scene.dirty, "{:#?}", edited.diagnostics());
     assert!(
         edited_scene
             .editor
             .inspector
             .entities
             .iter()
-            .any(|entity| entity.id.as_str() == GAME_VIEW_PROBE_ENTITY)
+            .any(|entity| entity.id == probe_entity)
     );
     assert_eq!(fs::read(&scene_path).unwrap(), source_before);
 
@@ -128,11 +136,18 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     let preview_hit = preview
         .hits()
         .iter()
-        .find(|hit| hit.entity().as_str() == GAME_VIEW_PROBE_ENTITY)
+        .find(|hit| hit.entity() == &probe_entity)
         .expect("the unsaved color sprite must be visible in Scene Preview");
     assert!(preview_hit.contains_clip_point([0.0, 0.0]));
     drop(preview);
-    select_entity(&mut application, document, GAME_VIEW_PROBE_ENTITY);
+    select_entity(&mut application, document, probe_entity.as_str());
+    let selected = current_frame(&application);
+    for (field, value) in sprite_properties {
+        assert_eq!(
+            selected_f64_field(&selected, SPRITE_COMPONENT, field).value,
+            value
+        );
+    }
 
     dispatch(
         &mut application,
@@ -229,7 +244,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
                 document,
                 base_revision: paused.workspace().active_scene.as_ref().unwrap().revision,
                 command: SceneInspectorCommand::SetField {
-                    entity: SceneEntityId::new(GAME_VIEW_PROBE_ENTITY).unwrap(),
+                    entity: probe_entity.clone(),
                     component: ComponentTypeId::new(TRANSFORM_COMPONENT),
                     component_version: transform.component_version,
                     field: ComponentFieldId::new(TRANSLATION_X_FIELD),
@@ -349,7 +364,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
         .workspace()
         .active_document
         .unwrap();
-    select_entity(&mut application, reopened_document, GAME_VIEW_PROBE_ENTITY);
+    select_entity(&mut application, reopened_document, probe_entity.as_str());
     let reopened = current_frame(&application);
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(
@@ -390,7 +405,7 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
             base_revision: initial_revision,
             command: SceneCompositionCommand::CreateEntity {
                 kind: SceneCompositionEntityKind::ColoredSprite,
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                placement: ScenePlacement::last(ScenePlacementParent::Root),
             },
         })],
     );
@@ -572,7 +587,10 @@ fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
         .iter()
         .find(|row| row.id == created_entity)
         .expect("reopen reconstructs the composed entity in the canonical tree");
-    assert!(created_row.parent.is_none());
+    assert_eq!(
+        created_row.placement,
+        Some(ScenePlacement::last(ScenePlacementParent::Root))
+    );
 
     let finally_closed = dispatch(
         &mut application,
@@ -908,52 +926,6 @@ fn selected_f64_field(
         component_version: component.schema_version,
         value: value.get(),
     }
-}
-
-fn transform_value(x: f64, y: f64) -> ComponentValue {
-    ComponentValue::map([
-        (
-            "translation",
-            ComponentValue::map([
-                ("x", ComponentValue::f64(x).unwrap()),
-                ("y", ComponentValue::f64(y).unwrap()),
-            ]),
-        ),
-        ("rotation", ComponentValue::f64(0.0).unwrap()),
-        (
-            "scale",
-            ComponentValue::map([
-                ("x", ComponentValue::f64(1.0).unwrap()),
-                ("y", ComponentValue::f64(1.0).unwrap()),
-            ]),
-        ),
-    ])
-}
-
-fn color_sprite_value() -> ComponentValue {
-    ComponentValue::map([
-        (
-            "size",
-            ComponentValue::map([
-                ("x", ComponentValue::f64(96.0).unwrap()),
-                ("y", ComponentValue::f64(96.0).unwrap()),
-            ]),
-        ),
-        (
-            "material",
-            ComponentValue::map([(
-                "tint",
-                ComponentValue::map([
-                    ("r", ComponentValue::f64(0.2).unwrap()),
-                    ("g", ComponentValue::f64(0.7).unwrap()),
-                    ("b", ComponentValue::f64(1.0).unwrap()),
-                    ("a", ComponentValue::f64(1.0).unwrap()),
-                ]),
-            )]),
-        ),
-        ("layer", ComponentValue::I64(0)),
-        ("sort_key", ComponentValue::I64(0)),
-    ])
 }
 
 fn transform_x_field(frame: &nara::tooling::EditorFrameModel) -> TransformXField {

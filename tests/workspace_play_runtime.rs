@@ -22,14 +22,14 @@ use nara::project_host::EditorGameViewBridgeFailure;
 use nara::{
     ProductConfiguration, ProductRecipe,
     app::{
-        App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginDefinitionId, PluginDomainError, PluginError, PluginId, PluginShutdownContext,
+        App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
+        PluginDomainError, PluginError, PluginId, PluginShutdownContext,
         PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
         RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
         StartupStage,
     },
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
-    ecs::{Commands, Entity, Query, Res, Resource, schedule::IntoScheduleConfigs},
+    ecs::{Commands, Entity, Query, Res, Resource},
     project_host::{
         EditorProjectSession, TrustedCompiledEditorProjectIntent,
         advanced::{RuntimeProbe, open_trusted_compiled_editor_with_probe},
@@ -37,8 +37,9 @@ use nara::{
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     render::Camera2d,
     scene::{
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
-        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        PrefabEntityTarget, SceneComponentRecord, SceneDocument, SceneEntityId,
+        SceneEntityPlacement, SceneEntityRecord, SceneEntitySource, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
@@ -56,7 +57,7 @@ use nara::{
     feature = "render-wgpu"
 ))]
 use nara::{project_host::EditorGameViewCompletion, render::Extent2d};
-use project_content_fixture::TestProject;
+use project_content_fixture::{TestProject, scene_id};
 
 const DELAYED_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-delayed-close");
 const DELAYED_CLOSE_DEFINITION_ID: PluginDefinitionId =
@@ -396,10 +397,10 @@ fn editor_frame_publishes_ordered_navigation_and_mutation_only_after_drive() {
                 EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
                     document,
                     base_revision: revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(added.clone()),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: add_root_patch(
+                        &[SceneEntityPlacement::root(selected.clone())],
+                        added.clone(),
+                    ),
                 }),
             ],
         ))
@@ -583,11 +584,9 @@ fn document_transactions_reject_stale_bases_and_accept_fresh_bases_without_redra
     let document = frame.workspace().active_document.unwrap();
     let revision = frame.workspace().scene(document).unwrap().revision;
 
-    let patch = |id: &str| {
-        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(SceneEntityId::new(id).unwrap()),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
-        }])
+    let initial_placements = vec![SceneEntityPlacement::root(scene_id("enemy-anchor"))];
+    let patch = |placements: &[SceneEntityPlacement], id: &str| {
+        add_root_patch(placements, SceneEntityId::new(id).unwrap())
     };
     let report = editor.dispatch_editor_actions(EditorActionBatch::new(
         frame.revision(),
@@ -595,12 +594,12 @@ fn document_transactions_reject_stale_bases_and_accept_fresh_bases_without_redra
             EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
                 document,
                 base_revision: revision,
-                patch: patch("first-frame-edit"),
+                patch: patch(&initial_placements, "first-frame-edit"),
             }),
             EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
                 document,
                 base_revision: revision,
-                patch: patch("second-frame-edit"),
+                patch: patch(&initial_placements, "second-frame-edit"),
             }),
         ],
     ));
@@ -625,7 +624,13 @@ fn document_transactions_reject_stale_bases_and_accept_fresh_bases_without_redra
                 EditorDocumentMutation::ApplyScenePatch {
                     document,
                     base_revision,
-                    patch: patch("fresh-base-edit"),
+                    patch: patch(
+                        &[
+                            initial_placements[0].clone(),
+                            SceneEntityPlacement::root(scene_id("first-frame-edit")),
+                        ],
+                        "fresh-base-edit",
+                    ),
                 },
             )],
         ))
@@ -725,12 +730,10 @@ fn play_does_not_rebase_to_a_later_document_revision_from_the_same_frame() {
             EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
                 document,
                 base_revision: revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(
-                        SceneEntityId::new("post-play-frame-edit").unwrap(),
-                    ),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
+                patch: add_root_patch(
+                    &[SceneEntityPlacement::root(scene_id("enemy-anchor"))],
+                    SceneEntityId::new("post-play-frame-edit").unwrap(),
+                ),
             }),
         ],
     );
@@ -784,12 +787,10 @@ fn save_completion_becomes_visible_only_after_an_editor_frame_publishes_it() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document,
                     base_revision: revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("saved-frame-edit").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: add_root_patch(
+                        &[SceneEntityPlacement::root(scene_id("enemy-anchor"))],
+                        SceneEntityId::new("saved-frame-edit").unwrap(),
+                    ),
                 },
             )],
         ))
@@ -1564,10 +1565,17 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
     let root_id = SceneEntityId::new("root").unwrap();
     let child_id = SceneEntityId::new("root/child").unwrap();
     project.write_scene_source(&SceneDocument::new(
-        [root_id.clone()],
+        [
+            SceneEntityPlacement::root(root_id.clone()),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(child_id.clone()),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    root_id.clone(),
+                ))),
+            ),
+        ],
         [
             SceneEntityRecord::new(root_id.clone())
-                .with_children([child_id.clone()])
                 .with_component(transform_id.clone(), transform_record(10.0, 20.0)),
             SceneEntityRecord::new(child_id.clone())
                 .with_component(transform_id.clone(), transform_record(3.0, 4.0)),
@@ -1904,6 +1912,23 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
             cancelled_request
         ))
     );
+}
+
+fn add_root_patch(
+    placements: &[SceneEntityPlacement],
+    entity: SceneEntityId,
+) -> ScenePatchDocument {
+    let mut value = placements.to_vec();
+    value.push(SceneEntityPlacement::root(entity.clone()));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(entity),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value,
+        },
+    ])
 }
 
 fn transform_record(x: f64, y: f64) -> SceneComponentRecord {

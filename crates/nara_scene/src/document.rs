@@ -9,7 +9,7 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabInstance, SceneComponentBindings,
+    PrefabInstance, SceneComponentBindings, SceneEntityPlacement,
     validation::{
         preflight_authoring_scene, preflight_authoring_scene_for_patch,
         preflight_authoring_scene_with_context, preflight_authoring_scene_with_context_for_patch,
@@ -21,33 +21,33 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneDocument {
-    pub roots: Vec<SceneEntityId>,
+    pub placements: Vec<SceneEntityPlacement>,
     pub entities: Vec<SceneEntityRecord>,
 }
 
 impl SceneDocument {
     #[must_use]
     pub fn new(
-        roots: impl IntoIterator<Item = SceneEntityId>,
+        placements: impl IntoIterator<Item = SceneEntityPlacement>,
         entities: impl IntoIterator<Item = SceneEntityRecord>,
     ) -> Self {
         let mut entities = entities.into_iter().collect::<Vec<_>>();
         entities.sort_by(|left, right| left.id.cmp(&right.id));
         Self {
-            roots: roots.into_iter().collect(),
+            placements: placements.into_iter().collect(),
             entities,
         }
     }
 
-    /// Creates a flat document whose input record order is its root order.
+    /// Declares every input entity as a root, preserving the input order in explicit placements.
     #[must_use]
     pub fn from_ordered_roots(entities: impl IntoIterator<Item = SceneEntityRecord>) -> Self {
         let entities = entities.into_iter().collect::<Vec<_>>();
-        let roots = entities
+        let placements = entities
             .iter()
-            .map(|entity| entity.id.clone())
+            .map(|entity| SceneEntityPlacement::root(entity.id.clone()))
             .collect::<Vec<_>>();
-        Self::new(roots, entities)
+        Self::new(placements, entities)
     }
 
     pub fn canonicalize(&mut self) {
@@ -134,13 +134,14 @@ impl SceneComponentBindings {
         .diagnostics
     }
 
-    /// Validates a complete expanded Scene through the shared native/data preflight.
+    /// Compiles and validates a complete Scene through the shared native/data preflight.
     ///
     /// Native records use the selected real codecs and migrations; data records require their
     /// admitted owner, current version, Schema and declared references. `limits` bounds aggregate
     /// retained effective component values across both families. When supplied, `asset_resolution`
     /// checks declared asset references against project metadata without loading assets.
-    /// This does not access a `World`, mutate the source, expand Prefabs or publish runtime state.
+    /// This does not access a `World`, mutate the source or publish executable state. Sources
+    /// that require a Prefab resolver must use the complete compilation operation with that resolver.
     #[must_use]
     pub fn validate_scene(
         &self,
@@ -168,8 +169,6 @@ impl SceneComponentBindings {
 pub struct SceneEntityRecord {
     pub id: SceneEntityId,
     #[cfg_attr(feature = "serde", serde(default))]
-    pub children: Vec<SceneEntityId>,
-    #[cfg_attr(feature = "serde", serde(default))]
     pub components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
     #[cfg_attr(
         feature = "serde",
@@ -183,16 +182,9 @@ impl SceneEntityRecord {
     pub fn new(id: SceneEntityId) -> Self {
         Self {
             id,
-            children: Vec::new(),
             components: BTreeMap::new(),
             prefab: None,
         }
-    }
-
-    #[must_use]
-    pub fn with_children(mut self, children: impl IntoIterator<Item = SceneEntityId>) -> Self {
-        self.children = children.into_iter().collect();
-        self
     }
 
     #[must_use]

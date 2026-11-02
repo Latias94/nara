@@ -11,9 +11,8 @@ use super::*;
 use crate::{
     AuthoringDocumentSource, PrefabAddition, PrefabAuthoringSession, PrefabDocument,
     PrefabDocumentCandidate, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop,
-    PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
+    PrefabOverlay, PrefabProjectionStep, SceneAuthoringSession, SceneComponentRecord,
+    SceneDocument, SceneDocumentCandidate, SourceDocumentKey, SourceDocumentKind,
     authoring::prefab_conversion::tests::{
         admit_schema, basis, component, id, instance, original, schema_owner,
     },
@@ -26,6 +25,192 @@ fn key(name: &str) -> SourceDocumentKey {
         SourceDocumentKind::Prefab,
     )
     .unwrap()
+}
+
+fn child_placement(parent: &str, child: &str) -> SceneEntityPlacement {
+    SceneEntityPlacement::new(
+        PrefabEntityTarget::source(id(child)),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            id(parent),
+        ))),
+    )
+}
+
+fn selected_input(name: &str) -> EntityReference {
+    EntityReference::Authored {
+        reference: AuthoredEntityReference {
+            through: vec![PrefabInstanceHop {
+                anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                expected_base: key("base"),
+            }],
+            target: AuthoredReferenceTarget::Input(
+                nara_identity::ReferenceInputId::new(name).unwrap(),
+            ),
+        },
+    }
+}
+
+#[test]
+fn query_inventory_is_finite_deduplicated_and_uses_understood_lexical_payloads() {
+    let field = ComponentFieldId::new("target");
+    let basis = admit_schema(
+        ComponentSchema::new(component(), "Queries", ComponentSchemaVersion::ONE)
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::Inspect])
+            .with_fields([ComponentFieldSchema::optional_with_default(
+                field.clone(),
+                "Target",
+                ComponentFieldPath::from_fields(["target"]),
+                ComponentValueKind::EntityRef,
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: id("anchor"),
+                }),
+            )
+            .with_capabilities([ComponentCapability::Scene, ComponentCapability::EntityRef])]),
+    );
+    let payload = SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([("target", ComponentValue::Null)]),
+    )
+    .with_owner(schema_owner())
+    .with_contextual_default(
+        field,
+        ComponentValue::EntityReference(selected_input("hidden")),
+    );
+    let mut retained = SceneEntityRecord::new(id("retained")).with_component(component(), payload);
+    let mut declaration = instance("unrelated");
+    declaration.arguments = Some(crate::PrefabReferenceArguments {
+        base: key("unrelated"),
+        values: [
+            (
+                nara_identity::ReferenceInputId::new("dormant").unwrap(),
+                selected_input("dormant"),
+            ),
+            (
+                nara_identity::ReferenceInputId::new("duplicate").unwrap(),
+                selected_input("hidden"),
+            ),
+            (
+                nara_identity::ReferenceInputId::new("own").unwrap(),
+                EntityReference::Authored {
+                    reference: AuthoredEntityReference::input(
+                        nara_identity::ReferenceInputId::new("own").unwrap(),
+                    ),
+                },
+            ),
+        ]
+        .into(),
+    });
+    retained.prefab = Some(declaration);
+    retained.components.insert(
+        nara_reflect::ComponentTypeId::new("test.UnknownQuery"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([(
+                "unknown",
+                ComponentValue::EntityReference(selected_input("opaque")),
+            )]),
+        ),
+    );
+    let records = vec![retained];
+    let limits = crate::validation::reference_traversal_limits(
+        ComponentValueMaterializationLimits::default(),
+    );
+    let maximum = nara_core::ByteLimit::new(1024 * 1024).unwrap();
+    let collected =
+        source::collect_source_reference_queries(&records, &id("anchor"), &basis, limits, maximum)
+            .unwrap();
+    assert_eq!(collected.values.len(), 2);
+    for name in ["hidden", "dormant"] {
+        let EntityReference::Authored { reference } = selected_input(name) else {
+            unreachable!()
+        };
+        assert!(collected.values.contains(&reference));
+    }
+    let exact = nara_core::ByteLimit::new(collected.work_bytes).unwrap();
+    source::collect_source_reference_queries(&records, &id("anchor"), &basis, limits, exact)
+        .unwrap();
+    assert!(
+        source::collect_source_reference_queries(
+            &records,
+            &id("anchor"),
+            &basis,
+            limits,
+            nara_core::ByteLimit::new(collected.work_bytes - 1).unwrap()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn query_inventory_accumulates_source_read_nodes_and_bytes_without_input_queries() {
+    let basis = basis();
+    let reference_target = "a".repeat(4096);
+    let records = ["first", "other"].map(|name| {
+        SceneEntityRecord::new(id(name)).with_component(component(), reference(&reference_target))
+    });
+    let limits = crate::validation::reference_traversal_limits(
+        ComponentValueMaterializationLimits::default(),
+    );
+    let maximum = nara_core::ByteLimit::new(1024 * 1024).unwrap();
+    let first = source::collect_source_reference_queries(
+        &records[..1],
+        &id("anchor"),
+        &basis,
+        limits,
+        maximum,
+    )
+    .unwrap();
+    let other = source::collect_source_reference_queries(
+        &records[1..],
+        &id("anchor"),
+        &basis,
+        limits,
+        maximum,
+    )
+    .unwrap();
+    assert!(first.values.is_empty() && other.values.is_empty());
+    assert_eq!(first.reference_work, other.reference_work);
+    assert!(first.reference_work.0 > 0 && first.reference_work.1 > 0);
+    let combined =
+        source::collect_source_reference_queries(&records, &id("anchor"), &basis, limits, maximum)
+            .unwrap();
+    assert_eq!(
+        combined.reference_work,
+        (first.reference_work.0 * 2, first.reference_work.1 * 2)
+    );
+    for bounded in [
+        nara_reflect::EntityReferenceTraversalLimits::new(
+            nara_core::ItemLimit::new(first.reference_work.0).unwrap(),
+            limits.bytes(),
+            limits.depth(),
+        ),
+        nara_reflect::EntityReferenceTraversalLimits::new(
+            limits.nodes(),
+            nara_core::ByteLimit::new(first.reference_work.1).unwrap(),
+            limits.depth(),
+        ),
+    ] {
+        for record in &records {
+            source::collect_source_reference_queries(
+                std::slice::from_ref(record),
+                &id("anchor"),
+                &basis,
+                bounded,
+                maximum,
+            )
+            .unwrap();
+        }
+        assert!(
+            source::collect_source_reference_queries(
+                &records,
+                &id("anchor"),
+                &basis,
+                bounded,
+                maximum
+            )
+            .is_err()
+        );
+    }
 }
 
 fn reference(target: &str) -> SceneComponentRecord {
@@ -65,11 +250,10 @@ fn source() -> SceneDocument {
     )]);
     addition.components.insert(component(), link);
     overlay.additions.push(addition);
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("leaf")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("leaf")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     anchor.prefab.as_mut().unwrap().overrides = Some(overlay);
     document
 }
@@ -85,10 +269,13 @@ impl Sources {
         let mut nested = crate::SceneEntityRecord::new(id("root-b"));
         nested.prefab = Some(instance("nested"));
         let base = PrefabDocument::new(
-            [id("root-a"), id("root-b")],
+            [
+                SceneEntityPlacement::root(id("root-a")),
+                SceneEntityPlacement::root(id("root-b")),
+                child_placement("root-a", "leaf"),
+            ],
             [
                 crate::SceneEntityRecord::new(id("root-a"))
-                    .with_children([id("leaf")])
                     .with_component(component(), reference("leaf")),
                 crate::SceneEntityRecord::new(id("leaf"))
                     .with_component(component(), reference("root-a")),
@@ -242,15 +429,15 @@ fn real_selected_composition_localizes_mixed_origins_and_replays_exact_source_da
         if old.id == id("anchor") {
             assert_eq!(retained.components, old.components);
             assert!(retained.prefab.is_none());
-            assert_eq!(
-                retained.children,
-                [
-                    root_a.clone(),
-                    root_b.clone(),
-                    addition.clone(),
-                    id("local-child")
-                ]
-            );
+            for entity in [&root_a, &root_b, &addition] {
+                assert!(reviewed.placements.iter().any(|entry| {
+                    entry.target == PrefabEntityTarget::source(entity.clone())
+                        && entry.placement.parent
+                            == ScenePlacementParent::Entity(PrefabEntityTarget::source(id(
+                                "anchor",
+                            )))
+                }));
+            }
         } else {
             assert_eq!(retained, old);
         }
@@ -298,7 +485,7 @@ fn real_selected_composition_localizes_mixed_origins_and_replays_exact_source_da
 fn nominal_prefab_conversion_cancellation_and_source_reopen_keep_owner_affinity() {
     let basis = basis();
     let scene = source();
-    let original = PrefabDocument::new(scene.roots, scene.entities);
+    let original = PrefabDocument::new(scene.placements, scene.entities);
     let published = PrefabDocumentCandidate::decode_json_str(&original.to_json_string().unwrap())
         .unwrap()
         .admit_authoring_with_basis(
@@ -441,17 +628,47 @@ fn source_copy_limits_and_stale_revision_refuse_before_publication() {
 #[test]
 fn repeated_root_placements_admit_the_full_existing_sibling_id_before_copying() {
     let basis = basis();
-    let child = id(&"c".repeat(256 * 1024));
+    let child = id(&"c".repeat(16 * 1024));
     let mut document = original();
     for record in &mut document.entities {
-        if record.id == id("anchor") {
-            record.children = vec![child.clone()];
-        } else if record.id == id("local-child") {
+        if record.id == id("local-child") {
             record.id = child.clone();
         }
     }
+    document
+        .placements
+        .iter_mut()
+        .find(|entry| entry.target == PrefabEntityTarget::source(id("local-child")))
+        .unwrap()
+        .target = PrefabEntityTarget::source(child.clone());
+    for index in 0..100 {
+        document.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("anchor")),
+                    expected_base: key("base"),
+                }],
+                entity: PrefabEntityOrigin::SourceEntity(id(&format!("root-{index}"))),
+            },
+            ScenePlacement::before(
+                ScenePlacementParent::Entity(PrefabEntityTarget::source(id("anchor"))),
+                PrefabEntityTarget::source(child.clone()),
+            ),
+        ));
+    }
     document.canonicalize();
-    let session = open_scene(&document, &basis, Default::default());
+    let defaults = SceneAuthoringHistoryLimits::default();
+    let limits = SceneAuthoringHistoryLimits::new(
+        defaults.max_records(),
+        defaults.max_operations(),
+        defaults.max_value_nodes(),
+        defaults.max_logical_bytes(),
+        defaults.max_entry_operations(),
+        defaults.max_entry_value_nodes(),
+        1024 * 1024,
+    )
+    .unwrap();
+    let session = open_scene(&document, &basis, limits);
     let before = session.shared_document();
     let mut sources = Sources::new(basis);
     sources.documents.insert(
@@ -720,21 +937,25 @@ fn contextual_defaults_survive_nested_conversion_reopen_and_exact_history() {
         let mut bridge = crate::SceneEntityRecord::new(id("bridge"));
         bridge.prefab = Some(instance("nested"));
         let base = PrefabDocument::new(
-            [id("root")],
+            [
+                SceneEntityPlacement::root(id("root")),
+                child_placement("root", "leaf"),
+                child_placement("root", "bridge"),
+            ],
             [
                 crate::SceneEntityRecord::new(id("root"))
-                    .with_children([id("leaf"), id("bridge")])
                     .with_component(component(), payload.clone()),
                 crate::SceneEntityRecord::new(id("leaf")),
                 bridge,
             ],
         );
         let nested = PrefabDocument::new(
-            [id("root")],
             [
-                crate::SceneEntityRecord::new(id("root"))
-                    .with_children([id("leaf")])
-                    .with_component(component(), payload),
+                SceneEntityPlacement::root(id("root")),
+                child_placement("root", "leaf"),
+            ],
+            [
+                crate::SceneEntityRecord::new(id("root")).with_component(component(), payload),
                 crate::SceneEntityRecord::new(id("leaf")),
             ],
         );
@@ -745,7 +966,9 @@ fn contextual_defaults_survive_nested_conversion_reopen_and_exact_history() {
         ]
         .into();
         let mut document = original();
-        document.roots.push(id("root"));
+        document
+            .placements
+            .push(SceneEntityPlacement::root(id("root")));
         document
             .entities
             .push(crate::SceneEntityRecord::new(id("root")));
@@ -866,7 +1089,7 @@ fn remaining_conversion_allowance_refuses_large_unrelated_root_before_document_c
         );
     let scene = open_scene(&document, &basis, Default::default());
     let published = PrefabDocumentCandidate::decode_json_str(
-        &PrefabDocument::new(document.roots.clone(), document.entities.clone())
+        &PrefabDocument::new(document.placements.clone(), document.entities.clone())
             .to_json_string()
             .unwrap(),
     )
@@ -951,7 +1174,7 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
     let session = open_scene(&document, &basis, Default::default());
     let prefab = PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(
-            &PrefabDocument::new(document.roots.clone(), document.entities.clone())
+            &PrefabDocument::new(document.placements.clone(), document.entities.clone())
                 .to_json_string()
                 .unwrap(),
         )
@@ -1427,19 +1650,20 @@ fn mixed_contextual_default_updates_inventory_and_mapped_target_after_ordinary_r
             .with_capability(ComponentCapability::AssetRef)]),
     );
     let base = PrefabDocument::new(
-        [id("root")],
         [
-            crate::SceneEntityRecord::new(id("root"))
-                .with_children([id("leaf")])
-                .with_component(
-                    component(),
-                    SceneComponentRecord::new(
-                        ComponentSchemaVersion::ONE,
-                        ComponentValue::map([("link", mixed(&id("leaf"), &visible))]),
-                    )
-                    .with_owner(schema_owner())
-                    .with_contextual_default(field.clone(), hidden_default),
-                ),
+            SceneEntityPlacement::root(id("root")),
+            child_placement("root", "leaf"),
+        ],
+        [
+            crate::SceneEntityRecord::new(id("root")).with_component(
+                component(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([("link", mixed(&id("leaf"), &visible))]),
+                )
+                .with_owner(schema_owner())
+                .with_contextual_default(field.clone(), hidden_default),
+            ),
             crate::SceneEntityRecord::new(id("leaf")),
         ],
     );

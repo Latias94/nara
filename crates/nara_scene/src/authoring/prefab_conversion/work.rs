@@ -10,15 +10,23 @@ pub(crate) struct ConversionWork {
 }
 
 impl ConversionWork {
+    pub(super) const fn new(maximum: ByteLimit) -> Self {
+        Self {
+            maximum: maximum.get(),
+            used: 0,
+        }
+    }
+
+    pub(super) const fn used_bytes(&self) -> usize {
+        self.used
+    }
+
     pub(super) fn after_compilation(
         maximum: ByteLimit,
         compiler_bytes: usize,
         dependency_bytes: usize,
     ) -> Result<Self, ScenePatchReport> {
-        let mut work = Self {
-            maximum: maximum.get(),
-            used: 0,
-        };
+        let mut work = Self::new(maximum);
         work.reserve("selected-compilation", Some(compiler_bytes))?;
         work.reserve("dependency-snapshots", Some(dependency_bytes))?;
         Ok(work)

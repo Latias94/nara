@@ -278,12 +278,11 @@ fn csharp_source_tool_creation_metadata_evolution_preserves_existing_data_and_hi
     let old_edit = application
         .prepare_authoring_edit(
             &old_basis,
-            &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(
-                    SceneEntityId::new("stale-before-evolution").unwrap(),
-                ),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }]),
+            &crate::app::named_root_patch(
+                &application,
+                old_basis.document,
+                "stale-before-evolution",
+            ),
         )
         .unwrap();
 

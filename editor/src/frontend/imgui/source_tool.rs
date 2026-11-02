@@ -683,8 +683,11 @@ impl SourceToolWidgets {
                         super::authoring::value_label(Some(value))
                     ));
                 }
-                ScenePatchOperation::AddEntity { entity, .. } => {
+                ScenePatchOperation::AddEntity { entity } => {
                     ui.text_wrapped(format!("Create entity {}", entity.id.as_str()))
+                }
+                ScenePatchOperation::SetPlacements { .. } => {
+                    ui.text_wrapped("Update source hierarchy")
                 }
                 ScenePatchOperation::AddComponent {
                     entity, component, ..

@@ -14,8 +14,8 @@ use nara_scene::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringRecordReadiness, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
     SceneAuthoringHistoryUsage, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner, SchemaReclassificationLimits,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, SchemaReclassificationLimits,
 };
 
 use super::*;
@@ -121,7 +121,7 @@ fn open(
         }
         EditorDocumentKind::Prefab => {
             let path = format!("prefabs/{name}.prefab.json");
-            let source = PrefabDocument::new(source.roots.clone(), source.entities.clone());
+            let source = PrefabDocument::new(source.placements.clone(), source.entities.clone());
             workspace
                 .open_authoring_prefab_document(
                     name,
@@ -151,16 +151,28 @@ fn open_pair(
         .map(|kind| open(workspace, kind, "reclassify", &source_document(), basis))
 }
 
-fn add(name: &str) -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id(name)),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }])
+fn add(workspace: &EditorWorkspace, document: EditorDocumentId, name: &str) -> ScenePatchDocument {
+    let placements = match &workspace.documents[&document] {
+        EditorDocumentSlot::Scene(slot) => &slot.session.document().placements,
+        EditorDocumentSlot::Prefab(slot) => &slot.session.document().placements,
+        EditorDocumentSlot::Extension(_) => unreachable!(),
+    };
+    let mut value = placements.clone();
+    value.push(SceneEntityPlacement::root(id(name)));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id(name)),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.clone(),
+            value,
+        },
+    ])
 }
 
 fn apply_patch(workspace: &mut EditorWorkspace, document: EditorDocumentId, name: &str) {
     let base_revision = workspace.document_revision(document).unwrap();
-    let patch = add(name);
+    let patch = add(workspace, document, name);
     let command = match workspace.document_kind(document).unwrap() {
         EditorDocumentKind::Scene => EditorWorkspaceCommand::ApplyScenePatch {
             document,
@@ -757,7 +769,7 @@ fn old_queries_continuations_and_edit_candidates_are_stale_at_the_same_revision(
             .next
             .unwrap();
         let candidate = workspace
-            .prepare_authoring_edit(&basis, &add("old-candidate"))
+            .prepare_authoring_edit(&basis, &add(&workspace, document, "old-candidate"))
             .unwrap();
         (document, basis, query, cursor, candidate)
     });
@@ -793,7 +805,7 @@ fn old_queries_continuations_and_edit_candidates_are_stale_at_the_same_revision(
         );
         assert_refused(
             &workspace
-                .prepare_authoring_edit(&basis, &add("stale-basis"))
+                .prepare_authoring_edit(&basis, &add(&workspace, document, "stale-basis"))
                 .unwrap_err(),
         );
         assert_refused(&workspace.commit_authoring_edit(candidate));

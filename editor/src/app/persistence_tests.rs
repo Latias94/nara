@@ -13,10 +13,7 @@ use nara::{
     project_host::{
         EditorPreviewCandidate, EditorProjectCloseReceipt, TrustedCompiledEditorProjectIntent,
     },
-    scene::{
-        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-        ScenePlacement, ScenePlacementOwner,
-    },
+    scene::{SceneDocument, SceneEntityId, SceneEntityRecord},
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
         EditorDocumentMutation, EditorDocumentOpenResult, EditorPersistenceAction,
@@ -1388,12 +1385,11 @@ fn edit_save_source(application: &mut EditorApplication) -> EditorDocumentId {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("saved-before-retirement").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: super::named_root_patch(
+                        application,
+                        scene.document,
+                        "saved-before-retirement",
+                    ),
                 },
             )],
         ),
@@ -1434,12 +1430,11 @@ fn queue_reopen(application: &mut EditorApplication) {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("discarded-by-reopen").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: super::named_root_patch(
+                        application,
+                        scene.document,
+                        "discarded-by-reopen",
+                    ),
                 },
             )],
         ),

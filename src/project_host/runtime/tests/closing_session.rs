@@ -84,7 +84,7 @@ fn closing_session_rejects_retained_construction_at_owning_ingress() {
             let mut draft = editor.begin_authoring_construction(&basis).unwrap();
             let local = draft
                 .create_entity(nara_scene::ScenePlacement::last(
-                    nara_scene::ScenePlacementOwner::Root,
+                    nara_scene::ScenePlacementParent::Root,
                 ))
                 .unwrap();
             let prepared = editor
@@ -311,10 +311,16 @@ fn closing_session_fences_the_common_workspace_command_ingress() {
     let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
         document,
         base_revision,
-        patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-            entity: SceneEntityRecord::new(nara_identity::SceneEntityId::new("late").unwrap()),
-            placement: nara_scene::ScenePlacement::last(nara_scene::ScenePlacementOwner::Root),
-        }]),
+        patch: crate::scene_test_support::add_root_entity_patch(
+            &editor
+                .workspace()
+                .scene(document)
+                .unwrap()
+                .session()
+                .document()
+                .placements,
+            SceneEntityRecord::new(nara_identity::SceneEntityId::new("late").unwrap()),
+        ),
     });
     let after = document_state(&editor, document);
     let _ = drive_editor_close_to_completion(&mut editor);

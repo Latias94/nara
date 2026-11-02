@@ -100,10 +100,18 @@ macro_rules! source_creation {
                 })?;
                 let mut record = SceneEntityRecord::new(entity.clone());
                 record.components = components;
-                let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: record,
+                let mut placements = self.document().placements.clone();
+                placements.push(crate::SceneEntityPlacement::new(
+                    crate::PrefabEntityTarget::source(entity.clone()),
                     placement,
-                }]);
+                ));
+                let patch = ScenePatchDocument::new([
+                    ScenePatchOperation::AddEntity { entity: record },
+                    ScenePatchOperation::SetPlacements {
+                        expected: self.document().placements.clone(),
+                        value: placements,
+                    },
+                ]);
                 let report = match asset_resolution {
                     Some(asset_resolution) => {
                         self.apply_patch_with_asset_resolution(&patch, registry, asset_resolution)
@@ -135,10 +143,20 @@ macro_rules! source_creation {
                         .iter()
                         .any(|record| &record.id == id)
                 })?;
-                let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(entity.clone()),
+                let mut placements = self.document().placements.clone();
+                placements.push(crate::SceneEntityPlacement::new(
+                    crate::PrefabEntityTarget::source(entity.clone()),
                     placement,
-                }]);
+                ));
+                let patch = ScenePatchDocument::new([
+                    ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(entity.clone()),
+                    },
+                    ScenePatchOperation::SetPlacements {
+                        expected: self.document().placements.clone(),
+                        value: placements,
+                    },
+                ]);
                 let report = self.apply_authoring_patch(&patch);
                 finish_creation(entity, report)
             }

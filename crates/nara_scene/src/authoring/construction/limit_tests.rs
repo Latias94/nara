@@ -16,8 +16,8 @@ use crate::{
     __private::AuthoringAdapterReceipt, AuthoringDocumentSource, AuthoringPropertyEdit,
     AuthoringSchemaBasis, MAX_AUTHORING_FIELD_WRITES, PrefabAuthoringSession, PrefabDocument,
     PrefabDocumentCandidate, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 
 const FIELDS: [&str; 10] = [
@@ -106,7 +106,7 @@ fn scene(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> SceneAuthori
 }
 
 fn prefab(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> PrefabAuthoringSession {
-    let document = PrefabDocument::new(document.roots.clone(), document.entities.clone());
+    let document = PrefabDocument::new(document.placements.clone(), document.entities.clone());
     PrefabAuthoringSession::from_published_authoring_document(
         PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
             .unwrap()
@@ -148,7 +148,7 @@ fn ten_field_construction_preserves_templates_and_one_scene_and_prefab_history_e
         assert_eq!(template.owner(), Some(&owner()));
         let mut draft = session.begin_authoring_construction(revision).unwrap();
         let local = draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         draft.add_component(&local, component()).unwrap();
         for (index, name) in FIELDS.iter().enumerate() {
@@ -165,9 +165,9 @@ fn ten_field_construction_preserves_templates_and_one_scene_and_prefab_history_e
         let prepared = session.prepare_authoring_construction(&draft).unwrap();
         let created = prepared.entity(&local).unwrap().clone();
         let expected = prepared.document().clone();
-        assert_eq!(prepared.patch().operations.len(), FIELDS.len() + 2);
+        assert_eq!(prepared.patch().operations.len(), FIELDS.len() + 3);
         assert!(matches!(
-            &prepared.patch().operations[1],
+            &prepared.patch().operations[2],
             ScenePatchOperation::AddComponent { entity, value, .. }
                 if entity == &created && value == &template
         ));
@@ -189,7 +189,13 @@ fn ten_field_construction_preserves_templates_and_one_scene_and_prefab_history_e
             .components[&component()];
         assert_eq!(record.value, values(100));
         assert_eq!(record.owner(), Some(&owner()));
-        assert_eq!(expected.roots, [existing(), created.clone()]);
+        assert_eq!(
+            expected.placements,
+            [
+                SceneEntityPlacement::root(existing()),
+                SceneEntityPlacement::root(created.clone()),
+            ]
+        );
         assert!(Arc::ptr_eq(&before, &session.shared_document()));
         assert_eq!(session.revision(), revision);
         assert_eq!(session.content_state(), content);
@@ -395,16 +401,16 @@ fn usage(draft: &AuthoringConstructionDraft) -> (usize, usize, usize, usize, usi
 }
 
 #[test]
-fn declaration_append_admits_exactly_256_entities_components_or_writes_in_total() {
+fn declaration_append_reserves_one_operation_for_a_changed_placement_vector() {
     assert_eq!(MAX_AUTHORING_EDIT_OPERATIONS, 256);
     let session = scene(&document(true), &basis());
-    for (entities, components, writes) in [(256, 0, 0), (0, 256, 0), (0, 0, 256), (85, 85, 86)] {
+    for (entities, components, writes) in [(255, 0, 0), (0, 256, 0), (0, 0, 256), (85, 85, 85)] {
         let mut draft = session
             .begin_authoring_construction(session.revision())
             .unwrap();
         for _ in 0..entities {
             draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .unwrap();
         }
         for _ in 0..components {
@@ -421,12 +427,15 @@ fn declaration_append_admits_exactly_256_entities_components_or_writes_in_total(
                 .unwrap();
         }
         let accepted = usage(&draft);
-        assert_eq!(accepted.0 + accepted.1 + accepted.2, 256);
+        assert_eq!(
+            accepted.0 + accepted.1 + accepted.2 + usize::from(entities > 0),
+            256
+        );
         assert_eq!(accepted.3, writes);
         assert!(accepted.4 < MAX_AUTHORING_FIELD_LOGICAL_BYTES);
         assert!(
             draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .is_err()
         );
         assert_eq!(usage(&draft), accepted);
@@ -476,7 +485,7 @@ fn construction_write_value_nodes_remain_bounded_at_256() {
     );
     assert_eq!(usage(&draft), accepted);
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     draft.add_component(existing(), component()).unwrap();
 }
@@ -507,7 +516,7 @@ fn construction_write_logical_bytes_remain_bounded_at_64_kib() {
     );
     assert_eq!(usage(&draft), accepted);
     draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     draft.add_component(existing(), component()).unwrap();
 }

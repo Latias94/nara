@@ -8,12 +8,12 @@ mod tests;
 
 /// Shares the live complete raw-source admission with data-only recovery validation.
 pub(crate) fn admit_authored_upgrade_document(
-    roots: &[SceneEntityId],
+    placements: &[crate::SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
     admit: &mut reclassification::AdmissionCallback<'_>,
 ) -> Result<(), ScenePatchReport> {
-    reclassification::admit_document(roots, entities, limits, admit)
+    reclassification::admit_document(placements, entities, limits, admit)
 }
 
 impl AuthoringDocumentState {
@@ -458,7 +458,9 @@ impl AuthoredFieldUpgrade {
         match (old, next) {
             (None, None) => Ok(()),
             (Some(old), Some(next))
-                if old.source == next.source && old.arguments == next.arguments =>
+                if old.source == next.source
+                    && old.binding == next.binding
+                    && old.arguments == next.arguments =>
             {
                 match (&old.overrides, &next.overrides) {
                     (None, None) => Ok(()),
@@ -595,15 +597,15 @@ impl AuthoredFieldUpgrade {
 
     fn validate_sources(
         &self,
-        (old_roots, old_entities): (&[SceneEntityId], &[SceneEntityRecord]),
-        (next_roots, next_entities): (&[SceneEntityId], &[SceneEntityRecord]),
+        (old_placements, old_entities): (&[crate::SceneEntityPlacement], &[SceneEntityRecord]),
+        (next_placements, next_entities): (&[crate::SceneEntityPlacement], &[SceneEntityRecord]),
         validation: &mut UpgradeSourceValidation<'_, '_>,
     ) -> Result<(), ScenePatchReport> {
-        if old_roots != next_roots || old_entities.len() != next_entities.len() {
+        if old_placements != next_placements || old_entities.len() != next_entities.len() {
             return Err(refused());
         }
         for (old, next) in old_entities.iter().zip(next_entities) {
-            if old.id != next.id || old.children != next.children {
+            if old.id != next.id {
                 return Err(refused());
             }
             self.components(&old.components, &next.components, validation)?;
@@ -629,8 +631,8 @@ impl AuthoringDocumentState {
             return Err(refused());
         }
         self.validate_authored_upgrade(
-            (&original.roots, &original.entities),
-            (&candidate.roots, &candidate.entities),
+            (&original.placements, &original.entities),
+            (&candidate.placements, &candidate.entities),
             upgrade,
             admit,
         )?;
@@ -659,8 +661,8 @@ impl AuthoringDocumentState {
             return Err(refused());
         }
         self.validate_authored_upgrade(
-            (&original.roots, &original.entities),
-            (&candidate.roots, &candidate.entities),
+            (&original.placements, &original.entities),
+            (&candidate.placements, &candidate.entities),
             upgrade,
             admit,
         )?;
@@ -668,7 +670,7 @@ impl AuthoringDocumentState {
         // The incumbent structural/classification kernel reads a Scene projection. Reserve its
         // complete coexisting copy before instantiate; footprint proof itself only borrows Prefab.
         reclassification::admit_document(
-            &candidate.roots,
+            &candidate.placements,
             &candidate.entities,
             self.limits,
             admit,
@@ -678,8 +680,8 @@ impl AuthoringDocumentState {
 
     fn validate_authored_upgrade(
         &self,
-        original: (&[SceneEntityId], &[SceneEntityRecord]),
-        candidate: (&[SceneEntityId], &[SceneEntityRecord]),
+        original: (&[crate::SceneEntityPlacement], &[SceneEntityRecord]),
+        candidate: (&[crate::SceneEntityPlacement], &[SceneEntityRecord]),
         upgrade: &AuthoredFieldUpgrade,
         admit: &mut reclassification::AdmissionCallback<'_>,
     ) -> Result<(), ScenePatchReport> {

@@ -132,6 +132,8 @@ pub mod runtime_content;
 
 #[cfg(feature = "runtime-core")]
 mod scene_retention;
+#[cfg(all(test, feature = "runtime-core"))]
+mod scene_test_support;
 
 #[cfg(all(feature = "runtime-core", feature = "serde"))]
 mod scene_format_diagnostic;
@@ -234,10 +236,12 @@ pub mod prelude {
     };
     pub use nara_scene::{
         CompiledSceneCandidate, CompiledSceneComponent, CompiledSceneDocument, CompiledSceneEntity,
-        ExpandedSceneDocument, Name, PrefabDocument, PreparedScene, SceneAuthoringSession,
-        SceneComponentRecord, SceneDocument, SceneEntityRecord, SceneOccurrenceKey,
-        ScenePatchDocument, ScenePatchOperation, SourceDocumentKey, SourceDocumentKind, Visibility,
-        export_scene, prepare_scene, prepare_scene_replacement, spawn_scene,
+        ExpandedSceneDocument, ExpandedSceneEntity, Name, PrefabDocument, PrefabInstance,
+        PrefabInstanceBinding, PreparedScene, SceneAuthoringSession, SceneComponentRecord,
+        SceneDocument, SceneEntityPlacement, SceneEntityRecord, SceneOccurrenceKey,
+        ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+        ScenePlacementSlot, SourceDocumentKey, SourceDocumentKind, Visibility, export_scene,
+        prepare_scene, prepare_scene_replacement, spawn_scene,
     };
     pub use nara_transform::{
         FixedSpatialSnapshot2d, GlobalTransform2d, HistoricalSpatialSnapshot2d,

@@ -61,8 +61,8 @@ impl AuthoringSceneCompilationReport {
             // All new facts and their later converted copies are admitted before any cloning.
             self.usage = usage;
             self.omissions.reserve_exact(count);
-            for entity in &candidate.document().entities {
-                for (component, record) in &entity.components {
+            for entity in candidate.entities() {
+                for (component, record) in entity.components() {
                     if self
                         .basis
                         .native_preview_matches_registry(component, record, registry)
@@ -71,7 +71,7 @@ impl AuthoringSceneCompilationReport {
                         // Available Native records are disjoint from the compiler's original
                         // Data/unavailable omissions. No duplicate index or repeated search is needed.
                         self.omissions.push(AuthoringSceneCompilationOmission {
-                            entity: entity.id.clone(),
+                            entity: entity.id().clone(),
                             component: component.clone(),
                             reason:
                                 AuthoringSceneCompilationOmissionReason::NativeBindingUnavailable,
@@ -150,10 +150,10 @@ impl AuthoringSceneCompilationReport {
         candidate: &ExpandedSceneDocument,
         registry: &ComponentRegistrySnapshot,
     ) -> Option<(usize, SceneCompilationUsage)> {
-        let (count, bytes) = candidate.document().entities.iter().try_fold(
+        let (count, bytes) = candidate.entities().iter().try_fold(
             (0_usize, 0_usize),
             |(count, bytes), entity| {
-                entity.components.iter().try_fold(
+                entity.components().iter().try_fold(
                     (count, bytes),
                     |(count, bytes), (component, record)| {
                         if self
@@ -166,9 +166,9 @@ impl AuthoringSceneCompilationReport {
                         Some((
                             count.checked_add(1)?,
                             bytes.checked_add(omission_work_bytes(
-                                &entity.id,
+                                entity.id(),
                                 component,
-                                candidate.provenance().get(&entity.id),
+                                candidate.provenance().get(entity.id()),
                             )?)?,
                         ))
                     },

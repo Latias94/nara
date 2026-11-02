@@ -188,7 +188,7 @@ fn data_only_scene_reset_preserves_raw_presence_history_and_reopen() {
 #[test]
 fn data_only_prefab_reset_preserves_raw_presence_history_and_reopen() {
     let (bundle, adapter, document) = fixture();
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     let published =
         PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
             .unwrap()
@@ -264,7 +264,7 @@ fn data_only_field_write_inserts_absent_override_and_undo_removes_it() {
         Some(&ComponentValue::I64(99))
     );
 
-    let prefab = PrefabDocument::new(document.roots, document.entities);
+    let prefab = PrefabDocument::new(document.placements, document.entities);
     let published =
         PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
             .unwrap()

@@ -370,6 +370,7 @@ fn captured_project(stable: bool) -> (TestProject, AuthoringProjectSessionSnapsh
     project.write("nara.toml", manifest.as_bytes());
     let mut anchor = SceneEntityRecord::new(SceneEntityId::new("anchor").unwrap());
     anchor.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("external.prefab.ron").unwrap(),
         overrides: None,

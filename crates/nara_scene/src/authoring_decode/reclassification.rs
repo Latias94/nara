@@ -176,15 +176,39 @@ impl AuthoringDocumentState {
         admit: &mut AdmissionCallback<'_>,
     ) -> Result<Self, ScenePatchReport> {
         successor.require_reclassification_successor_of(&self.schema_basis(), kind)?;
-        // The incumbent structural validator accepts SceneDocument. Admit this nominal
-        // projection explicitly; it coexists with the borrowed Prefab and successor facts.
-        admit_document(&document.roots, &document.entities, self.limits, admit)?;
-        classify_with_admission(&document.instantiate(), self, successor, admit)
+        classify_source_with_admission(
+            AuthoringSourceParts {
+                placements: &document.placements,
+                entities: &document.entities,
+                inputs: Some(&document.inputs),
+            },
+            self,
+            successor,
+            admit,
+        )
     }
 }
 
 pub(super) fn classify_with_admission(
     document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    successor: &AuthoringSchemaBasis,
+    admit: &mut AdmissionCallback<'_>,
+) -> Result<AuthoringDocumentState, ScenePatchReport> {
+    classify_source_with_admission(
+        AuthoringSourceParts {
+            placements: &document.placements,
+            entities: &document.entities,
+            inputs: None,
+        },
+        state,
+        successor,
+        admit,
+    )
+}
+
+fn classify_source_with_admission(
+    document: AuthoringSourceParts<'_>,
     state: &AuthoringDocumentState,
     successor: &AuthoringSchemaBasis,
     admit: &mut AdmissionCallback<'_>,
@@ -207,7 +231,7 @@ pub(super) fn classify_with_admission(
                 AuthoringDocumentPublicationError::new(DiagnosticReport::default())
             })
         };
-        classify_scene_document_impl(
+        classify_source_document_impl(
             document,
             state.source.clone(),
             state.kind,
@@ -630,13 +654,13 @@ pub(super) fn validate_prefab_shape(
 }
 
 pub(super) fn admit_document(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     limits: SceneFileLimits,
     admit: &mut AdmissionCallback<'_>,
 ) -> Result<(), ScenePatchReport> {
     let bytes = source_retention::document_dynamic_bytes_with_admission(
-        roots,
+        placements,
         entities,
         limits,
         |bytes| admit("source-cost-walk", bytes),
@@ -660,85 +684,47 @@ pub(super) fn admit_patch_copy(
 }
 
 pub(super) fn placement_index_bytes(document: &SceneDocument) -> Option<usize> {
-    placement_parts_index_bytes(&document.roots, &document.entities)
+    placement_parts_index_bytes(&document.placements)
 }
 
-fn placement_parts_index_bytes(
-    roots: &[SceneEntityId],
-    entities: &[SceneEntityRecord],
-) -> Option<usize> {
+fn placement_parts_index_bytes(placements: &[SceneEntityPlacement]) -> Option<usize> {
     let mut bytes = size_of::<BTreeMap<SceneEntityId, crate::ScenePlacement>>();
-    for (parent, siblings) in std::iter::once((None, roots)).chain(
-        entities
-            .iter()
-            .map(|entity| (Some(&entity.id), entity.children.as_slice())),
-    ) {
-        if let Some(parent) = parent {
-            bytes = bytes.checked_add(provenance_string_bytes(parent.as_str())?)?;
-        }
-        for (index, entity) in siblings.iter().enumerate() {
+    for declaration in placements {
+        if let crate::PrefabEntityOrigin::SourceEntity(entity) = &declaration.target.entity
+            && declaration.target.through.is_empty()
+        {
             bytes = bytes
                 .checked_add(
                     TREE_ENTRY_BYTES
                         + size_of::<SceneEntityId>()
                         + size_of::<crate::ScenePlacement>(),
                 )?
-                .checked_add(provenance_string_bytes(entity.as_str())?)?;
-            if let Some(parent) = parent {
-                bytes = bytes.checked_add(provenance_string_bytes(parent.as_str())?)?;
-            }
-            if index > 0 {
-                bytes =
-                    bytes.checked_add(provenance_string_bytes(siblings[index - 1].as_str())?)?;
-            }
+                .checked_add(provenance_string_bytes(entity.as_str())?)?
+                .checked_add(retention::placement_dynamic_bytes(Some(
+                    &declaration.placement,
+                ))?)?;
         }
     }
     Some(bytes)
 }
 
 pub(super) fn structure_parts_bytes(
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
 ) -> Option<usize> {
-    // Match validate_scene_placement's actual collections: owned IDs, owner and parent maps,
-    // completed IDs, per-chain positions/path/current, and each parent's local-child set.
-    // Charge cumulative chain storage (each valid source ID enters one unfinished chain).
-    let mut bytes = placement_parts_index_bytes(roots, entities)?;
-    for entity in entities {
-        let id = provenance_string_bytes(entity.id.as_str())?;
-        bytes = bytes
-            // Classification's borrowed namespace.
-            .checked_add(TREE_ENTRY_BYTES + size_of::<&SceneEntityId>())?
-            // Validation: ids, owners, parents, completed, positions, path, current.
-            .checked_add(TREE_ENTRY_BYTES + size_of::<SceneEntityId>())?
-            .checked_add(id)?
-            .checked_add(
-                TREE_ENTRY_BYTES + size_of::<SceneEntityId>() + size_of::<Option<SceneEntityId>>(),
-            )?
-            .checked_add(id)?
-            .checked_add(
-                TREE_ENTRY_BYTES + size_of::<SceneEntityId>() + size_of::<Option<SceneEntityId>>(),
-            )?
-            .checked_add(id)?
-            .checked_add(TREE_ENTRY_BYTES + size_of::<SceneEntityId>())?
-            .checked_add(id)?
-            .checked_add(TREE_ENTRY_BYTES + size_of::<SceneEntityId>() + size_of::<usize>())?
-            .checked_add(id)?
-            .checked_add(size_of::<SceneEntityId>())?
-            .checked_add(id)?
-            .checked_add(size_of::<SceneEntityId>())?
-            .checked_add(id)?;
-        for child in &entity.children {
-            bytes = bytes
-                // Parent values in owners and parents, and traversal's next current ID.
-                .checked_add(id)?
-                .checked_add(id)?
-                .checked_add(id)?
-                .checked_add(TREE_ENTRY_BYTES + size_of::<SceneEntityId>())?
-                .checked_add(provenance_string_bytes(child.as_str())?)?;
-        }
-    }
-    Some(bytes)
+    // Classification copies local locations and borrows the source namespace. Source validation
+    // borrows a record map, a target set and a local-placement set; it resolves no projected graph.
+    placement_parts_index_bytes(placements)?
+        .checked_add(entities.len().checked_mul(
+            3 * TREE_ENTRY_BYTES
+                + 3 * size_of::<&SceneEntityId>()
+                + size_of::<&SceneEntityRecord>(),
+        )?)?
+        .checked_add(
+            placements
+                .len()
+                .checked_mul(TREE_ENTRY_BYTES + size_of::<&PrefabEntityTarget>())?,
+        )
 }
 
 #[cfg(test)]
@@ -912,6 +898,7 @@ mod measurement_tests {
         let mut anchor = SceneEntityRecord::new(entity);
         anchor.prefab = Some(PrefabInstance {
             source: AssetRef::path("prefabs/measurement.prefab.json").unwrap(),
+            binding: crate::PrefabInstanceBinding::Forest,
             arguments: None,
             overrides: None,
         });

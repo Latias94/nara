@@ -337,14 +337,12 @@ fn workflow(program: &dyn Language) {
     let original = source();
     let edited = authoring_project::edit_save_reopen(&definition.owner, &original);
     let label = ComponentTypeId::new("trial.behavior.Label");
-    let prefab = PrefabDocument::new(edited.roots.clone(), edited.entities.clone());
+    let prefab = PrefabDocument::new(edited.placements.clone(), edited.entities.clone());
     let linked = SceneDocument::from_ordered_roots(["first", "second"].map(|anchor| {
         let mut record = SceneEntityRecord::new(id(anchor));
-        record.prefab = Some(PrefabInstance {
-            source: nara_asset::AssetRef::path("base.prefab.json").unwrap(),
-            arguments: None,
-            overrides: None,
-        });
+        record.prefab = Some(PrefabInstance::forest(
+            nara_asset::AssetRef::path("base.prefab.json").unwrap(),
+        ));
         record
     }));
     for (source, prefab, count) in [(&edited, None, 1), (&linked, Some(&prefab), 2)] {

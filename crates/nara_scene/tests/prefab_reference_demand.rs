@@ -210,6 +210,7 @@ impl Fixture {
         });
         let mut anchor = SceneEntityRecord::new(entity("anchor"));
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             source: prefab_request(),
             arguments: None,
             overrides: Some(overlay),

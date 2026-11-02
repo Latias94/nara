@@ -84,6 +84,7 @@ fn runtime_content_resolves_repaired_reference_after_property_composition() {
         }
         let mut anchor = SceneEntityRecord::new(id("instance"));
         anchor.prefab = Some(PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("p.prefab.json").unwrap(),
             overrides: repair.then_some(overlay),

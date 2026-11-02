@@ -11,7 +11,10 @@ use nara_identity::{
 };
 use nara_reflect::ComponentValue;
 
-use crate::{PrefabInstance, SceneComponentRecord, SceneEntityId, SceneEntityRecord};
+use crate::{
+    PrefabEntityTarget, PrefabInstance, PrefabInstanceBinding, SceneComponentRecord,
+    SceneEntityPlacement, SceneEntityRecord, ScenePlacementParent, ScenePlacementSlot,
+};
 
 // Both current parsers have a recursion budget of 128. RON guards collection visitation and
 // child dispatch separately; keep the supported wire depth well below those budgets. Deeper
@@ -20,7 +23,7 @@ const CERTIFICATE_DEPTH: usize = 32;
 
 pub(super) fn certifies_entity_document<T>(
     envelope: &PersistentFileEnvelope<T>,
-    roots: &[SceneEntityId],
+    placements: &[SceneEntityPlacement],
     entities: &[SceneEntityRecord],
     inputs: Option<&std::collections::BTreeSet<ReferenceInputId>>,
     limits: SerdeShapeLimits,
@@ -30,7 +33,7 @@ pub(super) fn certifies_entity_document<T>(
         nodes: 0,
         string_bytes: 0,
     }
-    .envelope(envelope, roots, entities, inputs)
+    .envelope(envelope, placements, entities, inputs)
     .is_some()
 }
 
@@ -78,7 +81,7 @@ impl Certificate {
     fn envelope<T>(
         &mut self,
         envelope: &PersistentFileEnvelope<T>,
-        roots: &[SceneEntityId],
+        placements: &[SceneEntityPlacement],
         entities: &[SceneEntityRecord],
         inputs: Option<&std::collections::BTreeSet<ReferenceInputId>>,
     ) -> Option<()> {
@@ -101,15 +104,54 @@ impl Certificate {
         self.string(3, envelope.generator().name())?;
         self.string(3, &envelope.generator().version().to_string())?;
         if let Some(inputs) = inputs.filter(|inputs| !inputs.is_empty()) {
-            self.structure(2, &["inputs", "roots", "entities"])?;
+            self.structure(2, &["inputs", "placements", "entities"])?;
             self.container(3, inputs.len())?;
             for input in inputs {
                 self.string(4, input.as_str())?;
             }
         } else {
-            self.structure(2, &["roots", "entities"])?;
+            self.structure(2, &["placements", "entities"])?;
         }
-        self.ids(3, roots)?;
+        self.container(3, placements.len())?;
+        for declaration in placements {
+            self.structure(4, &["target", "placement"])?;
+            self.entity_target(5, &declaration.target)?;
+            self.structure(5, &["parent", "slot"])?;
+            match &declaration.placement.parent {
+                ScenePlacementParent::Root => {
+                    self.structure(6, &["kind"])?;
+                    self.string(7, "root")?;
+                }
+                ScenePlacementParent::Entity(target) => {
+                    self.structure(6, &["kind", "target"])?;
+                    self.string(7, "entity")?;
+                    self.entity_target(7, target)?;
+                }
+            }
+            match &declaration.placement.slot {
+                ScenePlacementSlot::First | ScenePlacementSlot::Last => {
+                    self.structure(6, &["kind"])?;
+                    self.string(
+                        7,
+                        match &declaration.placement.slot {
+                            ScenePlacementSlot::First => "first",
+                            _ => "last",
+                        },
+                    )?;
+                }
+                ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) => {
+                    self.structure(6, &["kind", "target"])?;
+                    self.string(
+                        7,
+                        match &declaration.placement.slot {
+                            ScenePlacementSlot::Before(_) => "before",
+                            _ => "after",
+                        },
+                    )?;
+                    self.entity_target(7, target)?;
+                }
+            }
+        }
         self.container(3, entities.len())?;
         for entity in entities {
             self.entity(4, entity)?;
@@ -117,12 +159,15 @@ impl Certificate {
         Some(())
     }
 
-    fn ids(&mut self, depth: usize, ids: &[SceneEntityId]) -> Option<()> {
-        self.container(depth, ids.len())?;
-        for id in ids {
-            self.string(depth + 1, id.as_str())?;
+    fn entity_target(&mut self, depth: usize, target: &PrefabEntityTarget) -> Option<()> {
+        self.structure(depth, &["through", "entity"])?;
+        self.container(depth + 1, target.through.len())?;
+        for hop in &target.through {
+            self.structure(depth + 2, &["anchor", "expected_base"])?;
+            self.entity_origin(depth + 3, &hop.anchor)?;
+            self.source_key(depth + 3, &hop.expected_base)?;
         }
-        Some(())
+        self.entity_origin(depth + 1, &target.entity)
     }
 
     fn entity(&mut self, depth: usize, entity: &SceneEntityRecord) -> Option<()> {
@@ -130,13 +175,12 @@ impl Certificate {
         self.structure(
             depth,
             if entity.prefab.is_some() {
-                &["id", "children", "components", "prefab"]
+                &["id", "components", "prefab"]
             } else {
-                &["id", "children", "components"]
+                &["id", "components"]
             },
         )?;
         self.string(depth + 1, entity.id.as_str())?;
-        self.ids(depth + 1, &entity.children)?;
         self.container(depth + 1, entity.components.len())?;
         for (component, record) in &entity.components {
             self.string(depth + 2, component.as_str())?;
@@ -156,9 +200,9 @@ impl Certificate {
         self.structure(
             depth,
             if instance.arguments.is_some() {
-                &["source", "arguments", "overrides"]
+                &["source", "binding", "arguments", "overrides"]
             } else {
-                &["source", "overrides"]
+                &["source", "binding", "overrides"]
             },
         )?;
         self.structure(depth + 1, &["kind", "value"])?;
@@ -172,6 +216,18 @@ impl Certificate {
                 self.string_length(depth + 2, 36)?;
             }
             nara_asset::AssetRef::Product(_) => return None,
+        }
+        match &instance.binding {
+            PrefabInstanceBinding::Forest => {
+                self.structure(depth + 1, &["kind"])?;
+                self.string(depth + 2, "forest")?;
+            }
+            PrefabInstanceBinding::Root { base, root } => {
+                self.structure(depth + 1, &["kind", "base", "root"])?;
+                self.string(depth + 2, "root")?;
+                self.source_key(depth + 2, base)?;
+                self.string(depth + 2, root.as_str())?;
+            }
         }
         self.node(depth + 1)?; // overrides=None is retained on the wire.
         if let Some(arguments) = &instance.arguments {

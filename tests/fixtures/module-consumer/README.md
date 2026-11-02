@@ -47,6 +47,12 @@ entity creation through the public, window-free Editor Host. Scene and Prefab ca
 unknown/future records, replay one history entry, save exact source bytes and reopen the stored
 generated identity. It does not predict generated ID spelling or qualify transaction-local drafts.
 
+`tests/root_binding.rs` follows one mixed-owner topology through source editing, exact Undo/Redo,
+physical JSON/RON save and re-admission, compilation and ordinary Native spawn. P owns a local
+child between two Q-owned children without changing Q. Repeated explicit root bindings produce
+eight entities with distinct canonical occurrences and the same actual Parent/Children order.
+This qualifies the topology prerequisite, not extraction or project-wide publication/recovery.
+
 `tests/prefab_conversion.rs` consumes complete selected-instance conversion through direct Scene
 and renamed root Prefab APIs. It moves an immutable request to a background thread, reviews the
 typed identity mapping, commits the same dependency-fenced candidate, replays one Undo/Redo and

@@ -26,8 +26,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    CompiledSceneComponent, SceneComponentBindings, SceneComponentRecord, SceneDataComponents,
-    SceneDocument, SceneEntityId, SceneEntityRecord,
+    CompiledSceneComponent, PrefabEntityTarget, SceneComponentBindings, SceneComponentRecord,
+    SceneDataComponents, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent,
     component_binding_plugin::{
         SceneComponentBindingsAuthorityError, scene_component_bindings,
         validate_scene_component_bindings_authority,
@@ -397,11 +398,12 @@ fn export_scene_selected(
         }
     }
 
-    let roots = world
+    let mut placements = world
         .get_resource::<HierarchyRoots>()
         .into_iter()
         .flat_map(HierarchyRoots::iter)
         .filter_map(|entity| id_by_entity.get(&entity).cloned())
+        .map(SceneEntityPlacement::root)
         .collect::<Vec<_>>();
     let root_entities = world
         .get_resource::<HierarchyRoots>()
@@ -640,21 +642,30 @@ fn export_scene_selected(
             }
         }
 
-        records.push(SceneEntityRecord {
-            id,
-            children: world
+        placements.extend(
+            world
                 .get::<Children>(export_entity.entity)
                 .into_iter()
                 .flat_map(Children::iter)
                 .filter_map(|child| id_by_entity.get(&child).cloned())
-                .collect(),
+                .map(|child| {
+                    SceneEntityPlacement::new(
+                        PrefabEntityTarget::source(child),
+                        ScenePlacement::last(ScenePlacementParent::Entity(
+                            PrefabEntityTarget::source(id.clone()),
+                        )),
+                    )
+                }),
+        );
+        records.push(SceneEntityRecord {
+            id,
             components,
             prefab: None,
         });
     }
 
     let output = (!diagnostics.has_errors()).then(|| SceneExportOutput {
-        document: SceneDocument::new(roots, records),
+        document: SceneDocument::new(placements, records),
         remap: SceneExportRemap {
             source_domain: domain.id(),
             entries: remap_entries,

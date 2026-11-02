@@ -8,7 +8,9 @@ copy admission and Native value gates have their
 [qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T031431Z-inline-authored-references-and-contextual-default-production-qualification-6f60b71dc5c6458bbd6c9c63f1df239e.md).
 The independent flat compiled representation and complete compiler Interface have their
 [qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md).
-Root/placement replacement and the complete extraction consumer remain unfinished.
+Explicit root binding, source placements and the private flat authoring observation have their
+[qualified production prerequisite](../knowledge/engineering/verification/2026-11/2026-11-02T121917Z-explicit-root-binding-and-source-placement-production-qualification-0eada24ff287416bbfe94ccf511d2380.md).
+Complete extraction correspondence and project publication/recovery remain unfinished.
 No extraction implementation or qualification is claimed.
 **Parent:** [Foundation R5](2026-10-23-foundation-architecture-rebaseline-plan.md#r5-durable-addressing-prefab-overlays-and-projection-lifetime).
 **Evidence:** [Pinned extraction study](../research/2026-11-02-prefab-extraction-and-occurrence-continuity.md).
@@ -36,8 +38,8 @@ first possible replacement preserve the old working inputs and history.
 
 ## Owning Representation Problems
 
-The current [compiler layout](../../crates/nara_scene/src/prefab/overlay/compile/staged.rs)
-mounts a Prefab's roots as children of a containing entity. Merely moving the selected record to
+At the starting baseline, the [compiler layout](../../crates/nara_scene/src/prefab/overlay/compile/staged.rs)
+mounted every Prefab's roots as children of a containing entity. Merely moving the selected record to
 Q retains the old anchor and adds Q's root below it. This changes entity count, hierarchy and
 transform composition. Renaming or ignoring the wrapper in an Editor panel cannot repair that
 meaning.
@@ -49,9 +51,9 @@ the cut could make its target unrepresentable. The selected inline reference lan
 replaces that asymmetry. A global source-key substitution or preserving terminal ID spelling
 does not establish the target.
 
-The staged compiler retains one declared node scope/origin and one final entity provenance.
-Any root binding must therefore select canonical entity identity and contributor provenance
-explicitly, including reference aliases and local-versus-inherited child order. Aliasing two arena
+The starting staged compiler retained one declared node scope/origin and one final entity provenance.
+Root binding therefore required explicit canonical entity identity and contributor provenance,
+including reference aliases and local-versus-inherited child order. Aliasing two arena
 nodes to one materialized entity without those rules is not a complete root design.
 
 There is also an owning-source ordering counterexample: P's root k binds Q, Q owns children d1
@@ -96,6 +98,35 @@ duplicate, self-relative, parent and cycle checks. Persisted declaration order s
 cohorts; runtime IDs or map iteration never supply order.
 Forest mounts keep roots-before-local as their initial composition order, not an immutable
 partition: a valid containing-source or outer placement may interleave actual same-parent siblings.
+
+### Source Placement And Flat Observation Interfaces
+
+Scene and Prefab sources store an ordered `Vec<SceneEntityPlacement>` independently of their
+entity records. Each declaration pairs an occurrence target with a `ScenePlacement` desired
+parent and sibling slot. Overlay placements use the same type and layout kernel. Every directly
+owned source entity requires exactly one declaration; an inherited target can have an additional
+explicit source pin. Entity-map order never replaces a missing declaration. Raw admission checks
+the local declaration shape without opening Prefabs; effective compilation alone proves routed
+targets, canonical bases and the final normalized hierarchy.
+
+Source transactions compare and replace complete placement declarations, including their stored
+order. The inverse retains the complete old vector. Ordinary single-target pin and Revert helpers
+construct that exact transaction; they do not replay historical moves to determine desired
+layout. Adding or removing source records and their placements is one atomic batch, validated
+against the complete result. Removing a declaration does not infer an effective visual subtree.
+
+`PrefabInstanceBinding` explicitly selects `Forest` or `Root { base, root }`. Its canonical base
+and named source entity remain part of complete instance intent, including dormant declarations
+and exact history snapshots. The serialized binding is required; source decoding does not infer
+it from root count or preserve an older forest-only reader.
+
+The compiler's temporary flat hierarchy is a private `SceneDraft`, with separate readonly
+`ExpandedSceneEntity` observations. Authored records no longer carry compiled children, and an
+authoring observation cannot be converted back into source merely by copying a document field.
+Strict compiled storage and Native admission retain their already qualified independent owner.
+Root aliases retain occurrence-local declaration facets, slots and lexical environments while
+their final hierarchy, component batch and canonical provenance contain one entity. Source-facet
+working storage and final materialized entity count have separate budget meaning.
 
 ## Reference Comparison And Selected Direction
 

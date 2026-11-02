@@ -222,7 +222,7 @@ impl EditorUiAuthoringFrame {
             }
             UiPreparedStructure::Move { target, placement } => {
                 PrefabCompositionCommand::MoveEntity {
-                    entity: target,
+                    target: nara_scene::PrefabEntityTarget::source(target),
                     to: placement,
                 }
             }
@@ -234,7 +234,7 @@ impl EditorUiAuthoringFrame {
                     return Err(EditorUiAuthoringEditError::DescriptorMismatch);
                 };
                 PrefabCompositionCommand::MoveEntity {
-                    entity: target,
+                    target: nara_scene::PrefabEntityTarget::source(target),
                     to: placement.clone(),
                 }
             }
@@ -343,23 +343,32 @@ pub(in super::super) fn projection_admits_structure_command(
 ) -> bool {
     match command {
         PrefabCompositionCommand::AddComponent { .. }
-        | PrefabCompositionCommand::RemoveComponent { .. } => false,
+        | PrefabCompositionCommand::RemoveComponent { .. }
+        | PrefabCompositionCommand::RevertPlacement { .. } => false,
         PrefabCompositionCommand::CreateEntity { draft, placement } => projection
             .revalidate_create_recipe(draft.components(), placement, image_choices)
             .is_ok(),
-        PrefabCompositionCommand::MoveEntity { entity, to } => match projection.prepare_structure(
-            &UiStructureIntent::Move {
-                target: entity.clone(),
-                placement: to.clone(),
-            },
-            None,
-        ) {
-            Ok(UiPreparedStructure::Move { target, placement }) => {
-                target == *entity && placement == *to
+        PrefabCompositionCommand::MoveEntity { target, to } => {
+            let nara_scene::PrefabEntityOrigin::SourceEntity(entity) = &target.entity else {
+                return false;
+            };
+            if !target.through.is_empty() {
+                return false;
             }
-            Ok(UiPreparedStructure::NoOp { target }) => target == *entity,
-            _ => false,
-        },
+            match projection.prepare_structure(
+                &UiStructureIntent::Move {
+                    target: entity.clone(),
+                    placement: to.clone(),
+                },
+                None,
+            ) {
+                Ok(UiPreparedStructure::Move { target, placement }) => {
+                    target == *entity && placement == *to
+                }
+                Ok(UiPreparedStructure::NoOp { target }) => target == *entity,
+                _ => false,
+            }
+        }
         PrefabCompositionCommand::RemoveEntity { entity } => matches!(
             projection.prepare_structure(
                 &UiStructureIntent::Delete {

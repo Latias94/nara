@@ -18,7 +18,7 @@ use crate::{
     AuthoringSchemaBasis, PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate,
     SceneAuthoringHistoryLimits, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, ScenePatchApplyLimits,
-    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementParent,
 };
 
 fn component() -> ComponentTypeId {
@@ -128,7 +128,7 @@ fn prefab(
     limits: SceneAuthoringHistoryLimits,
 ) -> PrefabAuthoringSession {
     let document = document();
-    let document = PrefabDocument::new(document.roots, document.entities);
+    let document = PrefabDocument::new(document.placements, document.entities);
     let published = PrefabDocumentCandidate::decode_json_str(&document.to_json_string().unwrap())
         .unwrap()
         .admit_authoring_with_basis(
@@ -172,13 +172,13 @@ fn ordinary_add_and_new_entity_templates_preserve_hidden_defaults_absence_and_ex
                     .begin_authoring_construction(session.revision())
                     .unwrap();
                 let local = draft
-                    .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                    .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                     .unwrap();
                 draft.add_component(&local, component()).unwrap();
                 let prepared = session.prepare_authoring_construction(&draft).unwrap();
                 let created = prepared.entity(&local).unwrap().clone();
                 assert!(matches!(
-                    &prepared.patch().operations[1],
+                    &prepared.patch().operations[2],
                     ScenePatchOperation::AddComponent { value, .. } if value == &template
                 ));
                 assert!(Arc::ptr_eq(&before, &session.shared_document()));

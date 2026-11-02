@@ -128,6 +128,7 @@ fn link(entity: &str) -> SceneComponentRecord {
 fn instance(entity: &str, base: &str, overrides: Option<PrefabOverlay>) -> SceneEntityRecord {
     let mut record = SceneEntityRecord::new(id(entity));
     record.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source(base),
         arguments: None,
         overrides,

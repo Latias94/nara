@@ -22,9 +22,9 @@ use nara_reflect::{
 use super::*;
 use crate::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
-    PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionPath, PrefabProjectionStep, SceneComponentRecord, SceneDocument, SceneEntityId,
-    SceneEntityProvenance, SceneEntityRecord,
+    PrefabInstance, PrefabOverlay, PrefabProjectionPath, PrefabProjectionStep,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
+    SceneEntityProvenance, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
 };
 
 fn id(value: &str) -> SceneEntityId {
@@ -226,12 +226,16 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> CompiledSceneCandi
     let outer_request = AssetRef::path(format!("prefabs/{alias}/outer.ron")).unwrap();
     let mut nested = SceneEntityRecord::new(id("nested"));
     nested.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: nested_request.clone(),
         arguments: None,
         overrides: None,
     });
     let outer = PrefabDocument::new(
-        [id("source"), id("nested")],
+        [
+            SceneEntityPlacement::root(id("source")),
+            SceneEntityPlacement::root(id("nested")),
+        ],
         [
             SceneEntityRecord::new(id("source")).with_component(
                 component("game.Link"),
@@ -246,16 +250,16 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> CompiledSceneCandi
     );
     let mut addition = PrefabAddition::new(id("added"));
     addition.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: nested_request.clone(),
         arguments: None,
         overrides: None,
     });
     let mut overlay = PrefabOverlay::new(prefab_key("canonical.outer"));
     overlay.additions.push(addition);
-    overlay.placements.push(PrefabPlacement {
+    overlay.placements.push(SceneEntityPlacement {
         target: PrefabEntityTarget::addition(id("added")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
+        placement: ScenePlacement::last(ScenePlacementParent::Root),
     });
     let resolver = InMemoryPrefabSourceResolver::new()
         .with_prefab(outer_request.clone(), prefab_key("canonical.outer"), outer)
@@ -269,6 +273,7 @@ fn fixture(bindings: &SceneComponentBindings, alias: &str) -> CompiledSceneCandi
         record(ComponentValue::String("anchor".into())),
     );
     anchor.prefab = Some(PrefabInstance {
+        binding: crate::PrefabInstanceBinding::Forest,
         source: outer_request,
         arguments: None,
         overrides: Some(overlay),

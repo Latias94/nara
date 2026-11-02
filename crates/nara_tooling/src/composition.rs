@@ -10,8 +10,10 @@ use nara_reflect::{
     ComponentCapability, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
 };
 use nara_scene::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, SceneComponentRecord, SceneDocument,
+    SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+    ScenePatchOperation, ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
+    SourceLocalSceneHierarchy,
 };
 
 use crate::diagnostic;
@@ -36,9 +38,8 @@ pub enum SceneCompositionCommand {
         kind: SceneCompositionEntityKind,
         placement: ScenePlacement,
     },
-    RemoveEntity {
-        entity: SceneEntityId,
-    },
+    /// Removes a source-local branch admitted by the shared local hierarchy query.
+    RemoveEntity { entity: SceneEntityId },
     AddComponent {
         entity: SceneEntityId,
         component: ComponentTypeId,
@@ -48,9 +49,11 @@ pub enum SceneCompositionCommand {
         component: ComponentTypeId,
     },
     MoveEntity {
-        entity: SceneEntityId,
+        target: PrefabEntityTarget,
         to: ScenePlacement,
     },
+    /// Resumes inherited placement. Direct source entities always retain an explicit placement.
+    RevertPlacement { target: PrefabEntityTarget },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,18 +84,33 @@ pub(crate) enum GenericCompositionDocument<'a> {
 }
 
 impl GenericCompositionDocument<'_> {
-    fn current_placement(&self, entity: &SceneEntityId) -> Option<ScenePlacement> {
+    fn placements(&self) -> &[SceneEntityPlacement] {
         match self {
-            Self::Scene(document) => ScenePlacement::current(document, entity),
-            Self::Prefab(document) => ScenePlacement::current_prefab(document, entity),
+            Self::Scene(document) => &document.placements,
+            Self::Prefab(document) => &document.placements,
         }
     }
 
-    fn subtree_contains(&self, root: &SceneEntityId, candidate: &SceneEntityId) -> bool {
+    fn records(&self) -> &[SceneEntityRecord] {
         match self {
-            Self::Scene(document) => subtree_contains(document, root, candidate),
-            Self::Prefab(document) => prefab_subtree_contains(document, root, candidate),
+            Self::Scene(document) => &document.entities,
+            Self::Prefab(document) => &document.entities,
         }
+    }
+
+    fn contains(&self, entity: &SceneEntityId) -> bool {
+        match self {
+            Self::Scene(document) => document.entities.iter().any(|record| &record.id == entity),
+            Self::Prefab(document) => document.entities.iter().any(|record| &record.id == entity),
+        }
+    }
+
+    fn local_hierarchy(&self) -> Result<SourceLocalSceneHierarchy, Diagnostic> {
+        match self {
+            Self::Scene(document) => document.local_hierarchy(Default::default()),
+            Self::Prefab(document) => document.local_hierarchy(Default::default()),
+        }
+        .map_err(|_| removal_requires_local_hierarchy())
     }
 }
 
@@ -126,32 +144,37 @@ pub(crate) fn prepare_generic_composition(
             ScenePatchOperation::RemoveComponent { entity, component },
             SceneCompositionSelection::Preserve,
         ),
-        SceneCompositionCommand::MoveEntity { entity, to } => {
-            let from = document
-                .current_placement(&entity)
-                .ok_or_else(|| missing_entity(&entity))?;
-            (
-                ScenePatchOperation::MoveEntity { entity, from, to },
-                SceneCompositionSelection::Preserve,
-            )
+        SceneCompositionCommand::MoveEntity { target, to } => {
+            return Ok(PreparedSceneComposition {
+                patch: ScenePatchDocument::set_placement(document.placements(), target, to),
+                selection: SceneCompositionSelection::Preserve,
+            });
+        }
+        SceneCompositionCommand::RevertPlacement { target } => {
+            return Ok(PreparedSceneComposition {
+                patch: ScenePatchDocument::revert_placement(document.placements(), &target)?,
+                selection: SceneCompositionSelection::Preserve,
+            });
         }
         SceneCompositionCommand::RemoveEntity { entity } => {
-            let from = document
-                .current_placement(&entity)
-                .ok_or_else(|| missing_entity(&entity))?;
-            let selection =
-                if selected.is_some_and(|selected| document.subtree_contains(&entity, selected)) {
-                    SceneCompositionSelection::Select(match &from.owner {
-                        ScenePlacementOwner::Root => None,
-                        ScenePlacementOwner::Parent { parent } => Some(parent.clone()),
-                    })
-                } else {
-                    SceneCompositionSelection::Preserve
-                };
-            (
-                ScenePatchOperation::RemoveEntity { entity, from },
-                selection,
-            )
+            if !document.contains(&entity) {
+                return Err(missing_entity(&entity));
+            }
+            let hierarchy = document.local_hierarchy()?;
+            let (patch, replacement) = removal_patch(
+                document.placements(),
+                document.records(),
+                &hierarchy,
+                &entity,
+                selected,
+            )?;
+            return Ok(PreparedSceneComposition {
+                patch,
+                selection: replacement.map_or(
+                    SceneCompositionSelection::Preserve,
+                    SceneCompositionSelection::Select,
+                ),
+            });
         }
         _ => {
             return Err(diagnostic::error(
@@ -175,19 +198,20 @@ pub(crate) fn prepare_scene_composition(
     match command {
         SceneCompositionCommand::CreateEntity { .. } => Err(creation_requires_source_owner()),
         SceneCompositionCommand::RemoveEntity { entity } => {
-            let from = current_placement(document, &entity)?;
-            let replacement_selection = selected
-                .filter(|selected| subtree_contains(document, &entity, selected))
-                .map(|_| match &from.owner {
-                    ScenePlacementOwner::Root => None,
-                    ScenePlacementOwner::Parent { parent } => Some(parent.clone()),
-                });
+            require_entity(document, &entity)?;
+            let hierarchy = document
+                .local_hierarchy(Default::default())
+                .map_err(|_| removal_requires_local_hierarchy())?;
+            let (patch, replacement) = removal_patch(
+                &document.placements,
+                &document.entities,
+                &hierarchy,
+                &entity,
+                selected,
+            )?;
             Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
-                    entity,
-                    from,
-                }]),
-                selection: replacement_selection.map_or(
+                patch,
+                selection: replacement.map_or(
                     SceneCompositionSelection::Preserve,
                     SceneCompositionSelection::Select,
                 ),
@@ -216,17 +240,14 @@ pub(crate) fn prepare_scene_composition(
                 selection: SceneCompositionSelection::Preserve,
             })
         }
-        SceneCompositionCommand::MoveEntity { entity, to } => {
-            let from = current_placement(document, &entity)?;
-            Ok(PreparedSceneComposition {
-                patch: ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
-                    entity,
-                    from,
-                    to,
-                }]),
-                selection: SceneCompositionSelection::Preserve,
-            })
-        }
+        SceneCompositionCommand::MoveEntity { target, to } => Ok(PreparedSceneComposition {
+            patch: ScenePatchDocument::set_placement(&document.placements, target, to),
+            selection: SceneCompositionSelection::Preserve,
+        }),
+        SceneCompositionCommand::RevertPlacement { target } => Ok(PreparedSceneComposition {
+            patch: ScenePatchDocument::revert_placement(&document.placements, &target)?,
+            selection: SceneCompositionSelection::Preserve,
+        }),
     }
 }
 
@@ -324,9 +345,13 @@ pub enum PrefabCompositionCommand {
         placement: ScenePlacement,
     },
     MoveEntity {
-        entity: SceneEntityId,
+        target: PrefabEntityTarget,
         to: ScenePlacement,
     },
+    RevertPlacement {
+        target: PrefabEntityTarget,
+    },
+    /// Removes a source-local branch; routed topology requires actual source compilation.
     RemoveEntity {
         entity: SceneEntityId,
     },
@@ -347,14 +372,17 @@ pub enum PrefabCompositionOutcome {
         entity: SceneEntityId,
     },
     Moved {
-        entity: SceneEntityId,
+        target: PrefabEntityTarget,
+    },
+    PlacementReverted {
+        target: PrefabEntityTarget,
     },
     Removed {
         entity: SceneEntityId,
         selection: Option<SceneEntityId>,
     },
     NoOp {
-        entity: SceneEntityId,
+        target: PrefabEntityTarget,
     },
     ComponentAdded {
         entity: SceneEntityId,
@@ -428,46 +456,62 @@ pub(crate) fn prepare_prefab_composition(
             })
         }
         PrefabCompositionCommand::CreateEntity { .. } => Err(creation_requires_source_owner()),
-        PrefabCompositionCommand::MoveEntity { entity, to } => {
-            let from = ScenePlacement::current_prefab(document, &entity)
-                .ok_or_else(|| missing_prefab_entity(&entity))?;
-            if to.matches_current_prefab(document, &entity) {
+        PrefabCompositionCommand::MoveEntity { target, to } => {
+            if document
+                .placements
+                .iter()
+                .any(|entry| entry.target == target && entry.placement == to)
+            {
                 return Ok(PreparedPrefabComposition {
                     patch: None,
                     selection: PrefabCompositionSelection::Preserve,
-                    outcome: PrefabCompositionOutcome::NoOp { entity },
+                    outcome: PrefabCompositionOutcome::NoOp { target },
                 });
             }
             Ok(PreparedPrefabComposition {
-                patch: Some(ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
-                    entity: entity.clone(),
-                    from,
+                patch: Some(ScenePatchDocument::set_placement(
+                    &document.placements,
+                    target.clone(),
                     to,
-                }])),
+                )),
                 selection: PrefabCompositionSelection::Preserve,
-                outcome: PrefabCompositionOutcome::Moved { entity },
+                outcome: PrefabCompositionOutcome::Moved { target },
+            })
+        }
+        PrefabCompositionCommand::RevertPlacement { target } => {
+            let patch = ScenePatchDocument::revert_placement(&document.placements, &target)?;
+            let present = document
+                .placements
+                .iter()
+                .any(|entry| entry.target == target);
+            Ok(PreparedPrefabComposition {
+                patch: present.then_some(patch),
+                selection: PrefabCompositionSelection::Preserve,
+                outcome: if present {
+                    PrefabCompositionOutcome::PlacementReverted { target }
+                } else {
+                    PrefabCompositionOutcome::NoOp { target }
+                },
             })
         }
         PrefabCompositionCommand::RemoveEntity { entity } => {
-            let from = ScenePlacement::current_prefab(document, &entity)
-                .ok_or_else(|| missing_prefab_entity(&entity))?;
-            let replacement_selection = selected
-                .filter(|selected| prefab_subtree_contains(document, &entity, selected))
-                .map(|_| match &from.owner {
-                    ScenePlacementOwner::Root => None,
-                    ScenePlacementOwner::Parent { parent } => Some(parent.clone()),
-                });
-            let selection = replacement_selection
-                .clone()
-                .unwrap_or_else(|| selected.cloned());
+            if !document.entities.iter().any(|record| record.id == entity) {
+                return Err(missing_prefab_entity(&entity));
+            }
+            let hierarchy = document
+                .local_hierarchy(Default::default())
+                .map_err(|_| removal_requires_local_hierarchy())?;
+            let (patch, replacement) = removal_patch(
+                &document.placements,
+                &document.entities,
+                &hierarchy,
+                &entity,
+                selected,
+            )?;
+            let selection = replacement.clone().unwrap_or_else(|| selected.cloned());
             Ok(PreparedPrefabComposition {
-                patch: Some(ScenePatchDocument::new([
-                    ScenePatchOperation::RemoveEntity {
-                        entity: entity.clone(),
-                        from,
-                    },
-                ])),
-                selection: replacement_selection.map_or(
+                patch: Some(patch),
+                selection: replacement.map_or(
                     PrefabCompositionSelection::Preserve,
                     PrefabCompositionSelection::Select,
                 ),
@@ -475,27 +519,6 @@ pub(crate) fn prepare_prefab_composition(
             })
         }
     }
-}
-
-fn prefab_subtree_contains(
-    document: &PrefabDocument,
-    root: &SceneEntityId,
-    candidate: &SceneEntityId,
-) -> bool {
-    let mut pending = vec![root];
-    let mut visited = BTreeSet::new();
-    while let Some(entity) = pending.pop() {
-        if entity == candidate {
-            return true;
-        }
-        if !visited.insert(entity.clone()) {
-            continue;
-        }
-        if let Some(record) = document.entities.iter().find(|record| record.id == *entity) {
-            pending.extend(record.children.iter());
-        }
-    }
-    false
 }
 
 fn missing_prefab_entity(entity: &SceneEntityId) -> Diagnostic {
@@ -573,13 +596,6 @@ fn require_entity(document: &SceneDocument, entity: &SceneEntityId) -> Result<()
     Err(missing_entity(entity))
 }
 
-fn current_placement(
-    document: &SceneDocument,
-    entity: &SceneEntityId,
-) -> Result<ScenePlacement, Diagnostic> {
-    ScenePlacement::current(document, entity).ok_or_else(|| missing_entity(entity))
-}
-
 fn missing_entity(entity: &SceneEntityId) -> Diagnostic {
     diagnostic::with_entity(
         diagnostic::error(
@@ -590,23 +606,138 @@ fn missing_entity(entity: &SceneEntityId) -> Diagnostic {
     )
 }
 
-fn subtree_contains(
-    document: &SceneDocument,
-    root: &SceneEntityId,
-    candidate: &SceneEntityId,
-) -> bool {
-    let mut pending = vec![root];
-    let mut visited = BTreeSet::new();
+/// Selects the branch from the shared source-local observation, never declaration-vector order.
+/// Repairs owned sibling intent; final admission still rejects surviving value references.
+fn removal_patch(
+    placements: &[SceneEntityPlacement],
+    records: &[SceneEntityRecord],
+    hierarchy: &SourceLocalSceneHierarchy,
+    entity: &SceneEntityId,
+    selected: Option<&SceneEntityId>,
+) -> Result<(ScenePatchDocument, Option<Option<SceneEntityId>>), Diagnostic> {
+    if hierarchy.children(entity).is_none() {
+        return Err(missing_entity(entity));
+    }
+    let mut removed = BTreeSet::new();
+    let mut pending = vec![entity.clone()];
     while let Some(entity) = pending.pop() {
-        if entity == candidate {
-            return true;
-        }
-        if !visited.insert(entity.clone()) {
-            continue;
-        }
-        if let Some(record) = document.entities.iter().find(|record| record.id == *entity) {
-            pending.extend(record.children.iter());
+        if removed.insert(entity.clone()) {
+            pending.extend(hierarchy.children(&entity).into_iter().flatten().cloned());
         }
     }
-    false
+    let replacement = selected
+        .filter(|selected| removed.contains(*selected))
+        .map(|_| {
+            placements
+                .iter()
+                .find_map(|entry| match &entry.target.entity {
+                    PrefabEntityOrigin::SourceEntity(parent)
+                        if entry.target.through.is_empty()
+                            && hierarchy
+                                .children(parent)
+                                .is_some_and(|children| children.contains(entity)) =>
+                    {
+                        Some(parent.clone())
+                    }
+                    _ => None,
+                })
+        });
+    let value = removal_placements(placements, records, hierarchy, &removed)?;
+    let mut operations = removed
+        .iter()
+        .cloned()
+        .map(|entity| ScenePatchOperation::RemoveEntity { entity })
+        .collect::<Vec<_>>();
+    operations.push(ScenePatchOperation::SetPlacements {
+        expected: placements.to_vec(),
+        value,
+    });
+    Ok((ScenePatchDocument::new(operations), replacement))
+}
+
+fn source_local_entity(target: &PrefabEntityTarget) -> Option<&SceneEntityId> {
+    match &target.entity {
+        PrefabEntityOrigin::SourceEntity(entity) if target.through.is_empty() => Some(entity),
+        _ => None,
+    }
+}
+
+fn removal_placements(
+    placements: &[SceneEntityPlacement],
+    records: &[SceneEntityRecord],
+    hierarchy: &SourceLocalSceneHierarchy,
+    removed: &BTreeSet<SceneEntityId>,
+) -> Result<Vec<SceneEntityPlacement>, Diagnostic> {
+    let survives = |entry: &&SceneEntityPlacement| {
+        !source_local_entity(&entry.target).is_some_and(|entity| removed.contains(entity))
+    };
+    let mut affected_parents = BTreeSet::new();
+    for entry in placements.iter().filter(survives) {
+        let sibling = match &entry.placement.slot {
+            ScenePlacementSlot::Before(sibling) | ScenePlacementSlot::After(sibling) => sibling,
+            ScenePlacementSlot::First | ScenePlacementSlot::Last => continue,
+        };
+        if source_local_entity(sibling).is_some_and(|entity| removed.contains(entity)) {
+            let parent = match &entry.placement.parent {
+                ScenePlacementParent::Root => None,
+                ScenePlacementParent::Entity(parent) => {
+                    Some(source_local_entity(parent).ok_or_else(removal_requires_local_hierarchy)?)
+                }
+            };
+            affected_parents.insert(parent);
+        }
+    }
+    for record in records {
+        if record.prefab.is_some() && affected_parents.contains(&Some(&record.id)) {
+            return Err(diagnostic::with_entity(
+                diagnostic::error(
+                    "tooling.composition-removal-requires-source-context",
+                    "Repairing sibling placements below a Prefab anchor requires the actual source context",
+                ),
+                &record.id,
+            ));
+        }
+    }
+
+    // Reauthor the entire affected sequence. Reanchoring only a dangling pin can conflict with
+    // another survivor's Before/After intent and create a cycle or change the surviving order.
+    let mut previous_siblings = BTreeMap::new();
+    for parent in affected_parents {
+        let siblings = match parent {
+            None => hierarchy.roots(),
+            Some(parent) => hierarchy
+                .children(parent)
+                .ok_or_else(removal_requires_local_hierarchy)?,
+        };
+        let mut previous = None;
+        for sibling in siblings
+            .iter()
+            .filter(|sibling| !removed.contains(*sibling))
+        {
+            previous_siblings.insert(sibling, previous);
+            previous = Some(sibling);
+        }
+    }
+    Ok(placements
+        .iter()
+        .filter(survives)
+        .map(|entry| {
+            let mut value = entry.clone();
+            if let Some(previous) =
+                source_local_entity(&entry.target).and_then(|entity| previous_siblings.get(entity))
+            {
+                value.placement.slot = previous.map_or(ScenePlacementSlot::First, |previous| {
+                    ScenePlacementSlot::After(PrefabEntityTarget::source(previous.clone()))
+                });
+            }
+            value
+        })
+        .collect())
+}
+
+fn removal_requires_local_hierarchy() -> Diagnostic {
+    diagnostic::error(
+        "tooling.composition-removal-requires-local-hierarchy",
+        "Source-local branch removal requires complete local topology; projected targets require actual source compilation",
+    )
 }

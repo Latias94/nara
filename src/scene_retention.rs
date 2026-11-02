@@ -5,8 +5,9 @@ use nara_asset::AssetRef;
 use nara_scene::PrefabDocument;
 use nara_scene::{
     CompiledSceneCandidate, CompiledSceneDocument, CompiledSceneEntity, PrefabInstance,
-    PrefabProjectionPath, PrefabProjectionStep, SceneDocument, SceneEntityId,
-    SceneEntityProvenanceMap, SceneEntityRecord,
+    PrefabInstanceBinding, PrefabProjectionPath, PrefabProjectionStep, SceneDocument,
+    SceneEntityId, SceneEntityPlacement, SceneEntityProvenanceMap, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent, ScenePlacementSlot,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -22,8 +23,8 @@ pub(crate) fn scene_retained_bytes(
 ) -> Result<usize, SceneRetentionOverflow> {
     document_retained_bytes(
         size_of::<SceneDocument>(),
-        &document.roots,
-        document.roots.capacity(),
+        &document.placements,
+        document.placements.capacity(),
         &document.entities,
         document.entities.capacity(),
     )
@@ -114,16 +115,36 @@ pub(crate) fn compiled_scene_retained_bytes(
     Ok(total)
 }
 
+/// Charges flat authoring observation storage, including spare hierarchy buffers and source values.
 #[cfg(feature = "serde")]
 pub(crate) fn authoring_scene_observation_retained_bytes(
     observation: &nara_scene::ExpandedSceneDocument,
 ) -> Result<usize, SceneRetentionOverflow> {
-    checked_sum([
+    let mut total = checked_sum([
         size_of_val(observation),
-        ARC_CONTROL_BLOCK_BYTES,
-        scene_retained_bytes(observation.document())?,
+        scene_entity_ids_retained_bytes(observation.roots(), observation.roots_capacity())?,
+        checked_product(
+            observation.entities_capacity(),
+            size_of::<nara_scene::ExpandedSceneEntity>(),
+        )?,
         scene_provenance_retained_bytes(observation.provenance())?,
-    ])
+    ])?;
+    for entity in observation.entities() {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                string_retained_bytes(entity.id().as_str())?,
+                scene_entity_ids_retained_bytes(entity.children(), entity.children_capacity())?,
+            ])?,
+        )?;
+        for (component, record) in entity.components() {
+            checked_add_to(
+                &mut total,
+                component_record_retained_bytes(component, record)?,
+            )?;
+        }
+    }
+    Ok(total)
 }
 
 #[cfg(feature = "serde")]
@@ -373,8 +394,8 @@ pub(crate) fn prefab_retained_bytes(
     checked_sum([
         document_retained_bytes(
             size_of::<PrefabDocument>(),
-            &document.roots,
-            document.roots.capacity(),
+            &document.placements,
+            document.placements.capacity(),
             &document.entities,
             document.entities.capacity(),
         )?,
@@ -397,16 +418,25 @@ pub(crate) fn reference_inputs_retained_bytes(
 
 fn document_retained_bytes(
     document_bytes: usize,
-    roots: &[SceneEntityId],
-    root_capacity: usize,
+    placements: &[SceneEntityPlacement],
+    placement_capacity: usize,
     entities: &[SceneEntityRecord],
     entity_capacity: usize,
 ) -> Result<usize, SceneRetentionOverflow> {
     let mut total = checked_sum([
         document_bytes,
-        scene_entity_ids_retained_bytes(roots, root_capacity)?,
+        checked_product(placement_capacity, size_of::<SceneEntityPlacement>())?,
         checked_product(entity_capacity, size_of::<SceneEntityRecord>())?,
     ])?;
+    for declaration in placements {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                target_retained_bytes(&declaration.target)?,
+                placement_dynamic_bytes(&declaration.placement)?,
+            ])?,
+        )?;
+    }
     for entity in entities {
         checked_add_to(&mut total, entity_dynamic_bytes(entity)?)?;
     }
@@ -415,10 +445,6 @@ fn document_retained_bytes(
 
 fn entity_dynamic_bytes(entity: &SceneEntityRecord) -> Result<usize, SceneRetentionOverflow> {
     let mut total = string_retained_bytes(entity.id.as_str())?;
-    checked_add_to(
-        &mut total,
-        scene_entity_ids_retained_bytes(&entity.children, entity.children.capacity())?,
-    )?;
     for (id, record) in &entity.components {
         checked_add_to(&mut total, component_record_retained_bytes(id, record)?)?;
     }
@@ -444,6 +470,7 @@ pub(crate) fn prefab_instance_retained_bytes(
 ) -> Result<usize, SceneRetentionOverflow> {
     checked_sum([
         asset_ref_retained_bytes(&instance.source)?,
+        instance_binding_retained_bytes(&instance.binding)?,
         instance
             .arguments
             .as_ref()
@@ -452,6 +479,32 @@ pub(crate) fn prefab_instance_retained_bytes(
             .overrides
             .as_ref()
             .map_or(Ok(0), overlay_retained_bytes)?,
+    ])
+}
+
+fn instance_binding_retained_bytes(
+    binding: &PrefabInstanceBinding,
+) -> Result<usize, SceneRetentionOverflow> {
+    match binding {
+        PrefabInstanceBinding::Forest => Ok(0),
+        PrefabInstanceBinding::Root { base, root } => {
+            checked_sum([base.retained_bytes(), string_retained_bytes(root.as_str())?])
+        }
+    }
+}
+
+fn placement_dynamic_bytes(placement: &ScenePlacement) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        match &placement.parent {
+            ScenePlacementParent::Root => 0,
+            ScenePlacementParent::Entity(target) => target_retained_bytes(target)?,
+        },
+        match &placement.slot {
+            ScenePlacementSlot::First | ScenePlacementSlot::Last => 0,
+            ScenePlacementSlot::Before(target) | ScenePlacementSlot::After(target) => {
+                target_retained_bytes(target)?
+            }
+        },
     ])
 }
 
@@ -501,7 +554,7 @@ pub(crate) fn overlay_retained_bytes(
                 )?,
                 checked_product(
                     overlay.placements.capacity(),
-                    size_of::<nara_scene::PrefabPlacement>(),
+                    size_of::<nara_scene::SceneEntityPlacement>(),
                 )?,
                 checked_product(
                     overlay.suppressions.capacity(),
@@ -516,6 +569,10 @@ pub(crate) fn overlay_retained_bytes(
             }
             if let Some(instance) = &addition.prefab {
                 checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                checked_add_to(
+                    &mut total,
+                    instance_binding_retained_bytes(&instance.binding)?,
+                )?;
                 if let Some(arguments) = &instance.arguments {
                     checked_add_to(&mut total, reference_arguments_retained_bytes(arguments)?)?;
                 }
@@ -526,6 +583,10 @@ pub(crate) fn overlay_retained_bytes(
             checked_add_to(&mut total, target_retained_bytes(&claim.target)?)?;
             if let Some(instance) = &claim.value {
                 checked_add_to(&mut total, asset_ref_retained_bytes(&instance.source)?)?;
+                checked_add_to(
+                    &mut total,
+                    instance_binding_retained_bytes(&instance.binding)?,
+                )?;
                 if let Some(arguments) = &instance.arguments {
                     checked_add_to(&mut total, reference_arguments_retained_bytes(arguments)?)?;
                 }
@@ -582,11 +643,11 @@ pub(crate) fn overlay_retained_bytes(
         }
         for placement in &overlay.placements {
             checked_add_to(&mut total, target_retained_bytes(&placement.target)?)?;
-            if let nara_scene::PrefabPlacementParent::Entity(target) = &placement.parent {
+            if let nara_scene::ScenePlacementParent::Entity(target) = &placement.placement.parent {
                 checked_add_to(&mut total, target_retained_bytes(target)?)?;
             }
-            if let nara_scene::PrefabPlacementSlot::Before(target)
-            | nara_scene::PrefabPlacementSlot::After(target) = &placement.slot
+            if let nara_scene::ScenePlacementSlot::Before(target)
+            | nara_scene::ScenePlacementSlot::After(target) = &placement.placement.slot
             {
                 checked_add_to(&mut total, target_retained_bytes(target)?)?;
             }
@@ -773,18 +834,17 @@ mod tests {
         let mut anchor = SceneEntityRecord::new(scene_id(name));
         let mut overlay = nara_scene::PrefabOverlay::new(base);
         for entity in additions {
-            assert!(entity.children.is_empty());
             let mut addition = nara_scene::PrefabAddition::new(entity.id.clone());
             addition.components = entity.components;
             addition.prefab = entity.prefab;
-            overlay.placements.push(nara_scene::PrefabPlacement {
+            overlay.placements.push(nara_scene::SceneEntityPlacement {
                 target: nara_scene::PrefabEntityTarget::addition(entity.id),
-                parent: nara_scene::PrefabPlacementParent::Root,
-                slot: nara_scene::PrefabPlacementSlot::Last,
+                placement: nara_scene::ScenePlacement::last(nara_scene::ScenePlacementParent::Root),
             });
             overlay.additions.push(addition);
         }
         anchor.prefab = Some(PrefabInstance {
+            binding: PrefabInstanceBinding::Forest,
             arguments: None,
             source,
             overrides: Some(overlay),
@@ -878,6 +938,7 @@ mod tests {
         )
         .unwrap();
         let plain = PrefabInstance {
+            binding: PrefabInstanceBinding::Forest,
             source: AssetRef::path("base.prefab.json").unwrap(),
             arguments: None,
             overrides: None,
@@ -1193,31 +1254,110 @@ mod tests {
     }
 
     #[test]
-    fn scene_retention_counts_ordered_roots_and_children() {
+    fn scene_retention_counts_complete_placement_targets_and_spare_capacity() {
+        use nara_scene::{PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceHop};
+
         let root = scene_id("root");
         let child = scene_id("root/child");
-        let mut roots = Vec::with_capacity(3);
-        roots.push(root.clone());
-        let mut children = Vec::with_capacity(4);
-        children.push(child.clone());
+        let base = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.placement-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let mut through = Vec::with_capacity(4);
+        through.push(PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(root.clone()),
+            expected_base: base.clone(),
+        });
+        let inherited = PrefabEntityTarget {
+            through,
+            entity: PrefabEntityOrigin::SourceEntity(scene_id("inherited")),
+        };
+        let mut placements = Vec::with_capacity(5);
+        placements.push(SceneEntityPlacement::root(root.clone()));
+        placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(child.clone()),
+            ScenePlacement::before(
+                ScenePlacementParent::Entity(inherited.clone()),
+                inherited.clone(),
+            ),
+        ));
+        placements.push(SceneEntityPlacement::new(
+            inherited,
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
         let mut entities = Vec::with_capacity(5);
-        entities.push(SceneEntityRecord::new(root.clone()).with_children(children));
+        entities.push(SceneEntityRecord::new(root.clone()));
         entities.push(SceneEntityRecord::new(child.clone()));
-        let document = SceneDocument { roots, entities };
+        let document = SceneDocument {
+            placements,
+            entities,
+        };
+        let ScenePlacementParent::Entity(parent) = &document.placements[1].placement.parent else {
+            unreachable!()
+        };
+        let ScenePlacementSlot::Before(sibling) = &document.placements[1].placement.slot else {
+            unreachable!()
+        };
+        let inherited_bytes = |target: &PrefabEntityTarget| {
+            string_bytes("inherited")
+                + target.through.capacity() * size_of::<PrefabInstanceHop>()
+                + string_bytes(root.as_str())
+                + base.retained_bytes()
+        };
 
         let expected = checked_sum([
             size_of::<SceneDocument>(),
-            document.roots.capacity() * size_of::<SceneEntityId>(),
-            string_retained_bytes(root.as_str()).unwrap(),
+            document.placements.capacity() * size_of::<SceneEntityPlacement>(),
+            string_bytes(root.as_str()),
+            string_bytes(child.as_str()),
+            inherited_bytes(parent),
+            inherited_bytes(sibling),
+            inherited_bytes(&document.placements[2].target),
             document.entities.capacity() * size_of::<SceneEntityRecord>(),
-            string_retained_bytes(root.as_str()).unwrap(),
-            document.entities[0].children.capacity() * size_of::<SceneEntityId>(),
-            string_retained_bytes(child.as_str()).unwrap(),
-            string_retained_bytes(child.as_str()).unwrap(),
+            string_bytes(root.as_str()),
+            string_bytes(child.as_str()),
         ])
         .unwrap();
 
         assert_eq!(scene_retained_bytes(&document).unwrap(), expected);
+    }
+
+    #[test]
+    fn root_binding_retention_charges_owned_pins_in_every_instance_carrier() {
+        use nara_scene::{PrefabAddition, PrefabEntityTarget, PrefabInstanceClaim, PrefabOverlay};
+
+        let base = SourceDocumentKey::named(
+            "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
+            "retention.bound-root-source",
+            SourceDocumentKind::Prefab,
+        )
+        .unwrap();
+        let root = scene_id("selected-source-root");
+        let forest = PrefabInstance::forest(AssetRef::path("base.prefab.json").unwrap());
+        let bound = PrefabInstance::root(forest.source.clone(), base.clone(), root.clone());
+        let expected = base.retained_bytes() + string_bytes(root.as_str());
+        for carrier in 0..3 {
+            let retained = |instance: &PrefabInstance| {
+                if carrier == 0 {
+                    return prefab_instance_retained_bytes(instance).unwrap();
+                }
+                let mut overlay = PrefabOverlay::new(base.clone());
+                if carrier == 1 {
+                    let mut addition = PrefabAddition::new(scene_id("added"));
+                    addition.prefab = Some(instance.clone());
+                    overlay.additions.push(addition);
+                } else {
+                    overlay.instances.push(PrefabInstanceClaim {
+                        target: PrefabEntityTarget::source(scene_id("nested")),
+                        value: Some(instance.clone()),
+                    });
+                }
+                overlay_retained_bytes(&overlay).unwrap()
+            };
+            assert_eq!(retained(&bound) - retained(&forest), expected);
+        }
     }
 
     #[test]

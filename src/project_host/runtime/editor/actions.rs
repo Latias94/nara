@@ -1044,6 +1044,7 @@ fn prefab_command_uses_ui_domain(command: &nara_tooling::PrefabCompositionComman
             component_uses_ui_domain(component)
         }
         PrefabCompositionCommand::MoveEntity { .. }
+        | PrefabCompositionCommand::RevertPlacement { .. }
         | PrefabCompositionCommand::RemoveEntity { .. } => false,
     }
 }
@@ -1062,29 +1063,14 @@ pub(super) fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument
                     }
                 }
             }
-            ScenePatchOperation::AddEntity { entity, .. } => {
+            ScenePatchOperation::AddEntity { entity }
+            | ScenePatchOperation::RestoreEntity { entity } => {
                 if entity.components.keys().any(component_uses_ui_domain) {
                     return true;
                 }
                 if let Some(prefab) = &entity.prefab {
                     if prefab_instance_uses_ui_domain(prefab) {
                         return true;
-                    }
-                }
-            }
-            ScenePatchOperation::RestoreEntity {
-                entity,
-                descendants,
-                ..
-            } => {
-                for entity in std::iter::once(entity).chain(descendants.iter()) {
-                    if entity.components.keys().any(component_uses_ui_domain) {
-                        return true;
-                    }
-                    if let Some(prefab) = &entity.prefab {
-                        if prefab_instance_uses_ui_domain(prefab) {
-                            return true;
-                        }
                     }
                 }
             }
@@ -1271,6 +1257,7 @@ mod tests {
     fn ui_domain_guard_checks_nested_expected_and_value_snapshots() {
         let id = SceneEntityId::new("nested").unwrap();
         let instance = |overrides| PrefabInstance {
+            binding: nara_scene::PrefabInstanceBinding::Forest,
             arguments: None,
             source: AssetRef::path("base.prefab.json").unwrap(),
             overrides,

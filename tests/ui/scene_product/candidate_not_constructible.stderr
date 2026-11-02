@@ -7,7 +7,7 @@ error[E0624]: associated function `from_compilation` is private
  ::: crates/nara_scene/src/candidate.rs
   |
   | /     pub(crate) fn from_compilation(
-  | |         document: SceneDocument,
+  | |         document: SceneDraft,
   | |         provenance: SceneEntityProvenanceMap,
   | |     ) -> Result<Self, InvalidSceneProvenance> {
   | |_____________________________________________- private associated function defined here

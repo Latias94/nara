@@ -16,9 +16,9 @@ use nara_reflect::{
     ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringSession, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchApplyLimits, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabAuthoringSession, PrefabDocument, PrefabEntityTarget, SceneAuthoringSession,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePatchApplyLimits, ScenePatchDocument, ScenePatchOperation,
 };
 
 #[derive(Component)]
@@ -157,7 +157,12 @@ fn final_closure_patch() -> ScenePatchDocument {
         set_field("images", images("textures/present.png")),
         ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(scene_id("later")),
-            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: document().placements,
+            value: ["source", "old", "later"]
+                .map(|id| SceneEntityPlacement::root(scene_id(id)))
+                .to_vec(),
         },
     ])
 }
@@ -216,7 +221,8 @@ fn nested_multi_operation_closure_commits_one_inverse_and_revision_across_native
             .applied
     );
 
-    let original_prefab = PrefabDocument::new(original.roots.clone(), original.entities.clone());
+    let original_prefab =
+        PrefabDocument::new(original.placements.clone(), original.entities.clone());
     let mut prefab = PrefabAuthoringSession::new(original_prefab.clone());
     let before = prefab.revision();
     let report = prefab.apply_patch_with_asset_resolution(
@@ -277,7 +283,7 @@ fn final_nested_asset_or_local_dangling_rejects_without_history_publication() {
         assert_eq!(scene.revision(), revision);
         assert_eq!(scene.history_status(), history);
 
-        let original = PrefabDocument::new(original.roots, original.entities);
+        let original = PrefabDocument::new(original.placements, original.entities);
         let mut prefab = PrefabAuthoringSession::new(original.clone());
         let revision = prefab.revision();
         let history = prefab.history_status();
@@ -394,10 +400,17 @@ fn public_patch_selected_value_limits_bound_default_interpretation() {
     let original = document.clone();
     let limits =
         ScenePatchApplyLimits::default().with_validation_value_nodes(ItemLimit::new(2).unwrap());
-    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(scene_id("later")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(scene_id("later")),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: document.placements.clone(),
+            value: ["source", "later"]
+                .map(|id| SceneEntityPlacement::root(scene_id(id)))
+                .to_vec(),
+        },
+    ]);
     let report = patch.apply_to_scene_with_limits(&mut document, &registry, limits);
     assert!(
         !report.applied,
@@ -415,12 +428,34 @@ fn public_patch_selected_value_limits_bound_default_interpretation() {
 #[cfg(feature = "serde")]
 #[test]
 fn authoring_asset_resolution_file_entries_preserve_selected_canonical_value_limits() {
-    use nara_scene::{PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileLimits};
+    use nara_scene::{
+        PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileBudgetKind, SceneFileLimits,
+        SceneFormatError,
+    };
     let registry = budget_registry();
     let database = ProjectAssetDatabase::default();
-    let limits = SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(1).unwrap());
+    // One placement/target/location (3) and its empty component map (1) fit raw admission.
+    // Publication still must admit the effective map/list and all 32 defaulted values (34).
+    let raw_nodes = 3 + 1;
+    let limits =
+        SceneFileLimits::default().with_component_value_nodes(ItemLimit::new(raw_nodes).unwrap());
     let scene = budget_document();
     let scene_json = scene.to_json_string().unwrap();
+    let SceneFormatError::Budget(error) = SceneDocumentCandidate::decode_json_bytes_with_limits(
+        scene_json.as_bytes(),
+        limits.with_component_value_nodes(ItemLimit::new(raw_nodes - 1).unwrap()),
+    )
+    .unwrap_err() else {
+        panic!("raw Scene admission must reject exactly one missing node");
+    };
+    assert_eq!(
+        (error.kind, error.observed, error.maximum),
+        (
+            SceneFileBudgetKind::ComponentValueNodes,
+            raw_nodes,
+            raw_nodes - 1
+        )
+    );
     let scene_candidate = || {
         SceneDocumentCandidate::decode_json_bytes_with_limits(scene_json.as_bytes(), limits)
             .unwrap()
@@ -447,8 +482,23 @@ fn authoring_asset_resolution_file_entries_preserve_selected_canonical_value_lim
     assert_eq!(session.document(), &SceneDocument::default());
     assert_eq!(session.revision(), revision);
 
-    let prefab = PrefabDocument::new(scene.roots, scene.entities);
+    let prefab = PrefabDocument::new(scene.placements, scene.entities);
     let prefab_json = prefab.to_json_string().unwrap();
+    let SceneFormatError::Budget(error) = PrefabDocumentCandidate::decode_json_bytes_with_limits(
+        prefab_json.as_bytes(),
+        limits.with_component_value_nodes(ItemLimit::new(raw_nodes - 1).unwrap()),
+    )
+    .unwrap_err() else {
+        panic!("raw Prefab admission must reject exactly one missing node");
+    };
+    assert_eq!(
+        (error.kind, error.observed, error.maximum),
+        (
+            SceneFileBudgetKind::ComponentValueNodes,
+            raw_nodes,
+            raw_nodes - 1
+        )
+    );
     let prefab_candidate = || {
         PrefabDocumentCandidate::decode_json_bytes_with_limits(prefab_json.as_bytes(), limits)
             .unwrap()
@@ -558,7 +608,9 @@ fn published_data_authoring_closes_known_local_edges_and_preserves_unknown_recor
     dangling
         .entities
         .retain(|entity| entity.id != scene_id("old"));
-    dangling.roots.retain(|entity| entity != &scene_id("old"));
+    dangling
+        .placements
+        .retain(|entry| entry.target != PrefabEntityTarget::source(scene_id("old")));
     for omit_link in [false, true] {
         let mut candidate_document = dangling.clone();
         if omit_link {
@@ -590,7 +642,8 @@ fn published_data_authoring_closes_known_local_edges_and_preserves_unknown_recor
                 .is_err(),
             "known nested local reference lost its target during Scene authoring publication, omitted={omit_link}"
         );
-        let prefab = PrefabDocument::new(candidate_document.roots, candidate_document.entities);
+        let prefab =
+            PrefabDocument::new(candidate_document.placements, candidate_document.entities);
         let candidate =
             PrefabDocumentCandidate::decode_json_bytes(prefab.to_json_string().unwrap().as_bytes())
                 .unwrap();
@@ -643,20 +696,18 @@ fn prefab_anchor_does_not_bypass_direct_source_reference_closure() {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
     let mut anchor = SceneEntityRecord::new(scene_id("anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source,
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(source));
     let mut source_document = document();
-    source_document.roots.push(anchor.id.clone());
+    source_document
+        .placements
+        .push(SceneEntityPlacement::root(anchor.id.clone()));
     source_document.entities.push(anchor);
     for dangling in [false, true] {
         let mut candidate_document = source_document.clone();
         if dangling {
             candidate_document
-                .roots
-                .retain(|entity| entity != &scene_id("old"));
+                .placements
+                .retain(|entry| entry.target != PrefabEntityTarget::source(scene_id("old")));
             candidate_document
                 .entities
                 .retain(|entity| entity.id != scene_id("old"));

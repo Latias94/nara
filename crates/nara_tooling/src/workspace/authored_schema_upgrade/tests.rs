@@ -210,7 +210,7 @@ fn open(
         }
         EditorDocumentKind::Prefab => {
             let path = format!("prefabs/{name}.prefab.json");
-            let source = PrefabDocument::new(source.roots, source.entities);
+            let source = PrefabDocument::new(source.placements, source.entities);
             let published =
                 PrefabDocumentCandidate::decode_json_str(&source.to_json_string().unwrap())
                     .unwrap()

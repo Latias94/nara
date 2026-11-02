@@ -18,7 +18,7 @@ fn a_dirty_close_prompt_allows_exact_revocation_while_retaining_physical_custody
         let basis = editor.document_query_basis(document).unwrap();
         let mut draft = editor.begin_authoring_construction(&basis).unwrap();
         draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let prepared = editor
             .prepare_authoring_construction(&basis, &draft)
@@ -374,7 +374,7 @@ fn a_successful_probe_blocked_by_a_dirty_close_prompt_retains_the_predecessor_re
         let basis = editor.document_query_basis(document).unwrap();
         let mut draft = editor.begin_authoring_construction(&basis).unwrap();
         draft
-            .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+            .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
             .unwrap();
         let prepared = editor
             .prepare_authoring_construction(&basis, &draft)
@@ -662,7 +662,7 @@ fn output_and_accept_both_reject_an_original_basis_after_document_revision_chang
             let basis = editor.document_query_basis(document).unwrap();
             let mut draft = editor.begin_authoring_construction(&basis).unwrap();
             draft
-                .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+                .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
                 .unwrap();
             let prepared = editor
                 .prepare_authoring_construction(&basis, &draft)

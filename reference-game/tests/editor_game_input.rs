@@ -25,8 +25,8 @@ use nara::{
         advanced::{RuntimeProbe, open_trusted_compiled_editor_with_probe},
     },
     scene::{
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+        ScenePatchDocument, ScenePatchOperation,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorCloseDecision,
@@ -271,6 +271,14 @@ fn gpu_recovery_pauses_runtime_without_resolving_dirty_exit() {
     complete_fake_presentation(&mut editor, first);
     let frame = editor.current_frame();
     let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let source = SceneDocumentCandidate::decode_json_bytes(&source_before)
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+    let mut placements = source.placements.clone();
+    placements.push(SceneEntityPlacement::root(
+        SceneEntityId::new("recovery-unsaved-entity").unwrap(),
+    ));
     editor
         .dispatch_editor_actions(EditorActionBatch::new(
             frame.revision(),
@@ -278,12 +286,17 @@ fn gpu_recovery_pauses_runtime_without_resolving_dirty_exit() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("recovery-unsaved-entity").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: ScenePatchDocument::new([
+                        ScenePatchOperation::AddEntity {
+                            entity: SceneEntityRecord::new(
+                                SceneEntityId::new("recovery-unsaved-entity").unwrap(),
+                            ),
+                        },
+                        ScenePatchOperation::SetPlacements {
+                            expected: source.placements,
+                            value: placements,
+                        },
+                    ]),
                 },
             )],
         ))

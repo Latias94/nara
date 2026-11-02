@@ -192,11 +192,9 @@ fn prefab(amount: u64) -> PrefabDocument {
 
 fn linked(anchor: &str, path: &str) -> SceneEntityRecord {
     let mut entity = named(anchor, anchor);
-    entity.prefab = Some(PrefabInstance {
-        source: nara::asset::AssetRef::path(path).unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    entity.prefab = Some(PrefabInstance::forest(
+        nara::asset::AssetRef::path(path).unwrap(),
+    ));
     entity
 }
 

@@ -6,8 +6,8 @@ use nara::{
     scene::{
         InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentSetMode, PrefabDocument,
         PrefabEntityTarget, PrefabInstanceClaim, SceneCompilationFailureKind, SceneComponentRecord,
-        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePlacement,
-        ScenePlacementOwner, SourceDocumentKey, SourceDocumentKind,
+        SceneDocument, SceneEntityId, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
+        SourceDocumentKey, SourceDocumentKind,
     },
     tooling::{EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation},
 };
@@ -29,9 +29,8 @@ fn key() -> SourceDocumentKey {
 
 fn instance(overlay: Option<PrefabOverlay>) -> PrefabInstance {
     PrefabInstance {
-        source: AssetRef::path("ordinary.prefab.json").unwrap(),
-        arguments: None,
         overrides: overlay,
+        ..PrefabInstance::forest(AssetRef::path("ordinary.prefab.json").unwrap())
     }
 }
 
@@ -239,10 +238,11 @@ fn source_revision_change_does_not_reprepare_the_reviewed_token_at_commit() {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: captured.document,
                     base_revision: captured.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(id("later-direct")),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: crate::app::named_root_patch(
+                        &harness.application,
+                        captured.document,
+                        "later-direct",
+                    ),
                 },
             )],
         ),
@@ -373,11 +373,12 @@ fn source_observation_retains_nested_paths_and_every_intent_kind_including_detac
             intent: nara::scene::PrefabPropertyIntent::Absent,
         }],
     });
-    overlay.placements.push(nara::scene::PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("nested-addition")),
-        parent: nara::scene::PrefabPlacementParent::Root,
-        slot: nara::scene::PrefabPlacementSlot::Last,
-    });
+    overlay
+        .placements
+        .push(nara::scene::SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(id("nested-addition")),
+            ScenePlacement::last(ScenePlacementParent::Root),
+        ));
     let mut anchor = SceneEntityRecord::new(id("intent-anchor"));
     anchor.prefab = Some(instance(Some(overlay)));
     fs::write(
@@ -483,11 +484,9 @@ fn composition_status_distinguishes_foreign_source_and_never_infers_success() {
         PrefabDocument::from_ordered_roots([bad]),
     );
     let mut anchor = SceneEntityRecord::new(id("containing-anchor"));
-    anchor.prefab = Some(PrefabInstance {
-        source: AssetRef::path("outer.prefab.json").unwrap(),
-        arguments: None,
-        overrides: None,
-    });
+    anchor.prefab = Some(PrefabInstance::forest(
+        AssetRef::path("outer.prefab.json").unwrap(),
+    ));
     let failure = SceneDocument::from_ordered_roots([anchor])
         .compile(&registry, &resolver)
         .failure

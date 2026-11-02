@@ -16,10 +16,10 @@ use nara_reflect::{
 use nara_scene::{
     InMemoryPrefabSourceResolver, PrefabAddition, PrefabComponentIntent, PrefabComponentSetMode,
     PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceClaim,
-    PrefabInstanceHop, PrefabOverlay, PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot,
-    PrefabProjectionStep, PrefabPropertyClaim, PrefabPropertyIntent, PrefabSourceResolver,
-    ResolvedPrefabSource, SceneCompilationReport, SceneComponentRecord, SceneDocument,
-    SceneEntityId, SceneEntityRecord, SourceDocumentKey, SourceDocumentKind,
+    PrefabInstanceHop, PrefabOverlay, PrefabProjectionStep, PrefabPropertyClaim,
+    PrefabPropertyIntent, PrefabSourceResolver, ResolvedPrefabSource, SceneCompilationReport,
+    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+    ScenePlacement, ScenePlacementParent, SourceDocumentKey, SourceDocumentKind,
     register_scene_components,
 };
 
@@ -123,12 +123,12 @@ fn pin_x(target: PrefabEntityTarget, x: u64) -> PrefabComponentIntent {
 fn old_instance() -> PrefabInstance {
     let mut overlay = PrefabOverlay::new(key("q"));
     overlay.additions.push(PrefabAddition::new(id("q_overlay")));
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("q_overlay")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("q_overlay")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source("q"),
         arguments: None,
         overrides: Some(overlay),
@@ -136,28 +136,50 @@ fn old_instance() -> PrefabInstance {
 }
 
 fn replacement() -> PrefabInstance {
-    PrefabInstance {
-        source: source("r"),
-        arguments: None,
-        overrides: None,
-    }
+    PrefabInstance::forest(source("r"))
 }
 
 fn outer_prefab() -> PrefabDocument {
-    let mut nested = SceneEntityRecord::new(id("n"))
-        .with_children([id("p_local_first"), id("p_local_last")])
-        .with_component(
-            ComponentTypeId::new("nara.scene.Name"),
-            SceneComponentRecord::new(
-                ComponentSchemaVersion::ONE,
-                ComponentValue::String("P-owned nested anchor".into()),
-            ),
-        );
+    let mut nested = SceneEntityRecord::new(id("n")).with_component(
+        ComponentTypeId::new("nara.scene.Name"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::String("P-owned nested anchor".into()),
+        ),
+    );
     nested.prefab = Some(old_instance());
     PrefabDocument::new(
-        [id("p_root")],
         [
-            SceneEntityRecord::new(id("p_root")).with_children([id("n"), id("p_sibling")]),
+            SceneEntityPlacement::root(id("p_root")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("n")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("p_root"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("p_sibling")),
+                ScenePlacement::after(
+                    ScenePlacementParent::Entity(PrefabEntityTarget::source(id("p_root"))),
+                    PrefabEntityTarget::source(id("n")),
+                ),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("p_local_first")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("n"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("p_local_last")),
+                ScenePlacement::after(
+                    ScenePlacementParent::Entity(PrefabEntityTarget::source(id("n"))),
+                    PrefabEntityTarget::source(id("p_local_first")),
+                ),
+            ),
+        ],
+        [
+            SceneEntityRecord::new(id("p_root")),
             nested,
             SceneEntityRecord::new(id("p_local_first")),
             SceneEntityRecord::new(id("p_local_last")),
@@ -167,14 +189,23 @@ fn outer_prefab() -> PrefabDocument {
 }
 
 fn scene(overrides: PrefabOverlay) -> SceneDocument {
-    let mut outer = SceneEntityRecord::new(id("outer")).with_children([id("scene_local")]);
+    let mut outer = SceneEntityRecord::new(id("outer"));
     outer.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         source: source("p"),
         arguments: None,
         overrides: Some(overrides),
     });
     SceneDocument::new(
-        [id("outer")],
+        [
+            SceneEntityPlacement::root(id("outer")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("scene_local")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("outer"),
+                ))),
+            ),
+        ],
         [outer, SceneEntityRecord::new(id("scene_local"))],
     )
 }
@@ -348,12 +379,12 @@ fn outer_instance_replaces_nested_missing_source_before_resolving_it() {
 fn nested_replacement_never_requests_registered_source_with_invalid_topology() {
     let registry = registry();
     let mut resolver = resolver();
-    let invalid = PrefabDocument::new([id("missing_root")], []);
+    let invalid = PrefabDocument::new([SceneEntityPlacement::root(id("missing_root"))], []);
     let invalid_diagnostics = invalid.validate(&registry);
     assert!(
         invalid_diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code().as_str() == "scene.dangling-root"),
+            .any(|diagnostic| diagnostic.code().as_str() == "scene.invalid-placement-target"),
         "{invalid_diagnostics:?}"
     );
     resolver.sources.insert(source("q"), key("q"), invalid);
@@ -531,11 +562,10 @@ fn explicit_equal_leaf_pin_through_an_added_instance_inherits_rebased_siblings()
     let mut addition = PrefabAddition::new(id("added_instance"));
     addition.prefab = Some(replacement());
     overlay.additions.push(addition);
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("added_instance")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("added_instance")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     overlay.components.push(pin_x(
         PrefabEntityTarget {
             through: vec![PrefabInstanceHop {

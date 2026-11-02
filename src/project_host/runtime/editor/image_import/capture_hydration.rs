@@ -749,7 +749,7 @@ fn newly_selected_image_capture(
 ) -> AuthoringDocumentCapture {
     use crate::project_host::authoring::document::AuthoringDocumentSourceFact;
     use nara_reflect::{ComponentFieldId, ComponentPropertyPath, ComponentTypeId, ComponentValue};
-    use nara_scene::{SceneAuthoringSession, ScenePlacement, ScenePlacementOwner};
+    use nara_scene::{SceneAuthoringSession, ScenePlacement, ScenePlacementParent};
 
     let source = AuthoringDocumentSourceFact::from_captured_source(
         project.startup_source(),
@@ -762,7 +762,7 @@ fn newly_selected_image_capture(
         .begin_authoring_construction(session.revision())
         .unwrap();
     let entity = draft
-        .create_entity(ScenePlacement::last(ScenePlacementOwner::Root))
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
         .unwrap();
     let component = ComponentTypeId::new("nara.sprite.Sprite");
     draft.add_component(&entity, component.clone()).unwrap();

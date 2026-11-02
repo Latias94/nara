@@ -31,8 +31,8 @@ use nara::{
     },
     scene::{
         AuthoringReadError, AuthoringRecordReadiness, SceneComponentRecord, SceneDocument,
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneEntityId, SceneEntityRecord, ScenePatchOperation, ScenePlacement,
+        ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorAuthoringProjection,
@@ -510,12 +510,11 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
     let old_edit = application
         .prepare_authoring_edit(
             &old_basis,
-            &ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                entity: SceneEntityRecord::new(
-                    SceneEntityId::new("stale-before-adoption").unwrap(),
-                ),
-                placement: ScenePlacement::last(ScenePlacementOwner::Root),
-            }]),
+            &crate::app::named_root_patch(
+                &application,
+                old_basis.document,
+                "stale-before-adoption",
+            ),
         )
         .unwrap();
     let deadline = Instant::now() + TIMEOUT;
@@ -815,10 +814,21 @@ fn csharp_source_tool_application_preserves_review_and_exact_commit_result() {
         )
     };
     assert_ne!(created, enemy);
-    assert_eq!(spawn_patch.operations.len(), 6);
+    assert_eq!(spawn_patch.operations.len(), 7);
     assert!(matches!(&spawn_patch.operations[0],
-        ScenePatchOperation::AddEntity { entity, placement }
-            if entity.id == created && placement == &ScenePlacement::last(ScenePlacementOwner::Root)));
+        ScenePatchOperation::AddEntity { entity } if entity.id == created));
+    let placements = spawn_patch
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ScenePatchOperation::SetPlacements { value, .. } => Some(value),
+            _ => None,
+        })
+        .expect("Spawn carries its complete source hierarchy update");
+    assert!(placements.iter().any(|entry| {
+        entry.target == nara::scene::PrefabEntityTarget::source(created.clone())
+            && entry.placement == ScenePlacement::last(ScenePlacementParent::Root)
+    }));
     assert!(!spawn_inverse.operations.is_empty());
     let observers = (
         application.current_frame().unwrap(),

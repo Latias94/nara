@@ -9,7 +9,10 @@ use std::{
 use dear_imgui_rs::{ConfigFlags, Context, Key, MouseButton};
 use nara::{
     project_host::{EditorUiAuthoringFrame, TrustedCompiledEditorProjectIntent},
-    scene::{SceneEntityId, ScenePlacementAnchor},
+    scene::{
+        PrefabEntityTarget, SceneEntityId, SceneEntityPlacement, ScenePlacement,
+        ScenePlacementParent, ScenePlacementSlot,
+    },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
         EditorPersistenceResult,
@@ -140,9 +143,9 @@ impl StructureInteraction {
             .position(|candidate| {
                 candidate.parent().as_str() == parent
                     && matches!(
-                        &candidate.placement().anchor,
-                        ScenePlacementAnchor::After { sibling: anchor }
-                            if anchor.as_str() == sibling
+                        &candidate.placement().slot,
+                        ScenePlacementSlot::After(anchor)
+                            if anchor == &PrefabEntityTarget::source(SceneEntityId::new(sibling).unwrap())
                     )
             })
             .expect("the exact requested parent/sibling anchor is offered");
@@ -246,38 +249,48 @@ impl Drop for StructureInteraction {
 fn install_tree(project: &UiProject) -> Value {
     let source = project.0.join("prefabs/ui.prefab.json");
     let mut document: Value = serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
-    let mut root = document["payload"]["entities"][0].clone();
+    let root = document["payload"]["entities"][0].clone();
     let leaf = document["payload"]["entities"][1].clone();
     let container = json!({
         "id": "template",
-        "children": [],
         "components": { "nara.ui.UiNode": root["components"]["nara.ui.UiNode"].clone() },
     });
-    root["children"] = json!(["source-parent", "destination-parent", "unrelated-node"]);
     let mut entities = vec![root];
-    for (id, children, template) in [
-        (
-            "source-parent",
-            vec!["moving-group", "source-tail"],
-            &container,
-        ),
-        ("moving-group", vec!["moving-leaf"], &container),
-        ("moving-leaf", vec![], &leaf),
-        ("source-tail", vec![], &leaf),
-        (
-            "destination-parent",
-            vec!["dest-first", "dest-second"],
-            &container,
-        ),
-        ("dest-first", vec![], &leaf),
-        ("dest-second", vec![], &leaf),
-        ("unrelated-node", vec![], &leaf),
+    for (id, template) in [
+        ("source-parent", &container),
+        ("moving-group", &container),
+        ("moving-leaf", &leaf),
+        ("source-tail", &leaf),
+        ("destination-parent", &container),
+        ("dest-first", &leaf),
+        ("dest-second", &leaf),
+        ("unrelated-node", &leaf),
     ] {
         let mut record = template.clone();
         record["id"] = json!(id);
-        record["children"] = json!(children);
         entities.push(record);
     }
+    let mut placements = vec![SceneEntityPlacement::root(
+        SceneEntityId::new("ui-root").unwrap(),
+    )];
+    for (entity, parent) in [
+        ("source-parent", "ui-root"),
+        ("destination-parent", "ui-root"),
+        ("unrelated-node", "ui-root"),
+        ("moving-group", "source-parent"),
+        ("source-tail", "source-parent"),
+        ("moving-leaf", "moving-group"),
+        ("dest-first", "destination-parent"),
+        ("dest-second", "destination-parent"),
+    ] {
+        placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(SceneEntityId::new(entity).unwrap()),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                SceneEntityId::new(parent).unwrap(),
+            ))),
+        ));
+    }
+    document["payload"]["placements"] = serde_json::to_value(placements).unwrap();
     document["payload"]["entities"] = json!(entities);
     fs::write(source, serde_json::to_vec_pretty(&document).unwrap()).unwrap();
     document
@@ -366,25 +379,30 @@ fn specialized_ui_move_and_placement_widgets_reparent_reorder_undo_and_save_reop
             .unwrap()
             .dirty
     );
-    for record in expected_source["payload"]["entities"]
-        .as_array_mut()
+    let mut placements: Vec<SceneEntityPlacement> =
+        serde_json::from_value(expected_source["payload"]["placements"].clone()).unwrap();
+    placements
+        .iter_mut()
+        .find(|entry| {
+            entry.target == PrefabEntityTarget::source(SceneEntityId::new("moving-group").unwrap())
+        })
         .unwrap()
-    {
-        if record["id"] == "source-parent" {
-            record["children"] = json!(["source-tail"]);
-        } else if record["id"] == "destination-parent" {
-            record["children"] = json!(["dest-first", "dest-second", "moving-group"]);
-        }
-    }
+        .placement = ScenePlacement::after(
+        ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            SceneEntityId::new("destination-parent").unwrap(),
+        )),
+        PrefabEntityTarget::source(SceneEntityId::new("dest-second").unwrap()),
+    );
+    expected_source["payload"]["placements"] = serde_json::to_value(placements).unwrap();
     let stored: Value = serde_json::from_slice(&fs::read(&source).unwrap()).unwrap();
     assert_eq!(
-        stored["payload"]["roots"],
-        expected_source["payload"]["roots"]
+        stored["payload"]["placements"],
+        expected_source["payload"]["placements"]
     );
     assert_eq!(
         records(&stored),
         records(&expected_source),
-        "only the two parent child lists change; the complete subtree and unrelated records survive"
+        "the placement declaration changes while all component records survive"
     );
 
     interaction.click("Dismiss persistence result");

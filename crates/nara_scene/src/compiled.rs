@@ -19,10 +19,11 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabProjectionStep, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
-    SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
+    PrefabProjectionStep, SceneEntityId, SceneEntityProvenanceMap, SourceDocumentKey,
+    SourceDocumentKind, SourceDocumentOrigin,
     candidate::validate_flat_scene_provenance,
     diagnostics::{error, with_codec_error, with_public_locator},
+    draft::SceneDraft,
     provenance::CanonicalSceneEntityAddress,
     schema_authority::SchemaAuthority,
 };
@@ -206,7 +207,7 @@ pub(crate) enum CompiledSceneAdmissionError<E> {
 /// record containers and selected-owner strings are admitted before their respective allocations.
 /// Source-dependent defaults must already have been lowered and removed by their owning compiler.
 pub(crate) fn admit_draft<E>(
-    document: SceneDocument,
+    document: SceneDraft,
     canonical_provenance: SceneEntityProvenanceMap,
     authority: SchemaAuthority<'_>,
     limits: ComponentValueMaterializationLimits,
@@ -215,15 +216,9 @@ pub(crate) fn admit_draft<E>(
 ) -> Result<CompiledSceneDocument, CompiledSceneAdmissionError<E>> {
     use claims::{FlatSceneClaims, FlatSceneComponentClaim, FlatSceneEntityClaim};
 
-    // Source syntax is eliminated, not stored behind the closed result. Validate the omitted
-    // source-owner rule before stamping the actual selection into an exact flat claim.
+    // Instance declarations cannot enter a flat draft. Validate the remaining source metadata
+    // and owner rule before stamping the actual selection into an exact flat claim.
     for entity in &document.entities {
-        if entity.prefab.is_some() {
-            return Err(refused(
-                "scene.prefab-instance-unsupported",
-                "Prefab instances require compilation before scene spawn",
-            ));
-        }
         for (component, record) in &entity.components {
             if !record.contextual_defaults.is_empty() {
                 return Err(match authority.schema(component) {

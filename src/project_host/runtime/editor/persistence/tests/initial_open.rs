@@ -234,8 +234,10 @@ fn rejected_initial_open_retains_runtime_until_body_and_late_result_return_then_
     acknowledge(&mut editor);
     let scene = editor.workspace.scene(document).unwrap();
     assert_eq!(
-        scene.session().document().roots,
-        [SceneEntityId::new("saved-after-rejected-open").unwrap()]
+        scene.session().document().placements,
+        [nara_scene::SceneEntityPlacement::root(
+            SceneEntityId::new("saved-after-rejected-open").unwrap(),
+        )]
     );
     assert!(!scene.is_dirty());
     assert_eq!(fs::read(&startup).unwrap(), saved);

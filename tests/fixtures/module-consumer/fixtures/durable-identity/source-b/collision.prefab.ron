@@ -3,5 +3,5 @@
     format_version: 1,
     engine_min_version: "0.1.0",
     generator: (name: "durable-identity-consumer", version: "0.0.0"),
-    payload: (roots: [], entities: []),
+    payload: (placements: [], entities: []),
 )

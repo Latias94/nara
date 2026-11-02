@@ -11,9 +11,10 @@ use nara::{
         PersistentComponentProvider,
     },
     scene::{
-        SceneAuthoringSession, SceneComponentRecord, SceneDocument, SceneDocumentCandidate,
-        SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchDocumentCandidate,
-        ScenePatchOperation,
+        PrefabEntityTarget, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
+        SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement, SceneEntityRecord,
+        ScenePatchDocument, ScenePatchDocumentCandidate, ScenePatchOperation, ScenePlacement,
+        ScenePlacementParent,
     },
 };
 use nara_reference_game::{
@@ -506,10 +507,18 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     let player_entity_id = scene_id("player");
     let weapon_entity_id = scene_id("player-weapon");
     let document = SceneDocument::new(
-        [player_entity_id.clone(), scene_id("enemy")],
+        [
+            SceneEntityPlacement::root(player_entity_id.clone()),
+            SceneEntityPlacement::root(scene_id("enemy")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(weapon_entity_id.clone()),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    player_entity_id.clone(),
+                ))),
+            ),
+        ],
         [
             SceneEntityRecord::new(player_entity_id.clone())
-                .with_children([weapon_entity_id.clone()])
                 .with_component(
                     player_role_id.clone(),
                     scene_component_record(PlayerRole {}, &player_role_id, &registry),

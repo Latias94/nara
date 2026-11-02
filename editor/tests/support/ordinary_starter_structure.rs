@@ -3,7 +3,10 @@ use nara::{
     ProductRecipe,
     project_workflow::{ProjectCheckRequest, check_project},
     reflect::ComponentTypeId,
-    scene::{SceneEntityId, ScenePlacement, ScenePlacementOwner},
+    scene::{
+        PrefabEntityTarget, SceneDocumentCandidate, SceneEntityId, ScenePlacement,
+        ScenePlacementParent,
+    },
     tooling::{
         EditorDocumentMutation, EditorPersistenceAction, EditorPersistenceResult,
         EditorReopenTarget, SceneCompositionCommand, SceneCompositionEntityKind,
@@ -17,47 +20,65 @@ pub(super) fn arrange_save_reopen_and_check(
     let source = project.root().join("scenes/startup.scene.json");
     let initial_bytes = std::fs::read(&source).unwrap();
     let library = std::fs::read(project.root().join("src/lib.rs")).unwrap();
-    let first = create(application, ScenePlacement::last(ScenePlacementOwner::Root));
+    let first = create(
+        application,
+        ScenePlacement::last(ScenePlacementParent::Root),
+    );
     add_transform(application, first.clone());
     let child = create(
         application,
-        ScenePlacement::last(ScenePlacementOwner::Parent {
-            parent: first.clone(),
-        }),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            first.clone(),
+        ))),
     );
     add_transform(application, child.clone());
-    let second = create(application, ScenePlacement::last(ScenePlacementOwner::Root));
+    let second = create(
+        application,
+        ScenePlacement::last(ScenePlacementParent::Root),
+    );
     add_transform(application, second.clone());
     compose(
         application,
         SceneCompositionCommand::MoveEntity {
-            entity: child.clone(),
-            to: ScenePlacement::last(ScenePlacementOwner::Parent {
-                parent: second.clone(),
-            }),
+            target: PrefabEntityTarget::source(child.clone()),
+            to: ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                second.clone(),
+            ))),
         },
     );
     compose(
         application,
         SceneCompositionCommand::MoveEntity {
-            entity: second.clone(),
-            to: ScenePlacement::first(ScenePlacementOwner::Root),
+            target: PrefabEntityTarget::source(second.clone()),
+            to: ScenePlacement::first(ScenePlacementParent::Root),
         },
     );
-    let arranged = tree(application);
-    assert_eq!(arranged[0].0, second.clone());
-    assert!(arranged.contains(&(child.clone(), Some(second.clone()))));
+    let arranged = placements(application);
+    assert!(arranged.contains(&(
+        second.clone(),
+        ScenePlacement::first(ScenePlacementParent::Root),
+    )));
+    assert!(arranged.contains(&(
+        child.clone(),
+        ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+            second.clone(),
+        ))),
+    )));
     compose(
         application,
         SceneCompositionCommand::RemoveEntity {
             entity: first.clone(),
         },
     );
-    assert!(!tree(application).iter().any(|(entity, _)| entity == &first));
+    assert!(
+        !placements(application)
+            .iter()
+            .any(|(entity, _)| entity == &first)
+    );
     history(application, false);
-    assert_eq!(tree(application), arranged);
+    assert_eq!(placements(application), arranged);
     history(application, true);
-    let accepted = tree(application);
+    let accepted = placements(application);
     assert!(!accepted.iter().any(|(entity, _)| entity == &first));
     assert_eq!(
         std::fs::read(&source).unwrap(),
@@ -84,6 +105,14 @@ pub(super) fn arrange_save_reopen_and_check(
     );
     let saved = std::fs::read(&source).unwrap();
     assert_ne!(saved, initial_bytes);
+    let saved_document = SceneDocumentCandidate::decode_json_bytes(&saved)
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+    let hierarchy = saved_document.local_hierarchy(Default::default()).unwrap();
+    assert_eq!(hierarchy.roots().first(), Some(&second));
+    assert_eq!(hierarchy.children(&second).unwrap(), [child]);
+    assert!(!hierarchy.roots().contains(&first));
     let attempt = current_frame(application)
         .persistence()
         .attempt()
@@ -106,7 +135,7 @@ pub(super) fn arrange_save_reopen_and_check(
         current_frame(application).persistence().result(),
         Some(EditorPersistenceResult::Opened { .. })
     ));
-    assert_eq!(tree(application), accepted);
+    assert_eq!(placements(application), accepted);
     let reopened = current_frame(application);
     let scene = reopened.workspace().active_scene.as_ref().unwrap();
     assert!(!scene.dirty);
@@ -143,7 +172,7 @@ pub(super) fn arrange_save_reopen_and_check(
 }
 
 fn create(application: &mut EditorApplication, placement: ScenePlacement) -> SceneEntityId {
-    let before = tree(application).len();
+    let before = placements(application).len();
     compose(
         application,
         SceneCompositionCommand::CreateEntity {
@@ -151,7 +180,7 @@ fn create(application: &mut EditorApplication, placement: ScenePlacement) -> Sce
             placement,
         },
     );
-    assert_eq!(tree(application).len(), before + 1);
+    assert_eq!(placements(application).len(), before + 1);
     current_frame(application)
         .workspace()
         .active_scene
@@ -216,7 +245,7 @@ fn history(application: &mut EditorApplication, redo: bool) {
     );
 }
 
-fn tree(application: &EditorApplication) -> Vec<(SceneEntityId, Option<SceneEntityId>)> {
+fn placements(application: &EditorApplication) -> Vec<(SceneEntityId, ScenePlacement)> {
     current_frame(application)
         .workspace()
         .active_scene
@@ -226,7 +255,7 @@ fn tree(application: &EditorApplication) -> Vec<(SceneEntityId, Option<SceneEnti
         .inspector
         .entities
         .iter()
-        .map(|row| (row.id.clone(), row.parent.clone()))
+        .map(|row| (row.id.clone(), row.placement.clone().unwrap()))
         .collect()
 }
 

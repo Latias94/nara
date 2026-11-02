@@ -40,7 +40,7 @@ one-way projection.
 flowchart LR
     Source[Ordered Scene or Prefab document]
     Validate[Validate complete placement closure]
-    Patch[Atomic anchor-based patch and inverse]
+    Patch[Exact source declarations and inverse]
     Runtime[Ordered non-linked runtime hierarchy]
     Consumers[Transform, UI, tooling, export]
 
@@ -58,9 +58,15 @@ flowchart LR
   source files do not keep both desired placements and roots/children as competing authorities.
 - Placement uses stable root-or-parent ownership plus `first`, `last`, `before stable sibling`, or
   `after stable sibling`. Add, move, reparent, reorder, remove, and restore share this vocabulary.
-- Validation rejects missing, duplicate, dangling, cyclic, overlapping, or multiply owned
-  placement before publication. A batch is all-or-nothing and every successful mutation has an
-  exact inverse.
+- Raw source admission proves local IDs, required local placements and typed target grammar
+  without opening Prefabs. Source transactions reject provable local parent and relative-order
+  cycles and known sibling-membership conflicts, including in documents with projected intent.
+  Only constraints that require the actual selected source context remain deferred; an unrelated
+  projected declaration cannot disable local proof. Effective compilation rejects
+  missing, duplicate, dangling, cyclic, overlapping or multiply owned placement before publishing
+  an effective candidate. A source batch is all-or-nothing and its inverse retains the complete
+  ordered placement declarations. Per-record shape admission still occurs before an invalid
+  input could disappear behind a later replacement in that batch.
 - Prefab expansion, overrides, copy/export, and nested instance projection preserve the ordered
   closure. They never reconstruct order from map iteration, a numeric rank, source order that is
   not part of the document, or runtime entity allocation.
@@ -73,6 +79,15 @@ flowchart LR
 - Source and overlay placements share the layout implementation and declaration-order cohort
   rules. The declaration's own source/base determines its address context; a source is not made
   into a synthetic instance of itself merely to express its ordinary layout.
+- An ordinary source-local branch removal is a semantic command over the admitted local
+  hierarchy. If removing a sibling would leave another owned placement's Before/After anchor
+  dangling, the command prepares the affected remaining sibling sequence in the same order as
+  one exact placement transaction. Unrelated sequences and record payloads stay unchanged, and
+  Undo restores the original declarations rather than reconstructing them. Rewriting a sibling
+  domain that may contain inherited children requires actual selected-source context; a local
+  observation must refuse instead of guessing that mixed order. Component references to removed
+  entities retain their own closure checks. Raw RemoveEntity still removes only its named source
+  record and does not acquire this semantic command's branch or placement-repair authority.
 - `nara_hierarchy` owns the synchronized non-linked runtime parent/ordered-children projection.
   Supported first-party mutation goes through its writer/command transaction. Structure remains
   independent from lifecycle ownership, transform math, visibility, and UI state.
@@ -134,7 +149,7 @@ The current implementation/qualification boundary remains in the implementation 
 | Exact patch inverses | 100% of accepted placement operations | Patch round-trip and undo/redo tests |
 | Order preservation | Identical across source, prefab expansion, runtime projection, export, and Retry | Cross-layer integration fixtures |
 | Allocation-independent UI order | 100% | Unrelated-allocation and repeated-instance UI tests |
-| Legacy ambiguity | 0 silent repairs | Canonical-format rejection tests and migration guide |
+| Invalid source shape | 0 silent repairs | Canonical-format rejection tests and first-party source fixtures |
 
 ## Risks and Mitigations
 

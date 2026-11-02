@@ -420,9 +420,9 @@ mod tests {
         prelude::ComponentRegistryBuilder,
         scene::{
             InMemoryPrefabSourceResolver, PrefabAddition, PrefabDocument, PrefabEntityTarget,
-            PrefabInstance, PrefabOverlay, PrefabPlacement, PrefabPlacementParent,
-            PrefabPlacementSlot, SceneDocument, SceneEntityId, SceneEntityRecord,
-            SceneOccurrenceKey, SourceDocumentKey, SourceDocumentKind, spawn_scene,
+            PrefabInstance, PrefabOverlay, SceneDocument, SceneEntityId, SceneEntityPlacement,
+            SceneEntityRecord, SceneOccurrenceKey, ScenePlacement, ScenePlacementParent,
+            SourceDocumentKey, SourceDocumentKind, spawn_scene,
         },
     };
 
@@ -451,14 +451,14 @@ mod tests {
         recreated
             .additions
             .push(PrefabAddition::new(retry_id.clone()));
-        recreated.placements.push(PrefabPlacement {
-            target: PrefabEntityTarget::addition(retry_id.clone()),
-            parent: PrefabPlacementParent::Root,
-            slot: PrefabPlacementSlot::First,
-        });
+        recreated.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::addition(retry_id.clone()),
+            ScenePlacement::first(ScenePlacementParent::Root),
+        ));
         for (overrides, expected) in [(None, Some("retry-button")), (Some(recreated), None)] {
             let mut anchor = SceneEntityRecord::new(SceneEntityId::new("reference-ui").unwrap());
             anchor.prefab = Some(PrefabInstance {
+                binding: nara::scene::PrefabInstanceBinding::Forest,
                 source: source_document.clone(),
                 arguments: None,
                 overrides,

@@ -25,51 +25,6 @@ pub(crate) use properties::validate_claim_paths;
 #[cfg(all(test, feature = "serde"))]
 mod regression_tests;
 
-/// Desired parent within the original declaring overlay's effective hierarchy.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(
-        tag = "kind",
-        content = "target",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )
-)]
-pub enum PrefabPlacementParent {
-    Root,
-    Entity(PrefabEntityTarget),
-}
-
-/// Desired order within one admitted parent sequence, without an old sibling snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(
-        tag = "kind",
-        content = "target",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )
-)]
-pub enum PrefabPlacementSlot {
-    First,
-    Last,
-    Before(PrefabEntityTarget),
-    After(PrefabEntityTarget),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct PrefabPlacement {
-    pub target: PrefabEntityTarget,
-    pub parent: PrefabPlacementParent,
-    pub slot: PrefabPlacementSlot,
-}
-
 /// Complete source data for an overlay-local entity.
 ///
 /// Placements are the sole hierarchy representation. Components and an optional nested instance
@@ -192,7 +147,7 @@ pub struct PrefabOverlay {
     #[cfg_attr(feature = "serde", serde(default))]
     pub components: Vec<PrefabComponentIntent>,
     #[cfg_attr(feature = "serde", serde(default))]
-    pub placements: Vec<PrefabPlacement>,
+    pub placements: Vec<crate::SceneEntityPlacement>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub suppressions: Vec<PrefabEntityTarget>,
 }

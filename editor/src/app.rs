@@ -2818,6 +2818,45 @@ pub(crate) mod startup_retirement_tests;
 pub(crate) use persistence_tests::failed_trusted_session_close_receipt;
 
 #[cfg(test)]
+pub(crate) fn named_root_patch(
+    application: &EditorApplication,
+    document: nara::tooling::EditorDocumentId,
+    name: &str,
+) -> nara::scene::ScenePatchDocument {
+    use nara::scene::{
+        SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementParent,
+    };
+
+    let basis = application.document_query_basis(document).unwrap();
+    let mut draft = application.begin_authoring_construction(&basis).unwrap();
+    draft
+        .create_entity(ScenePlacement::last(ScenePlacementParent::Root))
+        .unwrap();
+    let prepared = application
+        .prepare_authoring_construction(&basis, &draft)
+        .unwrap();
+    let expected = prepared
+        .patch()
+        .operations
+        .iter()
+        .find_map(|operation| match operation {
+            ScenePatchOperation::SetPlacements { expected, .. } => Some(expected.clone()),
+            _ => None,
+        })
+        .expect("root construction carries the exact source placement precondition");
+    let entity = SceneEntityId::new(name).unwrap();
+    let mut value = expected.clone();
+    value.push(SceneEntityPlacement::root(entity.clone()));
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(entity),
+        },
+        ScenePatchOperation::SetPlacements { expected, value },
+    ])
+}
+
+#[cfg(test)]
 mod tests {
     use super::{EditorApplicationOpenError, root_error_code, root_error_summary};
     use std::{io, path::PathBuf};
@@ -2994,15 +3033,9 @@ mod tests {
     #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
     #[test]
     fn consecutive_batches_preserve_each_originating_feedback_before_redraw() {
-        use nara::{
-            scene::{
-                SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
-                ScenePlacement, ScenePlacementOwner,
-            },
-            tooling::{
-                EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
-                EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-            },
+        use nara::tooling::{
+            EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
+            EditorWorkspaceIntent, EditorWorkspaceIntentAction,
         };
 
         let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
@@ -3047,12 +3080,11 @@ mod tests {
                 EditorDocumentMutation::ApplyScenePatch {
                     document: scene.document,
                     base_revision: scene.revision,
-                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                        entity: SceneEntityRecord::new(
-                            SceneEntityId::new("feedback-before-close").unwrap(),
-                        ),
-                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                    }]),
+                    patch: super::named_root_patch(
+                        &application,
+                        scene.document,
+                        "feedback-before-close",
+                    ),
                 },
             )],
         ));

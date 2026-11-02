@@ -31,8 +31,10 @@ fn assert_structural_save_snapshot(uncertain: bool) {
             document,
             base_revision,
             command: nara_tooling::SceneCompositionCommand::MoveEntity {
-                entity: id("unknown"),
-                to: ScenePlacement::last(ScenePlacementOwner::Parent { parent: id(parent) }),
+                target: nara_scene::PrefabEntityTarget::source(id("unknown")),
+                to: ScenePlacement::last(ScenePlacementParent::Entity(
+                    nara_scene::PrefabEntityTarget::source(id(parent)),
+                )),
             },
         });
         assert!(report.applied, "{:?}", report.diagnostics);
@@ -302,7 +304,7 @@ fn pending_scene_save_preserves_preview_and_projects_later_edits() {
                 base_revision,
                 command: nara_tooling::SceneCompositionCommand::CreateEntity {
                     kind: nara_tooling::SceneCompositionEntityKind::ColoredSprite,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             })
             .applied
@@ -334,7 +336,7 @@ fn pending_scene_save_preserves_preview_and_projects_later_edits() {
                 base_revision: captured_revision,
                 command: nara_tooling::SceneCompositionCommand::CreateEntity {
                     kind: nara_tooling::SceneCompositionEntityKind::ColoredSprite,
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    placement: ScenePlacement::last(ScenePlacementParent::Root),
                 },
             })
             .applied
@@ -371,6 +373,7 @@ fn legacy_prefab_source_navigation_is_busy_until_scene_save_returns_its_host() {
     let anchor = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("panel.prefab.json").unwrap(),
         overrides: None,
@@ -443,6 +446,7 @@ fn content_refresh_retry_waits_for_the_held_save_to_return_its_host() {
     let anchor = nara_identity::SceneEntityId::new("prefab-anchor").unwrap();
     let mut instance = SceneEntityRecord::new(anchor.clone());
     instance.prefab = Some(nara_scene::PrefabInstance {
+        binding: nara_scene::PrefabInstanceBinding::Forest,
         arguments: None,
         source: AssetRef::path("panel.prefab.json").unwrap(),
         overrides: None,

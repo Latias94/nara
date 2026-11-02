@@ -31,12 +31,11 @@ use nara_scene::{
     LocalizedPrefabEntity, PrefabAddition, PrefabAuthoringSession, PrefabConversionError,
     PrefabConversionReceipt, PrefabConversionRequest, PrefabDocument, PrefabDocumentCandidate,
     PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, PrefabInstanceHop, PrefabOverlay,
-    PrefabPlacement, PrefabPlacementParent, PrefabPlacementSlot, PrefabProjectionStep,
-    PreparedPrefabConversion, PreparedScenePrefabConversion, ResolvedPrefabSource,
-    SceneAuthoringSession, SceneCompilationWorkingSet, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
-    ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement, ScenePlacementOwner,
-    ScenePrefabConversionRequest,
+    PrefabProjectionStep, PreparedPrefabConversion, PreparedScenePrefabConversion,
+    ResolvedPrefabSource, SceneAuthoringSession, SceneCompilationWorkingSet, SceneComponentRecord,
+    SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityPlacement,
+    SceneEntityProvenance, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+    ScenePatchReport, ScenePlacement, ScenePlacementParent, ScenePrefabConversionRequest,
 };
 
 fn id(name: &str) -> SceneEntityId {
@@ -124,11 +123,7 @@ fn link(target: &str) -> SceneComponentRecord {
 }
 
 fn instance(name: &str) -> PrefabInstance {
-    PrefabInstance {
-        source: source(name),
-        arguments: None,
-        overrides: None,
-    }
+    PrefabInstance::forest(source(name))
 }
 
 fn anchor(name: &str, prefab: &str) -> SceneEntityRecord {
@@ -139,12 +134,10 @@ fn anchor(name: &str, prefab: &str) -> SceneEntityRecord {
 
 fn scene_document() -> SceneDocument {
     let unknown = ComponentTypeId::new("test.Unavailable");
-    let mut selected = anchor("A", "base")
-        .with_children([id("local-child"), id("local-peer")])
-        .with_component(
-            unknown.clone(),
-            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(73)),
-        );
+    let mut selected = anchor("A", "base").with_component(
+        unknown.clone(),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(73)),
+    );
     let mut overlay = PrefabOverlay::new(prefab_source::key("base"));
     let mut addition = PrefabAddition::new(id("leaf"));
     let mut added_link = link("leaf");
@@ -167,14 +160,30 @@ fn scene_document() -> SceneDocument {
     ]);
     addition.components.insert(component(), added_link);
     overlay.additions.push(addition);
-    overlay.placements.push(PrefabPlacement {
-        target: PrefabEntityTarget::addition(id("leaf")),
-        parent: PrefabPlacementParent::Root,
-        slot: PrefabPlacementSlot::Last,
-    });
+    overlay.placements.push(SceneEntityPlacement::new(
+        PrefabEntityTarget::addition(id("leaf")),
+        ScenePlacement::last(ScenePlacementParent::Root),
+    ));
     selected.prefab.as_mut().unwrap().overrides = Some(overlay);
     SceneDocument::new(
-        [id("A"), id("B"), id("C")],
+        [
+            SceneEntityPlacement::root(id("A")),
+            SceneEntityPlacement::root(id("B")),
+            SceneEntityPlacement::root(id("C")),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local-child")),
+                ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                    id("A"),
+                ))),
+            ),
+            SceneEntityPlacement::new(
+                PrefabEntityTarget::source(id("local-peer")),
+                ScenePlacement::after(
+                    ScenePlacementParent::Entity(PrefabEntityTarget::source(id("A"))),
+                    PrefabEntityTarget::source(id("local-child")),
+                ),
+            ),
+        ],
         [
             selected,
             anchor("local-child", "missing-child").with_component(
@@ -193,7 +202,7 @@ fn scene_document() -> SceneDocument {
 
 fn prefab_document() -> PrefabDocument {
     let scene = scene_document();
-    PrefabDocument::new(scene.roots, scene.entities)
+    PrefabDocument::new(scene.placements, scene.entities)
 }
 
 fn open_scene(document: &SceneDocument, basis: &AuthoringSchemaBasis) -> SceneAuthoringSession {
@@ -229,11 +238,19 @@ struct Sources {
 impl Sources {
     fn new(basis: &AuthoringSchemaBasis) -> Self {
         let base = PrefabDocument::new(
-            [id("root-a"), id("root-b"), id("root-c")],
             [
-                SceneEntityRecord::new(id("root-a"))
-                    .with_children([id("leaf")])
-                    .with_component(component(), link("leaf")),
+                SceneEntityPlacement::root(id("root-a")),
+                SceneEntityPlacement::root(id("root-b")),
+                SceneEntityPlacement::root(id("root-c")),
+                SceneEntityPlacement::new(
+                    PrefabEntityTarget::source(id("leaf")),
+                    ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                        id("root-a"),
+                    ))),
+                ),
+            ],
+            [
+                SceneEntityRecord::new(id("root-a")).with_component(component(), link("leaf")),
                 SceneEntityRecord::new(id("leaf")).with_component(component(), link("root-a")),
                 anchor("root-b", "nested"),
                 anchor("root-c", "nested-alias"),
@@ -347,6 +364,7 @@ fn mapping_snapshot(
 fn assert_review(
     original: &[SceneEntityRecord],
     reviewed: &[SceneEntityRecord],
+    hierarchy: &nara_scene::SourceLocalSceneHierarchy,
     mappings: &[LocalizedPrefabEntity],
 ) {
     assert_eq!(mappings.len(), 7);
@@ -408,11 +426,11 @@ fn assert_review(
         );
         assert_eq!(entity(reviewed, record).components.len(), 1);
     }
-    assert_eq!(entity(reviewed, root_a).children, [leaf.clone()]);
-    assert_eq!(entity(reviewed, root_b).children, [nested_b.clone()]);
-    assert_eq!(entity(reviewed, root_c).children, [nested_c.clone()]);
+    assert_eq!(hierarchy.children(root_a).unwrap(), [leaf.clone()]);
+    assert_eq!(hierarchy.children(root_b).unwrap(), [nested_b.clone()]);
+    assert_eq!(hierarchy.children(root_c).unwrap(), [nested_c.clone()]);
     for leaf in [leaf, nested_b, nested_c, addition] {
-        assert!(entity(reviewed, leaf).children.is_empty());
+        assert!(hierarchy.children(leaf).unwrap().is_empty());
     }
     for root in [root_b, root_c] {
         assert!(entity(reviewed, root).components.is_empty());
@@ -428,7 +446,7 @@ fn assert_review(
             assert_eq!(retained.components, old.components);
             assert!(retained.prefab.is_none());
             assert_eq!(
-                retained.children,
+                hierarchy.children(&retained.id).unwrap(),
                 [
                     root_a.clone(),
                     root_b.clone(),
@@ -444,11 +462,20 @@ fn assert_review(
     }
 }
 
-fn add_later() -> ScenePatchDocument {
-    ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(id("later")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }])
+fn add_later(placements: &[SceneEntityPlacement]) -> ScenePatchDocument {
+    ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(id("later")),
+        },
+        ScenePatchOperation::SetPlacements {
+            expected: placements.to_vec(),
+            value: placements
+                .iter()
+                .cloned()
+                .chain([SceneEntityPlacement::root(id("later"))])
+                .collect(),
+        },
+    ])
 }
 
 fn source_refusal(error: PrefabConversionError<LoadFailure>) -> ScenePatchReport {
@@ -528,6 +555,10 @@ macro_rules! source_workflow {
             assert_review(
                 &original.entities,
                 &cancelled.document().entities,
+                &cancelled
+                    .document()
+                    .local_hierarchy(Default::default())
+                    .unwrap(),
                 cancelled.entities(),
             );
             drop(cancelled);
@@ -555,8 +586,16 @@ macro_rules! source_workflow {
                 &PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("unrelated-c"))]),
                 &basis,
             );
-            assert!(unrelated_b.apply_authoring_patch(&add_later()).applied);
-            assert!(unrelated_c.apply_authoring_patch(&add_later()).applied);
+            assert!(
+                unrelated_b
+                    .apply_authoring_patch(&add_later(&unrelated_b.document().placements))
+                    .applied
+            );
+            assert!(
+                unrelated_c
+                    .apply_authoring_patch(&add_later(&unrelated_c.document().placements))
+                    .applied
+            );
             let (prepared, mut sources): ($prepared, Sources) = worker.join().unwrap();
             assert_eq!(prepared.base_revision(), revision);
             assert_eq!(prepared.anchor(), &id("A"));
@@ -565,8 +604,22 @@ macro_rules! source_workflow {
             assert_eq!(session.history_usage().records, 0);
             let reviewed = prepared.document().clone();
             let mappings = mapping_snapshot(prepared.entities());
-            assert_review(&original.entities, &reviewed.entities, prepared.entities());
-            assert_eq!(reviewed.roots, original.roots);
+            assert_review(
+                &original.entities,
+                &reviewed.entities,
+                &reviewed.local_hierarchy(Default::default()).unwrap(),
+                prepared.entities(),
+            );
+            assert_eq!(
+                reviewed
+                    .local_hierarchy(Default::default())
+                    .unwrap()
+                    .roots(),
+                original
+                    .local_hierarchy(Default::default())
+                    .unwrap()
+                    .roots()
+            );
 
             // Reacquiring equal bodies is valid; unrelated missing/erroring sources are irrelevant.
             for name in ["base", "nested", "nested-alias"] {
@@ -662,7 +715,11 @@ macro_rules! source_workflow {
             let request: $request = session
                 .request_complete_prefab_conversion(revision, &id("A"), Default::default())
                 .unwrap();
-            assert!(session.apply_authoring_patch(&add_later()).applied);
+            assert!(
+                session
+                    .apply_authoring_patch(&add_later(&session.document().placements))
+                    .applied
+            );
             assert!(
                 session
                     .request_complete_prefab_conversion(revision, &id("A"), Default::default())
