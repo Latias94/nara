@@ -5,7 +5,7 @@ use std::{ffi::OsString, io::Write, path::PathBuf, process::ExitCode};
 use nara_engine::{
     core::ItemLimit,
     project_host::{
-        AuthoredSchemaUpgradeHostLimits, AuthoredSchemaUpgradeRecovery,
+        AuthoringSourceOperationLimits, AuthoredSchemaUpgradeRecovery,
         AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
         AuthoredSchemaUpgradeRecoveryView,
     },
@@ -37,7 +37,7 @@ struct Options {
     action: Action,
     root: PathBuf,
     profile: Option<String>,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
     max_steps: ItemLimit,
     stop: Option<Stop>,
 }
@@ -110,7 +110,7 @@ fn options() -> Result<Options, String> {
         action,
         root,
         profile: (profile != "base").then_some(profile),
-        limits: AuthoredSchemaUpgradeHostLimits::default()
+        limits: AuthoringSourceOperationLimits::default()
             .with_host_work(work.ok_or("--host-work is required")?)
             .with_open_handles(handles.ok_or("--open-handles is required")?),
         max_steps: steps.ok_or("--max-steps is required")?,

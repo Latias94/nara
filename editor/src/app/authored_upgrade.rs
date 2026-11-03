@@ -5,10 +5,9 @@ use std::time::Duration;
 use nara::{
     diagnostic::DiagnosticReport,
     project_host::{
-        AuthoredSchemaUpgradeHostLimits, AuthoredSchemaUpgradeProposal,
-        AuthoredSchemaUpgradeReview, EditorAuthoredSchemaUpgradeError,
-        EditorAuthoredSchemaUpgradeId, EditorAuthoredSchemaUpgradeInputs,
-        EditorAuthoredSchemaUpgradeView, EditorProjectSession,
+        AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview, AuthoringSourceOperationLimits,
+        EditorAuthoredSchemaUpgradeError, EditorAuthoredSchemaUpgradeId,
+        EditorAuthoredSchemaUpgradeInputs, EditorAuthoredSchemaUpgradeView, EditorProjectSession,
     },
 };
 
@@ -34,7 +33,7 @@ impl EditorApplication {
     /// Selects finite Host work and native custody before capturing the complete upgrade set.
     pub fn begin_authored_schema_upgrade_with_limits(
         &mut self,
-        limits: AuthoredSchemaUpgradeHostLimits,
+        limits: AuthoringSourceOperationLimits,
     ) -> Result<EditorAuthoredSchemaUpgradeId, EditorAuthoredSchemaUpgradeError> {
         if self.session_retirement.is_some() {
             return Err(EditorAuthoredSchemaUpgradeError::Closing);

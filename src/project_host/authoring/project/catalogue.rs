@@ -10,6 +10,8 @@ use nara_fs::{DirectoryEnumerationLimits, FileKind};
 
 use super::*;
 
+mod frozen;
+
 #[cfg(test)]
 mod tests;
 
@@ -155,11 +157,24 @@ impl SourceDirectoryBinding {
     }
 }
 
-#[derive(Clone)]
 pub(super) struct ResolvedResourceSource {
     pub(super) path: AssetPath,
     pub(super) binding: SourceDirectoryBinding,
     pub(super) demand: AssetReferenceDemand,
+    retained_bytes: usize,
+}
+
+impl ResolvedResourceSource {
+    /// Releases only this result's admitted copies after their last borrowed use. Consumers
+    /// which transfer the fields retain their reservation with those fields instead.
+    pub(super) fn release(
+        self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<(), AuthoringProjectSourceAdmissionError> {
+        let retained_bytes = self.retained_bytes;
+        drop(self);
+        budget.reconcile_retained_reservation(retained_bytes, 0)
+    }
 }
 
 pub(super) struct ReferenceCatalogue {
@@ -174,6 +189,13 @@ pub(super) struct ReferenceCatalogue {
     // Capture-local collision rejection only. These copied observations never attest that
     // a subsequently opened leaf is the historical object, and do not escape for revalidation.
     resolved_identities: HashMap<FileIdentity, AssetSourcePath>,
+    frozen_storage: Option<FrozenCatalogueStorage>,
+}
+
+/// Reservations issued by the frozen constructor, excluding the inventory's own storage.
+struct FrozenCatalogueStorage {
+    database_bytes: usize,
+    temporary_bytes: usize,
 }
 
 impl ReferenceCatalogue {
@@ -221,6 +243,7 @@ impl ReferenceCatalogue {
             lookups: BTreeMap::new(),
             resolved_targets: BTreeMap::new(),
             resolved_identities: HashMap::new(),
+            frozen_storage: None,
         })
     }
 
@@ -244,6 +267,93 @@ impl ReferenceCatalogue {
         self.indexed
     }
 
+    pub(super) fn database(&self) -> &ProjectAssetDatabase {
+        &self.database
+    }
+
+    /// Admits a sidecar's declaration through the same scopes used by actual indexing.
+    /// Outside all scanned roots is distinct from an invalid declaration inside a root.
+    /// Neither result creates an observed file fact or catalogue membership.
+    pub(super) fn planned_metadata_binding(
+        bindings: &[SourceDirectoryBinding],
+        canonical: &AssetSourcePath,
+        authored: &AssetPath,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<Option<usize>, AuthoringProjectSourceAdmissionError> {
+        let mut covered = None;
+        for (index, binding) in bindings.iter().enumerate() {
+            budget.charge_source_bytes(
+                0,
+                0,
+                checked_sum([
+                    canonical.as_str().len(),
+                    binding.directory.as_str().len(),
+                    authored.as_str().len(),
+                ])?,
+                0,
+            )?;
+            if let Some(local) = binding.scope.relative_path(canonical) {
+                if local == authored.as_str() {
+                    return Ok(Some(index));
+                }
+                covered.get_or_insert(local);
+            }
+        }
+        let Some(local) = covered else {
+            return Ok(None);
+        };
+        // The refusal owns both diagnostic paths. Admit those copies before constructing them.
+        budget.charge_source_bytes(
+            0,
+            0,
+            0,
+            checked_sum([local.len(), authored.as_str().len()])?,
+        )?;
+        Err(
+            AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
+                requested: AssetPath::new(local)
+                    .map_err(|_| AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?,
+                declared: authored.clone(),
+            },
+        )
+    }
+
+    /// Transfers the admitted database and settles the frozen constructor's temporary indexes.
+    /// Database reservations and the inventory's original custody remain live and charged.
+    pub(super) fn into_database(
+        self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<ProjectAssetDatabase, AuthoringProjectSourceAdmissionError> {
+        let Self {
+            root,
+            bindings,
+            indexed: _,
+            database,
+            metadata,
+            source_bindings,
+            lookups,
+            resolved_targets,
+            resolved_identities,
+            frozen_storage,
+        } = self;
+        drop((
+            root,
+            bindings,
+            metadata,
+            source_bindings,
+            lookups,
+            resolved_targets,
+            resolved_identities,
+        ));
+        if let Some(storage) = frozen_storage {
+            budget.reconcile_retained_reservation(
+                checked_sum([storage.database_bytes, storage.temporary_bytes])?,
+                storage.database_bytes,
+            )?;
+        }
+        Ok(database)
+    }
+
     pub(super) fn lookup_sources(&self) -> impl Iterator<Item = &Arc<AuthoringSourceFact>> {
         self.lookups
             .values()
@@ -258,20 +368,14 @@ impl ReferenceCatalogue {
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Option<ResolvedResourceSource>, AuthoringProjectSourceAdmissionError> {
         if let AssetRef::Path(path) = reference {
-            budget.charge_source_bytes(
-                0,
-                0,
-                0,
-                checked_sum([
-                    size_of::<ResolvedResourceSource>(),
-                    path.as_str().len(),
-                    self.assets().directory.as_str().len(),
-                ])?,
-            )?;
+            let retained_bytes =
+                checked_sum([size_of::<ResolvedResourceSource>(), path.as_str().len()])?;
+            budget.charge_source_bytes(0, 0, 0, retained_bytes)?;
             return Ok(Some(ResolvedResourceSource {
                 path: path.clone(),
                 binding: self.assets(),
                 demand: AssetReferenceDemand::Immediate,
+                retained_bytes,
             }));
         }
         self.ensure_indexed(budget)?;
@@ -294,24 +398,36 @@ impl ReferenceCatalogue {
             .source_bindings
             .get(record.path())
             .expect("an indexed record retains its actual directory binding");
-        budget.charge_source_bytes(
-            0,
-            0,
-            0,
-            checked_sum([
-                size_of::<ResolvedResourceSource>(),
-                record.path().as_str().len(),
-                binding.directory.as_str().len() * 2,
-            ])?,
-        )?;
-        let mut binding = binding.clone();
-        binding.expected_kind = Some(record.source_kind().clone());
-        let path = self.resolve(reference, &binding, budget)?;
-        Ok(path.map(|path| ResolvedResourceSource {
-            path,
-            binding,
-            demand: AssetReferenceDemand::Immediate,
-        }))
+        let retained_bytes = checked_sum([
+            size_of::<ResolvedResourceSource>(),
+            binding
+                .scope
+                .relative_path(record.path())
+                .map_or(0, str::len),
+            match record.source_kind() {
+                AssetSourceKind::Other(kind) => kind.len(),
+                _ => 0,
+            },
+        ])?;
+        budget.charge_source_bytes(0, 0, 0, retained_bytes)?;
+        let binding = SourceDirectoryBinding {
+            directory: Arc::clone(&binding.directory),
+            scope: Arc::clone(&binding.scope),
+            expected_kind: Some(record.source_kind().clone()),
+        };
+        match self.resolve(reference, &binding, budget) {
+            Ok(Some(path)) => Ok(Some(ResolvedResourceSource {
+                path,
+                binding,
+                demand: AssetReferenceDemand::Immediate,
+                retained_bytes,
+            })),
+            result => {
+                drop(binding);
+                budget.reconcile_retained_reservation(retained_bytes, 0)?;
+                result.map(|_| None)
+            }
+        }
     }
 
     pub(super) fn resolve_prefab(
@@ -323,16 +439,14 @@ impl ReferenceCatalogue {
             return Ok(None);
         }
         if let AssetRef::Path(path) = reference {
-            budget.charge_source_bytes(
-                0,
-                0,
-                0,
-                checked_sum([size_of::<ResolvedResourceSource>(), path.as_str().len()])?,
-            )?;
+            let retained_bytes =
+                checked_sum([size_of::<ResolvedResourceSource>(), path.as_str().len()])?;
+            budget.charge_source_bytes(0, 0, 0, retained_bytes)?;
             return Ok(Some(ResolvedResourceSource {
                 path: path.clone(),
                 binding: self.prefabs(),
                 demand: AssetReferenceDemand::Immediate,
+                retained_bytes,
             }));
         }
         let selected = self.resolve_resource(reference, budget)?;
@@ -340,6 +454,9 @@ impl ReferenceCatalogue {
             .as_ref()
             .is_some_and(|selected| selected.binding.expected_kind != Some(AssetSourceKind::Prefab))
         {
+            if let Some(selected) = selected {
+                selected.release(budget)?;
+            }
             return Err(AuthoringProjectSourceAdmissionError::NativeSource(
                 super::super::AuthoringDocumentAdmissionError::NativeSourceMetadataMismatch,
             ));
@@ -366,7 +483,9 @@ impl ReferenceCatalogue {
             AssetRef::Product(product) => product.source(),
         };
         self.ensure_indexed(budget)?;
-        if !self.lookups.contains_key(&stable_id) {
+        // The frozen owner retains and revalidates the complete inventory, so it needs no
+        // additional per-demand receipts. Ordinary live captures keep their lookup observations.
+        if self.frozen_storage.is_none() && !self.lookups.contains_key(&stable_id) {
             let record = self.indexed_record(stable_id);
             budget.charge_source_bytes(
                 0,
@@ -861,19 +980,14 @@ impl ReferenceCatalogue {
         let canonical_path = self.bindings[index].scope.resolve(&path);
         // A traversal root locates the observed file. The sidecar's local spelling binds
         // through an actual configured scope, independently of its source kind or owner.
-        let scope = self
-            .bindings
-            .iter()
-            .find(|binding| {
-                binding.scope.relative_path(&canonical_path)
-                    == Some(metadata.identity().path().as_str())
-            })
-            .ok_or_else(
-                || AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
-                    requested: path.clone(),
-                    declared: metadata.identity().path().clone(),
-                },
-            )?;
+        let binding_index = Self::planned_metadata_binding(
+            &self.bindings,
+            &canonical_path,
+            metadata.identity().path(),
+            budget,
+        )?
+        .ok_or(AuthoringProjectSourceAdmissionError::DocumentSourceMismatch)?;
+        let scope = &self.bindings[binding_index];
         let source_binding = scope.clone();
         let record = metadata.identity().clone().into_record(&scope.scope);
         if record.path() != &canonical_path {

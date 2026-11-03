@@ -8,7 +8,7 @@ use crate::{
     project_host::{
         authoring::{
             AuthoringProjectAdmissionHost,
-            source_upgrade_inventory::SourceUpgradeInventory,
+            source_inventory::SourceInventory,
             tests::{
                 TestAuthoringProject,
                 independent_capture::{bound_source_host, independent_project, open_second_scene},
@@ -50,7 +50,7 @@ fn open(
     project: &TestAuthoringProject,
 ) -> (
     AuthoringProjectSessionSnapshot,
-    SourceUpgradeInventory,
+    SourceInventory,
     AuthoringProjectAdmissionBudget,
 ) {
     let schema = AuthoringProjectAdmissionHost::default()
@@ -73,7 +73,7 @@ fn open(
     let mut budget = snapshot.schema.budget;
     budget.limits.decode_work = ItemLimit::new(200_000_000).unwrap();
     let inventory =
-        SourceUpgradeInventory::capture(&snapshot.schema, &[], snapshot.scene_limits, &mut budget)
+        SourceInventory::capture(&snapshot.schema, &[], snapshot.scene_limits, &mut budget)
             .unwrap();
     (snapshot, inventory, budget)
 }
@@ -323,7 +323,7 @@ fn fresh_dependency_content_does_not_inherit_the_old_project_inventory_object_pi
     let mut budget = snapshot.schema.budget;
     budget.limits.decode_work = ItemLimit::new(200_000_000).unwrap();
     let inventory =
-        SourceUpgradeInventory::capture(&snapshot.schema, &[], snapshot.scene_limits, &mut budget)
+        SourceInventory::capture(&snapshot.schema, &[], snapshot.scene_limits, &mut budget)
             .unwrap();
     snapshot.install_source_observation_custody(inventory.shared_custody());
     let path = "prefabs/leaf.prefab.json";

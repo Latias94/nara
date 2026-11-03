@@ -3,6 +3,17 @@ use super::*;
 use nara_reflect::{ComponentSchemaVersion, ComponentTypeId};
 use nara_scene::{AuthoringDocumentReadiness, AuthoringRecordReadiness};
 
+fn encode_prefab(
+    encoding: DocumentEncoding,
+    prefab: &PrefabDocument,
+) -> Result<Vec<u8>, nara_scene::SceneFormatError> {
+    match encoding {
+        DocumentEncoding::Json => prefab.to_json_string(),
+        DocumentEncoding::Ron => prefab.to_ron_string(),
+    }
+    .map(String::into_bytes)
+}
+
 #[test]
 fn prefab_open_shares_scene_basis_and_preserves_unavailable_records_through_save_and_reopen() {
     for (path, encoding) in [

@@ -24,8 +24,7 @@ use nara_core::{
 };
 use nara_fs::{ContentDigest, RelativePath};
 use nara_project::{
-    NativeDocumentIdentity, ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest,
-    ProjectAuthoringState, ProjectManifest,
+    NativeDocumentIdentity, ProjectAuthoringRecoveryDigest, ProjectAuthoringState, ProjectManifest,
 };
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleLimits, ComponentFieldId, ComponentFieldSchema,
@@ -37,12 +36,15 @@ use nara_scene::{
         AuthoredFieldUpgrade, AuthoringAdapterReceipt, canonical_prefab_source_matches,
         canonical_scene_source_matches,
     },
-    AuthoringSchemaBasis, PrefabDocumentCandidate, SceneDocumentCandidate, SceneFileEncoding,
-    SceneFileLimits, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
+    AuthoringSchemaBasis, SceneFileLimits, SourceDocumentKey, SourceDocumentOrigin,
 };
 use serde::{Deserialize, Serialize};
 
-use super::{AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError};
+use super::{
+    AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
+    project::AuthoringProjectSourceAdmissionError,
+    source_decode::{SourceDecodeError, SourceTree, decode_source, release_tree},
+};
 
 #[cfg(test)]
 mod tests;
@@ -83,6 +85,7 @@ impl Default for SourceUpgradeRecoveryLimits {
 /// Borrowed reviewed data, already validated for complete physical membership by the enclosing
 /// operation. Supplying a subset cannot establish ownership of the whole project here.
 pub(super) struct SourceUpgradeRecoveryInput<'a> {
+    pub(super) selected_profile: Option<&'a str>,
     pub(super) old_ready_manifest: &'a [u8],
     pub(super) future_ready_manifest: &'a [u8],
     pub(super) bundle_path: &'a str,
@@ -102,6 +105,7 @@ pub(super) struct SourceUpgradeRecoveryMemberInput<'a> {
     pub(super) path: &'a str,
     pub(super) key: &'a SourceDocumentKey,
     pub(super) encoding: RecoverySourceEncoding,
+    pub(super) explicit_native: bool,
     pub(super) old_disk: &'a [u8],
     pub(super) reviewed_working: &'a [u8],
     pub(super) successor: &'a [u8],
@@ -125,6 +129,15 @@ pub(super) struct SourceUpgradeRecoveryRootInput<'a> {
 pub(super) enum RecoverySourceEncoding {
     Json,
     Ron,
+}
+
+impl From<RecoverySourceEncoding> for nara_scene::SceneFileEncoding {
+    fn from(encoding: RecoverySourceEncoding) -> Self {
+        match encoding {
+            RecoverySourceEncoding::Json => Self::Json,
+            RecoverySourceEncoding::Ron => Self::Ron,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +213,7 @@ pub(super) struct RecoveryMember {
     pub(super) path: String,
     pub(super) key: SourceDocumentKey,
     pub(super) encoding: RecoverySourceEncoding,
+    pub(super) explicit_native: bool,
     pub(super) old_disk: RecoveryBytes,
     pub(super) reviewed_working: RecoveryBytes,
     pub(super) successor: RecoveryBytes,
@@ -232,6 +246,9 @@ struct RecoveryField {
 #[serde(deny_unknown_fields)]
 struct RecoveryPayload {
     source_universe: SourceUniverseId,
+    // Explicit null selects the default policy; an absent operation fact is malformed.
+    #[serde(deserialize_with = "Option::<String>::deserialize")]
+    selected_profile: Option<String>,
     history_policy: RecoveryHistoryPolicy,
     field: RecoveryField,
     manifest: RecoveryReplacement,
@@ -302,6 +319,7 @@ impl SourceUpgradeRecovery {
                     path: member.path.to_owned(),
                     key: member.key.clone(),
                     encoding: member.encoding,
+                    explicit_native: member.explicit_native,
                     old_disk: RecoveryBytes::copy(member.old_disk)?,
                     reviewed_working: RecoveryBytes::copy(member.reviewed_working)?,
                     successor: RecoveryBytes::copy(member.successor)?,
@@ -332,6 +350,7 @@ impl SourceUpgradeRecovery {
             }
             let payload = RecoveryPayload {
                 source_universe,
+                selected_profile: input.selected_profile.map(str::to_owned),
                 history_policy: RecoveryHistoryPolicy::SaveReviewedWorkingCopiesAndStartNewHistory,
                 field: RecoveryField {
                     component: input.component.clone(),
@@ -422,74 +441,6 @@ impl SourceUpgradeRecovery {
         })
     }
 
-    /// The caller supplies the actual bytes read at this exact Pending reference. Missing and
-    /// mismatched data refuse before semantic decoding; this grants no Generic Open bypass.
-    pub(super) fn decode_pending(
-        reference: &ProjectAuthoringRecovery,
-        observed_path: &str,
-        observed_bytes: Option<&[u8]>,
-        limits: SourceUpgradeRecoveryLimits,
-        budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> Result<Self, SourceUpgradeRecoveryError> {
-        with_candidate_storage(budget, |budget| {
-            if observed_path != reference.recovery_path().as_str() {
-                return Err(SourceUpgradeRecoveryError::PendingPathMismatch);
-            }
-            let encoded = observed_bytes.ok_or(SourceUpgradeRecoveryError::PendingMissing)?;
-            check_encoded(encoded.len(), limits)?;
-            budget.charge_source_bytes(0, 0, encoded.len(), 0)?;
-            if digest(encoded) != reference.recovery_digest() {
-                return Err(SourceUpgradeRecoveryError::PendingDigestMismatch);
-            }
-            let recovery = Self::decode(encoded, limits, budget)?;
-            recovery.validate_recovery_path(observed_path, budget)?;
-            Ok(recovery)
-        })
-    }
-
-    /// The stored package cannot occupy, contain, or lie inside another operation-owned path.
-    /// Storage publication and Pending decode share this data-coherence rule; native path
-    /// resolution and the actual file/parent observations remain the storage owner's duty.
-    pub(super) fn validate_recovery_path(
-        &self,
-        path: &str,
-        budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> Result<(), SourceUpgradeRecoveryError> {
-        validate_path(path, budget)?;
-        let paths = || {
-            self.payload
-                .file_paths()
-                .chain(self.roots().iter().map(|root| root.path.as_str()))
-                .chain(self.missing_sidecars().iter().map(String::as_str))
-        };
-        let (count, total, maximum) = paths().try_fold(
-            (0_usize, 0_usize, 0_usize),
-            |(count, total, maximum), path| {
-                Ok::<_, SourceUpgradeRecoveryError>((
-                    sum(count, 1)?,
-                    sum(total, path.len())?,
-                    maximum.max(path.len()),
-                ))
-            },
-        )?;
-        let scratch = product(sum(path.len(), maximum)?, 3)?;
-        let work = sum(
-            product(total, 3)?,
-            product(product(path.len(), 3)?, sum(count, 1)?)?,
-        )?;
-        budget.charge_source_bytes(0, 0, work, 0)?;
-        with_temporary(scratch, budget, |_| {
-            let path = path.to_lowercase();
-            for owned in paths() {
-                let owned = owned.to_lowercase();
-                if path == owned || below(&path, &owned) || below(&owned, &path) {
-                    return Err(SourceUpgradeRecoveryError::PathConflict);
-                }
-            }
-            Ok(())
-        })
-    }
-
     pub(super) fn encoded_bytes(&self) -> &[u8] {
         &self.encoded
     }
@@ -523,6 +474,9 @@ impl SourceUpgradeRecovery {
     }
     pub(super) const fn source_universe(&self) -> SourceUniverseId {
         self.payload.source_universe
+    }
+    pub(super) fn selected_profile(&self) -> Option<&str> {
+        self.payload.selected_profile.as_deref()
     }
     pub(super) fn manifest(&self) -> &RecoveryReplacement {
         &self.payload.manifest
@@ -729,6 +683,16 @@ fn validate_configurations(
     manifest: &ProjectManifest,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), SourceUpgradeRecoveryError> {
+    if let Some(selected) = payload.selected_profile.as_deref() {
+        let comparisons = (usize::BITS - manifest.profiles.len().leading_zeros()) as usize + 1;
+        budget.charge_source_bytes(0, 0, product(sum(selected.len(), 1)?, comparisons)?, 0)?;
+        // The full Ready grammar and the bounded loop below resolve every configuration.
+        // This borrowed lookup proves the recorded selection exists without allocating a
+        // redundant EffectiveProjectSettings projection before its owner has admitted scratch.
+        if !manifest.profiles.contains_key(selected) {
+            return Err(SourceUpgradeRecoveryError::ConfigurationMismatch);
+        }
+    }
     let root_bytes = payload
         .roots
         .iter()
@@ -937,75 +901,57 @@ fn validate_source(
     if !encoding_matches {
         return Err(SourceUpgradeRecoveryError::SourceInvalid);
     }
-    let reservation = super::project::reserve_source_decode(
-        encoded.len(),
-        limits.encoded_bytes().get(),
-        0,
-        limits,
-        budget,
-    )
-    .map_err(|error| match error {
-        super::project::AuthoringProjectSourceAdmissionError::Budget(error) => {
-            SourceUpgradeRecoveryError::Admission(error)
-        }
-        _ => SourceUpgradeRecoveryError::AccountingOverflow,
-    })?;
-    let limits = reservation.limits;
-    // The source owner charged this temporary reservation before returning it. Release it on
-    // every outcome, retaining the cumulative decode work and any other operation charges.
+    let before = budget.retained_candidate_bytes;
     let result = (|| {
-        let encoding = match member.encoding {
-            RecoverySourceEncoding::Json => SceneFileEncoding::Json,
-            RecoverySourceEncoding::Ron => SceneFileEncoding::Ron,
-        };
-        match member.key.kind() {
-            SourceDocumentKind::Scene => {
-                let candidate = match member.encoding {
-                    RecoverySourceEncoding::Json => {
-                        SceneDocumentCandidate::decode_json_bytes_with_limits(encoded, limits)
-                    }
-                    RecoverySourceEncoding::Ron => {
-                        SceneDocumentCandidate::decode_ron_bytes_with_limits(encoded, limits)
-                    }
-                }
-                .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?;
-                let document = candidate
-                    .into_composition_source()
-                    .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?;
-                if canonical
-                    && !canonical_scene_source_matches(document, encoding, encoded, limits)
-                        .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?
-                {
-                    return Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor);
-                }
+        let encoding = member.encoding.into();
+        let tree = decode_source(member.key.kind(), encoding, encoded, limits, budget)
+            .map_err(source_decode_error)?;
+        if !canonical {
+            return release_tree(tree, budget).map_err(source_decode_error);
+        }
+        // Decoding already admitted raw domain checks, ordering and local structure. Canonical
+        // comparison performs another domain/order/serializer pass and needs its own allowance.
+        tree.admit_canonical_comparison(encoded.len(), budget)
+            .map_err(source_decode_error)?;
+        let matches = match tree {
+            SourceTree::Scene(document) => {
+                canonical_scene_source_matches(document, encoding, encoded, limits)
             }
-            SourceDocumentKind::Prefab => {
-                let candidate = match member.encoding {
-                    RecoverySourceEncoding::Json => {
-                        PrefabDocumentCandidate::decode_json_bytes_with_limits(encoded, limits)
-                    }
-                    RecoverySourceEncoding::Ron => {
-                        PrefabDocumentCandidate::decode_ron_bytes_with_limits(encoded, limits)
-                    }
-                }
-                .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?;
-                let document = candidate
-                    .into_composition_source()
-                    .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?;
-                if canonical
-                    && !canonical_prefab_source_matches(document, encoding, encoded, limits)
-                        .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?
-                {
-                    return Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor);
-                }
+            SourceTree::Prefab(document) => {
+                canonical_prefab_source_matches(document, encoding, encoded, limits)
             }
+        }
+        .map_err(|_| SourceUpgradeRecoveryError::SourceInvalid)?;
+        if !matches {
+            return Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor);
         }
         Ok(())
     })();
+    // No decoded tree or serializer local survives this closure, even when admission refuses.
+    // Preserve cumulative encoded/decoded/work observations and every preexisting allocation.
+    let temporary = budget
+        .retained_candidate_bytes
+        .checked_sub(before)
+        .ok_or(SourceUpgradeRecoveryError::AccountingOverflow)?;
     budget
-        .reconcile_retained_reservation(reservation.bytes, 0)
+        .reconcile_retained_reservation(temporary, 0)
         .map_err(|_| SourceUpgradeRecoveryError::AccountingOverflow)?;
     result
+}
+
+fn source_decode_error(error: SourceDecodeError) -> SourceUpgradeRecoveryError {
+    match error {
+        SourceDecodeError::Admission(error)
+        | SourceDecodeError::Project(AuthoringProjectSourceAdmissionError::Budget(error)) => {
+            SourceUpgradeRecoveryError::Admission(error)
+        }
+        SourceDecodeError::Project(AuthoringProjectSourceAdmissionError::AccountingOverflow) => {
+            SourceUpgradeRecoveryError::AccountingOverflow
+        }
+        SourceDecodeError::Project(_)
+        | SourceDecodeError::Format(_)
+        | SourceDecodeError::Structure(_) => SourceUpgradeRecoveryError::SourceInvalid,
+    }
 }
 
 fn parse_ready(bytes: &[u8]) -> Result<ProjectManifest, SourceUpgradeRecoveryError> {
@@ -1029,7 +975,10 @@ fn encode_package(
 ) -> Result<Vec<u8>, SourceUpgradeRecoveryError> {
     // Header strings are fixed and admitted before construction too.
     with_temporary(OWNER_FIXED_BYTES, budget, |budget| {
-        budget.charge_source_bytes(0, 0, product(payload_retained_bytes(payload)?, 8)?, 0)?;
+        // Two serde traversals: counting and final serialization. Each gets two passes over
+        // stored data/keys/control; encoded-buffer writes, shape and digest have separate debits.
+        // Parser allocation capacity is not additional serializer work.
+        budget.charge_source_bytes(0, 0, product(payload_retained_bytes(payload)?, 4)?, 0)?;
         let envelope = envelope(KIND, payload)?;
         let mut counter = CountingWriter {
             written: 0,
@@ -1313,6 +1262,7 @@ fn input_copy_work(
     let mut work = product(aggregate, 3)?;
     for bytes in [
         size_of::<RecoveryPayload>(),
+        input.selected_profile.map_or(0, str::len),
         MANIFEST_PATH.len(),
         input.bundle_path.len(),
         input.component.as_str().len(),
@@ -1379,6 +1329,7 @@ fn input_retained_bytes(
     input: &SourceUpgradeRecoveryInput<'_>,
 ) -> Result<usize, SourceUpgradeRecoveryError> {
     let mut bytes = sum(size_of::<RecoveryPayload>(), MANIFEST_PATH.len())?;
+    bytes = sum(bytes, input.selected_profile.map_or(0, str::len))?;
     bytes = sum(bytes, input.bundle_path.len())?;
     bytes = sum(bytes, input.component.as_str().len())?;
     bytes = sum(bytes, input.field.as_str().len())?;
@@ -1424,6 +1375,10 @@ fn input_retained_bytes(
 
 fn payload_retained_bytes(payload: &RecoveryPayload) -> Result<usize, SourceUpgradeRecoveryError> {
     let mut bytes = sum(size_of::<RecoveryPayload>(), aggregate_bytes(payload)?)?;
+    bytes = sum(
+        bytes,
+        payload.selected_profile.as_deref().map_or(0, str::len),
+    )?;
     bytes = sum(
         bytes,
         sum(payload.manifest.path.len(), payload.bundle.path.len())?,
@@ -1786,9 +1741,6 @@ pub(crate) enum SourceUpgradeRecoveryError {
     MemberInvalid { index: usize },
     NonCanonicalSuccessor,
     MemberDigestMismatch,
-    PendingMissing,
-    PendingPathMismatch,
-    PendingDigestMismatch,
 }
 
 impl From<AuthoringProjectAdmissionError> for SourceUpgradeRecoveryError {

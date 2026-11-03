@@ -1,11 +1,11 @@
 use super::*;
 use crate::project_host::authoring::{
-    source_upgrade_publication::{
-        SourceUpgradePublication, SourceUpgradePublicationError, SourceUpgradePublicationStep,
-    },
-    source_upgrade_storage::{
+    recovery_storage::{
         PendingRecoveryStorage, RecoveryPendingPublication, RecoveryStorageHost,
         RecoveryStoragePublication,
+    },
+    source_upgrade_publication::{
+        SourceUpgradePublication, SourceUpgradePublicationError, SourceUpgradePublicationStep,
     },
 };
 use nara_project::ProjectManifest;
@@ -14,7 +14,7 @@ fn pending(
     fixture: &Fixture,
     recovery: Arc<SourceUpgradeRecovery>,
     budget: &mut AuthoringProjectAdmissionBudget,
-) -> PendingRecoveryStorage {
+) -> PendingRecoveryStorage<SourceUpgradeRecovery> {
     fs::create_dir_all(fixture.root.join(".nara/upgrades")).unwrap();
     let prepared = RecoveryStorageHost::capture(fixture.schema.project_root(), budget)
         .unwrap()
@@ -40,7 +40,7 @@ fn prepare(
 ) -> (
     PreparedAuthoredSourceUpgrade,
     SourceUpgradePublication,
-    PendingRecoveryStorage,
+    PendingRecoveryStorage<SourceUpgradeRecovery>,
 ) {
     budget.limits.decode_work = ItemLimit::new(200_000_000).unwrap();
     let mut work = AuthoredSchemaUpgradeWork::default();
@@ -68,7 +68,7 @@ fn prepare(
 
 fn publish_all(
     publication: &mut SourceUpgradePublication,
-    pending: &PendingRecoveryStorage,
+    pending: &PendingRecoveryStorage<SourceUpgradeRecovery>,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) {
     while !publication.is_complete() {

@@ -21,16 +21,14 @@ use super::project::source_upgrade::PreparedAuthoredSourceUpgrade;
 use super::{
     AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError, AuthoringSchemaReceipt,
     document::{AuthoringDocumentAdmissionError, AuthoringDocumentSourceFact},
-    source_upgrade_inventory::{
-        RecoveredSourceUpgradeInventory, SharedSourceUpgradeInventoryCustody,
-        SourceUpgradeInventory, SourceUpgradeInventoryError,
-    },
-    source_upgrade_ready::RETAINED_HANDLE_CAPACITY as READY_HANDLE_CAPACITY,
-    source_upgrade_recovery::SourceUpgradeRecovery,
-    source_upgrade_storage::{
+    recovery_storage::{
         ObservedPendingRecoveryStorage, PENDING_HANDLE_CAPACITY,
         RETAINED_HANDLE_CAPACITY as STORAGE_HANDLE_CAPACITY, RecoveryStorageError,
     },
+    source_inventory::{SharedSourceInventoryCustody, SourceInventory, SourceInventoryError},
+    source_upgrade_inventory::{RecoveredSourceUpgradeInventory, SourceUpgradeInventoryError},
+    source_upgrade_ready::RETAINED_HANDLE_CAPACITY as READY_HANDLE_CAPACITY,
+    source_upgrade_recovery::SourceUpgradeRecovery,
 };
 #[cfg(test)]
 use crate::project_host::file_publication::CleanupTestControl;
@@ -53,7 +51,7 @@ const ACTIVE_HANDLE_RESERVATION: usize = 2;
 pub(super) struct SourceUpgradePublication {
     root: DirectoryCapability,
     bundle: BundleCustody,
-    originals: SharedSourceUpgradeInventoryCustody,
+    originals: SharedSourceInventoryCustody,
     recovery: Arc<SourceUpgradeRecovery>,
     entries: Vec<Entry>,
     next: usize,
@@ -156,7 +154,7 @@ impl SourceUpgradePublication {
     /// current pinned leaf: old members replace from stored bytes, while new/identical members
     /// are only observed by the same publication kernel.
     pub(super) fn prepare_recovered(
-        pending: &ObservedPendingRecoveryStorage,
+        pending: &ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
         recovered: &RecoveredSourceUpgradeInventory,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<Self, SourceUpgradePublicationError> {
@@ -164,9 +162,9 @@ impl SourceUpgradePublication {
             recovered
                 .validate(pending, budget)
                 .map_err(|error| match error {
-                    SourceUpgradeInventoryError::Admission(error) => {
-                        SourceUpgradePublicationError::Admission(error)
-                    }
+                    SourceUpgradeInventoryError::Inventory(SourceInventoryError::Admission(
+                        error,
+                    )) => SourceUpgradePublicationError::Admission(error),
                     error => SourceUpgradePublicationError::Inventory(error),
                 })?;
             let inventory = recovered.inventory();
@@ -250,7 +248,7 @@ impl SourceUpgradePublication {
     /// keeps old Session writes fenced after any confirmed Pending transition.
     pub(super) fn publish_next(
         &mut self,
-        pending: &ObservedPendingRecoveryStorage,
+        pending: &ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> SourceUpgradePublicationStep {
         let index = self.next;
@@ -388,7 +386,7 @@ impl SourceUpgradePublication {
 
     fn validate_pending(
         &self,
-        pending: &ObservedPendingRecoveryStorage,
+        pending: &ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), SourceUpgradePublicationError> {
         if self.operation() != pending.recovery().digest()
@@ -405,7 +403,7 @@ impl SourceUpgradePublication {
     /// deliberately a separate proof from `VerifiedSourceUpgradeInventory`.
     pub(super) fn validate_complete(
         &self,
-        pending: &ObservedPendingRecoveryStorage,
+        pending: &ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
         budget: &mut AuthoringProjectAdmissionBudget,
     ) -> Result<(), SourceUpgradePublicationError> {
         self.validate_pending(pending, budget)?;
@@ -519,7 +517,7 @@ pub(crate) enum SourceUpgradePublicationError {
 }
 
 fn check_handle_capacity(
-    inventory: &SourceUpgradeInventory,
+    inventory: &SourceInventory,
     open_documents: usize,
     additional_pending_handles: usize,
     budget: &AuthoringProjectAdmissionBudget,
@@ -548,7 +546,7 @@ fn check_handle_capacity(
 }
 
 fn prepare_source_entries(
-    inventory: &SourceUpgradeInventory,
+    inventory: &SourceInventory,
     recovery: &SourceUpgradeRecovery,
     file_limits: impl Fn(usize) -> Option<SceneFileLimits>,
     budget: &mut AuthoringProjectAdmissionBudget,

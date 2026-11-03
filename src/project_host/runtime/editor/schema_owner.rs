@@ -584,7 +584,9 @@ impl EditorProjectSession {
     }
 
     pub(super) fn authoring_operation_fenced(&self) -> bool {
-        self.schema_owner_adoption.fenced() || self.authored_schema_upgrade.writes_fenced()
+        self.schema_owner_adoption.fenced()
+            || self.authored_schema_upgrade.writes_fenced()
+            || self.prefab_extraction.writes_fenced()
     }
 
     fn schema_adoption_conflicting_work(&self) -> bool {

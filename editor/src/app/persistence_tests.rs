@@ -30,6 +30,8 @@ use super::{
 
 #[path = "persistence_tests/authored_upgrade.rs"]
 mod authored_upgrade;
+#[path = "persistence_tests/prefab_extraction.rs"]
+mod prefab_extraction;
 
 fn advance_to_session_publication(application: &mut EditorApplication) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -83,8 +85,7 @@ fn settle_background_imports(application: &mut EditorApplication) {
             && !frame.authoring_retirement_pending()
             && !frame.source_tool().has_pending_work()
             && !frame.scene_preview_work_pending()
-            && !frame.schema_owner_adoption_work_pending()
-            && !frame.authored_schema_upgrade_work_pending()
+            && !frame.authoring_operation_work_pending()
         {
             return;
         }

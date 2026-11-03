@@ -100,6 +100,7 @@ impl Fixture {
             AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default());
         let recovery = SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: None,
                 old_ready_manifest: &original_manifest,
                 future_ready_manifest: &future_manifest,
                 bundle_path: BUNDLE,
@@ -117,6 +118,7 @@ impl Fixture {
                     path: "scenes/empty.scene.json",
                     key: &scene_key,
                     encoding: RecoverySourceEncoding::Json,
+                    explicit_native: false,
                     old_disk: &scene_bytes,
                     reviewed_working: &scene_bytes,
                     successor: &scene_bytes,
@@ -493,7 +495,7 @@ fn ready_receipt_keeps_ordinary_capture_policy_outside_the_completed_upgrade_all
         let next = accepted
             .schema
             .budget
-            .for_authored_upgrade(ItemLimit::new(1).unwrap(), ItemLimit::new(64).unwrap());
+            .for_source_operation(ItemLimit::new(1).unwrap(), ItemLimit::new(64).unwrap());
         assert_eq!(next.usage().decode_work(), 0);
         assert_eq!(
             next.usage().retained_candidate_bytes(),
@@ -583,7 +585,7 @@ fn failed_schema_preparation_refunds_temporary_storage_and_preserves_cumulative_
     let previous = budget.usage();
     assert!(matches!(
         prepare_schema_models(&malformed, &mut budget),
-        Err(SourceUpgradeReadyError::Admission(
+        Err(SchemaModelsError::Admission(
             AuthoringProjectAdmissionError::BundleInvalid(_)
         ))
     ));

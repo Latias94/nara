@@ -123,8 +123,7 @@ impl EditorFrameClock {
             document_open: Default::default(),
             scene_preview_document: None,
             authoring_retirement_pending: false,
-            schema_owner_adoption_work_pending: false,
-            authored_schema_upgrade_work_pending: false,
+            authoring_operation_work_pending: false,
             scene_preview_work_pending: false,
             scene_preview_recheck_after: None,
             scene_preview_unsaved_dependencies: 0,
@@ -297,8 +296,7 @@ pub struct EditorFrameModel {
     document_open: crate::EditorDocumentOpenView,
     scene_preview_document: Option<EditorDocumentId>,
     authoring_retirement_pending: bool,
-    schema_owner_adoption_work_pending: bool,
-    authored_schema_upgrade_work_pending: bool,
+    authoring_operation_work_pending: bool,
     scene_preview_work_pending: bool,
     scene_preview_recheck_after: Option<Duration>,
     scene_preview_unsaved_dependencies: usize,
@@ -374,27 +372,16 @@ impl EditorFrameModel {
         self
     }
 
-    /// Finite Session metadata work or cleanup still needs observation, independently of rendering.
+    /// Finite Session authoring work or cleanup still needs observation, independently of
+    /// rendering and persistent write fences. A Review awaiting user input does not set this.
     #[must_use]
-    pub const fn schema_owner_adoption_work_pending(&self) -> bool {
-        self.schema_owner_adoption_work_pending
+    pub const fn authoring_operation_work_pending(&self) -> bool {
+        self.authoring_operation_work_pending
     }
 
     #[must_use]
-    pub fn with_schema_owner_adoption_work_pending(mut self, pending: bool) -> Self {
-        self.schema_owner_adoption_work_pending = pending;
-        self
-    }
-
-    /// Finite authored-upgrade work needs maintenance independently of its persistent write fence.
-    #[must_use]
-    pub const fn authored_schema_upgrade_work_pending(&self) -> bool {
-        self.authored_schema_upgrade_work_pending
-    }
-
-    #[must_use]
-    pub fn with_authored_schema_upgrade_work_pending(mut self, pending: bool) -> Self {
-        self.authored_schema_upgrade_work_pending = pending;
+    pub fn with_authoring_operation_work_pending(mut self, pending: bool) -> Self {
+        self.authoring_operation_work_pending = pending;
         self
     }
 

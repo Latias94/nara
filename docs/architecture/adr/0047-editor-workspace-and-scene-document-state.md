@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-03
 **Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
 receipt-backed content state
 **Amended**: 2026-10-27 to capture actual open Prefab working copies for authoring Scene preview
@@ -14,6 +14,7 @@ with independent file evidence and complete content authorization
 **Amended**: 2026-10-28 to prepare additive Schema classification for the complete open set
 **Amended**: 2026-11-01 for complete source/Schema/history/persistence upgrade installation
 **Amended**: 2026-11-02 for compiled Native/Data source authoring under the selected Schema
+**Amended**: 2026-11-03 for selective source/history checkpoints in reviewed Prefab extraction
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Amended**: 2026-10-28 to retain installed-content protection independently of graph withdrawal;
 management facts do not recover creation or deletion authority on Open
@@ -317,6 +318,58 @@ Rules:
   cannot charge discarded original inventories, recovery buffers or binding scratch as live
   successor storage. Final leaf verification consumes the same operation allowance before its
   reads, hashing, transient handles and scratch allocation.
+- Reviewed Prefab extraction keeps the original nominal Schema basis and proves complete source
+  and occurrence correspondence separately from a Schema upgrade. Capture and validate every open
+  source, binding, incarnation/revision, content state, original classification and history policy.
+  The shared physical source inventory owns observations, configuration membership and native
+  custody. Each concrete operation admits its Ready/Pending authority and semantic generation
+  transition separately; the scanner neither interprets a recovery package nor approves topology.
+  A complete physical member claim does not grant additional native interpretation contexts.
+  Preserve whether the original source had explicit native participation independently of its
+  catalogue discovery and open-document save disposition. An originally open source may also be
+  a Guard, while a closed catalogue member may overlap another profile's Scripts root. Recovery
+  carries this logical participation fact with each original member, without serializing a
+  Workspace, native handle or approval token. Shared scanning must not widen profile membership
+  or metadata visibility merely because a complete operation lists all original sources.
+  Retain the operation's original selected profile as well: a location-keyed explicit source
+  keeps that selected-policy context even when another profile's roots discovered its file.
+  Fresh recovery uses this recorded selection; omitting a new profile choice does not silently
+  substitute the default context, and a conflicting explicit choice refuses before adoption.
+  The stored selection field is required; explicit null names the default policy, while a
+  missing field is malformed rather than another spelling of that choice.
+  The source construction owner identifies actual changed declarations; a new allocation or a
+  potential context dependency alone does not select a replacement checkpoint. Changed working
+  sources prepare their ordinary classification and explicit new history checkpoint before live
+  binding. Guard-only inputs retain their source, both history branches, saved state and disk bytes.
+  Their historical source replay may expose a composition conflict after topology changes, under
+  the same existing replay-versus-activation boundary.
+  Reviewed SaveCurrent can publish exact captured working bytes without replacing that source or
+  clearing history; it uses ordinary saved checkpoint and external-reload conflict semantics.
+  Original disk and dirty working sources remain distinct observations. The concrete operation's
+  Review selects replacement, SaveCurrent or guard participation; capture alone grants none of them.
+  The concrete operation separately validates the final saved generation in each relevant
+  interpretation environment: published members use exact reviewed outputs, and every other
+  member uses its captured original disk source. An unpublished dirty working copy cannot supply
+  missing saved dependencies. Working correspondence and individual leaf output association do
+  not replace that complete-generation proof.
+  Complete physical Guard declarations also require route continuity, including dormant
+  Prefabs with no current Scene consumer and contextual defaults masked by explicit values.
+  The extraction owner reuses its actual cut and relocation semantics for a bounded borrowed
+  check; an unchanged working source does not authorize retaining obsolete disk declarations.
+  Before confirmation, an operation can explicitly revise its SaveCurrent set while retaining
+  the original source preparations, physical corpus and spent Work. It returns encoded outputs
+  and recovery/checkpoints through their actual owners before proving the new saved generation.
+  An invalid proposed selection retains an editable preparation and its owning diagnostics;
+  the superseded Review cannot still authorize confirmation. A first selection refusal has the
+  same correction path, without another capture or allowance. Outstanding checkpoint-return
+  refusal retains that exact owner and proof. Confirmation closes selection revision before any
+  actual publication. Thereafter every refusal retains the complete original publisher, Review
+  and accepted evidence; it cannot reconstruct a replacement from only source/file observations.
+  An unstarted preparation retains its exact request. Cancellation releases retained preparation
+  only after physical Task return, then ordinary document Close/dirty arbitration can continue.
+  All source, saved, persistence-leaf, lane and future-project guards bind before Ready. Dropping
+  or releasing guards installs nothing; successful Ready permits only the already prepared swaps.
+  Closed dependants and a newly created Prefab/sidecar do not thereby acquire Workspace sessions.
 - Authoring revision remains monotonic for conflict detection. Dirty state compares the current
   opaque content-state identity with the receipt-backed saved content-state identity, with
   source-upgrade-required as an additional dirty condition.
@@ -325,6 +378,18 @@ Rules:
   revision, content-state identity, exact Scene snapshot, canonical content digest,
   post-publication content observation, and required guarantee tier. A UI/tooling command or an
   unhosted `EditorWorkspace` cannot advance saved state.
+  Scene/Prefab checkpoints retain the actual immutable source allocation, not a copied working
+  Session. Canonical encoding issues one immutable output associated with that exact nominal
+  capture. Receipt admission compares both written and verified digests with this issued output;
+  a valid receipt for unrelated bytes cannot acknowledge the capture. Failed encoding or evidence
+  adoption returns the same capture/output for explicit retry. Recovery may instead verify those
+  fixed bytes through an actual current leaf; it must not fabricate a replacement receipt.
+  The concrete Host separately binds its configured parent/name before installation. Readmission
+  shares the original classification and validates actual output candidates without creating a
+  Session or history solely to check a save.
+  Bounded authoring operations debit every actual reclassification, including omitted Schema
+  defaults and effective-value validation, to their original allowance. Raw bytes and retained
+  classification facts alone cannot bound Schema-derived temporary work, including on retries.
 - Concrete file Hosts retain the accepted leaf capability alongside its observed digest. Open and
   Reopen preparation carry the actually read handle through owner admission; successful publication
   transfers the candidate's retained handle into the Host. Neither handoff leaves a bare native ID

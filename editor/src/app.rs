@@ -40,6 +40,7 @@ mod shell;
 
 mod authored_upgrade;
 mod extension_documents;
+mod prefab_extraction;
 mod schema_owner;
 mod source_tools;
 pub use source_tools::EditorApplicationSourceToolSubmission;
@@ -899,10 +900,10 @@ impl EditorApplication {
         if self.session_retirement.is_some()
             || self.project_open_retirement_pending()
             || self.final_exit_committed
-            || self
-                .state
-                .workspace()
-                .is_some_and(|project| project.session.authored_schema_upgrade_view().writes_fenced)
+            || self.state.workspace().is_some_and(|project| {
+                project.session.authored_schema_upgrade_view().writes_fenced
+                    || project.session.prefab_extraction_view().writes_fenced
+            })
         {
             return false;
         }
@@ -1654,12 +1655,14 @@ impl EditorApplication {
         let upgrade_cancelled = self.state.workspace_mut().is_some_and(|project| {
             authored_upgrade::cancel_pre_pending_for_close(&mut project.session)
         });
-        let actions_observed = actions_observed || upgrade_cancelled;
-        if self
-            .state
-            .workspace()
-            .is_some_and(|project| project.session.authored_schema_upgrade_view().writes_fenced)
-        {
+        let extraction_cancelled = self.state.workspace_mut().is_some_and(|project| {
+            prefab_extraction::cancel_pre_pending_for_close(&mut project.session)
+        });
+        let actions_observed = actions_observed || upgrade_cancelled || extraction_cancelled;
+        if self.state.workspace().is_some_and(|project| {
+            project.session.authored_schema_upgrade_view().writes_fenced
+                || project.session.prefab_extraction_view().writes_fenced
+        }) {
             // Pre-Pending cancellation retains its inputs until physical return. Dirty-document
             // arbitration starts only after that operation releases its write fence.
             return EditorApplicationUpdate {
@@ -2646,10 +2649,15 @@ fn request_exit_on_project(
     drive_runtime: bool,
 ) -> EditorApplicationUpdate {
     let upgrade_cancelled = authored_upgrade::cancel_pre_pending_for_close(&mut project.session);
+    let extraction_cancelled =
+        prefab_extraction::cancel_pre_pending_for_close(&mut project.session);
     let dispatch = dispatch_exit_on_project(project);
     let frame_observed = drive_project_frame(project, real_delta, drive_runtime);
     EditorApplicationUpdate {
-        actions_observed: upgrade_cancelled || dispatch.actions_observed() || frame_observed,
+        actions_observed: upgrade_cancelled
+            || extraction_cancelled
+            || dispatch.actions_observed()
+            || frame_observed,
         exit_ready: false,
     }
 }
@@ -2663,9 +2671,11 @@ fn dispatch_exit_on_project(project: &mut PublishedEditorProject) -> EditorAppli
                 EditorWorkspaceIntentAction::AcknowledgeResult,
             ));
         }
-        // A prior Close result must not settle this new request while the upgrade retires.
+        // A prior Close result must not settle this new request while a source operation retires.
         // Its acknowledgement is independent of admission of the new Exit arbitration.
-        if !project.session.authored_schema_upgrade_view().writes_fenced {
+        if !project.session.authored_schema_upgrade_view().writes_fenced
+            && !project.session.prefab_extraction_view().writes_fenced
+        {
             actions.push(EditorAction::WorkspaceIntent(
                 EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
             ));

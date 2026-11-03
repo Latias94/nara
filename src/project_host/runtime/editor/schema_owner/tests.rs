@@ -1428,7 +1428,7 @@ fn cancelled_held_publication_retains_evidence_and_reconciles_the_current_dirty_
         for _ in 0..3 {
             let frame = held.poll(|| editor.drive_editor_frame(Duration::ZERO));
             held.assert_pending(editor, &returned);
-            assert!(frame.schema_owner_adoption_work_pending());
+            assert!(frame.authoring_operation_work_pending());
             assert_eq!(
                 editor.schema_owner_adoption_view().operation,
                 Some(operation)
@@ -1728,7 +1728,7 @@ fn cancelled_failed_publication_keeps_cleanup_pending_after_physical_return_unti
         assert_eq!(returned.state(), TaskReturnState::Returned);
         for _ in 0..3 {
             let frame = editor.drive_editor_frame(Duration::ZERO);
-            assert!(frame.schema_owner_adoption_work_pending());
+            assert!(frame.authoring_operation_work_pending());
             assert!(publisher.try_with(|host| host.has_cleanup()).unwrap());
             assert!(editor.schema_owner_adoption.work.is_none());
             assert!(editor.schema_owner_adoption.pending());

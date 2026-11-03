@@ -34,6 +34,7 @@ const OPEN: &str = "scenes/open.scene.json";
 const CLOSED: &str = "prefabs/closed.prefab.ron";
 const OTHER_PROFILE: &str = "other/scenes/closed.scene.json";
 const CATALOGUED: &str = "assets/catalogued.json";
+const MOBILE_NATIVE: &str = "mobile/scenes/open.scene.json";
 
 mod disposal;
 mod recovered;
@@ -42,7 +43,7 @@ struct SuccessorFixture {
     project: Fixture,
     incumbent: Arc<AuthoringSchemaReceipt>,
     previous: AuthoringSchemaBasis,
-    original: SourceUpgradeInventory,
+    original: SourceInventory,
     recovery: SourceUpgradeRecovery,
 }
 
@@ -56,11 +57,54 @@ impl SuccessorFixture {
     }
 
     fn with_source_options(include_prefix: bool, unchanged_catalogued: bool) -> Self {
-        let project = Fixture::new(
-            "project_location",
+        Self::with_scripts_context(include_prefix, unchanged_catalogued, None)
+    }
+
+    fn with_scripts_context(
+        include_prefix: bool,
+        unchanged_catalogued: bool,
+        open_catalogued: Option<bool>,
+    ) -> Self {
+        Self::with_native_context(
+            include_prefix,
+            unchanged_catalogued,
+            open_catalogued,
+            false,
+            None,
+        )
+    }
+
+    fn with_selected_native(profile: Option<&str>) -> Self {
+        Self::with_native_context(false, false, None, true, profile)
+    }
+
+    fn with_native_context(
+        include_prefix: bool,
+        unchanged_catalogued: bool,
+        open_catalogued: Option<bool>,
+        open_mobile: bool,
+        selected_profile: Option<&str>,
+    ) -> Self {
+        let profiles = if open_catalogued.is_some() {
             "[profiles.other.paths]\nscenes = 'other/scenes'\n\
-             [profiles.dormant.paths]\nscenes = 'missing/scenes'\n",
-        );
+             [profiles.dormant.paths]\nscenes = 'missing/scenes'\n\
+             [profiles.scripts.paths]\nassets = 'scripts-only/assets'\n\
+             scenes = 'scripts-only/scenes'\nprefabs = 'scripts-only/prefabs'\n\
+             scripts = 'assets'\n"
+        } else {
+            "[profiles.other.paths]\nscenes = 'other/scenes'\n\
+             [profiles.dormant.paths]\nscenes = 'missing/scenes'\n"
+        };
+        let profiles = if open_mobile {
+            format!(
+                "{profiles}[profiles.desktop.paths]\nassets = 'desktop/assets'\n\
+                 scenes = 'desktop/scenes'\nprefabs = 'desktop/prefabs'\n\
+                 [profiles.mobile.paths]\nscenes = 'mobile/scenes'\n"
+            )
+        } else {
+            profiles.to_owned()
+        };
+        let project = Fixture::new("project_location", &profiles);
         fs::create_dir(project.root.join(".nara")).unwrap();
         for (path, kind) in [
             (OPEN, SourceDocumentKind::Scene),
@@ -73,6 +117,12 @@ impl SuccessorFixture {
             } else {
                 project.write(path, &source(path, kind, false));
             }
+        }
+        if open_mobile {
+            project.write(
+                MOBILE_NATIVE,
+                &source(MOBILE_NATIVE, SourceDocumentKind::Scene, false),
+            );
         }
         project.metadata(
             CATALOGUED,
@@ -111,7 +161,7 @@ impl SuccessorFixture {
         let root = crate::test_host_fs::writable_directory(&project.root).unwrap();
         let incumbent = Arc::new(
             AuthoringProjectAdmissionHost::default()
-                .prepare(root, None)
+                .prepare(root, selected_profile)
                 .unwrap()
                 .admit_bundle()
                 .unwrap()
@@ -119,7 +169,41 @@ impl SuccessorFixture {
         );
         let adapters = project_authoring_adapters(incumbent.bundle()).unwrap();
         let previous = AuthoringSchemaBasis::admit(incumbent.bundle(), &adapters).unwrap();
-        let original = capture(&incumbent);
+        let mut open_paths = vec![OPEN];
+        if open_catalogued == Some(true) {
+            open_paths.push(CATALOGUED);
+        }
+        if open_mobile {
+            open_paths.push(MOBILE_NATIVE);
+        }
+        let open: Vec<_> = open_paths
+            .iter()
+            .map(|path| {
+                let root = incumbent.project_root();
+                let file = root
+                    .open_file_exact(&RelativePath::new(*path).unwrap())
+                    .unwrap();
+                let native = NativeDocumentSourcePolicy::new(incumbent.settings())
+                    .admit(&root, path, SourceDocumentKind::Scene, file.identity())
+                    .unwrap();
+                AuthoringDocumentSourceFact::from_native_observation(
+                    path,
+                    file.identity(),
+                    file.parent_identity(),
+                    file.digest(1_048_576).unwrap(),
+                    &native,
+                )
+                .unwrap()
+            })
+            .collect();
+        let open: Vec<_> = open.iter().map(OpenSource::Bound).collect();
+        let original = SourceInventory::capture(
+            &incumbent,
+            &open,
+            SceneFileLimits::default(),
+            &mut operation_budget(),
+        )
+        .unwrap();
         let successors: Vec<_> = original
             .participants()
             .map(|participant| {
@@ -138,9 +222,10 @@ impl SuccessorFixture {
                     path: participant.file().path(),
                     key: participant.source_key(),
                     encoding: match participant.encoding() {
-                        SourceUpgradeEncoding::Json => RecoverySourceEncoding::Json,
-                        SourceUpgradeEncoding::Ron => RecoverySourceEncoding::Ron,
+                        SourceEncoding::Json => RecoverySourceEncoding::Json,
+                        SourceEncoding::Ron => RecoverySourceEncoding::Ron,
                     },
+                    explicit_native: participant.explicit_native(),
                     old_disk: participant.bytes(),
                     reviewed_working: participant.bytes(),
                     successor,
@@ -164,10 +249,8 @@ impl SuccessorFixture {
             .map(|root| SourceUpgradeRecoveryRootInput {
                 path: root.path(),
                 missing_ancestor: match root.observation() {
-                    SourceUpgradeRootObservation::Available { .. } => None,
-                    SourceUpgradeRootObservation::Missing { ancestor_path, .. } => {
-                        Some(ancestor_path)
-                    }
+                    SourceRootObservation::Available { .. } => None,
+                    SourceRootObservation::Missing { ancestor_path, .. } => Some(ancestor_path),
                 },
             })
             .collect();
@@ -179,6 +262,7 @@ impl SuccessorFixture {
             .unwrap();
         let recovery = SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: original.selected_profile(),
                 old_ready_manifest: incumbent.manifest_bytes(),
                 future_ready_manifest: &future,
                 bundle_path: BUNDLE,
@@ -290,6 +374,40 @@ impl SuccessorFixture {
         schema: &AuthoringSchemaReceipt,
         basis: &AuthoringSchemaBasis,
     ) -> AuthoringDocumentSourceFact {
+        self.future_open_at(schema, basis, OPEN)
+    }
+
+    fn future_open_at(
+        &self,
+        schema: &AuthoringSchemaReceipt,
+        basis: &AuthoringSchemaBasis,
+        path: &str,
+    ) -> AuthoringDocumentSourceFact {
+        if path != OPEN {
+            // Catalogue-only or other-profile sources need not be Browser Scene rows in the
+            // selected configuration. The inventory consumes their actual native observation.
+            let root = schema.project_root();
+            let file = root
+                .open_file_exact(&RelativePath::new(path).unwrap())
+                .unwrap();
+            let digest = file
+                .digest(nara_project::DEFAULT_MANIFEST_BYTE_LIMIT)
+                .unwrap();
+            let native =
+                crate::project_host::authoring::native_source::NativeDocumentSourcePolicy::new(
+                    schema.settings(),
+                )
+                .admit(&root, path, SourceDocumentKind::Scene, file.identity())
+                .unwrap();
+            return AuthoringDocumentSourceFact::from_native_observation(
+                path,
+                file.identity(),
+                file.parent_identity(),
+                digest,
+                &native,
+            )
+            .unwrap();
+        }
         let pools = TaskPools::try_new(TaskPoolConfig::default()).unwrap();
         let mut state = ProjectSourceIndexState::new(schema);
         state.request_refresh().unwrap();
@@ -308,7 +426,7 @@ impl SuccessorFixture {
             AuthoringDocumentAdmissionBasis::new(schema, basis, SceneFileLimits::default())
                 .admit(
                     &state.snapshot().unwrap(),
-                    OPEN,
+                    path,
                     AuthoringDocumentKind::Scene,
                 )
                 .unwrap();
@@ -344,7 +462,7 @@ impl SuccessorFixture {
                 bytes: manifest_bytes,
             }),
             settings: parsed.resolve_profile(None).unwrap(),
-            bundle: AdmittedAuthoringSchemaBundle::from_upgrade_observation(
+            bundle: AdmittedAuthoringSchemaBundle::from_observation(
                 ProjectPath::new(BUNDLE).unwrap(),
                 root.open_file_exact(&RelativePath::new(BUNDLE).unwrap())
                     .unwrap(),
@@ -450,7 +568,7 @@ fn source(path: &str, kind: SourceDocumentKind, next: bool) -> Vec<u8> {
 fn verified(
     fixture: &SuccessorFixture,
     schema: &Arc<AuthoringSchemaReceipt>,
-    future_open: &[SourceUpgradeOpenSource<'_>],
+    future_open: &[OpenSource<'_>],
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<VerifiedSourceUpgradeInventory, SourceUpgradeInventoryError> {
     VerifiedSourceUpgradeInventory::capture(
@@ -465,14 +583,13 @@ fn verified(
 #[test]
 fn actual_pending_successor_proof_preserves_receipt_lineage_and_ordinary_capture_still_refuses() {
     let fixture = SuccessorFixture::new();
-    fixture
-        .original
-        .validate_original_recovery(
-            &fixture.incumbent,
-            &fixture.recovery,
-            &mut operation_budget(),
-        )
-        .unwrap();
+    validate_original_recovery(
+        &fixture.original,
+        &fixture.incumbent,
+        &fixture.recovery,
+        &mut operation_budget(),
+    )
+    .unwrap();
     let ready = fixture.ready();
     let schema = ready.observed_pending_schema();
     assert!(matches!(
@@ -481,10 +598,10 @@ fn actual_pending_successor_proof_preserves_receipt_lineage_and_ordinary_capture
     ));
     assert!(matches!(
         try_capture(schema),
-        Err(SourceUpgradeInventoryError::SourceAuthoringPending)
+        Err(SourceInventoryError::SourceAuthoringPending)
     ));
     let open = fixture.future_open(schema, ready.basis());
-    let future = [SourceUpgradeOpenSource::Bound(&open)];
+    let future = [OpenSource::Bound(&open)];
     let mut budget = operation_budget();
     let proof = verified(&fixture, schema, &future, &mut budget).unwrap();
     assert!(Arc::ptr_eq(&proof.schema, schema));
@@ -527,6 +644,42 @@ fn actual_pending_successor_proof_preserves_receipt_lineage_and_ordinary_capture
         AuthoringProjectAdmissionHost::default().prepare(schema.project_root(), None),
         Err(AuthoringProjectAdmissionError::SourceAuthoringPending)
     ));
+}
+
+#[test]
+fn original_recovery_refuses_changed_explicit_native_admission() {
+    for path in [OPEN, CATALOGUED] {
+        let fixture = SuccessorFixture::new();
+        let actual = fixture
+            .original
+            .participants()
+            .find(|participant| participant.file().path() == path)
+            .unwrap();
+        let mut encoded: serde_json::Value =
+            serde_json::from_slice(fixture.recovery.encoded_bytes()).unwrap();
+        let member = encoded["payload"]["members"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|member| member["path"].as_str() == Some(path))
+            .unwrap();
+        member["explicit_native"] = (!actual.explicit_native()).into();
+        let recovery = SourceUpgradeRecovery::decode(
+            &serde_json::to_vec(&encoded).unwrap(),
+            SourceUpgradeRecoveryLimits::default(),
+            &mut operation_budget(),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_original_recovery(
+                &fixture.original,
+                &fixture.incumbent,
+                &recovery,
+                &mut operation_budget(),
+            ),
+            Err(SourceUpgradeInventoryError::RecoveryInventory),
+        ));
+    }
 }
 
 #[test]
@@ -582,7 +735,7 @@ fn confirmation_refuses_unopened_edits_late_other_profile_members_and_removals()
         if change == 2 {
             // Recorded members are read even when enumeration no longer discovers the leaf.
             assert!(
-                matches!(&error, SourceUpgradeInventoryError::Host(error) if is_missing(error)),
+                matches!(&error, SourceUpgradeInventoryError::Inventory(SourceInventoryError::Host(error)) if is_missing(error)),
                 "{change}: {error:?}"
             );
         } else {
@@ -635,7 +788,9 @@ fn confirmation_refuses_same_successor_bytes_at_a_different_leaf_identity() {
     let handles = budget.usage().retained_open_handles();
     assert!(matches!(
         proof.validate(schema, &fixture.recovery, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::MembershipChanged
+        ))
     ));
     assert_eq!(budget.usage().retained_open_handles(), handles);
 }
@@ -650,32 +805,32 @@ fn future_open_observations_are_exact_and_cannot_reuse_old_workspace_facts() {
         verified(
             &fixture,
             schema,
-            &[SourceUpgradeOpenSource::Bound(&old)],
+            &[OpenSource::Bound(&old)],
             &mut operation_budget()
         ),
-        Err(SourceUpgradeInventoryError::OpenSourceChanged)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::OpenSourceChanged
+        ))
     ));
     assert!(matches!(
         verified(
             &fixture,
             schema,
-            &[SourceUpgradeOpenSource::Unbound],
+            &[OpenSource::Unbound],
             &mut operation_budget()
         ),
-        Err(SourceUpgradeInventoryError::UnboundOpenSource)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::UnboundOpenSource
+        ))
     ));
     let future = fixture.future_open(schema, ready.basis());
     let mut budget = operation_budget();
-    let proof = verified(
-        &fixture,
-        schema,
-        &[SourceUpgradeOpenSource::Bound(&future)],
-        &mut budget,
-    )
-    .unwrap();
+    let proof = verified(&fixture, schema, &[OpenSource::Bound(&future)], &mut budget).unwrap();
     assert!(matches!(
         proof.validate(schema, &fixture.recovery, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::MembershipChanged
+        ))
     ));
     let bytes = fixture
         .recovery
@@ -690,10 +845,12 @@ fn future_open_observations_are_exact_and_cannot_reuse_old_workspace_facts() {
         proof.validate(
             schema,
             &fixture.recovery,
-            &[SourceUpgradeOpenSource::Bound(&future)],
+            &[OpenSource::Bound(&future)],
             &mut budget
         ),
-        Err(SourceUpgradeInventoryError::OpenSourceChanged)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::OpenSourceChanged
+        ))
     ));
 }
 
@@ -781,7 +938,7 @@ fn repeated_successful_and_refused_confirmation_releases_only_temporary_retentio
         assert!(matches!(
             proof.validate(schema, &fixture.recovery, &[], &mut budget),
             Err(SourceUpgradeInventoryError::RecoveryInventory
-                | SourceUpgradeInventoryError::MembershipChanged)
+                | SourceUpgradeInventoryError::Inventory(SourceInventoryError::MembershipChanged))
         ));
         assert_eq!(budget.usage().retained_candidate_bytes(), retained);
         assert_eq!(budget.usage().retained_open_handles(), handles);
@@ -801,7 +958,9 @@ fn confirmation_requires_the_same_pending_receipt_instead_of_equal_re_admitted_s
     assert_eq!(other.bundle_digest(), schema.bundle_digest());
     assert!(matches!(
         proof.validate(&other, &fixture.recovery, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::AuthorityChanged)
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::AuthorityChanged
+        ))
     ));
 }
 
@@ -851,18 +1010,50 @@ fn wrong_pending_operation_full_profile_configuration_universe_and_successor_bun
 }
 
 #[test]
+fn pending_authority_and_configuration_refuse_before_physical_member_reads() {
+    let fixture = SuccessorFixture::new();
+    let ready = fixture.ready();
+    let mut manifest =
+        ProjectManifest::parse_toml_bytes(ready.observed_pending_schema().manifest_bytes())
+            .manifest
+            .unwrap();
+    manifest.profiles.get_mut("other").unwrap().paths.scenes = Some("different/scenes".to_owned());
+    fixture.publish("nara.toml", &manifest.to_canonical_toml_bytes().unwrap());
+    let observed = fixture.conflicting_pending_observation();
+    fs::remove_file(fixture.project.root.join(CLOSED)).unwrap();
+    let mut budget = operation_budget();
+    let before = budget.usage();
+    assert!(matches!(
+        verified(&fixture, &observed, &[], &mut budget),
+        Err(SourceUpgradeInventoryError::RecoveryInventory)
+    ));
+    assert_eq!(
+        budget.usage().retained_candidate_bytes(),
+        before.retained_candidate_bytes()
+    );
+    assert_eq!(
+        budget.usage().retained_open_handles(),
+        before.retained_open_handles()
+    );
+    assert!(budget.usage().decode_work() > before.decode_work());
+}
+
+#[test]
 fn comparison_work_is_admitted_before_original_recovery_body_comparisons() {
     let fixture = SuccessorFixture::new();
     let mut budget = operation_budget();
     budget.limits.decode_work = nara_core::ItemLimit::new(1).unwrap();
     assert!(matches!(
-        fixture.original.validate_original_recovery(
+        validate_original_recovery(
+            &fixture.original,
             &fixture.incumbent,
             &fixture.recovery,
             &mut budget
         ),
-        Err(SourceUpgradeInventoryError::Admission(
-            AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::Admission(
+                AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+            )
         ))
     ));
 }
@@ -882,14 +1073,13 @@ fn complete_metadata_comparison_uses_exact_sidecar_membership_when_source_order_
         .map(|metadata| metadata.path.as_str())
         .collect();
     assert_ne!(inventory_paths, recovery_paths);
-    fixture
-        .original
-        .validate_original_recovery(
-            &fixture.incumbent,
-            &fixture.recovery,
-            &mut operation_budget(),
-        )
-        .unwrap();
+    validate_original_recovery(
+        &fixture.original,
+        &fixture.incumbent,
+        &fixture.recovery,
+        &mut operation_budget(),
+    )
+    .unwrap();
     let ready = fixture.ready();
     let mut budget = operation_budget();
     let proof = verified(&fixture, ready.observed_pending_schema(), &[], &mut budget).unwrap();
@@ -913,8 +1103,10 @@ fn failed_successor_capture_refunds_storage_and_preserves_cumulative_work() {
     budget.limits.decode_work = nara_core::ItemLimit::new(1).unwrap();
     assert!(matches!(
         verified(&fixture, schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::Admission(
-            AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+        Err(SourceUpgradeInventoryError::Inventory(
+            SourceInventoryError::Admission(
+                AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+            )
         ))
     ));
     assert_eq!(budget.usage().retained_candidate_bytes(), retained);

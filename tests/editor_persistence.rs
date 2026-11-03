@@ -175,8 +175,14 @@ fn persistence_commit_rejects_content_changed_outside_the_temporary_capability()
     let checkpoint = authority.capture(&workspace, document).unwrap();
 
     assert!(
-        EditorPersistenceCommit::from_publication(checkpoint, previous.identity(), receipt)
-            .is_none()
+        EditorPersistenceCommit::from_publication(
+            checkpoint
+                .encode(nara_scene::SceneFileEncoding::Json, Default::default())
+                .unwrap(),
+            previous.identity(),
+            receipt,
+        )
+        .is_err()
     );
     assert_eq!(fs::read(target_path).unwrap(), b"tampered");
 }

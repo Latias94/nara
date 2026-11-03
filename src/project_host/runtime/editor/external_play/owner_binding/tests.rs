@@ -3,7 +3,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nara_asset::{AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId};
 use nara_fs::ContentDigest;
+use nara_scene::SceneEntityId;
 use nara_tooling::{
     EditorExternalPlayObservation, EditorExternalPlayOutput, EditorExternalPlayState,
     EditorPlayCommand, EditorPlayRequestResult,
@@ -16,6 +18,9 @@ use crate::project_host::{
     },
 };
 
+use super::super::super::prefab_extraction::{
+    EditorPrefabExtractionError, EditorPrefabExtractionRequest,
+};
 use super::super::source_fact_tests::SourceReceiptProject;
 use super::*;
 
@@ -35,7 +40,13 @@ fn open(project: &SourceReceiptProject) -> EditorProjectSession {
 }
 
 fn with_sessions(test: impl FnOnce(&mut EditorProjectSession, &mut EditorProjectSession)) {
-    let project = SourceReceiptProject::new(&[]);
+    with_project_sessions(SourceReceiptProject::new(&[]), test);
+}
+
+fn with_project_sessions(
+    project: SourceReceiptProject,
+    test: impl FnOnce(&mut EditorProjectSession, &mut EditorProjectSession),
+) {
     let mut first = open(&project);
     let mut second = open(&project);
     let result = catch_unwind(AssertUnwindSafe(|| test(&mut first, &mut second)));
@@ -142,7 +153,7 @@ fn an_unattached_session_cannot_export_a_launch_or_accept_an_external_observatio
         .unwrap();
         assert!(session.take_external_play_request(&foreign).is_none());
         assert!(!session.apply_external_play_observation(&foreign, observation));
-        let operation = begin(session);
+        let operation = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(session));
         session
             .begin_supervised_play_retirement(operation, digest(b"unattached"))
             .unwrap();
@@ -160,7 +171,7 @@ fn retirement_requires_the_original_request_and_rejects_foreign_and_replayed_att
     with_sessions(|session, other| {
         let binding = session.register_supervised_play_owner(23).unwrap();
         let foreign = other.register_supervised_play_owner(23).unwrap();
-        let operation = begin(session);
+        let operation = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(session));
         let recovery_digest = digest(b"reviewed recovery");
         session
             .begin_supervised_play_retirement(operation, recovery_digest)
@@ -254,7 +265,7 @@ fn retirement_requires_the_original_request_and_rejects_foreign_and_replayed_att
 fn equal_source_bytes_with_a_new_nominal_schema_authority_cannot_satisfy_retirement() {
     with_sessions(|session, other| {
         let binding = session.register_supervised_play_owner(31).unwrap();
-        let operation = begin(session);
+        let operation = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(session));
         session
             .begin_supervised_play_retirement(operation, digest(b"schema custody"))
             .unwrap();
@@ -298,8 +309,8 @@ fn a_retirement_cannot_be_reused_for_another_live_operation_or_registration() {
     with_sessions(|session, other| {
         let binding = session.register_supervised_play_owner(41).unwrap();
         let foreign = other.register_supervised_play_owner(41).unwrap();
-        let operation = begin(session);
-        let foreign_operation = begin(other);
+        let operation = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(session));
+        let foreign_operation = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(other));
         let recovery_digest = digest(b"same recovery bytes");
         assert_eq!(
             session.begin_supervised_play_retirement(foreign_operation, recovery_digest),
@@ -342,12 +353,116 @@ fn a_retirement_cannot_be_reused_for_another_live_operation_or_registration() {
 }
 
 #[test]
+fn authored_upgrade_and_prefab_extraction_retirements_do_not_share_nominal_authority() {
+    let project = SourceReceiptProject::new(&[AssetRef::path("shared.prefab.json").unwrap()]);
+    with_project_sessions(project, |session, other| {
+        let binding = session.register_supervised_play_owner(47).unwrap();
+        let other_binding = other.register_supervised_play_owner(47).unwrap();
+        let upgrade = EditorSourceOperationId::AuthoredSchemaUpgrade(begin(session));
+        let document = other.workspace.active_document().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let extraction = loop {
+            let request = EditorPrefabExtractionRequest::new(
+                document,
+                SceneEntityId::new("instance-0").unwrap(),
+                AssetMetaIdentity::new(
+                    StableAssetId::parse_str("812b243a-3d27-4151-a2c0-41710fbcf42b").unwrap(),
+                    AssetPath::new("extracted.prefab.json").unwrap(),
+                    AssetSourceKind::Prefab,
+                ),
+            );
+            match other.begin_prefab_extraction(request) {
+                Ok(operation) => break EditorSourceOperationId::PrefabExtraction(operation),
+                Err(EditorPrefabExtractionError::Busy) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "initial source owners did not settle"
+                    );
+                    other.drive_editor_frame(Duration::ZERO);
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("extraction acceptance failed: {error:?}"),
+            }
+        };
+        let recovery_digest = digest(b"same recovery bytes across source operations");
+        assert_eq!(
+            session.begin_supervised_play_retirement(extraction, recovery_digest),
+            Err(EditorSupervisedPlayOwnerError::Operation)
+        );
+        assert_eq!(
+            other.begin_supervised_play_retirement(upgrade, recovery_digest),
+            Err(EditorSupervisedPlayOwnerError::Operation)
+        );
+        session
+            .begin_supervised_play_retirement(upgrade, recovery_digest)
+            .unwrap();
+        other
+            .begin_supervised_play_retirement(extraction, recovery_digest)
+            .unwrap();
+        let request = session
+            .supervised_play_retirement_request(&binding)
+            .unwrap()
+            .unwrap();
+        let other_request = other
+            .supervised_play_retirement_request(&other_binding)
+            .unwrap()
+            .unwrap();
+        assert_eq!(request.operation(), upgrade);
+        assert_eq!(other_request.operation(), extraction);
+        assert!(!request.is_same_request(&other_request));
+        assert!(
+            other_request.is_same_request(
+                &other
+                    .supervised_play_retirement_request(&other_binding)
+                    .unwrap()
+                    .unwrap()
+            )
+        );
+        let acknowledgment = binding.attest_retirement(request).unwrap();
+        let other_acknowledgment = other_binding.attest_retirement(other_request).unwrap();
+        for (session, binding, foreign_acknowledgment, operation) in [
+            (session, binding, other_acknowledgment, upgrade),
+            (other, other_binding, acknowledgment, extraction),
+        ] {
+            assert_eq!(
+                session.apply_supervised_play_retirement_ack(&binding, foreign_acknowledgment),
+                Err(EditorSupervisedPlayOwnerError::Request)
+            );
+            assert!(session.supervised_play_retirement_pending());
+            let acknowledgment = binding
+                .attest_retirement(
+                    session
+                        .supervised_play_retirement_request(&binding)
+                        .unwrap()
+                        .unwrap(),
+                )
+                .unwrap();
+            session
+                .apply_supervised_play_retirement_ack(&binding, acknowledgment)
+                .unwrap();
+            session.finish_supervised_play_retirement().unwrap();
+            assert!(match operation {
+                EditorSourceOperationId::AuthoredSchemaUpgrade(_) => {
+                    session.authored_schema_upgrade_view().writes_fenced
+                }
+                EditorSourceOperationId::PrefabExtraction(_) => {
+                    session.prefab_extraction_view().writes_fenced
+                }
+            });
+        }
+    });
+}
+
+#[test]
 fn the_original_binding_can_export_a_fresh_launch_after_acknowledged_cancellation() {
     with_sessions(|session, _| {
         let binding = session.register_supervised_play_owner(51).unwrap();
         let operation = begin(session);
         session
-            .begin_supervised_play_retirement(operation, digest(b"cancel recovery"))
+            .begin_supervised_play_retirement(
+                EditorSourceOperationId::AuthoredSchemaUpgrade(operation),
+                digest(b"cancel recovery"),
+            )
             .unwrap();
         let acknowledgment = binding
             .attest_retirement(

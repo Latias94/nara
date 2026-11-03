@@ -18,15 +18,15 @@ use super::{
     authoring_work::{Pending, WorkError},
     *,
 };
-use crate::project_host::authoring::{
-    AuthoredSchemaUpgradeHostLimits, AuthoredSourceUpgradePublication,
-    AuthoredSourceUpgradePublicationPhase, AuthoringProjectSourceAdmissionError,
-    PreparedAuthoredSchemaUpgradeReview, SourceUpgradeBaseline, SourceUpgradeOpenInput,
-    SourceUpgradePreparationError, SourceUpgradeProposalError, SourceUpgradeProposalFailure,
-};
 pub use crate::project_host::authoring::{
     AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeReview,
     AuthoredSchemaUpgradeReviewedSource, AuthoredSchemaUpgradeSourceProposal,
+};
+use crate::project_host::authoring::{
+    AuthoredSourceUpgradePublication, AuthoredSourceUpgradePublicationPhase,
+    AuthoringProjectSourceAdmissionError, AuthoringSourceOperationLimits,
+    PreparedAuthoredSchemaUpgradeReview, SourceUpgradeBaseline, SourceUpgradeOpenInput,
+    SourceUpgradePreparationError, SourceUpgradeProposalError, SourceUpgradeProposalFailure,
 };
 
 mod publication;
@@ -111,7 +111,7 @@ pub struct EditorAuthoredSchemaUpgradeView {
     pub work_pending: bool,
     pub writes_fenced: bool,
     /// Selected at acceptance and shared by capture, every proposal attempt and publication.
-    pub limits: AuthoredSchemaUpgradeHostLimits,
+    pub limits: AuthoringSourceOperationLimits,
     cancellation_allowed: bool,
     retry_allowed: bool,
 }
@@ -195,7 +195,7 @@ impl Default for EditorAuthoredSchemaUpgradeView {
             sources: 0,
             work_pending: false,
             writes_fenced: false,
-            limits: AuthoredSchemaUpgradeHostLimits::default(),
+            limits: AuthoringSourceOperationLimits::default(),
             cancellation_allowed: true,
             retry_allowed: false,
         }
@@ -350,14 +350,14 @@ impl EditorProjectSession {
     pub fn begin_authored_schema_upgrade(
         &mut self,
     ) -> Result<EditorAuthoredSchemaUpgradeId, EditorAuthoredSchemaUpgradeError> {
-        self.begin_authored_schema_upgrade_with_limits(AuthoredSchemaUpgradeHostLimits::default())
+        self.begin_authored_schema_upgrade_with_limits(AuthoringSourceOperationLimits::default())
     }
 
     /// Chooses finite Host work and native-handle ceilings before complete capture starts.
     /// Refusal never renews them. Retained memory and source preparation keep their own limits.
     pub fn begin_authored_schema_upgrade_with_limits(
         &mut self,
-        limits: AuthoredSchemaUpgradeHostLimits,
+        limits: AuthoringSourceOperationLimits,
     ) -> Result<EditorAuthoredSchemaUpgradeId, EditorAuthoredSchemaUpgradeError> {
         use EditorAuthoredSchemaUpgradeError as E;
         if !self.accepts_new_work() {
@@ -564,7 +564,10 @@ impl EditorProjectSession {
         }
         let digest = review.recovery_digest();
         if self
-            .begin_supervised_play_retirement(operation, digest)
+            .begin_supervised_play_retirement(
+                EditorSourceOperationId::AuthoredSchemaUpgrade(operation),
+                digest,
+            )
             .is_err()
         {
             self.authored_schema_upgrade.review = Some(review);
@@ -850,7 +853,7 @@ impl EditorProjectSession {
                 .and_then(|bytes| bytes.checked_add(source.checked_retained_bytes()?))
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
         }
-        let mut inputs = project.admit_authored_upgrade_inputs(
+        let mut inputs = project.admit_source_operation_inputs(
             host_bytes,
             worker_bytes,
             self.authored_schema_upgrade.view.limits.host_work(),

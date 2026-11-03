@@ -6,23 +6,46 @@ pub(crate) use adapter::compiled_authoring_adapters;
 mod bundle;
 pub(crate) mod document;
 pub(crate) mod native_source;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod pending_recovery;
 mod project;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use pending_recovery::{
+    PendingAuthoringRecoveryInspection, PendingAuthoringRecoveryInspectionError,
+    PendingAuthoringRecoveryInspectionErrorKind, PendingAuthoringRecoveryKind,
+    PendingAuthoringRecoveryUsage,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod publication_admission;
+mod schema_models;
+mod source_decode;
 mod source_index;
+mod source_inventory;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+mod source_operation_policy;
 mod source_upgrade_inventory;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 mod source_upgrade_policy;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 pub use project::{
     AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
-    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryMember,
-    AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
-    AuthoredSchemaUpgradeRecoveryReceipt, AuthoredSchemaUpgradeRecoveryReview,
-    AuthoredSchemaUpgradeRecoveryUsage, AuthoredSchemaUpgradeRecoveryView,
+    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryInspectionFailure,
+    AuthoredSchemaUpgradeRecoveryMember, AuthoredSchemaUpgradeRecoveryMemberState,
+    AuthoredSchemaUpgradeRecoveryPhase, AuthoredSchemaUpgradeRecoveryReceipt,
+    AuthoredSchemaUpgradeRecoveryReview, AuthoredSchemaUpgradeRecoveryUsage,
+    AuthoredSchemaUpgradeRecoveryView, PrefabExtractionRecovery,
+    PrefabExtractionRecoveryDestination, PrefabExtractionRecoveryErrorKind,
+    PrefabExtractionRecoveryFailure, PrefabExtractionRecoveryInspectionFailure,
+    PrefabExtractionRecoveryMember, PrefabExtractionRecoveryMemberDisposition,
+    PrefabExtractionRecoveryMemberState, PrefabExtractionRecoveryOutcome,
+    PrefabExtractionRecoveryPhase, PrefabExtractionRecoveryReview, PrefabExtractionRecoveryUsage,
+    PrefabExtractionRecoveryView,
 };
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
-pub use source_upgrade_policy::{
-    AuthoredSchemaUpgradeHistoryPolicy, AuthoredSchemaUpgradeHostLimits,
-};
+pub use source_operation_policy::AuthoringSourceOperationLimits;
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use source_upgrade_policy::AuthoredSchemaUpgradeHistoryPolicy;
+mod recovery_storage;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 mod source_upgrade_publication;
 #[cfg(any(feature = "tooling", feature = "project-tooling", test))]
@@ -48,21 +71,29 @@ pub use project::{
 pub(crate) use project::{
     AuthoredSourceUpgradeObservedFile, AuthoredSourceUpgradePublication,
     AuthoredSourceUpgradePublicationFailure, AuthoredSourceUpgradePublicationPhase,
-    PreparedAuthoredSchemaUpgradeReview, SourceUpgradeBaseline, SourceUpgradeCaptureRequest,
-    SourceUpgradeOpenInput, SourceUpgradePreparationError, SourceUpgradeProposalError,
-    SourceUpgradeProposalFailure,
+    PrefabExtractionCaptureRequest, PrefabExtractionOpenInput,
+    PrefabExtractionPersistenceDestination, PrefabExtractionReviewRequest,
+    PrefabExtractionReviewRevisionRequest, PrefabExtractionSessionInstallation,
+    PrefabExtractionSessionPreparationError, PrefabExtractionSessionPreparationFailure,
+    PrefabExtractionSessionPublication, PrefabExtractionSessionPublicationError,
+    PrefabExtractionSessionPublicationPhase, PrefabExtractionTarget,
+    PreparedAuthoredSchemaUpgradeReview, PreparedPrefabExtractionSessionReview,
+    ProjectPrefabExtractionOutput, ProjectPrefabExtractionOutputEncoding, SourceUpgradeBaseline,
+    SourceUpgradeCaptureRequest, SourceUpgradeOpenInput, SourceUpgradePreparationError,
+    SourceUpgradeProposalError, SourceUpgradeProposalFailure,
 };
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
     AuthoringAssetSource, AuthoringDocumentCapture, AuthoringPrefabSessionSnapshot,
     AuthoringPrefabSourceCapture, AuthoringProjectCandidate, AuthoringProjectReadiness,
-    AuthoringProjectReceipt, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
-    AuthoringProjectSourceAdmissionError, AuthoringSceneSessionSnapshot,
+    AuthoringProjectReceipt, AuthoringProjectSnapshot, AuthoringSceneSessionSnapshot,
     AuthoringSchemaOwnerProjectInput, AuthoringSourceCaptureInputs, AuthoringSourceKind,
     AuthoringSourceValidation, CapturedAuthoringPreview, PreparedAuthoringProject,
     PreparedSchemaOwnerProject, PreparedSchemaOwnerSceneCapture,
     SchemaOwnerObservedProjectAttachmentFailure, SchemaOwnerProjectAttachmentFailure,
 };
+#[cfg(any(feature = "tooling", feature = "project-tooling", test))]
+pub(crate) use project::{AuthoringProjectSessionSnapshot, AuthoringProjectSourceAdmissionError};
 
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITIES: usize = 4_096;
 pub(crate) const MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES: usize = 2 * 1024 * 1024;
@@ -383,7 +414,7 @@ impl AuthoringProjectAdmissionBudget {
 
     /// Starts a new authored operation's work meter once. Existing admitted content, storage
     /// and native custody remain charged; a proposal retry continues the returned budget.
-    fn for_authored_upgrade(mut self, work_limit: ItemLimit, open_handles: ItemLimit) -> Self {
+    fn for_source_operation(mut self, work_limit: ItemLimit, open_handles: ItemLimit) -> Self {
         self.limits.decode_work = work_limit;
         self.limits.peak_open_handles = open_handles;
         self.decode_work = 0;
@@ -752,7 +783,7 @@ impl AuthoringProjectAdmissionHost {
 }
 
 struct AdmittedAuthoringManifest {
-    // Only the private authored-upgrade publisher prepares an empty slot. It never exposes
+    // Only a private source-operation publisher prepares an empty slot. It never exposes
     // its ordinary receipt until its own confirmed publication fills this slot.
     capability: OnceLock<FileCapability>,
     bytes: Arc<[u8]>,
@@ -1037,7 +1068,7 @@ impl Display for AuthoringProjectAdmissionError {
             Self::ManifestInvalid { .. } => formatter.write_str("project manifest is invalid"),
             Self::Profile(_) => formatter.write_str("project profile could not be resolved"),
             Self::SourceAuthoringPending => {
-                formatter.write_str("project sources have an unfinished authored upgrade")
+                formatter.write_str("project sources have an unfinished source-authoring operation")
             }
             Self::MissingSchemaBundle => {
                 formatter.write_str("project manifest does not declare an authoring schema bundle")

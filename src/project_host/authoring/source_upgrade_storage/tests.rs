@@ -1,13 +1,20 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use nara_asset::AssetSourcePath;
 use nara_core::ItemLimit;
-use nara_project::ProjectAuthoringRecoveryDigest;
+use nara_fs::{ContentDigest, DirectoryCapability, RelativePath};
+use nara_project::{
+    DEFAULT_MANIFEST_BYTE_LIMIT, ProjectAuthoringRecovery, ProjectAuthoringRecoveryDigest,
+    ProjectAuthoringState, ProjectManifest, ProjectPath,
+};
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
     ComponentFieldPath, ComponentFieldSchema, ComponentPropertyPath, ComponentPropertyStep,
@@ -16,10 +23,16 @@ use nara_reflect::{
 };
 use nara_scene::{SceneDocument, SourceDocumentKey, SourceDocumentKind};
 
+use super::super::recovery_storage::*;
 use super::*;
+use crate::project_host::file_publication::{
+    FilePublicationFailureStage, FilePublicationHost, FilePublicationOutcome,
+    FilePublicationRejection,
+};
 use crate::{
     project_host::authoring::{
-        AuthoringProjectAdmissionHost, AuthoringProjectAdmissionLimits,
+        AuthoringProjectAdmissionError, AuthoringProjectAdmissionHost,
+        AuthoringProjectAdmissionLimits, PROJECT_MANIFEST_PATH,
         source_upgrade_recovery::{
             RecoverySourceEncoding, SourceUpgradeRecoveryInput, SourceUpgradeRecoveryMemberInput,
             SourceUpgradeRecoveryRootInput,
@@ -107,6 +120,7 @@ impl Fixture {
         );
         SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: None,
                 old_ready_manifest: &self.manifest,
                 future_ready_manifest: &self.future_manifest,
                 bundle_path: BUNDLE_PATH,
@@ -122,6 +136,7 @@ impl Fixture {
                     path: SOURCE_PATH,
                     key: &key,
                     encoding: RecoverySourceEncoding::Json,
+                    explicit_native: false,
                     old_disk: &self.scene,
                     reviewed_working: &self.scene,
                     successor: &self.scene,
@@ -149,7 +164,10 @@ impl Fixture {
         .unwrap()
     }
 
-    fn prepare(&self, budget: &mut AuthoringProjectAdmissionBudget) -> PreparedRecoveryStorage {
+    fn prepare(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> PreparedRecoveryStorage<SourceUpgradeRecovery> {
         let recovery = self.package(budget);
         RecoveryStorageHost::capture(self.root.share(), budget)
             .unwrap()
@@ -161,11 +179,17 @@ impl Fixture {
             .unwrap()
     }
 
-    fn stored(&self, budget: &mut AuthoringProjectAdmissionBudget) -> StoredRecovery {
+    fn stored(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> StoredRecovery<SourceUpgradeRecovery> {
         stored(self.prepare(budget).publish(budget))
     }
 
-    fn pending(&self, budget: &mut AuthoringProjectAdmissionBudget) -> PendingRecoveryStorage {
+    fn pending(
+        &self,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> PendingRecoveryStorage<SourceUpgradeRecovery> {
         pending(
             self.stored(budget)
                 .bind_pending(budget)
@@ -309,7 +333,9 @@ fn budget() -> AuthoringProjectAdmissionBudget {
     AuthoringProjectAdmissionBudget::new(AuthoringProjectAdmissionLimits::default())
 }
 
-fn stored(outcome: RecoveryStoragePublication) -> StoredRecovery {
+fn stored(
+    outcome: RecoveryStoragePublication<SourceUpgradeRecovery>,
+) -> StoredRecovery<SourceUpgradeRecovery> {
     match outcome {
         RecoveryStoragePublication::Published(stored) => stored,
         RecoveryStoragePublication::Refused { error, .. } => panic!("package refused: {error:?}"),
@@ -323,7 +349,9 @@ fn stored(outcome: RecoveryStoragePublication) -> StoredRecovery {
     }
 }
 
-fn pending(outcome: RecoveryPendingPublication) -> PendingRecoveryStorage {
+fn pending(
+    outcome: RecoveryPendingPublication<SourceUpgradeRecovery>,
+) -> PendingRecoveryStorage<SourceUpgradeRecovery> {
     match outcome {
         RecoveryPendingPublication::Published(pending) => pending,
         RecoveryPendingPublication::Refused { error, .. } => panic!("Pending refused: {error:?}"),
@@ -334,6 +362,111 @@ fn pending(outcome: RecoveryPendingPublication) -> PendingRecoveryStorage {
         RecoveryPendingPublication::Uncertain { publication, .. } => {
             panic!("Pending uncertain: {publication:?}")
         }
+    }
+}
+
+struct WrongCommitment(Arc<SourceUpgradeRecovery>);
+
+impl RecoveryPackageData for WrongCommitment {
+    fn encoded_bytes(&self) -> &[u8] {
+        self.0.encoded_bytes()
+    }
+    fn digest(&self) -> ProjectAuthoringRecoveryDigest {
+        let digest = self.0.digest();
+        let mut bytes = *digest.as_bytes();
+        bytes[0] ^= 1;
+        ProjectAuthoringRecoveryDigest::from_parts(digest.length(), bytes)
+    }
+    fn source_universe(&self) -> SourceUniverseId {
+        self.0.source_universe()
+    }
+    fn old_ready_manifest(&self) -> &[u8] {
+        self.0.manifest().old_disk.bytes()
+    }
+    fn final_ready_manifest(&self) -> &[u8] {
+        self.0.manifest().successor.bytes()
+    }
+    fn protected_paths(&self) -> impl Iterator<Item = &str> {
+        self.0.protected_paths()
+    }
+}
+
+#[test]
+fn transport_rechecks_projected_commitments_before_writes_or_raw_capture_transfer() {
+    for fresh in [false, true] {
+        let fixture = Fixture::new();
+        let mut work = budget();
+        if fresh {
+            drop(fixture.pending(&mut work));
+            let loaded = RecoveryStorageHost::load_pending(
+                fixture.root.share(),
+                SourceUpgradeRecoveryLimits::default().encoded_bytes,
+                &mut work,
+            )
+            .unwrap();
+            let package = SourceUpgradeRecovery::decode(
+                loaded.encoded_bytes(),
+                Default::default(),
+                &mut work,
+            )
+            .unwrap()
+            .into_shared(&mut work)
+            .unwrap();
+            work.charge_source_bytes(0, 0, 0, 4 * std::mem::size_of::<usize>())
+                .unwrap();
+            let wrong = Arc::new(WrongCommitment(package));
+            let original = Arc::as_ptr(&wrong);
+            let encoded = loaded.encoded_bytes().as_ptr();
+            let before = work.usage();
+            let Err(failure) = loaded.bind(wrong, &mut work) else {
+                panic!("a projected digest cannot replace the actual Pending commitment")
+            };
+            assert!(matches!(
+                failure.error,
+                RecoveryStorageError::PackageDigestMismatch
+            ));
+            assert_eq!(Arc::as_ptr(&failure.recovery), original);
+            assert_eq!(failure.loaded.encoded_bytes().as_ptr(), encoded);
+            assert_eq!(
+                work.usage().retained_candidate_bytes(),
+                before.retained_candidate_bytes()
+            );
+            assert_eq!(
+                work.usage().retained_open_handles(),
+                before.retained_open_handles()
+            );
+            assert!(work.usage().decode_work() > before.decode_work());
+        } else {
+            let package = fixture.package(&mut work).into_shared(&mut work).unwrap();
+            work.charge_source_bytes(0, 0, 0, 4 * std::mem::size_of::<usize>())
+                .unwrap();
+            let wrong = Arc::new(WrongCommitment(package));
+            let original = Arc::as_ptr(&wrong);
+            let host = RecoveryStorageHost::capture(fixture.root.share(), &mut work).unwrap();
+            let before = work.usage();
+            let Err(failure) =
+                host.prepare(wrong, ProjectPath::new(RECOVERY_PATH).unwrap(), &mut work)
+            else {
+                panic!("fixed bytes must match their commitment before publishing recovery data")
+            };
+            assert!(matches!(
+                failure.error,
+                RecoveryStorageError::PackageDigestMismatch
+            ));
+            assert_eq!(Arc::as_ptr(&failure.recovery), original);
+            assert_eq!(
+                work.usage().retained_candidate_bytes(),
+                before.retained_candidate_bytes()
+            );
+            assert_eq!(
+                work.usage().retained_open_handles(),
+                before.retained_open_handles()
+            );
+            assert!(work.usage().decode_work() > before.decode_work());
+            fixture.assert_original_ready();
+            assert!(!fixture.directory.join(RECOVERY_PATH).exists());
+        }
+        fixture.assert_original_sources();
     }
 }
 
@@ -416,7 +549,7 @@ fn actual_package_precedes_pending_and_fresh_capabilities_read_the_same_operatio
     // with this session. It yields read observations, never old publication receipts.
     let fresh_root = host_fs::writable_directory(&fixture.directory).unwrap();
     assert_ne!(fresh_root.identity(), original_session);
-    let reopened = RecoveryStorageHost::load_pending(
+    let reopened = load_pending(
         fresh_root,
         SourceUpgradeRecoveryLimits::default(),
         &mut budget(),
@@ -447,12 +580,14 @@ fn dropping_before_pending_preserves_ready_and_keeps_the_published_package() {
         digest
     );
     assert!(matches!(
-        RecoveryStorageHost::load_pending(
+        load_pending(
             fixture.root.share(),
             SourceUpgradeRecoveryLimits::default(),
             &mut budget()
         ),
-        Err(RecoveryStorageError::PendingRequired)
+        Err(SourceUpgradeStorageError::Storage(
+            RecoveryStorageError::PendingRequired
+        ))
     ));
 }
 
@@ -604,7 +739,7 @@ fn preparation_returns_incumbents_after_late_refusal_and_retries_the_same_shared
         let _other_owner = shared_elsewhere.then(|| Arc::clone(&recovery));
         let original = Arc::as_ptr(&recovery);
         let digest = recovery.digest();
-        let ready_identity = host.ready_file.identity();
+        let ready_identity = host.test_ready_observation().0.identity();
         let mut path = ProjectPath::new(RECOVERY_PATH).unwrap();
         let original_path = path.as_str().as_ptr();
         let before = work.usage();
@@ -623,8 +758,11 @@ fn preparation_returns_incumbents_after_late_refusal_and_retries_the_same_shared
                 1 + usize::from(shared_elsewhere)
             );
             assert_eq!(refusal.recovery.digest(), digest);
-            assert_eq!(refusal.host.ready_file.identity(), ready_identity);
-            assert_eq!(refusal.host.ready_bytes, fixture.manifest);
+            assert_eq!(
+                refusal.host.test_ready_observation().0.identity(),
+                ready_identity
+            );
+            assert_eq!(refusal.host.test_ready_observation().1, fixture.manifest);
             assert_eq!(refusal.path.as_str().as_ptr(), original_path);
             assert_eq!(
                 work.usage().retained_candidate_bytes(),
@@ -641,9 +779,9 @@ fn preparation_returns_incumbents_after_late_refusal_and_retries_the_same_shared
         }
         fs::remove_file(fixture.directory.join(RECOVERY_PATH)).unwrap();
         let prepared = host.prepare(recovery, path, &mut work).unwrap();
-        assert_eq!(Arc::as_ptr(&prepared.recovery), original);
-        assert_eq!(prepared.recovery.digest(), digest);
-        assert_eq!(prepared.host.ready_file.identity(), ready_identity);
+        assert_eq!(std::ptr::from_ref(prepared.recovery()), original);
+        assert_eq!(prepared.recovery().digest(), digest);
+        assert_eq!(prepared.test_ready_identity(), ready_identity);
         assert_eq!(
             work.usage().retained_open_handles(),
             before.retained_open_handles() + 2
@@ -711,7 +849,7 @@ fn preparation_capacity_refusals_return_live_inputs_without_refunding_their_stor
         work.limits.retained_candidate_bytes = byte_limit;
         work.limits.peak_open_handles = handle_limit;
         let prepared = host.prepare(recovery, path, &mut work).unwrap();
-        assert_eq!(Arc::as_ptr(&prepared.recovery), original);
+        assert_eq!(std::ptr::from_ref(prepared.recovery()), original);
         fixture.assert_original_ready();
     }
 }
@@ -895,7 +1033,10 @@ fn late_ready_edit_or_same_byte_replacement_refuses_bound_pending_publication() 
             if change == 2 {
                 // Exercise an actually grown leaf without manufacturing a race between owner
                 // checks. Verification's read bound belongs to FilePublicationHost's tests.
-                external.resize(manifest_limit(), b' ');
+                external.resize(
+                    usize::try_from(nara_project::DEFAULT_MANIFEST_BYTE_LIMIT).unwrap(),
+                    b' ',
+                );
             } else {
                 external.extend_from_slice(b"\n# External Ready bytes\n");
             }
@@ -946,7 +1087,7 @@ fn package_write_failure_preserves_ready_and_keeps_cleanup_custody() {
     let fixture = Fixture::new();
     let mut work = budget();
     let mut prepared = fixture.prepare(&mut work);
-    let cleanup = prepared.publisher.test_fail_after_write();
+    let cleanup = prepared.test_fail_after_write();
     let RecoveryStoragePublication::Failed {
         mut prepared,
         stage: FilePublicationFailureStage::WriteTemporary,
@@ -968,7 +1109,7 @@ fn pending_write_failure_preserves_ready_and_the_confirmed_recovery() {
     let fixture = Fixture::new();
     let mut work = budget();
     let mut bound = fixture.stored(&mut work).bind_pending(&mut work).unwrap();
-    let cleanup = bound.publisher.test_fail_after_write();
+    let cleanup = bound.test_fail_after_write();
     let RecoveryPendingPublication::Failed {
         mut pending,
         stage: FilePublicationFailureStage::WriteTemporary,
@@ -980,7 +1121,7 @@ fn pending_write_failure_preserves_ready_and_the_confirmed_recovery() {
     assert!(!pending.retry_cleanup());
     fixture.assert_original_ready();
     assert_eq!(
-        pending.stored.digest(),
+        pending.recovery_digest(),
         ContentDigest::of_bytes(&fs::read(fixture.directory.join(RECOVERY_PATH)).unwrap())
     );
     cleanup.release();
@@ -1005,7 +1146,7 @@ fn fresh_pending_read_refuses_missing_or_digest_mismatched_recovery_specifically
         let retained_before = work.usage().retained_candidate_bytes();
         for _ in 0..3 {
             let before = work.usage();
-            let actual = RecoveryStorageHost::load_pending(
+            let actual = load_pending(
                 host_fs::writable_directory(&fixture.directory).unwrap(),
                 SourceUpgradeRecoveryLimits::default(),
                 &mut work,
@@ -1013,15 +1154,15 @@ fn fresh_pending_read_refuses_missing_or_digest_mismatched_recovery_specifically
             if corrupt {
                 assert!(matches!(
                     actual,
-                    Err(RecoveryStorageError::Recovery(
-                        SourceUpgradeRecoveryError::PendingDigestMismatch
+                    Err(SourceUpgradeStorageError::Storage(
+                        RecoveryStorageError::PackageDigestMismatch
                     ))
                 ));
             } else {
                 assert!(matches!(
                     actual,
-                    Err(RecoveryStorageError::Recovery(
-                        SourceUpgradeRecoveryError::PendingMissing
+                    Err(SourceUpgradeStorageError::Storage(
+                        RecoveryStorageError::PackageMissing
                     ))
                 ));
             }
@@ -1082,7 +1223,7 @@ fn fresh_read_uses_the_actual_reference_and_refuses_changed_configuration() {
         let mut work = budget();
         work.charge_source_bytes(0, 0, 0, 128).unwrap();
         let before = work.usage();
-        let actual = RecoveryStorageHost::load_pending(
+        let actual = load_pending(
             host_fs::writable_directory(&fixture.directory).unwrap(),
             SourceUpgradeRecoveryLimits::default(),
             &mut work,
@@ -1090,19 +1231,21 @@ fn fresh_read_uses_the_actual_reference_and_refuses_changed_configuration() {
         match change {
             0 => assert!(matches!(
                 actual,
-                Err(RecoveryStorageError::Recovery(
-                    SourceUpgradeRecoveryError::PendingMissing
+                Err(SourceUpgradeStorageError::Storage(
+                    RecoveryStorageError::PackageMissing
                 ))
             )),
             1 => assert!(matches!(
                 actual,
-                Err(RecoveryStorageError::Recovery(
-                    SourceUpgradeRecoveryError::PendingDigestMismatch
+                Err(SourceUpgradeStorageError::Storage(
+                    RecoveryStorageError::PackageDigestMismatch
                 ))
             )),
             _ => assert!(matches!(
                 actual,
-                Err(RecoveryStorageError::ConfigurationMismatch)
+                Err(SourceUpgradeStorageError::Storage(
+                    RecoveryStorageError::ConfigurationMismatch
+                ))
             )),
         }
         assert_eq!(
@@ -1123,13 +1266,15 @@ fn pending_read_admission_refusal_releases_retention_without_refunding_work() {
     work.limits.decode_work = ItemLimit::new(1).unwrap();
     let before = work.usage();
     assert!(matches!(
-        RecoveryStorageHost::load_pending(
+        load_pending(
             fixture.root.share(),
             SourceUpgradeRecoveryLimits::default(),
             &mut work,
         ),
-        Err(RecoveryStorageError::Admission(
-            AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+        Err(SourceUpgradeStorageError::Storage(
+            RecoveryStorageError::Admission(
+                AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+            )
         ))
     ));
     assert_eq!(
@@ -1155,7 +1300,7 @@ fn successful_pending_read_keeps_its_observations_reserved() {
     let mut work = budget();
     work.charge_source_bytes(0, 0, 0, 128).unwrap();
     let before = work.usage();
-    let observed = RecoveryStorageHost::load_pending(
+    let observed = load_pending(
         fixture.root.share(),
         SourceUpgradeRecoveryLimits::default(),
         &mut work,
@@ -1188,7 +1333,7 @@ fn successful_pending_read_keeps_its_observations_reserved() {
 fn fresh_read_custody_refuses_a_later_same_byte_manifest_replacement() {
     let fixture = Fixture::new();
     drop(fixture.pending(&mut budget()));
-    let observed = RecoveryStorageHost::load_pending(
+    let observed = load_pending(
         fixture.root.share(),
         SourceUpgradeRecoveryLimits::default(),
         &mut budget(),

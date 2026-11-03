@@ -16,7 +16,7 @@ use nara_engine::{
     fs::{CapabilityRights, DirectoryCapability, FileCapability, HostCapabilityOptions, TrustMode},
     project::{ProjectAuthoringState, ProjectManifest},
     project_host::{
-        AuthoredSchemaUpgradeHostLimits, EditorProjectOpenFailure, EditorProjectOpenHost,
+        AuthoringSourceOperationLimits, EditorProjectOpenFailure, EditorProjectOpenHost,
         EditorProjectOpenProgress,
     },
 };
@@ -330,7 +330,7 @@ fn produce_pending(container: &Path, product_ready: bool) -> ! {
     let (mut editor, documents) = open_dirty(&project);
     let operation = editor
         .begin_authored_schema_upgrade_with_limits(
-            AuthoredSchemaUpgradeHostLimits::default()
+            AuthoringSourceOperationLimits::default()
                 .with_host_work(ItemLimit::new(200_000_000).unwrap())
                 .with_open_handles(ItemLimit::new(128).unwrap()),
         )
@@ -442,7 +442,7 @@ fn child_entry() {
                 .expect("ordinary Open must refuse Pending");
             assert!(
                 failure.diagnostics().iter().any(|diagnostic| {
-                    diagnostic.code().as_str() == "project.editor.authored-upgrade-pending"
+                    diagnostic.code().as_str() == "project.editor.source-authoring-pending"
                 }),
                 "{:?}",
                 failure.diagnostics(),

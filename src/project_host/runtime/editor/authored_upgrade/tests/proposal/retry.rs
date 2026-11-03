@@ -3,7 +3,7 @@
 use super::*;
 use crate::project_host::runtime::editor::authored_upgrade::Work;
 use crate::project_host::{
-    AuthoredSchemaUpgradeHostLimits,
+    AuthoringSourceOperationLimits,
     authoring::{
         AuthoredSourceUpgradePublication, AuthoredSourceUpgradePublicationFailure,
         AuthoredSourceUpgradePublicationPhase,
@@ -11,14 +11,14 @@ use crate::project_host::{
     file_publication::{FilePublicationFailureStage, FilePublicationRejection},
 };
 
-fn limits() -> AuthoredSchemaUpgradeHostLimits {
-    AuthoredSchemaUpgradeHostLimits::default()
+fn limits() -> AuthoringSourceOperationLimits {
+    AuthoringSourceOperationLimits::default()
         .with_open_handles(nara_core::ItemLimit::new(128).unwrap())
 }
 
 fn prepare(
     editor: &mut EditorProjectSession,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
 ) -> EditorAuthoredSchemaUpgradeId {
     let operation = editor
         .begin_authored_schema_upgrade_with_limits(limits)
@@ -262,7 +262,7 @@ fn source_cleanup_retry_adopts_the_reviewed_dirty_and_closed_sources_and_new_his
 #[cfg(windows)]
 fn failed_source(
     fixture: &Fixture,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
 ) -> (
     EditorProjectSession,
     EditorAuthoredSchemaUpgradeId,

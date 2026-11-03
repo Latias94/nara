@@ -25,9 +25,8 @@ use nara_tooling::{
 
 use super::super::{
     document::{self, AuthoringDocumentSourceFact},
-    source_upgrade_inventory::{
-        SourceUpgradeInventory, SourceUpgradeInventoryError, SourceUpgradeOpenSource,
-    },
+    source_inventory::{OpenSource, SourceInventory, SourceInventoryError},
+    source_upgrade_inventory::{SourceUpgradeInventoryError, validate_original_recovery},
     source_upgrade_ready::PreparedSourceUpgradeSchema,
     source_upgrade_recovery::{RecoveryMember, RecoverySourceEncoding, SourceUpgradeRecovery},
 };
@@ -70,7 +69,7 @@ struct OpenDocument {
 /// Source/history successors only. Actual saved leaves and Ready adoption remain unbound.
 pub(crate) struct PreparedAuthoredSourceUpgrade {
     schema: Arc<AuthoringSchemaReceipt>,
-    inventory: SourceUpgradeInventory,
+    inventory: SourceInventory,
     input: EditorWorkspaceAuthoredSchemaUpgradeInput,
     recovery: Arc<SourceUpgradeRecovery>,
     workspace: PreparedEditorWorkspaceAuthoredSchemaUpgrade,
@@ -82,7 +81,7 @@ pub(crate) struct PreparedAuthoredSourceUpgrade {
 /// Refusal keeps the reviewed corpus, frozen Workspace inputs and their original charged custody.
 /// The caller may correct the proposal without reading another baseline or refunding live inputs.
 pub(in crate::project_host::authoring) struct SourceUpgradePreparationFailure {
-    pub(in crate::project_host::authoring) inventory: SourceUpgradeInventory,
+    pub(in crate::project_host::authoring) inventory: SourceInventory,
     pub(in crate::project_host::authoring) input: EditorWorkspaceAuthoredSchemaUpgradeInput,
     pub(in crate::project_host::authoring) error: SourceUpgradePreparationError,
 }
@@ -185,7 +184,7 @@ impl PreparedAuthoredSourceUpgrade {
         schema: &Arc<AuthoringSchemaReceipt>,
         selected: &PreparedSourceUpgradeSchema,
         recovery: &Arc<SourceUpgradeRecovery>,
-        inventory: SourceUpgradeInventory,
+        inventory: SourceInventory,
         input: EditorWorkspaceAuthoredSchemaUpgradeInput,
         complete_open: &[SourceUpgradeOpenDocument<'_>],
         budget: &mut AuthoringProjectAdmissionBudget,
@@ -245,7 +244,7 @@ impl PreparedAuthoredSourceUpgrade {
         schema: &Arc<AuthoringSchemaReceipt>,
         selected: &PreparedSourceUpgradeSchema,
         recovery: &Arc<SourceUpgradeRecovery>,
-        inventory: &SourceUpgradeInventory,
+        inventory: &SourceInventory,
         workspace: &EditorWorkspaceAuthoredSchemaUpgradeInput,
         complete_open: &[SourceUpgradeOpenDocument<'_>],
         budget: &mut AuthoringProjectAdmissionBudget,
@@ -264,14 +263,11 @@ impl PreparedAuthoredSourceUpgrade {
         let inventory_inputs = inventory_inputs(complete_open, budget)?;
         let inventory_result =
             inventory.validate_preparation_inputs(schema, &inventory_inputs, budget);
-        let input_bytes = checked_product(
-            inventory_inputs.len(),
-            size_of::<SourceUpgradeOpenSource<'_>>(),
-        )?;
+        let input_bytes = checked_product(inventory_inputs.len(), size_of::<OpenSource<'_>>())?;
         drop(inventory_inputs);
         budget.reconcile_retained_reservation(input_bytes, 0)?;
         inventory_result?;
-        inventory.validate_original_recovery(&schema, &recovery, budget)?;
+        validate_original_recovery(inventory, &schema, &recovery, budget)?;
         let scene_limits = inventory.scene_limits();
         let slots = checked_product(
             inventory.participants().len(),
@@ -294,7 +290,13 @@ impl PreparedAuthoredSourceUpgrade {
                 .map(|index| &open[index]);
             if let Some(selected) = selected {
                 validate_working_copy(workspace, selected, member, scene_limits, budget)?;
-                let tree = decode_source(member, member.successor.bytes(), scene_limits, budget)?;
+                let tree = decode_source(
+                    member.key.kind(),
+                    member.encoding.into(),
+                    member.successor.bytes(),
+                    scene_limits,
+                    budget,
+                )?;
                 let binding = workspace
                     .document_source_binding(selected.document)
                     .ok_or(SourceUpgradePreparationError::OpenSet)?;
@@ -324,9 +326,16 @@ impl PreparedAuthoredSourceUpgrade {
             } else {
                 // A live review cannot introduce a dirty working copy for a closed source.
                 // Fresh-process recovery has its own explicit restoration/adoption operation.
-                let tree = decode_source(member, member.old_disk.bytes(), scene_limits, budget)?;
+                let tree = decode_source(
+                    member.key.kind(),
+                    member.encoding.into(),
+                    member.old_disk.bytes(),
+                    scene_limits,
+                    budget,
+                )?;
                 let reviewed = decode_source(
-                    member,
+                    member.key.kind(),
+                    member.encoding.into(),
                     member.reviewed_working.bytes(),
                     scene_limits,
                     budget,
@@ -379,7 +388,13 @@ impl PreparedAuthoredSourceUpgrade {
         let mut prepared_unopened = Vec::with_capacity(unopened.len());
         for (index, incumbent) in unopened {
             let member = &recovery.members()[index];
-            let tree = decode_source(member, member.successor.bytes(), scene_limits, budget)?;
+            let tree = decode_source(
+                member.key.kind(),
+                member.encoding.into(),
+                member.successor.bytes(),
+                scene_limits,
+                budget,
+            )?;
             let prepared = match (incumbent, tree) {
                 (UnopenedIncumbent::Scene(original, retained), SourceTree::Scene(document)) => {
                     let prepared = original
@@ -445,7 +460,7 @@ impl PreparedAuthoredSourceUpgrade {
         Arc::clone(&self.recovery)
     }
 
-    pub(in crate::project_host::authoring) fn inventory(&self) -> &SourceUpgradeInventory {
+    pub(in crate::project_host::authoring) fn inventory(&self) -> &SourceInventory {
         &self.inventory
     }
 
@@ -541,7 +556,7 @@ impl PreparedAuthoredSourceUpgrade {
 /// No field here supplies mutation authority or a second preparation allowance.
 pub(crate) struct AuthoredSourceUpgradeInstallRetention {
     schema: Arc<AuthoringSchemaReceipt>,
-    inventory: SourceUpgradeInventory,
+    inventory: SourceInventory,
     input: EditorWorkspaceAuthoredSchemaUpgradeInput,
     recovery: Arc<SourceUpgradeRecovery>,
     unopened: Vec<PreparedUnopenedSourceUpgrade>,
@@ -685,20 +700,12 @@ fn charge_open_work(
 fn inventory_inputs<'a>(
     complete_open: &[SourceUpgradeOpenDocument<'a>],
     budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<Vec<SourceUpgradeOpenSource<'a>>, SourceUpgradePreparationError> {
-    let bytes = checked_product(
-        complete_open.len(),
-        size_of::<SourceUpgradeOpenSource<'_>>(),
-    )?;
+) -> Result<Vec<OpenSource<'a>>, SourceUpgradePreparationError> {
+    let bytes = checked_product(complete_open.len(), size_of::<OpenSource<'_>>())?;
     budget.charge_source_bytes(0, 0, bytes, bytes)?;
     Ok(complete_open
         .iter()
-        .map(|source| {
-            source.source.map_or(
-                SourceUpgradeOpenSource::Unbound,
-                SourceUpgradeOpenSource::Bound,
-            )
-        })
+        .map(|source| source.source.map_or(OpenSource::Unbound, OpenSource::Bound))
         .collect())
 }
 
@@ -709,7 +716,13 @@ fn validate_working_copy(
     limits: SceneFileLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), SourceUpgradePreparationError> {
-    let reviewed = decode_source(member, member.reviewed_working.bytes(), limits, budget)?;
+    let reviewed = decode_source(
+        member.key.kind(),
+        member.encoding.into(),
+        member.reviewed_working.bytes(),
+        limits,
+        budget,
+    )?;
     let same = match &reviewed {
         SourceTree::Scene(document) => workspace
             .scene_document(selected.document)
@@ -760,13 +773,19 @@ impl From<SourceUpgradeInventoryError> for SourceUpgradePreparationError {
     }
 }
 
-impl From<SourceUpgradeDecodeError> for SourceUpgradePreparationError {
-    fn from(error: SourceUpgradeDecodeError) -> Self {
+impl From<SourceInventoryError> for SourceUpgradePreparationError {
+    fn from(error: SourceInventoryError) -> Self {
+        Self::Inventory(error.into())
+    }
+}
+
+impl From<SourceDecodeError> for SourceUpgradePreparationError {
+    fn from(error: SourceDecodeError) -> Self {
         match error {
-            SourceUpgradeDecodeError::Admission(error) => Self::Admission(error),
-            SourceUpgradeDecodeError::Project(error) => Self::Project(error),
-            SourceUpgradeDecodeError::Format(error) => Self::Format(error),
-            SourceUpgradeDecodeError::Structure(error) => Self::Structure(error),
+            SourceDecodeError::Admission(error) => Self::Admission(error),
+            SourceDecodeError::Project(error) => Self::Project(error),
+            SourceDecodeError::Format(error) => Self::Format(error),
+            SourceDecodeError::Structure(error) => Self::Structure(error),
         }
     }
 }
@@ -774,7 +793,9 @@ impl From<SourceUpgradeDecodeError> for SourceUpgradePreparationError {
 impl SourceUpgradePreparationError {
     pub(crate) fn invalid_metadata_path(&self) -> Option<&str> {
         match self {
-            Self::Inventory(SourceUpgradeInventoryError::MetadataFormat { path, .. }) => Some(path),
+            Self::Inventory(SourceUpgradeInventoryError::Inventory(
+                SourceInventoryError::MetadataFormat { path, .. },
+            )) => Some(path),
             _ => None,
         }
     }
@@ -787,11 +808,13 @@ impl SourceUpgradePreparationError {
                 | Self::Project(AuthoringProjectSourceAdmissionError::Budget(
                     DecodeWorkExceeded { .. }
                 ))
-                | Self::Inventory(SourceUpgradeInventoryError::Admission(
-                    DecodeWorkExceeded { .. }
+                | Self::Inventory(SourceUpgradeInventoryError::Inventory(
+                    SourceInventoryError::Admission(DecodeWorkExceeded { .. })
                 ))
-                | Self::Inventory(SourceUpgradeInventoryError::Native(
-                    AuthoringProjectSourceAdmissionError::Budget(DecodeWorkExceeded { .. })
+                | Self::Inventory(SourceUpgradeInventoryError::Inventory(
+                    SourceInventoryError::Native(AuthoringProjectSourceAdmissionError::Budget(
+                        DecodeWorkExceeded { .. }
+                    ))
                 ))
         )
     }

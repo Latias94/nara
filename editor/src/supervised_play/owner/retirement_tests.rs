@@ -111,7 +111,7 @@ fn begin(
     let digest = ContentDigest::of_bytes(b"reviewed custodian recovery");
     session
         .begin_supervised_play_retirement(
-            operation,
+            nara::project_host::EditorSourceOperationId::AuthoredSchemaUpgrade(operation),
             ProjectAuthoringRecoveryDigest::from_parts(digest.length(), *digest.as_bytes()),
         )
         .unwrap();

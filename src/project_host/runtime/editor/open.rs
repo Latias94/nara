@@ -410,10 +410,10 @@ fn manifest_failure(error: AuthoringProjectAdmissionError) -> EditorProjectOpenF
         AuthoringProjectAdmissionError::SourceAuthoringPending => (
             EditorProjectOpenFailureSource::ProjectManifest,
             single_error(
-                "project.editor.authored-upgrade-pending",
-                "The project has an unfinished authored upgrade",
+                "project.editor.source-authoring-pending",
+                "The project has an unfinished source-authoring operation",
             ),
-            "Inspect and reconcile the project's authored-upgrade recovery information before retrying.",
+            "Inspect the authenticated pending source-authoring package and reconcile its concrete operation before retrying.",
         ),
         _ => (
             EditorProjectOpenFailureSource::ProjectManifest,

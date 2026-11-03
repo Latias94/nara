@@ -655,12 +655,12 @@ impl ProjectSourceIndexState {
         })
     }
 
-    /// Rebinds a private, not-yet-driven upgrade index after its own final Ready publication.
+    /// Rebinds a private, not-yet-driven index after its own final Ready publication.
     /// Configuration and bundle were prepared under the same Pending capture. Only the new
     /// manifest leaf and digest become known at the final name switch; no allocation or scan
     /// starts during this installation.
     #[cfg(any(feature = "tooling", feature = "project-tooling"))]
-    pub(super) fn commit_authored_upgrade_manifest(
+    pub(super) fn commit_manifest_publication(
         &mut self,
         identity: FileIdentity,
         digest: ContentDigest,

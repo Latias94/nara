@@ -134,6 +134,17 @@ pub(in crate::project_host) struct FilePublicationEvidence {
 }
 
 impl FilePublicationEvidence {
+    /// Restores transferred physical evidence after a semantic owner refuses adoption.
+    pub(in crate::project_host) fn from_parts(
+        receipt: ReplaceReceipt,
+        parent_directory_sync: StageStatus,
+    ) -> Self {
+        Self {
+            receipt,
+            parent_directory_sync,
+        }
+    }
+
     pub(in crate::project_host) const fn receipt(&self) -> &ReplaceReceipt {
         &self.receipt
     }

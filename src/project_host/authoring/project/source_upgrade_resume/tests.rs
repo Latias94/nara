@@ -32,23 +32,22 @@ use super::{
 use crate::{
     project_host::{
         authoring::{
-            AuthoredSchemaUpgradeHistoryPolicy, AuthoredSchemaUpgradeHostLimits,
-            AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
-            AuthoringProjectAdmissionHost, AuthoringProjectAdmissionLimits,
-            AuthoringProjectReadiness, PreparedAuthoringProject,
+            AuthoredSchemaUpgradeHistoryPolicy, AuthoringProjectAdmissionBudget,
+            AuthoringProjectAdmissionError, AuthoringProjectAdmissionHost,
+            AuthoringProjectAdmissionLimits, AuthoringProjectReadiness,
+            AuthoringSourceOperationLimits, PreparedAuthoringProject,
             document::AuthoringDocumentSourceFact,
             native_source::NativeDocumentSourcePolicy,
             project_authoring_adapters,
-            source_upgrade_inventory::{
-                SourceUpgradeInventory, SourceUpgradeInventoryError, SourceUpgradeOpenSource,
+            recovery_storage::{
+                RecoveryPendingPublication, RecoveryStorageHost, RecoveryStoragePublication,
             },
+            source_inventory::{OpenSource, SourceInventory, SourceInventoryError},
+            source_upgrade_inventory::SourceUpgradeInventoryError,
             source_upgrade_recovery::{
                 RecoverySourceEncoding, SourceUpgradeRecovery, SourceUpgradeRecoveryInput,
                 SourceUpgradeRecoveryLimits, SourceUpgradeRecoveryMemberInput,
                 SourceUpgradeRecoveryMetadataInput, SourceUpgradeRecoveryRootInput,
-            },
-            source_upgrade_storage::{
-                RecoveryPendingPublication, RecoveryStorageHost, RecoveryStoragePublication,
             },
         },
         file_publication::{FilePublicationHost, FilePublicationOutcome},
@@ -220,9 +219,9 @@ impl Fixture {
                     &native,
                 )
                 .unwrap();
-                let inventory = SourceUpgradeInventory::capture(
+                let inventory = SourceInventory::capture(
                     &schema,
-                    &[SourceUpgradeOpenSource::Bound(&source)],
+                    &[OpenSource::Bound(&source)],
                     nara_scene::SceneFileLimits::default(),
                     &mut budget,
                 )
@@ -257,6 +256,12 @@ impl Fixture {
                     path: member.path,
                     key: &member.key,
                     encoding: member.encoding,
+                    explicit_native: original.as_ref().is_some_and(|inventory| {
+                        inventory.participants().any(|participant| {
+                            participant.file().path() == member.path
+                                && participant.explicit_native()
+                        })
+                    }),
                     old_disk: &member.old,
                     reviewed_working: &member.working,
                     successor: &member.successor,
@@ -285,6 +290,9 @@ impl Fixture {
                 .collect();
             let recovery = SourceUpgradeRecovery::prepare(
                 SourceUpgradeRecoveryInput {
+                    selected_profile: original
+                        .as_ref()
+                        .and_then(SourceInventory::selected_profile),
                     old_ready_manifest: &manifest,
                     future_ready_manifest: &ready_manifest,
                     bundle_path: BUNDLE_PATH,
@@ -343,7 +351,7 @@ impl Fixture {
 
     fn inspect(
         &self,
-        limits: AuthoredSchemaUpgradeHostLimits,
+        limits: AuthoringSourceOperationLimits,
     ) -> Result<AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError> {
         AuthoredSchemaUpgradeRecovery::inspect(self.root.share(), None, limits)
     }
@@ -519,8 +527,8 @@ impl Drop for Fixture {
     }
 }
 
-fn complete_limits() -> AuthoredSchemaUpgradeHostLimits {
-    AuthoredSchemaUpgradeHostLimits::default().with_open_handles(ItemLimit::new(128).unwrap())
+fn complete_limits() -> AuthoringSourceOperationLimits {
+    AuthoringSourceOperationLimits::default().with_open_handles(ItemLimit::new(128).unwrap())
 }
 
 fn successor_property() -> ComponentPropertyPath {
@@ -1076,7 +1084,7 @@ fn confirmation_refuses_equal_byte_replacement_third_content_and_membership_chan
         assert!(matches!(
             cause::<SourceUpgradeInventoryError>(error),
             Some(
-                SourceUpgradeInventoryError::MembershipChanged
+                SourceUpgradeInventoryError::Inventory(SourceInventoryError::MembershipChanged)
                     | SourceUpgradeInventoryError::RecoveryInventory
             )
         ));
@@ -1147,7 +1155,7 @@ fn ready_tail_refuses_external_leaf_replacement_and_retains_the_same_pending_own
 fn finite_work_and_native_custody_preserve_selected_limits_and_specific_refusals() {
     let fixture = Fixture::new();
     let frozen = fixture.freeze();
-    let defaults = AuthoredSchemaUpgradeHostLimits::default();
+    let defaults = AuthoringSourceOperationLimits::default();
     assert_eq!(defaults.host_work().get(), 200_000_000);
     assert_eq!(defaults.open_handles().get(), 64);
     let work = complete_limits().with_host_work(ItemLimit::new(1).unwrap());
@@ -1278,7 +1286,7 @@ fn advance_before_confirmation_returns_phase_error_without_consuming_review_or_w
 fn recovery_at_publication(
     fixture: &Fixture,
     phase: AuthoredSchemaUpgradeRecoveryPhase,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
 ) -> AuthoredSchemaUpgradeRecovery {
     let mut recovery = fixture.inspect(limits).unwrap();
     match phase {
@@ -1299,7 +1307,7 @@ fn recovery_at_publication(
 fn fail_publication_with_cleanup(
     fixture: &Fixture,
     phase: AuthoredSchemaUpgradeRecoveryPhase,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
 ) -> (
     AuthoredSchemaUpgradeRecovery,
     crate::project_host::file_publication::CleanupTestControl,

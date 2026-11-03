@@ -4,12 +4,12 @@ use super::super::super::source_upgrade_adoption::{
 use super::*;
 use crate::project_host::{
     authoring::{
-        source_upgrade_inventory::VerifiedSourceUpgradeInventory,
-        source_upgrade_ready::{PreparedSourceUpgradeReady, SourceUpgradePendingManifest},
-        source_upgrade_storage::{
+        recovery_storage::{
             PendingRecoveryStorage, RecoveryPendingPublication, RecoveryStorageHost,
             RecoveryStoragePublication,
         },
+        source_upgrade_inventory::VerifiedSourceUpgradeInventory,
+        source_upgrade_ready::{PreparedSourceUpgradeReady, SourceUpgradePendingManifest},
     },
     file_publication::{FilePublicationHost, FilePublicationOutcome},
 };
@@ -18,7 +18,7 @@ fn enter_pending(
     fixture: &Fixture,
     recovery: SourceUpgradeRecovery,
     budget: &mut AuthoringProjectAdmissionBudget,
-) -> PendingRecoveryStorage {
+) -> PendingRecoveryStorage<SourceUpgradeRecovery> {
     fs::create_dir_all(fixture.root.join(".nara/upgrades")).unwrap();
     let host = RecoveryStorageHost::capture(fixture.schema.project_root(), budget).unwrap();
     let prepared = host
@@ -59,7 +59,7 @@ fn publish_source(root: &DirectoryCapability, path: &str, old: &[u8], next: &[u8
     ));
 }
 
-fn published_sources(fixture: &Fixture, pending: &PendingRecoveryStorage) {
+fn published_sources(fixture: &Fixture, pending: &PendingRecoveryStorage<SourceUpgradeRecovery>) {
     let root = fixture.schema.project_root();
     for member in pending.observed().recovery().members() {
         publish_source(
@@ -80,7 +80,7 @@ fn published_sources(fixture: &Fixture, pending: &PendingRecoveryStorage) {
 
 fn verified_project_sources(
     fixture: &Fixture,
-    pending: &PendingRecoveryStorage,
+    pending: &PendingRecoveryStorage<SourceUpgradeRecovery>,
     ready: &PreparedSourceUpgradeReady,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> VerifiedSourceUpgradeInventory {
@@ -100,7 +100,7 @@ fn verified_project_sources(
                 .unwrap(),
         );
     }
-    let open: Vec<_> = facts.iter().map(SourceUpgradeOpenSource::Bound).collect();
+    let open: Vec<_> = facts.iter().map(OpenSource::Bound).collect();
     VerifiedSourceUpgradeInventory::capture(
         ready.observed_pending_schema(),
         pending.observed().recovery(),
@@ -113,7 +113,7 @@ fn verified_project_sources(
 
 fn prepare_project(
     fixture: &Fixture,
-    pending: &PendingRecoveryStorage,
+    pending: &PendingRecoveryStorage<SourceUpgradeRecovery>,
     ready: &PreparedSourceUpgradeReady,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> PreparedSourceUpgradeProject {
@@ -331,7 +331,7 @@ fn final_ready_installs_the_prepared_project_without_readmission_and_rebinds_all
     );
     let next = published
         .session
-        .admit_authored_upgrade_inputs(
+        .admit_source_operation_inputs(
             0,
             0,
             ItemLimit::new(1).unwrap(),

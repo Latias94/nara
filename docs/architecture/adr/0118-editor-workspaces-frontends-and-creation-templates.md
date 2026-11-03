@@ -65,6 +65,14 @@ An observed successor leaf is attached without inventing a publication receipt o
 again. Changed predecessor declarations, unrelated owner additions and observation drift refuse;
 no automatic disk rollback or reuse of the stale original prepared candidate follows.
 
+The immutable Editor frame exposes one aggregate observation for finite authoring-operation
+work that needs maintenance. Detailed phases and cancellation/publication authority stay with
+each concrete Session owner. A persistent source write fence alone does not schedule polling:
+a Review awaiting user input has no runnable work, while a logically cancelled worker remains
+pending until its actual physical return. Adding a concrete source operation therefore extends
+the Session aggregate without adding another operation-specific field or scheduler rule to a
+native frontend. This observation grants no permission to mutate a source or clear a fence.
+
 The reviewed authored upgrade (CP1) under [ADR 0043](0043-scene-prefab-and-patch-document-migration-policy.md)
 has a distinct persistence boundary. Its Session fences new mutations, Save, ordinary Reopen,
 Close/Exit-triggered Save and competing source/publication admissions at operation acceptance.

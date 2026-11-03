@@ -9,8 +9,8 @@ fn budget() -> AuthoringProjectAdmissionBudget {
 fn actual_capture(
     schema: &AuthoringSchemaReceipt,
     budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<SourceUpgradeInventory, SourceUpgradeInventoryError> {
-    SourceUpgradeInventory::capture(schema, &[], SceneFileLimits::default(), budget)
+) -> Result<SourceInventory, SourceInventoryError> {
+    SourceInventory::capture(schema, &[], SceneFileLimits::default(), budget)
 }
 
 fn replace_file(project: &Fixture, path: &str, bytes: &[u8]) {
@@ -48,8 +48,8 @@ fn original_capture_retains_first_read_leaves_metadata_exact_parents_and_missing
     );
     for fact in inventory
         .participants()
-        .map(SourceUpgradeParticipant::file)
-        .chain(inventory.metadata().map(SourceUpgradeMetadata::file))
+        .map(SourceParticipant::file)
+        .chain(inventory.metadata().map(SourceMetadata::file))
     {
         let file = inventory.shared_file(fact.path()).unwrap();
         assert!(Arc::ptr_eq(
@@ -164,7 +164,7 @@ fn continuously_retained_closed_source_rejects_same_bytes_at_a_new_native_leaf()
     let handles = budget.usage().retained_open_handles();
     assert!(matches!(
         inventory.validate(&schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceInventoryError::MembershipChanged)
     ));
     assert_eq!(budget.usage().retained_open_handles(), handles);
 }
@@ -189,7 +189,7 @@ fn metadata_native_identity_is_backed_by_the_same_continuously_live_first_read()
     assert_eq!(original.read_to_end_bounded(4096).unwrap(), bytes);
     assert!(matches!(
         inventory.validate(&schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceInventoryError::MembershipChanged)
     ));
 }
 
@@ -218,14 +218,14 @@ fn replaced_missing_ancestor_is_a_conflict_even_when_the_child_is_still_missing(
     let handles = budget.usage().retained_open_handles();
     assert!(matches!(
         inventory.validate(&schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceInventoryError::MembershipChanged)
     ));
     assert_eq!(budget.usage().retained_open_handles(), handles);
 }
 
 #[test]
 fn real_handle_peak_is_admitted_exactly_and_one_short_refuses_before_any_pending_write() {
-    let project = Fixture::new("project_location", "");
+    let project = Fixture::new("project_location", "[profiles.other]\n");
     project.scene("scenes/nested/one.scene.json");
     project.metadata(
         "assets/image.png",
@@ -237,6 +237,14 @@ fn real_handle_peak_is_admitted_exactly_and_one_short_refuses_before_any_pending
     let schema = project.receipt(None);
     let mut measured = budget();
     let inventory = actual_capture(&schema, &mut measured).unwrap();
+    assert_eq!(inventory.configurations().len(), 2);
+    for configuration in inventory.configurations() {
+        assert_eq!(
+            configuration.participant_paths().collect::<Vec<_>>(),
+            ["scenes/nested/one.scene.json"],
+        );
+    }
+    assert_eq!(inventory.metadata().next().unwrap().visibility().len(), 2);
     let exact = measured.usage().peak_open_handles();
     let retained = inventory.retained_handle_count();
     assert!(exact > retained);
@@ -261,7 +269,7 @@ fn real_handle_peak_is_admitted_exactly_and_one_short_refuses_before_any_pending
             drop(inventory);
             limited.release_open_handles(handles);
         } else {
-            assert!(matches!(result, Err(SourceUpgradeInventoryError::Admission(
+            assert!(matches!(result, Err(SourceInventoryError::Admission(
                 AuthoringProjectAdmissionError::PeakOpenHandlesExceeded { maximum: actual }
             )) if actual == maximum));
         }
@@ -296,7 +304,7 @@ fn confirmation_drops_its_handles_and_storage_on_success_and_membership_refusal(
     let work = budget.usage().decode_work();
     assert!(matches!(
         inventory.validate(&schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        Err(SourceInventoryError::MembershipChanged)
     ));
     assert_eq!(budget.usage().retained_open_handles(), handles);
     assert_eq!(budget.usage().retained_candidate_bytes(), bytes);
@@ -312,7 +320,7 @@ fn failed_capture_closes_all_new_handles_before_refunding_their_allowance() {
     let mut budget = budget();
     assert!(matches!(
         actual_capture(&schema, &mut budget),
-        Err(SourceUpgradeInventoryError::MetadataFormat { path, .. }) if path == "assets/image.png.meta"
+        Err(SourceInventoryError::MetadataFormat { path, .. }) if path == "assets/image.png.meta"
     ));
     assert_eq!(budget.usage().retained_open_handles(), 0);
     assert_eq!(budget.usage().retained_candidate_bytes(), 0);

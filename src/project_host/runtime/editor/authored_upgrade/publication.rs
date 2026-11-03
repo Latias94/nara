@@ -3,9 +3,7 @@
 use super::*;
 use crate::project_host::{
     authoring::{AuthoredSourceUpgradePublicationFailure, SourceUpgradeProjectOutcome},
-    persistence::{
-        PersistenceAuthoredUpgradeCommit, PersistenceAuthoredUpgradeValidationCost, editor_digest,
-    },
+    persistence::{PersistenceLeafCommit, PersistenceLeafValidationCost, editor_digest},
 };
 use nara_tooling::EditorAuthoredUpgradeSavedSource;
 
@@ -242,7 +240,7 @@ fn bind_and_publish(
     let mut bytes = count
         .checked_mul(
             size_of::<HostGuard<'_>>()
-                + size_of::<PersistenceAuthoredUpgradeCommit<'_>>()
+                + size_of::<PersistenceLeafCommit<'_>>()
                 + size_of::<EditorAuthoredUpgradeSavedSource>()
                 + size_of::<EditorDocumentId>(),
         )
@@ -371,7 +369,7 @@ fn bind_and_publish_admitted(
             predecessor.parent_identity(),
             predecessor.digest(),
         );
-        let cost = PersistenceAuthoredUpgradeValidationCost::checked(
+        let cost = PersistenceLeafValidationCost::checked(
             observation.source.digest(),
             predecessor.relative_path().len(),
         )
@@ -391,9 +389,9 @@ fn bind_and_publish_admitted(
             HostGuard::Scene(guard) => {
                 guard
                     .host_mut()
-                    .bind_authored_upgrade(expected, file, observation.source.digest())
+                    .bind_published_leaf(expected, file, observation.source.digest())
             }
-            HostGuard::Prefab(guard) => guard.host_mut().bind_authored_upgrade(
+            HostGuard::Prefab(guard) => guard.host_mut().bind_published_leaf(
                 key,
                 expected,
                 file,
@@ -485,7 +483,7 @@ fn bind_and_publish_admitted(
 }
 
 fn restore_files(
-    commits: Vec<(EditorDocumentId, PersistenceAuthoredUpgradeCommit<'_>)>,
+    commits: Vec<(EditorDocumentId, PersistenceLeafCommit<'_>)>,
     observations: &mut [crate::project_host::authoring::AuthoredSourceUpgradeObservedFile],
 ) {
     for (document, commit) in commits {

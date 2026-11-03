@@ -42,8 +42,10 @@ mod authored_schema_upgrade;
 mod authoring_query;
 mod construction;
 mod extension;
+mod persistence_checkpoint;
 mod prefab_conversion;
 mod prefab_declarations;
+mod prefab_extraction;
 mod prepared_edit;
 mod schema_reclassification;
 #[doc(hidden)]
@@ -58,9 +60,28 @@ pub use extension::{
     EditorExtensionDocumentError, EditorExtensionDocumentView,
 };
 use extension::{ErasedExtensionDocument, TypedExtensionDocument};
+#[doc(hidden)]
+pub use persistence_checkpoint::{
+    EditorPersistenceEncodingError, EditorPersistenceEncodingFailure,
+    EditorPersistenceObservationFailure, EditorPersistencePublicationFailure,
+    EncodedEditorPersistenceCheckpoint,
+};
 pub use prefab_conversion::{
     CommittedEditorPrefabConversion, EditorPrefabConversionCommitError,
     EditorPrefabConversionRequest, PreparedEditorPrefabConversion,
+};
+#[doc(hidden)]
+pub use prefab_extraction::{
+    EditorPrefabExtractionCorpusBindFailure, EditorPrefabExtractionCorpusBinding,
+    EditorPrefabExtractionDisposition, EditorWorkspaceExtractionCheckpointFailure,
+    EditorWorkspaceExtractionEncodingFailure, EditorWorkspaceExtractionPersistenceBindFailure,
+    EditorWorkspaceExtractionPersistenceCommit, EditorWorkspaceExtractionPersistencePrepareFailure,
+    EditorWorkspaceExtractionSaveFailure, EditorWorkspaceExtractionSavedGenerationFailure,
+    EditorWorkspacePrefabExtractionInput, EditorWorkspacePrefabExtractionSourceBindFailure,
+    EditorWorkspacePrefabExtractionSourceCommit,
+    EditorWorkspacePrefabExtractionSourcePrepareFailure,
+    PreparedEditorWorkspaceExtractionPersistence, PreparedEditorWorkspaceExtractionSources,
+    PreparedEditorWorkspacePrefabExtraction,
 };
 pub use prepared_edit::PreparedEditorDocumentEdit;
 pub use schema_reclassification::{
@@ -140,6 +161,9 @@ impl EditorDocumentDigest {
 #[derive(Debug, Default)]
 struct EditorWorkspacePersistenceIdentity;
 
+#[derive(Debug)]
+struct EditorPersistenceCaptureIdentity;
+
 /// Exclusive capability for advancing persistence state in one hosted workspace.
 ///
 /// The capability is intentionally neither cloneable nor available from [`EditorWorkspace::new`].
@@ -155,6 +179,7 @@ pub struct EditorPersistenceAuthority {
 #[derive(Debug)]
 pub struct EditorPersistenceCheckpoint {
     identity: Arc<EditorWorkspacePersistenceIdentity>,
+    capture: Arc<EditorPersistenceCaptureIdentity>,
     document: EditorDocumentId,
     kind: EditorDocumentKind,
     source_binding: Option<EditorDocumentSourceBinding>,
@@ -165,15 +190,15 @@ pub struct EditorPersistenceCheckpoint {
 
 #[derive(Debug)]
 enum EditorPersistenceContent {
-    Scene(SceneDocument),
-    Prefab(PrefabDocument),
+    Scene(Arc<SceneDocument>),
+    Prefab(Arc<PrefabDocument>),
     Extension(Result<Vec<u8>, EditorExtensionDocumentError>),
 }
 
 /// Linear proof that one captured revision was published with the required filesystem evidence.
 ///
-/// The value can only be created by consuming a [`ReplaceReceipt`] whose publication evidence
-/// satisfies the editor save contract. It deliberately carries no public constructor or fields.
+/// Publication or a current-file observation must verify the exact immutable output encoded
+/// from the captured source. The concrete Host additionally binds the actual parent and name.
 #[derive(Debug)]
 pub struct EditorPersistenceCommit {
     checkpoint: EditorPersistenceCheckpoint,
@@ -185,10 +210,10 @@ impl EditorPersistenceCommit {
     #[doc(hidden)]
     #[must_use]
     pub fn from_publication(
-        checkpoint: EditorPersistenceCheckpoint,
+        encoded: EncodedEditorPersistenceCheckpoint,
         expected_previous: FileIdentity,
         receipt: ReplaceReceipt,
-    ) -> Option<Self> {
+    ) -> Result<Self, EditorPersistencePublicationFailure> {
         if receipt.previous_identity() != Some(expected_previous)
             || receipt.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
             || receipt.published_identity() != Some(receipt.candidate_identity())
@@ -200,16 +225,15 @@ impl EditorPersistenceCommit {
             || receipt.durability().data_synced() != StageStatus::Achieved
             || receipt.durability().file_metadata_synced() != StageStatus::Achieved
             || receipt.durability().name_published() != StageStatus::Achieved
-            || receipt.verified_content_digest().is_none()
+            || receipt.written_content_digest() != encoded.digest()
+            || receipt.verified_content_digest() != Some(encoded.digest())
         {
-            return None;
+            return Err(EditorPersistencePublicationFailure::new(encoded, receipt));
         }
 
-        let content_digest = receipt
-            .verified_content_digest()
-            .expect("matching published content evidence was checked above");
-        Some(Self {
-            checkpoint,
+        let content_digest = encoded.digest();
+        Ok(Self {
+            checkpoint: encoded.into_checkpoint(),
             digest: EditorDocumentDigest::new(content_digest.length(), *content_digest.as_bytes()),
         })
     }
@@ -260,7 +284,7 @@ impl EditorPersistenceCheckpoint {
     #[must_use]
     pub fn scene(&self) -> Option<&SceneDocument> {
         match &self.content {
-            EditorPersistenceContent::Scene(scene) => Some(scene),
+            EditorPersistenceContent::Scene(scene) => Some(scene.as_ref()),
             EditorPersistenceContent::Prefab(_) | EditorPersistenceContent::Extension(_) => None,
         }
     }
@@ -269,7 +293,7 @@ impl EditorPersistenceCheckpoint {
     #[must_use]
     pub fn prefab(&self) -> Option<&PrefabDocument> {
         match &self.content {
-            EditorPersistenceContent::Prefab(prefab) => Some(prefab),
+            EditorPersistenceContent::Prefab(prefab) => Some(prefab.as_ref()),
             EditorPersistenceContent::Scene(_) | EditorPersistenceContent::Extension(_) => None,
         }
     }
@@ -2682,6 +2706,9 @@ impl EditorWorkspace {
 
 impl EditorPersistenceAuthority {
     /// Captures the current revision of one document for a concrete persistence Host.
+    ///
+    /// Scene and Prefab captures retain the Session's exact immutable nominal document. The
+    /// checkpoint keeps that complete version alive across later edits and source replacement.
     #[must_use]
     pub fn capture(
         &mut self,
@@ -2698,14 +2725,14 @@ impl EditorPersistenceAuthority {
                 slot.source_binding.clone(),
                 slot.revision(),
                 slot.session.content_state(),
-                EditorPersistenceContent::Scene(slot.session.document().clone()),
+                EditorPersistenceContent::Scene(slot.session.shared_document()),
             ),
             EditorDocumentSlot::Prefab(slot) => (
                 EditorDocumentKind::Prefab,
                 Some(slot.source_binding.clone()),
                 slot.revision(),
                 slot.session.content_state(),
-                EditorPersistenceContent::Prefab(slot.session.document().clone()),
+                EditorPersistenceContent::Prefab(slot.session.shared_document()),
             ),
             EditorDocumentSlot::Extension(slot) => (
                 EditorDocumentKind::Extension(slot.owner.type_id()),
@@ -2715,15 +2742,38 @@ impl EditorPersistenceAuthority {
                 EditorPersistenceContent::Extension(slot.owner.encode()),
             ),
         };
-        Some(EditorPersistenceCheckpoint {
-            identity: Arc::clone(&self.identity),
+        Some(Self::capture_shared(
+            &self.identity,
             document,
             kind,
             source_binding,
             revision,
             content_state,
             content,
-        })
+        ))
+    }
+
+    /// Packages an actual source version with its owning workspace and authoring identities.
+    /// Callers retain those facts from the source owner; this does not create a Session or history.
+    fn capture_shared(
+        identity: &Arc<EditorWorkspacePersistenceIdentity>,
+        document: EditorDocumentId,
+        kind: EditorDocumentKind,
+        source_binding: Option<EditorDocumentSourceBinding>,
+        revision: SceneAuthoringRevision,
+        content_state: SceneAuthoringContentState,
+        content: EditorPersistenceContent,
+    ) -> EditorPersistenceCheckpoint {
+        EditorPersistenceCheckpoint {
+            identity: Arc::clone(identity),
+            capture: Arc::new(EditorPersistenceCaptureIdentity),
+            document,
+            kind,
+            source_binding,
+            revision,
+            content_state,
+            content,
+        }
     }
 
     /// Commits a captured checkpoint backed by accepted filesystem publication evidence.
@@ -4544,6 +4594,242 @@ mod tests {
         let discarded = workspace.__discard_document(document);
         assert!(discarded.applied);
         assert!(workspace.is_empty());
+    }
+
+    #[test]
+    fn persistence_capture_retains_actual_source_version_across_edit_undo_and_reopen() {
+        let registry = frozen_empty_registry();
+        let bundle = authoring_basis_bundle("Basis");
+        let encoded_document = |checkpoint: &EditorPersistenceCheckpoint| match &checkpoint.content
+        {
+            EditorPersistenceContent::Scene(document) => document.to_json_string().unwrap(),
+            EditorPersistenceContent::Prefab(document) => document.to_json_string().unwrap(),
+            EditorPersistenceContent::Extension(_) => unreachable!(),
+        };
+
+        for published in [false, true] {
+            for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
+                let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+                let source_binding = EditorDocumentSourceBinding::new(match kind {
+                    EditorDocumentKind::Scene => "scenes/basis.scene.json",
+                    EditorDocumentKind::Prefab => "prefabs/basis.prefab.json",
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                });
+                let opened = match kind {
+                    EditorDocumentKind::Scene => {
+                        let session = if published {
+                            SceneAuthoringSession::from_published_authoring_document(
+                                published_basis_scene(&bundle),
+                            )
+                        } else {
+                            SceneAuthoringSession::new(SceneDocument::default())
+                        };
+                        workspace
+                            .open_scene_session_with_source_binding(
+                                "snapshot",
+                                Some(source_binding.clone()),
+                                session,
+                            )
+                            .unwrap()
+                    }
+                    EditorDocumentKind::Prefab => {
+                        let session = if published {
+                            let published = PrefabDocumentCandidate::decode_json_bytes(
+                                PrefabDocument::default()
+                                    .to_json_string()
+                                    .unwrap()
+                                    .as_bytes(),
+                            )
+                            .unwrap()
+                            .admit_authoring(
+                                AuthoringDocumentSource::new(
+                                    AssetRef::path(source_binding.locator()).unwrap(),
+                                ),
+                                &bundle,
+                                &[],
+                            )
+                            .unwrap()
+                            .publish();
+                            PrefabAuthoringSession::from_published_authoring_document(published)
+                        } else {
+                            PrefabAuthoringSession::new(PrefabDocument::default())
+                        };
+                        workspace
+                            .open_prefab_session("snapshot", source_binding.clone(), session)
+                            .unwrap()
+                    }
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                };
+                let document = opened.opened_document.unwrap();
+                let checkpoint = authority.capture(&workspace, document).unwrap();
+                let slot = workspace.documents.get(&document).unwrap();
+                assert!(Arc::ptr_eq(
+                    &checkpoint.identity,
+                    &workspace.persistence_identity
+                ));
+                assert_eq!(checkpoint.document(), document);
+                assert_eq!(checkpoint.kind(), kind);
+                assert_eq!(checkpoint.source_binding(), Some(&source_binding));
+                assert_eq!(checkpoint.revision(), slot.revision());
+                match (&checkpoint.content, slot) {
+                    (
+                        EditorPersistenceContent::Scene(captured),
+                        EditorDocumentSlot::Scene(slot),
+                    ) => {
+                        assert!(Arc::ptr_eq(captured, &slot.session().shared_document()));
+                        assert!(std::ptr::eq(checkpoint.scene().unwrap(), captured.as_ref()));
+                        assert!(checkpoint.prefab().is_none());
+                        assert_eq!(checkpoint.content_state(), slot.session().content_state());
+                    }
+                    (
+                        EditorPersistenceContent::Prefab(captured),
+                        EditorDocumentSlot::Prefab(slot),
+                    ) => {
+                        assert!(Arc::ptr_eq(captured, &slot.session().shared_document()));
+                        assert!(std::ptr::eq(
+                            checkpoint.prefab().unwrap(),
+                            captured.as_ref()
+                        ));
+                        assert!(checkpoint.scene().is_none());
+                        assert_eq!(checkpoint.content_state(), slot.session().content_state());
+                    }
+                    _ => unreachable!(),
+                }
+                let original = encoded_document(&checkpoint);
+
+                for undo in [false, true] {
+                    let base_revision = workspace.documents.get(&document).unwrap().revision();
+                    let command = if undo {
+                        EditorWorkspaceCommand::Undo {
+                            document,
+                            base_revision,
+                        }
+                    } else {
+                        let patch = add_entity_patch("later", &[]);
+                        match kind {
+                            EditorDocumentKind::Scene => EditorWorkspaceCommand::ApplyScenePatch {
+                                document,
+                                base_revision,
+                                patch,
+                            },
+                            EditorDocumentKind::Prefab => {
+                                EditorWorkspaceCommand::ApplyPrefabPatch {
+                                    document,
+                                    base_revision,
+                                    patch,
+                                }
+                            }
+                            EditorDocumentKind::Extension(_) => unreachable!(),
+                        }
+                    };
+                    let report = if published {
+                        workspace.apply_authoring_command(command)
+                    } else {
+                        workspace.apply_command(&registry, command)
+                    };
+                    assert!(
+                        report.applied,
+                        "{kind:?}, published={published}: {:?}",
+                        report.diagnostics
+                    );
+                    let current = authority.capture(&workspace, document).unwrap();
+                    assert_eq!(encoded_document(&checkpoint), original);
+                    if undo {
+                        assert_eq!(encoded_document(&current), original);
+                        assert_eq!(current.content_state(), checkpoint.content_state());
+                    } else {
+                        assert_ne!(encoded_document(&current), original);
+                    }
+                }
+
+                let base_revision = workspace.documents.get(&document).unwrap().revision();
+                let entity = SceneEntityRecord::new(entity_id("reopened"));
+                let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
+                let reopened = match kind {
+                    EditorDocumentKind::Scene => {
+                        let source = SceneDocument::from_ordered_roots([entity]);
+                        let candidate = SceneDocumentCandidate::decode_json_bytes(
+                            source.to_json_string().unwrap().as_bytes(),
+                        )
+                        .unwrap();
+                        let session = if published {
+                            workspace
+                                .scene(document)
+                                .unwrap()
+                                .session()
+                                .try_reopen_authoring_candidate(candidate)
+                                .unwrap()
+                        } else {
+                            SceneAuthoringSession::try_from_file_candidate(candidate, &registry)
+                                .unwrap()
+                        };
+                        authority
+                            .publish_reopened_session(
+                                &mut workspace,
+                                document,
+                                base_revision,
+                                session,
+                                digest,
+                            )
+                            .unwrap()
+                    }
+                    EditorDocumentKind::Prefab => {
+                        let source = PrefabDocument::from_ordered_roots([entity]);
+                        let candidate = PrefabDocumentCandidate::decode_json_bytes(
+                            source.to_json_string().unwrap().as_bytes(),
+                        )
+                        .unwrap();
+                        let session = if published {
+                            workspace
+                                .prefab(document)
+                                .unwrap()
+                                .session()
+                                .try_reopen_authoring_candidate(candidate)
+                                .unwrap()
+                        } else {
+                            PrefabAuthoringSession::try_from_file_candidate(candidate, &registry)
+                                .unwrap()
+                        };
+                        authority
+                            .publish_reopened_prefab_session(
+                                &mut workspace,
+                                document,
+                                base_revision,
+                                source_binding,
+                                session,
+                                digest,
+                            )
+                            .unwrap()
+                    }
+                    EditorDocumentKind::Extension(_) => unreachable!(),
+                };
+                assert!(reopened.applied);
+                let current = authority.capture(&workspace, document).unwrap();
+                assert_ne!(
+                    current.revision().source_id(),
+                    checkpoint.revision().source_id()
+                );
+                assert_eq!(current.source_binding(), checkpoint.source_binding());
+                assert_ne!(encoded_document(&current), original);
+                assert_eq!(encoded_document(&checkpoint), original);
+
+                let stale = authority.commit(
+                    &mut workspace,
+                    EditorPersistenceCommit {
+                        checkpoint,
+                        digest: EditorDocumentDigest::new(3, [0x11; 32]),
+                    },
+                );
+                assert!(!stale.applied);
+                assert_eq!(
+                    stale.diagnostics.iter().next().unwrap().code().as_str(),
+                    "tooling.workspace-persistence-checkpoint-mismatch"
+                );
+                let slot = workspace.documents.get(&document).unwrap();
+                assert_eq!(slot.saved_revision(), current.revision());
+                assert!(!slot.is_dirty());
+            }
+        }
     }
 
     #[test]

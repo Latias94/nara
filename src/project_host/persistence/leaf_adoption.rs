@@ -1,4 +1,4 @@
-//! Actual persistence-leaf binding for the finite authored Schema upgrade.
+//! Actual persistence-leaf binding shared by source-changing authoring operations.
 //!
 //! This does not attest multi-file publication, source meaning or a saved Workspace checkpoint.
 //! The enclosing owner validates those and holds every Host guard before final Ready. This
@@ -8,14 +8,14 @@ use super::*;
 
 /// The owning validation's read/hash and scratch ceiling, before opening its current leaf.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::project_host) struct PersistenceAuthoredUpgradeValidationCost {
+pub(in crate::project_host) struct PersistenceLeafValidationCost {
     pub(in crate::project_host) encoded_bytes: usize,
     pub(in crate::project_host) work_bytes: usize,
     pub(in crate::project_host) scratch_bytes: usize,
     pub(in crate::project_host) transient_handles: usize,
 }
 
-impl PersistenceAuthoredUpgradeValidationCost {
+impl PersistenceLeafValidationCost {
     pub(in crate::project_host) fn checked(
         digest: ContentDigest,
         path_bytes: usize,
@@ -33,13 +33,13 @@ impl PersistenceAuthoredUpgradeValidationCost {
 }
 
 #[must_use]
-pub(in crate::project_host) struct PersistenceAuthoredUpgradeCommit<'a> {
+pub(in crate::project_host) struct PersistenceLeafCommit<'a> {
     file: &'a mut PersistenceFileState,
     replacement: FileCapability,
     digest: ContentDigest,
 }
 
-impl PersistenceAuthoredUpgradeCommit<'_> {
+impl PersistenceLeafCommit<'_> {
     /// Installs only an already validated file observation. No filesystem work remains here.
     pub(in crate::project_host) fn commit(self) {
         self.file.commit_reopen(self.replacement, self.digest);
@@ -52,33 +52,33 @@ impl PersistenceAuthoredUpgradeCommit<'_> {
 }
 
 #[derive(Debug)]
-pub(in crate::project_host) struct PersistenceAuthoredUpgradeBindFailure {
+pub(in crate::project_host) struct PersistenceLeafBindFailure {
     pub(in crate::project_host) replacement: FileCapability,
     pub(in crate::project_host) reason: EditorPersistenceRejection,
 }
 
 impl PersistenceFileState {
-    fn bind_authored_upgrade(
+    fn bind_published_leaf(
         &mut self,
         expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
         replacement: FileCapability,
         digest: ContentDigest,
-    ) -> Result<PersistenceAuthoredUpgradeCommit<'_>, PersistenceAuthoredUpgradeBindFailure> {
-        let result = self.validate_authored_upgrade(expected, &replacement, digest);
+    ) -> Result<PersistenceLeafCommit<'_>, PersistenceLeafBindFailure> {
+        let result = self.validate_published_leaf(expected, &replacement, digest);
         if let Err(reason) = result {
-            return Err(PersistenceAuthoredUpgradeBindFailure {
+            return Err(PersistenceLeafBindFailure {
                 replacement,
                 reason,
             });
         }
-        Ok(PersistenceAuthoredUpgradeCommit {
+        Ok(PersistenceLeafCommit {
             file: self,
             replacement,
             digest,
         })
     }
 
-    fn validate_authored_upgrade(
+    fn validate_published_leaf(
         &self,
         expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
         replacement: &FileCapability,
@@ -117,32 +117,30 @@ impl PersistenceFileState {
 }
 
 impl ScenePersistenceHost {
-    pub(in crate::project_host) fn bind_authored_upgrade(
+    pub(in crate::project_host) fn bind_published_leaf(
         &mut self,
         expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
         replacement: FileCapability,
         digest: ContentDigest,
-    ) -> Result<PersistenceAuthoredUpgradeCommit<'_>, PersistenceAuthoredUpgradeBindFailure> {
-        self.file
-            .bind_authored_upgrade(expected, replacement, digest)
+    ) -> Result<PersistenceLeafCommit<'_>, PersistenceLeafBindFailure> {
+        self.file.bind_published_leaf(expected, replacement, digest)
     }
 }
 
 impl PrefabPersistenceHost {
-    pub(in crate::project_host) fn bind_authored_upgrade(
+    pub(in crate::project_host) fn bind_published_leaf(
         &mut self,
         binding: &nara_tooling::EditorDocumentSourceBinding,
         expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
         replacement: FileCapability,
         digest: ContentDigest,
-    ) -> Result<PersistenceAuthoredUpgradeCommit<'_>, PersistenceAuthoredUpgradeBindFailure> {
+    ) -> Result<PersistenceLeafCommit<'_>, PersistenceLeafBindFailure> {
         if binding != &self.source_binding {
-            return Err(PersistenceAuthoredUpgradeBindFailure {
+            return Err(PersistenceLeafBindFailure {
                 replacement,
                 reason: EditorPersistenceRejection::SourceBindingMismatch,
             });
         }
-        self.file
-            .bind_authored_upgrade(expected, replacement, digest)
+        self.file.bind_published_leaf(expected, replacement, digest)
     }
 }

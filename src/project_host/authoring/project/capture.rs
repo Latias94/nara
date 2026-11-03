@@ -600,7 +600,7 @@ pub(crate) struct AuthoringSourceValidation {
     sources: Arc<[Arc<AuthoringSourceFact>]>,
     stable_lookups: Arc<[catalogue::ReferenceObservation]>,
     retained_capture_bytes: usize,
-    source_observation_custody: Option<SharedSourceUpgradeInventoryCustody>,
+    source_observation_custody: Option<SharedSourceInventoryCustody>,
     source_observations: Arc<SourceObservations>,
     opened_source: Option<OpenedSourceObservation>,
 }
@@ -740,7 +740,7 @@ impl AuthoringSourceValidation {
 
     pub(super) fn with_source_observation_custody(
         mut self,
-        custody: Option<SharedSourceUpgradeInventoryCustody>,
+        custody: Option<SharedSourceInventoryCustody>,
     ) -> Self {
         self.source_observation_custody = custody;
         self

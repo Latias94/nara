@@ -22,13 +22,16 @@ use super::source_upgrade_adoption::{
 use super::*;
 use crate::project_host::{
     authoring::{
-        AuthoredSchemaUpgradeHistoryPolicy, AuthoredSchemaUpgradeHostLimits,
-        AuthoringProjectAdmissionHost, AuthoringProjectAdmissionLimits, document,
+        AuthoredSchemaUpgradeHistoryPolicy, AuthoringProjectAdmissionHost,
+        AuthoringProjectAdmissionLimits, AuthoringSourceOperationLimits,
+        PendingAuthoringRecoveryInspection, PendingAuthoringRecoveryInspectionError,
+        PendingAuthoringRecoveryInspectionErrorKind, PendingAuthoringRecoveryKind, document,
+        publication_admission::with_cleanup_admission,
+        recovery_storage::ObservedPendingRecoveryStorage,
         source_upgrade_inventory::{
             RecoveredSourceUpgradeInventory, SourceUpgradeInventoryError,
             VerifiedSourceUpgradeInventory,
         },
-        source_upgrade_policy::with_cleanup_admission,
         source_upgrade_publication::{
             SourceUpgradePublication, SourceUpgradePublicationError, SourceUpgradePublicationStep,
         },
@@ -37,11 +40,10 @@ use crate::project_host::{
             SourceUpgradePendingManifest, SourceUpgradeReadyError,
         },
         source_upgrade_recovery::{
-            RecoveryMemberState, RecoverySourceEncoding, SourceUpgradeRecoveryLimits,
+            RecoveryMemberState, RecoverySourceEncoding, SourceUpgradeRecovery,
+            SourceUpgradeRecoveryLimits,
         },
-        source_upgrade_storage::{
-            ObservedPendingRecoveryStorage, RecoveryStorageError, RecoveryStorageHost,
-        },
+        source_upgrade_storage::{self, SourceUpgradeStorageError},
     },
     file_publication::{
         FilePublicationEvidence, FilePublicationFailureStage, FilePublicationRejection,
@@ -51,7 +53,7 @@ use crate::project_host::{
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
 #[cfg(test)]
-use crate::project_host::authoring::source_upgrade_policy::CLEANUP_WORK;
+use crate::project_host::authoring::publication_admission::CLEANUP_WORK;
 
 /// A complete recovery has one explicit confirmation before any source replacement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +111,7 @@ pub struct AuthoredSchemaUpgradeRecoveryView {
     pub refusal: Option<AuthoredSchemaUpgradeRecoveryErrorKind>,
     pub cleanup_pending: bool,
     pub uncertain: bool,
-    pub limits: AuthoredSchemaUpgradeHostLimits,
+    pub limits: AuthoringSourceOperationLimits,
     pub usage: AuthoredSchemaUpgradeRecoveryUsage,
 }
 
@@ -128,7 +130,7 @@ pub struct AuthoredSchemaUpgradeRecoveryMember<'a> {
 /// Borrowed review before confirmation. Inspection never runs a project converter.
 pub struct AuthoredSchemaUpgradeRecoveryReview<'a> {
     selected: &'a PreparedSourceUpgradeSchema,
-    pending: &'a ObservedPendingRecoveryStorage,
+    pending: &'a ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
     inventory: &'a RecoveredSourceUpgradeInventory,
 }
 
@@ -211,13 +213,13 @@ enum Stage {
 /// Ordinary Open/Check/Play continues to refuse Pending. An uncertain write cannot be retried
 /// through this owner; retain its evidence and establish a fresh complete observation.
 pub struct AuthoredSchemaUpgradeRecovery {
-    pending: ObservedPendingRecoveryStorage,
+    pending: ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
     inventory: RecoveredSourceUpgradeInventory,
     selected: Option<PreparedSourceUpgradeSchema>,
     publication: SourceUpgradePublication,
     budget: AuthoringProjectAdmissionBudget,
     work: AuthoredSchemaUpgradeWork,
-    limits: AuthoredSchemaUpgradeHostLimits,
+    limits: AuthoringSourceOperationLimits,
     stage: Option<Stage>,
     failure: Option<AuthoredSchemaUpgradeRecoveryError>,
 }
@@ -238,19 +240,47 @@ impl AuthoredSchemaUpgradeRecovery {
     pub fn inspect(
         root: DirectoryCapability,
         profile: Option<&str>,
-        limits: AuthoredSchemaUpgradeHostLimits,
+        limits: AuthoringSourceOperationLimits,
+    ) -> Result<Self, AuthoredSchemaUpgradeRecoveryError> {
+        let inspection = PendingAuthoringRecoveryInspection::inspect(root, limits)
+            .map_err(RecoveryFailure::Inspection)?;
+        Self::from_inspection(inspection, profile).map_err(|failure| failure.error)
+    }
+
+    /// Dispatches the original authenticated read without renewing its allowance. A wrong
+    /// known kind returns the inspection for the matching operation, without payload decoding.
+    pub fn from_inspection(
+        inspection: PendingAuthoringRecoveryInspection,
+        profile: Option<&str>,
+    ) -> Result<Self, AuthoredSchemaUpgradeRecoveryInspectionFailure> {
+        if inspection.kind() != PendingAuthoringRecoveryKind::AuthoredSchemaUpgrade {
+            return Err(AuthoredSchemaUpgradeRecoveryInspectionFailure {
+                inspection: Some(inspection),
+                error: RecoveryFailure::OperationKind.into(),
+            });
+        }
+        Self::admit_inspected(inspection, profile).map_err(|error| {
+            AuthoredSchemaUpgradeRecoveryInspectionFailure {
+                inspection: None,
+                error,
+            }
+        })
+    }
+
+    fn admit_inspected(
+        inspection: PendingAuthoringRecoveryInspection,
+        profile: Option<&str>,
     ) -> Result<Self, AuthoredSchemaUpgradeRecoveryError> {
         let ordinary = AuthoringProjectAdmissionLimits::default();
         let attempt = AuthoringProjectAdmissionHost::new(ordinary)
             .allocate_attempt()
             .map_err(RecoveryFailure::Admission)?;
-        let mut budget = AuthoringProjectAdmissionBudget::new(ordinary)
-            .for_authored_upgrade(limits.host_work(), limits.open_handles());
+        let (loaded, mut budget, limits) = inspection.into_parts();
         budget
             .charge_source_bytes(0, 0, 0, size_of::<Self>())
             .map_err(RecoveryFailure::Admission)?;
         let recovery_limits = SourceUpgradeRecoveryLimits::default();
-        let pending = RecoveryStorageHost::load_pending(root, recovery_limits, &mut budget)
+        let pending = source_upgrade_storage::admit_loaded(loaded, recovery_limits, &mut budget)
             .map_err(RecoveryFailure::Pending)?;
         let inventory =
             RecoveredSourceUpgradeInventory::capture(&pending, recovery_limits.scene, &mut budget)
@@ -591,6 +621,33 @@ impl AuthoredSchemaUpgradeRecovery {
     }
 }
 
+/// No publisher exists at inspection. A mismatched known kind retains the exact transport;
+/// a terminal concrete data/semantic failure exposes its original typed cause.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub struct AuthoredSchemaUpgradeRecoveryInspectionFailure {
+    inspection: Option<PendingAuthoringRecoveryInspection>,
+    #[source]
+    error: AuthoredSchemaUpgradeRecoveryError,
+}
+
+impl AuthoredSchemaUpgradeRecoveryInspectionFailure {
+    pub fn error(&self) -> &AuthoredSchemaUpgradeRecoveryError {
+        &self.error
+    }
+    pub fn inspection(&self) -> Option<&PendingAuthoringRecoveryInspection> {
+        self.inspection.as_ref()
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        Option<PendingAuthoringRecoveryInspection>,
+        AuthoredSchemaUpgradeRecoveryError,
+    ) {
+        (self.inspection, self.error)
+    }
+}
+
 /// A confirmed Ready replacement performed by this recovery owner.
 #[derive(Debug)]
 pub struct AuthoredSchemaUpgradeRecoveryReceipt {
@@ -634,6 +691,11 @@ impl AuthoredSchemaUpgradeRecoveryError {
             RecoveryFailure::Phase => K::Phase,
             RecoveryFailure::Admission(_) => K::Admission,
             RecoveryFailure::Pending(_) => K::Pending,
+            RecoveryFailure::Inspection(ref error) => match error.kind() {
+                PendingAuthoringRecoveryInspectionErrorKind::Admission => K::Admission,
+                _ => K::Pending,
+            },
+            RecoveryFailure::OperationKind => K::Pending,
             RecoveryFailure::Inventory(_) => K::Inventory,
             RecoveryFailure::Schema(_) => K::Schema,
             RecoveryFailure::Decode(_) | RecoveryFailure::Source(_) | RecoveryFailure::Path(_) => {
@@ -674,16 +736,20 @@ impl AuthoredSchemaUpgradeRecoveryError {
 enum RecoveryFailure {
     #[error("the requested recovery action does not match its retained phase")]
     Phase,
+    #[error("Pending operation inspection refused: {0}")]
+    Inspection(#[source] PendingAuthoringRecoveryInspectionError),
+    #[error("the authenticated Pending package is not a Schema upgrade")]
+    OperationKind,
     #[error("recovery admission refused: {0}")]
     Admission(#[source] AuthoringProjectAdmissionError),
     #[error("Pending recovery storage refused: {0}")]
-    Pending(#[source] RecoveryStorageError),
+    Pending(#[source] SourceUpgradeStorageError),
     #[error("complete recovery inventory refused: {0}")]
     Inventory(#[source] SourceUpgradeInventoryError),
     #[error("recovered Schema admission refused: {0}")]
     Schema(#[source] SourceUpgradeReadyError),
     #[error("stored source decoding refused: {0}")]
-    Decode(#[from] SourceUpgradeDecodeError),
+    Decode(#[from] SourceDecodeError),
     #[error("stored source identity refused: {0:?}")]
     Source(document::AuthoringDocumentDataError),
     #[error("stored source path is invalid: {0}")]
@@ -738,14 +804,26 @@ fn validate_pair(
 ) -> Result<(), RecoveryFailure> {
     let before = budget.retained_candidate_bytes;
     let result = (|| {
-        let original = decode_source(member, member.reviewed_working.bytes(), limits, budget)?;
-        let successor = decode_source(member, member.successor.bytes(), limits, budget)?;
+        let original = decode_source(
+            member.key.kind(),
+            member.encoding.into(),
+            member.reviewed_working.bytes(),
+            limits,
+            budget,
+        )?;
+        let successor = decode_source(
+            member.key.kind(),
+            member.encoding.into(),
+            member.successor.bytes(),
+            limits,
+            budget,
+        )?;
         let path_bytes = member
             .path
             .len()
             .checked_mul(2)
             .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
-            .map_err(SourceUpgradeDecodeError::from)?;
+            .map_err(SourceDecodeError::from)?;
         budget
             .charge_source_bytes(0, 0, path_bytes, path_bytes)
             .map_err(RecoveryFailure::Admission)?;

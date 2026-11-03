@@ -131,7 +131,7 @@ fn settled_schema(editor: &mut EditorProjectSession) {
             EditorSchemaOwnerAdoptionPhase::Review
                 | EditorSchemaOwnerAdoptionPhase::Terminal
                 | EditorSchemaOwnerAdoptionPhase::RequiresReconcile
-        ) && !editor.current_frame().schema_owner_adoption_work_pending()
+        ) && !editor.current_frame().authoring_operation_work_pending()
     });
 }
 

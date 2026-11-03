@@ -381,7 +381,7 @@ fn undriven_session_capture_rejects_replacement_and_close_uses_normal_dirty_arbi
         let view = application.authored_schema_upgrade_view().unwrap();
         assert_eq!(view.phase, EditorAuthoredSchemaUpgradePhase::Draining);
         assert!(view.work_pending && view.writes_fenced);
-        assert!(!frame.authored_schema_upgrade_work_pending());
+        assert!(!frame.authoring_operation_work_pending());
         assert!(
             !application.request_project_replacement(&fixture.root, Some("desktop".to_owned()))
         );

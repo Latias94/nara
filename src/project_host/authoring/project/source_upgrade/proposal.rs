@@ -14,7 +14,7 @@ use nara_scene::SourceDocumentKey;
 use super::*;
 use crate::project_host::authoring::{
     AuthoredSchemaUpgradeHistoryPolicy,
-    source_upgrade_inventory::{SourceUpgradeEncoding, SourceUpgradeRootObservation},
+    source_inventory::{SourceEncoding, SourceRootObservation},
     source_upgrade_ready::SourceUpgradeReadyError,
     source_upgrade_recovery::{
         SourceUpgradeRecoveryError, SourceUpgradeRecoveryInput, SourceUpgradeRecoveryLimits,
@@ -474,7 +474,7 @@ impl PreparedAuthoredSchemaUpgradeReview {
 
 fn admit_proposal(
     proposal: &mut AuthoredSchemaUpgradeProposal,
-    inventory: &SourceUpgradeInventory,
+    inventory: &SourceInventory,
     scene_limits: SceneFileLimits,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<usize, SourceUpgradeProposalError> {
@@ -555,7 +555,7 @@ fn admit_proposal(
 fn prepare_metadata(
     schema: &Arc<AuthoringSchemaReceipt>,
     basis: &AuthoringSchemaBasis,
-    inventory: &SourceUpgradeInventory,
+    inventory: &SourceInventory,
     scene_limits: SceneFileLimits,
     proposal: &AuthoredSchemaUpgradeProposal,
     budget: &mut AuthoringProjectAdmissionBudget,
@@ -585,9 +585,10 @@ fn prepare_metadata(
                 path: actual.file().path(),
                 key: actual.source_key(),
                 encoding: match actual.encoding() {
-                    SourceUpgradeEncoding::Json => RecoverySourceEncoding::Json,
-                    SourceUpgradeEncoding::Ron => RecoverySourceEncoding::Ron,
+                    SourceEncoding::Json => RecoverySourceEncoding::Json,
+                    SourceEncoding::Ron => RecoverySourceEncoding::Ron,
                 },
+                explicit_native: actual.explicit_native(),
                 old_disk: actual.bytes(),
                 reviewed_working: &proposed.reviewed_working,
                 successor: &proposed.successor,
@@ -605,16 +606,15 @@ fn prepare_metadata(
             .map(|actual| SourceUpgradeRecoveryRootInput {
                 path: actual.path(),
                 missing_ancestor: match actual.observation() {
-                    SourceUpgradeRootObservation::Available { .. } => None,
-                    SourceUpgradeRootObservation::Missing { ancestor_path, .. } => {
-                        Some(ancestor_path)
-                    }
+                    SourceRootObservation::Available { .. } => None,
+                    SourceRootObservation::Missing { ancestor_path, .. } => Some(ancestor_path),
                 },
             })
             .collect();
         let missing: Vec<_> = inventory.missing_sidecars().collect();
         SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: inventory.selected_profile(),
                 old_ready_manifest: schema.manifest_bytes(),
                 future_ready_manifest: &ready,
                 bundle_path: schema.bundle_path().as_str(),

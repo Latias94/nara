@@ -9,7 +9,7 @@ use nara_engine::{
     core::ItemLimit,
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     project::{ProjectAuthoringState, ProjectManifest},
-    project_host::{AuthoredSchemaUpgradeHostLimits, TrustedCompiledEditorProjectIntent},
+    project_host::{AuthoringSourceOperationLimits, TrustedCompiledEditorProjectIntent},
 };
 use nara_tooling::{
     EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
@@ -206,7 +206,7 @@ fn publish(project: &project::Project) -> (EditorProjectSession, [EditorDocument
     let (mut editor, documents) = open_dirty(project);
     let operation = editor
         .begin_authored_schema_upgrade_with_limits(
-            AuthoredSchemaUpgradeHostLimits::default()
+            AuthoringSourceOperationLimits::default()
                 .with_host_work(ItemLimit::new(200_000_000).unwrap())
                 .with_open_handles(ItemLimit::new(128).unwrap()),
         )

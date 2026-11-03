@@ -706,8 +706,11 @@ intent; Native codecs and Runtime data setters require fully resolved effective 
 
 The [public inline-reference consumer](../../crates/nara_scene/tests/inline_authored_references.rs)
 exercises lexical overrides, nested/repeated inputs, dormant defaults, demand and cycle refusal.
-The [complete CP2 plan](../plans/2026-11-02-prefab-extraction-plan.md) separately tracks the
-unfinished flat-storage, root/placement and extraction replacement.
+Closed flat compiled storage, explicit root binding and source-owned placements are implemented.
+The [complete CP2 plan](../plans/2026-11-02-prefab-extraction-plan.md) separately tracks extraction
+publication/recovery and its remaining independent, strict execution and native qualification.
+See the [extraction guide](prefab-extraction.md) for the Session/Application and headless recovery
+boundaries.
 
 ## Complete Prefab Conversion
 

@@ -24,13 +24,14 @@ use super::*;
 use crate::{
     project_host::authoring::{
         AuthoringProjectAdmissionLimits,
+        recovery_storage::{
+            RecoveryPendingPublication, RecoveryStorageHost, RecoveryStoragePublication,
+        },
         source_upgrade_recovery::{
             RecoverySourceEncoding, SourceUpgradeRecoveryInput, SourceUpgradeRecoveryLimits,
             SourceUpgradeRecoveryMemberInput, SourceUpgradeRecoveryRootInput,
         },
-        source_upgrade_storage::{
-            RecoveryPendingPublication, RecoveryStorageHost, RecoveryStoragePublication,
-        },
+        source_upgrade_storage,
     },
     test_host_fs as host_fs,
 };
@@ -129,6 +130,7 @@ impl Fixture {
                 path: member.path,
                 key: &member.key,
                 encoding: member.encoding,
+                explicit_native: false,
                 old_disk: &member.old,
                 reviewed_working: &member.old,
                 successor: &member.successor,
@@ -148,6 +150,7 @@ impl Fixture {
             .collect();
         let recovery = SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: None,
                 old_ready_manifest: &manifest,
                 future_ready_manifest: &future_manifest,
                 bundle_path: BUNDLE_PATH,
@@ -206,12 +209,12 @@ impl Fixture {
         &self,
         limits: SceneFileLimits,
     ) -> (
-        ObservedPendingRecoveryStorage,
+        ObservedPendingRecoveryStorage<SourceUpgradeRecovery>,
         RecoveredSourceUpgradeInventory,
         AuthoringProjectAdmissionBudget,
     ) {
         let mut budget = budget();
-        let pending = RecoveryStorageHost::load_pending(
+        let pending = source_upgrade_storage::load_pending(
             host_fs::writable_directory(&self.directory).unwrap(),
             SourceUpgradeRecoveryLimits::default(),
             &mut budget,
@@ -573,7 +576,7 @@ fn recovered_inventory_cannot_be_paired_with_another_pending_capability_root() {
     assert!(matches!(
         SourceUpgradePublication::prepare_recovered(&other_pending, &recovered, &mut budget),
         Err(SourceUpgradePublicationError::Inventory(
-            SourceUpgradeInventoryError::AuthorityChanged
+            SourceUpgradeInventoryError::Inventory(SourceInventoryError::AuthorityChanged)
         ))
     ));
     fixture.assert_sources(false);

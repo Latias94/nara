@@ -178,6 +178,26 @@ root contributor facets may share one canonical output entity, but originally di
 entities cannot merge. Reusing publication kernels does not justify a fabricated Schema successor
 or field-upgrade receipt. Recovery distinguishes modified original members from new observed-absent
 Q/sidecar destinations, with fixed IDs/output bytes and actual per-file outcomes before final Ready.
+Fresh-process extraction admission verifies stored working/output relations under its own actual
+Schema basis without reconstructing complete candidates or assigning replacement input names.
+Canonical record ordering does not change those stored bindings. Package transport and its digest
+commitment remain distinct from complete declaration, occurrence and saved-generation proof.
+
+Ordinary Open refuses actual Pending before admitting bundle/source or project execution. Its
+diagnostic does not identify an operation kind. A read-only inspection authenticates the actual
+manifest/package binding, committed length/digest and current names before reading the bounded
+persistent header. The header kind selects Schema-upgrade or Prefab-extraction payload admission;
+the recovery filename and an earlier Open diagnostic cannot select a decoder. A mismatched known
+kind returns the same authenticated transport, and correct dispatch consumes that read and its
+original cumulative allowance rather than reopening files or issuing a fresh budget.
+
+Extraction recovery is available to a headless project-workflow consumer without Tooling or an
+old Workspace. Recovered files/future-Project/Ready owners share the live operation's format and
+semantic kernels but do not fabricate old document checkpoints, histories, capabilities or
+receipts. The final recovered outcome retains its actual prepared Project and remaining custody
+alongside accepted Ready evidence; a public receipt does not require discarding that prepared
+state. A new ordinary Open still admits its own generation. These contracts do not by themselves
+qualify every process interruption, cleanup failure, Check/Play or native Editor workflow.
 
 Stored authored-only references are not Native values. Selected composition resolves them under
 the original declaration scope; every direct Native admission rejects leftovers after defaults and

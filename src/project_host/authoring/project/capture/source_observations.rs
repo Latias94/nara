@@ -272,7 +272,7 @@ impl SourceObservations {
         schema: &AuthoringSchemaReceipt,
         source: &AuthoringSourceFact,
         original: Option<&FileSourceObservation>,
-        inventory: Option<&SharedSourceUpgradeInventoryCustody>,
+        inventory: Option<&SharedSourceInventoryCustody>,
         budget: &mut AuthoringProjectAdmissionBudget,
         output: &mut Vec<FileCapability>,
     ) -> Result<(), FsError> {

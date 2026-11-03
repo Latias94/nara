@@ -481,7 +481,7 @@ fn external_leaf_replacement_refuses_even_if_copied_source_facts_are_updated() {
         assert!(matches!(
             request.capture(),
             Err(SourceUpgradePreparationError::Inventory(
-                SourceUpgradeInventoryError::OpenSourceChanged
+                SourceUpgradeInventoryError::Inventory(SourceInventoryError::OpenSourceChanged)
             ))
         ));
         assert_eq!(fixture.disk_state(), disk);
@@ -541,7 +541,7 @@ fn a_new_upgrade_counts_work_from_acceptance_while_retaining_the_original_input_
     assert!(ordinary.budget.usage().decode_work() > 0);
     let upgrade = fixture
         .project
-        .admit_authored_upgrade_inputs(
+        .admit_source_operation_inputs(
             0,
             0,
             ItemLimit::new(1).unwrap(),

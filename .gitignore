@@ -7,3 +7,5 @@ repo-ref/
 __pycache__/
 docs/reviews/
 .codex-research/
+vendor/dear-imgui-wgpu/Cargo.lock
+vendor/dear-imgui-wgpu/imgui.ini

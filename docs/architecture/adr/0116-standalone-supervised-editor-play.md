@@ -160,6 +160,11 @@ The source Session hands external requests to one attached nominal Play-owner bi
 published project generation. The binding cannot be reconstructed from IDs or silently replaced;
 an unattached Session cannot export a launch request. CP1 retirement requests and acknowledgments
 use that same authority with the exact incumbent Schema/basis, operation and recovery digest.
+Concrete reviewed source operations share that custody through a finite operation identity:
+authored Schema upgrade and Prefab extraction retain distinct nominal IDs. A request from one
+operation kind cannot attest retirement for another, even if their recovery bytes or numeric
+labels coincide. This identity generalization grants no new cancellation or publication rights;
+each current fenced Session owner still validates its own operation.
 The concrete Application owner attests its actual physical completion. Root verifies the attached
 authority and retained request, rather than independently claiming to inspect another crate's child.
 

@@ -9,7 +9,16 @@ use nara_project::ProjectAuthoringRecoveryDigest;
 
 use crate::project_host::authoring::AuthoringSchemaOwnerProjectInput;
 
+use super::super::prefab_extraction::EditorPrefabExtractionId;
 use super::super::{EditorAuthoredSchemaUpgradeId, EditorProjectSession};
+
+/// Identifies the concrete Session source operation retaining supervised Play retirement.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorSourceOperationId {
+    AuthoredSchemaUpgrade(EditorAuthoredSchemaUpgradeId),
+    PrefabExtraction(EditorPrefabExtractionId),
+}
 
 /// Authority issued once to the supervised Play custodian for a published project generation.
 ///
@@ -39,7 +48,7 @@ struct Retirement {
 #[derive(Debug)]
 struct RetirementIdentity {
     registration: Arc<Registration>,
-    operation: EditorAuthoredSchemaUpgradeId,
+    operation: EditorSourceOperationId,
     recovery_digest: ProjectAuthoringRecoveryDigest,
     incumbent: AuthoringSchemaOwnerProjectInput,
 }
@@ -72,7 +81,7 @@ pub enum EditorSupervisedPlayOwnerError {
     AlreadyRegistered,
     #[error("the binding is not this Session's registered supervised Play owner")]
     ForeignOwner,
-    #[error("the authored upgrade operation is not the current fenced operation")]
+    #[error("the source operation is not the current fenced operation")]
     Operation,
     #[error("retirement requires an incumbent Authoring project")]
     NotAuthoring,
@@ -123,7 +132,7 @@ impl EditorSupervisedPlayBinding {
 
 impl EditorSupervisedPlayRetirementRequest {
     #[must_use]
-    pub fn operation(&self) -> EditorAuthoredSchemaUpgradeId {
+    pub fn operation(&self) -> EditorSourceOperationId {
         self.identity.operation
     }
 
@@ -173,12 +182,12 @@ impl EditorProjectSession {
         })
     }
 
-    /// Issues one retained retirement request for the current fenced authored upgrade.
+    /// Issues one retained retirement request for the current fenced source operation.
     /// An unattached Session has no external participant and cannot export external launches.
     #[doc(hidden)]
     pub fn begin_supervised_play_retirement(
         &mut self,
-        operation: EditorAuthoredSchemaUpgradeId,
+        operation: EditorSourceOperationId,
         recovery_digest: ProjectAuthoringRecoveryDigest,
     ) -> Result<(), EditorSupervisedPlayOwnerError> {
         self.validate_supervised_play_retirement_operation(operation)?;
@@ -323,10 +332,19 @@ impl EditorProjectSession {
 
     fn validate_supervised_play_retirement_operation(
         &self,
-        operation: EditorAuthoredSchemaUpgradeId,
+        operation: EditorSourceOperationId,
     ) -> Result<(), EditorSupervisedPlayOwnerError> {
-        let current = self.authored_schema_upgrade_view();
-        if current.operation != Some(operation) || !current.writes_fenced {
+        let current_is_fenced = match operation {
+            EditorSourceOperationId::AuthoredSchemaUpgrade(operation) => {
+                let current = self.authored_schema_upgrade_view();
+                current.operation == Some(operation) && current.writes_fenced
+            }
+            EditorSourceOperationId::PrefabExtraction(operation) => {
+                let current = self.prefab_extraction_view();
+                current.operation == Some(operation) && current.writes_fenced
+            }
+        };
+        if !current_is_fenced {
             return Err(EditorSupervisedPlayOwnerError::Operation);
         }
         Ok(())

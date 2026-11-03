@@ -318,11 +318,7 @@ fn awaiting(editor: &mut EditorProjectSession, operation: EditorAuthoredSchemaUp
     assert_eq!(view.outcome, None);
     assert!(!view.work_pending);
     assert!(view.writes_fenced);
-    assert!(
-        !editor
-            .current_frame()
-            .authored_schema_upgrade_work_pending()
-    );
+    assert!(!editor.current_frame().authoring_operation_work_pending());
 }
 
 fn cancelled(editor: &EditorProjectSession, operation: EditorAuthoredSchemaUpgradeId) {
@@ -488,7 +484,7 @@ fn capture_work_exhaustion_returns_no_baseline_and_does_not_change_a_later_opera
         let disk = fixture.disk();
         let operation = editor
             .begin_authored_schema_upgrade_with_limits(
-                crate::project_host::AuthoredSchemaUpgradeHostLimits::default()
+                crate::project_host::AuthoringSourceOperationLimits::default()
                     .with_host_work(nara_core::ItemLimit::new(1).unwrap()),
             )
             .unwrap();
@@ -549,7 +545,7 @@ fn queued_browser_refresh_sleeps_behind_the_upgrade_fence_and_resumes_after_canc
         for _ in 0..3 {
             let frame = editor.drive_editor_frame(Duration::ZERO);
             assert!(!frame.project_browser().has_pending_work());
-            assert!(!frame.authored_schema_upgrade_work_pending());
+            assert!(!frame.authoring_operation_work_pending());
             assert_eq!(
                 editor.project_source_index_snapshot().unwrap().generation(),
                 original
@@ -726,11 +722,7 @@ fn begin_fences_writes_and_retains_all_profile_originals_and_dirty_working_histo
         }
         for _ in 0..3 {
             editor.drive_editor_frame(Duration::ZERO);
-            assert!(
-                !editor
-                    .current_frame()
-                    .authored_schema_upgrade_work_pending()
-            );
+            assert!(!editor.current_frame().authoring_operation_work_pending());
             assert!(editor.authored_schema_upgrade_view().writes_fenced);
         }
         assert_writes_rejected(editor, startup);
@@ -1034,11 +1026,7 @@ fn cancelling_a_started_capture_keeps_work_and_writes_fenced_until_physical_retu
                 "Cancel must not wait on the capture worker"
             );
             held.assert_pending(editor, &returned);
-            assert!(
-                editor
-                    .current_frame()
-                    .authored_schema_upgrade_work_pending()
-            );
+            assert!(editor.current_frame().authoring_operation_work_pending());
             assert_eq!(
                 editor.request_persistence(EditorPersistenceCommand::Save {
                     document: Some(document)

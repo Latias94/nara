@@ -3,7 +3,7 @@ use super::*;
 fn prepared(editor: &mut EditorProjectSession) -> EditorAuthoredSchemaUpgradeId {
     let operation = editor
         .begin_authored_schema_upgrade_with_limits(
-            crate::project_host::AuthoredSchemaUpgradeHostLimits::default()
+            crate::project_host::AuthoringSourceOperationLimits::default()
                 .with_open_handles(nara_core::ItemLimit::new(128).unwrap()),
         )
         .unwrap();

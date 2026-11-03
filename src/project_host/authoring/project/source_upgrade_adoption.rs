@@ -233,7 +233,7 @@ impl PreparedSourceUpgradeProject {
         // Document/asset source facts contain no duplicate Schema observations. Validation
         // derives manifest/bundle facts from this receipt, so moving the actual Ready receipt
         // updates that authority once. The private index needs only two Copy-field updates.
-        session.source_index.commit_authored_upgrade_manifest(
+        session.source_index.commit_manifest_publication(
             ready.schema.manifest_identity(),
             ready.schema.manifest_digest(),
         );

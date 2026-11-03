@@ -11,15 +11,12 @@ fn same_and_reordered_complete_inputs_use_captured_facts_and_scene_limits() {
     let schema = project.receipt(None);
     let first = project.open_source(&schema, "scenes/first.scene.json");
     let second = project.open_source(&schema, "scenes/second.scene.json");
-    let inputs = [
-        SourceUpgradeOpenSource::Bound(&first),
-        SourceUpgradeOpenSource::Bound(&second),
-    ];
+    let inputs = [OpenSource::Bound(&first), OpenSource::Bound(&second)];
     let limits = SceneFileLimits::default()
         .with_encoded_bytes(ByteLimit::new(65_536).unwrap())
         .with_components(ItemLimit::new(128).unwrap());
     let mut budget = schema.budget;
-    let inventory = SourceUpgradeInventory::capture(&schema, &inputs, limits, &mut budget).unwrap();
+    let inventory = SourceInventory::capture(&schema, &inputs, limits, &mut budget).unwrap();
     assert_eq!(inventory.scene_limits(), limits);
 
     // Preparation consumes the captured baseline. Only confirmation re-enumerates current disk.
@@ -41,18 +38,13 @@ fn empty_complete_inputs_are_valid_only_when_none_were_captured_open() {
     let open = project.open_source(&schema, "scenes/closed.scene.json");
     let mut budget = schema.budget;
     let inventory =
-        SourceUpgradeInventory::capture(&schema, &[], SceneFileLimits::default(), &mut budget)
-            .unwrap();
+        SourceInventory::capture(&schema, &[], SceneFileLimits::default(), &mut budget).unwrap();
     inventory
         .validate_preparation_inputs(&schema, &[], &mut budget)
         .unwrap();
     assert!(matches!(
-        inventory.validate_preparation_inputs(
-            &schema,
-            &[SourceUpgradeOpenSource::Bound(&open)],
-            &mut budget,
-        ),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        inventory.validate_preparation_inputs(&schema, &[OpenSource::Bound(&open)], &mut budget,),
+        Err(SourceInventoryError::MembershipChanged)
     ));
 }
 
@@ -64,27 +56,24 @@ fn omitted_sources_and_repeated_sources_replacing_an_omission_refuse() {
     let schema = project.receipt(None);
     let first = project.open_source(&schema, "scenes/first.scene.json");
     let second = project.open_source(&schema, "scenes/second.scene.json");
-    let inputs = [
-        SourceUpgradeOpenSource::Bound(&first),
-        SourceUpgradeOpenSource::Bound(&second),
-    ];
+    let inputs = [OpenSource::Bound(&first), OpenSource::Bound(&second)];
     let mut budget = schema.budget;
     let inventory =
-        SourceUpgradeInventory::capture(&schema, &inputs, SceneFileLimits::default(), &mut budget)
+        SourceInventory::capture(&schema, &inputs, SceneFileLimits::default(), &mut budget)
             .unwrap();
     for incomplete in [&[][..], &inputs[..1], &[inputs[0], inputs[0]][..]] {
         assert!(matches!(
             inventory.validate_preparation_inputs(&schema, incomplete, &mut budget),
-            Err(SourceUpgradeInventoryError::MembershipChanged)
+            Err(SourceInventoryError::MembershipChanged)
         ));
     }
     assert!(matches!(
         inventory.validate_preparation_inputs(
             &schema,
-            &[inputs[0], SourceUpgradeOpenSource::Unbound],
+            &[inputs[0], OpenSource::Unbound],
             &mut budget,
         ),
-        Err(SourceUpgradeInventoryError::UnboundOpenSource)
+        Err(SourceInventoryError::UnboundOpenSource)
     ));
 }
 
@@ -97,9 +86,9 @@ fn changed_accepted_identity_parent_and_digest_refuse() {
     let original = project.open_source(&schema, "scenes/original.scene.json");
     let other = project.open_source(&schema, "scenes/other.scene.json");
     let mut budget = schema.budget;
-    let inventory = SourceUpgradeInventory::capture(
+    let inventory = SourceInventory::capture(
         &schema,
-        &[SourceUpgradeOpenSource::Bound(&original)],
+        &[OpenSource::Bound(&original)],
         SceneFileLimits::default(),
         &mut budget,
     )
@@ -129,19 +118,15 @@ fn changed_accepted_identity_parent_and_digest_refuse() {
         assert!(matches!(
             inventory.validate_preparation_inputs(
                 &schema,
-                &[SourceUpgradeOpenSource::Bound(&changed)],
+                &[OpenSource::Bound(&changed)],
                 &mut budget,
             ),
-            Err(SourceUpgradeInventoryError::OpenSourceChanged)
+            Err(SourceInventoryError::OpenSourceChanged)
         ));
     }
     assert!(matches!(
-        inventory.validate_preparation_inputs(
-            &schema,
-            &[SourceUpgradeOpenSource::Bound(&other)],
-            &mut budget,
-        ),
-        Err(SourceUpgradeInventoryError::MembershipChanged)
+        inventory.validate_preparation_inputs(&schema, &[OpenSource::Bound(&other)], &mut budget,),
+        Err(SourceInventoryError::MembershipChanged)
     ));
 }
 
@@ -152,9 +137,9 @@ fn reforged_native_key_with_the_same_path_and_accepted_observation_refuses() {
     let schema = project.receipt(None);
     let original = project.open_source(&schema, "scenes/original.scene.json");
     let mut budget = schema.budget;
-    let inventory = SourceUpgradeInventory::capture(
+    let inventory = SourceInventory::capture(
         &schema,
-        &[SourceUpgradeOpenSource::Bound(&original)],
+        &[OpenSource::Bound(&original)],
         SceneFileLimits::default(),
         &mut budget,
     )
@@ -181,10 +166,10 @@ fn reforged_native_key_with_the_same_path_and_accepted_observation_refuses() {
     assert!(matches!(
         inventory.validate_preparation_inputs(
             &schema,
-            &[SourceUpgradeOpenSource::Bound(&reforged)],
+            &[OpenSource::Bound(&reforged)],
             &mut budget,
         ),
-        Err(SourceUpgradeInventoryError::OpenSourceChanged)
+        Err(SourceInventoryError::OpenSourceChanged)
     ));
 }
 
@@ -203,9 +188,9 @@ fn changed_native_metadata_with_the_same_key_and_accepted_observation_refuses() 
     let schema = project.receipt(None);
     let original = project.open_source(&schema, path);
     let mut budget = schema.budget;
-    let inventory = SourceUpgradeInventory::capture(
+    let inventory = SourceInventory::capture(
         &schema,
-        &[SourceUpgradeOpenSource::Bound(&original)],
+        &[OpenSource::Bound(&original)],
         SceneFileLimits::default(),
         &mut budget,
     )
@@ -233,19 +218,12 @@ fn changed_native_metadata_with_the_same_key_and_accepted_observation_refuses() 
     assert_eq!(changed.encoded_bytes(), original.encoded_bytes());
     assert_ne!(changed.native_source(), original.native_source());
     assert!(matches!(
-        inventory.validate_preparation_inputs(
-            &schema,
-            &[SourceUpgradeOpenSource::Bound(&changed)],
-            &mut budget,
-        ),
-        Err(SourceUpgradeInventoryError::OpenSourceChanged)
+        inventory
+            .validate_preparation_inputs(&schema, &[OpenSource::Bound(&changed)], &mut budget,),
+        Err(SourceInventoryError::OpenSourceChanged)
     ));
     inventory
-        .validate_preparation_inputs(
-            &schema,
-            &[SourceUpgradeOpenSource::Bound(&original)],
-            &mut budget,
-        )
+        .validate_preparation_inputs(&schema, &[OpenSource::Bound(&original)], &mut budget)
         .unwrap();
 }
 
@@ -257,13 +235,12 @@ fn another_captured_authority_refuses_even_with_equal_manifest_and_bundle_bytes(
     let other_schema = other_project.receipt(None);
     let mut budget = schema.budget;
     let inventory =
-        SourceUpgradeInventory::capture(&schema, &[], SceneFileLimits::default(), &mut budget)
-            .unwrap();
+        SourceInventory::capture(&schema, &[], SceneFileLimits::default(), &mut budget).unwrap();
     assert_eq!(schema.manifest_digest(), other_schema.manifest_digest());
     assert_eq!(schema.bundle_digest(), other_schema.bundle_digest());
     assert!(matches!(
         inventory.validate_preparation_inputs(&other_schema, &[], &mut budget),
-        Err(SourceUpgradeInventoryError::AuthorityChanged)
+        Err(SourceInventoryError::AuthorityChanged)
     ));
 }
 
@@ -273,10 +250,10 @@ fn comparisons_are_cumulative_and_never_charge_existing_storage_or_handles_again
     project.scene("scenes/original.scene.json");
     let schema = project.receipt(None);
     let original = project.open_source(&schema, "scenes/original.scene.json");
-    let inputs = [SourceUpgradeOpenSource::Bound(&original)];
+    let inputs = [OpenSource::Bound(&original)];
     let mut budget = schema.budget;
     let inventory =
-        SourceUpgradeInventory::capture(&schema, &inputs, SceneFileLimits::default(), &mut budget)
+        SourceInventory::capture(&schema, &inputs, SceneFileLimits::default(), &mut budget)
             .unwrap();
     // Exact incumbent ceilings leave no room for reacquisition or a temporary comparison set.
     budget.limits.retained_candidate_bytes =
@@ -301,10 +278,10 @@ fn comparisons_are_cumulative_and_never_charge_existing_storage_or_handles_again
             assert!(matches!(
                 inventory.validate_preparation_inputs(
                     &schema,
-                    &[SourceUpgradeOpenSource::Bound(&changed)],
+                    &[OpenSource::Bound(&changed)],
                     &mut budget,
                 ),
-                Err(SourceUpgradeInventoryError::OpenSourceChanged)
+                Err(SourceInventoryError::OpenSourceChanged)
             ));
         }
         let work = budget.usage().decode_work() - previous;
@@ -321,12 +298,9 @@ fn comparisons_are_cumulative_and_never_charge_existing_storage_or_handles_again
     budget.limits.decode_work =
         ItemLimit::new(budget.usage().decode_work() + comparison_work - 1).unwrap();
     assert!(matches!(
-        inventory.validate_preparation_inputs(
-            &schema,
-            &[SourceUpgradeOpenSource::Bound(&changed)],
-            &mut budget,
-        ),
-        Err(SourceUpgradeInventoryError::Admission(
+        inventory
+            .validate_preparation_inputs(&schema, &[OpenSource::Bound(&changed)], &mut budget,),
+        Err(SourceInventoryError::Admission(
             AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
         ))
     ));

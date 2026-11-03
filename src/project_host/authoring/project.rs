@@ -35,17 +35,41 @@ use super::{
     AuthoringProjectAdmissionError, AuthoringProjectAdmissionUsage,
     AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt, checked_retained_replacement,
     document::{AuthoringDocumentDataError, admit_scene_bytes_with_basis},
+    source_decode::{
+        AuthoringDocumentMetrics, CompositionDecodeReservation, checked_product, checked_sum,
+        reserve_source_decode,
+    },
     source_index::ProjectSourceIndexState,
-    source_upgrade_inventory::SharedSourceUpgradeInventoryCustody,
+    source_inventory::SharedSourceInventoryCustody,
 };
 
 mod capture;
 use capture::source_observations::SourceObservations;
 mod catalogue;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
-mod source_upgrade_decode;
+mod prefab_extraction;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
-use source_upgrade_decode::{SourceTree, SourceUpgradeDecodeError, decode_source, release_tree};
+use super::source_decode::{SourceDecodeError, SourceTree, decode_source, release_tree};
+#[cfg(feature = "tooling")]
+pub(crate) use prefab_extraction::{
+    PrefabExtractionCaptureRequest, PrefabExtractionOpenInput,
+    PrefabExtractionPersistenceDestination, PrefabExtractionReviewRequest,
+    PrefabExtractionReviewRevisionRequest, PrefabExtractionSessionInstallation,
+    PrefabExtractionSessionPreparationError, PrefabExtractionSessionPreparationFailure,
+    PrefabExtractionSessionPublication, PrefabExtractionSessionPublicationError,
+    PrefabExtractionSessionPublicationPhase, PrefabExtractionTarget,
+    PreparedPrefabExtractionSessionReview, ProjectPrefabExtractionOutput,
+    ProjectPrefabExtractionOutputEncoding,
+};
+#[cfg(any(feature = "tooling", feature = "project-tooling"))]
+pub use prefab_extraction::{
+    PrefabExtractionRecovery, PrefabExtractionRecoveryDestination,
+    PrefabExtractionRecoveryErrorKind, PrefabExtractionRecoveryFailure,
+    PrefabExtractionRecoveryInspectionFailure, PrefabExtractionRecoveryMember,
+    PrefabExtractionRecoveryMemberDisposition, PrefabExtractionRecoveryMemberState,
+    PrefabExtractionRecoveryOutcome, PrefabExtractionRecoveryPhase, PrefabExtractionRecoveryReview,
+    PrefabExtractionRecoveryUsage, PrefabExtractionRecoveryView,
+};
 #[cfg(any(feature = "tooling", test))]
 mod schema_owner;
 #[cfg(feature = "tooling")]
@@ -82,10 +106,11 @@ pub(crate) use source_upgrade_adoption::SourceUpgradeProjectOutcome;
 #[cfg(any(feature = "tooling", feature = "project-tooling"))]
 pub use source_upgrade_resume::{
     AuthoredSchemaUpgradeRecovery, AuthoredSchemaUpgradeRecoveryError,
-    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryMember,
-    AuthoredSchemaUpgradeRecoveryMemberState, AuthoredSchemaUpgradeRecoveryPhase,
-    AuthoredSchemaUpgradeRecoveryReceipt, AuthoredSchemaUpgradeRecoveryReview,
-    AuthoredSchemaUpgradeRecoveryUsage, AuthoredSchemaUpgradeRecoveryView,
+    AuthoredSchemaUpgradeRecoveryErrorKind, AuthoredSchemaUpgradeRecoveryInspectionFailure,
+    AuthoredSchemaUpgradeRecoveryMember, AuthoredSchemaUpgradeRecoveryMemberState,
+    AuthoredSchemaUpgradeRecoveryPhase, AuthoredSchemaUpgradeRecoveryReceipt,
+    AuthoredSchemaUpgradeRecoveryReview, AuthoredSchemaUpgradeRecoveryUsage,
+    AuthoredSchemaUpgradeRecoveryView,
 };
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod content_observation_finish_tests;
@@ -151,7 +176,7 @@ impl AuthoringSourceFact {
     fn collect_reclamation_source(
         &self,
         root: &DirectoryCapability,
-        custody: Option<&SharedSourceUpgradeInventoryCustody>,
+        custody: Option<&SharedSourceInventoryCustody>,
         output: &mut Vec<FileCapability>,
     ) -> Result<(), FsError> {
         let path = RelativePath::new(self.project_path.as_str())?;
@@ -718,14 +743,14 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     source_observations: Arc<SourceObservations>,
     usage: AuthoringProjectAdmissionUsage,
     source_index: ProjectSourceIndexState,
-    source_observation_custody: Option<SharedSourceUpgradeInventoryCustody>,
+    source_observation_custody: Option<SharedSourceInventoryCustody>,
 }
 
 impl AuthoringProjectSessionSnapshot {
     /// Keeps admitted native observations alive without extending the captured dependency set.
     pub(super) fn install_source_observation_custody(
         &mut self,
-        custody: SharedSourceUpgradeInventoryCustody,
+        custody: SharedSourceInventoryCustody,
     ) {
         self.source_observation_custody = Some(custody);
     }
@@ -849,6 +874,24 @@ impl AuthoringProjectSessionSnapshot {
             host_retained_bytes,
             worker_retained_bytes,
             self.schema.budget,
+        )
+    }
+
+    /// Selects an entire source operation's finite work/native limits before its first input
+    /// admission. Existing content and custody stay charged; retries continue the same inputs.
+    pub(crate) fn admit_source_operation_inputs(
+        &self,
+        host_retained_bytes: usize,
+        worker_retained_bytes: usize,
+        work_limit: nara_core::ItemLimit,
+        open_handles: nara_core::ItemLimit,
+    ) -> Result<AuthoringSourceCaptureInputs, AuthoringProjectSourceAdmissionError> {
+        self.admit_source_capture_inputs_with_budget(
+            host_retained_bytes,
+            worker_retained_bytes,
+            self.schema
+                .budget
+                .for_source_operation(work_limit, open_handles),
         )
     }
 
@@ -1721,34 +1764,14 @@ fn admit_prefab_composition_source(
     Ok((Arc::new(document), limits))
 }
 
-/// The production decoder enforces this shape ceiling before allocating domain data.
-/// Parser/domain memory is reserved separately from the finite wire scan work.
-pub(super) struct CompositionDecodeReservation {
-    pub(super) bytes: usize,
-    pub(super) limits: SceneFileLimits,
-    constrained_nodes: bool,
-    maximum_retained: usize,
-}
-
 impl CompositionDecodeReservation {
     fn format_error(
         &self,
         source: &ReadAuthoringSource,
         error: SceneFormatError,
     ) -> AuthoringProjectSourceAdmissionError {
-        if self.constrained_nodes
-            && matches!(
-                error.shape_error(),
-                Some(
-                    nara_core::SerdeShapeError::NodeLimitExceeded { .. }
-                        | nara_core::SerdeShapeError::ContainerItemLimitExceeded { .. }
-                )
-            )
-        {
-            return AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
-                maximum: self.maximum_retained,
-            }
-            .into();
+        if let Some(error) = self.capacity_error(&error) {
+            return error.into();
         }
         AuthoringProjectSourceAdmissionError::SourceFormat {
             kind: source.source.kind(),
@@ -1770,91 +1793,6 @@ fn reserve_composition_decode(
         limits,
         budget,
     )
-}
-
-/// Reserves the existing decoder's actual shape ceiling before it constructs owned source data.
-/// Borrowed reviewed inputs use the same model as file-backed composition sources.
-pub(super) fn reserve_source_decode(
-    encoded_len: usize,
-    read_limit: usize,
-    source_metadata_bytes: usize,
-    limits: SceneFileLimits,
-    budget: &mut AuthoringProjectAdmissionBudget,
-) -> Result<CompositionDecodeReservation, AuthoringProjectSourceAdmissionError> {
-    let encoded = encoded_len.max(1);
-    let maximum_retained = budget.limits.retained_candidate_bytes().get();
-    let available = maximum_retained.saturating_sub(budget.retained_candidate_bytes);
-    let bound = |nodes| {
-        checked_sum([
-            checked_product(encoded, 8)?,
-            checked_product(nodes, 32)?,
-            checked_product(limits.shape().container_items().get().min(nodes), 64)?,
-            checked_product(
-                limits.entities().get().min(nodes),
-                checked_sum([
-                    size_of::<SceneEntityRecord>(),
-                    3 * size_of::<nara_scene::SceneEntityId>(),
-                    128,
-                ])?,
-            )?,
-            checked_product(
-                limits.components().get().min(nodes),
-                checked_sum([
-                    size_of::<nara_scene::SceneComponentRecord>(),
-                    size_of::<nara_reflect::ComponentTypeId>(),
-                    128,
-                ])?,
-            )?,
-            checked_product(
-                limits.prefab_instances().get().min(nodes),
-                size_of::<PrefabInstance>(),
-            )?,
-            checked_product(limits.overlay_declarations().get().min(nodes), 512)?,
-            checked_product(limits.component_value_nodes().get().min(nodes), 96)?,
-            checked_product(limits.diagnostic_sources().get().min(nodes), 128)?,
-            source_metadata_bytes,
-            4 * size_of::<usize>(),
-        ])
-    };
-    let mut lower = 0;
-    let mut upper = limits.shape().nodes().get().min(encoded);
-    while lower < upper {
-        let midpoint = lower + (upper - lower) / 2 + 1;
-        if bound(midpoint)? <= available {
-            lower = midpoint;
-        } else {
-            upper = midpoint - 1;
-        }
-    }
-    let nodes = nara_core::ItemLimit::new(lower).ok_or(
-        AuthoringProjectAdmissionError::RetainedCandidateBytesExceeded {
-            maximum: maximum_retained,
-        },
-    )?;
-    let shape = limits.shape();
-    let limits = limits
-        .with_encoded_bytes(
-            ByteLimit::new(read_limit)
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-        )
-        .with_shape(nara_core::SerdeShapeLimits::new(
-            shape.depth(),
-            nodes,
-            nara_core::ItemLimit::new(shape.container_items().get().min(nodes.get()))
-                .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?,
-            shape.string_bytes(),
-            shape.total_string_bytes(),
-        ));
-    let bytes = bound(nodes.get())?;
-    // Shape, header and payload parsing each scan the actual encoded input. Memory capacity
-    // is not work performed; whitespace must not masquerade as millions of domain records.
-    budget.charge_source_bytes(0, 0, checked_product(encoded_len, 3)?, bytes)?;
-    Ok(CompositionDecodeReservation {
-        bytes,
-        limits,
-        constrained_nodes: nodes.get() < shape.nodes().get().min(encoded),
-        maximum_retained,
-    })
 }
 
 fn charge_composition_source(
@@ -1995,24 +1933,6 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
     Ok(())
 }
 
-trait AuthoringDocumentMetrics {
-    fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError>;
-}
-
-impl AuthoringDocumentMetrics for SceneDocument {
-    fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        crate::scene_retention::scene_retained_bytes(self)
-            .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
-    }
-}
-
-impl AuthoringDocumentMetrics for PrefabDocument {
-    fn retained_bytes(&self) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-        crate::scene_retention::prefab_retained_bytes(self)
-            .map_err(|_| AuthoringProjectSourceAdmissionError::AccountingOverflow)
-    }
-}
-
 fn prefab_instance_retained_bytes(
     prefab: &PrefabInstance,
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
@@ -2134,7 +2054,7 @@ pub(super) fn revalidate_source_fact(
 fn source_observation_matches_custody(
     source: &AuthoringSourceFact,
     actual: &FileCapability,
-    custody: Option<&SharedSourceUpgradeInventoryCustody>,
+    custody: Option<&SharedSourceInventoryCustody>,
 ) -> Result<bool, FsError> {
     let Some(custody) = custody else {
         return Ok(true);
@@ -2151,7 +2071,7 @@ fn source_observation_matches_custody(
 fn revalidate_source_fact_with_custody(
     root: &DirectoryCapability,
     source: &AuthoringSourceFact,
-    custody: Option<&SharedSourceUpgradeInventoryCustody>,
+    custody: Option<&SharedSourceInventoryCustody>,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let changed = || AuthoringProjectSourceAdmissionError::SourceChanged {
@@ -2294,25 +2214,6 @@ fn unresolved_dependencies_retained_bytes(
             size_of::<AuthoringUnresolvedDependency>(),
             asset_ref_retained_bytes(dependency.reference())?,
         ])
-    })
-}
-
-fn checked_product(
-    count: usize,
-    bytes: usize,
-) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    count
-        .checked_mul(bytes)
-        .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
-}
-
-fn checked_sum<const N: usize>(
-    values: [usize; N],
-) -> Result<usize, AuthoringProjectSourceAdmissionError> {
-    values.into_iter().try_fold(0_usize, |total, value| {
-        total
-            .checked_add(value)
-            .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)
     })
 }
 

@@ -13,19 +13,24 @@ use nara_fs::{
 use nara_scene::{
     AuthoringDocumentReadmission, AuthoringDocumentSource, AuthoringSchemaBasis,
     PrefabAuthoringSession, PrefabDocumentCandidate, SceneAuthoringRevision, SceneAuthoringSession,
-    SceneDocument, SceneDocumentCandidate, SceneFileLimits,
+    SceneDocumentCandidate, SceneFileEncoding, SceneFileLimits,
 };
 use nara_tooling::{
     EditorDocumentDigest, EditorDocumentId, EditorPersistenceCheckpoint, EditorPersistenceCommit,
-    EditorPersistenceFailureStage, EditorPersistenceRejection,
+    EditorPersistenceFailureStage, EditorPersistenceRejection, EncodedEditorPersistenceCheckpoint,
 };
 
-mod authored_upgrade;
+mod leaf_adoption;
+mod prefab_extraction;
 mod reopen;
 mod source_observation;
 pub(super) use super::file_publication::{FileSourceObservation, FileSourceObservationCost};
-pub(super) use authored_upgrade::PersistenceAuthoredUpgradeCommit;
-pub(super) use authored_upgrade::PersistenceAuthoredUpgradeValidationCost;
+pub(super) use leaf_adoption::PersistenceLeafCommit;
+pub(super) use leaf_adoption::PersistenceLeafValidationCost;
+pub(super) use prefab_extraction::{
+    ExtractionCheckpointAcceptance, ExtractionCheckpointLeafBindFailure,
+    ExtractionCheckpointLeafCommit, ExtractionPersistenceError,
+};
 pub(super) use reopen::{
     PrefabReopenRequest, PreparedPrefabReopen, PreparedSceneReopen, ReopenFailure,
     SceneReopenRequest,
@@ -293,17 +298,15 @@ impl PersistenceFileState {
 
     fn save_preflighted(
         &mut self,
-        checkpoint: EditorPersistenceCheckpoint,
-        bytes: &[u8],
+        encoded: EncodedEditorPersistenceCheckpoint,
     ) -> PersistenceSaveOutcome {
-        if bytes.len() > self.limits.encoded_bytes().get() {
+        if encoded.bytes().len() > self.limits.encoded_bytes().get() {
             return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
         }
 
         publish_editor_checkpoint(
             &mut self.publication,
-            checkpoint,
-            bytes,
+            encoded,
             #[cfg(test)]
             std::mem::take(&mut self.reject_next_valid_receipt),
         )
@@ -437,21 +440,21 @@ impl ScenePersistenceHost {
                 EditorPersistenceRejection::DocumentKindMismatch,
             );
         }
-        let Some(scene) = checkpoint.scene() else {
+        if checkpoint.scene().is_none() {
             return PersistenceSaveOutcome::Rejected(
                 EditorPersistenceRejection::DocumentKindMismatch,
             );
-        };
+        }
         if let Err(outcome) = self.file.preflight_save() {
             return outcome;
         }
-        let bytes = match encode_scene(self.file.encoding, scene) {
-            Ok(bytes) => bytes,
-            Err(stage) => return PersistenceSaveOutcome::Failed(stage),
+        let encoded = match checkpoint.encode(self.file.encoding.into(), self.file.limits) {
+            Ok(encoded) => encoded,
+            Err(_) => return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode),
         };
         match validate_authoring_scene_save(
             self.file.encoding,
-            &bytes,
+            encoded.bytes(),
             self.file.limits,
             &authoring,
         ) {
@@ -465,8 +468,8 @@ impl ScenePersistenceHost {
                 );
             }
         }
-        self.file.validated_authoring_digest = Some(ContentDigest::of_bytes(&bytes));
-        let outcome = self.file.save_preflighted(checkpoint, &bytes);
+        self.file.validated_authoring_digest = Some(encoded.digest());
+        let outcome = self.file.save_preflighted(encoded);
         if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
             self.file.validated_authoring_digest = None;
         }
@@ -585,21 +588,21 @@ impl PrefabPersistenceHost {
                 EditorPersistenceRejection::SourceBindingMismatch,
             );
         }
-        let Some(prefab) = checkpoint.prefab() else {
+        if checkpoint.prefab().is_none() {
             return PersistenceSaveOutcome::Rejected(
                 EditorPersistenceRejection::DocumentKindMismatch,
             );
-        };
+        }
         if let Err(outcome) = self.file.preflight_save() {
             return outcome;
         }
-        let bytes = match encode_prefab(self.file.encoding, prefab) {
-            Ok(bytes) => bytes,
-            Err(stage) => return PersistenceSaveOutcome::Failed(stage),
+        let encoded = match checkpoint.encode(self.file.encoding.into(), self.file.limits) {
+            Ok(encoded) => encoded,
+            Err(_) => return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode),
         };
         match validate_authoring_prefab_save(
             self.file.encoding,
-            &bytes,
+            encoded.bytes(),
             self.file.limits,
             &authoring,
         ) {
@@ -613,8 +616,8 @@ impl PrefabPersistenceHost {
                 );
             }
         }
-        self.file.validated_authoring_digest = Some(ContentDigest::of_bytes(&bytes));
-        let outcome = self.file.save_preflighted(checkpoint, &bytes);
+        self.file.validated_authoring_digest = Some(encoded.digest());
+        let outcome = self.file.save_preflighted(encoded);
         if !matches!(outcome, PersistenceSaveOutcome::PersistenceUncertain { .. }) {
             self.file.validated_authoring_digest = None;
         }
@@ -640,16 +643,13 @@ fn document_encoding(path: &str) -> Option<DocumentEncoding> {
     }
 }
 
-fn encode_scene(
-    encoding: DocumentEncoding,
-    scene: &SceneDocument,
-) -> Result<Vec<u8>, EditorPersistenceFailureStage> {
-    let encoded = match encoding {
-        DocumentEncoding::Json => scene.to_json_string(),
-        DocumentEncoding::Ron => scene.to_ron_string(),
+impl From<DocumentEncoding> for SceneFileEncoding {
+    fn from(encoding: DocumentEncoding) -> Self {
+        match encoding {
+            DocumentEncoding::Json => Self::Json,
+            DocumentEncoding::Ron => Self::Ron,
+        }
     }
-    .map_err(|_| EditorPersistenceFailureStage::Encode)?;
-    Ok(encoded.into_bytes())
 }
 
 fn decode_scene_candidate(
@@ -681,25 +681,15 @@ fn validate_authoring_scene_save(
 ) -> Result<(), AuthoringSaveValidationError> {
     let candidate = decode_scene_candidate(encoding, bytes, limits)
         .map_err(AuthoringSaveValidationError::Decode)?;
-    let reopened = authoring.reopen_scene_candidate(candidate).map_err(|_| {
-        AuthoringSaveValidationError::Decode(EditorPersistenceFailureStage::Validate)
-    })?;
-    if !authoring.preserves_scene(&reopened) {
+    let preserved = authoring
+        .preserves_scene_candidate(candidate)
+        .map_err(|_| {
+            AuthoringSaveValidationError::Decode(EditorPersistenceFailureStage::Validate)
+        })?;
+    if !preserved {
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
-}
-
-fn encode_prefab(
-    encoding: DocumentEncoding,
-    prefab: &nara_scene::PrefabDocument,
-) -> Result<Vec<u8>, EditorPersistenceFailureStage> {
-    let encoded = match encoding {
-        DocumentEncoding::Json => prefab.to_json_string(),
-        DocumentEncoding::Ron => prefab.to_ron_string(),
-    }
-    .map_err(|_| EditorPersistenceFailureStage::Encode)?;
-    Ok(encoded.into_bytes())
 }
 
 fn decode_prefab_candidate(
@@ -726,10 +716,12 @@ fn validate_authoring_prefab_save(
 ) -> Result<(), AuthoringSaveValidationError> {
     let candidate = decode_prefab_candidate(encoding, bytes, limits)
         .map_err(AuthoringSaveValidationError::Decode)?;
-    let reopened = authoring.reopen_prefab_candidate(candidate).map_err(|_| {
-        AuthoringSaveValidationError::Decode(EditorPersistenceFailureStage::Validate)
-    })?;
-    if !authoring.preserves_prefab(&reopened) {
+    let preserved = authoring
+        .preserves_prefab_candidate(candidate)
+        .map_err(|_| {
+            AuthoringSaveValidationError::Decode(EditorPersistenceFailureStage::Validate)
+        })?;
+    if !preserved {
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
@@ -738,8 +730,7 @@ fn validate_authoring_prefab_save(
 /// Codec-independent persistence publication shared by Scene, Prefab, and extension owners.
 pub(super) fn publish_editor_checkpoint(
     publication: &mut FilePublicationHost,
-    checkpoint: EditorPersistenceCheckpoint,
-    bytes: &[u8],
+    encoded: EncodedEditorPersistenceCheckpoint,
     #[cfg(test)] reject_receipt: bool,
 ) -> PersistenceSaveOutcome {
     let previous_identity = match publication.binding() {
@@ -750,7 +741,7 @@ pub(super) fn publish_editor_checkpoint(
             );
         }
     };
-    let accepted = match publication.publish(bytes) {
+    let accepted = match publication.publish(encoded.bytes()) {
         FilePublicationOutcome::Published(accepted) => accepted,
         FilePublicationOutcome::Rejected(reason) => {
             return PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason));
@@ -760,11 +751,11 @@ pub(super) fn publish_editor_checkpoint(
         }
         FilePublicationOutcome::Uncertain(evidence) => {
             return PersistenceSaveOutcome::PersistenceUncertain {
-                evidence: editor_persistence_receipt(&checkpoint, &evidence),
+                evidence: editor_persistence_receipt(encoded.checkpoint(), &evidence),
             };
         }
     };
-    let evidence = editor_persistence_receipt(&checkpoint, accepted.evidence());
+    let evidence = editor_persistence_receipt(encoded.checkpoint(), accepted.evidence());
     #[cfg(test)]
     if reject_receipt {
         publication.mark_uncertain();
@@ -772,8 +763,7 @@ pub(super) fn publish_editor_checkpoint(
     }
     let (publication_evidence, source) = accepted.into_parts();
     let (receipt, _) = publication_evidence.into_parts();
-    let Some(commit) =
-        EditorPersistenceCommit::from_publication(checkpoint, previous_identity, receipt)
+    let Ok(commit) = EditorPersistenceCommit::from_publication(encoded, previous_identity, receipt)
     else {
         publication.mark_uncertain();
         return PersistenceSaveOutcome::PersistenceUncertain { evidence };
@@ -851,6 +841,8 @@ mod tests {
 
     mod authored_upgrade;
     mod compiled_prefab;
+    mod encoded_checkpoint;
+    mod prefab_extraction;
     mod source_observation;
 
     use std::{
@@ -870,7 +862,7 @@ mod tests {
     use nara_scene::{
         AuthoringDocumentSource, AuthoringFieldEdit, PrefabDocument,
         SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession,
-        SceneComponentRecord, SceneEntityId, SceneEntityRecord,
+        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     };
     use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspace, EditorWorkspaceCommand};
 

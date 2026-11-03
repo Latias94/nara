@@ -895,7 +895,9 @@ impl EditorProjectSession {
         command: EditorPersistenceCommand,
     ) -> EditorPersistenceRequestResult {
         if let EditorPersistenceCommand::AcknowledgeResult { attempt } = command {
-            if self.authored_schema_upgrade.waits_for_save(attempt) {
+            if self.authored_schema_upgrade.waits_for_save(attempt)
+                || self.prefab_extraction.waits_for_save(attempt)
+            {
                 return EditorPersistenceRequestResult::Refused(EditorPersistenceRejection::Busy);
             }
             return self.acknowledge_persistence_attempt(attempt);

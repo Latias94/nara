@@ -1,5 +1,5 @@
 use nara_asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetSourcePath, StableAssetId};
-use nara_project::ProjectPath;
+use nara_project::{ProjectAuthoringRecovery, ProjectPath};
 use nara_reflect::{
     AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldPath, ComponentFieldSchema,
     ComponentPropertyStep, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
@@ -7,11 +7,17 @@ use nara_reflect::{
     PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    PrefabDocument, PrefabDocumentCandidate, SceneComponentRecord, SceneDocument,
+    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SourceDocumentKind,
 };
 
 use super::*;
-use crate::project_host::authoring::AuthoringProjectAdmissionLimits;
+use crate::project_host::authoring::{
+    AuthoringProjectAdmissionLimits,
+    recovery_storage::{RecoveryStorageError, validate_pending_bytes, validate_storage_path},
+    source_decode::reserve_source_decode,
+    source_upgrade_storage::SourceUpgradeStorageError,
+};
 
 const UNIVERSE: &str = "421112bd-693a-4e6b-85bc-318d567b2f21";
 const OWNER: &str = "trial.enemy";
@@ -129,6 +135,7 @@ impl Fixture {
                 path: &member.path,
                 key: &member.key,
                 encoding: member.encoding,
+                explicit_native: false,
                 old_disk: &member.old,
                 reviewed_working: &member.working,
                 successor: &member.next,
@@ -153,6 +160,7 @@ impl Fixture {
         let missing: Vec<_> = self.missing_sidecars.iter().map(String::as_str).collect();
         SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: None,
                 old_ready_manifest: &self.old_manifest,
                 future_ready_manifest: &self.future_manifest,
                 bundle_path: "schema.json",
@@ -569,8 +577,6 @@ fn adaptive_shapes_constrain_real_package_bundle_and_source_decoders() {
 
 #[test]
 fn adaptive_source_reservation_uses_remaining_capacity_and_refunds_json_and_ron_scratch() {
-    use crate::project_host::authoring::project::reserve_source_decode;
-
     let package = Fixture::new().package();
     let limits = SceneFileLimits::default();
     for member in package
@@ -637,6 +643,69 @@ fn adaptive_source_reservation_uses_remaining_capacity_and_refunds_json_and_ron_
 }
 
 #[test]
+fn canonical_source_comparison_requires_its_own_exact_work_and_releases_only_temporary_trees() {
+    let package = Fixture::new().package();
+    let limits = SceneFileLimits::default();
+    for member in package
+        .members()
+        .iter()
+        .filter(|member| !member.path.contains("unaffected"))
+    {
+        let encoded = member.successor.bytes();
+        let mut decoded = budget();
+        validate_source(member, encoded, false, limits, &mut decoded).unwrap();
+        assert_eq!(decoded.usage().retained_candidate_bytes(), 0);
+        let mut measured = budget();
+        validate_source(member, encoded, true, limits, &mut measured).unwrap();
+        assert!(measured.usage().decode_work() > decoded.usage().decode_work());
+        assert_eq!(measured.usage().retained_candidate_bytes(), 0);
+        assert_eq!(
+            measured.usage().decoded_bytes(),
+            decoded.usage().decoded_bytes()
+        );
+
+        for (maximum, accepted) in [
+            (measured.usage().decode_work(), true),
+            (measured.usage().decode_work() - 1, false),
+            (decoded.usage().decode_work(), false),
+        ] {
+            let mut shared = budget();
+            shared.charge_source_bytes(0, 0, 0, 321).unwrap();
+            shared.limits.decode_work = ItemLimit::new(maximum).unwrap();
+            let result = validate_source(member, encoded, true, limits, &mut shared);
+            if accepted {
+                result.unwrap();
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(SourceUpgradeRecoveryError::Admission(
+                        AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+                    ))
+                ));
+            }
+            assert_eq!(shared.usage().decode_work(), measured.usage().decode_work());
+            assert_eq!(shared.usage().retained_candidate_bytes(), 321);
+            assert_eq!(shared.usage().retained_open_handles(), 0);
+        }
+
+        let mut noncanonical = encoded.to_vec();
+        noncanonical.push(b'\n');
+        let mut shared = budget();
+        shared.charge_source_bytes(0, 0, 0, 321).unwrap();
+        for _ in 0..2 {
+            let work = shared.usage().decode_work();
+            assert!(matches!(
+                validate_source(member, &noncanonical, true, limits, &mut shared),
+                Err(SourceUpgradeRecoveryError::NonCanonicalSuccessor)
+            ));
+            assert!(shared.usage().decode_work() > work);
+            assert_eq!(shared.usage().retained_candidate_bytes(), 321);
+            assert_eq!(shared.usage().retained_open_handles(), 0);
+        }
+    }
+}
+
+#[test]
 fn deterministic_roundtrip_retains_saved_dirty_and_native_json_ron_bytes_separately() {
     let mut fixture = Fixture::new();
     let package = fixture.package();
@@ -683,6 +752,102 @@ fn deterministic_roundtrip_retains_saved_dirty_and_native_json_ron_bytes_separat
         recovered.payload.history_policy,
         RecoveryHistoryPolicy::SaveReviewedWorkingCopiesAndStartNewHistory
     );
+}
+
+#[test]
+fn explicit_native_admission_is_required_and_roundtrips_both_values() {
+    let package = Fixture::new().package();
+    for explicit_native in [false, true] {
+        let encoded = rewritten(&package, |value| {
+            value["payload"]["members"][0]["explicit_native"] = explicit_native.into();
+        });
+        let recovered = decode(&encoded).unwrap();
+        assert_eq!(recovered.members()[0].explicit_native, explicit_native);
+        assert!(!recovered.members()[1].explicit_native);
+    }
+    let missing = rewritten(&package, |value| {
+        value["payload"]["members"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("explicit_native");
+    });
+    assert!(matches!(
+        decode(&missing),
+        Err(SourceUpgradeRecoveryError::Syntax),
+    ));
+}
+
+#[test]
+fn selected_profile_roundtrips_once_and_must_resolve_from_the_full_ready_manifest() {
+    let mut fixture = Fixture::new();
+    fixture
+        .old_manifest
+        .extend_from_slice(b"\n[profiles.desktop.paths]\nscenes = 'scenes'\n");
+    fixture.future_manifest = parse_ready(&fixture.old_manifest)
+        .unwrap()
+        .to_canonical_toml_bytes()
+        .unwrap();
+    let package = fixture.package();
+    assert_eq!(package.selected_profile(), None);
+    let missing = rewritten(&package, |value| {
+        value["payload"]
+            .as_object_mut()
+            .unwrap()
+            .remove("selected_profile");
+    });
+    assert!(matches!(
+        decode(&missing),
+        Err(SourceUpgradeRecoveryError::Syntax)
+    ));
+    // Decode both sides through the same owner: its measured Vec capacities can differ
+    // from the producer's exact-capacity tables independently of the selected-profile text.
+    let baseline = decode(package.encoded_bytes()).unwrap();
+    for selected in [None, Some("desktop")] {
+        let encoded = rewritten(&package, |value| {
+            value["payload"]["selected_profile"] = serde_json::json!(selected);
+        });
+        let recovered = decode(&encoded).unwrap();
+        assert_eq!(recovered.selected_profile(), selected);
+        let missing = rewritten(&recovered, |value| {
+            value["payload"]
+                .as_object_mut()
+                .unwrap()
+                .remove("selected_profile");
+        });
+        assert!(matches!(
+            decode(&missing),
+            Err(SourceUpgradeRecoveryError::Syntax)
+        ));
+        assert_eq!(
+            payload_retained_bytes(&recovered.payload).unwrap(),
+            payload_retained_bytes(&baseline.payload).unwrap() + selected.map_or(0, str::len),
+        );
+        assert_eq!(
+            String::from_utf8(encoded)
+                .unwrap()
+                .matches("\"selected_profile\"")
+                .count(),
+            1,
+        );
+    }
+    let invalid = rewritten(&package, |value| {
+        value["payload"]["selected_profile"] = serde_json::json!("missing");
+    });
+    let mut shared = budget();
+    let before = shared.usage();
+    assert!(matches!(
+        SourceUpgradeRecovery::decode(
+            &invalid,
+            SourceUpgradeRecoveryLimits::default(),
+            &mut shared,
+        ),
+        Err(SourceUpgradeRecoveryError::ConfigurationMismatch),
+    ));
+    assert_eq!(
+        shared.usage().retained_candidate_bytes(),
+        before.retained_candidate_bytes()
+    );
+    assert!(shared.usage().decode_work() > before.decode_work());
 }
 
 #[test]
@@ -758,44 +923,63 @@ fn pending_requires_exact_location_package_bytes_and_digest() {
     )
     .unwrap();
     let load = |path, bytes| {
-        SourceUpgradeRecovery::decode_pending(
+        validate_pending_bytes(
             &reference,
             path,
             bytes,
-            SourceUpgradeRecoveryLimits::default(),
+            SourceUpgradeRecoveryLimits::default().encoded_bytes,
             &mut budget(),
         )
     };
     assert!(matches!(
         load(".nara/upgrades/one.json", None),
-        Err(SourceUpgradeRecoveryError::PendingMissing)
+        Err(RecoveryStorageError::PackageMissing)
     ));
     assert!(matches!(
         load(".nara/upgrades/other.json", Some(package.encoded_bytes())),
-        Err(SourceUpgradeRecoveryError::PendingPathMismatch)
+        Err(RecoveryStorageError::PackagePathMismatch)
     ));
     assert!(matches!(
         load(".nara/upgrades/one.json", Some(b"{}")),
-        Err(SourceUpgradeRecoveryError::PendingDigestMismatch)
+        Err(RecoveryStorageError::PackageDigestMismatch)
     ));
-    assert_eq!(
-        load(".nara/upgrades/one.json", Some(package.encoded_bytes()))
-            .unwrap()
-            .digest(),
-        package.digest()
-    );
-    let colliding =
-        ProjectAuthoringRecovery::new(ProjectPath::new("schema.json").unwrap(), package.digest())
-            .unwrap();
-    assert!(matches!(
-        SourceUpgradeRecovery::decode_pending(
-            &colliding,
-            "schema.json",
+    load(".nara/upgrades/one.json", Some(package.encoded_bytes())).unwrap();
+    for (maximum, accepted) in [
+        (package.encoded_bytes().len(), true),
+        (package.encoded_bytes().len() - 1, false),
+    ] {
+        let mut shared = budget();
+        let result = validate_pending_bytes(
+            &reference,
+            ".nara/upgrades/one.json",
             Some(package.encoded_bytes()),
-            SourceUpgradeRecoveryLimits::default(),
-            &mut budget()
-        ),
-        Err(SourceUpgradeRecoveryError::PathConflict)
+            ByteLimit::new(maximum).unwrap(),
+            &mut shared,
+        );
+        if accepted {
+            result.unwrap();
+            assert_eq!(shared.usage().decode_work(), package.encoded_bytes().len());
+        } else {
+            assert!(matches!(
+                result,
+                Err(RecoveryStorageError::PackageEncodedBytesExceeded)
+            ));
+            assert_eq!(shared.usage().decode_work(), 0);
+        }
+        assert_eq!(shared.usage().retained_candidate_bytes(), 0);
+    }
+    let mut shared = budget();
+    let recovered = SourceUpgradeRecovery::decode(
+        package.encoded_bytes(),
+        SourceUpgradeRecoveryLimits::default(),
+        &mut shared,
+    )
+    .unwrap();
+    validate_storage_path(".nara/upgrades/one.json", &recovered, &mut shared).unwrap();
+    assert_eq!(recovered.digest(), package.digest());
+    assert!(matches!(
+        validate_storage_path("schema.json", &recovered, &mut shared),
+        Err(RecoveryStorageError::RecoveryPathConflict)
     ));
 }
 
@@ -811,19 +995,10 @@ fn pending_paths_share_case_and_ancestor_conflict_rules_with_storage() {
         "PREFABS",
         "scenes/active.scene.json.meta/recovery.json",
     ] {
-        let reference =
-            ProjectAuthoringRecovery::new(ProjectPath::new(path).unwrap(), package.digest())
-                .unwrap();
         assert!(
             matches!(
-                SourceUpgradeRecovery::decode_pending(
-                    &reference,
-                    path,
-                    Some(package.encoded_bytes()),
-                    SourceUpgradeRecoveryLimits::default(),
-                    &mut budget()
-                ),
-                Err(SourceUpgradeRecoveryError::PathConflict)
+                validate_storage_path(path, &package, &mut budget()),
+                Err(RecoveryStorageError::RecoveryPathConflict)
             ),
             "{path}"
         );
@@ -835,14 +1010,14 @@ fn pending_paths_share_case_and_ancestor_conflict_rules_with_storage() {
         "schema.json.sibling",
         "scenes-sibling/recovery.json",
     ] {
-        package.validate_recovery_path(path, &mut shared).unwrap();
+        validate_storage_path(path, &package, &mut shared).unwrap();
         assert_eq!(shared.usage().retained_candidate_bytes(), retained);
     }
     for path in ["SCHEMA.json", "schema.json/recovery.json"] {
         let work = shared.usage().decode_work();
         assert!(matches!(
-            package.validate_recovery_path(path, &mut shared),
-            Err(SourceUpgradeRecoveryError::PathConflict)
+            validate_storage_path(path, &package, &mut shared),
+            Err(RecoveryStorageError::RecoveryPathConflict)
         ));
         assert_eq!(shared.usage().retained_candidate_bytes(), retained);
         assert!(shared.usage().decode_work() > work);
@@ -850,14 +1025,12 @@ fn pending_paths_share_case_and_ancestor_conflict_rules_with_storage() {
 }
 
 #[test]
-fn semantic_and_pending_path_refusals_release_the_owned_candidate_without_refunding_work() {
+fn semantic_decode_and_storage_path_refusals_release_only_temporary_storage() {
     let package = Fixture::new().package();
     let semantic_invalid = rewritten(&package, |value| {
         value["payload"]["manifest"]["path"] = "wrong.toml".into();
     });
     let path = "SCHEMA.json";
-    let reference =
-        ProjectAuthoringRecovery::new(ProjectPath::new(path).unwrap(), package.digest()).unwrap();
     let mut shared = budget();
     shared.charge_source_bytes(0, 0, 0, 321).unwrap();
     let retained = shared.usage().retained_candidate_bytes();
@@ -875,14 +1048,8 @@ fn semantic_and_pending_path_refusals_release_the_owned_candidate_without_refund
         assert!(shared.usage().decode_work() > work);
         let work = shared.usage().decode_work();
         assert!(matches!(
-            SourceUpgradeRecovery::decode_pending(
-                &reference,
-                path,
-                Some(package.encoded_bytes()),
-                SourceUpgradeRecoveryLimits::default(),
-                &mut shared
-            ),
-            Err(SourceUpgradeRecoveryError::PathConflict)
+            validate_storage_path(path, &package, &mut shared),
+            Err(RecoveryStorageError::RecoveryPathConflict)
         ));
         assert_eq!(shared.usage().retained_candidate_bytes(), retained);
         assert!(shared.usage().decode_work() > work);
@@ -1389,23 +1556,26 @@ fn failed_owned_and_pending_decode_keep_work_charges_and_refund_temporary_storag
         ProjectAuthoringRecovery::new(ProjectPath::new(path).unwrap(), digest(&invalid)).unwrap();
     let limits = SourceUpgradeRecoveryLimits::default();
     for pending in [false, true] {
-        let attempt = |shared: &mut AuthoringProjectAdmissionBudget| {
+        let attempt = |shared: &mut AuthoringProjectAdmissionBudget|
+         -> Result<SourceUpgradeRecovery, SourceUpgradeStorageError> {
             if pending {
-                SourceUpgradeRecovery::decode_pending(
+                validate_pending_bytes(
                     &reference,
                     path,
                     Some(&invalid),
-                    limits,
+                    limits.encoded_bytes,
                     shared,
-                )
-            } else {
-                SourceUpgradeRecovery::decode(&invalid, limits, shared)
+                )?;
             }
+            SourceUpgradeRecovery::decode(&invalid, limits, shared)
+                .map_err(SourceUpgradeStorageError::Recovery)
         };
         let mut shared = budget();
         assert!(matches!(
             attempt(&mut shared),
-            Err(SourceUpgradeRecoveryError::Syntax)
+            Err(SourceUpgradeStorageError::Recovery(
+                SourceUpgradeRecoveryError::Syntax
+            ))
         ));
         let one_attempt = shared.usage().decode_work();
         assert!(one_attempt > 0);
@@ -1414,14 +1584,22 @@ fn failed_owned_and_pending_decode_keep_work_charges_and_refund_temporary_storag
         shared.limits.decode_work = ItemLimit::new(one_attempt * 2).unwrap();
         assert!(matches!(
             attempt(&mut shared),
-            Err(SourceUpgradeRecoveryError::Syntax)
+            Err(SourceUpgradeStorageError::Recovery(
+                SourceUpgradeRecoveryError::Syntax
+            ))
         ));
         assert_eq!(shared.usage().decode_work(), one_attempt * 2);
         assert_eq!(shared.usage().retained_candidate_bytes(), 0);
         assert!(matches!(
             attempt(&mut shared),
-            Err(SourceUpgradeRecoveryError::Admission(
-                AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+            Err(SourceUpgradeStorageError::Recovery(
+                SourceUpgradeRecoveryError::Admission(
+                    AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+                )
+            )) | Err(SourceUpgradeStorageError::Storage(
+                RecoveryStorageError::Admission(
+                    AuthoringProjectAdmissionError::DecodeWorkExceeded { .. }
+                )
             ))
         ));
         assert!(matches!(
@@ -1435,8 +1613,14 @@ fn failed_owned_and_pending_decode_keep_work_charges_and_refund_temporary_storag
     let wrong =
         ProjectAuthoringRecovery::new(ProjectPath::new(path).unwrap(), package.digest()).unwrap();
     assert!(matches!(
-        SourceUpgradeRecovery::decode_pending(&wrong, path, Some(&invalid), limits, &mut shared),
-        Err(SourceUpgradeRecoveryError::PendingDigestMismatch)
+        validate_pending_bytes(
+            &wrong,
+            path,
+            Some(&invalid),
+            limits.encoded_bytes,
+            &mut shared
+        ),
+        Err(RecoveryStorageError::PackageDigestMismatch)
     ));
     assert_eq!(
         shared.usage().decode_work(),

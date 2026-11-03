@@ -24,8 +24,8 @@ use nara_tooling::{
 mod owner_binding;
 pub(super) use owner_binding::SupervisedPlayOwnerRegistration;
 pub use owner_binding::{
-    EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError, EditorSupervisedPlayRetirementAck,
-    EditorSupervisedPlayRetirementRequest,
+    EditorSourceOperationId, EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
+    EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
 };
 
 /// Capability-free source authority admitted for one supervised desktop launch.

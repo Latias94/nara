@@ -74,6 +74,7 @@ impl EditorProjectSession {
         self.advance_source_tools();
         self.advance_schema_owner_adoption();
         self.advance_authored_schema_upgrade();
+        self.advance_prefab_extraction();
         if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
@@ -180,9 +181,10 @@ impl EditorProjectSession {
                 )
                 .with_document_open(self.document_open_view())
                 .with_authoring_retirement_pending(self.authoring_retirements.is_pending())
-                .with_schema_owner_adoption_work_pending(self.schema_owner_adoption.work_pending())
-                .with_authored_schema_upgrade_work_pending(
-                    self.authored_schema_upgrade.work_pending(),
+                .with_authoring_operation_work_pending(
+                    self.schema_owner_adoption.work_pending()
+                        || self.authored_schema_upgrade.work_pending()
+                        || self.prefab_extraction.work_pending(),
                 )
                 .with_scene_preview_work(preview_work.0, preview_work.1, preview_work.2)
                 .with_scene_preview_document(self.scene_preview_document)

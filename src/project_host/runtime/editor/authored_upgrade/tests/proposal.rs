@@ -501,7 +501,7 @@ fn refused_complete_proposal_returns_the_original_capture_for_correction_and_ret
             let disk = fixture.disk();
             let operation = match work_limit {
                 Some(limit) => editor.begin_authored_schema_upgrade_with_limits(
-                    crate::project_host::AuthoredSchemaUpgradeHostLimits::default()
+                    crate::project_host::AuthoringSourceOperationLimits::default()
                         .with_host_work(limit),
                 ),
                 None => editor.begin_authored_schema_upgrade(),

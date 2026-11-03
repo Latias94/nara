@@ -96,6 +96,32 @@ impl NativeDocumentSourcePolicy {
         )
     }
 
+    /// Interprets the file already read and retained by a complete source capture. The caller
+    /// owns its exact path/parent/name observation and revalidates that observation separately.
+    /// Reusing custody avoids opening the same source again for every configuration; stable
+    /// metadata still passes this policy's actual sidecar admission.
+    pub(super) fn admit_opened_budgeted(
+        &self,
+        root: &DirectoryCapability,
+        path: &str,
+        kind: SourceDocumentKind,
+        current: &FileCapability,
+        dependency_depth: usize,
+        retained_native_handles: usize,
+        budget: &mut AuthoringProjectAdmissionBudget,
+    ) -> Result<AdmittedNativeDocumentSource, AuthoringProjectSourceAdmissionError> {
+        self.admit_budgeted_source(
+            root,
+            path,
+            kind,
+            current.identity(),
+            dependency_depth,
+            retained_native_handles,
+            Some(current),
+            budget,
+        )
+    }
+
     /// Revalidates the logical source and sidecar content against the same live leaf the
     /// caller reads and hashes. This grants no historical object or publication evidence.
     pub(super) fn revalidate_read_content(
@@ -204,7 +230,10 @@ impl NativeDocumentSourcePolicy {
             65_536_usize
                 .saturating_mul(preflight.components())
                 .saturating_mul(usize::from(current.is_none()) + usize::from(stable))
-                .saturating_add(metadata_limit.saturating_mul(4)),
+                .saturating_add(metadata_limit.saturating_mul(4))
+                // Already-held source custody removes a native reopen, not logical path
+                // validation and the canonical-key copy performed by this policy.
+                .saturating_add(path.len().saturating_mul(3)),
             retained_bound,
         )?;
         let admitted = match current {

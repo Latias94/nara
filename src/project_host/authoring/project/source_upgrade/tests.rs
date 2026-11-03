@@ -235,6 +235,10 @@ impl Fixture {
                 path,
                 key: &keys[index],
                 encoding: RecoverySourceEncoding::Json,
+                explicit_native: self
+                    .open
+                    .iter()
+                    .any(|(_, source)| source.relative_path() == *path),
                 old_disk: &old[index],
                 reviewed_working: &working[index],
                 successor: &next[index],
@@ -259,6 +263,7 @@ impl Fixture {
             .unwrap();
         SourceUpgradeRecovery::prepare(
             SourceUpgradeRecoveryInput {
+                selected_profile: self.schema.settings().profile_name.as_deref(),
                 old_ready_manifest: self.schema.manifest_bytes(),
                 future_ready_manifest: &ready,
                 bundle_path: "schema.json",
@@ -278,19 +283,11 @@ impl Fixture {
         .unwrap()
     }
 
-    fn capture_inventory(
-        &self,
-        budget: &mut AuthoringProjectAdmissionBudget,
-    ) -> SourceUpgradeInventory {
+    fn capture_inventory(&self, budget: &mut AuthoringProjectAdmissionBudget) -> SourceInventory {
         let inputs = inventory_inputs(&self.open_sources(), budget).unwrap();
-        let bytes =
-            checked_product(inputs.len(), size_of::<SourceUpgradeOpenSource<'_>>()).unwrap();
-        let result = SourceUpgradeInventory::capture(
-            &self.schema,
-            &inputs,
-            SceneFileLimits::default(),
-            budget,
-        );
+        let bytes = checked_product(inputs.len(), size_of::<OpenSource<'_>>()).unwrap();
+        let result =
+            SourceInventory::capture(&self.schema, &inputs, SceneFileLimits::default(), budget);
         drop(inputs);
         budget.reconcile_retained_reservation(bytes, 0).unwrap();
         result.unwrap()

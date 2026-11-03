@@ -8,7 +8,7 @@ use nara_scene::__private::AuthoredSchemaUpgradeUsage;
 use nara_scene::{SceneFileEncoding, SourceDocumentKey};
 
 use super::*;
-use crate::project_host::authoring::source_upgrade_inventory::SourceUpgradeEncoding;
+use crate::project_host::authoring::source_inventory::SourceEncoding;
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod tests;
@@ -58,7 +58,7 @@ pub(crate) struct SourceUpgradeBaseline {
     pub(super) work: AuthoredSchemaUpgradeWork,
     pub(super) input: EditorWorkspaceAuthoredSchemaUpgradeInput,
     pub(super) open: Vec<SourceUpgradeOpenInput>,
-    pub(super) inventory: SourceUpgradeInventory,
+    pub(super) inventory: SourceInventory,
 }
 
 /// Borrowed command input. An unopened source uses its original disk bytes; an open source
@@ -74,30 +74,10 @@ pub(crate) struct SourceUpgradeSourceInput<'a> {
 }
 
 impl AuthoringProjectSessionSnapshot {
-    /// Starts the complete operation's work meter before its first input admission. Existing
-    /// content and retained custody continue; work done before this operation is historical.
-    pub(crate) fn admit_authored_upgrade_inputs(
-        &self,
-        host_retained_bytes: usize,
-        worker_retained_bytes: usize,
-        work_limit: nara_core::ItemLimit,
-        open_handles: nara_core::ItemLimit,
-    ) -> Result<AuthoringSourceCaptureInputs, AuthoringProjectSourceAdmissionError> {
-        let budget = self
-            .schema
-            .budget
-            .for_authored_upgrade(work_limit, open_handles);
-        self.admit_source_capture_inputs_with_budget(
-            host_retained_bytes,
-            worker_retained_bytes,
-            budget,
-        )
-    }
-
     /// Transfers the already admitted Host/worker selections and their live observation proofs.
     ///
     /// Before cloning selections, the caller must admit their storage with
-    /// `admit_source_capture_inputs`, using `SourceUpgradeOpenInput::capture_retained_bytes` for
+    /// `admit_source_operation_inputs`, using `SourceUpgradeOpenInput::capture_retained_bytes` for
     /// each worker selection, plus `size_of::<SourceUpgradeCaptureRequest>()`. Acquire each proof
     /// through those same inputs. Capture the complete Workspace with the supplied Work before
     /// transferring both here. Host selection retention, worker inputs and observation handles
@@ -234,8 +214,7 @@ impl SourceUpgradeCaptureRequest {
             input,
             open,
         } = self;
-        let reference_bytes =
-            checked_product(open.len(), size_of::<SourceUpgradeOpenSource<'_>>())?;
+        let reference_bytes = checked_product(open.len(), size_of::<OpenSource<'_>>())?;
         budget.charge_source_bytes(0, 0, reference_bytes, reference_bytes)?;
         let sources = open
             .iter()
@@ -243,12 +222,11 @@ impl SourceUpgradeCaptureRequest {
                 selected
                     .source
                     .as_ref()
-                    .map(SourceUpgradeOpenSource::Bound)
+                    .map(OpenSource::Bound)
                     .ok_or(SourceUpgradePreparationError::OpenSet)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let captured =
-            SourceUpgradeInventory::capture(&schema, &sources, scene_limits, &mut budget);
+        let captured = SourceInventory::capture(&schema, &sources, scene_limits, &mut budget);
         drop(sources);
         budget.reconcile_retained_reservation(reference_bytes, 0)?;
         let inventory = captured?;
@@ -267,7 +245,7 @@ impl SourceUpgradeCaptureRequest {
 }
 
 fn validate_observations(
-    inventory: &SourceUpgradeInventory,
+    inventory: &SourceInventory,
     open: &[SourceUpgradeOpenInput],
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), SourceUpgradePreparationError> {
@@ -287,7 +265,7 @@ fn validate_observations(
         let member = loop {
             let member = participants
                 .next()
-                .ok_or(SourceUpgradeInventoryError::OpenSourceChanged)?;
+                .ok_or(SourceInventoryError::OpenSourceChanged)?;
             budget.charge_source_bytes(
                 0,
                 0,
@@ -304,7 +282,7 @@ fn validate_observations(
         };
         let file = custody
             .file(member.file().path())
-            .ok_or(SourceUpgradeInventoryError::OpenSourceChanged)?;
+            .ok_or(SourceInventoryError::OpenSourceChanged)?;
         if observation.observation()
             != (
                 member.file().identity(),
@@ -313,9 +291,9 @@ fn validate_observations(
             )
             || !observation
                 .matches(file)
-                .map_err(SourceUpgradeInventoryError::Host)?
+                .map_err(SourceInventoryError::Host)?
         {
-            return Err(SourceUpgradeInventoryError::OpenSourceChanged.into());
+            return Err(SourceInventoryError::OpenSourceChanged.into());
         }
     }
     Ok(())
@@ -349,8 +327,8 @@ impl SourceUpgradeBaseline {
                 key: member.source_key(),
                 path: member.file().path(),
                 encoding: match member.encoding() {
-                    SourceUpgradeEncoding::Json => SceneFileEncoding::Json,
-                    SourceUpgradeEncoding::Ron => SceneFileEncoding::Ron,
+                    SourceEncoding::Json => SceneFileEncoding::Json,
+                    SourceEncoding::Ron => SceneFileEncoding::Ron,
                 },
                 disk: member.bytes(),
                 document,
@@ -374,7 +352,7 @@ impl SourceUpgradeBaseline {
         &self.input
     }
 
-    pub(super) fn inventory(&self) -> &SourceUpgradeInventory {
+    pub(super) fn inventory(&self) -> &SourceInventory {
         &self.inventory
     }
 

@@ -22,6 +22,7 @@ mod open;
 mod persistence;
 mod play;
 mod prefab_conversion;
+mod prefab_extraction;
 mod prepared_edit;
 #[cfg(feature = "presentation-2d")]
 mod presentation;
@@ -58,10 +59,10 @@ pub(crate) use document_open::preparation::OpenTestPhase;
 pub use extension_documents::EditorExtensionDocumentHostError;
 #[doc(hidden)]
 pub use external_play::{
-    EditorExternalPlayReceiptError, EditorSupervisedPlayBinding, EditorSupervisedPlayOwnerError,
-    EditorSupervisedPlayRetirementAck, EditorSupervisedPlayRetirementRequest,
-    SupervisedDesktopSourceAdmissionError, SupervisedDesktopSourceAuthority,
-    admit_supervised_desktop_source_receipt,
+    EditorExternalPlayReceiptError, EditorSourceOperationId, EditorSupervisedPlayBinding,
+    EditorSupervisedPlayOwnerError, EditorSupervisedPlayRetirementAck,
+    EditorSupervisedPlayRetirementRequest, SupervisedDesktopSourceAdmissionError,
+    SupervisedDesktopSourceAuthority, admit_supervised_desktop_source_receipt,
 };
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
@@ -82,6 +83,12 @@ pub use open::{
 };
 #[cfg(test)]
 pub(crate) use persistence::{ReopenTestPhase, SaveTestPhase};
+pub use prefab_extraction::{
+    EditorPrefabExtractionError, EditorPrefabExtractionId, EditorPrefabExtractionOutcome,
+    EditorPrefabExtractionPhase, EditorPrefabExtractionRequest, EditorPrefabExtractionReview,
+    EditorPrefabExtractionReviewedOutput, EditorPrefabExtractionSelection,
+    EditorPrefabExtractionSelectionDocument, EditorPrefabExtractionView,
+};
 pub use prepared_edit::EditorEditPreparationError;
 #[cfg(feature = "presentation-2d")]
 pub use presentation::{
@@ -897,6 +904,7 @@ pub struct EditorProjectSession {
     source_tools: source_tools::EditorSourceTools,
     schema_owner_adoption: schema_owner::EditorSchemaOwnerAdoptionHost,
     authored_schema_upgrade: authored_upgrade::EditorAuthoredSchemaUpgradeHost,
+    prefab_extraction: prefab_extraction::EditorPrefabExtractionHost,
     #[cfg(test)]
     next_close_poll_gate: Option<Box<dyn FnOnce(&mut Self) + Send>>,
     authoring_prefab_source_observations:
@@ -1054,6 +1062,7 @@ impl fmt::Debug for EditorProjectSession {
 impl Drop for EditorProjectSession {
     fn drop(&mut self) {
         self.authored_schema_upgrade.cancel();
+        self.prefab_extraction.cancel();
         self.schema_owner_adoption.cancel();
         if let Some(project) = self.authoring_project_mut() {
             project.cancel_source_index();
@@ -1095,7 +1104,9 @@ impl EditorProjectSession {
         self.advance_schema_owner_adoption();
         self.authored_schema_upgrade.cancel();
         self.advance_authored_schema_upgrade();
-        if self.authored_schema_upgrade.writes_fenced() {
+        self.prefab_extraction.cancel();
+        self.advance_prefab_extraction();
+        if self.authored_schema_upgrade.writes_fenced() || self.prefab_extraction.writes_fenced() {
             // Publication still owns its Task inputs and recovery fence. Do not shut down
             // the pools that must return those actual results or complete reconciliation.
             return EditorProjectCloseProgress::Incomplete {
@@ -1145,12 +1156,15 @@ impl EditorProjectSession {
             authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
                 self.advance_schema_owner_adoption();
                 self.advance_authored_schema_upgrade();
+                self.advance_prefab_extraction();
                 self.drain_schema_adoption_source_asset_import();
                 self.advance_prefab_conversion();
                 self.advance_source_tools();
                 files_closed &= !self.schema_owner_adoption.pending();
                 files_closed &= !self.authored_schema_upgrade.work_pending();
                 files_closed &= !self.authored_schema_upgrade.writes_fenced();
+                files_closed &= !self.prefab_extraction.work_pending();
+                files_closed &= !self.prefab_extraction.writes_fenced();
                 files_closed &= !self.source_asset_import.schema_adoption_pending();
                 files_closed &= self.authoring_runtime.host_custody().retry_cleanup();
                 let task_shutdown = self.session_task_shutdown(&task_shutdown);
@@ -1746,6 +1760,7 @@ impl EditorProjectSession {
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
                 authored_schema_upgrade: Default::default(),
+                prefab_extraction: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -2050,6 +2065,7 @@ impl EditorProjectSession {
                 source_tools: Default::default(),
                 schema_owner_adoption: Default::default(),
                 authored_schema_upgrade: Default::default(),
+                prefab_extraction: Default::default(),
                 #[cfg(test)]
                 next_close_poll_gate: None,
                 authoring_prefab_source_observations: BTreeMap::new(),
@@ -2969,7 +2985,7 @@ impl EditorProjectSession {
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
-        if self.authored_schema_upgrade.writes_fenced() {
+        if self.authored_schema_upgrade.writes_fenced() || self.prefab_extraction.writes_fenced() {
             return EditorWorkspaceIntentRequestResult::Rejected(
                 EditorWorkspaceIntentRejection::Busy,
             );

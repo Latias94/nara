@@ -241,16 +241,22 @@ fn open_source<D: EditorExtensionDocument>(
 
 impl ExtensionPersistenceLane {
     pub(super) fn save(&self, checkpoint: EditorPersistenceCheckpoint) -> PersistenceSaveOutcome {
-        let bytes = match checkpoint.extension_bytes() {
-            Some(Ok(bytes)) => bytes.to_vec(),
-            Some(Err(_)) => {
+        let encoded = match checkpoint.encode_extension(
+            nara_core::ByteLimit::new(EXTENSION_DOCUMENT_BYTE_LIMIT as usize)
+                .expect("the extension document limit is nonzero"),
+        ) {
+            Ok(encoded) => encoded,
+            Err(failure) => {
+                if matches!(
+                    failure.error(),
+                    nara_tooling::EditorPersistenceEncodingError::DocumentKind
+                ) {
+                    return PersistenceSaveOutcome::Rejected(
+                        EditorPersistenceRejection::DocumentKindMismatch,
+                    );
+                }
                 return PersistenceSaveOutcome::Failed(
                     nara_tooling::EditorPersistenceFailureStage::Encode,
-                );
-            }
-            None => {
-                return PersistenceSaveOutcome::Rejected(
-                    EditorPersistenceRejection::DocumentKindMismatch,
                 );
             }
         };
@@ -258,8 +264,7 @@ impl ExtensionPersistenceLane {
             .with_worker(|host| {
                 publish_editor_checkpoint(
                     host,
-                    checkpoint,
-                    &bytes,
+                    encoded,
                     #[cfg(test)]
                     false,
                 )

@@ -8,18 +8,18 @@ use super::super::source_upgrade_adoption::{
 };
 use super::*;
 use crate::project_host::authoring::{
+    publication_admission::with_cleanup_admission,
+    recovery_storage::{
+        BoundRecoveryPending, PendingRecoveryStorage, PreparedRecoveryStorage,
+        RecoveryPendingPublication, RecoveryStorageError, RecoveryStorageHost,
+        RecoveryStoragePublication, StoredRecovery,
+    },
     source_upgrade_inventory::VerifiedSourceUpgradeInventory,
-    source_upgrade_policy::with_cleanup_admission,
     source_upgrade_publication::{
         SourceUpgradePublication, SourceUpgradePublicationError, SourceUpgradePublicationStep,
     },
     source_upgrade_ready::{
         PreparedSourceUpgradeReady, SourceUpgradePendingManifest, SourceUpgradeReadyError,
-    },
-    source_upgrade_storage::{
-        BoundRecoveryPending, PendingRecoveryStorage, PreparedRecoveryStorage,
-        RecoveryPendingPublication, RecoveryStorageError, RecoveryStorageHost,
-        RecoveryStoragePublication, StoredRecovery,
     },
 };
 
@@ -76,9 +76,9 @@ enum Stage {
     Confirm,
     CaptureStorage,
     PrepareStorage(RecoveryStorageHost, nara_project::ProjectPath),
-    Recovery(PreparedRecoveryStorage),
-    Stored(StoredRecovery),
-    Pending(BoundRecoveryPending),
+    Recovery(PreparedRecoveryStorage<SourceUpgradeRecovery>),
+    Stored(StoredRecovery<SourceUpgradeRecovery>),
+    Pending(BoundRecoveryPending<SourceUpgradeRecovery>),
     Sources,
     PrepareReady,
     Verify(PreparedSourceUpgradeReady),
@@ -99,7 +99,7 @@ pub(crate) struct AuthoredSourceUpgradePublication {
     open: Vec<SourceUpgradeOpenInput>,
     stage: Option<Stage>,
     publication: Option<SourceUpgradePublication>,
-    pending: Option<PendingRecoveryStorage>,
+    pending: Option<PendingRecoveryStorage<SourceUpgradeRecovery>>,
     observations: Vec<AuthoredSourceUpgradeObservedFile>,
     project: Option<BoundSourceUpgradeProject>,
     failure: Option<AuthoredSourceUpgradePublicationFailure>,
@@ -300,7 +300,9 @@ impl AuthoredSourceUpgradePublication {
             | Some(E::Storage(RecoveryStorageError::Admission(error)))
             | Some(E::Ready(SourceUpgradeReadyError::Admission(error)))
             | Some(E::Project(SourceUpgradeProjectError::Admission(error)))
-            | Some(E::Inventory(SourceUpgradeInventoryError::Admission(error))) => Some(error),
+            | Some(E::Inventory(SourceUpgradeInventoryError::Inventory(
+                SourceInventoryError::Admission(error),
+            ))) => Some(error),
             _ => None,
         };
         matches!(
@@ -419,7 +421,7 @@ impl AuthoredSourceUpgradePublication {
 
     pub(crate) fn admit_persistence_validation(
         &mut self,
-        cost: crate::project_host::persistence::PersistenceAuthoredUpgradeValidationCost,
+        cost: crate::project_host::persistence::PersistenceLeafValidationCost,
     ) -> Result<usize, AuthoredSourceUpgradePublicationFailure> {
         self.budget.admit_handle_peak(cost.transient_handles)?;
         let before = self.budget.retained_candidate_bytes;
@@ -491,15 +493,14 @@ impl AuthoredSourceUpgradePublication {
             Stage::Confirm => {
                 let before = self.budget.retained_candidate_bytes;
                 let result = (|| {
-                    let bytes =
-                        checked_product(self.open.len(), size_of::<SourceUpgradeOpenSource<'_>>())?;
+                    let bytes = checked_product(self.open.len(), size_of::<OpenSource<'_>>())?;
                     self.budget.charge_source_bytes(0, 0, bytes, bytes)?;
                     let open: Vec<_> = self
                         .open
                         .iter()
                         .map(|open| match &open.source {
-                            Some(source) => SourceUpgradeOpenSource::Bound(source),
-                            None => SourceUpgradeOpenSource::Unbound,
+                            Some(source) => OpenSource::Bound(source),
+                            None => OpenSource::Unbound,
                         })
                         .collect();
                     let sources = self.sources.as_ref().unwrap();
@@ -777,12 +778,12 @@ impl AuthoredSourceUpgradePublication {
         self.observations
             .sort_unstable_by_key(|observation| observation.document);
         let before = self.budget.retained_candidate_bytes;
-        let bytes = checked_product(count, size_of::<SourceUpgradeOpenSource<'_>>())?;
+        let bytes = checked_product(count, size_of::<OpenSource<'_>>())?;
         self.budget.charge_source_bytes(0, 0, bytes, bytes)?;
         let open: Vec<_> = self
             .observations
             .iter()
-            .map(|observation| SourceUpgradeOpenSource::Bound(&observation.source))
+            .map(|observation| OpenSource::Bound(&observation.source))
             .collect();
         let result = VerifiedSourceUpgradeInventory::capture(
             ready.observed_pending_schema(),

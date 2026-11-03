@@ -10,8 +10,8 @@ mod project_command;
 use nara::{
     core::ItemLimit,
     project_host::{
-        AuthoredSchemaUpgradeHostLimits, AuthoredSchemaUpgradeProposal,
-        AuthoredSchemaUpgradeSourceProposal, EditorAuthoredUpgradeWorkingSource,
+        AuthoredSchemaUpgradeProposal, AuthoredSchemaUpgradeSourceProposal,
+        AuthoringSourceOperationLimits, EditorAuthoredUpgradeWorkingSource,
     },
     reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentTypeId,
@@ -161,7 +161,7 @@ fn application_confirmation_publishes_ready_and_replaces_its_actual_registered_p
     };
     let operation = application
         .begin_authored_schema_upgrade_with_limits(
-            AuthoredSchemaUpgradeHostLimits::default()
+            AuthoringSourceOperationLimits::default()
                 .with_open_handles(ItemLimit::new(128).unwrap()),
         )
         .unwrap();
@@ -260,7 +260,7 @@ fn application_close_and_exit_can_retry_the_retained_pending_operation_after_a_r
         edit_save_source(&mut application);
         let operation = application
             .begin_authored_schema_upgrade_with_limits(
-                AuthoredSchemaUpgradeHostLimits::default()
+                AuthoringSourceOperationLimits::default()
                     .with_open_handles(ItemLimit::new(128).unwrap()),
             )
             .unwrap();

@@ -51,10 +51,10 @@ impl Host {
         expected: (FileIdentity, Option<FileIdentity>, ContentDigest),
         file: FileCapability,
         digest: ContentDigest,
-    ) -> Result<PersistenceAuthoredUpgradeCommit<'_>, EditorPersistenceRejection> {
+    ) -> Result<PersistenceLeafCommit<'_>, EditorPersistenceRejection> {
         let result = match self {
-            Self::Scene(host) => host.bind_authored_upgrade(expected, file, digest),
-            Self::Prefab(host) => host.bind_authored_upgrade(
+            Self::Scene(host) => host.bind_published_leaf(expected, file, digest),
+            Self::Prefab(host) => host.bind_published_leaf(
                 &EditorDocumentSourceBinding::new(path),
                 expected,
                 file,

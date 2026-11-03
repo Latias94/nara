@@ -28,8 +28,8 @@ pub(super) struct AdmittedAuthoringSchemaBundle {
 
 impl AdmittedAuthoringSchemaBundle {
     /// Joins already admitted immutable metadata to its exact verified source observation.
-    /// The upgrade owner checks the live leaf, parent and digest before calling this helper.
-    pub(super) fn from_upgrade_observation(
+    /// The observation owner checks the live leaf, parent and digest before calling this helper.
+    pub(super) fn from_observation(
         path: ProjectPath,
         capability: FileCapability,
         bytes: Arc<[u8]>,
@@ -55,6 +55,10 @@ impl AdmittedAuthoringSchemaBundle {
 
     pub(super) fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    pub(super) fn shared_bytes(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
     }
 
     pub(super) const fn digest(&self) -> ContentDigest {
