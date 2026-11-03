@@ -58,8 +58,18 @@ and whole-field submission/result ownership. Pending children and invalid local 
 unpublished; deleting a preceding row preserves the surviving leaf's local history. This advances
 the supported value controls with 316 ordinary library tests and the final 16-case owner/native
 cohort, including complete Scene/Prefab history and disk Reopen. It does not complete
-component/tree parity, nested reference pickers, the Nara-owned Scene/tool
+component/tree parity, the Nara-owned Scene/tool
 visual, keyboard-only shell entry or broader native/idle/platform qualification.
+
+The [shared reference picker successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#shared-reference-picker-integration)
+uses one private owner for root and nested Record/Optional/List/Map entity references. Typed leaf
+addresses, bounded lazy target pages and captured menu revisions preserve exact draft/result
+ownership. Closing/reopening refuses earlier actions while stable keys keep truthful keyboard
+focus, including navigation before another paint. Choosing one leaf retires its old text/picker
+and preserves unrelated local editing. Its final 321-test ordinary library and 44-case owner/native
+cohort include exact Application controls and complete Scene/Prefab history/persistence. The
+complete selected Inspector and broader R11/R12
+requirements remain open.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

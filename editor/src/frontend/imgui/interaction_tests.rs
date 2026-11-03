@@ -33,6 +33,7 @@ use crate::{EditorApplication, EditorLaunchOptions};
 mod entity_references;
 mod field_drafts;
 mod field_overrides;
+mod nested_references;
 mod recursive_shapes;
 
 pub(super) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
@@ -74,6 +75,12 @@ impl InteractionProject {
     pub(crate) fn new_entity_references() -> Self {
         let project = Self::new();
         entity_references::configure(&project);
+        project
+    }
+
+    pub(crate) fn new_nested_entity_references() -> Self {
+        let project = Self::new();
+        nested_references::configure(&project);
         project
     }
 

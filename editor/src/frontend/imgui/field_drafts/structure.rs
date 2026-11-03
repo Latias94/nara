@@ -714,6 +714,14 @@ fn text_shape(shape: &ComponentValueShape) -> bool {
     }
 }
 
+pub(in crate::frontend::imgui) fn is_entity_reference(
+    shape: &ComponentValueShape,
+    input: &DraftInput,
+) -> bool {
+    matches!(input, DraftInput::Value(path)
+        if shape_at(shape, &path.0) == Some(&ComponentValueShape::EntityRef))
+}
+
 fn shape_at<'a>(
     mut shape: &'a ComponentValueShape,
     segments: &[PathSegment],

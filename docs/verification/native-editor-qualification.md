@@ -91,6 +91,12 @@ until whole-field Apply. The trajectory then checks exact history, ordinary Undo
 values, original unavailable records and a clean Save/Reopen. The predecessor recursive trajectory
 separately protects the shared Optional child identity change.
 
+The nested-reference trajectory uses the same source-local picker for Record, Optional, List and
+Map leaves in actual Scene and Prefab documents. It checks duplicate-name choices, menu cancellation,
+pending-child confirmation and whole-field Apply, then ordinary Undo/Redo, typed saved references
+and original unavailable records through clean Reopen. Its pointer and locating wheel events use
+the production owned image path; OS input-method delivery retains the separate limits below.
+
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
 requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window

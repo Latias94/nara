@@ -274,8 +274,84 @@ editing baseline; Save additionally compares every original raw entity record. M
 semantics are located by bounded real wheel input through the confirmed image. No product source,
 input or result admission is weakened.
 
-These results qualify the supported value controls and selected Windows backend paths. Nested
-entity-reference picker parity, complete component/tree controls, keyboard-only shell entry,
+These results qualify the supported value controls and selected Windows backend paths. The nested
+entity-reference picker successor follows below; complete component/tree controls, keyboard-only shell entry,
 the Nara-owned Scene/tool visual, virtualization, measured idle work and actual OS IME/clipboard/
 accessibility/DPI behavior retain their separate requirements. The predecessor and the broader
 foundation Goal remain open.
+
+## Shared reference picker integration
+
+Root and structured entity references now consume one private picker owner. Each leaf picker is
+addressed by the existing typed `DraftInput`, retaining the original field and child identity.
+The shared source-local projection formats only the current page's labels, with at most 32 choice
+controls per picker. Map key inputs and asset-reference text do not receive entity pickers.
+
+Each displayed picker action carries its original menu revision. Closing/reopening and page
+replacement advance that revision, retire old choices and reset pressed state. Even a compatible
+Toggle control whose key survives a close/open round trip cannot consume an earlier view's input.
+Presented field metadata includes every current picker revision, so an equivalent-looking menu
+cannot reuse a compiled frame with obsolete action bindings. Activation checks the captured view
+before changing menu or draft state. Reduction still synchronizes focus for an identical live key
+when an earlier view delivers navigation; its disabled descriptor suppresses old pointer state
+and activation without losing the kernel's current focus fact.
+
+Choosing rechecks the original field/draft/current projection, exact leaf and live choice,
+composition and pending state, capacity and current source-local membership. It writes a canonical
+reference through the same candidate parser, then retires only that leaf's text and picker.
+Unrelated text controls retain their local history. Pending child confirmation and whole-field
+Apply/Reapply keep their original meanings and exact Application result routing. A visible choice
+can still operate when its text input is fully clipped; it does not acquire hidden text authority.
+
+The old root-only menu flags and field-operation variants are removed. This is a private Editor
+consumer refactor; shared UI controls, source formats and public field APIs are unchanged. Full
+component/tree parity, the clipped Scene/tool visual and broader R11/R12 gates remain separate.
+
+The remaining selected-field parity work must include the predecessor's explicit retained-input
+copy path, including incompatible or temporarily unprojected drafts, and retained-budget recovery.
+Inspect `FieldEditors::show_requested_recovery`/`show_recovery` before deleting that field path.
+The ordinary source-tool facet and clipped live Scene remain complete-workflow consumers of the
+same submission/history owners; supporting every value shape does not qualify those visual paths.
+
+## Shared reference picker qualification
+
+This integration is based on `18c8faa`, using Windows 11, Rust 1.95.0, root `target`, serial
+single-job Cargo, DX12 and the installed `simhei.ttf` fallback.
+
+| Gate | Result |
+| --- | --- |
+| Ordinary Editor library | 321/321, `6bd8313c-fba4-4ce3-956b-8b72e1e19696`; 43 ignored cases excluded |
+| Final owner/native cohort | 44/44, `9e5c9b3a-a660-4a7d-8eb3-75376d788ad1`; 29 CPU controls, Project IME backend input and 14 actual native trajectories |
+| Independent review | Two focus-state P2 findings corrected; final scoped re-review has no remaining findings |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; warnings remain |
+| Build, formatting and documents | Editor locked build, `cargo fmt --all -- --check`, changed local Markdown targets and `git diff --check` pass |
+
+Both final cohorts include the same latest production source and focus corrections. The native
+addition chooses all seven reference leaves across Record, pending/accepted Optional, existing/new
+List and existing/new Map paths in an ordinary Scene and Prefab. Duplicate names retain exact IDs.
+Menu and whole-field cancellation, explicit pending confirmation and refused partial Apply leave
+the source/history unchanged. One final whole-field Apply, Undo/Redo, typed saved references,
+original raw source records, unavailable manifests, clean Reopen and unchanged project code pass.
+
+CPU controls additionally prove exact original Application completion, per-leaf token retirement,
+unrelated local Undo preservation, cancelled/replaced Optional choice refusal and bounded second
+page selection with the input fully clipped. Root controls retain their earlier conflict, stale
+choice, pagination and hidden-input assertions. The first nested controls assumed every leaf was
+visible in the finite panel. They now locate controls through bounded ordinary scrolling and
+explicitly place the direct input above the clip for the hidden-input assertion; no production
+visibility or input admission is relaxed.
+
+Review first found that view replacement cleared the focused state of stable Toggle/Next buttons.
+It then found that simply rejecting an old view's entire batch also discarded a real focus loss
+when the user navigated before repaint. The correction preserves stable-key focus on view change
+and reduces old-view batches with a disabled descriptor. It updates focus and clears pointer
+state without producing intents; direct activation still refuses the old view. A real kernel
+FocusTarget/ActivateFocused regression drives that sequence through the actual Inspector reducer.
+A separate control establishes nonempty pressed/hovered state before view replacement and verifies
+pointer cancellation with focus retained. The final ordinary and native runs follow both fixes.
+
+The first 36-case combined run passed before the final focus-loss correction. The final 44-case
+run supersedes it for this integration. This evidence does not qualify actual OS keyboard/IME/
+clipboard delivery, native accessibility, keyboard-only shell entry, virtualized control counts,
+idle costs or the Nara-owned live Scene/tool visual. Complete selected-field/component parity and
+the broader foundation Goal remain open.

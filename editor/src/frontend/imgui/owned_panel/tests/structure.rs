@@ -1,11 +1,11 @@
 use super::*;
 
-fn repaint(harness: &mut Harness) {
+pub(super) fn repaint(harness: &mut Harness) {
     let candidate = harness.draw();
     harness.submit(candidate);
 }
 
-fn control(
+pub(super) fn control(
     harness: &Harness,
     panel: EditorPanelInstanceId,
     field: &str,
@@ -32,7 +32,7 @@ fn control(
     (Arc::clone(&frame), node.key().clone())
 }
 
-fn action(harness: &mut Harness, panel: EditorPanelInstanceId, field: &str, name: &str) {
+pub(super) fn action(harness: &mut Harness, panel: EditorPanelInstanceId, field: &str, name: &str) {
     let (frame, button) = control(harness, panel, field, UiSemanticRole::Button, name);
     let model = harness.application.current_frame().unwrap();
     let widgets = harness
@@ -52,7 +52,7 @@ fn action(harness: &mut Harness, panel: EditorPanelInstanceId, field: &str, name
     repaint(harness);
 }
 
-fn replace_leaf(
+pub(super) fn replace_leaf(
     harness: &mut Harness,
     panel: EditorPanelInstanceId,
     field: &str,
@@ -89,7 +89,7 @@ fn replace_leaf(
     (frame, input, token)
 }
 
-fn operation(
+pub(super) fn operation(
     harness: &mut Harness,
     panel: EditorPanelInstanceId,
     field: &str,
@@ -118,7 +118,7 @@ fn operation(
         .owned_operation(panel, &frame, &owner, operation, &model)
 }
 
-fn selected_value(harness: &Harness, field: &str) -> ComponentValue {
+pub(super) fn selected_value(harness: &Harness, field: &str) -> ComponentValue {
     harness
         .application
         .current_frame()
@@ -145,7 +145,7 @@ fn selected_value(harness: &Harness, field: &str) -> ComponentValue {
         .unwrap()
 }
 
-fn complete_exactly(
+pub(super) fn complete_exactly(
     harness: &mut Harness,
     panel: EditorPanelInstanceId,
     field: &str,

@@ -5,6 +5,7 @@ use structure::StructuredRow;
 pub(super) struct StructuredControls {
     pub(super) inputs: HashMap<DraftInput, Box<UiTextField>>,
     pub(super) buttons: HashMap<DraftAction, ButtonControl>,
+    pub(super) references: HashMap<DraftInput, ReferencePicker>,
 }
 
 impl StructuredControls {
@@ -26,6 +27,8 @@ impl StructuredControls {
         self.inputs
             .retain(|target, control| inputs.get(target).copied() == Some(control.editor().text()));
         self.buttons.retain(|target, _| actions.contains(target));
+        self.references
+            .retain(|target, _| inputs.contains_key(target));
     }
 }
 
@@ -37,6 +40,7 @@ impl OwnedInspector {
         width: f32,
         inputs: &mut HashMap<UiKey, DisplayedInput>,
         buttons: &mut HashMap<UiKey, DisplayedButton>,
+        entities: &[nara::tooling::SceneInspectorEntityRow],
     ) -> Result<Vec<UiNode>, OwnedInspectorError> {
         let Candidate::Structured(root) = &draft.candidate else {
             return Err(OwnedInspectorError::ChangedDraft);
@@ -115,7 +119,7 @@ impl OwnedInspector {
                             width,
                         )?
                         .with_semantics(
-                            UiSemantics::new(UiSemanticRole::TextInput, label)?
+                            UiSemantics::new(UiSemanticRole::TextInput, label.clone())?
                                 .with_value(text.editor().text())?,
                         ),
                     );
@@ -127,6 +131,25 @@ impl OwnedInspector {
                             width,
                         },
                     );
+                    if structure::is_entity_reference(&draft.basis.field.shape, &input) {
+                        let picker = controls.references.entry(input.clone()).or_default();
+                        for (node, button) in references::reference_nodes(
+                            &self.root,
+                            &mut self.next_identity,
+                            picker,
+                            entities,
+                            references::ReferenceContext {
+                                field: &owner,
+                                input: Some(&input),
+                                name: Some(&label),
+                                enabled: actions_enabled,
+                                width,
+                            },
+                        )? {
+                            nodes.push(node);
+                            buttons.insert(button.button.key().clone(), button);
+                        }
+                    }
                 }
                 StructuredRow::Button {
                     action,

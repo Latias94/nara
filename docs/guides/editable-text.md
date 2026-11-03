@@ -97,8 +97,9 @@ The existing Editor workspace offers a `Nara properties` Inspector tab. Its stri
 fields use Nara drawing and local editing. Boolean values use an explicit `Set true` or `Set false`
 button. Entity and asset references use bounded text editing; `Choose target` also offers the
 current document's source-local entities in pages of at most 32 choices. Labels include each
-entity's exact ID to distinguish duplicate names. Choosing a target changes the retained draft;
-explicit Apply publishes it. Supported Optional, Record and scalar-item List/Map fields use
+entity's exact ID to distinguish duplicate names. The same picker is available for entity-reference
+leaves inside supported structured fields. Choosing a target changes only that leaf in the retained
+draft; explicit whole-field Apply publishes it. Supported Optional, Record and scalar-item List/Map fields use
 `Edit value` to open a structured draft. Unsupported shapes remain read-only. The complete
 predecessor Inspector remains available under `Document` during this incremental integration.
 
@@ -140,6 +141,11 @@ duplicate map keys retain the input for correction. Removing one row preserves t
 text editing and local Undo/Redo; it revokes the removed row's old input lifetime. Child confirmation
 and cancellation do not change the document. Explicit Apply/Reapply, document Undo/Redo and
 Save/Reopen retain their ordinary whole-field meaning.
+
+A choice for an unfinished Some, list item or map entry still needs that child's confirmation.
+Cancelling or replacing the child retires its picker and text input together. Choosing one leaf
+preserves the other leaves' text buffers and local Undo/Redo. Reference menus page independently;
+closing, reopening or changing a page refuses queued events from the earlier menu view.
 
 The Host uses the bundled primary face and, when configured, one fallback from
 `NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file

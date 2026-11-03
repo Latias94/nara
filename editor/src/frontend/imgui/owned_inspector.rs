@@ -41,6 +41,9 @@ mod references;
 mod structured;
 mod viewport;
 
+pub(super) use references::ReferenceAction;
+use references::{ReferenceBinding, ReferencePicker};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InspectorOperation {
     Apply,
@@ -48,14 +51,11 @@ pub(crate) enum InspectorOperation {
     Reapply,
     Reset,
     Toggle,
-    References,
-    PreviousReferences,
-    NextReferences,
 }
 
 impl InspectorOperation {
     const FOOTER: [Self; 4] = [Self::Apply, Self::Discard, Self::Reapply, Self::Reset];
-    const COUNT: usize = 8;
+    const COUNT: usize = 5;
 
     const fn index(self) -> usize {
         match self {
@@ -64,9 +64,6 @@ impl InspectorOperation {
             Self::Reapply => 2,
             Self::Reset => 3,
             Self::Toggle => 4,
-            Self::References => 5,
-            Self::PreviousReferences => 6,
-            Self::NextReferences => 7,
         }
     }
 
@@ -77,9 +74,6 @@ impl InspectorOperation {
             Self::Reapply => "Reapply",
             Self::Reset => "Reset",
             Self::Toggle => "Toggle",
-            Self::References => "Choose target",
-            Self::PreviousReferences => "Previous targets",
-            Self::NextReferences => "Next targets",
         }
     }
 }
@@ -93,7 +87,8 @@ pub(super) enum InspectorBinding {
     },
     Reference {
         field: UiKey,
-        entity: String,
+        input: Option<DraftInput>,
+        action: ReferenceAction,
     },
     Structure {
         field: UiKey,
@@ -111,9 +106,7 @@ struct FieldControl {
     allowed: bool,
     host_enabled: bool,
     buttons: [UiButtonState; InspectorOperation::COUNT],
-    reference_open: bool,
-    reference_page: usize,
-    references: HashMap<String, ButtonControl>,
+    reference: Option<ReferencePicker>,
 }
 
 struct ButtonControl {
@@ -122,6 +115,26 @@ struct ButtonControl {
 }
 
 impl FieldControl {
+    fn reference(&self, input: Option<&DraftInput>) -> Option<&ReferencePicker> {
+        match input {
+            None => self.reference.as_ref(),
+            Some(input) => match &self.input {
+                FieldInput::Structured(controls) => controls.references.get(input),
+                _ => None,
+            },
+        }
+    }
+
+    fn reference_mut(&mut self, input: Option<&DraftInput>) -> Option<&mut ReferencePicker> {
+        match input {
+            None => self.reference.as_mut(),
+            Some(input) => match &mut self.input {
+                FieldInput::Structured(controls) => controls.references.get_mut(input),
+                _ => None,
+            },
+        }
+    }
+
     fn input_key(&self) -> &UiKey {
         match &self.input {
             FieldInput::Text(text) => text.key(),
@@ -237,7 +250,7 @@ struct DisplayedField {
     draft: Option<DisplayedDraft>,
     display_text: Option<String>,
     operations: [bool; InspectorOperation::COUNT],
-    reference_view: Option<(bool, usize)>,
+    reference_views: HashMap<Option<DraftInput>, u64>,
     width: f32,
 }
 
@@ -257,7 +270,7 @@ struct DisplayedButton {
 #[derive(Clone)]
 enum InspectorButtonAction {
     Operation(InspectorOperation),
-    Reference(String),
+    Reference(ReferenceBinding),
     Structure(DraftAction),
 }
 
@@ -539,9 +552,10 @@ impl OwnedInspector {
                     field: button.field.clone(),
                     operation: *operation,
                 },
-                InspectorButtonAction::Reference(entity) => InspectorBinding::Reference {
+                InspectorButtonAction::Reference(reference) => InspectorBinding::Reference {
                     field: button.field.clone(),
-                    entity: entity.clone(),
+                    input: reference.input.clone(),
+                    action: reference.action.clone(),
                 },
                 InspectorButtonAction::Structure(action) => InspectorBinding::Structure {
                     field: button.field.clone(),
@@ -640,12 +654,15 @@ impl OwnedInspector {
             for state in &mut control.buttons {
                 *state = UiButtonState::default();
             }
-            for reference in control.references.values_mut() {
-                reference.state = UiButtonState::default();
+            if let Some(reference) = &mut control.reference {
+                reference.cancel_input();
             }
             if let FieldInput::Structured(controls) = &mut control.input {
                 for button in controls.buttons.values_mut() {
                     button.state = UiButtonState::default();
+                }
+                for picker in controls.references.values_mut() {
+                    picker.cancel_input();
                 }
             }
         }
@@ -864,14 +881,26 @@ impl OwnedInspector {
                 InspectorButtonAction::Operation(operation) => {
                     &mut control.buttons[operation.index()]
                 }
-                InspectorButtonAction::Reference(entity) => {
-                    let Some(reference) = control
-                        .references
-                        .get_mut(entity)
+                InspectorButtonAction::Reference(reference) => {
+                    let Some(picker) = control.reference_mut(reference.input.as_ref()) else {
+                        continue;
+                    };
+                    let stale = picker.revision != reference.revision;
+                    let Some(reference) = picker
+                        .buttons
+                        .get_mut(&reference.action)
                         .filter(|reference| reference.key == *button.button.key())
                     else {
                         continue;
                     };
+                    if stale {
+                        reference.state.reduce_batch(
+                            &button.button.clone().with_enabled(false),
+                            dispatch,
+                            &mut intents,
+                        )?;
+                        continue;
+                    }
                     &mut reference.state
                 }
                 InspectorButtonAction::Structure(action) => {
@@ -910,8 +939,8 @@ impl OwnedInspector {
             InspectorButtonAction::Operation(operation) => {
                 self.operate(frame, &binding.field, operation, model, fields)
             }
-            InspectorButtonAction::Reference(entity) => {
-                self.choose_reference(frame, &binding.field, button, &entity, model, fields)?;
+            InspectorButtonAction::Reference(_) => {
+                self.reference_action(frame, button, &binding, model, fields)?;
                 Ok(None)
             }
             InspectorButtonAction::Structure(action) => {
@@ -964,46 +993,11 @@ impl OwnedInspector {
             .controls
             .get(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        if displayed
-            .reference_view
-            .is_some_and(|view| view != (control.reference_open, control.reference_page))
-        {
-            return Err(OwnedInspectorError::ChangedProjection);
-        }
         if self.read_only || !editable || !control.host_enabled || !control.allowed {
             return Err(OwnedInspectorError::OperationDisabled(operation));
         }
         if control.is_composing() {
             return Err(OwnedInspectorError::Composing);
-        }
-        if matches!(
-            operation,
-            InspectorOperation::References
-                | InspectorOperation::PreviousReferences
-                | InspectorOperation::NextReferences
-        ) {
-            let control = self
-                .controls
-                .get_mut(key)
-                .ok_or(OwnedInspectorError::RetiredField)?;
-            match operation {
-                InspectorOperation::References => {
-                    control.reference_open = !control.reference_open;
-                    control.reference_page = 0;
-                    control.references.clear();
-                }
-                InspectorOperation::PreviousReferences => {
-                    control.reference_page = control.reference_page.saturating_sub(1)
-                }
-                InspectorOperation::NextReferences => {
-                    control.reference_page = control
-                        .reference_page
-                        .checked_add(1)
-                        .ok_or(OwnedInspectorError::IdentityExhausted)?
-                }
-                _ => return Err(OwnedInspectorError::OperationDisabled(operation)),
-            }
-            return Ok(None);
         }
         if draft.incompatible || (draft.conflict && operation != InspectorOperation::Reapply) {
             return Err(OwnedInspectorError::OperationDisabled(operation));
@@ -1273,9 +1267,8 @@ impl OwnedInspector {
                     allowed: false,
                     host_enabled: true,
                     buttons: [UiButtonState::default(); InspectorOperation::COUNT],
-                    reference_open: false,
-                    reference_page: 0,
-                    references: HashMap::new(),
+                    reference: (basis.field.shape == ComponentValueShape::EntityRef)
+                        .then(ReferencePicker::default),
                 },
             );
         }
@@ -1352,7 +1345,7 @@ impl OwnedInspector {
             )?);
         }
         if structured && let Some(draft) = draft {
-            children.extend(self.structured_nodes(&key, draft, width, inputs, buttons)?);
+            children.extend(self.structured_nodes(&key, draft, width, inputs, buttons, entities)?);
         }
         let mut operations = [false; InspectorOperation::COUNT];
         if let Some(draft) = draft {
@@ -1373,17 +1366,27 @@ impl OwnedInspector {
             operations[InspectorOperation::Reset.index()] =
                 can_edit && !draft.conflict && current.as_ref().is_some_and(can_reset);
             operations[InspectorOperation::Toggle.index()] = can_edit && boolean && !draft.conflict;
-            operations[InspectorOperation::References.index()] = can_edit
-                && current
-                    .as_ref()
-                    .is_some_and(|basis| basis.field.shape == ComponentValueShape::EntityRef);
             if basis.field.shape == ComponentValueShape::EntityRef {
-                for (node, button) in self.reference_nodes(
-                    &key,
-                    &input,
+                let control = self
+                    .controls
+                    .get_mut(&key)
+                    .ok_or(OwnedInspectorError::RetiredField)?;
+                let picker = control
+                    .reference
+                    .as_mut()
+                    .ok_or(OwnedInspectorError::ReadOnlyField)?;
+                for (node, button) in references::reference_nodes(
+                    &self.root,
+                    &mut self.next_identity,
+                    picker,
                     entities,
-                    operations[InspectorOperation::References.index()],
-                    width,
+                    references::ReferenceContext {
+                        field: &input,
+                        input: None,
+                        name: None,
+                        enabled: can_edit,
+                        width,
+                    },
                 )? {
                     children.push(node);
                     buttons.insert(button.button.key().clone(), button);
@@ -1546,10 +1549,19 @@ impl OwnedInspector {
                 basis.field.path.to_string(),
             )?)
             .with_children(children);
-        let reference_view = (basis.field.shape == ComponentValueShape::EntityRef).then(|| {
-            let control = &self.controls[&key];
-            (control.reference_open, control.reference_page)
-        });
+        let control = &self.controls[&key];
+        let mut reference_views = HashMap::new();
+        if let Some(reference) = &control.reference {
+            reference_views.insert(None, reference.revision);
+        }
+        if let FieldInput::Structured(controls) = &control.input {
+            reference_views.extend(
+                controls
+                    .references
+                    .iter()
+                    .map(|(input, picker)| (Some(input.clone()), picker.revision)),
+            );
+        }
         displayed.insert(
             input,
             DisplayedField {
@@ -1558,7 +1570,7 @@ impl OwnedInspector {
                 draft: draft.map(DisplayedDraft::observe),
                 display_text,
                 operations,
-                reference_view,
+                reference_views,
                 width,
             },
         );

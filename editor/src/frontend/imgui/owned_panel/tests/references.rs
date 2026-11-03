@@ -156,7 +156,10 @@ fn live_choices(
         .semantics()
         .iter()
         .filter_map(|node| match inspector.binding(frame, node.key()) {
-            Ok(InspectorBinding::Reference { entity, .. }) => Some((node.key().clone(), entity)),
+            Ok(InspectorBinding::Reference {
+                action: ReferenceAction::Choose(entity),
+                ..
+            }) => Some((node.key().clone(), entity)),
             _ => None,
         })
         .collect()
@@ -169,6 +172,23 @@ fn operation(harness: &mut Harness, panel: EditorPanelInstanceId, operation: Ins
         .frontend
         .owned_operation(panel, &frame, &field, operation, &model)
         .unwrap();
+}
+
+fn reference_operation(
+    harness: &mut Harness,
+    panel: EditorPanelInstanceId,
+    action: ReferenceAction,
+) {
+    let inspector = harness.frontend.presentation.widgets[&panel]
+        .owned_inspector
+        .as_ref()
+        .unwrap();
+    let frame = Arc::clone(inspector.compiled_frame().unwrap());
+    let button = frame.semantics().iter().find(|node| matches!(
+        inspector.binding(&frame, node.key()),
+        Ok(InspectorBinding::Reference { input: None, action: current, .. }) if current == action
+    )).unwrap().key().clone();
+    choose(harness, panel, &frame, &button).unwrap();
 }
 
 fn choose(
@@ -308,19 +328,9 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         .unwrap()
         .focus(&initial_frame, &initial_field)
         .unwrap();
-    operation(&mut harness, panel, InspectorOperation::References);
-    assert!(
-        harness
-            .frontend
-            .owned_operation(
-                panel,
-                &initial_frame,
-                &initial_field,
-                InspectorOperation::References,
-                &original,
-            )
-            .is_err()
-    );
+    let (_, initial_toggle) = target_button(&harness.frontend, panel, "Choose target");
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
+    assert!(choose(&mut harness, panel, &initial_frame, &initial_toggle).is_err());
     repaint(&mut harness);
     let (open_frame, first_choice) = target_button(&harness.frontend, panel, "other [other]");
     let (_, toggle) = target_button(&harness.frontend, panel, "Hide targets");
@@ -332,14 +342,16 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         inspector.binding(&open_frame, &first_choice).unwrap(),
         InspectorBinding::Reference {
             field: initial_field.clone(),
-            entity: "other".into(),
+            input: None,
+            action: ReferenceAction::Choose("other".into()),
         },
     );
     assert_eq!(
         inspector.binding(&open_frame, &toggle).unwrap(),
-        InspectorBinding::Operation {
+        InspectorBinding::Reference {
             field: initial_field.clone(),
-            operation: InspectorOperation::References,
+            input: None,
+            action: ReferenceAction::Toggle,
         },
     );
     repaint(&mut harness);
@@ -347,7 +359,7 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         target_button(&harness.frontend, panel, "other [other]").1,
         first_choice,
     );
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     assert!(choose(&mut harness, panel, &open_frame, &first_choice).is_err());
     repaint(&mut harness);
     target_button(&harness.frontend, panel, "Choose target");
@@ -362,11 +374,19 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         original.workspace().active_scene,
     );
 
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     repaint(&mut harness);
     let (reopened, replacement) = target_button(&harness.frontend, panel, "other [other]");
     assert_ne!(replacement, first_choice);
     assert!(choose(&mut harness, panel, &open_frame, &first_choice).is_err());
+    assert_eq!(
+        target_button(&harness.frontend, panel, "Hide targets").1,
+        toggle
+    );
+    assert!(matches!(
+        choose(&mut harness, panel, &open_frame, &toggle),
+        Err(OwnedInspectorError::ChangedProjection)
+    ));
     let deadline = Instant::now() + Duration::from_secs(10);
     while harness
         .application
@@ -470,7 +490,7 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         .unwrap()
         .focus(&frame, &field)
         .unwrap();
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     repaint(&mut harness);
     let (frame, choice) = target_button(&harness.frontend, panel, "other [other]");
     choose(&mut harness, panel, &frame, &choice).unwrap();
@@ -524,12 +544,12 @@ fn owned_entity_reference_picker_retires_menu_input_and_recovers_conflicting_dra
         "scene-local:target",
     );
 
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     repaint(&mut harness);
     let (frame, choice) = target_button(&harness.frontend, panel, "other [other]");
     choose(&mut harness, panel, &frame, &choice).unwrap();
     repaint(&mut harness);
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     repaint(&mut harness);
     let (stale_frame, stale_choice) = target_button(&harness.frontend, panel, "target [target]");
     let current = harness.application.current_frame().unwrap();
@@ -629,7 +649,7 @@ fn owned_entity_reference_pages_bound_live_choices_and_apply_a_later_target_exac
             .len(),
         67,
     );
-    operation(&mut harness, panel, InspectorOperation::References);
+    reference_operation(&mut harness, panel, ReferenceAction::Toggle);
     repaint(&mut harness);
     let first_page = live_choices(&harness.frontend, panel);
     assert!(!first_page.is_empty() && first_page.len() <= 32);
@@ -644,51 +664,31 @@ fn owned_entity_reference_pages_bound_live_choices_and_apply_a_later_target_exac
             .unwrap()
             .binding(&first_frame, &next)
             .unwrap(),
-        InspectorBinding::Operation {
+        InspectorBinding::Reference {
             field: field.clone(),
-            operation: InspectorOperation::NextReferences,
+            input: None,
+            action: ReferenceAction::Next,
         },
     );
-    assert!(
-        harness
-            .frontend
-            .owned_operation(
-                panel,
-                &first_frame,
-                &field,
-                InspectorOperation::PreviousReferences,
-                &original,
-            )
-            .is_err()
-    );
-    operation(&mut harness, panel, InspectorOperation::NextReferences);
+    let (_, previous) = target_button(&harness.frontend, panel, "Previous targets");
+    assert!(choose(&mut harness, panel, &first_frame, &previous).is_err());
+    reference_operation(&mut harness, panel, ReferenceAction::Next);
     assert!(choose(&mut harness, panel, &first_frame, &first_choice).is_err());
-    assert!(
-        harness
-            .frontend
-            .owned_operation(
-                panel,
-                &first_frame,
-                &field,
-                InspectorOperation::NextReferences,
-                &original,
-            )
-            .is_err()
-    );
+    assert!(choose(&mut harness, panel, &first_frame, &next).is_err());
     repaint(&mut harness);
     let second_page = live_choices(&harness.frontend, panel);
     assert!(!second_page.is_empty() && second_page.len() <= 32);
     let (second_frame, later_choice) =
         target_button(&harness.frontend, panel, "target-39 [target-39]");
     assert!(choose(&mut harness, panel, &first_frame, &first_choice).is_err());
-    operation(&mut harness, panel, InspectorOperation::PreviousReferences);
+    reference_operation(&mut harness, panel, ReferenceAction::Previous);
     assert!(choose(&mut harness, panel, &second_frame, &later_choice).is_err());
     repaint(&mut harness);
     assert_ne!(
         target_button(&harness.frontend, panel, "other [other]").1,
         first_choice,
     );
-    operation(&mut harness, panel, InspectorOperation::NextReferences);
+    reference_operation(&mut harness, panel, ReferenceAction::Next);
     repaint(&mut harness);
     let (frame, replacement) = target_button(&harness.frontend, panel, "target-39 [target-39]");
     assert_ne!(replacement, later_choice);

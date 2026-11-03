@@ -2,10 +2,8 @@ use nara::tooling::SceneInspectorEntityRow;
 
 pub(in crate::frontend::imgui) fn entity_choices(
     rows: &[SceneInspectorEntityRow],
-) -> Vec<(&str, String)> {
-    rows.iter()
-        .map(|row| (row.id.as_str(), entity_label(row)))
-        .collect()
+) -> impl ExactSizeIterator<Item = (&str, String)> + DoubleEndedIterator {
+    rows.iter().map(|row| (row.id.as_str(), entity_label(row)))
 }
 
 pub(in crate::frontend::imgui) fn entity_label(row: &SceneInspectorEntityRow) -> String {
@@ -43,7 +41,7 @@ mod tests {
             selected: false,
             live_locator: None,
         });
-        let choices = entity_choices(&rows);
+        let choices = entity_choices(&rows).collect::<Vec<_>>();
         assert_eq!(
             choices,
             vec![
@@ -74,7 +72,7 @@ mod tests {
         )));
         moved.reverse();
         assert_eq!(
-            entity_choices(&moved),
+            entity_choices(&moved).collect::<Vec<_>>(),
             choices.into_iter().rev().collect::<Vec<_>>()
         );
     }
