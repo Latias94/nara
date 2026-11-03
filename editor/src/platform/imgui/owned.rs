@@ -23,9 +23,11 @@ use nara_ui_kernel::{
 use nara_ui_render::UiPresentationPlanner;
 use winit::{
     event::{ElementState, Ime, MouseButton, WindowEvent},
-    keyboard::{KeyCode, ModifiersState, PhysicalKey},
+    keyboard::ModifiersState,
     window::WindowId,
 };
+
+mod keyboard;
 
 use crate::{
     frontend::imgui::{ImguiFrontendOutput, ImguiImageInteraction, ImguiOwnedImage},
@@ -59,6 +61,7 @@ pub(super) fn font_policy() -> Result<Vec<FontFace>, EditorRunError> {
 #[derive(Default)]
 pub(super) struct OwnedInspectorInput {
     focus: Option<OwnedTextFocus>,
+    keyboard: Option<(EditorPanelInstanceId, WindowId)>,
     cursor: Option<(WindowId, winit::dpi::PhysicalPosition<f64>)>,
     modifiers: ModifiersState,
     ime_ready: bool,
@@ -66,6 +69,7 @@ pub(super) struct OwnedInspectorInput {
     pointer_panel: Option<EditorPanelInstanceId>,
 }
 
+#[derive(Clone)]
 struct OwnedTextFocus {
     panel: EditorPanelInstanceId,
     frame: Arc<UiFrame>,
@@ -322,18 +326,21 @@ impl NativeImgui {
         &mut self,
         preserve_panel: Option<EditorPanelInstanceId>,
     ) -> Result<(), EditorRunError> {
+        if let Some((panel, _)) = self.owned_input.keyboard
+            && preserve_panel != Some(panel)
+        {
+            if let Some(surface) = self.owned.get_mut(&panel) {
+                surface.interaction = UiInteractionSession::default();
+            }
+            self.frontend
+                .cancel_owned_panel_input(panel)
+                .map_err(imgui_error)?;
+            self.owned_input.keyboard = None;
+        }
         if let Some(focus) = self.owned_input.focus.take() {
             let _ = self
                 .frontend
                 .owned_blur(focus.panel, &focus.frame, &focus.field);
-            if preserve_panel != Some(focus.panel) {
-                if let Some(surface) = self.owned.get_mut(&focus.panel) {
-                    surface.interaction = UiInteractionSession::default();
-                }
-                self.frontend
-                    .cancel_owned_panel_input(focus.panel)
-                    .map_err(imgui_error)?;
-            }
             self.platform.set_ime_allowed(false).map_err(imgui_error)?;
             self.platform.set_ime_auto_management(true);
         }
@@ -355,6 +362,42 @@ impl NativeImgui {
             WindowEvent::CursorMoved { position, .. } => {
                 self.owned_input.cursor = Some((window, *position))
             }
+            WindowEvent::CursorLeft { .. } => {
+                if self
+                    .owned_input
+                    .cursor
+                    .is_some_and(|(owner, _)| owner == window)
+                {
+                    self.owned_input.cursor = None;
+                }
+                if self.owned_input.pointer_panel.is_some_and(|panel| {
+                    self.owned.get(&panel).is_some_and(|surface| {
+                        surface.mapping.is_some_and(|(owner, _)| owner == window)
+                    })
+                }) {
+                    if let Some(panel) = self.owned_input.pointer_panel.take() {
+                        if let Some(surface) = self.owned.get_mut(&panel) {
+                            if let Some((frame, outcome)) =
+                                surface.dispatch(UiInputEvent::PointerCancelled {
+                                    seat: nara_ui_kernel::UiSeatId::PRIMARY,
+                                    pointer: nara_ui_kernel::UiPointerId::PRIMARY,
+                                })?
+                                && let Some(batch) = outcome.consumed()
+                            {
+                                self.frontend
+                                    .reconcile_owned_input(panel, &frame, batch)
+                                    .map_err(imgui_error)?;
+                            } else {
+                                surface.interaction = UiInteractionSession::default();
+                                self.frontend
+                                    .cancel_owned_panel_input(panel)
+                                    .map_err(imgui_error)?;
+                            }
+                        }
+                        self.owned_input.dragging = false;
+                    }
+                }
+            }
             WindowEvent::Focused(false)
             | WindowEvent::CloseRequested
             | WindowEvent::Destroyed
@@ -362,19 +405,26 @@ impl NativeImgui {
             | WindowEvent::ScaleFactorChanged { .. } => {
                 if self
                     .owned_input
-                    .focus
-                    .as_ref()
-                    .is_some_and(|focus| focus.window == window)
+                    .keyboard
+                    .is_some_and(|(_, owner)| owner == window)
                 {
                     self.cancel_owned_focus()?;
+                    self.owned_input.modifiers = ModifiersState::empty();
                 }
-                self.frontend.cancel_owned_input();
-                self.owned_input.pointer_panel = None;
-                for surface in self
-                    .owned
-                    .values_mut()
-                    .filter(|surface| surface.mapping.is_some_and(|(owner, _)| owner == window))
-                {
+                if self.owned_input.pointer_panel.is_some_and(|panel| {
+                    self.owned.get(&panel).is_some_and(|surface| {
+                        surface.mapping.is_some_and(|(owner, _)| owner == window)
+                    })
+                }) {
+                    self.owned_input.pointer_panel = None;
+                    self.owned_input.dragging = false;
+                }
+                for (panel, surface) in self.owned.iter_mut().filter(|(_, surface)| {
+                    surface.mapping.is_some_and(|(owner, _)| owner == window)
+                }) {
+                    self.frontend
+                        .cancel_owned_panel_input(*panel)
+                        .map_err(imgui_error)?;
                     surface.interaction = UiInteractionSession::default();
                     surface.invalidate();
                 }
@@ -482,55 +532,64 @@ impl NativeImgui {
                     if *state == ElementState::Pressed
                         && let Some(hit) = frame.hit_test(point)
                         && self.frontend.owned_field_at(panel, &frame, hit.key())
-                        && let Some(token) =
-                            self.frontend.owned_field_token(panel, &frame, hit.key())
                     {
+                        self.sync_owned_keyboard_focus(panel, window)?;
                         let field = hit.key().clone();
-                        let changed = self.owned_input.focus.as_ref().is_none_or(|focus| {
-                            focus.panel != panel
-                                || focus.field != field
-                                || focus.token != token
-                                || focus.window != window
-                        });
-                        if changed {
-                            self.release_owned_focus(Some(panel))?;
-                            self.input.invalidate(false);
-                            self.platform.set_ime_auto_management(false);
-                            self.platform.set_ime_allowed(false).map_err(imgui_error)?;
-                            self.platform.set_ime_allowed(true).map_err(imgui_error)?;
-                            self.owned_input.ime_ready = false;
-                        }
                         let local = nara_ui_kernel::UiPoint::new(
                             point.x() - hit.rect().origin().x(),
                             point.y() - hit.rect().origin().y(),
                         );
-                        let _ = self.frontend.owned_point(
-                            panel,
-                            &frame,
-                            &field,
-                            token,
-                            local,
-                            self.owned_input.modifiers.shift_key(),
-                        );
-                        self.owned_input.focus = Some(OwnedTextFocus {
-                            panel,
-                            frame,
-                            field,
-                            token,
-                            window,
-                        });
-                        self.owned_input.dragging = true;
+                        if let Some(focus) = self
+                            .owned_input
+                            .focus
+                            .as_ref()
+                            .filter(|focus| focus.field == field)
+                        {
+                            let _ = self.frontend.owned_point(
+                                panel,
+                                &frame,
+                                &field,
+                                focus.token,
+                                local,
+                                self.owned_input.modifiers.shift_key(),
+                            );
+                            self.owned_input.dragging = true;
+                        }
                     } else if *state == ElementState::Pressed {
-                        self.release_owned_focus(Some(panel))?;
+                        self.sync_owned_keyboard_focus(panel, window)?;
                     }
                 }
             } else if *state == ElementState::Pressed {
                 self.cancel_owned_focus()?;
+            } else if let Some(panel) = self.owned_input.pointer_panel {
+                if let Some(surface) = self.owned.get_mut(&panel) {
+                    surface.interaction = UiInteractionSession::default();
+                }
+                self.frontend
+                    .cancel_owned_panel_input(panel)
+                    .map_err(imgui_error)?;
+                if self
+                    .owned_input
+                    .keyboard
+                    .is_some_and(|(owner, _)| owner == panel)
+                {
+                    self.cancel_owned_focus()?;
+                }
             }
             if *state == ElementState::Released {
                 self.owned_input.dragging = false;
                 self.owned_input.pointer_panel = None;
             }
+        }
+        if let WindowEvent::KeyboardInput { event, .. } = event {
+            return self.owned_key(
+                window,
+                event.logical_key.as_ref(),
+                event.text.as_deref(),
+                event.state,
+                event.repeat,
+                application,
+            );
         }
         let Some(focus) = self
             .owned_input
@@ -575,88 +634,11 @@ impl NativeImgui {
             WindowEvent::Ime(Ime::Commit(text)) if self.owned_input.ime_ready => {
                 Some(nara_text::TextEdit::Commit(text.clone()))
             }
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                let extend = self.owned_input.modifiers.shift_key();
-                let word = self.owned_input.modifiers.control_key();
-                let composing = self.frontend.owned_composing(
-                    focus.panel,
-                    &focus.frame,
-                    &focus.field,
-                    focus.token,
-                );
-                match event.physical_key {
-                    PhysicalKey::Code(KeyCode::ArrowLeft) if !composing => {
-                        Some(nara_text::TextEdit::MoveLeft { extend, word })
-                    }
-                    PhysicalKey::Code(KeyCode::ArrowRight) if !composing => {
-                        Some(nara_text::TextEdit::MoveRight { extend, word })
-                    }
-                    PhysicalKey::Code(KeyCode::Home) if !composing => {
-                        Some(nara_text::TextEdit::Home { extend })
-                    }
-                    PhysicalKey::Code(KeyCode::End) if !composing => {
-                        Some(nara_text::TextEdit::End { extend })
-                    }
-                    PhysicalKey::Code(KeyCode::Backspace) if !composing => {
-                        Some(nara_text::TextEdit::Backspace)
-                    }
-                    PhysicalKey::Code(KeyCode::Delete) if !composing => {
-                        Some(nara_text::TextEdit::Delete)
-                    }
-                    PhysicalKey::Code(KeyCode::KeyA) if word && !composing => {
-                        Some(nara_text::TextEdit::SelectAll)
-                    }
-                    PhysicalKey::Code(KeyCode::KeyZ) if word && !composing => Some(if extend {
-                        nara_text::TextEdit::Redo
-                    } else {
-                        nara_text::TextEdit::Undo
-                    }),
-                    PhysicalKey::Code(KeyCode::KeyY) if word && !composing => {
-                        Some(nara_text::TextEdit::Redo)
-                    }
-                    PhysicalKey::Code(KeyCode::Escape) if composing => {
-                        Some(nara_text::TextEdit::CancelComposition)
-                    }
-                    PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Escape)
-                        if !composing =>
-                    {
-                        if let Some(model) = application.current_frame() {
-                            let operation =
-                                if event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
-                                    crate::frontend::imgui::InspectorOperation::Discard
-                                } else {
-                                    crate::frontend::imgui::InspectorOperation::Apply
-                                };
-                            let _ = self.frontend.owned_operation(
-                                focus.panel,
-                                &focus.frame,
-                                &focus.field,
-                                operation,
-                                &model,
-                            );
-                        }
-                        None
-                    }
-                    _ if !word && !composing => event
-                        .text
-                        .as_ref()
-                        .filter(|text| {
-                            !text.is_empty() && text.chars().all(|scalar| !scalar.is_control())
-                        })
-                        .map(|text| nara_text::TextEdit::Insert(text.to_string())),
-                    _ => None,
-                }
-            }
             _ => None,
         };
         if let Some(action) = action {
-            let _ = self.frontend.owned_edit(
-                focus.panel,
-                &focus.frame,
-                &focus.field,
-                focus.token,
-                &action,
-            );
+            let focus = focus.clone();
+            self.edit_owned_text(&focus, &action);
         }
         self.update_owned_ime_area()?;
         Ok(matches!(
@@ -771,9 +753,8 @@ impl NativeImgui {
         for panel in retired {
             if self
                 .owned_input
-                .focus
-                .as_ref()
-                .is_some_and(|focus| focus.panel == panel)
+                .keyboard
+                .is_some_and(|(owner, _)| owner == panel)
             {
                 self.cancel_owned_focus()?;
             }
@@ -944,6 +925,11 @@ impl NativeImgui {
             self.owned
                 .get(&focus.panel)
                 .is_none_or(|surface| surface.route.is_none())
+        });
+        cancel_focus |= self.owned_input.keyboard.is_some_and(|(panel, window)| {
+            self.owned.get(&panel).is_none_or(|surface| {
+                surface.route.is_none() || surface.mapping.is_none_or(|(owner, _)| owner != window)
+            })
         });
         if cancel_focus {
             self.cancel_owned_focus()?;

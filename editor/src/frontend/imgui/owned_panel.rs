@@ -217,6 +217,41 @@ impl ImguiEditorFrontend {
         Ok(())
     }
 
+    pub(crate) fn owned_selected_text(
+        &self,
+        panel: EditorPanelInstanceId,
+        frame: &Arc<UiFrame>,
+        field: &UiKey,
+        token: UiTextInputToken,
+    ) -> Result<Option<String>, String> {
+        let widgets = self
+            .presentation
+            .widgets
+            .get(&panel)
+            .ok_or("Inspector panel is retired")?;
+        widgets
+            .owned_inspector
+            .as_ref()
+            .ok_or("Inspector controls are absent")?
+            .selected_text(frame, field, token, &widgets.authoring.fields)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn owned_input_error(
+        &mut self,
+        panel: EditorPanelInstanceId,
+        frame: &Arc<UiFrame>,
+        field: &UiKey,
+        token: UiTextInputToken,
+        error: String,
+    ) {
+        if let Some(widgets) = self.presentation.widgets.get_mut(&panel)
+            && let Some(inspector) = widgets.owned_inspector.as_ref()
+        {
+            inspector.input_error(frame, field, token, &mut widgets.authoring.fields, error);
+        }
+    }
+
     pub(crate) fn owned_composing(
         &self,
         panel: EditorPanelInstanceId,
@@ -307,6 +342,9 @@ impl ImguiEditorFrontend {
             })
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn paint(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     let panel = context.model.instance().id();

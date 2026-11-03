@@ -10,7 +10,7 @@ publish = false
 default = []
 
 [dependencies]
-dear-imgui-rs.workspace = true
+dear-imgui-rs = { workspace = true, features = ["system-clipboard"] }
 dear-imgui-wgpu.workspace = true
 dear-imgui-winit.workspace = true
 nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow-cargo-facts", "render-wgpu", "runtime-ui", "tooling"] }

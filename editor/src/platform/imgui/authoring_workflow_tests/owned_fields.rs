@@ -64,12 +64,12 @@ impl ApplicationHandler for OwnedFieldsTestApplication {
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
 }
 
-struct OwnedFieldProbe {
-    panel: EditorPanelInstanceId,
-    frame: Arc<UiFrame>,
-    key: UiKey,
-    image: ImguiImageInteraction,
-    rect: UiRect,
+pub(super) struct OwnedFieldProbe {
+    pub(super) panel: EditorPanelInstanceId,
+    pub(super) frame: Arc<UiFrame>,
+    pub(super) key: UiKey,
+    pub(super) image: ImguiImageInteraction,
+    pub(super) rect: UiRect,
 }
 
 impl OwnedFieldProbe {
@@ -109,7 +109,7 @@ impl OwnedFieldProbe {
 }
 
 impl AuthoringWorkflow<'_> {
-    fn owned_test_control(
+    pub(super) fn owned_test_control(
         &self,
         field: &str,
         action: Option<&str>,
@@ -187,7 +187,7 @@ impl AuthoringWorkflow<'_> {
         ))
     }
 
-    fn owned_test_paint(&mut self) -> Result<(), String> {
+    pub(super) fn owned_test_paint(&mut self) -> Result<(), String> {
         for _ in 0..3 {
             self.paint(|_| {})?;
         }
@@ -224,7 +224,7 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_event(&mut self, event: WindowEvent) -> Result<bool, String> {
+    pub(super) fn owned_test_event(&mut self, event: WindowEvent) -> Result<bool, String> {
         let window = self.native.window.id();
         let consumed = self
             .native
@@ -239,7 +239,7 @@ impl AuthoringWorkflow<'_> {
         Ok(consumed)
     }
 
-    fn owned_test_pointer(
+    pub(super) fn owned_test_pointer(
         &mut self,
         field: &str,
         action: Option<&str>,
@@ -266,7 +266,7 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_mouse(&mut self, state: ElementState) -> Result<(), String> {
+    pub(super) fn owned_test_mouse(&mut self, state: ElementState) -> Result<(), String> {
         self.owned_test_event(WindowEvent::MouseInput {
             device_id: DeviceId::dummy(),
             state,
@@ -275,7 +275,7 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_select(&mut self, field: &str) -> Result<(), String> {
+    pub(super) fn owned_test_select(&mut self, field: &str) -> Result<(), String> {
         self.owned_test_pointer(field, None, 1.0)?;
         self.owned_test_mouse(ElementState::Pressed)?;
         if !self.native.owned_text_focus_for_test() {
@@ -292,7 +292,7 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_ime(&mut self, ime: Ime) -> Result<(), String> {
+    pub(super) fn owned_test_ime(&mut self, ime: Ime) -> Result<(), String> {
         if !self.owned_test_event(WindowEvent::Ime(ime))? {
             return Err("the owned Inspector did not consume its native IME event".into());
         }
@@ -308,7 +308,12 @@ impl AuthoringWorkflow<'_> {
         self.owned_test_draft(field, None)
     }
 
-    fn owned_test_text(&self, field: &str, expected: &str, composing: bool) -> Result<(), String> {
+    pub(super) fn owned_test_text(
+        &self,
+        field: &str,
+        expected: &str,
+        composing: bool,
+    ) -> Result<(), String> {
         let probe = self.owned_test_control(field, None)?;
         let value = probe
             .frame
@@ -333,7 +338,11 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_draft(&self, field: &str, expected: Option<&str>) -> Result<(), String> {
+    pub(super) fn owned_test_draft(
+        &self,
+        field: &str,
+        expected: Option<&str>,
+    ) -> Result<(), String> {
         let actual = self
             .native
             .frontend
@@ -347,7 +356,7 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
-    fn owned_test_document(
+    pub(super) fn owned_test_document(
         &self,
         label: &str,
         value: u64,

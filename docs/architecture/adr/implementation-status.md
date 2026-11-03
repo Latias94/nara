@@ -34,6 +34,14 @@ while retaining transform, clipping, propagation and behavior invalidation. Comp
 the Nara-owned Scene/tool visual and broader native/idle/platform gates remain open. The predecessor
 remains until those complete workflows pass.
 
+The [keyboard and font-policy successor](../../knowledge/engineering/verification/2026-11/2026-11-03T202859Z-native-owned-keyboard-and-font-policy-qualification-8df745e066a042c79a397610b8615985.md)
+adds enabled-control navigation, logical-key text shortcuts and a shared fallible clipboard owner.
+Failed Cut/Paste, composition, queued submission and held-modifier handoff preserve their original
+state. Three font-policy controls retain dirty, queued and pending drafts and exact Application
+results across control replacement. Nine selected Windows/DX12 trajectories pass; the keyboard
+test enters through the production logical-key method and uses an isolated memory clipboard.
+Physical OS key/clipboard delivery and keyboard-only entry from the shell remain unqualified.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

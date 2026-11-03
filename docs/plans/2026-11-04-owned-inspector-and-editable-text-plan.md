@@ -96,7 +96,15 @@ reuse their exact CPU/GPU output; text paint changes can preserve equivalent poi
 behavior changes, native mapping changes and presentation loss cancel gestures. Native backend
 injection and actual OS IME delivery retain separate evidence boundaries.
 
-Complete selected-panel replacement, clipboard and keyboard navigation, structured/reference
+Complete selected-panel replacement, keyboard-only shell entry, structured/reference
 editing, a Nara-owned clipped live Scene/tool visual, virtualization, measured idle costs and the
 remaining native platform gates are still open. The optional scalar tab is a checkpoint toward
 those workflows, not completion of R11.
+
+The keyboard successor adds logical-key editing, enabled-control navigation and explicit button
+activation inside the active Inspector image. Its shared Host clipboard uses a fallible direct
+port so rejected Cut/Paste preserves the original buffer. Composition and queued submission
+guards remain intact, and modifier state survives transfer to the predecessor controls. The
+corresponding native trajectory uses the production logical-key entry and an isolated memory
+clipboard; physical OS keyboard/clipboard delivery and keyboard-only shell entry remain open.
+This advances the clipboard/navigation part above without completing the selected-panel replacement.

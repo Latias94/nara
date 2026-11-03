@@ -98,8 +98,14 @@ fields use Nara drawing and local editing. Boolean, structured and reference val
 read-only in this tab; their existing controls are available under `Document`. This is an
 incremental integration, not a replacement of the complete Inspector or workspace frontend.
 
-Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Ctrl+Z/Ctrl+Y
-change the focused buffer. Explicit Apply and non-composing Enter submit that field through the
+Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Within the
+active Inspector image, Tab/Shift+Tab move through enabled fields and buttons; Enter or Space
+activates a focused button. Ctrl+C/X/V copy, cut and paste Unicode selections through the same
+clipboard owner as the workspace shell. A failed clipboard write leaves a Cut's original text
+and selection intact. Multiline or oversized paste is rejected with a field error, without changing
+the buffer or local history. Ctrl+Z/Ctrl+Y change the focused buffer. On macOS the implementation
+uses Command for these shortcuts, with native qualification still required on that platform.
+Explicit Apply and non-composing Enter submit that field through the
 ordinary document owner. Escape first cancels composition, then can discard the draft. Losing focus
 or switching Inspector tabs preserves unapplied input. A locally queued or admitted submission
 locks the captured draft until its exact result returns; a refusal preserves it for correction.
@@ -116,10 +122,15 @@ An absent fallback does not authorize character substitution or a CJK rendering 
 
 The Inspector image uses the existing graphics Host and exact native composite receipt. Unchanged
 fields reuse their compiled frame and retained image. Native focus or presentation loss cancels
-input; focus reacquisition establishes a new text lifetime. IME candidate geometry is mapped through
+input; focus reacquisition establishes a new text lifetime. Control navigation can retain keyboard
+ownership after a text token retires. Keyboard shortcuts use logical keys, distinguish AltGr text
+from Ctrl shortcuts, and preserve held modifiers when handing input back to the workspace shell.
+IME candidate geometry is mapped through
 the displayed image into its owning window. Backend-injected composition tests establish draft and
-history behavior, while actual OS candidate placement/event delivery, clipboard, complete keyboard
-navigation, detached-window/DPI behavior and text accessibility remain separate qualification work.
+history behavior. The keyboard trajectory calls the same logical-key entry used by Winit ingestion
+and replaces the clipboard backend with memory, leaving the user's actual clipboard untouched.
+Actual OS key/clipboard delivery, candidate placement/event delivery, keyboard-only entry from the
+surrounding shell, detached-window/DPI behavior and text accessibility retain separate qualification.
 
 The [independent UI consumer](../../tests/fixtures/ui-module-consumer/README.md) exercises local
 editing and field compilation without ECS, Scene, a window or a renderer. Owning tests cover

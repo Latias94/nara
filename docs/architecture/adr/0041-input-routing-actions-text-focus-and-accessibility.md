@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-10-30
+**Last Revised**: 2026-11-04
 **Refines**: ADR 0013, ADR 0025, ADR 0035, ADR 0036, ADR 0039
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -105,6 +105,23 @@ Rules:
 
 Frame-transient input/window events follow ADR 0036 and ADR 0039 cleanup rules. Retained input
 state such as pressed buttons, focused element, and pointer capture persists until changed.
+
+### Editor Text And Keyboard Handoff
+
+The native Editor adapter distinguishes the focused keyboard control from the focused text
+receiver. Moving from a field to its Apply button preserves control navigation while revoking
+the field's IME lifetime. Presented-frame navigation and activation use the same kernel session
+as pointer input. Ordinary editing shortcuts use the backend's logical key and current modifiers;
+gameplay physical-key bindings retain their separate meaning. Clearing ordinary keys during
+handoff preserves physically held modifier state for the receiving controls.
+
+The Host shares one clipboard owner between its existing workspace shell and Nara-owned controls.
+Cut changes the buffer only after a successful clipboard write. Paste passes through ordinary
+bounded single-line text admission, and refusal preserves buffer, selection and local history.
+Composition suppresses clipboard and control-navigation shortcuts until completion or explicit
+cancellation. Local text Undo/Redo and explicit document history remain separate. These are concrete
+Editor policies, not a shared gameplay action-map or platform accessibility capability; the
+[editable-text guide](../../guides/editable-text.md) records their supported consumer scope.
 
 ### Bounded Ingress And Terminal Retirement
 

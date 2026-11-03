@@ -39,6 +39,7 @@ mod field_drafts;
 mod field_overrides;
 mod ordinary_structure;
 mod owned_fields;
+mod owned_keyboard;
 mod prefab_conversion;
 mod prefab_extraction;
 mod recursive_shapes;

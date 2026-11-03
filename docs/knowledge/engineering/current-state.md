@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "799a9de9b3f3c67737fd77971101e8b7fb3a3b07d5979d1583e3c03438848e2e"
+source_fingerprint: "6617eb1bae8293b035aafa64cf9938e7fcd7cf26c693ada121275f9856e7b2f7"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "799a9de9b3f3c67737fd77971101e8b7fb3a3b07d5979d1583e3c034388
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `799a9de9b3f3c67737fd77971101e8b7fb3a3b07d5979d1583e3c03438848e2e`
-- Immutable records: 1240
+- Source fingerprint: `6617eb1bae8293b035aafa64cf9938e7fcd7cf26c693ada121275f9856e7b2f7`
+- Immutable records: 1241
 - Open lane heads: 2
 
 # Open Registrations
@@ -23,6 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Native owned keyboard and font-policy qualification](verification/2026-11/2026-11-03T202859Z-native-owned-keyboard-and-font-policy-qualification-8df745e066a042c79a397610b8615985.md) - Logical-key editing, shared fallible clipboard, exact keyboard focus and font-policy replacement preserve drafts and original document results.
 - **Verification Evidence**: [Native owned scalar Inspector and presented input qualification](verification/2026-11/2026-11-03T192310Z-native-owned-scalar-inspector-and-presented-input-qualification-fc9f002f34ed414e84470bf32a812b8e.md) - Shared drafts and exact native image authority carry Nara text editing through Apply, document history and disk Reopen; complete Inspector and platform qualification remain open.
 - **Verification Evidence**: [Bounded editable text and exact fallback glyph ownership qualify the shared Inspector prerequisite](verification/2026-11/2026-11-03T182954Z-bounded-editable-text-and-exact-fallback-glyph-ownership-qualify-the-shared-inspector-prerequisite-9047e27973f9491e9c6cb56b5c49e351.md) - Parley and ICU editing, exact admitted faces, preedit restoration, focus lifetimes, neutral consumers and actual GPU masks qualify the text prerequisite while the complete Inspector remains open.
 - **Verification Evidence**: [Authored collision definitions retain exact source attribution through real Rapier derivation and retirement](verification/2026-11/2026-11-03T170523Z-authored-collision-definitions-retain-exact-source-attribution-through-real-rapier-derivation-and-retirement-b550d8d09ee34b72adfa1d18262eec6a.md) - Public exact Schema and Scene editing, native collider/debug observations, full membership, mixed-input refusal and managed close qualify the finite collision workflow.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Retained extraction save selection corrects and revises the original complete preparation](verification/2026-11/2026-11-03T081849Z-retained-extraction-save-selection-corrects-and-revises-the-original-complete-preparation-74cb3a0454934a70aa008757b2f09c2d.md) - Same-corpus selection correction, actual returned failure custody, public App lifecycle controls and reconciled preconfirmation semantics.
 - **Verification Evidence**: [Live Session extraction confirmation and original publication custody pass real Root and Application consumers](verification/2026-11/2026-11-03T074415Z-live-session-extraction-confirmation-and-original-publication-custody-pass-real-root-and-application-consumers-c3a619b0f0d34cd9bbee59adf90aa70f.md) - Bounded live publication qualification, explicit stress capacity, diagnostic corrections and remaining complete CP2 obligations.
 - **Work Progress**: [UE6 research verified and live extraction confirmation retains concrete publication ownership](progress/2026-11/2026-11-03T073114Z-ue6-research-verified-and-live-extraction-confirmation-retains-concrete-publication-ownership-f82e70da88ae4faea5fc3af079080c33.md) - UE6 findings and prediction design committed; live Session publication integration awaits current real regression results.
-- **Work Progress**: [Session extraction captures real reviews with shared authoring maintenance and concrete Play operation identity](progress/2026-11/2026-11-03T065327Z-session-extraction-captures-real-reviews-with-shared-authoring-maintenance-and-concrete-play-operation-identity-0752d732f6ec4fa4b8af57788cd92062.md) - Unpublished Session/Application integration, original budget causes and physical-return cancellation; confirmation/publication remains open.
 
 # Integration Notes
 

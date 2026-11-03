@@ -53,11 +53,11 @@ placement, actual input-method event delivery, or manual cross-window typing.
 ## Nara Properties Integration
 
 For the incremental Nara-drawn scalar Inspector, select a standalone TrueType CJK fallback
-accepted by the current workspace shell and Nara text owner, then run its trajectory explicitly:
+accepted by the current workspace shell and Nara text owner, then run both trajectories explicitly:
 
 ```powershell
 $env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
-cargo +1.95.0 nextest run -p nara-editor -p nara_ui -p nara_winit --features nara_ui/serde,nara_winit/accessibility --lib --locked --run-ignored only -E 'test(native_owned_inspector_pointer_and_ime_drafts_apply_undo_redo_save_and_reopen)' --test-threads=1
+cargo +1.95.0 nextest run -p nara-editor -p nara_ui -p nara_winit --features nara_ui/serde,nara_winit/accessibility --lib --locked --run-ignored only -E 'test(native_owned_inspector_)' --test-threads=1
 ```
 
 Use an actual installed compatible font; an unavailable path or missing glyph diagnostics fail
@@ -68,10 +68,18 @@ document Undo/Redo and disk Save/Reopen. It also verifies composition isolation/
 fresh focus after an outside click, rejection of a commit before the new IME handshake, retained
 input across Inspector tabs and preservation of original unavailable source records.
 
+The keyboard trajectory uses the production logical-key entry called by Winit ingestion, with
+the shared clipboard replaced by an isolated memory backend. It covers Unicode Copy/Cut/Paste,
+failed Cut and invalid Paste preservation, local Undo/Redo, AltGr and modifier handoff, composition
+guards, Tab/Shift+Tab, explicit Enter/Space activation, cancelled pointer gestures and queued-input
+refusal before document history and disk Save/Reopen. It does not read or alter the user's actual
+clipboard or synthesize physical OS keyboard events.
+
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
-requesting a continuous follow-up. That observation is not an idle CPU benchmark. This trajectory
-does not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
-placement, detached-window/DPI transfer, clipboard, complete keyboard navigation or accessibility.
+requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories
+do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
+placement, physical OS key/clipboard delivery, keyboard-only entry from the surrounding shell,
+detached-window/DPI transfer or accessibility.
 The complete Inspector and Nara-owned Scene/tool visuals remain open under the
 [owning unit](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
 

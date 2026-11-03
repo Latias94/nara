@@ -51,6 +51,7 @@ mod canvas_reopen_tests;
 mod canvas_tests;
 #[cfg(all(test, target_os = "windows"))]
 mod canvas_workflow_tests;
+mod clipboard;
 #[cfg(all(test, target_os = "windows"))]
 mod external_cadence_tests;
 mod input;
@@ -504,6 +505,7 @@ struct NativeImgui {
     >,
     owned_fonts: Vec<nara_text::FontFace>,
     owned_input: owned::OwnedInspectorInput,
+    clipboard: clipboard::EditorClipboard,
     window: Arc<Window>,
     context: Context,
     platform: WinitPlatform,
@@ -839,12 +841,15 @@ impl NativeImgui {
                     .with_config(FontConfig::new().size_pixels(16.0).merge_mode(true))]);
         }
         let platform = WinitPlatform::new(&mut context).map_err(imgui_error)?;
+        let clipboard = clipboard::EditorClipboard::new();
+        context.set_clipboard_backend(clipboard.clone());
         let native_detachment = native_detachment_supported(event_loop);
         let mut native = Self {
             owned: Default::default(),
             owned_pending: Default::default(),
             owned_fonts: owned::font_policy()?,
             owned_input: Default::default(),
+            clipboard,
             window,
             context,
             platform,

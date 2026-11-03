@@ -503,6 +503,45 @@ impl OwnedInspector {
         Ok(text.editor().is_composing())
     }
 
+    pub(super) fn selected_text(
+        &self,
+        frame: &Arc<UiFrame>,
+        field: &UiKey,
+        token: UiTextInputToken,
+        fields: &FieldEditors,
+    ) -> Result<Option<String>, OwnedInspectorError> {
+        let displayed = self.live_field(frame, field)?;
+        self.check_input(&displayed.key, fields)?;
+        let text = self.controls[&displayed.key]
+            .text
+            .as_ref()
+            .ok_or(OwnedInspectorError::ReadOnlyField)?;
+        if text.input_token() != Some(token) {
+            return Err(UiTextFieldError::StaleInput.into());
+        }
+        if text.editor().is_composing() {
+            return Err(OwnedInspectorError::Composing);
+        }
+        let range = text.editor().selection_bytes();
+        Ok((!range.is_empty()).then(|| text.editor().text()[range].to_owned()))
+    }
+
+    pub(super) fn input_error(
+        &self,
+        frame: &Arc<UiFrame>,
+        field: &UiKey,
+        token: UiTextInputToken,
+        fields: &mut FieldEditors,
+        error: String,
+    ) {
+        if self.input_token(frame, field).ok().flatten() == Some(token)
+            && let Ok(displayed) = self.live_field(frame, field)
+            && let Some(draft) = fields.drafts.get_mut(&displayed.key)
+        {
+            draft.error = Some(error);
+        }
+    }
+
     pub(super) fn edit(
         &mut self,
         frame: &Arc<UiFrame>,
