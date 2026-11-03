@@ -280,3 +280,86 @@ fn reviewed_extraction_cancels_before_close_and_exit_resume_the_original_dirty_a
         );
     }
 }
+
+#[test]
+fn extraction_maintenance_observes_async_transitions_and_keeps_review_quiet() {
+    let fixture = fixture();
+    let mut application = fixture.open_with_expected_state(EditorApplicationState::AuthoringReady);
+    let previous = review(&mut application, None);
+    application.cancel_prefab_extraction(previous).unwrap();
+    settle_background_imports(&mut application);
+    let document = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        .unwrap();
+    let operation = application
+        .state
+        .workspace_mut()
+        .unwrap()
+        .session
+        .begin_prefab_extraction(EditorPrefabExtractionRequest::new(
+            document,
+            SceneEntityId::new("selected").unwrap(),
+            AssetMetaIdentity::new(
+                StableAssetId::try_random().unwrap(),
+                AssetPath::new("observed-extraction.prefab.json").unwrap(),
+                AssetSourceKind::Prefab,
+            ),
+        ))
+        .unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let deadline = Instant::now() + WAIT;
+        let mut transitions = 0;
+        loop {
+            let before = application.prefab_extraction_view().unwrap().clone();
+            let update = application.drive_editor_frame(Duration::ZERO, false, false);
+            let after = application.prefab_extraction_view().unwrap();
+            assert_eq!(after.operation, Some(operation));
+            if &before != after {
+                transitions += 1;
+                assert!(
+                    update.actions_observed(),
+                    "maintenance must request presentation for {before:?} -> {after:?}"
+                );
+            }
+            if after.phase == EditorPrefabExtractionPhase::Review {
+                break;
+            }
+            assert_ne!(
+                after.phase,
+                EditorPrefabExtractionPhase::Terminal,
+                "{after:?}"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "the real extraction worker did not return"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(transitions > 0);
+        for _ in 0..4 {
+            assert!(
+                !application
+                    .drive_editor_frame(Duration::ZERO, false, false)
+                    .actions_observed()
+            );
+            assert_eq!(
+                application.prefab_extraction_view().unwrap().phase,
+                EditorPrefabExtractionPhase::Review
+            );
+        }
+        assert!(
+            !fixture
+                .root
+                .join("blueprints/observed-extraction.prefab.json")
+                .exists()
+        );
+    }));
+    application.cancel_prefab_extraction(operation).unwrap();
+    close(&mut application);
+    if let Err(payload) = result {
+        std::panic::resume_unwind(payload);
+    }
+}

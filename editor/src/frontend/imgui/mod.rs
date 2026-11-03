@@ -14,6 +14,7 @@ mod interaction_tests;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
+mod prefab_extraction;
 mod prefab_intent;
 mod project;
 mod source_tool;
@@ -49,6 +50,7 @@ pub(crate) struct ImguiFrontendOutput {
     pub(crate) actions: Option<EditorActionBatch>,
     candidate_serial: Option<u64>,
     pub(crate) project_action: Option<crate::EditorProjectAction>,
+    pub(crate) prefab_extraction: Option<prefab_extraction::ExtractionAction>,
     pub(crate) shell_action: Option<crate::app::EditorProjectShellAction>,
     pub(crate) browser_actions: Vec<nara::tooling::EditorProjectBrowserLocalAction>,
     pub(crate) layout_changed: bool,
@@ -191,6 +193,7 @@ pub struct ImguiEditorFrontend {
     presentation: workspace::ImguiPanelPresentation,
     project: project::ImguiProjectPanels,
     toolbar: authoring::ImguiAuthoringPanels,
+    prefab_extraction: prefab_extraction::ExtractionUi,
     workspace_generation: Option<u64>,
     layout_lifecycle: Option<std::sync::Arc<()>>,
     #[cfg(test)]
@@ -325,6 +328,9 @@ impl ImguiEditorFrontend {
         if let Some(action) = output.project_action.take() {
             application.submit_project_action(action);
         }
+        if let Some(action) = output.prefab_extraction.take() {
+            self.apply_prefab_extraction(application, action);
+        }
         Ok(self.seal_output(&mut output))
     }
 
@@ -359,6 +365,14 @@ impl ImguiEditorFrontend {
             ledger: std::sync::Arc::clone(pending),
             batch: output.actions.take()?,
         })
+    }
+
+    pub(crate) fn apply_prefab_extraction(
+        &mut self,
+        application: &mut crate::EditorApplication,
+        action: prefab_extraction::ExtractionAction,
+    ) -> bool {
+        self.prefab_extraction.apply(application, action)
     }
 
     pub(crate) fn dispatch_submission(
@@ -441,6 +455,7 @@ impl ImguiEditorFrontend {
             self.presentation.reset_widgets();
             self.project.reset_workspace();
             self.toolbar.retire();
+            self.prefab_extraction = Default::default();
             self.workspace_generation = generation;
         }
         if let Some(frame) = application.current_frame() {
@@ -670,7 +685,20 @@ impl ImguiEditorFrontend {
                 self.toolbar.set_read_only(read_only);
                 self.toolbar
                     .show_document_controls(ui, &frame, &mut actions);
+                self.prefab_extraction.show_start(
+                    ui,
+                    &frame,
+                    !read_only
+                        && authoring::editing_enabled(&frame)
+                        && application
+                            .prefab_extraction_view()
+                            .is_ok_and(|view| !view.writes_fenced),
+                );
             });
+
+        output.prefab_extraction =
+            self.prefab_extraction
+                .show(ui, application, &mut output.text_owner);
 
         let input = ImguiPanelInput {
             frame: &frame,

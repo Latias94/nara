@@ -5,6 +5,8 @@
 
 #[path = "support/ordinary_starter_structure.rs"]
 mod ordinary_starter_structure;
+#[path = "support/prefab_extraction.rs"]
+mod prefab_extraction;
 #[path = "support/supervised_play_project.rs"]
 mod supervised_play_project;
 
@@ -26,11 +28,17 @@ fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
     let project = CleanRoomSupervisedPlayProject::new();
     let mut application = open_application(project.root());
     ordinary_starter_structure::arrange_save_reopen_and_check(&project, &mut application);
+    application.request_exit();
+    drive_until_exit_ready(&mut application, Duration::from_secs(10));
+    prefab_extraction::prepare_startup_prefab(&project);
+    let mut application = open_application(project.root());
+    let extraction = prefab_extraction::extract_and_check(&project, &mut application);
     let frame = current_frame(&application);
     assert_eq!(
         frame.runtime_availability(),
         EditorRuntimeAvailability::ExternalSupervised
     );
+    assert_eq!(frame.play().external().unwrap().generation(), None);
     let scene = frame
         .workspace()
         .active_scene
@@ -61,6 +69,7 @@ fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
         .expect("the generated starter publishes external Play state");
     assert!(external.generation().is_some());
     assert!(external.last_good_available());
+    extraction.assert_running_generation(&project, &running);
 
     let stopping = application.submit_and_drive(
         EditorActionBatch::new(
@@ -76,6 +85,7 @@ fn generated_starter_reaches_ready_stop_and_clean_editor_exit() {
         EditorPlayOperation::Stop,
         Duration::from_secs(30),
     );
+    extraction.assert_saved_generation(&project);
 
     let requested = application.request_exit();
     assert!(!requested.exit_ready());

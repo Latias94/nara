@@ -1,6 +1,11 @@
 # Reviewed Prefab Extraction And Occurrence Continuity
 
 **Status:** Root/placement/inline-reference direction selected after independent comparison.
+The selected complete CP2 unit now has
+[public/native qualification](../knowledge/engineering/verification/2026-11/2026-11-03T115127Z-complete-public-prefab-extraction-and-native-workflow-qualification-c440d6b31843411897951e9ba2221a2e.md),
+including independent extraction/editing/conversion, actual process recovery, strict Check,
+real supervised Play and Windows/DX12 extraction controls. The historical prerequisite sequence
+below retains each result's original scope; broader R5 and the full foundation remain open.
 The [pure identity ownership prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T215838Z-canonical-source-identity-ownership-prerequisite-25574e28909847799bbcd2c2b1f1d469.md).
 The [final reference-demand prerequisite is qualified](../knowledge/engineering/verification/2026-11/2026-11-01T231259Z-final-reference-demand-and-preallocated-property-paths-qualification-fdb7dce644a84dcbb5b8b81fee9ec514.md).
 Lexical payload/input scope is selected below. Inline values, contextual defaults, source-only

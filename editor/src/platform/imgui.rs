@@ -1508,6 +1508,9 @@ impl NativeImgui {
             }
             local_changed |= update.actions_observed();
         }
+        if let Some(action) = output.prefab_extraction {
+            local_changed |= self.frontend.apply_prefab_extraction(application, action);
+        }
         if extent != self.scene_extent {
             self.scene_extent = extent;
             application.set_scene_preview_extent(extent);

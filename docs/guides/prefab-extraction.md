@@ -5,11 +5,30 @@ Scene owns source meaning and correspondence; Workspace owns working copies, his
 checkpoints; the concrete Host owns files, publication and physical retirement. A frontend
 does not construct inverse patches, copy files or infer publication from displayed phases.
 
-The complete workflow and remaining qualification are tracked in the
-[extraction plan](../plans/2026-11-02-prefab-extraction-plan.md). The public Session/Application
-APIs and independent recovery consumer are implemented. This guide does not claim that a
-native extraction control, strict Check/Play after extraction or the complete foundation
-rebaseline has been qualified.
+The complete workflow is tracked in the [extraction plan](../plans/2026-11-02-prefab-extraction-plan.md).
+Its [public/native qualification](../knowledge/engineering/verification/2026-11/2026-11-03T115127Z-complete-public-prefab-extraction-and-native-workflow-qualification-c440d6b31843411897951e9ba2221a2e.md)
+covers independent Session use, inherited editing and conversion, actual process recovery,
+strict Check, supervised Play and selected Windows/DX12 controls. Broader foundation and
+additional native-platform qualification remain separate.
+
+## Native Entry
+
+In the Dear frontend, open the owning Prefab and select a directly source-owned branch in
+Hierarchy. Choose **Extract Prefab Branch...** in the document toolbar, enter a new alias
+such as `actors/player.prefab.json`, and choose **Prepare extraction review**. The draft
+retains that document's original source and Schema basis; changing tabs does not retarget it.
+The Session creates the fixed target identity at preparation, not while painting the Review.
+
+The operation window presents actual phases, retained diagnostics, original open-source save
+selection, dispositions and exact output paths. Select an output to inspect its encoded bytes
+in bounded pages. **Update extraction save selection** revises the original preparation rather
+than capturing a new project. **Confirm reviewed extraction** is a separate explicit action.
+Cancellation, retry and Close keep their owning Session's permission and cleanup rules.
+
+The operation window is independent of Inspector and Hierarchy visibility. Dismissing a
+terminal result hides that frontend observation; it neither cancels an operation nor releases
+native resources. The public Application APIs below expose the same semantic workflow without
+requiring any panel to remain open.
 
 ## Prepare And Review
 
@@ -78,10 +97,11 @@ capacity, Scene capacity, stale inputs and publication failures remain separate 
 Retry uses the original allowance; it cannot raise capacity or clear physical uncertainty.
 Only select cancellation/retry when the concrete view permits it. Cancellation and Close wait
 for actual worker return and necessary native cleanup. Dropping an owner is not cleanup evidence.
-Retain and acknowledge the exact terminal operation before starting a replacement.
+Observe the exact terminal outcome before starting a replacement; the next accepted Begin
+replaces that terminal observation. There is no separate extraction acknowledgement command.
 
 `EditorApplication` exposes the same request, view, review, revision, confirmation, cancellation,
-retry and acknowledgement operations. Replacement Open cannot hide a fenced operation. Close
+and retry operations. Replacement Open cannot hide a fenced operation. Close
 and Exit first retire it, then resume ordinary dirty-document Save/Discard arbitration.
 
 ## Recover In A New Process

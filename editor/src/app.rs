@@ -2628,6 +2628,7 @@ fn drive_project_frame(
 ) -> bool {
     let before = project.session.current_frame();
     let preview_before = project.session.current_editor_preview_content_stamp();
+    let extraction_before = project.session.prefab_extraction_view().clone();
     let after = project
         .session
         .drive_editor_frame_with_runtime(real_delta, drive_runtime);
@@ -2640,6 +2641,7 @@ fn drive_project_frame(
         || before.image_import_work_pending() != after.image_import_work_pending()
         || before.authoring_retirement_pending() != after.authoring_retirement_pending()
         || before.scene_preview_unsaved_dependencies() != after.scene_preview_unsaved_dependencies()
+        || extraction_before != *project.session.prefab_extraction_view()
         || preview_before != project.session.current_editor_preview_content_stamp()
 }
 

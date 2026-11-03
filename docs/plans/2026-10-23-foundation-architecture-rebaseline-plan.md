@@ -643,7 +643,10 @@ Explicit root binding/source placements now have their
 [production prerequisite qualification](../knowledge/engineering/verification/2026-11/2026-11-02T121917Z-explicit-root-binding-and-source-placement-production-qualification-0eada24ff287416bbfe94ccf511d2380.md).
 Domain construction/correspondence, Session/Application publication and CLI-only recovery now have
 [bounded integration evidence](../knowledge/engineering/verification/2026-11/2026-11-03T094705Z-recovered-extraction-process-and-integrated-source-owners-pass-current-qualification-e6d36a7a778d4f3494963eec011be399.md).
-Complete CP2 independent workflow, strict Check/Play and native extraction qualification remain open.
+The [complete public/native successor](../knowledge/engineering/verification/2026-11/2026-11-03T115127Z-complete-public-prefab-extraction-and-native-workflow-qualification-c440d6b31843411897951e9ba2221a2e.md)
+qualifies the selected CP2 independent workflow, strict Check, actual supervised Play and native
+extraction controls within the recorded Windows/source/filesystem scope. Broader R5 and the full
+foundation remain open; the next joint motion/phase/temporal/effect consumer keeps its own gates.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias

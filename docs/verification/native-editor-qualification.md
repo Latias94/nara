@@ -136,6 +136,22 @@ requires actual native composite receipts. It does not read back the GPU framebu
 monitor scanout. Host tests separately cover stale source/working-copy refusal and physical
 cancellation/Close; a passing native success path does not establish those failure paths.
 
+For reviewed branch extraction, also execute:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_prefab_extraction_reviews_cancels_and_publishes_exact_outputs)' --test-threads=1
+```
+
+This hidden-window DX12 trajectory opens the actual Prefab through Inspector, captures a branch
+draft and changes the active tab before preparing. It verifies the original source remains the
+target, revises an invalid SaveCurrent selection through the real checkboxes, cancels without
+writes, confirms the exact reviewed outputs and reopens the saved original Prefab. The ordinary
+`extraction_maintenance_observes_async_transitions_and_keeps_review_quiet` test separately proves
+that asynchronous operation changes request presentation through Application observation and an
+unchanged Review remains quiet. Explicit widget paints do not measure input-idle native repaint
+incidence. The independent consumer and real starter strict Check/supervised Play tests retain
+their separate complete source and child-process acceptance.
+
 For finite source-tool facets, panel/Inspector result routing or parameter retirement, build the
 actual C# consumer and run its explicitly selected native workflow:
 

@@ -4,6 +4,12 @@ This workspace exercises public Nara modules without importing engine-private im
 details. `tests/domain_reconciliation.rs` is a small native-effect plugin consumer; its support
 module contains the complete domain implementation.
 
+`tests/editor_prefab_extraction.rs` consumes the public Project Session without a frontend.
+It creates a real all-profile source corpus, reviews and publishes exact extraction outputs,
+checks25 compiled occurrences including cross-cut references, then exercises selective history,
+inherited Q edits, Revert, complete conversion and JSON/RON Save with fresh Session Open.
+Its bounded fixture setup and semantic observations live in `tests/support/prefab_extraction.rs`.
+
 It owns its manifest and lockfile independently of the engine workspace. This catches missing
 direct dependencies, accidental workspace inheritance and unsupported facade shortcuts.
 The root fixture library depends directly on `nara_reflect` and `nara_scene`. Its integration tests
