@@ -160,6 +160,12 @@ pub struct AuthoredEntityReference {
 }
 
 impl AuthoredEntityReference {
+    /// Constant-time logical node count, suitable for admission before scanning route bytes.
+    #[must_use]
+    pub fn cost_nodes(&self) -> usize {
+        self.through.len().saturating_mul(2).saturating_add(2)
+    }
+
     #[must_use]
     pub const fn source(entity: SceneEntityId) -> Self {
         Self {
@@ -199,7 +205,7 @@ impl AuthoredEntityReference {
         };
         self.through.iter().fold(
             EntityReferenceCost {
-                nodes: 2,
+                nodes: self.cost_nodes(),
                 logical_bytes,
             },
             |cost, hop| {
@@ -209,7 +215,7 @@ impl AuthoredEntityReference {
                     .as_str()
                     .len()
                     .saturating_add(source_key_logical_bytes(&hop.expected_base));
-                cost.saturating_add(2, bytes)
+                cost.saturating_add(0, bytes)
             },
         )
     }
@@ -251,6 +257,16 @@ impl EntityReferenceCost {
 }
 
 impl EntityReference {
+    /// Returns the logical node count without visiting an authored reference's hops.
+    /// Byte accounting remains in [`Self::cost`]; callers can admit this count first.
+    #[must_use]
+    pub fn cost_nodes(&self) -> usize {
+        match self {
+            Self::Authored { reference } => reference.cost_nodes(),
+            Self::SceneLocal { .. } | Self::Persistent { .. } => 1,
+        }
+    }
+
     /// Returns the canonical logical cost for reference-bearing value and compiler budgets.
     ///
     /// Native references retain their original cost: one node and the local ID's byte length,

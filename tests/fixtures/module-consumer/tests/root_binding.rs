@@ -62,7 +62,7 @@ fn p_document() -> PrefabDocument {
     anchor.prefab = Some(PrefabInstance::root(
         source("Q"),
         key("Q", SourceDocumentKind::Prefab),
-        id("q"),
+        PrefabEntityTarget::source(id("q")),
     ));
     PrefabDocument::new(
         [SceneEntityPlacement::root(id("k")), child("b", "k")],
@@ -76,7 +76,7 @@ fn scene_document() -> SceneDocument {
         anchor.prefab = Some(PrefabInstance::root(
             source("P"),
             key("P", SourceDocumentKind::Prefab),
-            id("k"),
+            PrefabEntityTarget::source(id("k")),
         ));
         anchor
     }))

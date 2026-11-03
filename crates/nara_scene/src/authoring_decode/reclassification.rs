@@ -207,7 +207,7 @@ pub(super) fn classify_with_admission(
     )
 }
 
-fn classify_source_with_admission(
+pub(super) fn classify_source_with_admission(
     document: AuthoringSourceParts<'_>,
     state: &AuthoringDocumentState,
     successor: &AuthoringSchemaBasis,
@@ -429,7 +429,8 @@ pub(super) fn effective_value<'value>(
     charge_measured(admission, "classification-contextual-defaults", |scratch| {
         retention::contextual_defaults_bytes(&record.contextual_defaults, limits, scratch)
     })?;
-    complete_value::validate_contextual_record(schema, record, limits)?;
+    complete_value::check_contextual_record(schema, record, limits, admission)
+        .map_err(|error| complete_value::contextual_record_rejection(schema, error))?;
     selected_effective_value(schema, record, limits, admission).map_err(|error| match error {
         nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
         nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {

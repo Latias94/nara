@@ -248,8 +248,8 @@ Unknown source records retain their complete values and declarations without low
 preservation grants no interpretation, extraction or Native execution authority. The compiler's
 authoring observation and its Native projection keep that distinction explicit.
 
-Root-bound instances substitute the selected source root into the containing anchor's effective
-entity; forest mounts remain an explicit independent composition form. Source-root declarations
+Root-bound instances substitute the explicitly targeted sole effective root into the containing
+anchor's effective entity; forest mounts remain an explicit independent composition form. Source-root declarations
 and containing-anchor declarations keep distinct facets and instance slots even when they
 contribute to one canonical output occurrence. No new World identity axis or universal node base
 type is introduced.
@@ -277,7 +277,7 @@ SceneComponentRecord
 
 PrefabInstance
   source: AssetRef
-  binding: Forest or Root { base: SourceDocumentKey, root: SceneEntityId }
+  binding: Forest or Root { base: SourceDocumentKey, root: PrefabEntityTarget }
   arguments: optional source-bound reference arguments
   overrides: optional PrefabOverlay
 

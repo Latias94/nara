@@ -31,8 +31,8 @@ use crate::{
     SceneEntityPlacement, SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     SourceDocumentKey, SourceDocumentKind,
     prefab::{
-        AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation,
-        SelectedInstanceSource, try_compile_authoring_scene_with_loader,
+        AuthoringSceneCompilationOmissionReason, SelectedInstanceCompilation, SourceDocumentInput,
+        try_compile_authoring_scene_with_loader,
         try_compile_selected_authoring_instance_with_loader,
     },
 };
@@ -368,7 +368,7 @@ impl Fixture {
     ) -> (SelectedInstanceCompilation, Vec<AssetRef>) {
         let mut reads = Vec::new();
         let report = try_compile_selected_authoring_instance_with_loader(
-            SelectedInstanceSource::Scene(&self.scene),
+            SourceDocumentInput::Scene(&self.scene),
             &id("A"),
             &[],
             (0, 0),
@@ -646,7 +646,7 @@ fn nominal_prefab_input_uses_its_actual_topology_without_instantiating_a_scene()
     );
     let before = prefab.clone();
     let from_prefab = try_compile_selected_authoring_instance_with_loader(
-        SelectedInstanceSource::Prefab(&prefab),
+        SourceDocumentInput::Prefab(&prefab),
         &id("A"),
         &[],
         (0, 0),
@@ -748,7 +748,7 @@ fn every_opened_selected_scope_requires_the_exact_shared_basis() {
     assert_ne!(basis, other_basis);
     for wrong in ["base", "branch", "leaf"] {
         let report = try_compile_selected_authoring_instance_with_loader(
-            SelectedInstanceSource::Scene(&fixture.scene),
+            SourceDocumentInput::Scene(&fixture.scene),
             &id("A"),
             &[],
             (0, 0),
@@ -781,7 +781,7 @@ fn selection_rejects_non_instance_or_projected_locators_without_loading() {
     let basis = basis();
     for selected in ["absent", "prefab_0", "socket", "skeleton_0"] {
         let report = try_compile_selected_authoring_instance_with_loader(
-            SelectedInstanceSource::Scene(&fixture.scene),
+            SourceDocumentInput::Scene(&fixture.scene),
             &id(selected),
             &[],
             (0, 0),
@@ -830,7 +830,7 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
         );
     }
     let report = try_compile_selected_authoring_instance_with_loader(
-        SelectedInstanceSource::Scene(&fixture.scene),
+        SourceDocumentInput::Scene(&fixture.scene),
         &id("A"),
         &[],
         (0, 0),
@@ -848,7 +848,7 @@ fn selected_work_reuses_compiler_caps_and_honors_loader_restrictions() {
     assert!(report.fragment.is_none());
     assert!(report.budget_failed);
     let error = try_compile_selected_authoring_instance_with_loader(
-        SelectedInstanceSource::Scene(&fixture.scene),
+        SourceDocumentInput::Scene(&fixture.scene),
         &id("A"),
         &[],
         (0, 0),
@@ -1116,7 +1116,7 @@ fn final_surviving_shells_and_root_bindings_share_the_entity_cap_without_copying
             anchor.prefab = Some(PrefabInstance::root(
                 request("base"),
                 key("base"),
-                id("selected"),
+                PrefabEntityTarget::source(id("selected")),
             ));
             // The merged anchor is selected value demand; only the other shells stay opaque.
             anchor.components.clear();

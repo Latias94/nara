@@ -25,7 +25,7 @@ use crate::{
     patch::bounded_component_records_source_cost,
     prefab::{
         AuthoringSceneCompilationOmissionReason, PrefabOverlayCostLimits,
-        SceneCompilationWorkingSet, SelectedInstanceCompilation, SelectedInstanceSource,
+        SceneCompilationWorkingSet, SelectedInstanceCompilation, SourceDocumentInput,
         prefab_instance_cost, try_compile_selected_authoring_instance_with_loader,
     },
 };
@@ -44,7 +44,7 @@ pub(super) struct LocalizedConversion {
 }
 
 pub(super) fn prepare<F, E>(
-    source: SelectedInstanceSource<'_>,
+    source: SourceDocumentInput<'_>,
     anchor: &SceneEntityId,
     basis: &AuthoringSchemaBasis,
     history: SceneAuthoringHistoryLimits,
@@ -73,8 +73,8 @@ where
         .with_materialized_value_nodes(value_nodes)
         .with_materialized_value_bytes(value_bytes);
     let (placements, records) = match &source {
-        SelectedInstanceSource::Scene(document) => (&document.placements, &document.entities),
-        SelectedInstanceSource::Prefab(document) => (&document.placements, &document.entities),
+        SourceDocumentInput::Scene(document) => (&document.placements, &document.entities),
+        SourceDocumentInput::Prefab(document) => (&document.placements, &document.entities),
     };
     // Reading retained source is independent of how much selected output is materialized.
     // Preserve the actual source admission and configured reference-work ceilings.

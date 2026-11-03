@@ -35,6 +35,8 @@ use crate::ExpandedSceneDocument;
 use crate::SourceDocumentKind;
 mod declaration;
 #[cfg(feature = "serde")]
+pub(crate) mod extraction;
+#[cfg(feature = "serde")]
 mod native_preview;
 mod overlay;
 #[cfg(feature = "serde")]
@@ -220,7 +222,7 @@ impl PrefabInstantiationReport {
 pub struct PrefabInstance {
     /// A primary native Prefab source selector. Auxiliary imported products are not sources.
     pub source: AssetRef,
-    /// Chooses a forest mount or a canonical-checked source root that contributes to its anchor.
+    /// Chooses a forest mount or a canonical-checked effective root that contributes to its anchor.
     pub binding: PrefabInstanceBinding,
     #[cfg_attr(
         feature = "serde",
@@ -266,8 +268,10 @@ impl<'de> serde::Deserialize<'de> for PrefabInstance {
 /// The explicit materialization relationship between an instance and its containing anchor.
 ///
 /// A root binding never depends on the current root count. Its selected source and overlay must
-/// yield exactly the named source entity as their only root, which then shares the anchor's
+/// yield exactly the targeted entity as their only root, which then shares the anchor's
 /// canonical identity. Declaration scopes and nested instance slots remain distinct.
+/// The target starts in the selected base, including source/addition origins and exact
+/// canonical predicates on every nested hop. It is resolved before root alias normalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
@@ -278,7 +282,7 @@ pub enum PrefabInstanceBinding {
     Forest,
     Root {
         base: SourceDocumentKey,
-        root: SceneEntityId,
+        root: PrefabEntityTarget,
     },
 }
 
@@ -294,7 +298,7 @@ impl PrefabInstance {
     }
 
     #[must_use]
-    pub const fn root(source: AssetRef, base: SourceDocumentKey, root: SceneEntityId) -> Self {
+    pub const fn root(source: AssetRef, base: SourceDocumentKey, root: PrefabEntityTarget) -> Self {
         Self {
             source,
             binding: PrefabInstanceBinding::Root { base, root },
@@ -432,6 +436,16 @@ impl ResolvedPrefabSource {
             ResolvedPrefabDocument::Authoring(document) => document.document(),
             #[cfg(feature = "serde")]
             ResolvedPrefabDocument::AuthoringSource { document, .. } => document,
+        }
+    }
+
+    /// Shares an actual unpublished authoring source without exposing resolver storage roles.
+    /// Published classifications and Native raw sources retain their own admission boundaries.
+    #[cfg(feature = "serde")]
+    pub(crate) fn authoring_source_allocation(&self) -> Option<&Arc<PrefabDocument>> {
+        match &self.document {
+            ResolvedPrefabDocument::AuthoringSource { document, .. } => Some(document),
+            ResolvedPrefabDocument::Authoring(_) | ResolvedPrefabDocument::Raw(_) => None,
         }
     }
 
@@ -591,6 +605,9 @@ pub enum SceneCompilationBudgetKind {
     MaterializedValueNodes,
     MaterializedValueBytes,
     MaterializedValueDepth,
+    SourceValueNodes,
+    SourceValueBytes,
+    SourceValueDepth,
     ResolvedInstances,
     OverlayDeclarations,
     GeneratedIdentifierBytes,
@@ -609,6 +626,9 @@ impl SceneCompilationBudgetKind {
             Self::MaterializedValueNodes => "materialized-value-nodes",
             Self::MaterializedValueBytes => "materialized-value-bytes",
             Self::MaterializedValueDepth => "materialized-value-depth",
+            Self::SourceValueNodes => "source-value-nodes",
+            Self::SourceValueBytes => "source-value-bytes",
+            Self::SourceValueDepth => "source-value-depth",
             Self::ResolvedInstances => "resolved-instances",
             Self::OverlayDeclarations => "overlay-declarations",
             Self::GeneratedIdentifierBytes => "generated-identifier-bytes",
@@ -1044,6 +1064,27 @@ pub enum AuthoringSceneCompilationOmissionReason {
     NativeBindingUnavailable,
 }
 
+/// The selected physical declaration of an unavailable component, before root aliases lose
+/// that contributor's identity. A concrete source operation opts in to these bounded facts.
+#[cfg(feature = "serde")]
+struct UnavailableSourceDeclaration {
+    entity: SceneEntityId,
+    component: nara_reflect::ComponentTypeId,
+    source: crate::PrefabDeclarationSource,
+    record: SceneEntityId,
+    slot: UnavailableComponentSlot,
+}
+
+#[cfg(feature = "serde")]
+#[derive(PartialEq, Eq)]
+enum UnavailableComponentSlot {
+    Record,
+    Overlay {
+        steps: Vec<crate::PrefabInstancePathSegment>,
+        slot: crate::PrefabOverlaySlot,
+    },
+}
+
 /// Compiles the same selected declaration program without native codecs or migrations.
 /// Source publication, saving and history remain the containing source owner's responsibility.
 #[cfg(feature = "serde")]
@@ -1088,8 +1129,8 @@ where
 
 /// An actual containing source, borrowed without a Scene-shaped surrogate.
 #[cfg(feature = "serde")]
-#[derive(Clone, Copy)]
-pub(crate) enum SelectedInstanceSource<'a> {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SourceDocumentInput<'a> {
     Scene(&'a SceneDocument),
     Prefab(&'a PrefabDocument),
 }
@@ -1123,7 +1164,7 @@ pub(crate) struct SelectedInstanceCompilation {
 /// All containing-source IDs and topology remain actual external reference context.
 #[cfg(feature = "serde")]
 pub(crate) fn try_compile_selected_authoring_instance_with_loader<F, E>(
-    source: SelectedInstanceSource<'_>,
+    source: SourceDocumentInput<'_>,
     anchor: &SceneEntityId,
     reference_queries: &[nara_identity::AuthoredEntityReference],
     initial_reference_work: (usize, usize),
@@ -1197,8 +1238,8 @@ where
             record.contextual_defaults = defaults.values;
         }
         let root_bound = match source {
-            SelectedInstanceSource::Scene(document) => &document.entities,
-            SelectedInstanceSource::Prefab(document) => &document.entities,
+            SourceDocumentInput::Scene(document) => &document.entities,
+            SourceDocumentInput::Prefab(document) => &document.entities,
         }
         .iter()
         .find(|record| &record.id == anchor)
@@ -1367,6 +1408,8 @@ pub struct SceneCompilationWorkingSet {
     bytes: Option<usize>,
     working_limit: ByteLimit,
     source_depth: usize,
+    reference_work: (usize, usize),
+    reference_limits: (ItemLimit, ByteLimit),
 }
 
 impl SceneCompilationWorkingSet {
@@ -1387,6 +1430,12 @@ impl SceneCompilationWorkingSet {
         if limit.get() < self.working_limit.get() {
             self.working_limit = limit;
         }
+    }
+
+    #[cfg(feature = "serde")]
+    fn restrict_reference_work(&mut self, nodes: ItemLimit, bytes: ByteLimit) {
+        self.reference_limits.0 = self.reference_limits.0.min(nodes);
+        self.reference_limits.1 = self.reference_limits.1.min(bytes);
     }
 
     #[cfg(feature = "serde")]
@@ -1607,6 +1656,10 @@ struct SceneCompilationContext<'a, F, E> {
     asset_references: Vec<nara_reflect::DeclaredAssetReference>,
     #[cfg(feature = "serde")]
     omissions: Vec<AuthoringSceneCompilationOmission>,
+    #[cfg(feature = "serde")]
+    capture_unavailable_declarations: bool,
+    #[cfg(feature = "serde")]
+    unavailable_declarations: Vec<UnavailableSourceDeclaration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1645,6 +1698,10 @@ where
             asset_references: Vec::new(),
             #[cfg(feature = "serde")]
             omissions: Vec::new(),
+            #[cfg(feature = "serde")]
+            capture_unavailable_declarations: false,
+            #[cfg(feature = "serde")]
+            unavailable_declarations: Vec::new(),
         }
     }
 
@@ -1877,6 +1934,11 @@ where
             bytes: self.usage.checked_work_bytes(),
             working_limit: self.options.limits.working_bytes(),
             source_depth: 1,
+            reference_work: self.reference_work,
+            reference_limits: (
+                self.options.limits.reference_work_nodes(),
+                self.options.limits.reference_work_bytes(),
+            ),
         }
     }
 

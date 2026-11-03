@@ -87,8 +87,18 @@ fn copy_record(
     // them. The effective tree is temporary: copying never turns an omission into a value pin.
     let limits = budget.materialization()?;
     budget.effective_record(schema, record)?;
-    crate::document::validate_contextual_defaults(schema, record, limits)
-        .map_err(|error| value_error(source, error))?;
+    crate::document::validate_contextual_defaults_with_admission(
+        schema,
+        record,
+        limits,
+        |nodes, bytes, allocated| budget.charge(nodes, bytes, allocated),
+    )
+    .map_err(|error| match error {
+        nara_reflect::__private::EffectiveValueAdmissionError::Admission(error) => error,
+        nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
+            value_error(source, error)
+        }
+    })?;
     let (effective, _) = effective_component_value_with_default_overrides_with_budget(
         schema,
         &record.value,
@@ -192,8 +202,9 @@ fn copy_instance(
         return Err(PrefabCopyError::AuxiliaryPrefabSource { source });
     }
     instance.source = mapping.asset(&instance.source, source, budget)?;
-    if let PrefabInstanceBinding::Root { base, .. } = &mut instance.binding {
+    if let PrefabInstanceBinding::Root { base, root } = &mut instance.binding {
         mapping.key(base, source, budget)?;
+        copy_target(root, source, mapping, budget)?;
     }
     if let Some(arguments) = &mut instance.arguments {
         mapping.key(&mut arguments.base, source, budget)?;

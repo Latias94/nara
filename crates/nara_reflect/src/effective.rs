@@ -681,23 +681,68 @@ pub fn validate_native_component_value_references_with_admission<E>(
 pub fn component_field_default_requires_context(
     field: &ComponentFieldSchema,
 ) -> Result<bool, ComponentCodecError> {
+    component_field_default_requires_context_impl(field, None)
+}
+
+/// Classifies the same canonical default with admission before shape scans and raw traversal.
+///
+/// The owning Schema, including the field's shape, must already be admitted. The shared kind
+/// scan admits each examined shape node and scratch growth without revalidating declarations.
+/// The shared raw walker then admits each default observation and iterator frame growth. No
+/// value is copied or materialized, and refusal returns the exact caller error.
+#[doc(hidden)]
+pub fn component_field_default_requires_context_with_admission<E>(
+    field: &ComponentFieldSchema,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<bool, EffectiveValueAdmissionError<E>> {
+    let mut refusal = None;
+    let result = {
+        let mut callback = |nodes, bytes, allocated| {
+            admit(nodes, bytes, allocated).map_err(|error| {
+                refusal = Some(error);
+                // Allocation-free carrier; the caller's exact error is returned below.
+                ComponentCodecError::MaterializationNodeLimit {
+                    observed: 0,
+                    maximum: 0,
+                }
+            })
+        };
+        component_field_default_requires_context_impl(field, Some(&mut callback))
+    };
+    match refusal {
+        Some(error) => Err(EffectiveValueAdmissionError::Admission(error)),
+        None => result.map_err(EffectiveValueAdmissionError::Value),
+    }
+}
+
+fn component_field_default_requires_context_impl<'admit>(
+    field: &ComponentFieldSchema,
+    mut admission: Option<&'admit mut MaterializationAdmission<'admit>>,
+) -> Result<bool, ComponentCodecError> {
+    const SCHEMA_DEFAULT_NODES: usize = 16_384;
+
     let Some(default) = field.default_value() else {
         return Ok(false);
     };
-    if !field
-        .shape()
-        .contains_kind(crate::ComponentValueKind::EntityRef)
-    {
+    let contains_reference = match admission.as_deref_mut() {
+        Some(admit) => field
+            .shape()
+            .contains_kind_with_admission(crate::ComponentValueKind::EntityRef, admit)?,
+        None => field
+            .shape()
+            .contains_kind(crate::ComponentValueKind::EntityRef),
+    };
+    if !contains_reference {
         return Ok(false);
     }
     let mut budget = MaterializationBudget {
-        maximum_nodes: 16_384,
+        maximum_nodes: SCHEMA_DEFAULT_NODES,
         maximum_bytes: crate::schema::MAX_SHAPE_BYTES,
         maximum_depth: DepthLimit::new(MAX_SHAPE_DEPTH)
             .expect("schema default depth limit is non-zero"),
         nodes: 0,
         bytes: 0,
-        admission: None,
+        admission,
         reference_policy: ReferencePolicy::SourceContext { required: false },
     };
     // Schema default admission starts at depth zero; ordinary document checks start at one.
@@ -707,6 +752,9 @@ pub fn component_field_default_requires_context(
         ReferencePolicy::SourceContext { required: true }
     ))
 }
+
+#[cfg(test)]
+mod context_admission_tests;
 
 /// Runs the ordinary finite raw-value check, admitting each observation and stack growth first.
 /// No default plan or value copy is constructed. Caller refusals retain their exact identity.
@@ -855,10 +903,13 @@ impl MaterializationBudget<'_> {
                                         | EntityReference::Authored { .. }
                                 );
                             }
-                            let cost = reference.cost();
-                            if cost.nodes() > 1 {
-                                self.observe_nodes(depth, cost.nodes() - 1)?;
+                            // The byte cost walks authored hops. Admit their O(1) logical
+                            // node count first, so an exhausted caller can stop that scan.
+                            let nodes = reference.cost_nodes();
+                            if nodes > 1 {
+                                self.observe_nodes(depth, nodes - 1)?;
                             }
+                            let cost = reference.cost();
                             self.observe_bytes(cost.logical_bytes())?;
                         }
                     }

@@ -771,10 +771,8 @@ fn ordinary_field_edits_reject_selected_wire_limits_without_publishing_either_ki
                     assert_eq!($session.authoring_record_facts().unwrap(), facts);
                     assert_eq!($session.unavailable_record_manifest(), Some(&manifest));
                     let after = $session.authoring_readmission().unwrap();
-                    assert_eq!(after.source, authority.source);
-                    assert_eq!(after.kind, authority.kind);
-                    assert_eq!(after.expected_readiness, authority.expected_readiness);
-                    assert!(Arc::ptr_eq(&after.basis, &authority.basis));
+                    assert!(Arc::ptr_eq(&after.state, &authority.state));
+                    assert_eq!(after.history_limits, authority.history_limits);
                 }};
             }
             match kind {

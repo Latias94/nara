@@ -100,8 +100,9 @@ pub use export::{
 pub use format::{
     CanonicalPrefabDocumentCandidate, CanonicalSceneDocumentCandidate, PrefabDocumentCandidate,
     PublishedPrefabDocument, PublishedSceneDocument, SceneDocumentCandidate, SceneFileBudgetError,
-    SceneFileBudgetKind, SceneFileEncoding, SceneFileLimits, SceneFilePublicationError,
-    SceneFormatError, ScenePatchDocumentCandidate,
+    SceneFileBudgetKind, SceneFileDecodingAdmissionError, SceneFileEncoding,
+    SceneFileEncodingAdmissionError, SceneFileLimits, SceneFilePublicationError, SceneFormatError,
+    ScenePatchDocumentCandidate,
 };
 pub use nara_identity::{
     SceneEntityId, SceneEntityIdError, SceneInstanceId, SourceDocumentBindingError,
@@ -177,6 +178,15 @@ pub mod __private {
         validate_authored_upgrade_prefab_transition, validate_authored_upgrade_scene_transition,
     };
     pub use crate::authoring::{
+        EncodedPrefabExtractionSource, PrefabExtractionDestination, PrefabExtractionFailure,
+        PrefabExtractionRequest, PrefabExtractionSavedGeneration,
+        PrefabExtractionSavedGenerationError, PrefabExtractionSourceBindFailure,
+        PrefabExtractionSourceCommit, PrefabExtractionSourceOutput,
+        PrefabExtractionStoredAdmissionFailure, PrefabExtractionUsage, PrefabExtractionWork,
+        PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
+        PreparedSceneExtractionSource, SceneExtractionSourceCommit, SceneSourceExtractionInput,
+    };
+    pub use crate::authoring::{
         PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
         PreparedPrefabSchemaSource, PreparedSceneSchemaSource,
         RetainedSchemaReclassificationSource, SceneSchemaReclassificationCommit,
@@ -196,6 +206,10 @@ pub mod __private {
         project_published_authoring_scene_preview,
     };
     pub use crate::format::{canonical_prefab_source_matches, canonical_scene_source_matches};
+    pub use crate::prefab::extraction::{
+        CapturedExtractionSource, PrefabExtractionAssets, PrefabExtractionBinding,
+        PrefabExtractionEnvironment,
+    };
     pub use crate::prefab::{
         AuthoringNativePreview, AuthoringSceneCompilationOmission,
         AuthoringSceneCompilationOmissionReason, AuthoringSceneCompilationParts,

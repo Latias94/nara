@@ -203,11 +203,8 @@ impl CopyBudget {
         )?;
         for field in schema.fields() {
             self.field_plan(field)?;
-            // Source-default validation plans even canonical templates hidden by explicit
-            // values or overrides. Reserve the same Reflect path storage before that call.
-            if let Some(default) = field.default_value() {
-                self.selected_plan(field, default)?;
-            }
+            // Contextual source validation separately debits its actual canonical-default
+            // traversal and scratch. This reservation covers materializer-owned temporaries.
             if let Some(default) = record
                 .contextual_defaults
                 .get(field.id())

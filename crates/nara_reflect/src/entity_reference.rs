@@ -8,8 +8,11 @@ use nara_identity::{EntityReference, EntityReferenceRemap, IdentityRemapError};
 use crate::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
     ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema, ComponentShapeMember,
-    ComponentValue, ComponentValueKind, ComponentValueShape,
+    ComponentValue, ComponentValueCost, ComponentValueKind, ComponentValueShape,
 };
+
+#[cfg(test)]
+mod rewrite_admission_tests;
 
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_NODES: usize = 16_384;
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_BYTES: usize = 4 * 1024 * 1024;
@@ -189,6 +192,98 @@ impl DeclaredEntityReferencePlan {
             planned_reference(value, planned)?;
         }
         Ok(())
+    }
+}
+
+/// Pre-admits one [`DeclaredEntityReferencePlan::rewrite_in_place`] on an unpublished candidate.
+///
+/// The caller must already have admitted the complete `value_cost` of that same, structurally
+/// equivalent candidate. Only its node upper bound is used, for ordinary BTree lookup work:
+/// `16 * bit_length(max(nodes, 1)) + 1` comparisons per field segment and access pass. This is
+/// modeled work and requested storage, not an allocator or elapsed-time guarantee.
+///
+/// Deltas cover this helper's path scan, validation and mutable access, eager `get_path` prefix
+/// copies, cumulative `visited` Vec growth, and possible Reflect diagnostic storage/path copies.
+/// Path lengths are admitted before scanning segments; key lengths are read without scanning
+/// their text. No helper scratch is allocated, and an empty plan makes no admission calls.
+/// Replacement values and work performed inside the rewrite callback remain the caller's debit.
+///
+/// `None` in the allocation delta signals arithmetic overflow, including node or byte overflow;
+/// the callback must reject it. Its exact error is returned without copying a diagnostic path.
+/// This only admits work: it neither validates nor rewrites the candidate. After success, the
+/// caller invokes the existing `rewrite_in_place` with its unchanged typed-error semantics.
+#[doc(hidden)]
+pub fn admit_declared_entity_reference_plan_rewrite<E>(
+    plan: &DeclaredEntityReferencePlan,
+    value_cost: ComponentValueCost,
+    mut admit: impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
+) -> Result<(), E> {
+    let lookup_levels = (usize::BITS - value_cost.nodes().max(1).leading_zeros()) as usize;
+    // The bit length is at most usize::BITS, so this arithmetic cannot overflow.
+    let lookup_comparisons = 16 * lookup_levels + 1;
+    for planned in &plan.references {
+        let segments = planned.path.segments();
+        let Some(nodes) = segments.len().checked_add(2) else {
+            return admit(0, 0, None);
+        };
+        // Admit the entire metadata scan first, plus both leaf access/check passes. Even an
+        // empty payload-relative reference path can produce an inline Reflect diagnostic.
+        admit(
+            nodes,
+            0,
+            Some(size_of::<ComponentEntityReferenceRewriteError<()>>()),
+        )?;
+        for (offset, segment) in segments.iter().enumerate() {
+            let field_bytes = match segment {
+                ComponentFieldPathSegment::Field(name) => Some(name.len()),
+                ComponentFieldPathSegment::Index(_) => None,
+            };
+            admit_reference_rewrite_segment(
+                segments.len() - offset,
+                field_bytes,
+                lookup_comparisons,
+                &mut admit,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn admit_reference_rewrite_segment<E>(
+    prefixes: usize,
+    field_bytes: Option<usize>,
+    lookup_comparisons: usize,
+    admit: &mut impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
+) -> Result<(), E> {
+    let cost = (|| {
+        // This segment appears in `prefixes` eager child-path copies in each access pass.
+        let prefix_copies = prefixes.checked_mul(2)?;
+        // Two visited strings, two error paths, and a possible MissingField name copy.
+        let owned_copies = prefix_copies.checked_add(5)?;
+        // Per pass, allow four spare slots per child-path Vec and four cumulative visited
+        // capacity slots per segment (minimum capacity four, geometric doubling). Two more
+        // slots cover full diagnostic path copies. No storage is refunded after a drop.
+        let allocation_slots = prefix_copies.checked_add(18)?;
+        let comparisons = if field_bytes.is_some() {
+            lookup_comparisons.checked_mul(2)?
+        } else {
+            0
+        };
+        // Access/dispatch, visited clones/relocation and diagnostic-copy overhead per segment.
+        let nodes = prefix_copies.checked_add(12)?.checked_add(comparisons)?;
+        let key_bytes = field_bytes.unwrap_or(0);
+        let logical_bytes = owned_copies
+            .checked_mul(field_bytes.unwrap_or(size_of::<u32>()))?
+            // Each string comparison may inspect both keys, bounded by the query key length.
+            .checked_add(comparisons.checked_mul(2)?.checked_mul(key_bytes)?)?;
+        let allocation_bytes = allocation_slots
+            .checked_mul(size_of::<ComponentFieldPathSegment>())?
+            .checked_add(owned_copies.checked_mul(key_bytes)?)?;
+        Some((nodes, logical_bytes, allocation_bytes))
+    })();
+    match cost {
+        Some((nodes, bytes, allocation)) => admit(nodes, bytes, Some(allocation)),
+        None => admit(0, 0, None),
     }
 }
 

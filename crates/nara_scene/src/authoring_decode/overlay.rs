@@ -3,9 +3,11 @@
 
 use super::*;
 use crate::{PrefabComponentIntent, PrefabOverlay};
+#[cfg(test)]
+use nara_reflect::ComponentValueKind;
 use nara_reflect::{
     ComponentEntityReferenceRewriteError, ComponentFieldPathError, ComponentPropertyError,
-    ComponentValueKind, DeclaredAssetReferenceError,
+    DeclaredAssetReferenceError,
 };
 
 pub(super) fn classify_instance(
@@ -217,8 +219,12 @@ fn classify_record(
                 )
             },
         )?;
-        if let Err(error) = complete_value::check_contextual_record(schema, record, context.limits)
-        {
+        if let Err(error) = complete_value::check_contextual_record(
+            schema,
+            record,
+            context.limits,
+            &mut context.admission,
+        ) {
             preserve_contextual_error(schema, error)?;
             classified.readiness = AuthoringRecordReadiness::UnresolvedOverlay;
             classified.adapter = None;
@@ -269,8 +275,29 @@ fn classify_record(
         for field in schema
             .fields()
             .iter()
-            .filter(|field| field.shape().contains_kind(ComponentValueKind::AssetRef))
+            .filter(|field| field.has_capability(ComponentCapability::AssetRef))
         {
+            let segments = field.path().segments();
+            reclassification::reference_charge(
+                &mut context.admission,
+                "overlay-asset-field-path",
+                segments.len(),
+                0,
+                0,
+            )?;
+            // get_path owns prefix paths even on success. The admitted Schema already proves
+            // reference capabilities; only this actual lookup's temporary paths need storage.
+            reclassification::charge(&mut context.admission, "overlay-asset-field-path", || {
+                let bytes = segments.iter().try_fold(0usize, |bytes, segment| {
+                    bytes
+                        .checked_add(std::mem::size_of::<ComponentFieldPathSegment>())?
+                        .checked_add(match segment {
+                            ComponentFieldPathSegment::Field(name) => name.len(),
+                            ComponentFieldPathSegment::Index(_) => 0,
+                        })
+                })?;
+                bytes.checked_mul(segments.len().checked_add(3)?)
+            })?;
             let payload = match record.value.get_path(field.path()) {
                 Ok(payload) => Some(payload),
                 Err(
@@ -404,8 +431,7 @@ fn classify_property(
                     PrefabPropertyIntent::Absent if claim.path.steps.is_empty() => {
                         if selected
                             .field
-                            .shape()
-                            .contains_kind(ComponentValueKind::EntityRef)
+                            .has_capability(ComponentCapability::EntityRef)
                         {
                             None
                         } else {
@@ -646,6 +672,7 @@ fn preserve_contextual_error(
     use nara_reflect::ComponentCodecError;
 
     match error {
+        ContextualRecordError::Admission(error) => Err(error),
         ContextualRecordError::Reference(error) => preserve_traversal_error(&error),
         ContextualRecordError::Value(
             ComponentCodecError::MaterializationNodeLimit { .. }

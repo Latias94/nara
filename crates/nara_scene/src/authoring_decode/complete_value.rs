@@ -26,7 +26,8 @@ pub(super) fn validate_complete_value<'value>(
             Some(schema),
         ))
     };
-    validate_contextual_record(schema, record, limits)?;
+    check_contextual_record(schema, record, limits, &mut None)
+        .map_err(|error| contextual_record_rejection(schema, error))?;
     let effective =
         nara_reflect::__private::effective_component_value_with_default_overrides_with_budget(
             schema,
@@ -52,18 +53,10 @@ pub(super) fn validate_complete_value<'value>(
     Ok(effective)
 }
 
-pub(super) fn validate_contextual_record(
-    schema: &ComponentSchema,
-    record: &SceneComponentRecord,
-    limits: SceneFileLimits,
-) -> Result<(), AuthoringDocumentPublicationError> {
-    check_contextual_record(schema, record, limits)
-        .map_err(|error| contextual_record_rejection(schema, error))
-}
-
 pub(super) enum ContextualRecordError {
     Value(nara_reflect::ComponentCodecError),
     Reference(nara_reflect::ComponentEntityReferenceRewriteError<()>),
+    Admission(AuthoringDocumentPublicationError),
 }
 
 pub(super) fn contextual_record_rejection(
@@ -76,6 +69,7 @@ pub(super) fn contextual_record_rejection(
             "contextual defaults",
             "declared reference grammar",
         ),
+        ContextualRecordError::Admission(error) => return error,
     };
     rejection(with_codec_error(
         with_public_locator(
@@ -97,26 +91,73 @@ pub(super) fn check_contextual_record(
     schema: &ComponentSchema,
     record: &SceneComponentRecord,
     limits: SceneFileLimits,
+    admission: &mut Option<&mut reclassification::ClassificationCallback<'_>>,
 ) -> Result<(), ContextualRecordError> {
-    crate::document::validate_contextual_defaults(
+    crate::document::validate_contextual_defaults_with_admission(
         schema,
         record,
         limits.component_materialization_limits(),
+        |nodes, bytes, allocated| {
+            reclassification::reference_charge(
+                admission,
+                "classification-contextual-validation",
+                nodes,
+                bytes,
+                allocated,
+            )
+        },
     )
-    .map_err(ContextualRecordError::Value)?;
+    .map_err(|error| match error {
+        nara_reflect::__private::EffectiveValueAdmissionError::Value(error) => {
+            ContextualRecordError::Value(error)
+        }
+        nara_reflect::__private::EffectiveValueAdmissionError::Admission(error) => {
+            ContextualRecordError::Admission(error)
+        }
+    })?;
     for (id, value) in &record.contextual_defaults {
-        let field = schema
-            .fields()
-            .iter()
-            .find(|field| field.id() == id)
-            .expect("contextual defaults retain admitted root IDs");
-        nara_reflect::__private::plan_declared_value_entity_references::<()>(
+        let mut selected = None;
+        for field in schema.fields() {
+            reclassification::reference_charge(
+                admission,
+                "classification-contextual-reference-field",
+                1,
+                field.id().as_str().len().saturating_add(id.as_str().len()),
+                0,
+            )
+            .map_err(ContextualRecordError::Admission)?;
+            if field.id() == id {
+                selected = Some(field);
+                break;
+            }
+        }
+        let field = selected.expect("contextual defaults retain admitted root IDs");
+        nara_reflect::__private::plan_declared_value_entity_references_with_admission::<(), _>(
             field,
             field.shape(),
             value,
             reference_traversal_limits(limits.component_materialization_limits()),
+            |nodes, bytes, allocated| {
+                reclassification::reference_charge(
+                    admission,
+                    "classification-contextual-references",
+                    nodes,
+                    bytes,
+                    allocated,
+                )
+            },
         )
-        .map_err(ContextualRecordError::Reference)?;
+        .map_err(|error| match error {
+            nara_reflect::__private::EntityReferencePlanError::Reference(error) => {
+                ContextualRecordError::Reference(error)
+            }
+            nara_reflect::__private::EntityReferencePlanError::Admission(error) => {
+                ContextualRecordError::Admission(error)
+            }
+        })?;
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod contextual_admission_tests;

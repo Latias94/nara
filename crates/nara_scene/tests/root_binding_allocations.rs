@@ -107,7 +107,11 @@ fn oversized_missing_root_is_refused_without_allocating_its_lookup_key() {
     // The caller already owns this identifier. Compilation must borrow it, even when it misses.
     let root = SceneEntityId::new("x".repeat(INVALID_ROOT_BYTES)).unwrap();
     let mut anchor = SceneEntityRecord::new(id("anchor"));
-    anchor.prefab = Some(PrefabInstance::root(source(), key(), root));
+    anchor.prefab = Some(PrefabInstance::root(
+        source(),
+        key(),
+        PrefabEntityTarget::source(root),
+    ));
     let document = SceneDocument::from_ordered_roots([anchor]);
 
     let (report, maximum) = compile_observing_allocations(&document, &sources);
@@ -152,7 +156,7 @@ fn borrowed_root_lookup_preserves_source_and_addition_namespaces() {
             id("q"),
         ))),
     ));
-    let mut instance = PrefabInstance::root(source(), key(), id("q"));
+    let mut instance = PrefabInstance::root(source(), key(), PrefabEntityTarget::source(id("q")));
     instance.overrides = Some(overlay);
     let mut anchor = SceneEntityRecord::new(id("anchor"));
     anchor.prefab = Some(instance);

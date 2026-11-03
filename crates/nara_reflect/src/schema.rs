@@ -1052,20 +1052,62 @@ impl ComponentValueShape {
         if self.validate().is_err() {
             return false;
         }
-        let mut pending = vec![self];
+        match self
+            .contains_kind_with_admission(kind, |_, _, _| Ok::<(), std::convert::Infallible>(()))
+        {
+            Ok(found) => found,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Scans an already admitted shape without validating its declarations again.
+    ///
+    /// The callback admits each examined node and pending-vector growth before it occurs.
+    /// Opaque containers remain outside the declared kind scan. Shared shape storage and
+    /// member names are neither copied nor charged; refusals return the exact caller error.
+    pub(crate) fn contains_kind_with_admission<E>(
+        &self,
+        kind: ComponentValueKind,
+        mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let mut pending = Vec::new();
+        Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
+        pending.push(self);
         while let Some(shape) = pending.pop() {
+            admit(1, 0, 0)?;
             match shape {
                 Self::Record { members } => {
-                    pending.extend(members.iter().map(|member| &member.shape))
+                    Self::reserve_kind_scan(&mut pending, members.len(), &mut admit)?;
+                    pending.extend(members.iter().map(|member| &member.shape));
                 }
-                Self::List { item } | Self::KeyedList { item, .. } => pending.push(item),
-                Self::Map { value } | Self::Optional { value } => pending.push(value),
+                Self::List { item } | Self::KeyedList { item, .. } => {
+                    Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
+                    pending.push(item);
+                }
+                Self::Map { value } | Self::Optional { value } => {
+                    Self::reserve_kind_scan(&mut pending, 1, &mut admit)?;
+                    pending.push(value);
+                }
                 Self::Opaque { .. } => {}
-                shape if shape.value_kind() == kind => return true,
+                shape if shape.value_kind() == kind => return Ok(true),
                 _ => {}
             }
         }
-        false
+        Ok(false)
+    }
+
+    fn reserve_kind_scan<E>(
+        pending: &mut Vec<&Self>,
+        additional: usize,
+        admit: &mut impl FnMut(usize, usize, usize) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let needed = pending.len().saturating_add(additional);
+        if needed > pending.capacity() {
+            let capacity = needed.max(pending.capacity().saturating_mul(2)).max(4);
+            admit(0, 0, capacity.saturating_mul(std::mem::size_of::<&Self>()))?;
+            pending.reserve_exact(capacity - pending.len());
+        }
+        Ok(())
     }
 
     pub fn validate(&self) -> Result<(), ComponentShapeError> {

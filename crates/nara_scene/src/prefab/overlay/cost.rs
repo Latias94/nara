@@ -9,6 +9,7 @@ use nara_reflect::{
 use super::{
     PrefabAddition, PrefabComponentIntent, PrefabEntityTarget, PrefabOverlay, PrefabPropertyIntent,
 };
+use crate::patch::{SourceCostObserver, source_cost_progress, with_source_cost_admission};
 use crate::provenance::{CostScratchAdmission, reserve_cost_scratch};
 use crate::{
     PrefabInstance, PrefabInstanceBinding, SceneComponentRecord, SceneEntityPlacement,
@@ -68,6 +69,28 @@ impl PrefabOverlayCostLimits {
         value_bytes: usize::MAX,
         logical_bytes: usize::MAX,
     };
+
+    /// Shares the raw instance walk with source owners observing borrowed component records
+    /// and intents. Refusal and raw cost limits both stop before an incomplete result escapes.
+    pub(crate) fn observe_instance(
+        self,
+        instance: &PrefabInstance,
+        observer: &mut dyn SourceCostObserver,
+    ) -> Option<PrefabOverlayCost> {
+        CostWalker::new(self, Some(observer))
+            .walk(Frame::Instance(instance, 1))
+            .ok()
+    }
+
+    pub(crate) fn observe_placements(
+        self,
+        placements: &[SceneEntityPlacement],
+        observer: &mut dyn SourceCostObserver,
+    ) -> Option<PrefabOverlayCost> {
+        let mut walker = CostWalker::new(self, Some(observer));
+        walker.placements(placements, 1).ok()?;
+        Some(walker.cost)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,26 +164,26 @@ enum Frame<'a> {
     Instances(std::slice::Iter<'a, super::PrefabInstanceClaim>, usize),
 }
 
-struct CostWalker<'a, 'environment> {
+struct CostWalker<'a> {
     cost: PrefabOverlayCost,
     limits: PrefabOverlayCostLimits,
-    admission: Option<&'a mut CostScratchAdmission<'environment>>,
+    observer: Option<&'a mut dyn SourceCostObserver>,
 }
 
-impl<'a, 'environment> CostWalker<'a, 'environment> {
+impl<'a> CostWalker<'a> {
     fn new(
         limits: PrefabOverlayCostLimits,
-        admission: Option<&'a mut CostScratchAdmission<'environment>>,
+        observer: Option<&'a mut dyn SourceCostObserver>,
     ) -> Self {
         Self {
             cost: PrefabOverlayCost::default(),
             limits,
-            admission,
+            observer,
         }
     }
 
     fn walk(mut self, first: Frame<'_>) -> Result<PrefabOverlayCost, PrefabOverlayCostError> {
-        let mut pending = if self.admission.is_some() {
+        let mut pending = if self.observer.is_some() {
             let mut pending = Vec::new();
             self.reserve_scratch(&mut pending, 1)?;
             pending.push(first);
@@ -172,6 +195,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
             match frame {
                 Frame::Instance(instance, depth) => {
                     self.node(depth)?;
+                    if let Some(observer) = self.observer.as_deref_mut()
+                        && !observer.instance(instance)
+                    {
+                        return Err(self.scratch_refusal());
+                    }
                     add(
                         &mut self.cost.prefab_instances,
                         1,
@@ -185,8 +213,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     self.bytes(1)?;
                     if let PrefabInstanceBinding::Root { base, root } = &instance.binding {
                         self.source(base, depth.saturating_add(2))?;
-                        self.node(depth.saturating_add(2))?;
-                        self.bytes(root.as_str().len())?;
+                        self.target(root, depth.saturating_add(2))?;
                     }
                     if let Some(arguments) = &instance.arguments {
                         self.node(depth.saturating_add(1))?;
@@ -197,9 +224,8 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                         for (input, reference) in &arguments.values {
                             self.node(depth.saturating_add(2))?;
                             self.bytes(input.as_str().len())?;
-                            let cost = reference.cost();
-                            self.nodes(cost.nodes(), depth.saturating_add(3))?;
-                            self.bytes(cost.logical_bytes())?;
+                            self.nodes(reference.cost_nodes(), depth.saturating_add(3))?;
+                            self.bytes(reference.cost().logical_bytes())?;
                         }
                     }
                     if let Some(overlay) = &instance.overrides {
@@ -209,6 +235,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 }
                 Frame::Overlay(overlay, depth) => {
                     self.node(depth)?;
+                    if let Some(observer) = self.observer.as_deref_mut()
+                        && !observer.overlay(overlay)
+                    {
+                        return Err(self.scratch_refusal());
+                    }
                     self.declarations(1)?;
                     self.source(&overlay.base, depth.saturating_add(1))?;
                     self.declarations(overlay.additions.len())?;
@@ -243,6 +274,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                         for (component, record) in &addition.components {
                             self.bytes(component.as_str().len())?;
                             self.record(record, depth.saturating_add(1))?;
+                            if let Some(observer) = self.observer.as_deref_mut()
+                                && !observer.record(component, record)
+                            {
+                                return Err(self.scratch_refusal());
+                            }
                         }
                         if let Some(instance) = &addition.prefab {
                             pending.push(Frame::Instance(instance, depth.saturating_add(1)));
@@ -271,8 +307,10 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         values: &mut Vec<T>,
         additional: usize,
     ) -> Result<(), PrefabOverlayCostError> {
-        reserve_cost_scratch(values, additional, &mut self.admission)
-            .ok_or_else(|| self.scratch_refusal())
+        with_source_cost_admission(&mut self.observer, |admission| {
+            reserve_cost_scratch(values, additional, admission)
+        })
+        .ok_or_else(|| self.scratch_refusal())
     }
 
     fn scratch_refusal(&self) -> PrefabOverlayCostError {
@@ -303,6 +341,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 self.target(target, depth)?;
                 self.bytes(component.as_str().len().saturating_add(1))?;
                 self.record(record, depth.saturating_add(1))?;
+                if let Some(observer) = self.observer.as_deref_mut()
+                    && !observer.record(component, record)
+                {
+                    return Err(self.scratch_refusal());
+                }
             }
             PrefabComponentIntent::Suppress { target, component } => {
                 self.target(target, depth)?;
@@ -342,6 +385,11 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                     }
                 }
             }
+        }
+        if let Some(observer) = self.observer.as_deref_mut()
+            && !observer.component_intent(intent)
+        {
+            return Err(self.scratch_refusal());
         }
         Ok(())
     }
@@ -439,7 +487,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         while let Some((value, depth, key_bytes)) = current {
             self.node(depth)?;
             let value_nodes = match value {
-                ComponentValue::EntityReference(reference) => reference.cost().nodes(),
+                ComponentValue::EntityReference(reference) => reference.cost_nodes(),
                 _ => 1,
             };
             self.nodes(value_nodes.saturating_sub(1), depth)?;
@@ -456,6 +504,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
                 ComponentValue::String(value) => value.len(),
                 ComponentValue::EntityReference(reference) => reference.cost().logical_bytes(),
             };
+            self.progress(0, key_bytes.saturating_add(scalar_bytes))?;
             add(
                 &mut bytes,
                 key_bytes.saturating_add(scalar_bytes),
@@ -494,10 +543,14 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         }
         // ComponentValueCost owns the scalar/key-byte convention. Reuse its canonical result
         // after the bounded walk rather than creating a second constructible cost type.
-        let value_cost = if let Some(admit) = self.admission.as_deref_mut() {
+        let value_cost = if let Some(observer) = self.observer.as_deref_mut() {
             value
                 .cost_up_to_with_admission(usize::MAX, usize::MAX, |bytes| {
-                    if admit(bytes) { Ok(()) } else { Err(()) }
+                    if observer.admit_scratch(bytes) {
+                        Ok(())
+                    } else {
+                        Err(())
+                    }
                 })
                 .map_err(|()| self.scratch_refusal())?
                 .ok_or_else(|| self.scratch_refusal())?
@@ -512,6 +565,15 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
         self.nodes(1, depth)
     }
 
+    fn progress(
+        &mut self,
+        nodes: usize,
+        logical_bytes: usize,
+    ) -> Result<(), PrefabOverlayCostError> {
+        source_cost_progress(&mut self.observer, nodes, logical_bytes)
+            .ok_or_else(|| self.scratch_refusal())
+    }
+
     fn nodes(&mut self, amount: usize, depth: usize) -> Result<(), PrefabOverlayCostError> {
         require(PrefabOverlayCostKind::Depth, depth, self.limits.depth)?;
         self.cost.depth = self.cost.depth.max(depth);
@@ -520,7 +582,8 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
             amount,
             self.limits.nodes,
             PrefabOverlayCostKind::Nodes,
-        )
+        )?;
+        self.progress(amount, 0)
     }
 
     fn declarations(&mut self, amount: usize) -> Result<(), PrefabOverlayCostError> {
@@ -544,6 +607,7 @@ impl<'a, 'environment> CostWalker<'a, 'environment> {
     fn bytes(&mut self, amount: usize) -> Result<(), PrefabOverlayCostError> {
         self.cost.structural_logical_bytes =
             self.cost.structural_logical_bytes.saturating_add(amount);
+        self.progress(0, amount)?;
         require(
             PrefabOverlayCostKind::LogicalBytes,
             self.cost.logical_bytes(),
@@ -756,7 +820,7 @@ mod tests {
             .unwrap()
             .binding = PrefabInstanceBinding::Root {
             base: key("dormant-root-source"),
-            root: SceneEntityId::new("specified-root").unwrap(),
+            root: PrefabEntityTarget::source(SceneEntityId::new("specified-root").unwrap()),
         };
         let bound = prefab_instance_cost(&declaration, PrefabOverlayCostLimits::UNBOUNDED).unwrap();
         assert!(bound.nodes > forest.nodes);

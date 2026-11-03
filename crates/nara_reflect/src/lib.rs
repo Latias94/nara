@@ -130,6 +130,7 @@ pub mod __private {
     pub use crate::effective::{
         EffectiveValueAdmissionError, component_defaults_are_explicit_with_admission,
         component_field_default_requires_context,
+        component_field_default_requires_context_with_admission,
         effective_component_value_owned_with_default_overrides,
         effective_component_value_with_admission, effective_component_value_with_budget,
         effective_component_value_with_default_overrides_with_admission,
@@ -139,7 +140,8 @@ pub mod __private {
         validate_value_materialization_budget,
     };
     pub use crate::entity_reference::{
-        DeclaredEntityReferencePlan, EntityReferencePlanError, plan_declared_entity_references,
+        DeclaredEntityReferencePlan, EntityReferencePlanError,
+        admit_declared_entity_reference_plan_rewrite, plan_declared_entity_references,
         plan_declared_entity_references_with_admission, plan_declared_value_entity_references,
         plan_declared_value_entity_references_with_admission,
     };

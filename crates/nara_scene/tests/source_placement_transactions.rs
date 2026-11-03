@@ -48,7 +48,7 @@ fn p() -> PrefabDocument {
     anchor.prefab = Some(PrefabInstance::root(
         AssetRef::path("Q.prefab.json").unwrap(),
         q_key(),
-        id("q"),
+        PrefabEntityTarget::source(id("q")),
     ));
     PrefabDocument::new(
         [

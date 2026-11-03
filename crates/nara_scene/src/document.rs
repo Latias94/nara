@@ -257,36 +257,71 @@ pub(crate) fn validate_contextual_defaults(
     record: &SceneComponentRecord,
     limits: ComponentValueMaterializationLimits,
 ) -> Result<(), nara_reflect::ComponentCodecError> {
+    match validate_contextual_defaults_with_admission(schema, record, limits, |_, _, _| {
+        Ok::<_, std::convert::Infallible>(())
+    }) {
+        Ok(()) => Ok(()),
+        Err(nara_reflect::__private::EffectiveValueAdmissionError::Value(error)) => Err(error),
+        Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) => {
+            match error {}
+        }
+    }
+}
+
+/// The same source-default contract with work/ownership admission before planning and validation.
+pub(crate) fn validate_contextual_defaults_with_admission<E>(
+    schema: &nara_reflect::ComponentSchema,
+    record: &SceneComponentRecord,
+    limits: ComponentValueMaterializationLimits,
+    mut admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
+) -> Result<(), nara_reflect::__private::EffectiveValueAdmissionError<E>> {
+    use nara_reflect::__private::{
+        ComponentPropertyAdmissionError, EffectiveValueAdmissionError,
+        component_field_default_requires_context_with_admission,
+        validate_component_property_value_with_admission,
+    };
     use nara_reflect::{ComponentCapability, ComponentCodecError, ComponentValueKind};
 
     if !record.contextual_defaults.is_empty() && record.version != schema.version() {
         return Err(ComponentCodecError::invalid_field(
             "contextual defaults",
             "current record version",
-        ));
+        )
+        .into());
     }
     for field in schema.fields() {
-        if nara_reflect::__private::component_field_default_requires_context(field)?
+        admit(1, field.id().as_str().len(), 0).map_err(EffectiveValueAdmissionError::Admission)?;
+        if component_field_default_requires_context_with_admission(field, &mut admit)?
             && !record.contextual_defaults.contains_key(field.id())
         {
             return Err(ComponentCodecError::invalid_field(
                 "contextual defaults",
                 "explicit source-dependent default",
-            ));
+            )
+            .into());
         }
     }
     let mut nodes = 0usize;
     let mut bytes = 0usize;
     for (id, value) in &record.contextual_defaults {
-        let field = schema
-            .fields()
-            .iter()
-            .find(|field| field.id() == id)
+        let mut selected = None;
+        for field in schema.fields() {
+            admit(
+                1,
+                field.id().as_str().len().saturating_add(id.as_str().len()),
+                0,
+            )
+            .map_err(EffectiveValueAdmissionError::Admission)?;
+            if field.id() == id {
+                selected = Some(field);
+                break;
+            }
+        }
+        let field = selected
             .filter(|field| {
                 field.default_value().is_some()
                     && field.has_capability(ComponentCapability::Scene)
                     && field.has_capability(ComponentCapability::EntityRef)
-                    && field.shape().contains_kind(ComponentValueKind::EntityRef)
             })
             .ok_or_else(|| {
                 ComponentCodecError::invalid_field(
@@ -294,7 +329,50 @@ pub(crate) fn validate_contextual_defaults(
                     "declared reference default",
                 )
             })?;
-        nara_reflect::__private::validate_value_materialization_budget(value, limits)?;
+        admit(
+            0,
+            0,
+            std::mem::size_of::<nara_reflect::ComponentPropertyPath>()
+                .saturating_add(id.as_str().len()),
+        )
+        .map_err(EffectiveValueAdmissionError::Admission)?;
+        let path = nara_reflect::ComponentPropertyPath::new(id.clone());
+        let mut observed = (0usize, 0usize, 0usize);
+        validate_component_property_value_with_admission(
+            field.shape(),
+            &path,
+            value,
+            limits,
+            |nodes, bytes, allocated| {
+                admit(nodes, bytes, allocated)?;
+                observed.0 = observed.0.saturating_add(nodes);
+                observed.1 = observed.1.saturating_add(bytes);
+                observed.2 = observed.2.saturating_add(allocated);
+                Ok(())
+            },
+        )
+        .map_err(|error| match error {
+            ComponentPropertyAdmissionError::Admission(error) => {
+                EffectiveValueAdmissionError::Admission(error)
+            }
+            ComponentPropertyAdmissionError::Property(
+                nara_reflect::ComponentPropertyError::InvalidValue(error),
+            ) => EffectiveValueAdmissionError::Value(error),
+            ComponentPropertyAdmissionError::Property(_) => EffectiveValueAdmissionError::Value(
+                ComponentCodecError::invalid_field("contextual defaults", "declared field shape"),
+            ),
+        })?;
+        // Aggregate source limits still use the ordinary raw cost. Its additional scan,
+        // shape check and iterator scratch share the complete validator's upper bound.
+        admit(observed.0, observed.1, observed.2)
+            .map_err(EffectiveValueAdmissionError::Admission)?;
+        if !field.shape().contains_kind(ComponentValueKind::EntityRef) {
+            return Err(ComponentCodecError::invalid_field(
+                "contextual defaults",
+                "declared reference default",
+            )
+            .into());
+        }
         let cost = value.cost();
         nodes = nodes.saturating_add(cost.nodes());
         bytes = bytes
@@ -304,17 +382,89 @@ pub(crate) fn validate_contextual_defaults(
             return Err(ComponentCodecError::MaterializationNodeLimit {
                 observed: nodes,
                 maximum: limits.nodes().get(),
-            });
+            }
+            .into());
         }
         if bytes > limits.bytes().get() {
             return Err(ComponentCodecError::MaterializationByteLimit {
                 observed: bytes,
                 maximum: limits.bytes().get(),
-            });
+            }
+            .into());
         }
-        field.shape().validate_value(value).map_err(|_| {
-            ComponentCodecError::invalid_field("contextual defaults", "declared field shape")
-        })?;
     }
     Ok(())
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod default_admission_tests {
+    use super::*;
+    use nara_reflect::{
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId,
+        ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog,
+        ComponentValueKind,
+    };
+
+    #[test]
+    fn no_default_fields_still_request_work_before_scanning_the_admitted_schema() {
+        let component = ComponentTypeId::new("test.NoDefaultAdmission");
+        let schema = ComponentSchema::new(
+            component.clone(),
+            "No defaults",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        .with_fields((0..4_096).map(|index| {
+            let name = format!("field{index}");
+            ComponentFieldSchema::optional(
+                ComponentFieldId::new(&name),
+                &name,
+                ComponentFieldPath::from_fields([name.clone()]),
+                ComponentValueKind::U64,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+        }));
+        let owner = PersistentComponentSchemaOwnerId::try_new("test.no-defaults").unwrap();
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            owner.clone(),
+            ComponentSchemaCatalog {
+                components: vec![schema],
+                ..Default::default()
+            },
+            None,
+        )])
+        .unwrap();
+        let adapter = crate::__private::AuthoringAdapterReceipt::from_schema_owner(
+            &bundle.owners()[0],
+            &Default::default(),
+        )
+        .unwrap();
+        let basis = crate::AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
+        let record = SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::Map(Default::default()),
+        )
+        .with_owner(owner);
+        let marker = Box::new(std::io::Error::other("no field work remains"));
+        let pointer = std::ptr::from_ref(marker.as_ref());
+        let mut marker = Some(marker);
+        let mut calls = 0;
+        let result = validate_contextual_defaults_with_admission(
+            basis.schema(&component).unwrap(),
+            &record,
+            Default::default(),
+            |nodes, _, allocated| {
+                calls += 1;
+                assert_eq!(nodes, 1);
+                assert_eq!(allocated, 0);
+                Err(marker.take().unwrap())
+            },
+        );
+        let Err(nara_reflect::__private::EffectiveValueAdmissionError::Admission(error)) = result
+        else {
+            panic!("the first field visit must consume the owner's allowance");
+        };
+        assert_eq!(calls, 1);
+        assert!(std::ptr::eq(error.as_ref(), pointer));
+    }
 }

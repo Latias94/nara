@@ -79,6 +79,12 @@ flowchart LR
 - Source and overlay placements share the layout implementation and declaration-order cohort
   rules. The declaration's own source/base determines its address context; a source is not made
   into a synthetic instance of itself merely to express its ordinary layout.
+- Splitting a source into a containing source and an extracted Prefab must preserve coupled
+  ordering and parent constraints across declaration layers. Pins in one relative-order cohort
+  or reparent dependency group cannot move independently merely because each target is expressible
+  in the destination. Cross-cut groups retain their complete containing-source order, with explicit
+  safe baselines for new local declarations. Original compiler facts can establish normalized
+  target equality; a flattened child sequence is not a replacement source declaration.
 - An ordinary source-local branch removal is a semantic command over the admitted local
   hierarchy. If removing a sibling would leave another owned placement's Before/After anchor
   dangling, the command prepares the affected remaining sibling sequence in the same order as

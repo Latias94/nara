@@ -411,12 +411,24 @@ impl AuthoredFieldUpgrade {
                     0,
                 )?;
             }
-            crate::document::validate_contextual_defaults(
+            crate::document::validate_contextual_defaults_with_admission(
                 schema,
                 record,
                 validation.limits.component_materialization_limits(),
+                |nodes, bytes, allocated| {
+                    charge_validation(
+                        validation.admit,
+                        "authored-upgrade-contextual-validation",
+                        nodes,
+                        bytes,
+                        allocated,
+                    )
+                },
             )
-            .map_err(|_| refused())?;
+            .map_err(|error| match error {
+                nara_reflect::__private::EffectiveValueAdmissionError::Admission(report) => report,
+                nara_reflect::__private::EffectiveValueAdmissionError::Value(_) => refused(),
+            })?;
         }
         validation.record(
             self.previous.schema(&self.component).ok_or_else(refused)?,

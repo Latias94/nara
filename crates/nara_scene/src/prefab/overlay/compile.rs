@@ -30,6 +30,13 @@ mod component_program_tests;
 
 mod staged;
 
+#[cfg(feature = "serde")]
+pub(crate) use staged::SourceCutMembership;
+
+#[cfg(all(test, feature = "serde"))]
+#[path = "compile/extraction_cut_tests.rs"]
+mod extraction_cut_tests;
+
 /// Flat values and source-only default snapshots have different consumers. Only selected
 /// source conversion requests the latter; Native admission never receives these declarations.
 pub(crate) struct StagedSceneOutput {
@@ -81,7 +88,7 @@ where
 #[cfg(feature = "serde")]
 pub(crate) fn expand_selected_instance<F, E>(
     context: &mut SceneCompilationContext<'_, F, E>,
-    source: crate::prefab::SelectedInstanceSource<'_>,
+    source: crate::prefab::SourceDocumentInput<'_>,
     anchor: &SceneEntityId,
     reference_queries: &[nara_identity::AuthoredEntityReference],
 ) -> Result<StagedSceneOutput, SceneCompilationFailure>
@@ -91,28 +98,47 @@ where
         &mut crate::prefab::SceneCompilationWorkingSet,
     ) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    staged::expand_selected(context, source_topology(source, reference_queries), anchor)
+}
+
+#[cfg(feature = "serde")]
+pub(crate) fn capture_source_cut<F, E>(
+    context: &mut SceneCompilationContext<'_, F, E>,
+    source: crate::prefab::SourceDocumentInput<'_>,
+    root: &SceneEntityId,
+) -> Result<SourceCutMembership, SceneCompilationFailure>
+where
+    F: FnMut(
+        &nara_asset::AssetRef,
+        &mut crate::prefab::SceneCompilationWorkingSet,
+    ) -> Result<Option<ResolvedPrefabSource>, E>,
+{
+    staged::capture_source_cut(context, source_topology(source, &[]), root)
+}
+
+#[cfg(feature = "serde")]
+fn source_topology<'a>(
+    source: crate::prefab::SourceDocumentInput<'a>,
+    reference_queries: &'a [nara_identity::AuthoredEntityReference],
+) -> staged::SourceTopology<'a> {
     let (placements, entities, inputs) = match source {
-        crate::prefab::SelectedInstanceSource::Scene(document) => (
+        crate::prefab::SourceDocumentInput::Scene(document) => (
             document.placements.as_slice(),
             document.entities.as_slice(),
             None,
         ),
-        crate::prefab::SelectedInstanceSource::Prefab(document) => (
+        crate::prefab::SourceDocumentInput::Prefab(document) => (
             document.placements.as_slice(),
             document.entities.as_slice(),
             Some(&document.inputs),
         ),
     };
-    staged::expand_selected(
-        context,
-        staged::SourceTopology {
-            placements,
-            entities,
-            inputs,
-            reference_queries,
-        },
-        anchor,
-    )
+    staged::SourceTopology {
+        placements,
+        entities,
+        inputs,
+        reference_queries,
+    }
 }
 
 impl<'a, F, E> SceneCompilationContext<'a, F, E>

@@ -6,7 +6,8 @@ use std::mem::size_of;
 use nara_asset::AssetRef;
 use nara_core::ItemLimit;
 use nara_reflect::__private::{
-    effective_component_value_owned_with_default_overrides, validate_value_materialization_budget,
+    EffectiveValueAdmissionError, effective_component_value_owned_with_default_overrides,
+    validate_value_materialization_budget,
 };
 use nara_reflect::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldPathSegment,
@@ -116,8 +117,21 @@ where
         let authority = self.context.authority;
         let original = self.component(program.record, component);
         #[cfg(feature = "serde")]
-        let opaque = matches!(program.record, Record::Source { .. })
-            && authority.unavailable_reason(component, original).is_some();
+        // Authoring observes complete selected records independently of their storage site.
+        // Only the Schema authority decides whether their meaning is available; Native/Mixed
+        // never enter this preservation path. Property interpretation below still refuses.
+        let opaque = {
+            let unavailable = authority.unavailable_reason(component, original);
+            if unavailable == Some(crate::AuthoringRecordReadiness::KnownUnbound) {
+                // Exact current Schema capability is known even when its Adapter is absent.
+                // Absence permits preserving the payload, not ignoring that declaration rule.
+                let schema = authority
+                    .schema(component)
+                    .ok_or(SceneCompilationFailureKind::Component)?;
+                authority.validate_current_schema_capabilities(component, schema)?;
+            }
+            unavailable.is_some()
+        };
         #[cfg(not(feature = "serde"))]
         let opaque = false;
 
@@ -154,30 +168,29 @@ where
             ));
             return Err(SceneCompilationFailureKind::OwnerAdmission.into());
         }
-        if !matches!(program.record, Record::Source { .. }) {
+        if !opaque && !matches!(program.record, Record::Source { .. }) {
             authority.current_schema(component, original)?;
         }
 
         let limits = self.value_program_limits();
-        let admitted = (|| {
-            // A diagnostic source caller may impose an explicit pre-migration input quota.
-            // Ordinary compilation instead bounds authored syntax by working storage because
-            // a resolved reference can be smaller than the canonical route that authored it.
-            if let Some(source_limits) = self.context.options.limits.source_value_limits {
+        // Source syntax has its own optional policy, independent of final values and the
+        // compiler's cumulative storage allowance. Preserve its actual units and ceiling.
+        if let Some(source_limits) = self.context.options.limits.source_value_limits {
+            let source_admission = (|| {
                 validate_value_materialization_budget(&original.value, source_limits)?;
                 for default in original.contextual_defaults.values() {
                     validate_value_materialization_budget(default, source_limits)?;
                 }
+                Ok::<(), ComponentCodecError>(())
+            })();
+            if let Err(error) = source_admission {
+                return Err(self.source_value_failure(&error, entity).into());
             }
+        }
+        let admitted = (|| {
             let cost = bounded_value_cost(&original.value, limits)?;
             for default in original.contextual_defaults.values() {
                 validate_value_materialization_budget(default, limits)?;
-            }
-            if !opaque
-                && !original.contextual_defaults.is_empty()
-                && let Some(schema) = authority.schema(component)
-            {
-                crate::document::validate_contextual_defaults(schema, original, limits)?;
             }
             let metadata = provenance_string_bytes(component.as_str())
                 .and_then(|bytes| {
@@ -211,6 +224,14 @@ where
             ));
         }
 
+        if !record.contextual_defaults.is_empty() {
+            let schema = authority
+                .schema(component)
+                .ok_or(SceneCompilationFailureKind::Component)?;
+            // Validate the admitted owned record before migration can change the version
+            // to which its contextual declarations are bound.
+            self.validate_program_contextual_defaults(schema, &record, entity)?;
+        }
         let record_scope = self.record_reference_scope(program.record)?;
         if matches!(program.record, Record::Source { .. }) {
             let previous_version = record.version;
@@ -413,8 +434,11 @@ where
     ) -> Result<(), SceneCompilationFailure> {
         let old_cost = record.value.cost();
         let limits = self.value_program_limits();
-        crate::document::validate_contextual_defaults(schema, record, limits)
-            .map_err(|error| self.normalization_failure(&error, entity))?;
+        // Nonempty declarations were validated after raw-copy admission and before migration.
+        // Empty maps still need the current Schema's source-context requirement checked.
+        if record.contextual_defaults.is_empty() {
+            self.validate_program_contextual_defaults(schema, record, entity)?;
+        }
         self.reserve_program_temporary(schema, record, old_cost, entity)?;
         let value = std::mem::replace(&mut record.value, ComponentValue::Null);
         record.value = match effective_component_value_owned_with_default_overrides(
@@ -452,6 +476,32 @@ where
         Ok(())
     }
 
+    fn validate_program_contextual_defaults(
+        &mut self,
+        schema: &ComponentSchema,
+        record: &SceneComponentRecord,
+        entity: &SceneEntityId,
+    ) -> Result<(), SceneCompilationFailure> {
+        crate::document::validate_contextual_defaults_with_admission(
+            schema,
+            record,
+            self.value_program_limits(),
+            |nodes, bytes, allocated| {
+                self.context
+                    .admit_terminal_work(nodes, bytes, Some(allocated))
+                    .map_err(|()| {
+                        SceneCompilationFailure::from(SceneCompilationFailureKind::WorkLimit)
+                    })
+            },
+        )
+        .map_err(|error| match error {
+            EffectiveValueAdmissionError::Value(error) => {
+                self.normalization_failure(&error, entity).into()
+            }
+            EffectiveValueAdmissionError::Admission(failure) => failure,
+        })
+    }
+
     fn reserve_program_temporary(
         &mut self,
         schema: &ComponentSchema,
@@ -477,6 +527,34 @@ where
             .reserve_scratch_bytes(bytes, Some(entity), None)
             .then_some(())
             .ok_or_else(|| SceneCompilationFailureKind::WorkLimit.into())
+    }
+
+    fn source_value_failure(
+        &mut self,
+        error: &ComponentCodecError,
+        entity: &SceneEntityId,
+    ) -> SceneCompilationFailureKind {
+        let (kind, observed, maximum) = match error {
+            ComponentCodecError::MaterializationNodeLimit { observed, maximum } => (
+                SceneCompilationBudgetKind::SourceValueNodes,
+                *observed,
+                *maximum,
+            ),
+            ComponentCodecError::MaterializationByteLimit { observed, maximum } => (
+                SceneCompilationBudgetKind::SourceValueBytes,
+                *observed,
+                *maximum,
+            ),
+            ComponentCodecError::MaterializationDepthLimit { observed, maximum } => (
+                SceneCompilationBudgetKind::SourceValueDepth,
+                *observed,
+                *maximum,
+            ),
+            _ => return self.normalization_failure(error, entity),
+        };
+        self.context
+            .fail_budget(kind, observed, maximum, Some(entity), None);
+        SceneCompilationFailureKind::WorkLimit
     }
 
     fn normalization_failure(
@@ -587,3 +665,6 @@ fn contextual_defaults_work_bytes(record: &SceneComponentRecord) -> Option<usize
                 .checked_add(value_work_bytes(cost)?)
         })
 }
+
+#[cfg(all(test, feature = "serde"))]
+mod contextual_admission_tests;

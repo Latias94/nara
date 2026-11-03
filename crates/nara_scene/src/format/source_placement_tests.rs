@@ -69,7 +69,17 @@ fn instance_binding_is_required_and_round_trips_both_explicit_modes() {
         PrefabInstanceBinding::Forest,
         PrefabInstanceBinding::Root {
             base: crate::tests::named_prefab_source_key("root-binding"),
-            root: id("specified-root"),
+            root: PrefabEntityTarget::source(id("specified-root")),
+        },
+        PrefabInstanceBinding::Root {
+            base: crate::tests::named_prefab_source_key("root-binding"),
+            root: PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("nested")),
+                    expected_base: crate::tests::named_prefab_source_key("nested-base"),
+                }],
+                entity: PrefabEntityOrigin::InstanceAddition(id("specified-root")),
+            },
         },
     ] {
         let instance = PrefabInstance {
@@ -79,12 +89,70 @@ fn instance_binding_is_required_and_round_trips_both_explicit_modes() {
             overrides: None,
         };
         let encoded = serde_json::to_string(&instance).unwrap();
+        if matches!(&instance.binding, PrefabInstanceBinding::Root { .. }) {
+            let wire: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert!(wire["binding"]["root"]["through"].is_array());
+            assert!(wire["binding"]["root"]["entity"].is_object());
+        }
         assert_eq!(
             serde_json::from_str::<PrefabInstance>(&encoded).unwrap(),
             instance
         );
         let encoded = ron::to_string(&instance).unwrap();
         assert_eq!(ron::from_str::<PrefabInstance>(&encoded).unwrap(), instance);
+    }
+}
+
+#[test]
+fn root_binding_wires_require_a_typed_target_and_well_formed_routes() {
+    let base = crate::tests::named_prefab_source_key("root-binding");
+    let json_base = serde_json::to_string(&base).unwrap();
+    let ron_base = ron::to_string(&base).unwrap();
+    for (json_root, ron_root, accepted) in [
+        (
+            r#"{"through":[],"entity":{"kind":"source_entity","entity":"specified-root"}}"#,
+            r#"(through:[],entity:(kind:"source_entity",entity:"specified-root"))"#,
+            true,
+        ),
+        (r#""specified-root""#, r#""specified-root""#, false),
+        ("{}", "()", false),
+        (
+            r#"{"through":[],"entity":"specified-root"}"#,
+            r#"(through:[],entity:"specified-root")"#,
+            false,
+        ),
+        (
+            r#"{"through":{},"entity":{"kind":"source_entity","entity":"specified-root"}}"#,
+            r#"(through:(),entity:(kind:"source_entity",entity:"specified-root"))"#,
+            false,
+        ),
+        (
+            r#"{"through":[{"anchor":{"kind":"source_entity","entity":"nested"}}],"entity":{"kind":"source_entity","entity":"specified-root"}}"#,
+            r#"(through:[(anchor:(kind:"source_entity",entity:"nested"))],entity:(kind:"source_entity",entity:"specified-root"))"#,
+            false,
+        ),
+        (
+            r#"{"through":[],"entity":{"kind":"input","input":"specified-root"}}"#,
+            r#"(through:[],entity:(kind:"input",input:"specified-root"))"#,
+            false,
+        ),
+    ] {
+        let json = format!(
+            r#"{{"source":{{"kind":"path","value":"missing.prefab.json"}},"binding":{{"kind":"root","base":{json_base},"root":{json_root}}}}}"#,
+        );
+        assert_eq!(
+            serde_json::from_str::<PrefabInstance>(&json).is_ok(),
+            accepted,
+            "{json}",
+        );
+        let ron = format!(
+            r#"(source:(kind:"path",value:"missing.prefab.json"),binding:(kind:"root",base:{ron_base},root:{ron_root}))"#,
+        );
+        assert_eq!(
+            ron::from_str::<PrefabInstance>(&ron).is_ok(),
+            accepted,
+            "{ron}",
+        );
     }
 }
 

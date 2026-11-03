@@ -12,10 +12,17 @@ use crate::SceneComponentRecord;
 use crate::prefab::SceneCompilationWorkingSet;
 use crate::provenance::{provenance_asset_ref_bytes, provenance_string_bytes};
 
+#[cfg(feature = "serde")]
+mod extraction;
 mod inputs;
 mod output;
 mod reference_program;
 mod values;
+
+#[cfg(feature = "serde")]
+pub(crate) use extraction::SourceCutMembership;
+#[cfg(feature = "serde")]
+pub(super) use extraction::capture_source_cut;
 
 type NodeId = usize;
 type ScopeId = usize;
@@ -59,6 +66,7 @@ struct ReferenceDemand {
 enum DemandSite {
     Source(PrefabDeclarationSource),
     Overlay(PrefabInstanceLocation),
+    RootBinding(PrefabInstanceLocation),
 }
 
 struct Node {
@@ -205,30 +213,7 @@ fn compile<F, E>(
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
-    let mut compiler = Compiler {
-        root: source,
-        selected_anchor,
-        context,
-        scopes: Vec::new(),
-        nodes: Vec::new(),
-        locators: BTreeMap::new(),
-        postorder: Vec::new(),
-    };
-    compiler.admit(Some(size_of::<Scope>()))?;
-    compiler.scopes.push(Scope {
-        source: None,
-        request: None,
-        site: None,
-        anchor: None,
-        depth: 0,
-        nodes: ScopeNodes::default(),
-        roots: Vec::new(),
-        aliases: BTreeMap::new(),
-        state: None,
-        input: BTreeSet::new(),
-        output: BTreeSet::new(),
-    });
-    compiler.register_scope(0)?;
+    let mut compiler = Compiler::start(context, source, selected_anchor)?;
     let mut scanned = 0;
     let mut layout = compiler.close_structure(&mut scanned)?;
     let baseline = compiler.context.usage;
@@ -260,6 +245,38 @@ impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    fn start(
+        context: &'context mut SceneCompilationContext<'owner, F, E>,
+        source: SourceTopology<'root>,
+        selected_anchor: Option<NodeId>,
+    ) -> Result<Self, SceneCompilationFailure> {
+        let mut compiler = Self {
+            root: source,
+            selected_anchor,
+            context,
+            scopes: Vec::new(),
+            nodes: Vec::new(),
+            locators: BTreeMap::new(),
+            postorder: Vec::new(),
+        };
+        compiler.admit(Some(size_of::<Scope>()))?;
+        compiler.scopes.push(Scope {
+            source: None,
+            request: None,
+            site: None,
+            anchor: None,
+            depth: 0,
+            nodes: ScopeNodes::default(),
+            roots: Vec::new(),
+            aliases: BTreeMap::new(),
+            state: None,
+            input: BTreeSet::new(),
+            output: BTreeSet::new(),
+        });
+        compiler.register_scope(0)?;
+        Ok(compiler)
+    }
+
     fn admit(&mut self, bytes: Option<usize>) -> Result<(), SceneCompilationFailure> {
         self.context
             .reserve_scratch_bytes(bytes, None, None)
@@ -307,6 +324,40 @@ where
             .source
             .as_ref()
             .map_or(self.root.placements, |source| &source.document().placements)
+    }
+
+    fn bound_root_target(&self, scope: ScopeId) -> Option<&PrefabEntityTarget> {
+        let instance = self.instance(self.scopes[scope].site.as_ref()?)?;
+        match &instance.binding {
+            crate::PrefabInstanceBinding::Root { root, .. } => Some(root),
+            crate::PrefabInstanceBinding::Forest => None,
+        }
+    }
+
+    /// Root routes enter their sources during demand closure. Layout borrows the admitted
+    /// route afterward, preserving source/addition facets before alias normalization.
+    fn bound_root_node(&self, scope: ScopeId) -> Result<Option<NodeId>, SceneCompilationFailure> {
+        let Some(target) = self.bound_root_target(scope) else {
+            return Ok(None);
+        };
+        let mut current = scope;
+        for hop in &target.through {
+            let anchor = *self.scopes[current]
+                .nodes
+                .get(&hop.anchor)
+                .ok_or(SceneCompilationFailureKind::RootBinding)?;
+            current = self.nodes[anchor]
+                .entered
+                .ok_or(SceneCompilationFailureKind::RootBinding)?;
+            if self.scopes[current].source.as_ref().unwrap().key() != &hop.expected_base {
+                return Err(SceneCompilationFailureKind::SourceChanged.into());
+            }
+        }
+        let facet = *self.scopes[current]
+            .nodes
+            .get(&target.entity)
+            .ok_or(SceneCompilationFailureKind::RootBinding)?;
+        Ok(Some(self.canonical_node(scope, facet)))
     }
 
     /// Resolves only materialized identity. Declaration lookup always retains the original facet.
@@ -766,6 +817,45 @@ where
         let mut demands = Vec::new();
         let mut current = self.nodes[node].scope;
         loop {
+            if self
+                .bound_root_target(current)
+                .is_some_and(|root| !root.through.is_empty())
+            {
+                self.admit(
+                    self.site_bytes(self.scopes[current].site.as_ref().unwrap())
+                        .and_then(|bytes| {
+                            bytes.checked_add(size_of::<DemandSite>() + 3 * size_of::<usize>())
+                        })
+                        .and_then(|bytes| {
+                            bytes.checked_add(self.relative_bytes(current, node)?.checked_mul(2)?)
+                        }),
+                )?;
+                let relative = self
+                    .relative(current, node)
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                let prefix = relative
+                    .through
+                    .iter()
+                    .map(|hop| &hop.anchor)
+                    .chain(std::iter::once(&relative.entity))
+                    .collect::<Vec<_>>();
+                let target = self.bound_root_target(current).unwrap();
+                if target.through.len() >= prefix.len()
+                    && target
+                        .through
+                        .iter()
+                        .zip(&prefix)
+                        .all(|(hop, origin)| &hop.anchor == *origin)
+                {
+                    demands.push((
+                        DemandSite::RootBinding(
+                            self.stable_site(self.scopes[current].site.as_ref().unwrap()),
+                        ),
+                        0,
+                        target.through.len() - prefix.len(),
+                    ));
+                }
+            }
             if let Some(layer) = self.overlay(current) {
                 let mut count = 0usize;
                 structural_targets(layer, |_, _| count = count.saturating_add(1));
@@ -1085,21 +1175,25 @@ where
         }
         let mut working = self.context.working_set();
         working.source_depth = depth;
-        let source = match (self.context.resolver)(&request, &mut working) {
+        let resolved = (self.context.resolver)(&request, &mut working);
+        self.context.options.limits = self
+            .context
+            .options
+            .limits
+            .with_working_bytes(working.working_limit)
+            .with_reference_work_nodes(working.reference_limits.0)
+            .with_reference_work_bytes(working.reference_limits.1);
+        let source = match resolved {
             Ok(source) => source,
             Err(error) => {
                 self.context.load_error = Some(error);
                 return Err(SceneCompilationFailureKind::OwnerAdmission.into());
             }
         };
-        self.context.options.limits = self
-            .context
-            .options
-            .limits
-            .with_working_bytes(working.working_limit);
         if !self
             .context
             .admit_working_usage(self.context.usage, Some(&anchor), Some(&request))
+            || self.context.admit_terminal_work(0, 0, Some(0)).is_err()
         {
             return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
@@ -1258,6 +1352,21 @@ where
         while *scanned < self.scopes.len() {
             let scope = *scanned;
             *scanned += 1;
+            // A direct missing root needs only borrowed layout lookup. A routed root also
+            // demands the exact nested slots, even if no surviving payload refers to them.
+            if let Some(target) = self
+                .bound_root_target(scope)
+                .filter(|target| !target.through.is_empty())
+            {
+                self.admit(target_clone_bytes(target))?;
+                let target = self.bound_root_target(scope).unwrap().clone();
+                self.resolve(scope, &target).map_err(|mut failure| {
+                    if failure.reason == SceneCompilationFailureKind::MissingTarget {
+                        failure.reason = SceneCompilationFailureKind::RootBinding;
+                    }
+                    self.scope_failure(scope, None, failure)
+                })?;
+            }
             let mut bytes = Some(0usize);
             placement_targets(self.source_placements(scope), |_, target| {
                 bytes = bytes.and_then(|bytes| {
@@ -1422,18 +1531,9 @@ where
             let Some(child) = self.nodes[anchor].entered else {
                 continue;
             };
-            let Some(site) = self.scopes[child].site.as_ref() else {
+            let Some(root) = self.bound_root_node(child)? else {
                 continue;
             };
-            let crate::PrefabInstanceBinding::Root { root, .. } =
-                &self.instance(site).unwrap().binding
-            else {
-                continue;
-            };
-            let root = *self.scopes[child]
-                .nodes
-                .source_entity(root)
-                .ok_or(SceneCompilationFailureKind::RootBinding)?;
             if !self.selects_values(anchor) && !self.selects_values(root) {
                 continue;
             }
@@ -1633,18 +1733,9 @@ where
             if let Some(child) = self.nodes[node].entered {
                 let mut fragment = self.layout_scope(child)?;
                 self.admit(self.scopes[child].output.len().checked_mul(512))?;
-                let bound_root = match &self
-                    .instance(self.scopes[child].site.as_ref().unwrap())
-                    .unwrap()
-                    .binding
-                {
-                    crate::PrefabInstanceBinding::Forest => None,
-                    crate::PrefabInstanceBinding::Root { root, .. } => {
-                        let root = self.scopes[child]
-                            .nodes
-                            .source_entity(root)
-                            .copied()
-                            .ok_or(SceneCompilationFailureKind::RootBinding)?;
+                let bound_root = match self.bound_root_node(child)? {
+                    None => None,
+                    Some(root) => {
                         if fragment.roots.len() != 1
                             || fragment.roots.first() != Some(&self.nodes[root].locator)
                         {

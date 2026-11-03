@@ -24,6 +24,39 @@ fn named_key(name: &str) -> SourceDocumentKey {
 }
 
 #[test]
+fn constant_time_node_count_agrees_with_full_cost_for_every_reference_role() {
+    for count in [0, 1, 4_096] {
+        let authored = AuthoredEntityReference {
+            through: vec![
+                PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("slot")),
+                    expected_base: named_key("p"),
+                };
+                count
+            ],
+            target: AuthoredReferenceTarget::Input(ReferenceInputId::new("u").unwrap()),
+        };
+        assert_eq!(authored.cost_nodes(), 2 + count * 2);
+        assert_eq!(authored.cost_nodes(), authored.cost().nodes());
+        let reference = EntityReference::Authored {
+            reference: authored,
+        };
+        assert_eq!(reference.cost_nodes(), reference.cost().nodes());
+    }
+    let local = EntityReference::SceneLocal {
+        entity: id("local"),
+    };
+    assert_eq!(local.cost_nodes(), local.cost().nodes());
+    let persistent = EntityReference::Persistent {
+        entity: PersistentRuntimeReference::new(
+            PersistentRuntimeNamespaceId::new("save").unwrap(),
+            PersistentRuntimeId::parse_str(STABLE_ID).unwrap(),
+        ),
+    };
+    assert_eq!(persistent.cost_nodes(), persistent.cost().nodes());
+}
+
+#[test]
 fn input_ids_validate_the_public_ascii_grammar_and_exact_byte_limit() {
     assert_eq!(ReferenceInputId::MAX_BYTES, 128);
     for value in ["A", "0", "_", ".", "..", "-", "camera.target_2-main"] {

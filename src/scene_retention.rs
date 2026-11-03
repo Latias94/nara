@@ -488,7 +488,7 @@ fn instance_binding_retained_bytes(
     match binding {
         PrefabInstanceBinding::Forest => Ok(0),
         PrefabInstanceBinding::Root { base, root } => {
-            checked_sum([base.retained_bytes(), string_retained_bytes(root.as_str())?])
+            checked_sum([base.retained_bytes(), target_retained_bytes(root)?])
         }
     }
 }
@@ -676,7 +676,7 @@ fn component_record_retained_bytes(
     ])
 }
 
-fn target_retained_bytes(
+pub(crate) fn target_retained_bytes(
     target: &nara_scene::PrefabEntityTarget,
 ) -> Result<usize, SceneRetentionOverflow> {
     let mut total = checked_sum([
@@ -1326,7 +1326,10 @@ mod tests {
 
     #[test]
     fn root_binding_retention_charges_owned_pins_in_every_instance_carrier() {
-        use nara_scene::{PrefabAddition, PrefabEntityTarget, PrefabInstanceClaim, PrefabOverlay};
+        use nara_scene::{
+            PrefabAddition, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstanceClaim,
+            PrefabInstanceHop, PrefabOverlay,
+        };
 
         let base = SourceDocumentKey::named(
             "840ad54a-4b14-4f32-954a-e873ff0d6e41".parse().unwrap(),
@@ -1336,27 +1339,52 @@ mod tests {
         .unwrap();
         let root = scene_id("selected-source-root");
         let forest = PrefabInstance::forest(AssetRef::path("base.prefab.json").unwrap());
-        let bound = PrefabInstance::root(forest.source.clone(), base.clone(), root.clone());
-        let expected = base.retained_bytes() + string_bytes(root.as_str());
-        for carrier in 0..3 {
-            let retained = |instance: &PrefabInstance| {
-                if carrier == 0 {
-                    return prefab_instance_retained_bytes(instance).unwrap();
-                }
-                let mut overlay = PrefabOverlay::new(base.clone());
-                if carrier == 1 {
-                    let mut addition = PrefabAddition::new(scene_id("added"));
-                    addition.prefab = Some(instance.clone());
-                    overlay.additions.push(addition);
-                } else {
-                    overlay.instances.push(PrefabInstanceClaim {
-                        target: PrefabEntityTarget::source(scene_id("nested")),
-                        value: Some(instance.clone()),
-                    });
-                }
-                overlay_retained_bytes(&overlay).unwrap()
+        for routed in [false, true] {
+            let through = if routed {
+                vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::InstanceAddition(scene_id("selected-slot")),
+                    expected_base: base.clone(),
+                }]
+            } else {
+                Vec::new()
             };
-            assert_eq!(retained(&bound) - retained(&forest), expected);
+            let bound = PrefabInstance::root(
+                forest.source.clone(),
+                base.clone(),
+                PrefabEntityTarget {
+                    through,
+                    entity: PrefabEntityOrigin::SourceEntity(root.clone()),
+                },
+            );
+            let expected = base.retained_bytes()
+                + string_bytes(root.as_str())
+                + if routed {
+                    size_of::<PrefabInstanceHop>()
+                        + string_bytes("selected-slot")
+                        + base.retained_bytes()
+                } else {
+                    0
+                };
+            for carrier in 0..3 {
+                let retained = |instance: &PrefabInstance| {
+                    if carrier == 0 {
+                        return prefab_instance_retained_bytes(instance).unwrap();
+                    }
+                    let mut overlay = PrefabOverlay::new(base.clone());
+                    if carrier == 1 {
+                        let mut addition = PrefabAddition::new(scene_id("added"));
+                        addition.prefab = Some(instance.clone());
+                        overlay.additions.push(addition);
+                    } else {
+                        overlay.instances.push(PrefabInstanceClaim {
+                            target: PrefabEntityTarget::source(scene_id("nested")),
+                            value: Some(instance.clone()),
+                        });
+                    }
+                    overlay_retained_bytes(&overlay).unwrap()
+                };
+                assert_eq!(retained(&bound) - retained(&forest), expected);
+            }
         }
     }
 

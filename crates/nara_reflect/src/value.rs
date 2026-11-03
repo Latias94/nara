@@ -163,8 +163,24 @@ impl ComponentValue {
         &self,
         max_nodes: usize,
         max_logical_bytes: usize,
-        mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
+        admit: impl FnMut(Option<usize>) -> Result<(), E>,
     ) -> Result<Option<ComponentValueCost>, E> {
+        self.cost_up_to_with_admission_measured(max_nodes, max_logical_bytes, admit)
+            .0
+    }
+
+    /// Returns the ordinary attempt and its actual visited prefix, including on refusal.
+    ///
+    /// The prefix excludes unvisited children inferred by the minimum-node guard. Scratch
+    /// admission retains its original error; an owning cumulative allowance settles the
+    /// returned prefix independently of that error and of the complete-value cost.
+    #[doc(hidden)]
+    pub fn cost_up_to_with_admission_measured<E>(
+        &self,
+        max_nodes: usize,
+        max_logical_bytes: usize,
+        mut admit: impl FnMut(Option<usize>) -> Result<(), E>,
+    ) -> (Result<Option<ComponentValueCost>, E>, ComponentValueCost) {
         let mut refusal = None;
         let mut cost = ComponentValueCost::ZERO;
         let complete = {
@@ -177,10 +193,11 @@ impl ComponentValue {
             };
             self.cost_up_to_impl(max_nodes, max_logical_bytes, &mut cost, Some(&mut callback))
         };
-        match refusal {
+        let result = match refusal {
             Some(error) => Err(error),
             None => Ok(complete.then_some(cost)),
-        }
+        };
+        (result, cost)
     }
 
     fn cost_up_to_impl(
@@ -639,6 +656,38 @@ impl Error for ComponentValueError {}
 #[cfg(test)]
 mod cost_traversal_tests {
     use super::{ComponentValue, ComponentValueCost};
+
+    #[test]
+    fn measured_attempt_keeps_the_visited_prefix_of_late_limit_and_scratch_refusals() {
+        let value = ComponentValue::List(vec![
+            ComponentValue::List(vec![ComponentValue::String(
+                "x".into()
+            )]);
+            8_192
+        ]);
+        let (result, visited) =
+            value.cost_up_to_with_admission_measured(10_000, usize::MAX, |_| {
+                Ok::<_, std::convert::Infallible>(())
+            });
+        assert_eq!(result, Ok(None));
+        assert_eq!(visited.nodes(), 3_616);
+        assert_eq!(visited.logical_bytes(), 1_807);
+
+        let (result, visited) =
+            value.cost_up_to_with_admission_measured(usize::MAX, usize::MAX, |_| {
+                Err("scratch refused")
+            });
+        assert_eq!(result, Err("scratch refused"));
+        assert_eq!(visited, ComponentValueCost::from_parts(1, 0));
+
+        let value = ComponentValue::map([("value", ComponentValue::U64(7))]);
+        let (result, visited) =
+            value.cost_up_to_with_admission_measured(usize::MAX, usize::MAX, |_| {
+                Ok::<_, std::convert::Infallible>(())
+            });
+        assert_eq!(result, Ok(Some(value.cost())));
+        assert_eq!(visited, value.cost());
+    }
 
     #[test]
     fn admitted_cost_preserves_limits_and_refuses_before_each_scratch_growth() {

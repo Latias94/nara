@@ -1,7 +1,11 @@
 //! Canonical scene, prefab, and standalone patch file boundaries.
 
 #[cfg(test)]
+mod decoding_tests;
+#[cfg(test)]
 mod diagnostic_tests;
+#[cfg(test)]
+mod encoding_tests;
 mod publication_shape;
 #[cfg(test)]
 mod publication_shape_tests;
@@ -337,6 +341,58 @@ pub enum SceneFormatError {
         source: Box<dyn Error + Send + Sync>,
     },
     Metadata(Box<dyn Error + Send + Sync>),
+}
+
+/// Preserves an enclosing operation's refusal while using the owning file encoder.
+#[doc(hidden)]
+#[derive(Debug)]
+pub enum SceneFileEncodingAdmissionError<E> {
+    Format(SceneFormatError),
+    Admission(E),
+}
+
+impl<E> Display for SceneFileEncodingAdmissionError<E> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(error) => Display::fmt(error, formatter),
+            Self::Admission(_) => formatter.write_str("encoded buffer admission refused"),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for SceneFileEncodingAdmissionError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Format(error) => Some(error),
+            Self::Admission(error) => Some(error),
+        }
+    }
+}
+
+/// Preserves an enclosing operation's refusal before decoded-source ordering and validation.
+#[doc(hidden)]
+#[derive(Debug)]
+pub enum SceneFileDecodingAdmissionError<E> {
+    Format(SceneFormatError),
+    Admission(E),
+}
+
+impl<E> Display for SceneFileDecodingAdmissionError<E> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Format(error) => Display::fmt(error, formatter),
+            Self::Admission(_) => formatter.write_str("decoded source admission refused"),
+        }
+    }
+}
+
+impl<E: Error + 'static> Error for SceneFileDecodingAdmissionError<E> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Format(error) => Some(error),
+            Self::Admission(error) => Some(error),
+        }
+    }
 }
 
 impl Display for SceneFormatError {
@@ -871,11 +927,53 @@ macro_rules! impl_scene_file_encoder {
     ($payload:ty) => {
         impl $payload {
             pub fn to_json_string(&self) -> Result<String, SceneFormatError> {
-                encode_json(self, SceneFileLimits::default())
+                self.to_json_string_with_limits(SceneFileLimits::default())
+            }
+
+            /// Encodes the canonical pretty JSON envelope within the supplied file limits.
+            ///
+            /// Payload admission precedes the canonical source copy; encoded-byte admission
+            /// precedes output growth. For an enclosing allocation allowance, precharge the
+            /// canonical copy, ordering scratch and serializer input, then use
+            /// `encode_with_admission` to admit output allocations as they grow.
+            pub fn to_json_string_with_limits(
+                &self,
+                limits: SceneFileLimits,
+            ) -> Result<String, SceneFormatError> {
+                encode_json(self, limits)
             }
 
             pub fn to_ron_string(&self) -> Result<String, SceneFormatError> {
-                encode_ron(self, SceneFileLimits::default())
+                self.to_ron_string_with_limits(SceneFileLimits::default())
+            }
+
+            /// Encodes the canonical pretty RON envelope within the supplied file limits.
+            ///
+            /// Payload admission precedes the canonical source copy; encoded-byte admission
+            /// precedes output growth. For an enclosing allocation allowance, precharge the
+            /// canonical copy, ordering scratch and serializer input, then use
+            /// `encode_with_admission` to admit output allocations as they grow.
+            pub fn to_ron_string_with_limits(
+                &self,
+                limits: SceneFileLimits,
+            ) -> Result<String, SceneFormatError> {
+                encode_ron(self, limits)
+            }
+
+            /// Encodes with operation-owned admission before each output allocation.
+            ///
+            /// The caller admits the canonical source copy, ordering scratch and serializer
+            /// input before calling. Each callback receives the full new buffer capacity,
+            /// including replacement allocations during growth, before reservation or copying.
+            /// The resulting String reuses the final buffer allocation.
+            #[doc(hidden)]
+            pub fn encode_with_admission<E>(
+                &self,
+                encoding: SceneFileEncoding,
+                limits: SceneFileLimits,
+                admission: impl FnMut(usize) -> Result<(), E>,
+            ) -> Result<String, SceneFileEncodingAdmissionError<E>> {
+                encode_with_admission(self, encoding, limits, admission)
             }
         }
     };
@@ -912,6 +1010,28 @@ macro_rules! impl_scene_file_candidate {
                 limits: SceneFileLimits,
             ) -> Result<Self, SceneFormatError> {
                 decode_ron::<$payload>(input, limits).map(|document| Self { document, limits })
+            }
+
+            /// Borrows the shape-bounded raw payload before domain traversal or canonical
+            /// ordering. The enclosing owner admits that work and any later structural checks
+            /// here. Refusal drops the raw payload and returns its exact admission error.
+            /// Wire parsing and allocation must already be reserved by the caller.
+            #[doc(hidden)]
+            pub fn decode_bytes_with_admission<E>(
+                input: &[u8],
+                encoding: SceneFileEncoding,
+                limits: SceneFileLimits,
+                admission: impl FnOnce(&$payload) -> Result<(), E>,
+            ) -> Result<Self, SceneFileDecodingAdmissionError<E>> {
+                let document = match encoding {
+                    SceneFileEncoding::Json => decode_json_payload::<$payload>(input, limits),
+                    SceneFileEncoding::Ron => decode_ron_payload::<$payload>(input, limits),
+                }
+                .map_err(SceneFileDecodingAdmissionError::Format)?;
+                admission(&document).map_err(SceneFileDecodingAdmissionError::Admission)?;
+                finish_decode(document, limits)
+                    .map(|document| Self { document, limits })
+                    .map_err(SceneFileDecodingAdmissionError::Format)
             }
 
             pub fn to_json_string(&self) -> Result<String, SceneFormatError> {
@@ -1249,30 +1369,82 @@ fn encode_json<T: SceneFilePayload>(
     payload: &T,
     limits: SceneFileLimits,
 ) -> Result<String, SceneFormatError> {
-    let envelope = canonical_envelope(payload, limits)?;
-    let encoded =
-        serde_json::to_string_pretty(&envelope).map_err(|source| SceneFormatError::Encode {
-            encoding: SceneFileEncoding::Json,
-            source: Box::new(source),
-        })?;
-    validate_encoded_bytes(encoded.as_bytes(), limits)?;
-    Ok(encoded)
+    encode(payload, limits, SceneFileEncoding::Json)
 }
 
 fn encode_ron<T: SceneFilePayload>(
     payload: &T,
     limits: SceneFileLimits,
 ) -> Result<String, SceneFormatError> {
-    let envelope = canonical_envelope(payload, limits)?;
-    let encoded =
-        ron::ser::to_string_pretty(&envelope, canonical_ron_pretty_config()).map_err(|source| {
-            SceneFormatError::Encode {
-                encoding: SceneFileEncoding::Ron,
-                source: Box::new(source),
+    encode(payload, limits, SceneFileEncoding::Ron)
+}
+
+fn encode<T: SceneFilePayload>(
+    payload: &T,
+    limits: SceneFileLimits,
+    encoding: SceneFileEncoding,
+) -> Result<String, SceneFormatError> {
+    match encode_with_admission(payload, encoding, limits, |_| {
+        Ok::<_, std::convert::Infallible>(())
+    }) {
+        Ok(encoded) => Ok(encoded),
+        Err(SceneFileEncodingAdmissionError::Format(error)) => Err(error),
+        Err(SceneFileEncodingAdmissionError::Admission(never)) => match never {},
+    }
+}
+
+fn encode_with_admission<T: SceneFilePayload, E>(
+    payload: &T,
+    encoding: SceneFileEncoding,
+    limits: SceneFileLimits,
+    mut admission: impl FnMut(usize) -> Result<(), E>,
+) -> Result<String, SceneFileEncodingAdmissionError<E>> {
+    use SceneFileEncodingAdmissionError::{Admission, Format};
+
+    let envelope = canonical_envelope(payload, limits).map_err(Format)?;
+    let mut refusal = None;
+    let mut admit = |bytes| {
+        admission(bytes).map_err(|error| {
+            refusal = Some(error);
+            io::Error::other("encoded buffer admission refused")
+        })
+    };
+    let (result, exceeded_at, bytes) = {
+        let mut encoded =
+            BoundedEncodedBuffer::new(limits.encoded_bytes().get(), true, Some(&mut admit));
+        let result = match encoding {
+            SceneFileEncoding::Json => serde_json::to_writer_pretty(&mut encoded, &envelope)
+                .map_err(|source| SceneFormatError::Encode {
+                    encoding,
+                    source: Box::new(source),
+                }),
+            SceneFileEncoding::Ron => {
+                ron::ser::to_writer_pretty(&mut encoded, &envelope, canonical_ron_pretty_config())
+                    .map_err(|source| SceneFormatError::Encode {
+                        encoding,
+                        source: Box::new(source),
+                    })
             }
-        })?;
-    validate_encoded_bytes(encoded.as_bytes(), limits)?;
-    Ok(encoded)
+        };
+        (result, encoded.exceeded_at(), encoded.bytes)
+    };
+    if let Some(error) = refusal {
+        return Err(Admission(error));
+    }
+    if let Some(observed) = exceeded_at {
+        return Err(Format(SceneFormatError::EncodedBytesExceeded {
+            observed,
+            maximum: limits.encoded_bytes().get(),
+        }));
+    }
+    result.map_err(Format)?;
+    // Reuse the admitted byte allocation; UTF-8 validation requires no output copy.
+    String::from_utf8(bytes).map_err(|source| {
+        Format(SceneFormatError::Encode {
+            encoding,
+            source: Box::new(source),
+        })
+    })
 }
 
 fn validate_publication_shape<T: SceneFilePayload>(
@@ -1454,14 +1626,30 @@ impl<'a> BoundedEncodedBuffer<'a> {
 
 impl Write for BoundedEncodedBuffer<'_> {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        let observed = self.written.saturating_add(buffer.len());
-        if observed > self.maximum {
-            self.exceeded_at = Some(observed);
+        if self.exceeded_at.is_some() {
             return Err(io::Error::other("persistent encoded byte limit exceeded"));
         }
+        let Some(observed) = self
+            .written
+            .checked_add(buffer.len())
+            .filter(|observed| *observed <= self.maximum)
+        else {
+            self.exceeded_at = Some(self.written.saturating_add(buffer.len()));
+            return Err(io::Error::other("persistent encoded byte limit exceeded"));
+        };
         if self.retain_bytes {
-            if let Some(admission) = &mut self.admission {
-                admission(buffer.len())?;
+            if observed > self.bytes.capacity() {
+                // Keep amortized growth while capping the requested allocation at the file
+                // ceiling. Reserving exactly each small serializer write would be quadratic.
+                let capacity = observed
+                    .max(self.bytes.capacity().saturating_mul(2))
+                    .min(self.maximum);
+                if let Some(admission) = &mut self.admission {
+                    admission(capacity)?;
+                }
+                self.bytes
+                    .try_reserve_exact(capacity - self.bytes.len())
+                    .map_err(io::Error::other)?;
             }
             self.bytes.extend_from_slice(buffer);
         }
@@ -1507,6 +1695,13 @@ fn decode_json<T: SceneFilePayload>(
     encoded: &[u8],
     limits: SceneFileLimits,
 ) -> Result<T, SceneFormatError> {
+    finish_decode(decode_json_payload::<T>(encoded, limits)?, limits)
+}
+
+fn decode_json_payload<T: SceneFilePayload>(
+    encoded: &[u8],
+    limits: SceneFileLimits,
+) -> Result<T, SceneFormatError> {
     let contract = file_contract(T::KIND)?;
     let envelope = decode_persistent_file_with_preflight(
         encoded,
@@ -1525,10 +1720,17 @@ fn decode_json<T: SceneFilePayload>(
         },
     )
     .map_err(|error| map_decode_error(SceneFileEncoding::Json, error))?;
-    finish_decode(T::from_wire(envelope.into_payload())?, limits)
+    T::from_wire(envelope.into_payload())
 }
 
 fn decode_ron<T: SceneFilePayload>(
+    encoded: &[u8],
+    limits: SceneFileLimits,
+) -> Result<T, SceneFormatError> {
+    finish_decode(decode_ron_payload::<T>(encoded, limits)?, limits)
+}
+
+fn decode_ron_payload<T: SceneFilePayload>(
     encoded: &[u8],
     limits: SceneFileLimits,
 ) -> Result<T, SceneFormatError> {
@@ -1554,7 +1756,7 @@ fn decode_ron<T: SceneFilePayload>(
         },
     )
     .map_err(|error| map_decode_error(SceneFileEncoding::Ron, error))?;
-    finish_decode(T::from_wire(envelope.into_payload())?, limits)
+    T::from_wire(envelope.into_payload())
 }
 
 #[derive(Debug)]

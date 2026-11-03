@@ -946,6 +946,13 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         Ok::<_, Infallible>(())
     };
     let schema = registry.schema(&component).unwrap();
+    crate::document::validate_contextual_defaults_with_admission(
+        schema,
+        &SceneComponentRecord::new(ComponentSchemaVersion::ONE, value.clone()),
+        Default::default(),
+        &mut admit_unit,
+    )
+    .unwrap();
     assert!(
         nara_reflect::__private::component_defaults_are_explicit_with_admission(
             schema,
@@ -977,7 +984,8 @@ fn effective_reference_work_is_shared_across_components_even_when_no_assets_are_
         )
         .unwrap();
     assert!(references.is_empty());
-    // The complete flat proof includes defaults, raw Native values, Schema shape and both
+    // The complete flat proof includes the source default contract, selected defaults,
+    // raw Native values, Schema shape and both
     // reference traversals. They share one allowance even when no reference leaves are produced.
     nara_reflect::__private::plan_declared_entity_references_with_admission::<(), Infallible>(
         schema,

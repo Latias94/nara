@@ -14,7 +14,7 @@ use crate::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneCompilationOptions,
     SceneCompilationWorkingSet, SceneDocument, SceneEntityId, SceneEntityProvenance,
     ScenePatchReport, authoring::prepared::stale_basis, authoring_decode::AuthoringDocumentState,
-    prefab::SelectedInstanceSource,
+    prefab::SourceDocumentInput,
 };
 
 /// Atomic source refusal or the dependency provider's original acquisition error.
@@ -125,9 +125,9 @@ macro_rules! conversion_owner {
                         &self.document.entities,
                         self.state.file_limits(),
                     )?)?
-                    .checked_add(match SelectedInstanceSource::$kind(&self.document) {
-                        SelectedInstanceSource::Scene(_) => Some(0),
-                        SelectedInstanceSource::Prefab(document) => {
+                    .checked_add(match SourceDocumentInput::$kind(&self.document) {
+                        SourceDocumentInput::Scene(_) => Some(0),
+                        SourceDocumentInput::Prefab(document) => {
                             document.inputs.iter().try_fold(0usize, |bytes, input| {
                                 bytes
                                     .checked_add(
@@ -183,7 +183,7 @@ macro_rules! conversion_owner {
             {
                 let basis = self.state.schema_basis();
                 let mut localized = localize::prepare(
-                    SelectedInstanceSource::$kind(&self.document),
+                    SourceDocumentInput::$kind(&self.document),
                     &self.anchor,
                     &basis,
                     self.history,

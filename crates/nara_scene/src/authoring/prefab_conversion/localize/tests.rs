@@ -1200,7 +1200,7 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         ),
         (
             7 * 1024 * 1024,
-            "classification-snapshot",
+            "publication-buffer",
             vec!["complete-document"],
         ),
     ] {
@@ -1261,6 +1261,48 @@ fn last_loader_restriction_governs_complete_root_and_classification_copies() {
         assert_eq!(super::super::work::take_copies(), copies);
         assert_eq!(prefab.history_usage().records, 0);
     }
+
+    // Full target capacities are admitted before each buffer allocation. The deeply nested
+    // source above now exhausts both Scene publication controls before classification.
+    // Isolate the classification guard with the same 2 MiB payload in a certified shallow
+    // value: its publication check needs no retained output, while root + classification
+    // copies still exceed the loader's 3 MiB ceiling.
+    let mut shallow = document.clone();
+    shallow
+        .entities
+        .iter_mut()
+        .find(|record| record.id == id("other"))
+        .unwrap()
+        .components
+        .get_mut(&nara_reflect::ComponentTypeId::new("test.LargeUnavailable"))
+        .unwrap()
+        .value = ComponentValue::List(
+        (0..4)
+            .map(|_| ComponentValue::String("x".repeat(512 * 1024)))
+            .collect(),
+    );
+    let shallow = open_scene(
+        &shallow,
+        &session.authoring_schema_basis().unwrap(),
+        Default::default(),
+    );
+    super::super::work::take_copies();
+    let error = shallow
+        .request_complete_prefab_conversion(shallow.revision(), &id("anchor"), Default::default())
+        .unwrap()
+        .prepare_with_loader(None, |_, working| {
+            working.restrict_working_bytes(nara_core::ByteLimit::new(3 * 1024 * 1024).unwrap());
+            Ok::<_, Infallible>(Some(resolved.clone()))
+        })
+        .unwrap_err();
+    let PrefabConversionError::Source(report) = error;
+    assert!(
+        copy_stage(&report, "classification-snapshot"),
+        "{:?}",
+        report.diagnostics
+    );
+    assert_eq!(super::super::work::take_copies(), ["complete-document"]);
+    assert_eq!(shallow.history_usage().records, 0);
 }
 
 #[test]

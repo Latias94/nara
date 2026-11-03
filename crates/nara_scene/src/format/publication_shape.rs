@@ -226,7 +226,7 @@ impl Certificate {
                 self.structure(depth + 1, &["kind", "base", "root"])?;
                 self.string(depth + 2, "root")?;
                 self.source_key(depth + 2, base)?;
-                self.string(depth + 2, root.as_str())?;
+                self.entity_target(depth + 2, root)?;
             }
         }
         self.node(depth + 1)?; // overrides=None is retained on the wire.

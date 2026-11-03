@@ -723,7 +723,7 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     root_bound_anchor.prefab = Some(PrefabInstance::root(
         source.clone(),
         prefab_source_key(&source),
-        scene_id("visual"),
+        crate::PrefabEntityTarget::source(scene_id("visual")),
     ));
     let root_bound = SceneDocument::from_ordered_roots([root_bound_anchor]).compile_with_options(
         &registry,
@@ -1910,7 +1910,7 @@ fn prefab_expansion_entity_budget_is_aggregate_across_reused_sources() {
                 anchor.prefab = Some(PrefabInstance::root(
                     source.clone(),
                     prefab_source_key(&source),
-                    scene_id("body"),
+                    crate::PrefabEntityTarget::source(scene_id("body")),
                 ));
             }
         }

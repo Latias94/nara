@@ -25,15 +25,13 @@ pub struct PrefabAuthoredSchemaUpgradeInput {
 
 #[derive(Debug)]
 struct OwnedUpgradeInput<D> {
-    document: Arc<D>,
-    state: Arc<AuthoringDocumentState>,
-    snapshot: UpgradeSourceSnapshot,
+    source: FrozenSource<D>,
     retained: RetainedAuthoredSchemaUpgradeSource,
 }
 
 impl<D> OwnedUpgradeInput<D> {
     fn capture(
-        source: UpgradeSource<'_, D>,
+        source: BorrowedSource<'_, D>,
         retained: RetainedAuthoredSchemaUpgradeSource,
         kind: SourceDocumentKind,
         work: &mut AuthoredSchemaUpgradeWork,
@@ -49,15 +47,12 @@ impl<D> OwnedUpgradeInput<D> {
             // Wrapper, shared Arc handles and exact snapshot metadata are inline. Their shared
             // bodies/control blocks remain covered by the original incumbent admission. Admit
             // the entire new input before cloning either handle; no history or token is minted.
-            let bytes = Some(size_of::<Self>());
-            work.reserve("authored-upgrade-input-storage", bytes)?;
-            work.retain_output(bytes)?;
-            Ok(Self {
-                document: Arc::clone(source.document),
-                state: Arc::clone(source.state),
-                snapshot: source.snapshot,
-                retained,
-            })
+            let source = FrozenSource::capture(source, || {
+                let bytes = Some(size_of::<Self>());
+                work.reserve("authored-upgrade-input-storage", bytes)?;
+                work.retain_output(bytes)
+            })?;
+            Ok(Self { source, retained })
         })();
         // On refusal no input or newly retained output escaped; only this step's scratch ends.
         // The parent's complete-history reservation and cumulative work are never refunded.
@@ -65,12 +60,8 @@ impl<D> OwnedUpgradeInput<D> {
         result
     }
 
-    fn borrowed(&self) -> UpgradeSource<'_, D> {
-        UpgradeSource {
-            document: &self.document,
-            state: &self.state,
-            snapshot: self.snapshot,
-        }
+    fn borrowed(&self) -> BorrowedSource<'_, D> {
+        self.source.borrowed()
     }
 }
 
@@ -88,7 +79,8 @@ macro_rules! owned_upgrade_input {
                 work: &mut AuthoredSchemaUpgradeWork,
             ) -> Result<$input, ScenePatchReport> {
                 let source =
-                    UpgradeSource::from_session(&self.document, &self.authority, &self.history)?;
+                    BorrowedSource::from_session(&self.document, &self.authority, &self.history)
+                        .map_err(checkpoint_error)?;
                 Ok($input {
                     input: OwnedUpgradeInput::capture(
                         source,
@@ -102,35 +94,35 @@ macro_rules! owned_upgrade_input {
 
         impl $input {
             pub fn document(&self) -> &$document {
-                &self.input.document
+                &self.input.source.document
             }
 
             pub fn shared_document(&self) -> Arc<$document> {
-                Arc::clone(&self.input.document)
+                Arc::clone(&self.input.source.document)
             }
 
             pub fn revision(&self) -> SceneAuthoringRevision {
-                self.input.snapshot.revision
+                self.input.source.snapshot.revision
             }
 
             pub fn schema_basis(&self) -> AuthoringSchemaBasis {
-                self.input.state.schema_basis()
+                self.input.source.state.schema_basis()
             }
 
             pub fn source(&self) -> &AuthoringDocumentSource {
-                self.input.state.source()
+                self.input.source.state.source()
             }
 
             pub fn file_limits(&self) -> SceneFileLimits {
-                self.input.state.file_limits()
+                self.input.source.state.file_limits()
             }
 
             pub fn history_limits(&self) -> SceneAuthoringHistoryLimits {
-                self.input.snapshot.history_limits
+                self.input.source.snapshot.history_limits
             }
 
             pub fn content_state(&self) -> SceneAuthoringContentState {
-                self.input.snapshot.content_state
+                self.input.source.snapshot.content_state
             }
 
             /// Prepares through the same source-owned kernel as direct Session preparation.

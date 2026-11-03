@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-03
 **Amended**: 2026-10-24 by production source admission, required Prefab/containing-source binding
 and Scene-owned logical occurrence
 **Amended**: 2026-10-25 by owned unbound ordinary Scene preparation
@@ -42,6 +42,15 @@ The canonical `SourceDocumentKey` value and its format are shared Identity repre
 Scene binds those values to the actual admitted source and owns declaration/occurrence meaning;
 Asset checks their compatibility with actual metadata records. Re-exporting the canonical value
 does not give a higher module an independent identity constructor, source registry or resolver.
+
+Canonical source identity is independent of project configuration. A physical source can
+participate in several actual profile resolution environments, including environments where
+the same authored alias selects different Prefabs. A project-wide transformation retains one
+physical source/output table and explicit configuration membership, catalogue visibility and
+before/after associations. It proves each participating interpretation separately instead of
+merging aliases or adding profile labels to canonical keys. Native-document participation alone
+does not prove catalogue visibility. The Host derives associations from its actual captured
+catalogue and scopes; the Scene owner validates their finite consistency and source semantics.
 Identity remains independent of Asset/App services. The
 [CP2 source-model replacement](../../plans/2026-11-02-prefab-extraction-plan.md) separately owns
 root, placement and inline-reference replacement; value relocation alone does not qualify it.
@@ -50,14 +59,20 @@ root, placement and inline-reference replacement; value relocation alone does no
 - A scene-local entity is owned by the scene document that contains its record.
 - A prefab source entity is owned by its prefab document.
 - A prefab instance anchor belongs to its containing source. An explicit forest mount expands
-  source roots below it; an explicit root binding contributes the specified source root to its
+  source roots below it; an explicit root binding contributes the targeted sole effective root to its
   canonical effective entity without a wrapper. Declaration facets and instance slots stay
   distinct from effective root aliases. Expanded content retains inherited source-entity or
   explicit instance-addition origin; visual parentage never transfers declaration ownership.
-  The complete declaration explicitly stores `PrefabInstanceBinding::Forest` or a named
+  The complete declaration explicitly stores `PrefabInstanceBinding::Forest` or a targeted
   `Root { base, root }`; neither source decoding nor compilation infers binding from root count.
   A root pin is checked against the actually selected canonical source before the effective
   single-root predicate. It remains part of dormant declarations and exact history snapshots.
+  The root is a `PrefabEntityTarget` in that selected base, with the same source/addition
+  namespaces and per-hop canonical checks as structural placement. It can select a projected
+  entity promoted to the only root by actual instance intent. A direct local ID cannot retain
+  that target after extraction moves its declaration into another Prefab. Resolve the complete
+  target before normalizing its root aliases; neither terminal spelling nor current root count
+  selects the binding. Whole-source copying and extraction must rewrite these routes too.
 - Scene projection exposes private instance-local materialization locators. They are not durable
   source identities; UI, session, semantics, selection and persistence keys must not parse or
   extend their generated encoding.

@@ -231,7 +231,11 @@ impl Fixture {
         );
         let unused = ReferenceInputId::new("unused").unwrap();
         r.inputs.insert(unused.clone());
-        let mut declaration = PrefabInstance::root(source("q"), prefab_key("q"), id("root"));
+        let mut declaration = PrefabInstance::root(
+            source("q"),
+            prefab_key("q"),
+            PrefabEntityTarget::source(id("root")),
+        );
         declaration.arguments = Some(PrefabReferenceArguments {
             base: prefab_key("q"),
             values: [(
@@ -255,7 +259,11 @@ impl Fixture {
         );
         anchor.prefab = Some(declaration);
         let mut outside = SceneEntityRecord::new(id("outside"));
-        let mut other = PrefabInstance::root(source("r"), prefab_key("r"), id("external-root"));
+        let mut other = PrefabInstance::root(
+            source("r"),
+            prefab_key("r"),
+            PrefabEntityTarget::source(id("external-root")),
+        );
         other.arguments = Some(PrefabReferenceArguments {
             base: prefab_key("r"),
             values: [(unused, selected_input())].into(),
@@ -806,7 +814,7 @@ fn retained_source_reference_inventory_is_independent_of_selected_materialized_o
     anchor.prefab = Some(PrefabInstance::root(
         source("empty"),
         prefab_key("empty"),
-        id("root"),
+        PrefabEntityTarget::source(id("root")),
     ));
     let document = SceneDocument::from_ordered_roots([
         anchor,

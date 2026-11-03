@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-07-13
 **Accepted**: 2026-08-18
-**Last Revised**: 2026-11-01 (reviewed source/Schema upgrade and explicit history checkpoint)
+**Last Revised**: 2026-11-03 (complete unavailable overlay records in authoring observations)
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -383,9 +383,16 @@ owner. The projection is read-only and keeps authored omission, explicit Null, a
 source intact; it grants no codec, remap, or Runtime authority. Unknown, future, or mismatched
 records remain interpretation-free and do not receive fabricated defaults.
 
-For prefabs, an unavailable whole record may pass through an untouched source/instance projection.
-Any override, merge, migration, or remap that targets the record rejects atomically. Silent strip is
-never a fallback.
+For prefabs, an unavailable whole record may pass through an untouched authoring observation,
+whether selected from a direct source record, an addition or a complete Set intent. Its storage
+position does not grant interpretation authority. Preserve the complete version, owner, value and
+contextual defaults; record the actual typed omission for presentation. This observes already
+stored complete intent and grants no generic field-edit, source-replacement or conversion authority.
+Structural selection and complete-slot existence checks still apply. A matching current Schema's
+explicit Scene-capability constraints still apply when its Adapter is absent; that absence does
+not make a known capability refusal opaque. Properties, field merges,
+migration or reference remapping that require unavailable meaning reject atomically. Runtime
+admission remains strict, and silent stripping is never an execution fallback.
 
 ### Runtime and Registry Authority
 

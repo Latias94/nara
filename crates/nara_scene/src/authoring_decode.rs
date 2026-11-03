@@ -5,6 +5,7 @@ mod asset_budget_tests;
 mod complete_value;
 mod conversion;
 mod copy_admission;
+mod extraction;
 mod field_candidate;
 mod overlay;
 #[cfg(test)]
@@ -12,6 +13,8 @@ mod placement_tests;
 #[cfg(test)]
 mod product_reference_tests;
 mod read;
+#[cfg(test)]
+mod readmission_budget_tests;
 mod reclassification;
 mod retention;
 pub(crate) mod schema_upgrade;
@@ -178,14 +181,10 @@ impl AuthoringSchemaBasis {
 /// record preservation expectation. It owns no working document, history entries, live instance
 /// or permission to replace a Workspace document. A Host must still admit a prepared result to
 /// its original document and revision before publishing it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuthoringDocumentReadmission {
-    source: AuthoringDocumentSource,
-    kind: AuthoringDocumentKind,
-    basis: Arc<AuthoringClassificationBasis>,
+    state: Arc<AuthoringDocumentState>,
     history_limits: crate::SceneAuthoringHistoryLimits,
-    expected_readiness: AuthoringDocumentReadiness,
-    expected_unavailable_manifest: UnavailableRecordManifest,
 }
 
 impl AuthoringDocumentReadmission {
@@ -194,25 +193,34 @@ impl AuthoringDocumentReadmission {
         &self,
         candidate: SceneDocumentCandidate,
     ) -> Result<crate::SceneAuthoringSession, AuthoringSessionReopenError> {
-        if self.kind != AuthoringDocumentKind::Scene {
-            return Err(
-                authoring_reopen_kind_rejection(AuthoringDocumentKind::Scene, self.kind).into(),
-            );
+        Ok(
+            crate::SceneAuthoringSession::from_published_authoring_document_with_history_limits(
+                self.readmit_scene(candidate)?.publish(),
+                self.history_limits,
+            ),
+        )
+    }
+
+    fn readmit_scene(
+        &self,
+        candidate: SceneDocumentCandidate,
+    ) -> Result<SceneAuthoringDocumentCandidate, AuthoringSessionReopenError> {
+        if self.state.kind != AuthoringDocumentKind::Scene {
+            return Err(authoring_reopen_kind_rejection(
+                AuthoringDocumentKind::Scene,
+                self.state.kind,
+            )
+            .into());
         }
         let (document, limits) = candidate.into_authoring_parts();
         let state = classify_scene_document(
             &document,
-            self.source.clone(),
+            self.state.source.clone(),
             AuthoringDocumentKind::Scene,
-            Arc::clone(&self.basis),
+            Arc::clone(&self.state.basis),
             limits,
         )?;
-        Ok(
-            crate::SceneAuthoringSession::from_published_authoring_document_with_history_limits(
-                SceneAuthoringDocumentCandidate { document, state }.publish(),
-                self.history_limits,
-            ),
-        )
+        Ok(SceneAuthoringDocumentCandidate { document, state })
     }
 
     /// Prepares a new Prefab lineage using the captured source and classification basis.
@@ -220,45 +228,163 @@ impl AuthoringDocumentReadmission {
         &self,
         candidate: PrefabDocumentCandidate,
     ) -> Result<crate::PrefabAuthoringSession, AuthoringSessionReopenError> {
-        if self.kind != AuthoringDocumentKind::Prefab {
-            return Err(
-                authoring_reopen_kind_rejection(AuthoringDocumentKind::Prefab, self.kind).into(),
-            );
-        }
-        let (document, limits) = candidate.into_authoring_parts();
-        let state = classify_prefab_document(
-            &document,
-            self.source.clone(),
-            AuthoringDocumentKind::Prefab,
-            Arc::clone(&self.basis),
-            limits,
-        )?;
         Ok(
             crate::PrefabAuthoringSession::from_published_authoring_document_with_history_limits(
-                PrefabAuthoringDocumentCandidate { document, state }.publish(),
+                self.readmit_prefab(candidate)?.publish(),
                 self.history_limits,
             ),
         )
     }
 
+    fn readmit_prefab(
+        &self,
+        candidate: PrefabDocumentCandidate,
+    ) -> Result<PrefabAuthoringDocumentCandidate, AuthoringSessionReopenError> {
+        if self.state.kind != AuthoringDocumentKind::Prefab {
+            return Err(authoring_reopen_kind_rejection(
+                AuthoringDocumentKind::Prefab,
+                self.state.kind,
+            )
+            .into());
+        }
+        let (document, limits) = candidate.into_authoring_parts();
+        let state = classify_prefab_document(
+            &document,
+            self.state.source.clone(),
+            AuthoringDocumentKind::Prefab,
+            Arc::clone(&self.state.basis),
+            limits,
+        )?;
+        Ok(PrefabAuthoringDocumentCandidate { document, state })
+    }
+
+    /// Reclassifies actual encoded Scene output and compares its preservation expectation.
+    /// Save validation creates neither a Session, source incarnation nor history owner.
+    pub fn preserves_scene_candidate(
+        &self,
+        candidate: SceneDocumentCandidate,
+    ) -> Result<bool, AuthoringSessionReopenError> {
+        Ok(self.preserves_classification(&self.readmit_scene(candidate)?.state))
+    }
+
+    /// Validates decoded Scene output under the captured source and file policy.
+    ///
+    /// Every classification, selected-default and scratch charge reaches `admit` before growth.
+    /// The caller retains its cumulative allowance across refusal and retry, and separately admits
+    /// decoded input retention. Validation creates neither a Session nor a history owner.
+    /// The candidate has already passed its actual wire-format limits; no encoding is repeated.
+    #[doc(hidden)]
+    pub fn preserves_scene_candidate_with_admission(
+        &self,
+        candidate: SceneDocumentCandidate,
+        mut admit: impl FnMut(Option<usize>) -> Result<(), ScenePatchReport>,
+    ) -> Result<bool, ScenePatchReport> {
+        let next = self.readmit_scene_with_admission(candidate, &mut |_, bytes| admit(bytes))?;
+        Ok(self.preserves_classification(&next))
+    }
+
+    fn readmit_scene_with_admission(
+        &self,
+        candidate: SceneDocumentCandidate,
+        admit: &mut reclassification::AdmissionCallback<'_>,
+    ) -> Result<AuthoringDocumentState, ScenePatchReport> {
+        if self.state.kind != AuthoringDocumentKind::Scene {
+            return Err(reclassification::publication_report(
+                authoring_reopen_kind_rejection(AuthoringDocumentKind::Scene, self.state.kind),
+            ));
+        }
+        let (document, _) = candidate.into_authoring_parts();
+        reclassification::admit_document(
+            &document.placements,
+            &document.entities,
+            self.state.limits,
+            admit,
+        )?;
+        reclassification::classify_with_admission(
+            &document,
+            &self.state,
+            &self.state.schema_basis(),
+            admit,
+        )
+    }
+
+    /// Validates actual encoded Prefab output without manufacturing a reopened working owner.
+    pub fn preserves_prefab_candidate(
+        &self,
+        candidate: PrefabDocumentCandidate,
+    ) -> Result<bool, AuthoringSessionReopenError> {
+        Ok(self.preserves_classification(&self.readmit_prefab(candidate)?.state))
+    }
+
+    /// Validates decoded Prefab output with admission for each actual classification attempt.
+    ///
+    /// Uses the captured source/file policy and the Prefab's own declarations and inputs. The
+    /// caller owns cumulative admission and decoded input retention, as for the Scene path.
+    /// The decoded candidate's actual wire-format constraints are not replaced by re-encoding.
+    #[doc(hidden)]
+    pub fn preserves_prefab_candidate_with_admission(
+        &self,
+        candidate: PrefabDocumentCandidate,
+        mut admit: impl FnMut(Option<usize>) -> Result<(), ScenePatchReport>,
+    ) -> Result<bool, ScenePatchReport> {
+        let next = self.readmit_prefab_with_admission(candidate, &mut |_, bytes| admit(bytes))?;
+        Ok(self.preserves_classification(&next))
+    }
+
+    fn readmit_prefab_with_admission(
+        &self,
+        candidate: PrefabDocumentCandidate,
+        admit: &mut reclassification::AdmissionCallback<'_>,
+    ) -> Result<AuthoringDocumentState, ScenePatchReport> {
+        if self.state.kind != AuthoringDocumentKind::Prefab {
+            return Err(reclassification::publication_report(
+                authoring_reopen_kind_rejection(AuthoringDocumentKind::Prefab, self.state.kind),
+            ));
+        }
+        let (document, _) = candidate.into_authoring_parts();
+        reclassification::admit_document(
+            &document.placements,
+            &document.entities,
+            self.state.limits,
+            admit,
+        )?;
+        reclassification::classify_source_with_admission(
+            AuthoringSourceParts {
+                placements: &document.placements,
+                entities: &document.entities,
+                inputs: Some(&document.inputs),
+            },
+            &self.state,
+            &self.state.schema_basis(),
+            admit,
+        )
+    }
+
+    fn preserves_classification(&self, next: &AuthoringDocumentState) -> bool {
+        self.state.kind == next.kind
+            && Arc::ptr_eq(&self.state.basis, &next.basis)
+            && self.state.readiness == next.readiness
+            && self.state.unavailable_manifest == next.unavailable_manifest
+    }
+
     /// Checks that re-admission preserved readiness and every unavailable Scene record.
     #[must_use]
     pub fn preserves_scene(&self, session: &crate::SceneAuthoringSession) -> bool {
-        self.kind == AuthoringDocumentKind::Scene
+        self.state.kind == AuthoringDocumentKind::Scene
             && session.authoring_schema_basis()
-                == Some(AuthoringSchemaBasis(Arc::clone(&self.basis)))
-            && session.authoring_readiness() == Some(self.expected_readiness)
-            && session.unavailable_record_manifest() == Some(&self.expected_unavailable_manifest)
+                == Some(AuthoringSchemaBasis(Arc::clone(&self.state.basis)))
+            && session.authoring_readiness() == Some(self.state.readiness)
+            && session.unavailable_record_manifest() == Some(&self.state.unavailable_manifest)
     }
 
     /// Checks that re-admission preserved readiness and every unavailable Prefab record.
     #[must_use]
     pub fn preserves_prefab(&self, session: &crate::PrefabAuthoringSession) -> bool {
-        self.kind == AuthoringDocumentKind::Prefab
+        self.state.kind == AuthoringDocumentKind::Prefab
             && session.authoring_schema_basis()
-                == Some(AuthoringSchemaBasis(Arc::clone(&self.basis)))
-            && session.authoring_readiness() == Some(self.expected_readiness)
-            && session.unavailable_record_manifest() == Some(&self.expected_unavailable_manifest)
+                == Some(AuthoringSchemaBasis(Arc::clone(&self.state.basis)))
+            && session.authoring_readiness() == Some(self.state.readiness)
+            && session.unavailable_record_manifest() == Some(&self.state.unavailable_manifest)
     }
 }
 
@@ -1562,16 +1688,12 @@ impl AuthoringDocumentState {
     }
 
     pub(crate) fn readmission(
-        &self,
+        self: &Arc<Self>,
         history_limits: crate::SceneAuthoringHistoryLimits,
     ) -> AuthoringDocumentReadmission {
         AuthoringDocumentReadmission {
-            source: self.source.clone(),
-            kind: self.kind,
-            basis: Arc::clone(&self.basis),
+            state: Arc::clone(self),
             history_limits,
-            expected_readiness: self.readiness,
-            expected_unavailable_manifest: self.unavailable_manifest.clone(),
         }
     }
 }
@@ -3357,9 +3479,31 @@ mod readmission_tests {
         );
         let source_id = session.revision().source_id();
         let admission = session.authoring_readmission().unwrap();
+        let shared = session.authoring_readmission().unwrap();
+        assert!(Arc::ptr_eq(&admission.state, &shared.state));
         drop(session);
 
         let reopened = std::thread::spawn(move || {
+            assert!(
+                admission
+                    .preserves_scene_candidate(
+                        SceneDocumentCandidate::decode_json_bytes(&bytes).unwrap(),
+                    )
+                    .unwrap()
+            );
+            assert!(
+                !admission
+                    .preserves_scene_candidate(
+                        SceneDocumentCandidate::decode_json_bytes(
+                            SceneDocument::default()
+                                .to_json_string()
+                                .unwrap()
+                                .as_bytes(),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap()
+            );
             let reopened = admission
                 .reopen_scene_candidate(SceneDocumentCandidate::decode_json_bytes(&bytes).unwrap())
                 .unwrap();
@@ -3419,9 +3563,31 @@ mod readmission_tests {
         );
         let source_id = session.revision().source_id();
         let admission = session.authoring_readmission().unwrap();
+        let shared = session.authoring_readmission().unwrap();
+        assert!(Arc::ptr_eq(&admission.state, &shared.state));
         drop(session);
 
         let reopened = std::thread::spawn(move || {
+            assert!(
+                admission
+                    .preserves_prefab_candidate(
+                        PrefabDocumentCandidate::decode_json_bytes(&bytes).unwrap(),
+                    )
+                    .unwrap()
+            );
+            assert!(
+                !admission
+                    .preserves_prefab_candidate(
+                        PrefabDocumentCandidate::decode_json_bytes(
+                            PrefabDocument::default()
+                                .to_json_string()
+                                .unwrap()
+                                .as_bytes(),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap()
+            );
             let reopened = admission
                 .reopen_prefab_candidate(
                     PrefabDocumentCandidate::decode_json_bytes(&bytes).unwrap(),

@@ -12,8 +12,9 @@ use nara_reflect::{
 };
 
 use crate::{
-    PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance, SceneComponentRecord,
-    SceneDocument, SceneEntityId, SceneEntityPlacement, SceneEntityRecord, ScenePlacement,
+    PrefabComponentIntent, PrefabDocument, PrefabEntityOrigin, PrefabEntityTarget, PrefabInstance,
+    PrefabOverlay, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityPlacement,
+    SceneEntityRecord, ScenePlacement,
     diagnostics::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
@@ -668,6 +669,88 @@ impl ScenePatchCost {
     }
 }
 
+/// Optional borrowed observations from the existing raw-storage walk. Returning false stops
+/// the walk; the observer retains its own typed refusal, independently of raw grammar limits.
+pub(crate) trait SourceCostObserver {
+    fn admit_scratch(&mut self, bytes: Option<usize>) -> bool;
+
+    /// Settles actual raw traversal separately from scratch and semantic observations.
+    /// Failed attempts report their visited prefix too. Returning false stops the walk;
+    /// the observer must retain the spent delta even when it exceeds its allowance.
+    fn progress(&mut self, _nodes: usize, _logical_bytes: usize) -> bool {
+        true
+    }
+
+    fn instance(&mut self, _instance: &PrefabInstance) -> bool {
+        true
+    }
+
+    /// Observes one physical overlay and its actual base. Nested declarations remain with
+    /// the existing raw walker; an observer admits any additional header inspection itself.
+    fn overlay(&mut self, _overlay: &PrefabOverlay) -> bool {
+        true
+    }
+
+    fn source_placements(&mut self, _placements: &[SceneEntityPlacement]) -> bool {
+        true
+    }
+
+    fn record(&mut self, _component: &ComponentTypeId, _record: &SceneComponentRecord) -> bool {
+        true
+    }
+
+    fn component_intent(&mut self, _intent: &PrefabComponentIntent) -> bool {
+        true
+    }
+}
+
+impl<F: FnMut(Option<usize>) -> bool> SourceCostObserver for F {
+    fn admit_scratch(&mut self, bytes: Option<usize>) -> bool {
+        self(bytes)
+    }
+}
+
+pub(crate) fn source_cost_progress(
+    observer: &mut Option<&mut dyn SourceCostObserver>,
+    nodes: usize,
+    logical_bytes: usize,
+) -> Option<()> {
+    if let Some(observer) = observer.as_deref_mut()
+        && !observer.progress(nodes, logical_bytes)
+    {
+        return None;
+    }
+    Some(())
+}
+
+pub(crate) fn with_source_cost_admission<T>(
+    observer: &mut Option<&mut dyn SourceCostObserver>,
+    operation: impl FnOnce(&mut Option<&mut CostScratchAdmission<'_>>) -> T,
+) -> T {
+    match observer.as_deref_mut() {
+        Some(observer) => {
+            let mut admit = |bytes| observer.admit_scratch(bytes);
+            operation(&mut Some(&mut admit))
+        }
+        None => operation(&mut None),
+    }
+}
+
+/// Borrows the actual Scene or Prefab, including all dormant instance declarations. Observation
+/// adds no source storage or classification manifest; ordinary cost-only entry points are shared.
+#[cfg(feature = "serde")]
+pub(crate) fn bounded_source_cost_with_observer(
+    source: crate::prefab::SourceDocumentInput<'_>,
+    limits: ScenePatchApplyLimits,
+    observer: &mut dyn SourceCostObserver,
+) -> Option<ScenePatchCost> {
+    let first = match source {
+        crate::prefab::SourceDocumentInput::Scene(document) => ValueCostNode::Scene(document, 1),
+        crate::prefab::SourceDocumentInput::Prefab(document) => ValueCostNode::Prefab(document, 1),
+    };
+    observed_tree_cost(first, Some(limits), Some(observer))
+}
+
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
@@ -696,6 +779,16 @@ pub(crate) fn bounded_scene_source_cost(
     tree_cost(ValueCostNode::Scene(document, 1), Some(limits), None)
 }
 
+/// Reuses complete Scene storage accounting with admission before walker scratch grows.
+#[cfg(feature = "serde")]
+pub(crate) fn bounded_scene_source_cost_with_admission<E>(
+    document: &SceneDocument,
+    limits: ScenePatchApplyLimits,
+    admit: impl FnMut(Option<usize>) -> Result<(), E>,
+) -> Result<Option<ScenePatchCost>, E> {
+    admitted_tree_cost(ValueCostNode::Scene(document, 1), limits, admit)
+}
+
 /// Admits borrowed component records without requiring an authored entity representation.
 /// Flat compiler drafts admit their entity IDs and hierarchy storage separately.
 pub(crate) fn bounded_component_records_source_cost<'a>(
@@ -703,10 +796,10 @@ pub(crate) fn bounded_component_records_source_cost<'a>(
     limits: ScenePatchApplyLimits,
 ) -> Option<ScenePatchCost> {
     let mut cost = ScenePatchCost::default();
-    let mut admission = None;
+    let mut observer = None;
     for record in records {
         cost.operation_count = cost.operation_count.saturating_add(1);
-        add_patch_record_cost(&mut cost, record, 1, Some(limits), &mut admission)?;
+        add_patch_record_cost(&mut cost, record, 1, Some(limits), &mut observer)?;
         if cost.operation_count > limits.validation_work().get()
             || cost.value_cost.nodes() > limits.validation_value_nodes().get()
             || cost.logical_bytes() > limits.validation_value_bytes().get()
@@ -801,11 +894,27 @@ fn admitted_tree_cost<E>(
 fn tree_cost(
     first: ValueCostNode<'_>,
     limits: Option<ScenePatchApplyLimits>,
-    mut admission: Option<&mut CostScratchAdmission<'_>>,
+    admission: Option<&mut CostScratchAdmission<'_>>,
 ) -> Option<ScenePatchCost> {
-    let mut pending = if admission.is_some() {
+    match admission {
+        Some(admit) => {
+            let mut observer = |bytes| admit(bytes);
+            observed_tree_cost(first, limits, Some(&mut observer))
+        }
+        None => observed_tree_cost(first, limits, None),
+    }
+}
+
+fn observed_tree_cost(
+    first: ValueCostNode<'_>,
+    limits: Option<ScenePatchApplyLimits>,
+    mut observer: Option<&mut dyn SourceCostObserver>,
+) -> Option<ScenePatchCost> {
+    let mut pending = if observer.is_some() {
         let mut pending = Vec::new();
-        reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+        with_source_cost_admission(&mut observer, |admission| {
+            reserve_cost_scratch(&mut pending, 1, admission)
+        })?;
         pending.push(first);
         pending
     } else {
@@ -817,12 +926,21 @@ fn tree_cost(
             ValueCostNode::Scene(document, depth) => {
                 admit_data_depth(depth, limits)?;
                 cost.operation_count = cost.operation_count.saturating_add(1);
-                reserve_cost_scratch(&mut pending, 2, &mut admission)?;
+                source_cost_progress(&mut observer, 1, 0)?;
+                if let Some(observer) = observer.as_deref_mut()
+                    && !observer.source_placements(&document.placements)
+                {
+                    return None;
+                }
+                with_source_cost_admission(&mut observer, |admission| {
+                    reserve_cost_scratch(&mut pending, 2, admission)
+                })?;
                 pending.push(ValueCostNode::Entities(document.entities.iter(), depth));
                 pending.push(ValueCostNode::Placements(&document.placements, depth));
             }
             ValueCostNode::Prefab(document, depth) => {
                 admit_data_depth(depth, limits)?;
+                source_cost_progress(&mut observer, 1, 0)?;
                 cost.operation_count = cost
                     .operation_count
                     .saturating_add(1)
@@ -832,20 +950,31 @@ fn tree_cost(
                 {
                     return None;
                 }
+                if let Some(observer) = observer.as_deref_mut()
+                    && !observer.source_placements(&document.placements)
+                {
+                    return None;
+                }
                 for input in &document.inputs {
+                    source_cost_progress(&mut observer, 1, input.as_str().len())?;
                     cost.structural_logical_bytes = cost
                         .structural_logical_bytes
                         .saturating_add(input.as_str().len());
                 }
-                reserve_cost_scratch(&mut pending, 2, &mut admission)?;
+                with_source_cost_admission(&mut observer, |admission| {
+                    reserve_cost_scratch(&mut pending, 2, admission)
+                })?;
                 pending.push(ValueCostNode::Entities(document.entities.iter(), depth));
                 pending.push(ValueCostNode::Placements(&document.placements, depth));
             }
             ValueCostNode::Placements(placements, depth) => {
                 admit_data_depth(depth, limits)?;
                 let allowance = declaration_cost_allowance(cost, depth, limits)?;
-                let placements =
-                    crate::prefab::scene_placements_cost(placements, allowance).ok()?;
+                let placements = if let Some(observer) = observer.as_deref_mut() {
+                    allowance.observe_placements(placements, observer)?
+                } else {
+                    crate::prefab::scene_placements_cost(placements, allowance).ok()?
+                };
                 cost.operation_count = cost.operation_count.saturating_add(placements.nodes);
                 cost.structural_logical_bytes = cost
                     .structural_logical_bytes
@@ -853,6 +982,7 @@ fn tree_cost(
             }
             ValueCostNode::Entity(entity, depth) => {
                 admit_data_depth(depth, limits)?;
+                source_cost_progress(&mut observer, 1, 0)?;
                 cost.operation_count = cost
                     .operation_count
                     .saturating_add(1)
@@ -864,24 +994,32 @@ fn tree_cost(
                 }
                 cost.structural_logical_bytes = cost
                     .structural_logical_bytes
-                    .saturating_add(entity.id.as_str().len())
-                    .saturating_add(entity.components.keys().fold(0usize, |bytes, component| {
-                        bytes.saturating_add(component.as_str().len())
-                    }));
-                for component in entity.components.values() {
-                    add_patch_record_cost(&mut cost, component, depth + 1, limits, &mut admission)?;
+                    .saturating_add(entity.id.as_str().len());
+                source_cost_progress(&mut observer, 0, entity.id.as_str().len())?;
+                for (component, record) in &entity.components {
+                    cost.structural_logical_bytes = cost
+                        .structural_logical_bytes
+                        .saturating_add(component.as_str().len());
+                    source_cost_progress(&mut observer, 1, component.as_str().len())?;
+                    add_patch_record_cost(&mut cost, record, depth + 1, limits, &mut observer)?;
+                    if let Some(observer) = observer.as_deref_mut()
+                        && !observer.record(component, record)
+                    {
+                        return None;
+                    }
                 }
                 if let Some(prefab) = &entity.prefab {
-                    reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+                    with_source_cost_admission(&mut observer, |admission| {
+                        reserve_cost_scratch(&mut pending, 1, admission)
+                    })?;
                     pending.push(ValueCostNode::Instance(prefab, depth + 1));
                 }
             }
             ValueCostNode::Instance(instance, depth) => {
                 admit_data_depth(depth, limits)?;
                 let allowance = declaration_cost_allowance(cost, depth, limits)?;
-                let instance_cost = if let Some(admit) = admission.as_deref_mut() {
-                    crate::prefab::prefab_instance_cost_with_admission(instance, allowance, admit)
-                        .ok()??
+                let instance_cost = if let Some(observer) = observer.as_deref_mut() {
+                    allowance.observe_instance(instance, observer)?
                 } else {
                     crate::prefab::prefab_instance_cost(instance, allowance).ok()?
                 };
@@ -893,7 +1031,9 @@ fn tree_cost(
             }
             ValueCostNode::Entities(mut entities, depth) => {
                 if let Some(entity) = entities.next() {
-                    reserve_cost_scratch(&mut pending, 2, &mut admission)?;
+                    with_source_cost_admission(&mut observer, |admission| {
+                        reserve_cost_scratch(&mut pending, 2, admission)
+                    })?;
                     pending.push(ValueCostNode::Entities(entities, depth));
                     pending.push(ValueCostNode::Entity(entity, depth));
                 }
@@ -906,14 +1046,20 @@ fn tree_cost(
                 {
                     return None;
                 }
-                reserve_cost_scratch(&mut pending, 1, &mut admission)?;
+                with_source_cost_admission(&mut observer, |admission| {
+                    reserve_cost_scratch(&mut pending, 1, admission)
+                })?;
                 pending.push(ValueCostNode::Operations(patch.operations.iter(), depth));
             }
             ValueCostNode::Operations(mut operations, depth) => {
                 if let Some(operation) = operations.next() {
+                    source_cost_progress(&mut observer, 1, 0)?;
+                    let mut reported_bytes = cost.structural_logical_bytes;
                     // One continuation plus at most two owned payload frames for an exact
                     // placement-vector or instance-declaration replacement.
-                    reserve_cost_scratch(&mut pending, 3, &mut admission)?;
+                    with_source_cost_admission(&mut observer, |admission| {
+                        reserve_cost_scratch(&mut pending, 3, admission)
+                    })?;
                     pending.push(ValueCostNode::Operations(operations, depth));
                     match operation {
                         ScenePatchOperation::AddEntity { entity }
@@ -977,12 +1123,18 @@ fn tree_cost(
                             add_scene_entity_id_cost(&mut cost, entity);
                             add_component_type_id_cost(&mut cost, component);
                             add_component_field_id_cost(&mut cost, field);
+                            source_cost_progress(
+                                &mut observer,
+                                0,
+                                cost.structural_logical_bytes.saturating_sub(reported_bytes),
+                            )?;
+                            reported_bytes = cost.structural_logical_bytes;
                             // Admit the complete canonical value before encoding, including
                             // the nested source/product maps of an explicit product selection.
                             // The bounded value walker separately admits its iterator scratch.
-                            if let Some(admit) = admission.as_deref_mut() {
+                            if let Some(observer) = observer.as_deref_mut() {
                                 let (nodes, logical_bytes) = asset_ref_value_size(asset_ref);
-                                if !admit(logical_bytes.checked_add(nodes * 96)) {
+                                if !observer.admit_scratch(logical_bytes.checked_add(nodes * 96)) {
                                     return None;
                                 }
                             }
@@ -991,7 +1143,7 @@ fn tree_cost(
                                 &asset_ref_value(asset_ref),
                                 depth + 1,
                                 limits,
-                                &mut admission,
+                                &mut observer,
                             )?;
                         }
                         ScenePatchOperation::SetPrefabInstance {
@@ -1008,13 +1160,18 @@ fn tree_cost(
                             );
                         }
                     }
+                    source_cost_progress(
+                        &mut observer,
+                        0,
+                        cost.structural_logical_bytes.saturating_sub(reported_bytes),
+                    )?;
                 }
             }
             ValueCostNode::Value(value, depth) => {
-                add_patch_value_cost(&mut cost, value, depth, limits, &mut admission)?;
+                add_patch_value_cost(&mut cost, value, depth, limits, &mut observer)?;
             }
             ValueCostNode::Record(record, depth) => {
-                add_patch_record_cost(&mut cost, record, depth, limits, &mut admission)?;
+                add_patch_record_cost(&mut cost, record, depth, limits, &mut observer)?;
             }
         }
         if limits.is_some_and(|limits| {
@@ -1033,8 +1190,13 @@ fn add_patch_record_cost(
     record: &SceneComponentRecord,
     depth: usize,
     limits: Option<ScenePatchApplyLimits>,
-    admission: &mut Option<&mut CostScratchAdmission<'_>>,
+    observer: &mut Option<&mut dyn SourceCostObserver>,
 ) -> Option<()> {
+    source_cost_progress(
+        observer,
+        0,
+        record.owner().map_or(0, |owner| owner.as_str().len()),
+    )?;
     cost.structural_logical_bytes = cost
         .structural_logical_bytes
         .saturating_add(record.owner().map_or(0, |owner| owner.as_str().len()));
@@ -1044,12 +1206,13 @@ fn add_patch_record_cost(
     if limits.is_some_and(|limits| cost.operation_count > limits.validation_work().get()) {
         return None;
     }
-    add_patch_value_cost(cost, &record.value, depth, limits, admission)?;
+    add_patch_value_cost(cost, &record.value, depth, limits, observer)?;
     for (field, value) in &record.contextual_defaults {
+        source_cost_progress(observer, 1, field.as_str().len())?;
         cost.structural_logical_bytes = cost
             .structural_logical_bytes
             .saturating_add(field.as_str().len());
-        add_patch_value_cost(cost, value, depth + 1, limits, admission)?;
+        add_patch_value_cost(cost, value, depth + 1, limits, observer)?;
     }
     Some(())
 }
@@ -1059,39 +1222,30 @@ fn add_patch_value_cost(
     value: &ComponentValue,
     depth: usize,
     limits: Option<ScenePatchApplyLimits>,
-    admission: &mut Option<&mut CostScratchAdmission<'_>>,
+    observer: &mut Option<&mut dyn SourceCostObserver>,
 ) -> Option<()> {
-    let value_cost = match limits {
-        Some(limits) if admission.is_some() => value
-            .cost_up_to_with_admission(
-                limits
-                    .validation_value_nodes()
-                    .get()
-                    .saturating_sub(cost.value_cost.nodes()),
-                limits
-                    .validation_value_bytes()
-                    .get()
-                    .saturating_sub(cost.logical_bytes()),
-                |bytes| {
-                    if admission.as_deref_mut().is_some_and(|admit| admit(bytes)) {
-                        Ok(())
-                    } else {
-                        Err(())
-                    }
-                },
-            )
-            .ok()??,
-        Some(limits) => value.cost_up_to(
-            limits
-                .validation_value_nodes()
-                .get()
-                .saturating_sub(cost.value_cost.nodes()),
-            limits
-                .validation_value_bytes()
-                .get()
-                .saturating_sub(cost.logical_bytes()),
-        )?,
-        None => value.cost(),
+    let max_nodes = limits
+        .map_or(usize::MAX, |limits| limits.validation_value_nodes().get())
+        .saturating_sub(cost.value_cost.nodes());
+    let max_bytes = limits
+        .map_or(usize::MAX, |limits| limits.validation_value_bytes().get())
+        .saturating_sub(cost.logical_bytes());
+    let value_cost = if observer.is_some() {
+        let (result, visited) = with_source_cost_admission(observer, |admission| {
+            value.cost_up_to_with_admission_measured(max_nodes, max_bytes, |bytes| {
+                if admission.as_deref_mut().is_some_and(|admit| admit(bytes)) {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            })
+        });
+        source_cost_progress(observer, visited.nodes(), visited.logical_bytes())?;
+        result.ok()??
+    } else if limits.is_some() {
+        value.cost_up_to(max_nodes, max_bytes)?
+    } else {
+        value.cost()
     };
     if limits.is_some() {
         admit_value_depth(value, depth)?;

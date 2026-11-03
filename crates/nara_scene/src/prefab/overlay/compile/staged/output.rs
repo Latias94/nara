@@ -10,6 +10,91 @@ impl<'root, 'context, 'owner, F, E> Compiler<'root, 'context, 'owner, F, E>
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    #[cfg(feature = "serde")]
+    fn capture_unavailable_declaration(
+        &mut self,
+        node: NodeId,
+        entity: &SceneEntityId,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Result<(), SceneCompilationFailure> {
+        let record = self.nodes[node]
+            .programs
+            .get(component)
+            .ok_or(SceneCompilationFailureKind::OwnerAdmission)?
+            .record;
+        let (scope, original, overlay) = match record {
+            Record::Source { scope, entity } => (scope, entity, None),
+            Record::Addition { scope, index } | Record::Set { scope, index } => {
+                let site = self.scopes[scope]
+                    .site
+                    .as_ref()
+                    .ok_or(SceneCompilationFailureKind::OwnerAdmission)?;
+                let slot = match record {
+                    Record::Addition { .. } => PrefabOverlaySlot::Addition { index },
+                    Record::Set { .. } => PrefabOverlaySlot::Component { index },
+                    Record::Source { .. } => unreachable!(),
+                };
+                (site.source, site.entity, Some((scope, slot)))
+            }
+        };
+        let source = self.scopes[scope].source.as_ref();
+        let original_id = &self.source_entities(scope)[original].id;
+        let bytes = source
+            .map_or(Some(0), |source| source.key().checked_retained_bytes())
+            .and_then(|bytes| bytes.checked_add(provenance_string_bytes(original_id.as_str())?))
+            .and_then(|bytes| bytes.checked_add(provenance_string_bytes(entity.as_str())?))
+            .and_then(|bytes| bytes.checked_add(provenance_string_bytes(component.as_str())?))
+            .and_then(|bytes| {
+                bytes.checked_add(overlay.map_or(Some(0), |(scope, _)| {
+                    self.scopes[scope]
+                        .site
+                        .as_ref()?
+                        .segments
+                        .len()
+                        .checked_mul(size_of::<PrefabInstancePathSegment>())
+                })?)
+            });
+        self.admit(bytes)?;
+        let declarations = &self.context.unavailable_declarations;
+        if declarations.len() == declarations.capacity() {
+            let capacity = declarations
+                .len()
+                .checked_add(1)
+                .map(|needed| needed.max(declarations.capacity().saturating_mul(2)).max(4))
+                .ok_or(SceneCompilationFailureKind::WorkLimit)?;
+            self.admit(
+                capacity.checked_mul(size_of::<crate::prefab::UnavailableSourceDeclaration>()),
+            )?;
+            self.context
+                .unavailable_declarations
+                .reserve_exact(capacity - self.context.unavailable_declarations.len());
+        }
+        let source = self.scopes[scope]
+            .source
+            .as_ref()
+            .map_or(PrefabDeclarationSource::Containing, |source| {
+                PrefabDeclarationSource::Prefab(source.key().clone())
+            });
+        // Copy only after admission. The selected site names a physical original input,
+        // independently of its target scope and the final entity's canonical provenance.
+        let slot = match overlay {
+            None => crate::prefab::UnavailableComponentSlot::Record,
+            Some((scope, slot)) => crate::prefab::UnavailableComponentSlot::Overlay {
+                steps: self.scopes[scope].site.as_ref().unwrap().segments.clone(),
+                slot,
+            },
+        };
+        let declaration = crate::prefab::UnavailableSourceDeclaration {
+            entity: entity.clone(),
+            component: component.clone(),
+            source,
+            record: self.source_entities(scope)[original].id.clone(),
+            slot,
+        };
+        self.context.unavailable_declarations.push(declaration);
+        Ok(())
+    }
+
     pub(super) fn materialize(
         &mut self,
         mut document: SceneDraft,
@@ -137,6 +222,10 @@ where
             }
             for (component, payload) in &mut record.components {
                 if !self.context.authority.can_interpret(component, payload) {
+                    #[cfg(feature = "serde")]
+                    if self.context.capture_unavailable_declarations {
+                        self.capture_unavailable_declaration(node, id, component)?;
+                    }
                     let cost = payload.value.cost();
                     let (nodes, bytes) = self
                         .context

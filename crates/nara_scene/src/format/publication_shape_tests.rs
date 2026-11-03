@@ -375,7 +375,7 @@ fn desired_placement_routes_and_root_bindings_match_both_complete_shape_oracles(
         source: AssetRef::path("source.prefab.json").unwrap(),
         binding: crate::PrefabInstanceBinding::Root {
             base,
-            root: id("specified-root"),
+            root: crate::PrefabEntityTarget::source(id("specified-root")),
         },
         arguments: None,
         overrides: None,

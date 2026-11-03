@@ -4,6 +4,69 @@ fn input() -> ReferenceInputId {
     ReferenceInputId::new("u").unwrap()
 }
 
+#[test]
+fn copied_root_targets_remap_every_canonical_hop_and_compile_the_actual_use() {
+    let r = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("r"))]);
+    let mut qr = SceneEntityRecord::new(id("qr"));
+    qr.prefab = Some(PrefabInstance::root(
+        reference("r"),
+        key("r"),
+        PrefabEntityTarget::source(id("r")),
+    ));
+    let q = PrefabDocument::from_ordered_roots([qr]);
+    let target = PrefabEntityTarget {
+        through: vec![PrefabInstanceHop {
+            anchor: PrefabEntityOrigin::SourceEntity(id("qr")),
+            expected_base: key("r"),
+        }],
+        entity: PrefabEntityOrigin::SourceEntity(id("r")),
+    };
+    let mut anchor = SceneEntityRecord::new(id("p"));
+    anchor.prefab = Some(PrefabInstance::root(reference("q"), key("q"), target));
+    let p = PrefabDocument::from_ordered_roots([anchor]);
+    let originals = [p.clone(), q.clone(), r.clone()];
+    let request = PrefabCopyRequest::new(vec![
+        mapped_source("p", p),
+        mapped_source("q", q),
+        mapped_source("r", r),
+    ]);
+    let basis = basis();
+    let prepared = request
+        .prepare(&basis, PrefabCopyLimits::default())
+        .unwrap();
+    let copied = prepared.sources()[0].document();
+    assert_eq!(copied.entities.len(), 1);
+    assert_eq!(
+        copied.entities[0].prefab.as_ref().unwrap().binding,
+        crate::PrefabInstanceBinding::Root {
+            base: key("copied-q"),
+            root: PrefabEntityTarget {
+                through: vec![PrefabInstanceHop {
+                    anchor: PrefabEntityOrigin::SourceEntity(id("qr")),
+                    expected_base: key("copied-r"),
+                }],
+                entity: PrefabEntityOrigin::SourceEntity(id("r")),
+            },
+        },
+    );
+    let mut host = SceneEntityRecord::new(id("host"));
+    host.prefab = Some(PrefabInstance::root(
+        reference("copied-p"),
+        key("copied-p"),
+        PrefabEntityTarget::source(id("p")),
+    ));
+    let scene = SceneDocument::from_ordered_roots([host]);
+    let report = compile_use(prepared.sources(), &scene, &basis);
+    assert_use_succeeds(&report);
+    let result = report.candidate().unwrap();
+    assert_eq!(result.roots(), &[id("host")]);
+    assert_eq!(result.entities().len(), 1);
+    assert_eq!(result.entities()[0].id(), &id("host"));
+    for (source, original) in request.sources.iter().zip(&originals) {
+        assert_eq!(&source.document, original);
+    }
+}
+
 fn parameterized() -> PrefabDocument {
     let mut document = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(id("q-root"))
         .with_component(
@@ -48,7 +111,11 @@ fn root_bindings_source_placements_and_dormant_declarations_copy_the_exact_mappe
         }],
         entity: PrefabEntityOrigin::SourceEntity(id(entity)),
     };
-    let mut declaration = PrefabInstance::root(reference("q"), key("q"), id("root"));
+    let mut declaration = PrefabInstance::root(
+        reference("q"),
+        key("q"),
+        PrefabEntityTarget::source(id("root")),
+    );
     declaration.arguments = Some(PrefabReferenceArguments {
         base: key("q"),
         values: [(
@@ -62,7 +129,11 @@ fn root_bindings_source_placements_and_dormant_declarations_copy_the_exact_mappe
     let mut overlay = PrefabOverlay::new(key("q"));
     overlay.instances.push(PrefabInstanceClaim {
         target: PrefabEntityTarget::source(id("dormant")),
-        value: Some(PrefabInstance::root(reference("q"), key("q"), id("root"))),
+        value: Some(PrefabInstance::root(
+            reference("q"),
+            key("q"),
+            PrefabEntityTarget::source(id("root")),
+        )),
     });
     declaration.overrides = Some(overlay);
     let mut anchor = SceneEntityRecord::new(id("anchor"));
@@ -118,7 +189,7 @@ fn root_bindings_source_placements_and_dormant_declarations_copy_the_exact_mappe
         declaration.binding,
         crate::PrefabInstanceBinding::Root {
             base: key("copied-q"),
-            root: id("root")
+            root: PrefabEntityTarget::source(id("root"))
         }
     );
     assert_eq!(declaration.source, reference("copied-q"));
@@ -145,7 +216,7 @@ fn root_bindings_source_placements_and_dormant_declarations_copy_the_exact_mappe
         dormant.binding,
         crate::PrefabInstanceBinding::Root {
             base: key("copied-q"),
-            root: id("root")
+            root: PrefabEntityTarget::source(id("root"))
         }
     );
 }

@@ -41,6 +41,8 @@ pub use prefab_conversion::{
 #[cfg(feature = "serde")]
 mod prefab_declarations;
 #[cfg(feature = "serde")]
+pub(crate) use prefab_declarations::instance_at as prefab_instance_slot_at;
+#[cfg(feature = "serde")]
 pub use prefab_declarations::{
     PrefabDeclarationError, PrefabDeclarationLimits, PrefabInstanceObservation,
 };
@@ -49,11 +51,24 @@ mod prepared;
 #[cfg(feature = "serde")]
 pub use prepared::{PreparedPrefabAuthoringEdit, PreparedSceneAuthoringEdit};
 #[cfg(feature = "serde")]
+mod prefab_extraction;
+#[cfg(feature = "serde")]
 mod schema_preparation;
 #[cfg(feature = "serde")]
 mod schema_reclassification;
 #[cfg(feature = "serde")]
 pub(crate) mod schema_upgrade;
+#[cfg(feature = "serde")]
+mod source_checkpoint;
+#[cfg(feature = "serde")]
+pub use prefab_extraction::{
+    EncodedPrefabExtractionSource, PrefabExtractionDestination, PrefabExtractionFailure,
+    PrefabExtractionRequest, PrefabExtractionSavedGeneration, PrefabExtractionSavedGenerationError,
+    PrefabExtractionSourceBindFailure, PrefabExtractionSourceCommit, PrefabExtractionSourceOutput,
+    PrefabExtractionStoredAdmissionFailure, PrefabExtractionUsage, PrefabExtractionWork,
+    PrefabSourceExtractionInput, PreparedPrefabExtraction, PreparedPrefabExtractionSource,
+    PreparedSceneExtractionSource, SceneExtractionSourceCommit, SceneSourceExtractionInput,
+};
 #[cfg(feature = "serde")]
 pub use schema_reclassification::{
     PrefabSchemaReclassificationCommit, PrefabSchemaReclassificationRequest,
@@ -928,7 +943,7 @@ impl PrefabAuthoringSession {
     #[must_use]
     pub fn authoring_readmission(&self) -> Option<crate::AuthoringDocumentReadmission> {
         self.authority
-            .published()
+            .published_shared()
             .map(|state| state.readmission(self.history.limits()))
     }
 
@@ -990,7 +1005,10 @@ impl PrefabAuthoringSession {
         self.authority.published().map(|state| state.source())
     }
 
-    /// Retains the exact immutable source without copying its document or authoring state.
+    /// Retains the exact immutable nominal source for either a native or published session.
+    ///
+    /// Later edits, history replay and source replacement leave this version unchanged. Sharing
+    /// it copies neither the document nor authoring state and grants no publication authority.
     #[doc(hidden)]
     #[must_use]
     pub fn shared_document(&self) -> Arc<PrefabDocument> {
@@ -1390,7 +1408,7 @@ impl SceneAuthoringSession {
     #[must_use]
     pub fn authoring_readmission(&self) -> Option<crate::AuthoringDocumentReadmission> {
         self.authority
-            .published()
+            .published_shared()
             .map(|state| state.readmission(self.history.limits()))
     }
 
@@ -1452,7 +1470,10 @@ impl SceneAuthoringSession {
         self.authority.published().map(|state| state.source())
     }
 
-    /// Retains the exact immutable source without copying its document or authoring state.
+    /// Retains the exact immutable nominal source for either a native or published session.
+    ///
+    /// Later edits, history replay and source replacement leave this version unchanged. Sharing
+    /// it copies neither the document nor authoring state and grants no publication authority.
     #[doc(hidden)]
     #[must_use]
     pub fn shared_document(&self) -> Arc<SceneDocument> {

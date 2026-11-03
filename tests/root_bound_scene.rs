@@ -139,7 +139,7 @@ fn spawn_fixture(world: &mut World) {
     branch_root.prefab = Some(PrefabInstance::root(
         source("leaf"),
         key("leaf", SourceDocumentKind::Prefab),
-        id("leaf-root"),
+        PrefabEntityTarget::source(id("leaf-root")),
     ));
     let branch = PrefabDocument::new(
         [
@@ -177,7 +177,7 @@ fn spawn_fixture(world: &mut World) {
     let instance = PrefabInstance::root(
         source("branch"),
         key("branch", SourceDocumentKind::Prefab),
-        id("branch-root"),
+        PrefabEntityTarget::source(id("branch-root")),
     );
     replaced.prefab = Some(instance.clone());
     // This occurrence has no containing Transform record: the bound root must supply it.

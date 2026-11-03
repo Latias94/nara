@@ -139,7 +139,11 @@ fn reader(name: &str, reference: EntityReference) -> SceneEntityRecord {
 }
 
 fn root_instance(base: &str, root: &str) -> PrefabInstance {
-    PrefabInstance::root(source(base), key(base), id(root))
+    PrefabInstance::root(
+        source(base),
+        key(base),
+        PrefabEntityTarget::source(id(root)),
+    )
 }
 
 fn with_argument(

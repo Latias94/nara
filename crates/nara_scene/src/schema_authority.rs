@@ -160,7 +160,7 @@ impl<'a> SchemaAuthority<'a> {
         Ok(schema)
     }
 
-    fn validate_current_schema_capabilities(
+    pub(crate) fn validate_current_schema_capabilities(
         self,
         component: &ComponentTypeId,
         schema: &ComponentSchema,

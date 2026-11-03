@@ -316,7 +316,7 @@ fn anchor_instance<'a>(
     Ok(&entities[index].prefab)
 }
 
-fn instance_at<'a>(
+pub(crate) fn instance_at<'a>(
     root: &'a Option<PrefabInstance>,
     steps: &[PrefabInstancePathSegment],
 ) -> Result<&'a Option<PrefabInstance>, PrefabDeclarationError> {
