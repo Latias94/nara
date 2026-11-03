@@ -161,7 +161,7 @@ and source allocations alone establish no faster/slower ranking.
 [plan]: ../../plans/2026-10-31-render-composition-and-host-execution-plan.md
 [ledger]: ../../architecture/adr/implementation-status.md#L1422
 [r9]: ../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r9-material-artifacts-views-color-and-domain-render-locality
-[known-f3]: ../2026-11-02-refactor-follow-up-review.md#f3--p2-window-composition-can-leave-the-replaced-runtime-frame-pickable
+[known-f3]: ../../audits/2026-11-02-refactor-follow-up-review.md#f3--p2-window-composition-can-leave-the-replaced-runtime-frame-pickable
 [n-graph]: ../../../crates/nara_render_wgpu/src/graph/compile.rs#L20
 [n-native]: ../../../crates/nara_render_wgpu/src/program/native.rs#L478
 [n-frame]: ../../../crates/nara_render/src/frame.rs#L89

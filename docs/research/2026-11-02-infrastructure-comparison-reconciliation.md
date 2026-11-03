@@ -5,7 +5,7 @@ qualification or acceptance of a new ADR.
 
 The supplied [seven-document study](2026-11-02-infrastructure-comparison/README.md) compares Nara
 at `a2640a1` with fixed Bevy, Fyrox and Godot snapshots. Its documents were copied and SHA256
-checked before import; only five relative links to the preceding review were repaired. Retain
+checked before import; relative links to the preceding review were repaired. Retain
 their original snapshot claims. Current contracts and results belong to the Accepted ADRs,
 [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md) and its ledger.
 

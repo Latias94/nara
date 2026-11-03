@@ -546,6 +546,12 @@ cross-platform bit-exact determinism. Debugger fresh restore does not prohibit c
 same-Runtime prediction rollback; that is a separate state/effect model. Server profile does
 not itself implement networking. Tick event freshness is not app-frame tracker freshness.
 
+The [UE6 review](../research/2026-11-03-ue6-direction-and-nara-architecture.md) sharpens that
+boundary: [ADR 0024](adr/0024-determinism-fixed-update-and-replay-policy.md#future-prediction-qualification)
+requires concrete recoverable-state/effect qualification, while R4c/R10 select attempt and
+confirmation semantics before freezing the affected execution Interface. This adds no implicit
+rollback right to an ordinary Rust system and leaves runtime-fault recovery unchanged.
+
 **Acceptance.** Motion tracer combines root motion, kinematic/dynamic bodies, parent edits,
 teleport and interpolation; add a minimal audio effect consumer. Repeat under pause/exact-step,
 different frame groupings and worker completion order. A bounded client/server prediction tracer

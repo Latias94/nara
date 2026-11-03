@@ -10,6 +10,10 @@ On resume, use the derived Current State to locate relevant records, then read t
 shards. Registration lineage describes work contexts; it does not reserve files or replace live
 agent coordination. Old task lists and platform gaps retain their recorded scope.
 
+Create a registration successor when a lane's scope, ownership or lifecycle state changes.
+An unchanged active status or another test run does not need a registration snapshot; record
+meaningful new results in the corresponding evidence instead.
+
 Capture meaningful context at handoff, decision, verification or commit boundaries: failed
 approaches, rationale absent from the final code, results and limits, or the next recovery step.
 Combine related facts where useful and cite existing artifacts rather than repeating their

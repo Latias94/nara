@@ -463,9 +463,20 @@ Editor graphics have their bounded qualification under the
 [activity-custody unit](../architecture/task-activity-scope-design.md) has bounded Tasks/Image and
 independent-consumer qualification; lazy/shared
 comparison now has [bounded release Image evidence](../benchmarks/2026-10-26-task-facility-locality.md).
-It challenges unconditional sharing for interactive progress; actual Editor lifecycle/deployment
-qualification and R4c remain open.
+It challenges unconditional sharing for interactive progress. The selected private-lazy Editor
+deployment and whole-Session physical close have their
+[bounded qualification](../knowledge/engineering/verification/2026-10/2026-10-25T213241Z-private-lazy-editor-tasks-and-whole-session-physical-close-qualification-4c62c82789e4449dba02bb60f145760c.md);
+broader activity-scope integration and R4c remain open.
 **Owners:** App/Tasks, executable Host and domains.
+
+The [I/O substrate study](../research/2026-11-03-io-substrate-and-engine-contracts.md) separates
+crate-backed file/execution mechanisms from Nara's authority, publication and physical-return
+contracts. Existing `rustix`/`windows-sys` adapters and injected import readers remain the baseline.
+Before replacing private worker dispatch or strict directory-relative opening, compare one actual
+operation against the candidate substrate under the same invariant tests and consumer. A different
+crate must remove meaningful implementation while preserving the required guarantees. This is a
+bounded reuse evaluation within these owner units, not a new universal VFS/Future runtime, an
+executor selection or a reason to repeat qualified production workflows.
 
 Three independently verifiable sub-units:
 
@@ -628,7 +639,11 @@ copying. The [qualified inline-reference replacement](../knowledge/engineering/v
 uses lexical payload/input scope independently of structural target scope; explicit routes select
 nested inputs. Closed compiled storage and its complete public compiler Interface now have their
 [production qualification](../knowledge/engineering/verification/2026-11/2026-11-02T071856Z-closed-compiled-scene-production-and-independent-delivery-qualification-91cc04f45ba249f881cec4f9f78bd3d1.md).
-Root/placement replacement and complete CP2 extraction remain open.
+Explicit root binding/source placements now have their
+[production prerequisite qualification](../knowledge/engineering/verification/2026-11/2026-11-02T121917Z-explicit-root-binding-and-source-placement-production-qualification-0eada24ff287416bbfe94ccf511d2380.md).
+Domain construction/correspondence, Session/Application publication and CLI-only recovery now have
+[bounded integration evidence](../knowledge/engineering/verification/2026-11/2026-11-03T094705Z-recovered-extraction-process-and-integrated-source-owners-pass-current-qualification-e6d36a7a778d4f3494963eec011be399.md).
+Complete CP2 independent workflow, strict Check/Play and native extraction qualification remain open.
 
 Acceptance: nested and repeated instances, base rename/reorder/delete, same-name members,
 Behavior migration, convert-to-local and explicit remap. Long edit churn preserves stale-alias
@@ -741,7 +756,9 @@ native trust. Delete duplicate root/domain registrations and incorrect recipe/co
 
 **Design:** D12. **State:** in progress; immutable local base and bounded first-party startup/travel
 qualified, including finite source Scene references and global source/processed Input;
-explicit Cargo build/capture is qualified; packaged delivery remains open.
+explicit Cargo build/capture and Windows headless cooked Player delivery are qualified within
+their recorded scopes. Native desktop packaged delivery and additional target/platform
+qualification remain open.
 **Owners:** Cargo tooling, Host capture/cook and Runtime loader.
 
 The [explicit Cargo selection unit](2026-10-31-explicit-cargo-build-selection-plan.md) now owns
