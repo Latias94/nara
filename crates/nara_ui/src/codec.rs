@@ -1227,8 +1227,9 @@ string_enum_reader!(read_text_alignment, UiTextAlignment, "start, center, or end
 string_enum_reader!(read_text_overflow, UiTextOverflow, "wrap or clip", {
     "wrap" => UiTextOverflow::Wrap, "clip" => UiTextOverflow::Clip,
 });
-string_enum_reader!(read_semantic_role, UiSemanticRole, "group, text, button, or status", {
+string_enum_reader!(read_semantic_role, UiSemanticRole, "group, text, text_input, button, or status", {
     "group" => UiSemanticRole::Group, "text" => UiSemanticRole::Text,
+    "text_input" => UiSemanticRole::TextInput,
     "button" => UiSemanticRole::Button, "status" => UiSemanticRole::Status,
 });
 
@@ -1309,6 +1310,7 @@ const fn semantic_role_name(value: UiSemanticRole) -> &'static str {
     match value {
         UiSemanticRole::Group => "group",
         UiSemanticRole::Text => "text",
+        UiSemanticRole::TextInput => "text_input",
         UiSemanticRole::Button => "button",
         UiSemanticRole::Status => "status",
     }

@@ -7,6 +7,7 @@ external callers of Nara's public APIs; they are not engine modules or user-faci
 |---|---|
 | [Module consumers](module-consumer/README.md) | Direct Scene, schema, filesystem, material and Editor panel use, plus the public project-workflow facade and compiled source asset domains. |
 | [UI module consumer](ui-module-consumer/README.md) | Text, UI compilation and widgets without the engine's ECS, Scene, window or renderer graph. |
+| [Motion execution](motion-execution/README.md) | Independently authored animation, real Rapier physics, schedule comparisons, bounded prediction/offline PCM effects and authored collision derivation. These are test integrations, not production domain plugins. |
 | [Product slices](product-slices/) | Focused root-facade feature combinations. |
 
 Consumer workspaces own their manifests and lockfiles, with explicit local dependencies and no

@@ -174,6 +174,107 @@ fn custom_font_shapes_and_plans_nonblank_glyphs() {
 }
 
 #[test]
+fn finite_fallback_fonts_keep_exact_glyph_masks_in_the_owned_atlas() {
+    let primary = bundled_font_face().unwrap();
+    let fallback = FontFace::from_bytes(
+        include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        0,
+    )
+    .unwrap();
+    let faces = vec![primary.clone(), fallback.clone()];
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(
+                UiRootKey::runtime("fallback-packet", "root").unwrap(),
+                UiLayer::Base,
+                UiStyle::fill(),
+            )
+            .with_child(text_node("label", "A\u{2229}", None)),
+        )
+        .build()
+        .unwrap();
+    let environment =
+        UiEnvironment::new(UiSurfaceId::new(71).unwrap(), 320.0, 180.0, 1.0, 1, 1, 1, 1).unwrap();
+    let frame = UiCompiler::with_fonts(faces.clone(), Default::default())
+        .unwrap()
+        .compile(&snapshot, environment, UiTheme::default())
+        .unwrap();
+    let keys = frame
+        .paint()
+        .iter()
+        .filter_map(|primitive| {
+            if let UiPaintPrimitive::Text { layout, .. } = primitive {
+                Some(layout.glyphs().iter().map(|glyph| glyph.key()))
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[0].face_id(), primary.id());
+    assert_eq!(keys[1].face_id(), fallback.id());
+    let mut planner = UiPresentationPlanner::with_fonts(faces.clone(), Default::default()).unwrap();
+    let packet = planner
+        .plan(
+            Arc::clone(&frame),
+            RenderTarget::Window(WindowId::PRIMARY),
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    let glyphs = packet
+        .primitives()
+        .iter()
+        .filter_map(|primitive| {
+            if let UiPacketPrimitive::Glyph {
+                page_index,
+                uv,
+                rect,
+                ..
+            } = primitive
+            {
+                Some((*page_index, *uv, *rect))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(glyphs.len(), keys.len());
+    let mut rasterizer = TextEngine::with_fonts(faces, Default::default()).unwrap();
+    for (key, (page_index, uv, rect)) in keys.into_iter().zip(glyphs) {
+        let expected = rasterizer.rasterize(key).unwrap();
+        assert!(expected.mask().iter().any(|coverage| *coverage > 0));
+        assert_eq!(rect.width(), expected.width());
+        assert_eq!(rect.height(), expected.height());
+        let page = &packet.glyph_pages()[usize::from(page_index)];
+        let left = (uv.top_left()[0] * page.width() as f32).round() as usize;
+        let top = (uv.top_left()[1] * page.height() as f32).round() as usize;
+        for row in 0..expected.height() as usize {
+            let page_start = (top + row) * page.width() as usize + left;
+            let mask_start = row * expected.width() as usize;
+            assert_eq!(
+                &page.pixels()[page_start..page_start + expected.width() as usize],
+                &expected.mask()[mask_start..mask_start + expected.width() as usize],
+            );
+        }
+    }
+    let original_pixels = packet.glyph_pages()[0].pixels().to_vec();
+    let mut incomplete =
+        UiPresentationPlanner::with_font(primary.clone(), Default::default()).unwrap();
+    assert!(matches!(
+        incomplete.plan(frame, RenderTarget::Window(WindowId::PRIMARY), &UiPreparedImages::default()),
+        Err(UiPresentationContentError::FontFaceMismatch { actual, .. }) if actual == fallback.id()
+    ));
+    assert!(
+        incomplete
+            .planned(RenderTarget::Window(WindowId::PRIMARY))
+            .is_none()
+    );
+    drop(planner);
+    assert_eq!(packet.glyph_pages()[0].pixels(), original_pixels);
+}
+
+#[test]
 fn foreign_font_is_rejected_before_atlas_mutation_and_last_good_replay_survives() {
     let custom = FontFace::from_bytes(
         include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),

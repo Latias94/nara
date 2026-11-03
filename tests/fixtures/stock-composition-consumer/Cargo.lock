@@ -2289,6 +2289,7 @@ name = "nara_text"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "icu_segmenter",
  "parley",
  "swash",
  "thiserror 2.0.18",
@@ -2389,6 +2390,7 @@ dependencies = [
 name = "nara_ui_widgets"
 version = "0.1.0"
 dependencies = [
+ "nara_text",
  "nara_ui_kernel",
  "thiserror 2.0.18",
 ]

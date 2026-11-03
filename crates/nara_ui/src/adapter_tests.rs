@@ -83,6 +83,34 @@ fn dynamic_text_content_preserves_authored_adapter_presentation() {
     assert_eq!(projected.semantic_text(), authored.semantic_text());
 }
 
+#[test]
+fn persistent_text_input_semantics_round_trip_empty_values_with_the_exact_role() {
+    let authored = UiSemantics::new(UiSemanticRole::TextInput, "Name")
+        .unwrap()
+        .with_value("")
+        .unwrap();
+    let registry = frozen_ui_registry();
+    let mut world = World::new();
+    let entity = world.spawn(authored.clone()).id();
+    let encoded = registry
+        .encode_component(&ComponentTypeId::new("nara.ui.UiSemantics"), &world, entity)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        encoded.field("role").unwrap(),
+        &ComponentValue::String("text_input".into())
+    );
+    assert_eq!(
+        encoded.field("has_value").unwrap(),
+        &ComponentValue::Bool(true)
+    );
+    assert_eq!(
+        encoded.field("value").unwrap(),
+        &ComponentValue::String(String::new())
+    );
+    assert_eq!(crate::codec::decode_semantics(&encoded).unwrap(), authored);
+}
+
 #[derive(Debug, Default, Resource)]
 struct CapturedGameplayPhases(Vec<ActionPhase>);
 

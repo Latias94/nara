@@ -9,6 +9,11 @@ independent Image consumer compiles an opaque Product-shaped name and two provid
 tokens into a retained frame without importing Asset, ECS or renderer types. It creates no native
 window or GPU surface and cannot manufacture presentation authority or persistent asset bindings.
 
+The editable-text consumer creates a bounded field through ordinary public text/widget APIs,
+cancels preedit without changing its committed buffer, rejects input from an earlier focus,
+performs local Undo/Redo and compiles the exact committed semantic value. It does not admit native
+focus or qualify an Inspector, OS input-method delivery or platform accessibility.
+
 The separate Cargo workspace and lockfile keep this dependency graph independent of the engine
 and the broader module-consumer project. Building alongside their ECS, Scene or renderer
 dependencies would weaken this isolation check.

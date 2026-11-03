@@ -68,6 +68,7 @@ impl UiInteraction {
 pub enum UiSemanticRole {
     Group,
     Text,
+    TextInput,
     Button,
     Status,
 }
@@ -86,6 +87,9 @@ pub struct UiSemantics {
 impl UiSemantics {
     pub fn new(role: UiSemanticRole, name: impl Into<String>) -> Result<Self, UiAuthoringError> {
         let name = name.into();
+        if name.is_empty() {
+            return Err(UiAuthoringError::EmptySemanticText { field: "name" });
+        }
         validate_semantic_text("name", &name)?;
         Ok(Self {
             role,
@@ -602,9 +606,6 @@ fn validate_root(root: &UiRoot, limits: UiLimits) -> Result<(), UiRootDiagnostic
 }
 
 fn validate_semantic_text(field: &'static str, value: &str) -> Result<(), UiAuthoringError> {
-    if value.is_empty() {
-        return Err(UiAuthoringError::EmptySemanticText { field });
-    }
     if value.len() > 16 * 1024 {
         return Err(UiAuthoringError::SemanticTextLimitExceeded {
             field,

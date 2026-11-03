@@ -49,8 +49,15 @@ impl UiPresentationPlanner {
         face: FontFace,
         limits: UiPresentationLimits,
     ) -> Result<Self, UiPresentationPlannerCreateError> {
+        Self::with_fonts(vec![face], limits)
+    }
+
+    pub fn with_fonts(
+        faces: Vec<FontFace>,
+        limits: UiPresentationLimits,
+    ) -> Result<Self, UiPresentationPlannerCreateError> {
         let limits = limits.validate()?;
-        let text = TextEngine::new(face, TextLimits::default())?;
+        let text = TextEngine::with_fonts(faces, TextLimits::default())?;
         Ok(Self {
             limits,
             text,
@@ -97,7 +104,7 @@ impl UiPresentationPlanner {
         if let Some(key) = preflight
             .requested_glyphs()
             .iter()
-            .find(|key| key.face_id() != self.text.font_face_id())
+            .find(|key| !self.text.contains_font(key.face_id()))
         {
             return Err(UiPresentationContentError::FontFaceMismatch {
                 expected: self.text.font_face_id(),

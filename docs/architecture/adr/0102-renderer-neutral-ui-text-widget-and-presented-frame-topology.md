@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-04
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -251,14 +251,22 @@ flowchart LR
   the independent Bevy/Godot comparison and the existing padded layout-gallery consumer. Its
   successor evidence must include auto-height Flow/Absolute layout, packet geometry and the
   amended neutral gallery before the shared change is closed.
-- One immutable admitted `FontFace` is the source for both compiler shaping and presentation
-  rasterization. Code-configured UI and presentation plugins capture that face in their frozen
-  configuration identity; the bundled face is their convenience default. A planner rejects glyph
-  runs from a different face before staged atlas or packet publication, retaining its last-good
-  output. Packets remain resource-complete and do not consult a mutable font registry at submission.
+- One explicit finite ordered set of immutable admitted font faces supplies compiler shaping and
+  presentation rasterization. The bundled single-face configuration remains the convenience
+  default. Each glyph retains its actual selected face; a planner rejects any face outside its
+  admitted set before staged atlas or packet publication, retaining its last-good output. Packets
+  remain resource-complete and do not consult a mutable font registry at submission.
 - Kernel routing owns capture/target/bubble, pointer capture, focus scopes, modal inertness,
   navigation, semantics, and geometry-coupled session state. `nara_ui_widgets` owns controlled
   behavior reducers and emits typed intents only.
+- The R11 editable-text prerequisite adds a bounded single-line field buffer with a distinct live
+  key per incarnation and a non-reused token per admitted text-input focus lifetime. Compatible
+  redraws preserve that owner. Removal/recreation, blur or disabled input revokes the prior token;
+  enabling an otherwise retained logical focus establishes a new input token. Preedit never enters
+  the committed value or document history. Buffer Undo/Redo is local; the product adapter alone
+  maps explicit Apply/Discard and exact document results. Signed finite position offsets permit
+  clipped horizontal text scrolling, while sizes and padding remain nonnegative. Paint, pointer
+  coordinates and candidate exclusion geometry share the field's resolved text origin.
 - Focus identity is distinct from current navigation and activation eligibility. A stable focused
   key that remains present in its active modal scope survives a temporary disabled state, while
   enabled-only navigation skips it and pointer, keyboard, gamepad, and semantic activation reject
@@ -389,8 +397,9 @@ and a narrow public API.
 - Frame-local UI action buffers and silent window/seat route replacement are removed. Slow intent
   consumers produce typed backpressure; they cannot lose entries or leak rejected UI input into
   gameplay.
-- Editable text, rich spans, localization, project fonts, virtual collections, docking, and native
-  multi-window Editor policy remain deferred.
+- The bounded text/field owners do not qualify a complete editable Editor, native IME candidate
+  behavior or text accessibility. Rich spans, localization, project font assets, virtual collections,
+  docking and native multi-window Editor policy retain their separate gates.
 - Headless interaction and presentation conformance requires an explicit first-party test presenter.
   Its doc-hidden authority stays local to the conformance executable and is not ordinary consumer
   Interface. A compiled frame by itself is not submission evidence, and a receipt never attests

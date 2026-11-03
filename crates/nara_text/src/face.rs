@@ -1,9 +1,11 @@
 use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
-use ttf_parser::{Face, name_id};
+use ttf_parser::{Face, FaceParsingError, name_id};
 
-pub const MAX_FONT_CONTAINER_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_FONT_CONTAINER_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_FONT_FACES: usize = 8;
+pub const MAX_TOTAL_FONT_BYTES: usize = 64 * 1024 * 1024;
 pub const BUNDLED_FONT_BYTE_LEN: usize = 438_028;
 pub const BUNDLED_FONT_SHA256: &str =
     "12b632bf96ea4e760691f345ef7743c549ca387a018681e11094fcf6146244f1";
@@ -23,7 +25,7 @@ impl FontFaceId {
     }
 }
 
-/// Validated single-face font data owned by the text module.
+/// One validated face selected from an immutable font container.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FontFace {
     bytes: Arc<Vec<u8>>,
@@ -34,6 +36,11 @@ pub struct FontFace {
 
 impl FontFace {
     pub fn from_bytes(bytes: Vec<u8>, face_index: u32) -> Result<Self, FontFaceError> {
+        Self::from_shared_bytes(Arc::new(bytes), face_index)
+    }
+
+    /// Admits one face while allowing several selections to share the same container.
+    pub fn from_shared_bytes(bytes: Arc<Vec<u8>>, face_index: u32) -> Result<Self, FontFaceError> {
         if bytes.len() > MAX_FONT_CONTAINER_BYTES {
             return Err(FontFaceError::ContainerTooLarge {
                 actual: bytes.len(),
@@ -43,16 +50,23 @@ impl FontFace {
         if bytes.is_empty() {
             return Err(FontFaceError::Empty);
         }
-        if face_index != 0 {
-            return Err(FontFaceError::UnsupportedFaceIndex {
+        if let Some(face_count) = ttf_parser::fonts_in_collection(&bytes) {
+            let table_bytes = usize::try_from(face_count)
+                .ok()
+                .and_then(|count| count.checked_mul(4))
+                .and_then(|length| length.checked_add(12))
+                .ok_or(FontFaceError::Malformed)?;
+            if table_bytes > bytes.len() {
+                return Err(FontFaceError::Malformed);
+            }
+        }
+        let parsed = Face::parse(&bytes, face_index).map_err(|error| match error {
+            FaceParsingError::FaceIndexOutOfBounds => FontFaceError::FaceIndexOutOfBounds {
                 requested: face_index,
-            });
-        }
-        if let Some(faces) = ttf_parser::fonts_in_collection(&bytes) {
-            return Err(FontFaceError::CollectionUnsupported { faces });
-        }
-
-        let parsed = Face::parse(&bytes, face_index).map_err(|_| FontFaceError::Malformed)?;
+                faces: ttf_parser::fonts_in_collection(&bytes).unwrap_or(1),
+            },
+            _ => FontFaceError::Malformed,
+        })?;
         let family_name = preferred_family_name(&parsed).ok_or(FontFaceError::MissingFamilyName)?;
         let mut hasher = blake3::Hasher::new();
         hasher.update(&bytes);
@@ -60,7 +74,7 @@ impl FontFace {
         let id = FontFaceId(*hasher.finalize().as_bytes());
 
         Ok(Self {
-            bytes: Arc::new(bytes),
+            bytes,
             face_index,
             family_name,
             id,
@@ -104,10 +118,8 @@ pub enum FontFaceError {
     Malformed,
     #[error("font container has no Unicode family name")]
     MissingFamilyName,
-    #[error("font face index {requested} is unsupported; only index zero is admitted")]
-    UnsupportedFaceIndex { requested: u32 },
-    #[error("font collections are unsupported ({faces} faces)")]
-    CollectionUnsupported { faces: u32 },
+    #[error("font face index {requested} is outside a container with {faces} faces")]
+    FaceIndexOutOfBounds { requested: u32, faces: u32 },
     #[error("font container has {actual} bytes; maximum is {maximum}")]
     ContainerTooLarge { actual: usize, maximum: usize },
 }

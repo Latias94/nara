@@ -1,5 +1,5 @@
 use nara_text::{
-    TextAlignment, TextDiagnostic, TextDirection, TextEngine, TextEngineCreateError,
+    FontFace, TextAlignment, TextDiagnostic, TextDirection, TextEngine, TextEngineCreateError,
     TextLayoutError, TextLayoutRequest, TextLimits, bundled_font_face,
 };
 
@@ -66,6 +66,158 @@ fn missing_glyphs_are_diagnostic_not_silent_ascii_substitution() {
             .any(|diagnostic| matches!(diagnostic, TextDiagnostic::MissingGlyph { scalar: '🧪' }))
     );
     assert!(!layout.glyphs().is_empty());
+}
+
+#[test]
+fn explicit_fallback_uses_its_actual_face_and_glyph_in_the_shaped_output() {
+    let primary_bytes = include_bytes!("../assets/FiraSans-Bold.ttf");
+    let fallback_bytes = include_bytes!("fixtures/FiraMono-Medium.ttf");
+    let parsed_primary = ttf_parser::Face::parse(primary_bytes, 0).unwrap();
+    let parsed_fallback = ttf_parser::Face::parse(fallback_bytes, 0).unwrap();
+    assert!(parsed_primary.glyph_index('\u{2229}').is_none());
+    let expected_primary_glyph = parsed_primary.glyph_index('A').unwrap().0;
+    let expected_fallback_glyph = parsed_fallback.glyph_index('\u{2229}').unwrap().0;
+    let primary = bundled_font_face().unwrap();
+    let fallback = FontFace::from_bytes(fallback_bytes.to_vec(), 0).unwrap();
+    let mut engine = TextEngine::with_fonts(
+        vec![primary.clone(), fallback.clone()],
+        TextLimits::default(),
+    )
+    .unwrap();
+
+    let request = TextLayoutRequest::new("A\u{2229}", 24.0).unwrap();
+    let layout = engine.layout(&request).unwrap();
+    assert_eq!(layout.glyphs().len(), 2);
+    assert_eq!(layout.glyphs()[0].key().face_id(), primary.id());
+    assert_eq!(layout.glyphs()[0].key().glyph_id(), expected_primary_glyph);
+    assert_eq!(layout.glyphs()[1].key().face_id(), fallback.id());
+    assert_eq!(layout.glyphs()[1].key().glyph_id(), expected_fallback_glyph);
+    assert!(layout.diagnostics().is_empty());
+    assert_eq!(engine.layout(&request).unwrap(), layout);
+}
+
+#[test]
+fn explicit_order_controls_shared_coverage_and_both_faces_can_supply_fallbacks() {
+    let fallback_bytes = include_bytes!("fixtures/FiraMono-Medium.ttf");
+    assert!(
+        ttf_parser::Face::parse(fallback_bytes, 0)
+            .unwrap()
+            .glyph_index('\u{0180}')
+            .is_none()
+    );
+    let primary = bundled_font_face().unwrap();
+    let fallback = FontFace::from_bytes(fallback_bytes.to_vec(), 0).unwrap();
+    let mut engine = TextEngine::with_fonts(
+        vec![fallback.clone(), primary.clone()],
+        TextLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(engine.font_face_id(), fallback.id());
+    let layout = engine
+        .layout(&TextLayoutRequest::new("A\u{0180}", 24.0).unwrap())
+        .unwrap();
+    assert_eq!(layout.glyphs().len(), 2);
+    assert_eq!(layout.glyphs()[0].key().face_id(), fallback.id());
+    assert_eq!(layout.glyphs()[1].key().face_id(), primary.id());
+    assert!(layout.diagnostics().is_empty());
+}
+
+#[test]
+fn multi_face_diagnostics_and_caller_glyph_allowances_remain_bounded() {
+    let primary = bundled_font_face().unwrap();
+    let fallback =
+        FontFace::from_bytes(include_bytes!("fixtures/FiraMono-Medium.ttf").to_vec(), 0).unwrap();
+    let limits = TextLimits {
+        max_diagnostics: 1,
+        max_glyphs: 2,
+        ..TextLimits::default()
+    };
+    let mut engine = TextEngine::with_fonts(vec![primary, fallback], limits).unwrap();
+    let diagnostics = engine
+        .layout(&TextLayoutRequest::new("🧪🦀", 24.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        diagnostics.diagnostics(),
+        &[TextDiagnostic::DiagnosticsTruncated { omitted: 2 }]
+    );
+    let request = TextLayoutRequest::new("A\u{2229}", 24.0).unwrap();
+    assert!(matches!(
+        engine.layout_with_glyph_limit(&request, 1),
+        Err(TextLayoutError::GlyphLimitExceeded {
+            actual: 2,
+            maximum: 1
+        })
+    ));
+    assert_eq!(engine.layout(&request).unwrap().glyphs().len(), 2);
+    assert!(matches!(
+        engine.layout_with_glyph_limit(
+            &TextLayoutRequest::new("A\u{2229}B", 24.0).unwrap(),
+            usize::MAX,
+        ),
+        Err(TextLayoutError::GlyphLimitExceeded {
+            actual: 3,
+            maximum: 2
+        })
+    ));
+    assert_eq!(engine.layout(&request).unwrap().glyphs().len(), 2);
+}
+
+#[test]
+fn partial_grapheme_coverage_cannot_hide_the_selected_faces_actual_missing_glyph() {
+    let primary = bundled_font_face().unwrap();
+    let fallback =
+        FontFace::from_bytes(include_bytes!("fixtures/FiraMono-Medium.ttf").to_vec(), 0).unwrap();
+    for (text, expected) in [
+        ("\u{0180}\u{0314}", 0..4),
+        ("\u{1E00} \u{0180}\u{0314}", 4..8),
+        ("\u{1E00}\u{0314}", 0..5),
+        ("\u{05D0}\u{05B0}", 0..4),
+    ] {
+        let fonts = if text == "\u{0180}\u{0314}" {
+            vec![primary.clone(), fallback.clone()]
+        } else { vec![primary.clone()] };
+        let mut engine = TextEngine::with_fonts(fonts, TextLimits::default()).unwrap();
+        let layout = engine
+            .layout(&TextLayoutRequest::new(text, 24.0).unwrap())
+            .unwrap();
+        assert!(
+            layout
+                .glyphs()
+                .iter()
+                .all(|glyph| glyph.key().face_id() == primary.id())
+        );
+        assert!(
+            layout
+                .glyphs()
+                .iter()
+                .any(|glyph| glyph.key().glyph_id() == 0)
+        );
+        assert_eq!(
+            layout.diagnostics(),
+            &[TextDiagnostic::MissingGlyphSequence {
+                text_range: expected
+            }]
+        );
+    }
+}
+
+#[test]
+fn excessive_graphemes_refuse_before_shaping_and_a_later_layout_recovers() {
+    let mut engine = engine(TextLimits::default());
+    for scalar_count in [33, 256] {
+        let text = format!("a{}", "\u{301}".repeat(scalar_count - 1));
+        assert!(
+            matches!(engine.layout(&TextLayoutRequest::new(text, 18.0).unwrap()),
+            Err(TextLayoutError::GraphemeLimitExceeded { actual, maximum: 32, .. }) if actual == scalar_count)
+        );
+    }
+    assert!(
+        !engine
+            .layout(&TextLayoutRequest::new("recovered", 18.0).unwrap())
+            .unwrap()
+            .glyphs()
+            .is_empty()
+    );
 }
 
 #[test]

@@ -2500,6 +2500,7 @@ name = "nara_text"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "icu_segmenter",
  "parley",
  "sha2",
  "swash",

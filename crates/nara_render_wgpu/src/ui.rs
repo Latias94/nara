@@ -547,11 +547,11 @@ mod tests {
     use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, PreparedImageSnapshot,
     };
-    use nara_text::{FontFace, bundled_font_face};
+    use nara_text::{FontFace, TextDiagnostic, TextEngine, TextLayoutRequest, bundled_font_face};
     use nara_ui_kernel::{
         UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
-        UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiRoot, UiRootKey,
-        UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
+        UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive,
+        UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiVisual,
     };
     use nara_window::WindowId;
 
@@ -849,6 +849,216 @@ mod tests {
             .count();
         assert!(nonblank > 0);
         assert!(nonblank < (READBACK_EXTENT * READBACK_EXTENT) as usize);
+    }
+
+    #[test]
+    fn fallback_font_packet_retains_clipped_gpu_pixels_matching_single_face_rasters() {
+        let primary = bundled_font_face().unwrap();
+        let fallback = FontFace::from_bytes(
+            include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            0,
+        )
+        .unwrap();
+        let faces = vec![primary.clone(), fallback.clone()];
+        let node = UiNode::new(UiStyle::absolute(4.0, 4.0, 24.0, 40.0))
+            .with_key(UiLocalKey::runtime("wgpu-fallback-font", "label").unwrap())
+            .with_text(
+                UiText::new("A\u{2229}", 24.0)
+                    .unwrap()
+                    .with_brush(UiBrush::Solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)))
+                    .with_overflow(UiTextOverflow::Clip),
+            );
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("wgpu-fallback-font", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(node),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            READBACK_EXTENT as f32,
+            READBACK_EXTENT as f32,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let frame = UiCompiler::with_fonts(faces.clone(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let layout = frame
+            .paint()
+            .iter()
+            .find_map(|primitive| match primitive {
+                UiPaintPrimitive::Text { layout, .. } => Some(layout),
+                UiPaintPrimitive::Rect { .. } => None,
+            })
+            .expect("the mixed-font frame must retain its shaped text");
+        assert!(layout.diagnostics().is_empty());
+        let keys = layout
+            .glyphs()
+            .iter()
+            .map(|glyph| glyph.key())
+            .collect::<Vec<_>>();
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].face_id(), primary.id());
+        assert_eq!(keys[1].face_id(), fallback.id());
+
+        let mut primary_engine = TextEngine::new(primary.clone(), Default::default()).unwrap();
+        let mut fallback_engine = TextEngine::new(fallback.clone(), Default::default()).unwrap();
+        let primary_layout = primary_engine
+            .layout(&TextLayoutRequest::new("A", 24.0).unwrap())
+            .unwrap();
+        let fallback_layout = fallback_engine
+            .layout(&TextLayoutRequest::new("\u{2229}", 24.0).unwrap())
+            .unwrap();
+        assert_eq!(
+            keys[0].glyph_id(),
+            primary_layout.glyphs()[0].key().glyph_id(),
+        );
+        assert_eq!(
+            keys[1].glyph_id(),
+            fallback_layout.glyphs()[0].key().glyph_id(),
+        );
+        assert_ne!(keys[1].glyph_id(), 0);
+        let rasters = [
+            primary_engine.rasterize(keys[0]).unwrap(),
+            fallback_engine.rasterize(keys[1]).unwrap(),
+        ];
+        drop(primary_engine);
+        drop(fallback_engine);
+
+        let primary_only_frame = UiCompiler::new(primary.clone(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let missing_layout = primary_only_frame
+            .paint()
+            .iter()
+            .find_map(|primitive| match primitive {
+                UiPaintPrimitive::Text { layout, .. } => Some(layout),
+                UiPaintPrimitive::Rect { .. } => None,
+            })
+            .expect("the primary-only control must retain its missing-glyph layout");
+        assert_eq!(missing_layout.glyphs().len(), 2);
+        assert_eq!(missing_layout.glyphs()[1].key().face_id(), primary.id());
+        assert_eq!(missing_layout.glyphs()[1].key().glyph_id(), 0);
+        assert_eq!(
+            missing_layout.diagnostics(),
+            &[TextDiagnostic::MissingGlyph { scalar: '\u{2229}' }],
+        );
+        let target = RenderTarget::Window(WindowId::PRIMARY);
+        let primary_only_packet =
+            nara_ui_render::UiPresentationPlanner::with_font(primary, Default::default())
+                .unwrap()
+                .plan(primary_only_frame, target, &Default::default())
+                .unwrap();
+        let packet = nara_ui_render::UiPresentationPlanner::with_fonts(faces, Default::default())
+            .unwrap()
+            .plan(frame, target, &Default::default())
+            .unwrap();
+        let glyphs = packet
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                UiPacketPrimitive::Glyph { rect, clip, .. } => {
+                    Some((*rect, clip.expect("text clipping must reach the packet")))
+                }
+                UiPacketPrimitive::Rect { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(glyphs.len(), 2);
+        assert!(glyphs[0].0.max_x() <= glyphs[1].0.min_x());
+        let text_clip = UiPacketRect::new(4, 4, 28, 44).unwrap();
+        let mut expected_alpha = vec![0_u8; (READBACK_EXTENT * READBACK_EXTENT) as usize];
+        let mut visible_ink = [0_usize; 2];
+        let mut clipped_ink = [0_usize; 2];
+        for (index, ((rect, clip), raster)) in glyphs.iter().zip(&rasters).enumerate() {
+            assert_eq!(
+                (rect.width(), rect.height()),
+                (raster.width(), raster.height()),
+            );
+            assert!(rect.min_x() >= 0 && rect.min_y() >= 0);
+            assert!(rect.max_x() <= READBACK_EXTENT as i32);
+            assert!(rect.max_y() <= READBACK_EXTENT as i32);
+            assert_eq!(rect.intersect(text_clip), Some(*clip));
+            for row in 0..raster.height() {
+                for column in 0..raster.width() {
+                    let x = rect.min_x() + column as i32;
+                    let y = rect.min_y() + row as i32;
+                    let alpha = raster.mask()[(row * raster.width() + column) as usize];
+                    if (clip.min_x()..clip.max_x()).contains(&x)
+                        && (clip.min_y()..clip.max_y()).contains(&y)
+                    {
+                        expected_alpha[(y as u32 * READBACK_EXTENT + x as u32) as usize] = alpha;
+                        visible_ink[index] += usize::from(alpha != 0);
+                    } else {
+                        clipped_ink[index] += usize::from(alpha != 0);
+                    }
+                }
+            }
+        }
+        assert!(
+            visible_ink[0] > 0,
+            "the primary A must contribute visible ink"
+        );
+        assert!(
+            visible_ink[1] > 0,
+            "the fallback intersection must contribute visible ink",
+        );
+        assert!(
+            clipped_ink[1] > 0,
+            "clipping must remove actual fallback ink",
+        );
+
+        let batches = collect_ui_quad_batches(
+            &[packet],
+            target,
+            Some(WindowId::PRIMARY),
+            readback_viewport(),
+        )
+        .unwrap();
+        let primary_only_batches = collect_ui_quad_batches(
+            &[primary_only_packet],
+            target,
+            Some(WindowId::PRIMARY),
+            readback_viewport(),
+        )
+        .unwrap();
+        let pixels = render_batches_to_rgba(&batches).unwrap();
+        let primary_only_pixels = render_batches_to_rgba(&primary_only_batches).unwrap();
+        for (index, (pixel, expected)) in pixels
+            .chunks_exact(READBACK_BYTES_PER_PIXEL as usize)
+            .zip(expected_alpha)
+            .enumerate()
+        {
+            assert!(
+                pixel[3].abs_diff(expected) <= 1,
+                "retained GPU alpha at ({}, {}) was {}, expected single-face coverage {}",
+                index % READBACK_EXTENT as usize,
+                index / READBACK_EXTENT as usize,
+                pixel[3],
+                expected,
+            );
+        }
+        let fallback_clip = glyphs[1].1;
+        assert!(
+            (fallback_clip.min_y()..fallback_clip.max_y()).any(|y| {
+                (fallback_clip.min_x()..fallback_clip.max_x()).any(|x| {
+                    readback_pixel(&pixels, x as u32, y as u32)[3]
+                        != readback_pixel(&primary_only_pixels, x as u32, y as u32)[3]
+                })
+            }),
+            "fallback-region GPU pixels must differ from the primary-only missing glyph",
+        );
     }
 
     #[test]

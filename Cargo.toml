@@ -112,6 +112,7 @@ glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
+icu_segmenter = { version = "2.2", default-features = false, features = ["compiled_data"] }
 notify = "8.2.0"
 parley = { version = "=0.11.0", default-features = false, features = ["std"] }
 taffy = { version = "=0.10.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "content_size"] }

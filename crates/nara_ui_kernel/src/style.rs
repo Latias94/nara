@@ -60,6 +60,17 @@ impl UiDimension {
             }
         }
     }
+
+    fn validate_offset(self) -> Result<(), UiStyleError> {
+        match self {
+            Self::Px(value) if value.is_finite() => Ok(()),
+            Self::Px(value) => Err(UiStyleError::InvalidFiniteValue {
+                field: "offset",
+                value,
+            }),
+            _ => self.validate(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -406,8 +417,8 @@ impl UiStyle {
     pub(crate) fn validate(self) -> Result<(), UiStyleError> {
         self.width.validate()?;
         self.height.validate()?;
-        self.left.validate()?;
-        self.top.validate()?;
+        self.left.validate_offset()?;
+        self.top.validate_offset()?;
         validate_non_negative("gap", self.gap)?;
         self.padding.validate()?;
         validate_non_negative("flex_grow", self.flex_grow)?;

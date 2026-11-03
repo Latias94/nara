@@ -6,11 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+nara_text.workspace = true
 nara_ui_kernel.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-nara_text.workspace = true
 
 [features]
 default = []

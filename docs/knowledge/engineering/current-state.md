@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "47bf1946321e3205bc72c9b8d5b50bc38d3f034cac1cc97e322ba369826c5ea6"
+source_fingerprint: "01e54bc9f4da35338f0521a7453e0b1da6a613920e0537336bd1272b3347e107"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "47bf1946321e3205bc72c9b8d5b50bc38d3f034cac1cc97e322ba369826
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `47bf1946321e3205bc72c9b8d5b50bc38d3f034cac1cc97e322ba369826c5ea6`
-- Immutable records: 1238
+- Source fingerprint: `01e54bc9f4da35338f0521a7453e0b1da6a613920e0537336bd1272b3347e107`
+- Immutable records: 1239
 - Open lane heads: 2
 
 # Open Registrations
@@ -23,6 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Bounded editable text and exact fallback glyph ownership qualify the shared Inspector prerequisite](verification/2026-11/2026-11-03T182954Z-bounded-editable-text-and-exact-fallback-glyph-ownership-qualify-the-shared-inspector-prerequisite-9047e27973f9491e9c6cb56b5c49e351.md) - Parley and ICU editing, exact admitted faces, preedit restoration, focus lifetimes, neutral consumers and actual GPU masks qualify the text prerequisite while the complete Inspector remains open.
 - **Verification Evidence**: [Authored collision definitions retain exact source attribution through real Rapier derivation and retirement](verification/2026-11/2026-11-03T170523Z-authored-collision-definitions-retain-exact-source-attribution-through-real-rapier-derivation-and-retirement-b550d8d09ee34b72adfa1d18262eec6a.md) - Public exact Schema and Scene editing, native collider/debug observations, full membership, mixed-input refusal and managed close qualify the finite collision workflow.
 - **Verification Evidence**: [Bounded same-World prediction and confirmed PCM effects preserve exact attempt and ancestor ownership](verification/2026-11/2026-11-03T162556Z-bounded-same-world-prediction-and-confirmed-pcm-effects-preserve-exact-attempt-and-ancestor-ownership-71be3014fb29466a8995909c5e20b8c6.md) - Complete persistent Rapier restoration, closed logical state and outcome admission, confirmed-prefix witnesses and sample-clock PCM effects qualify independently of ordinary FixedTime rollback.
 - **Verification Evidence**: [Captured semantic discontinuity preserves original motion samples and native history ownership](verification/2026-11/2026-11-03T154717Z-captured-semantic-discontinuity-preserves-original-motion-samples-and-native-history-ownership-908f52c3569b4614b9ec4274fb14c685.md) - Original lineage revision fences late captures; real borrowed motion, captured shader clocks, selective two-View history and original submission retirement pass on DX12.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [UE6 research verified and live extraction confirmation retains concrete publication ownership](progress/2026-11/2026-11-03T073114Z-ue6-research-verified-and-live-extraction-confirmation-retains-concrete-publication-ownership-f82e70da88ae4faea5fc3af079080c33.md) - UE6 findings and prediction design committed; live Session publication integration awaits current real regression results.
 - **Work Progress**: [Session extraction captures real reviews with shared authoring maintenance and concrete Play operation identity](progress/2026-11/2026-11-03T065327Z-session-extraction-captures-real-reviews-with-shared-authoring-maintenance-and-concrete-play-operation-identity-0752d732f6ec4fa4b8af57788cd92062.md) - Unpublished Session/Application integration, original budget causes and physical-return cancellation; confirmation/publication remains open.
 - **Verification Evidence**: [Original extraction destinations bind before Ready and finish without a resumable publication cursor](verification/2026-11/2026-11-03T060356Z-original-extraction-destinations-bind-before-ready-and-finish-without-a-resumable-publication-cursor-3aee2a2f035e45008b135733cea1d373.md) - Private live Workspace and original Host installation, exact refusal restoration and scoped paths; complete Session/public extraction remains open.
-- **Work Progress**: [UE6 review tightens prediction boundaries while extraction installation preserves exact owners](progress/2026-11/2026-11-03T054042Z-ue6-review-tightens-prediction-boundaries-while-extraction-installation-preserves-exact-owners-be5b0a82c37f4807adfd3627302515fa.md) - Verified bounded Workspace and leaf ownership transfer; primary-source UE6 review and scoped R4c/R10 refinement, with complete extraction still open.
 
 # Integration Notes
 

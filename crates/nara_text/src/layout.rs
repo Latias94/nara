@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use icu_segmenter::GraphemeClusterSegmenter;
 use thiserror::Error;
 
 use crate::FontFaceId;
@@ -7,6 +8,24 @@ use crate::FontFaceId;
 const MAX_REQUEST_LOGICAL_SIZE: f32 = 256.0;
 const MAX_REQUEST_SCALE_FACTOR: f32 = 64.0;
 const MAX_REQUEST_WRAP_WIDTH: f32 = 1_000_000.0;
+pub const MAX_GRAPHEME_SCALARS: usize = 32;
+
+pub(crate) fn validate_graphemes(text: &str) -> Result<(), TextLayoutError> {
+    let mut boundaries = GraphemeClusterSegmenter::new().segment_str(text);
+    let mut start = boundaries.next().unwrap_or(0);
+    for end in boundaries {
+        let actual = text[start..end].chars().count();
+        if actual > MAX_GRAPHEME_SCALARS {
+            return Err(TextLayoutError::GraphemeLimitExceeded {
+                byte_index: start,
+                actual,
+                maximum: MAX_GRAPHEME_SCALARS,
+            });
+        }
+        start = end;
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextAlignment {
@@ -27,6 +46,7 @@ pub enum TextDirection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TextDiagnostic {
     MissingGlyph { scalar: char },
+    MissingGlyphSequence { text_range: Range<usize> },
     DiagnosticsTruncated { omitted: usize },
 }
 
@@ -299,6 +319,12 @@ pub enum TextLayoutError {
     InvalidWrapWidth { value: f32 },
     #[error("text has {actual} bytes; maximum is {maximum}")]
     TextBytesExceeded { actual: usize, maximum: usize },
+    #[error("grapheme at byte {byte_index} has {actual} scalars; maximum is {maximum}")]
+    GraphemeLimitExceeded {
+        byte_index: usize,
+        actual: usize,
+        maximum: usize,
+    },
     #[error("layout has {actual} lines; maximum is {maximum}")]
     LineLimitExceeded { actual: usize, maximum: usize },
     #[error("layout has at least {actual} glyphs; maximum is {maximum}")]
@@ -307,6 +333,8 @@ pub enum TextLayoutError {
     ScaleFactorExceeded { actual: f32, maximum: f32 },
     #[error("shaped glyph identifier {glyph_id} cannot be represented")]
     GlyphIdOutOfRange { glyph_id: u32 },
+    #[error("text layout selected a font face outside the admitted font set")]
+    UnadmittedFontFace,
     #[error("text layout produced non-finite metrics")]
     NonFiniteResult,
 }

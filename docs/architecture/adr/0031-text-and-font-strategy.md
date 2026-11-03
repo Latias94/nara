@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-18
+**Last Revised**: 2026-11-04
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0095: Plugin-Owned Specialized
 Domains and Project Configuration;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
@@ -20,14 +20,33 @@ owned end to end by the runtime UI or a concrete text plugin.
 The reference-game UI workflow now proves a bounded CPU text consumer and the need to keep text
 independent from ECS and presentation ownership. ADR 0102 therefore admits `nara_text` as a
 workspace-internal deep module for deterministic font admission, shaping, bidi/line layout,
-measurement, glyph keys/raster requests, and diagnostics. Project fonts, localization, editable
-text, world text, replaceable providers, atlas allocation, and GPU residency remain outside this
-accepted slice.
+measurement, glyph keys/raster requests, and diagnostics. Project font assets, localization,
+world text, replaceable providers, atlas allocation and GPU residency retain their separate owners
+and qualification requirements.
 
-The foundation font repair admits one caller-selected immutable `FontFace` through the existing
-compiler and presentation workflow. Shaping and rasterization retain clones of that same validated
-face owner and content identity. Bundled-font defaults remain available. This is a code-configured
-single-face workflow; it does not admit project font assets, fallback sets or a mutable font service.
+The [owned Inspector unit](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md)
+extends that seam with an explicit finite ordered set of caller-selected immutable font faces.
+Each shaped glyph identifies its actual admitted face, and rasterization uses that exact face.
+Compiler and presentation owners receive the same configuration; system discovery stays with the
+Host rather than the text module. Bounded collection containers and selected face indices are
+valid immutable font inputs. Bundled single-face defaults remain available. This admits neither
+project font assets nor a mutable global font service.
+Selected faces use their default variation instance with automatic style synthesis disabled.
+Requested variable axes and synthetic weight/slant require a separate complete raster identity.
+
+The text owner uses pinned Parley editing primitives for a bounded single-line buffer, visual
+movement, selection, hit testing and logical caret/candidate geometry. ICU segmentation constrains
+navigation and deletion to Unicode grapheme boundaries; Parley's shaped ligature components do
+not independently define editable characters. Preedit is visible but does
+not replace the committed buffer or enter its local history. Cancellation restores the original
+selection and text; confirmation replaces that selection once. A rejected operation cannot adopt
+partial buffer, layout, selection or history changes. Local buffer Undo/Redo remains independent
+of document history, and the receiving engine must retain the original font/limit configuration.
+Field focus lifetimes, platform IME/clipboard, semantic Apply and document history remain outside
+this text owner. Native candidate placement and a complete Editor workflow need their own evidence.
+Complete proposed text is checked before shaping, including a 32-scalar-per-grapheme ceiling for
+the pinned shaper. Actual selected faces and missing shaped glyphs drive bounded diagnostics;
+the union of separate face coverage cannot certify a composed cluster.
 
 ## Context
 

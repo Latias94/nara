@@ -21,7 +21,7 @@ fn bundled_face_has_exact_provenance_and_metadata() {
 }
 
 #[test]
-fn malformed_collection_and_nonzero_face_index_fail_before_publication() {
+fn malformed_containers_and_out_of_bounds_face_indices_fail_before_publication() {
     assert_eq!(
         FontFace::from_bytes(Vec::new(), 0),
         Err(FontFaceError::Empty)
@@ -36,7 +36,10 @@ fn malformed_collection_and_nonzero_face_index_fail_before_publication() {
     ));
     assert!(matches!(
         FontFace::from_bytes(BUNDLED_BYTES.to_vec(), 1),
-        Err(FontFaceError::UnsupportedFaceIndex { requested: 1 })
+        Err(FontFaceError::FaceIndexOutOfBounds {
+            requested: 1,
+            faces: 1,
+        })
     ));
 
     let mut collection = b"ttcf\0\x01\0\0\0\0\0\x02".to_vec();
@@ -44,7 +47,7 @@ fn malformed_collection_and_nonzero_face_index_fail_before_publication() {
     collection.extend_from_slice(&20_u32.to_be_bytes());
     assert!(matches!(
         FontFace::from_bytes(collection, 0),
-        Err(FontFaceError::CollectionUnsupported { faces: 2 })
+        Err(FontFaceError::Malformed)
     ));
 }
 

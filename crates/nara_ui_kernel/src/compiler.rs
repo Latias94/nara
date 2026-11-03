@@ -37,8 +37,20 @@ impl UiCompiler {
         Self::with_text_limits(font_face, limits, TextLimits::default())
     }
 
+    pub fn with_fonts(font_faces: Vec<FontFace>, limits: UiLimits) -> Result<Self, UiCompileError> {
+        Self::with_fonts_and_text_limits(font_faces, limits, TextLimits::default())
+    }
+
     pub fn with_text_limits(
         font_face: FontFace,
+        limits: UiLimits,
+        text_limits: TextLimits,
+    ) -> Result<Self, UiCompileError> {
+        Self::with_fonts_and_text_limits(vec![font_face], limits, text_limits)
+    }
+
+    pub fn with_fonts_and_text_limits(
+        font_faces: Vec<FontFace>,
         limits: UiLimits,
         text_limits: TextLimits,
     ) -> Result<Self, UiCompileError> {
@@ -46,7 +58,7 @@ impl UiCompiler {
         let max_text_work_bytes = text_limits.max_text_bytes;
         let max_shaped_glyphs = text_limits.max_glyphs;
         Ok(Self {
-            text_engine: TextEngine::new(font_face, text_limits)?,
+            text_engine: TextEngine::with_fonts(font_faces, text_limits)?,
             limits,
             max_text_work_bytes,
             max_shaped_glyphs,

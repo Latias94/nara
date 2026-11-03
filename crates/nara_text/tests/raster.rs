@@ -1,4 +1,6 @@
-use nara_text::{GlyphRasterError, TextEngine, TextLayoutRequest, TextLimits, bundled_font_face};
+use nara_text::{
+    FontFace, GlyphRasterError, TextEngine, TextLayoutRequest, TextLimits, bundled_font_face,
+};
 
 #[test]
 fn shaped_glyph_key_rasterizes_to_a_deterministic_bounded_mask() {
@@ -51,6 +53,44 @@ fn glyph_extent_limit_rejects_without_partial_mask_publication() {
     assert!(matches!(
         engine.rasterize(layout.glyphs()[0].key()),
         Err(GlyphRasterError::ExtentExceeded { maximum: 4, .. })
+    ));
+}
+
+#[test]
+fn fallback_glyphs_rasterize_with_the_exact_admitted_face_and_cache_key() {
+    let primary = bundled_font_face().unwrap();
+    let fallback =
+        FontFace::from_bytes(include_bytes!("fixtures/FiraMono-Medium.ttf").to_vec(), 0).unwrap();
+    let mut engine = TextEngine::with_fonts(
+        vec![primary.clone(), fallback.clone()],
+        TextLimits::default(),
+    )
+    .unwrap();
+    let mut primary_engine = TextEngine::new(primary.clone(), TextLimits::default()).unwrap();
+    let mut fallback_engine = TextEngine::new(fallback.clone(), TextLimits::default()).unwrap();
+    let layout = engine
+        .layout(&TextLayoutRequest::new("A\u{2229}", 24.0).unwrap())
+        .unwrap();
+    assert_eq!(layout.glyphs().len(), 2);
+    let primary_key = layout.glyphs()[0].key();
+    let fallback_key = layout.glyphs()[1].key();
+    assert_eq!(primary_key.face_id(), primary.id());
+    assert_eq!(fallback_key.face_id(), fallback.id());
+    let expected_primary = primary_engine.rasterize(primary_key).unwrap();
+    let expected_fallback = fallback_engine.rasterize(fallback_key).unwrap();
+    assert!(expected_fallback.width() > 0 && expected_fallback.height() > 0);
+    assert!(expected_fallback.mask().iter().any(|alpha| *alpha != 0));
+    for _ in 0..3 {
+        assert_eq!(engine.rasterize(primary_key).unwrap(), expected_primary);
+        assert_eq!(engine.rasterize(fallback_key).unwrap(), expected_fallback);
+    }
+    assert!(matches!(
+        primary_engine.rasterize(fallback_key),
+        Err(GlyphRasterError::FaceMismatch)
+    ));
+    assert!(matches!(
+        fallback_engine.rasterize(primary_key),
+        Err(GlyphRasterError::FaceMismatch)
     ));
 }
 

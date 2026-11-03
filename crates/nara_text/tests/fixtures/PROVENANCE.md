@@ -17,3 +17,13 @@ The original repository is `https://github.com/bevyengine/bevy`.
 The fixture uses face index zero and is distributed under the SIL Open Font License 1.1.
 It exercises a real admitted font whose content identity differs from the bundled Fira Sans face.
 Tests embed the owned fixture and do not require the reference checkout or system fonts.
+
+`MonaSans-VariableFont.ttf` is copied byte-for-byte from `assets/fonts/MonaSans-VariableFont.ttf`;
+`MonaSans-LICENSE` comes from `assets/fonts/OFL.txt` in the same pinned Bevy checkout, with one
+trailing space removed. This SIL Open Font License 1.1 fixture detects implicit style synthesis away from
+the admitted face's default variation instance.
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `MonaSans-VariableFont.ttf` | 348,692 | `ae12d1b4e32a29fd115da324e525469ce760157803ab963e22967741e72671e0` |
+| `MonaSans-LICENSE` | 4,511 | `d7fdb7f636f8dab1b6ebd9152bdfd265682587d9610c478776732ddefe8238e8` |

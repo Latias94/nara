@@ -315,7 +315,7 @@ impl WinitAccessibilityPublisher {
                 UiSemanticRole::Text | UiSemanticRole::Status => {
                     node.set_value(fact.value().unwrap_or(fact.name()));
                 }
-                UiSemanticRole::Group | UiSemanticRole::Button => {
+                UiSemanticRole::Group | UiSemanticRole::Button | UiSemanticRole::TextInput => {
                     node.set_label(fact.name());
                     if let Some(value) = fact.value() {
                         node.set_value(value);
@@ -721,6 +721,7 @@ fn map_role(role: UiSemanticRole) -> Role {
     match role {
         UiSemanticRole::Group => Role::GenericContainer,
         UiSemanticRole::Text => Role::Label,
+        UiSemanticRole::TextInput => Role::TextInput,
         UiSemanticRole::Button => Role::Button,
         UiSemanticRole::Status => Role::Status,
     }

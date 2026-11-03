@@ -33,6 +33,70 @@ fn platform_action(
 }
 
 #[test]
+fn text_input_publication_retains_label_empty_value_and_focus_without_set_value_authority() {
+    let root = UiRootKey::runtime("accessibility-test", "text-input").unwrap();
+    let local = UiLocalKey::runtime("accessibility-test", "name").unwrap();
+    let key = exact_key(&root, &local);
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root, UiLayer::Base, UiStyle::fill()).with_child(
+                UiNode::new(UiStyle::absolute(12.0, 10.0, 100.0, 36.0))
+                    .with_key(local)
+                    .with_interaction(UiInteraction::focus_target())
+                    .with_semantics(
+                        UiSemantics::new(UiSemanticRole::TextInput, "Name")
+                            .unwrap()
+                            .with_value("")
+                            .unwrap(),
+                    ),
+            ),
+        )
+        .build()
+        .unwrap();
+    let surface = UiSurfaceId::new(91).unwrap();
+    let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+        .unwrap()
+        .compile(
+            &snapshot,
+            UiEnvironment::new(surface, 240.0, 100.0, 1.5, 1, 1, 1, 1).unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal.install_surface(surface, 1).unwrap();
+    let receipt = authority.submit(&mut journal, frame, 1).unwrap();
+    let mut session = UiInteractionSession::default();
+    let route = UiRouteStamp::from_receipt(receipt);
+    session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::FocusTarget {
+                seat: UiSeatId::PRIMARY,
+                target: key,
+            },
+        )
+        .unwrap();
+    let semantics = session
+        .semantic_snapshot(&journal, route, UiSeatId::PRIMARY)
+        .unwrap();
+    let mut publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+    publisher.publish_update(&semantics).unwrap();
+    let update = publisher.committed_update().unwrap().accesskit_update();
+    let (node_id, node) = update
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Name"))
+        .unwrap();
+    assert_eq!(node.role(), Role::TextInput);
+    assert_eq!(node.value(), Some(""));
+    assert_eq!(update.focus, *node_id);
+    assert!(node.supports_action(Action::Focus));
+    assert!(!node.supports_action(Action::SetValue));
+}
+
+#[test]
 fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     let base_root = UiRootKey::runtime("accessibility-test", "base").unwrap();
     let base_local = UiLocalKey::runtime("accessibility-test", "base-action").unwrap();

@@ -2,8 +2,22 @@ use nara_text::{TextLimits, bundled_font_face};
 use nara_ui_kernel::{
     UiAuthoringError, UiAuthoringSnapshotBuilder, UiCompileError, UiCompiler, UiDiagnostic,
     UiEnvironment, UiEnvironmentError, UiInteraction, UiLayer, UiLimits, UiNode, UiRoot, UiRootKey,
-    UiRootStatus, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
+    UiRootStatus, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
 };
+
+#[test]
+fn semantic_values_preserve_empty_input_without_relaxing_name_or_byte_limits() {
+    assert!(matches!(
+        UiSemantics::new(UiSemanticRole::TextInput, ""),
+        Err(UiAuthoringError::EmptySemanticText { field: "name" })
+    ));
+    let input = UiSemantics::new(UiSemanticRole::TextInput, "Name").unwrap();
+    assert_eq!(input.clone().with_value("").unwrap().value(), Some(""));
+    assert!(matches!(
+        input.with_value("x".repeat(16 * 1024 + 1)),
+        Err(UiAuthoringError::SemanticTextLimitExceeded { field: "value", .. })
+    ));
+}
 
 #[test]
 fn builder_preserves_a_known_root_identity_when_its_body_is_invalid() {

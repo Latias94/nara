@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use swash::{
-    FontRef,
     scale::{Render, Source, image::Content},
     zeno::{Format, Vector},
 };
@@ -53,7 +52,7 @@ impl GlyphRaster {
 
 impl TextEngine {
     pub fn rasterize(&mut self, key: GlyphRasterKey) -> Result<GlyphRaster, GlyphRasterError> {
-        if key.face_id() != self.face.id() {
+        if !self.contains_font(key.face_id()) {
             return Err(GlyphRasterError::FaceMismatch);
         }
         let physical_size = key.physical_size();
@@ -63,23 +62,22 @@ impl TextEngine {
             });
         }
 
-        let font = FontRef {
-            data: self.face.bytes(),
-            offset: self.swash_offset,
-            key: self.swash_key,
+        let image = {
+            let (font, scale_context) = self
+                .raster_context(key.face_id())
+                .ok_or(GlyphRasterError::FaceMismatch)?;
+            let mut scaler = scale_context
+                .builder(font)
+                .size(physical_size)
+                .hint(true)
+                .build();
+            let (offset_x, offset_y) = key.subpixel_offset();
+            let sources = [Source::Outline];
+            Render::new(&sources)
+                .format(Format::Alpha)
+                .offset(Vector::new(offset_x, offset_y))
+                .render(&mut scaler, key.glyph_id())
         };
-        let mut scaler = self
-            .scale_context
-            .builder(font)
-            .size(physical_size)
-            .hint(true)
-            .build();
-        let (offset_x, offset_y) = key.subpixel_offset();
-        let sources = [Source::Outline];
-        let image = Render::new(&sources)
-            .format(Format::Alpha)
-            .offset(Vector::new(offset_x, offset_y))
-            .render(&mut scaler, key.glyph_id());
 
         let Some(image) = image else {
             return Ok(GlyphRaster {
@@ -134,7 +132,7 @@ impl TextEngine {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum GlyphRasterError {
-    #[error("glyph raster key belongs to another font face")]
+    #[error("glyph raster key belongs to a font face outside the admitted set")]
     FaceMismatch,
     #[error("glyph physical size {value} is invalid")]
     InvalidPhysicalSize { value: f32 },
