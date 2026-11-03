@@ -29,4 +29,41 @@ Bevy's transitive `multi_threaded` feature. Raw parallel comparisons use at most
 NonSend observations remain on the driver. This does not qualify production parallel support.
 
 The [owning unit](../../../docs/plans/2026-11-03-joint-motion-execution-plan.md) retains the shared
-captured-history and bounded prediction/effect gates before any production phase-interface freeze.
+captured-history and bounded prediction/effect evidence before any production phase-interface
+freeze. The related [render consumer](../render-policy-consumer/README.md) combines these motion
+authors with actual captured two-View history execution on Windows/DX12.
+
+## Fixture responsibilities
+
+| Crate | Responsibility |
+| --- | --- |
+| `contract` | Shared actor handles, motion input, root-motion intent and sequencing observations. |
+| `animation` | Independently authored root-motion intent production. |
+| `physics` | Stand-in and real direct/borrowed Rapier solve, explicit join and pose commit. Its optional `checkpoint` feature captures persistent solver state for the bounded comparison. |
+| `audio` | Offline mono PCM tones, sample-time admission, semantic duplicate suppression and managed owner shutdown. |
+| `consumer` | Schedule alternatives, managed lifecycle/Transform integration and the closed prediction/effect tests. |
+
+These are independent test consumers, not production Physics, Animation or Audio modules. No
+production dependency imports them, and this fixture does not choose a production backend.
+
+## Bounded prediction and effects
+
+The test-only prediction consumer runs at most 32 logical ticks in explicitly driven custom
+schedules inside the same managed Runtime and World. Its clock is distinct from App's monotonic
+FixedTime. A checkpoint restores motion inputs/intents/poses, logical entity membership/values,
+seeded RNG and phase, pending commands, ordered asynchronous outcomes, cue intents and complete
+persistent solver state. The authoritative checksum includes encoded solver bytes. Corrected
+resimulation must match a clean corrected trajectory and continue matching on later ticks.
+
+Attempts carry Runtime generation and a non-rewound ordinal. Same-tick replacements and other
+Sessions cannot reuse their results or confirmation tokens. Confirmed state has an ancestor digest
+witness; even a later checkpoint refuses if it would replace that prefix. Confirmation and the
+audio duplicate ledger are not rolled back. Audio publication occurs only for the exact completed
+current attempt, and a failed publication does not advance confirmation.
+
+PCM rendering produces actual finite sine samples. Controls verify silence before confirmation,
+nonzero scheduled output, duplicate suppression across attempts, atomic batch refusal, sample
+chunking and managed shutdown. Uncovered Local, native I/O and configured worker-gate state refuse
+before their execution. This closed authored inventory cannot detect arbitrary hidden effects in
+trusted Rust systems. The fixture establishes no general rollback, physical audio-device support,
+cross-platform determinism or production automatic parallel profile.

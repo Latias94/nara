@@ -5,3 +5,6 @@ mod comparison;
 
 #[cfg(test)]
 mod managed;
+
+#[cfg(test)]
+mod prediction;

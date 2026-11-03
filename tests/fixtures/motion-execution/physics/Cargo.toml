@@ -7,10 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+checkpoint = ["rapier2d/serde-serialize", "dep:serde", "dep:bincode"]
+
 [dependencies]
+bincode = { version = "=1.3.3", optional = true }
 motion-contract.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
 nara_transform.workspace = true
 rapier2d = { version = "=0.33.0", default-features = false, features = ["dim2", "f32", "std"] }
+serde = { version = "1", features = ["derive"], optional = true }

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "5ca9102b2324bd80561eb7f3650980e182d4355cd461e74bc2c3e27efa639031"
+source_fingerprint: "6544af6330649a7b51f7821e2a9f912db4f8ffae659a1cc87ed9714b3b82511e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "5ca9102b2324bd80561eb7f3650980e182d4355cd461e74bc2c3e27efa6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `5ca9102b2324bd80561eb7f3650980e182d4355cd461e74bc2c3e27efa639031`
-- Immutable records: 1236
+- Source fingerprint: `6544af6330649a7b51f7821e2a9f912db4f8ffae659a1cc87ed9714b3b82511e`
+- Immutable records: 1237
 - Open lane heads: 2
 
 # Open Registrations
@@ -23,6 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Bounded same-World prediction and confirmed PCM effects preserve exact attempt and ancestor ownership](verification/2026-11/2026-11-03T162556Z-bounded-same-world-prediction-and-confirmed-pcm-effects-preserve-exact-attempt-and-ancestor-ownership-71be3014fb29466a8995909c5e20b8c6.md) - Complete persistent Rapier restoration, closed logical state and outcome admission, confirmed-prefix witnesses and sample-clock PCM effects qualify independently of ordinary FixedTime rollback.
 - **Verification Evidence**: [Captured semantic discontinuity preserves original motion samples and native history ownership](verification/2026-11/2026-11-03T154717Z-captured-semantic-discontinuity-preserves-original-motion-samples-and-native-history-ownership-908f52c3569b4614b9ec4274fb14c685.md) - Original lineage revision fences late captures; real borrowed motion, captured shader clocks, selective two-View history and original submission retirement pass on DX12.
 - **Verification Evidence**: [Independent joint motion comparison selects explicit serial automatic execution](verification/2026-11/2026-11-03T130631Z-independent-joint-motion-comparison-selects-explicit-serial-automatic-execution-dda9dc3f7d2e45d6baf30927cce70fc7.md) - Real borrowed solver, three compositions, feature-unified executor regression and narrow Ack evidence; shared temporal and prediction gates remain open.
 - **Verification Evidence**: [Complete public Prefab extraction and native workflow qualification](verification/2026-11/2026-11-03T115127Z-complete-public-prefab-extraction-and-native-workflow-qualification-c440d6b31843411897951e9ba2221a2e.md) - Independent exact extraction, inherited edits and conversion, strict Check and real Play, native widgets and truthful idle observation.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Original extraction destinations bind before Ready and finish without a resumable publication cursor](verification/2026-11/2026-11-03T060356Z-original-extraction-destinations-bind-before-ready-and-finish-without-a-resumable-publication-cursor-3aee2a2f035e45008b135733cea1d373.md) - Private live Workspace and original Host installation, exact refusal restoration and scoped paths; complete Session/public extraction remains open.
 - **Work Progress**: [UE6 review tightens prediction boundaries while extraction installation preserves exact owners](progress/2026-11/2026-11-03T054042Z-ue6-review-tightens-prediction-boundaries-while-extraction-installation-preserves-exact-owners-be5b0a82c37f4807adfd3627302515fa.md) - Verified bounded Workspace and leaf ownership transfer; primary-source UE6 review and scoped R4c/R10 refinement, with complete extraction still open.
 - **Verification Evidence**: [Private extraction future Project and actual final Ready publication preserve unchanged Schema ownership](verification/2026-11/2026-11-03T050808Z-private-extraction-future-project-and-actual-final-ready-publication-preserve-unchanged-schema-ownership-a987c2db3b534dc5a30995e64ff6420d.md) - Private saved Project and actual final manifest qualification; complete live installation remains open.
-- **Verification Evidence**: [Ordinary future extraction inventory retains exact native participation and selected policy](verification/2026-11/2026-11-03T041901Z-ordinary-future-extraction-inventory-retains-exact-native-participation-and-selected-policy-f13e25cb405b450eb945f1eabe557438.md) - Complete Pending future inventory uses ordinary Q metadata admission while preserving original native participation, selected profile, checkpoint owners and cumulative budgets.
 
 # Integration Notes
 

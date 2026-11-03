@@ -2,6 +2,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "checkpoint")]
+mod checkpoint;
+
+#[cfg(feature = "checkpoint")]
+pub use checkpoint::{SolverCheckpointError, SolverSnapshot};
+
 use std::{
     sync::{Arc, Condvar, Mutex},
     time::Duration,
@@ -37,6 +43,7 @@ pub enum PhysicsSet {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
+#[cfg_attr(feature = "checkpoint", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sample {
     pub tick: u64,
     pub kinematic: Vec2,

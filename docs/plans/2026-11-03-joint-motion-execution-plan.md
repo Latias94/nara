@@ -91,5 +91,67 @@ unaffected second-View history and another independent lineage. Numeric float hi
 pixels are read through the actual Host and compared with the existing CPU accumulation oracle.
 This does not classify all camera/shader/material edits or qualify native window presentation.
 
-The bounded prediction/effect consumer and its explicit state/refusal/confirmation model remain
-the next gate. No generic rollback or mandatory effect API is introduced by this temporal fix.
+The bounded prediction/effect successor below selects its own state/refusal/confirmation model.
+No generic rollback or mandatory effect API is introduced by the temporal fix.
+
+## Bounded prediction and PCM effect unit
+
+Use the same independent motion authors in a closed consumer. Keep its logical simulation tick
+separate from the managed driver's monotonic clock: an explicitly driven custom schedule executes
+one finite attempt without rewinding App clocks or introducing another automatic driver. The
+earlier fixed/Transform qualification remains a separate requirement, not evidence inherited from
+this custom schedule. Do not expose a generic World snapshot or arbitrary system replay API.
+
+Compare three restoration choices: pose-only copying loses solver contacts and warm-start state;
+reconstructing a fresh managed Runtime conflates prediction with generation replacement; a concrete
+owner checkpoint can restore this consumer's exact state in its existing managed World. Select the
+last only after same-build checksum and continued-simulation controls prove it. Rapier 0.33.0
+documents `PhysicsPipeline` as rebuildable scratch; retain all persistent solver structures,
+integration parameters, handles and sampled/target values. Reinitialize scratch and invalidate
+attempt-local join permission on restore. Refuse opaque configured worker gates.
+
+The finite recoverable model comprises motion inputs/root-motion phase, selected transforms,
+logical entity membership and values, explicit seeded RNG, queued deterministic commands, and
+admitted typed asynchronous outcomes. Include complete solver checkpoint bytes in the authoritative
+checksum. Raw ECS handles are not durable logical identity. No system-local state is admitted;
+a contribution requiring unreconstructible Local, an unmodeled native call or external I/O refuses
+before execution. This is a closed authored inventory, not a static purity analyzer or enforcement
+against arbitrary trusted Rust code.
+
+Attempts carry the existing Runtime generation and a non-rewound ordinal. Abandoning and rerunning
+the same logical tick rejects the old attempt's late result before state/effect application; a
+different Session's matching tick/ordinal token also refuses admission, simulation, abandonment
+and confirmation. Sort admitted outcome keys independently of physical worker completion order
+and refuse unclassified/missing outcomes. Checkpoint at a complete quiescent boundary, after
+deferred commands and borrowed solver join.
+
+A concrete PCM owner consumes semantic cue intents only after confirmation of the exact current
+attempt. Sound identity uses input event/occurrence/cue/sequence, without an attempt identifier.
+Its duplicate ledger and confirmed frontier are not speculative state. Keep at most 33 ancestor
+semantic state digests for genesis and 32 logical ticks. Restore replaces the speculative branch
+history only after its confirmed ancestor matches; a later checkpoint on a discarded branch must
+not rewrite that prefix. Advance confirmation only after successful audio publication. Refuse
+correction of an already confirmed tick rather than pretend to undo audible effects. A
+deterministic sample clock schedules a finite tone into offline PCM; test nonzero sample output,
+silence before confirmation, repeat suppression, late-sample refusal and actual owner shutdown
+through managed retirement.
+This does not select a production audio backend or qualify a physical speaker/device.
+
+Acceptance compares a corrected rerun with a clean corrected trajectory, including full state
+checksums and continuation. Exercise entity spawn/despawn, queued commands, RNG and outcome order;
+hold an old result until its replacement attempt exists. Preserve the ordinary sticky-fault and
+partial-effect regression. Confirmed audio, stale-attempt refusal and simulation success remain
+separate observations. Run serial before any separately admitted parallel comparison. Full R10
+collision authoring and arbitrary Rust/native rollback remain outside this finite qualification.
+
+## Bounded qualification result
+
+The closed same-World restoration and offline PCM model is implemented in the independent fixture.
+Corrected complete-state checksums and continuation through all 32 admitted logical ticks pass in
+direct and borrowed-solver modes. Final default and feature-unified cohorts pass 22/22 and 23/23;
+the existing actual DX12 history cohort remains 7/7. The
+[qualification](../knowledge/engineering/verification/2026-11/2026-11-03T162556Z-bounded-same-world-prediction-and-confirmed-pcm-effects-preserve-exact-attempt-and-ancestor-ownership-71be3014fb29466a8995909c5e20b8c6.md)
+retains the RED counterexamples, exact commands, independent review and limits. ADR0024 records
+the selected state/refusal/confirmation boundary. R4c's remaining consumers and the separate R10
+collision/affine-authoring requirements stay open; no production phase or generic prediction API
+is frozen by this result.

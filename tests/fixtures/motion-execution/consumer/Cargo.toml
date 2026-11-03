@@ -18,6 +18,7 @@ bevy_tasks = { version = "=0.20.0", default-features = false, optional = true }
 motion-contract.workspace = true
 motion-animation.workspace = true
 motion-physics.workspace = true
+motion-audio.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
@@ -25,3 +26,7 @@ nara_gameplay.workspace = true
 nara_hierarchy.workspace = true
 nara_reflect.workspace = true
 nara_transform.workspace = true
+
+[dev-dependencies]
+blake3 = "1"
+motion-physics = { workspace = true, features = ["checkpoint"] }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["contract", "animation", "physics", "consumer"]
+members = ["contract", "animation", "physics", "audio", "consumer"]
 
 [workspace.package]
 version = "0.0.0"
@@ -20,3 +20,4 @@ nara_transform = { path = "../../../crates/nara_transform" }
 motion-contract = { path = "contract" }
 motion-animation = { path = "animation" }
 motion-physics = { path = "physics" }
+motion-audio = { path = "audio" }

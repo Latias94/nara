@@ -1,0 +1,11 @@
+[package]
+name = "motion-audio"
+workspace = ".."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+nara_app.workspace = true

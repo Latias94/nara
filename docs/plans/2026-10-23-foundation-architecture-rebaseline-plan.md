@@ -495,8 +495,10 @@ Three independently verifiable sub-units:
 The [November 3 joint unit](2026-11-03-joint-motion-execution-plan.md) has the initial three-way
 comparison and thin real borrowed-solver consumer. It retains public sets and narrow consumption
 Ack for that bounded workflow and makes the production automatic serial baseline explicit under
-feature unification. Private raw parallel execution is not a production profile. R4c remains open
-until the shared temporal/effect admission and remaining complete-consumer gates are qualified.
+feature unification. Its successors qualify captured discontinuity and a closed same-World
+prediction/offline-PCM model, including exact attempt identity and preservation of the confirmed
+prefix. Private raw parallel execution is not a production profile. Remaining complete-consumer
+gates keep R4c open; these experiments do not freeze a new phase interface.
 
 Bring the R10 motion oracle into this comparison before selecting the schedule API: motion intent,
 kinematic target/solve, solver pose commit and spatial publication need an explicit same-tick join.
@@ -1113,9 +1115,10 @@ than requiring their public topology.
 
 ## R10: Motion, Time, Repeatability And Concrete Domain Seams
 
-**Design:** D09. **State:** the [joint motion/execution and captured-discontinuity unit](2026-11-03-joint-motion-execution-plan.md)
-has bounded independent and Windows/DX12 qualification; repeatability/effect admission and domain
-authoring remain open. The bounded keyboard/mouse Input endpoint successor is qualified.
+**Design:** D09. **State:** the [joint motion/execution unit](2026-11-03-joint-motion-execution-plan.md)
+has bounded independent, captured-discontinuity Windows/DX12 and same-World prediction/offline-PCM
+qualification. Broader repeatability/effects and generated collision authoring remain open. The
+bounded keyboard/mouse Input endpoint successor is qualified.
 **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver
@@ -1165,6 +1168,15 @@ that refuses this prediction scope, and retain the ordinary partial-effect/stick
 Prove the serial baseline before each actually supported parallel profile and real solver join.
 These controls qualify only this finite state/effect model, not arbitrary Rust/native rollback,
 distributed STM or exactly-once network/file delivery.
+
+The implemented closed tracer uses at most 32 logical ticks in managed custom schedules; it does
+not rewind ordinary App FixedTime. Complete persistent Rapier bytes, logical entities, explicit
+RNG, commands and classified outcomes match a clean corrected trajectory and continued simulation.
+Attempt tokens include Runtime generation, and restore validates the confirmed ancestor digest
+before changing World state. Offline PCM publication has separate semantic identity, sample-time
+refusal and managed close. Local/native-I/O and opaque worker-gate exclusions are explicit authored
+admission, not static purity analysis. This result does not qualify the separate collision,
+affine-authoring, physical-device or cross-platform requirements.
 
 The input sub-unit compares global maps, seat-scoped maps and per-device callbacks. Prefer
 seat/action/context aggregation with explicit map revision and device-connection generation.

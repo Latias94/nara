@@ -31,8 +31,8 @@ Rules:
   An execution fault can leave partial effects, including deferred commands; the generation must be
   closed and explicitly reconstructed rather than replaying its unacknowledged batch in place.
 - Fixed scheduling, ECS access analysis, serial execution and Schema admission do not establish
-  that arbitrary Rust or native operations can be restored or replayed. Future prediction admits
-  only an explicitly bounded state and effect model qualified by its concrete consumer.
+  that arbitrary Rust or native operations can be restored or replayed. Prediction admits only
+  an explicitly bounded state and effect model qualified by its concrete consumer.
 
 ```text
 Frame:
@@ -55,22 +55,47 @@ Frame:
   completion-order independence is required; ready-snapshot sorting alone promises only local
   ordering at one integration boundary.
 
-### Future Prediction Qualification
+### Bounded Prediction Qualification
 
 The [R4c/R10 consumer](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r10-motion-time-repeatability-and-concrete-domain-seams)
-must define its recoverable state before selecting a prediction Interface. Include every state
-that affects its result: selected components/resources, entity lifecycle, RNG, used system-local
-state, pending commands, admitted external outcomes and any participating solver state. A tested
-reconstruction strategy may restore that state; an unmodeled native or external effect refuses
-admission to this prediction scope. This is a qualification boundary, not implemented rollback
-support or a requirement that every ordinary system acquire a purity declaration.
+defines its recoverable state before selecting a prediction interface. Include every state that
+affects its result: selected components/resources, entity lifecycle, RNG, used system-local state,
+pending commands, admitted external outcomes and any participating solver state. A tested
+owner-specific reconstruction strategy may restore that state; an unmodeled native or external
+effect refuses admission before execution. A closed inventory is not a static purity analyzer or
+a requirement that every ordinary system acquire a purity declaration.
 
 Command consumption, successful simulation and authoritative confirmation are distinct facts.
 A successful speculative tick alone cannot authorize an irreversible effect. The concrete effect
-owner selects deferred publication, suppression or a verified recovery policy. An execution-attempt
-identity rejects stale work from an abandoned run of the same tick; a semantic effect identity
-supports that owner's duplicate-suppression policy across resimulation. Task cancellation does
-not undo completed I/O. Neither identity promises exactly-once external delivery.
+owner selects deferred publication, suppression or a verified recovery policy. The selected motion
+consumer defers cue publication until confirmation of the exact completed current attempt. Its
+execution-attempt identity includes the existing Runtime generation and a non-rewound ordinal,
+rejecting foreign-session and abandoned same-tick work. Semantic effect identity instead uses
+input event, occurrence, cue and sequence, supporting duplicate suppression across resimulation.
+Task cancellation does not undo completed I/O. Neither identity promises exactly-once external
+delivery.
+
+The confirmed frontier and effect ledger remain outside speculative checkpoints. A restore must
+preserve the confirmed state's ancestor witness, including when its checkpoint is from a later
+tick on another branch. Comparing tick numbers alone is insufficient. The frontier advances only
+after the concrete effect owner accepts publication; a refusal cannot confirm speculative history.
+The bounded consumer uses at most 33 semantic state digests for its genesis and 32 logical ticks.
+This is local branch evidence, not a new global identity service or untrusted checkpoint format.
+
+The [independent motion/PCM fixture](../../../tests/fixtures/motion-execution/README.md) implements
+this model within one managed Runtime and World. An explicitly driven custom schedule advances
+the speculative logical tick; App clocks remain monotonic and are not rewound. Checkpoints restore
+the selected entity membership/values, RNG, phase, pending commands, ordered outcomes, cue intents,
+motion state and all persistent Rapier solver structures. Rapier's documented scratch is rebuilt;
+opaque worker gates are refused. Complete same-build solver bytes participate in state checksums
+and continued-simulation comparisons. This does not implement ordinary FixedUpdate rollback,
+arbitrary ECS snapshots, a canonical RNG service or cross-platform bit-exact simulation.
+
+Its offline PCM owner schedules actual finite tones on a sample clock, atomically validates each
+publication batch, suppresses identical semantic duplicates, refuses conflicting or late cues and
+closes through managed retirement. No speculative attempt emits samples before confirmation.
+This qualifies offline sample generation and effect admission, not a physical audio device or
+production audio backend. The owning unit retains the executed evidence and remaining R10 gates.
 
 Authoring source/history transactions and debugger fresh-process restoration do not establish
 these simulation properties. Real runtime faults retain ADR 0084's sticky-fault and explicit
