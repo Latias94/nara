@@ -94,9 +94,10 @@ owner. These primitives alone do not qualify the complete
 ## Native Editor integration
 
 The existing Editor workspace offers a `Nara properties` Inspector tab. Its string and numeric
-fields use Nara drawing and local editing. Boolean, structured and reference values remain
-read-only in this tab; their existing controls are available under `Document`. This is an
-incremental integration, not a replacement of the complete Inspector or workspace frontend.
+fields use Nara drawing and local editing. Boolean values use an explicit `Set true` or `Set false`
+button. Structured and reference values remain read-only in this tab; their existing controls
+are available under `Document`. This incremental integration retains the complete predecessor
+Inspector and workspace frontend.
 
 Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Within the
 active Inspector image, Tab/Shift+Tab move through enabled fields and buttons; Enter or Space
@@ -113,6 +114,13 @@ Finish or cancel preedit before pointer selection or Apply. Pointer placement us
 from the displayed frame and refuses an unpresented replacement buffer.
 Reapply is explicit after a source conflict. Toolbar Undo/Redo and Save/Reopen continue to affect
 the document.
+
+Activating a boolean button submits its explicit value through the same document owner. The
+button supports pointer and Enter/Space activation without acquiring text or IME ownership.
+Repeated activation while its exact submission is queued or pending preserves the captured value.
+A refused submission retains the proposed boolean for explicit Apply, Discard or conflict Reapply;
+document Undo/Redo and Save/Reopen include accepted boolean edits. The retained-draft capacity is
+checked again at activation, including when other edits fill it after the displayed frame.
 
 The Host uses the bundled primary face and, when configured, one fallback from
 `NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file

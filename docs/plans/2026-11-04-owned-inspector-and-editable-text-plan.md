@@ -87,8 +87,9 @@ the broader R11/platform gates remain open after that boundary.
 The first adapter consumes the shared primitives in the existing workspace's `Nara properties`
 Inspector tab. It shares the original field drafts and exact Application submission results.
 Strings and numeric scalars have local editing, composition, explicit Apply/Discard/Reapply/Reset,
-document history and persistence. Other field shapes remain visibly read-only here; the predecessor
-is retained until equivalent complete behavior is qualified.
+document history and persistence. Boolean fields use explicit value buttons with the same exact
+submission and recovery paths. Structured and reference values remain visibly read-only here;
+the predecessor is retained until equivalent complete behavior is qualified.
 
 The original Host draws the panel into a retained image using the existing device/queue and admits
 input only after matching image, occurrence and native-window composite receipts. Equivalent frames
@@ -108,3 +109,43 @@ guards remain intact, and modifier state survives transfer to the predecessor co
 corresponding native trajectory uses the production logical-key entry and an isolated memory
 clipboard; physical OS keyboard/clipboard delivery and keyboard-only shell entry remain open.
 This advances the clipboard/navigation part above without completing the selected-panel replacement.
+
+The boolean successor uses the existing controlled Button and shared `FieldEditors` candidate.
+The explicit value command has keyboard focus without a text-input lifetime. Original presented
+basis, admission, exact completion, conflict recovery and the shared draft budget remain the
+same as other fields. Capacity is checked at activation as well as compilation, so a previously
+enabled control cannot exceed the budget after another edit fills it. No shared widget or platform
+interface changes are required by this private Editor consumer.
+
+## Boolean qualification checkpoint
+
+The boolean integration working tree is based on `45f3b5c`. Verification uses Windows 11,
+Rust 1.95.0, root `target`, `CARGO_BUILD_JOBS=1` and serial Cargo invocations.
+
+| Gate | Result |
+| --- | --- |
+| Final field/font controls and affected native workflows | 19/19, `8e0c9dec-f272-4788-89b5-bc75a3764fb1`; 15 CPU controls plus the owned pointer/IME and keyboard/boolean trajectories and two predecessor field regressions |
+| Ordinary Editor library | 303/303, `accb405b-c24f-4678-90ce-9f10fdea10d4`; 39 existing ignored cases excluded |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; existing warnings remain, and the introduced large-enum warning is removed |
+| Editor build and formatting | `cargo build --locked -p nara-editor` and `cargo fmt --all -- --check` pass |
+| Independent review | No correctness findings; the native test contribution is separately integrated and executed |
+
+The ordinary library run precedes the final private text-state boxing, which removes the new
+large-enum warning without changing editing behavior. The final 19-case cohort runs after that
+change. The earlier nine native Host trajectories retain their separately recorded keyboard
+checkpoint scope; unchanged cadence, detachment and recovery tests are not requalified here.
+
+The new CPU control qualifies boolean refusal recovery, exact result identity, stale-frame and
+read-only rejection; the late-capacity control now also proves an old enabled boolean cannot
+create another dirty draft after all 64 slots fill. The native trajectory preserves the original
+clipboard, composition, modifier, pointer-cancellation and document assertions while adding
+pointer/Enter/Space boolean commands, repeated pre-paint refusal and an actual saved/reopened
+`true` value. Test setup corrections add the CPU owner's required fresh-paint boundary before
+read-only compilation and follow the native fixture's actual field order for keyboard traversal.
+No product admission rule is relaxed.
+
+The keyboard trajectory still uses production logical-key ingress and an isolated memory
+clipboard. Physical OS input/clipboard, IME candidate placement, complete selected-panel parity,
+the Scene/tool visual and the broader R11/R12 platform requirements retain their open scope.
+The next panel replacement work is structured/reference editing and scrolling before removing
+the corresponding predecessor controls.

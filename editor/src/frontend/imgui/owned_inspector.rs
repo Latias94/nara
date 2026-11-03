@@ -39,10 +39,12 @@ pub(crate) enum InspectorOperation {
     Discard,
     Reapply,
     Reset,
+    Toggle,
 }
 
 impl InspectorOperation {
-    const ALL: [Self; 4] = [Self::Apply, Self::Discard, Self::Reapply, Self::Reset];
+    const FOOTER: [Self; 4] = [Self::Apply, Self::Discard, Self::Reapply, Self::Reset];
+    const COUNT: usize = 5;
 
     const fn index(self) -> usize {
         match self {
@@ -50,6 +52,7 @@ impl InspectorOperation {
             Self::Discard => 1,
             Self::Reapply => 2,
             Self::Reset => 3,
+            Self::Toggle => 4,
         }
     }
 
@@ -59,6 +62,7 @@ impl InspectorOperation {
             Self::Discard => "Discard",
             Self::Reapply => "Reapply",
             Self::Reset => "Reset",
+            Self::Toggle => "Toggle",
         }
     }
 }
@@ -77,17 +81,41 @@ struct FieldControl {
     key: UiKey,
     basis: FieldBasis,
     had_draft: bool,
-    text: Option<UiTextField>,
+    input: FieldInput,
     unavailable: Option<String>,
     allowed: bool,
     host_enabled: bool,
-    buttons: [UiButtonState; 4],
+    buttons: [UiButtonState; InspectorOperation::COUNT],
 }
 
 impl FieldControl {
     fn input_key(&self) -> &UiKey {
-        self.text.as_ref().map_or(&self.key, UiTextField::key)
+        match &self.input {
+            FieldInput::Text(text) => text.key(),
+            FieldInput::Boolean(key) => key,
+            FieldInput::ReadOnly => &self.key,
+        }
     }
+
+    fn text(&self) -> Option<&UiTextField> {
+        match &self.input {
+            FieldInput::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn text_mut(&mut self) -> Option<&mut UiTextField> {
+        match &mut self.input {
+            FieldInput::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+}
+
+enum FieldInput {
+    Text(Box<UiTextField>),
+    Boolean(UiKey),
+    ReadOnly,
 }
 
 #[derive(Clone, PartialEq)]
@@ -123,7 +151,7 @@ struct DisplayedField {
     current: Option<FieldBasis>,
     draft: Option<DisplayedDraft>,
     display_text: Option<String>,
-    operations: [bool; 4],
+    operations: [bool; InspectorOperation::COUNT],
     width: f32,
 }
 
@@ -339,7 +367,7 @@ impl OwnedInspector {
             displayed.retain(|key, _| semantics.contains_key(key));
             buttons.retain(|key, _| semantics.contains_key(key));
             for field in displayed.values_mut() {
-                field.operations = [false; 4];
+                field.operations = [false; InspectorOperation::COUNT];
             }
             for (key, button) in &buttons {
                 if let Some(field) = displayed.get_mut(&button.field) {
@@ -351,7 +379,7 @@ impl OwnedInspector {
             displayed.clear();
             buttons.clear();
             for control in self.controls.values_mut() {
-                if let Some(text) = &mut control.text {
+                if let Some(text) = control.text_mut() {
                     text.blur(&mut self.engine)?;
                     text.set_enabled(false, &mut self.engine)?;
                 }
@@ -400,13 +428,12 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text
-            .as_mut()
+            .text_mut()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         let token = text.focus()?;
         for (other, control) in &mut self.controls {
             if other != &key
-                && let Some(text) = &mut control.text
+                && let Some(text) = control.text_mut()
                 && text.input_token().is_some()
             {
                 text.blur(&mut self.engine)?;
@@ -426,8 +453,7 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text
-            .as_mut()
+            .text_mut()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         Ok(text.blur(&mut self.engine)?)
     }
@@ -444,15 +470,15 @@ impl OwnedInspector {
             .controls
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        let text = control
-            .text
-            .as_mut()
-            .ok_or(OwnedInspectorError::ReadOnlyField)?;
         control.host_enabled = enabled;
+        let allowed = control.allowed;
+        let text = control
+            .text_mut()
+            .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if !enabled {
             text.blur(&mut self.engine)?;
         }
-        Ok(text.set_enabled(enabled && control.allowed, &mut self.engine)?)
+        Ok(text.set_enabled(enabled && allowed, &mut self.engine)?)
     }
 
     pub(super) fn input_token(
@@ -462,8 +488,7 @@ impl OwnedInspector {
     ) -> Result<Option<UiTextInputToken>, OwnedInspectorError> {
         let displayed = self.live_field(frame, field)?;
         Ok(self.controls[&displayed.key]
-            .text
-            .as_ref()
+            .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?
             .input_token())
     }
@@ -471,7 +496,7 @@ impl OwnedInspector {
     pub(super) fn cancel_input(&mut self) -> Result<(), OwnedInspectorError> {
         let mut failure = None;
         for control in self.controls.values_mut() {
-            if let Some(text) = &mut control.text
+            if let Some(text) = control.text_mut()
                 && let Err(error) = text.blur(&mut self.engine)
             {
                 failure.get_or_insert(error);
@@ -494,8 +519,7 @@ impl OwnedInspector {
     ) -> Result<bool, OwnedInspectorError> {
         let displayed = self.live_field(frame, field)?;
         let text = self.controls[&displayed.key]
-            .text
-            .as_ref()
+            .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
@@ -513,8 +537,7 @@ impl OwnedInspector {
         let displayed = self.live_field(frame, field)?;
         self.check_input(&displayed.key, fields)?;
         let text = self.controls[&displayed.key]
-            .text
-            .as_ref()
+            .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
@@ -557,8 +580,7 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text
-            .as_mut()
+            .text_mut()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         let outcome = text.edit(token, edit, &mut self.engine)?;
         if outcome.text_changed {
@@ -583,8 +605,7 @@ impl OwnedInspector {
             .get_mut(&displayed.key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text
-            .as_mut()
+            .text_mut()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if displayed.display_text.as_deref() != Some(text.editor().display_text()) {
             return Err(OwnedInspectorError::ChangedProjection);
@@ -640,8 +661,7 @@ impl OwnedInspector {
     ) -> Result<UiRect, OwnedInspectorError> {
         let displayed = self.live_field(frame, field)?;
         let text = self.controls[&displayed.key]
-            .text
-            .as_ref()
+            .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
@@ -668,7 +688,7 @@ impl OwnedInspector {
         for (input, key) in fields {
             if let Some(control) = self.controls.get_mut(&key)
                 && control.input_key() == &input
-                && let Some(text) = &mut control.text
+                && let Some(text) = control.text_mut()
             {
                 text.reduce_focus(dispatch, &mut self.engine)?;
             }
@@ -721,6 +741,9 @@ impl OwnedInspector {
             return Err(OwnedInspectorError::OperationDisabled(operation));
         }
         let key = &displayed.key;
+        if operation != InspectorOperation::Discard && !fields.has_draft_capacity(key) {
+            return Err(OwnedInspectorError::DraftCapacity);
+        }
         let current = current_basis(model, key);
         let draft = fields
             .drafts
@@ -748,14 +771,13 @@ impl OwnedInspector {
             .controls
             .get(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        let text = control
-            .text
-            .as_ref()
-            .ok_or(OwnedInspectorError::ReadOnlyField)?;
-        if self.read_only || !editable || !control.host_enabled || !text.enabled() {
+        if self.read_only || !editable || !control.host_enabled || !control.allowed {
             return Err(OwnedInspectorError::OperationDisabled(operation));
         }
-        if text.editor().is_composing() {
+        if control
+            .text()
+            .is_some_and(|text| text.editor().is_composing())
+        {
             return Err(OwnedInspectorError::Composing);
         }
         if draft.incompatible || (draft.conflict && operation != InspectorOperation::Reapply) {
@@ -770,6 +792,13 @@ impl OwnedInspector {
                 return Err(OwnedInspectorError::OperationDisabled(operation));
             }
             draft.remove_intent = true;
+        }
+        if operation == InspectorOperation::Toggle {
+            let Candidate::Bool(value) = &mut draft.candidate else {
+                return Err(OwnedInspectorError::ReadOnlyField);
+            };
+            *value = !*value;
+            draft.remove_intent = false;
         }
         draft.dirty = true;
         let target = &draft.basis.target;
@@ -851,10 +880,7 @@ impl OwnedInspector {
             .controls
             .get(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        let text = control
-            .text
-            .as_ref()
-            .ok_or(OwnedInspectorError::ReadOnlyField)?;
+        let text = control.text().ok_or(OwnedInspectorError::ReadOnlyField)?;
         if draft.basis != control.basis
             || !matches!(&draft.candidate, Candidate::Text(value) if value == text.editor().text())
         {
@@ -912,7 +938,7 @@ impl OwnedInspector {
         }
         let capacity = fields.has_draft_capacity(&key);
         if let Some(basis) = &current {
-            if !fields.drafts.contains_key(&key) && scalar_text(basis) && capacity {
+            if !fields.drafts.contains_key(&key) && scalar_input(basis) && capacity {
                 fields
                     .drafts
                     .insert(key.clone(), FieldDraft::new(basis.clone()));
@@ -929,7 +955,7 @@ impl OwnedInspector {
         let replace = self.controls.get(&key).is_none_or(|control| {
             control.basis != *basis
                 || control.had_draft != draft.is_some()
-                || matches!((&control.text, draft), (Some(text), Some(draft))
+                || matches!((control.text(), draft), (Some(text), Some(draft))
                     if !matches!(&draft.candidate, Candidate::Text(value) if value == text.editor().text()))
         });
         if replace {
@@ -942,7 +968,7 @@ impl OwnedInspector {
                 UiLocalKey::runtime("nara.inspector.field", identity.to_string())?,
             )?;
             let mut unavailable = None;
-            let text = if let Some(draft) = draft
+            let input = if let Some(draft) = draft
                 && scalar_text(&draft.basis)
                 && let Candidate::Text(value) = &draft.candidate
             {
@@ -953,14 +979,22 @@ impl OwnedInspector {
                     TEXT_SIZE,
                     &mut self.engine,
                 ) {
-                    Ok(text) => Some(text),
+                    Ok(text) => FieldInput::Text(Box::new(text)),
                     Err(error) => {
                         unavailable = Some(format!("Read-only: {error}"));
-                        None
+                        FieldInput::ReadOnly
                     }
                 }
+            } else if let Some(draft) = draft
+                && scalar_input(&draft.basis)
+                && matches!(draft.candidate, Candidate::Bool(_))
+            {
+                FieldInput::Boolean(UiKey::scoped(
+                    self.root.clone(),
+                    UiLocalKey::runtime("nara.inspector.action", format!("{identity}.Toggle"))?,
+                )?)
             } else {
-                None
+                FieldInput::ReadOnly
             };
             self.controls.insert(
                 key.clone(),
@@ -969,11 +1003,11 @@ impl OwnedInspector {
                     key: row_key,
                     basis: basis.clone(),
                     had_draft: draft.is_some(),
-                    text,
+                    input,
                     unavailable,
                     allowed: false,
                     host_enabled: true,
-                    buttons: [UiButtonState::default(); 4],
+                    buttons: [UiButtonState::default(); InspectorOperation::COUNT],
                 },
             );
         }
@@ -982,13 +1016,13 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let identity = control.identity;
-        let current_scalar = current.as_ref().is_some_and(scalar_text);
+        let current_scalar = current.as_ref().is_some_and(scalar_input);
         control.allowed = editable
             && current_scalar
             && capacity
             && draft.is_some_and(|draft| !draft.incompatible && !draft.in_flight());
-        if let Some(text) = &mut control.text {
-            let enabled = control.allowed && control.host_enabled;
+        let enabled = control.allowed && control.host_enabled;
+        if let Some(text) = control.text_mut() {
             if !enabled {
                 text.blur(&mut self.engine)?;
             }
@@ -1001,8 +1035,7 @@ impl OwnedInspector {
             .cloned()
             .ok_or(OwnedInspectorError::UnknownControl)?;
         let text_node = control
-            .text
-            .as_ref()
+            .text()
             .map(|text| {
                 text.authored_node(
                     &self.root,
@@ -1016,14 +1049,13 @@ impl OwnedInspector {
             .transpose()?;
         let unavailable = control.unavailable.clone();
         let host_enabled = control.host_enabled;
-        let has_text = control.text.is_some();
+        let boolean = matches!(&control.input, FieldInput::Boolean(_));
+        let has_input = !matches!(&control.input, FieldInput::ReadOnly);
         let composing = control
-            .text
-            .as_ref()
+            .text()
             .is_some_and(|text| text.editor().is_composing());
         let display_text = control
-            .text
-            .as_ref()
+            .text()
             .map(|text| text.editor().display_text().to_owned());
         let states = control.buttons;
         let mut children = vec![self.label(
@@ -1036,18 +1068,18 @@ impl OwnedInspector {
         )?];
         if let Some(node) = text_node {
             children.push(node);
-        } else {
+        } else if !boolean {
             children.push(self.label(
                 &format!("{identity}.value"),
                 &authoring::value_label(source(&current.as_ref().unwrap_or(basis).field)),
             )?);
         }
-        let mut operations = [false; 4];
+        let mut operations = [false; InspectorOperation::COUNT];
         if let Some(draft) = draft {
             let can_edit = editable
                 && current_scalar
                 && capacity
-                && has_text
+                && has_input
                 && !composing
                 && host_enabled
                 && !draft.incompatible
@@ -1060,6 +1092,42 @@ impl OwnedInspector {
                 can_edit && draft.dirty && draft.conflict;
             operations[InspectorOperation::Reset.index()] =
                 can_edit && !draft.conflict && current.as_ref().is_some_and(can_reset);
+            operations[InspectorOperation::Toggle.index()] = can_edit && boolean && !draft.conflict;
+            if boolean && let Candidate::Bool(value) = &draft.candidate {
+                let button = UiButton::new(
+                    input.clone(),
+                    if *value { "Set false" } else { "Set true" },
+                    UiActionId::new(InspectorOperation::Toggle.label())?,
+                )?
+                .with_enabled(operations[InspectorOperation::Toggle.index()]);
+                let role = button_color(states[InspectorOperation::Toggle.index()], &button);
+                children.push(
+                    button
+                        .authored_node(
+                            &self.root,
+                            UiStyle::flex()
+                                .with_width(UiDimension::Px(width))
+                                .with_height(UiDimension::Px(36.0))
+                                .with_flex_shrink(0.0),
+                            UiVisual::role(role),
+                            UiBrush::Role(UiColorRole::PrimaryText),
+                            TEXT_SIZE,
+                        )?
+                        .with_semantics(
+                            UiSemantics::new(UiSemanticRole::Button, button.label())?
+                                .with_value(value.to_string())?
+                                .with_action(button.action().clone())?,
+                        ),
+                );
+                buttons.insert(
+                    input.clone(),
+                    DisplayedButton {
+                        field: input.clone(),
+                        operation: InspectorOperation::Toggle,
+                        button,
+                    },
+                );
+            }
             if draft.incompatible {
                 children.push(self.label(
                     &format!("{identity}.incompatible"),
@@ -1102,7 +1170,7 @@ impl OwnedInspector {
                 children.push(self.label(&format!("{identity}.error"), error)?);
             }
             let mut actions = Vec::new();
-            for operation in InspectorOperation::ALL {
+            for operation in InspectorOperation::FOOTER {
                 let button_key = UiKey::scoped(
                     self.root.clone(),
                     UiLocalKey::runtime(
@@ -1116,14 +1184,7 @@ impl OwnedInspector {
                     UiActionId::new(operation.label())?,
                 )?
                 .with_enabled(operations[operation.index()]);
-                let role = match states[operation.index()].visual_state(&button) {
-                    UiButtonVisualState::Disabled => UiColorRole::Disabled,
-                    UiButtonVisualState::Pressed | UiButtonVisualState::Focused => {
-                        UiColorRole::Focus
-                    }
-                    UiButtonVisualState::Hovered => UiColorRole::SecondaryText,
-                    UiButtonVisualState::Idle => UiColorRole::Panel,
-                };
+                let role = button_color(states[operation.index()], &button);
                 actions.push(
                     button.authored_node(
                         &self.root,
@@ -1161,7 +1222,7 @@ impl OwnedInspector {
             children.push(self.label(
                 &format!("{identity}.readonly"),
                 if current.is_some() {
-                    "Read-only: this panel edits only scalar strings and numbers"
+                    "Read-only: this panel edits only scalar strings, numbers and booleans"
                 } else {
                     "This field is not currently projected. Its retained draft is unchanged."
                 },
@@ -1202,6 +1263,26 @@ impl OwnedInspector {
         );
         Ok(node)
     }
+}
+
+fn button_color(state: UiButtonState, button: &UiButton) -> UiColorRole {
+    match state.visual_state(button) {
+        UiButtonVisualState::Disabled => UiColorRole::Disabled,
+        UiButtonVisualState::Pressed | UiButtonVisualState::Focused => UiColorRole::Focus,
+        UiButtonVisualState::Hovered => UiColorRole::SecondaryText,
+        UiButtonVisualState::Idle => UiColorRole::Panel,
+    }
+}
+
+fn scalar_input(basis: &FieldBasis) -> bool {
+    scalar_text(basis)
+        || matches!(
+            basis.field.shape,
+            ComponentValueShape::Scalar {
+                kind: ComponentValueKind::Bool,
+                ..
+            }
+        )
 }
 
 fn scalar_text(basis: &FieldBasis) -> bool {

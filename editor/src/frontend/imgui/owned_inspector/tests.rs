@@ -195,6 +195,164 @@ fn field_key(controller: &OwnedInspector, frame: &Arc<UiFrame>, field: &UiKey) -
     key
 }
 
+fn boolean(controller: &OwnedInspector, frame: &Arc<UiFrame>) -> UiKey {
+    frame
+        .semantics()
+        .iter()
+        .find(|node| {
+            matches!(
+                controller.binding(frame, node.key()),
+                Ok(InspectorBinding::Operation {
+                    operation: InspectorOperation::Toggle,
+                    ..
+                })
+            )
+        })
+        .expect("the actual boolean field has a toggle control")
+        .key()
+        .clone()
+}
+
+#[test]
+fn boolean_activation_retains_refused_candidates_and_uses_exact_application_results() {
+    let (_project, mut application) = application();
+    let model = application.current_frame().unwrap();
+    let original = model.workspace().active_scene.as_ref().unwrap().revision;
+    let mut controller = new_controller();
+    let mut fields = FieldEditors::default();
+    let frame = paint(&mut controller, &mut fields, &model);
+    let field = boolean(&controller, &frame);
+    let key = controller.live_field(&frame, &field).unwrap().key.clone();
+    assert!(controller.input_token(&frame, &field).is_err());
+    let semantic = frame
+        .semantics()
+        .iter()
+        .find(|node| node.key() == &field)
+        .unwrap();
+    assert_eq!(semantic.name(), "Set true");
+    assert_eq!(semantic.value(), Some("false"));
+    assert!(semantic.enabled());
+    let first = controller
+        .activate(&frame, &field, &model, &mut fields)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        first.action,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
+            base_revision,
+            command: SceneInspectorCommand::SetField { value: ComponentValue::Bool(true), .. },
+            ..
+        }) if base_revision == original
+    ));
+    assert!(
+        controller
+            .activate(&frame, &field, &model, &mut fields)
+            .is_err()
+    );
+    assert!(fields.drafts[&key].queued && fields.drafts[&key].dirty);
+    assert_eq!(fields.drafts[&key].candidate, Candidate::Bool(true));
+    assert_eq!(
+        application
+            .current_frame()
+            .unwrap()
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .revision,
+        original
+    );
+    fields.admitted(&key, Err(PanelSubmitError::Capacity));
+    let frame = paint(&mut controller, &mut fields, &model);
+    assert_eq!(fields.drafts[&key].candidate, Candidate::Bool(true));
+    assert!(!fields.drafts[&key].in_flight());
+    assert!(fields.drafts[&key].error.is_some());
+    let prepared = controller
+        .operate(
+            &frame,
+            &field,
+            InspectorOperation::Apply,
+            &model,
+            &mut fields,
+        )
+        .unwrap()
+        .unwrap();
+    let mut next = 0;
+    let mut entries = Vec::new();
+    let own = submission::enqueue(
+        &mut next,
+        &mut entries,
+        PanelOrigin {
+            instance: crate::workspace::EditorPanelInstanceId(1),
+            incarnation: Default::default(),
+        },
+        0,
+        Recipient::Authoring,
+    )
+    .unwrap();
+    let other = submission::enqueue(
+        &mut next,
+        &mut entries,
+        PanelOrigin {
+            instance: crate::workspace::EditorPanelInstanceId(1),
+            incarnation: Default::default(),
+        },
+        1,
+        Recipient::Authoring,
+    )
+    .unwrap();
+    fields.admitted(&key, Ok(own));
+    fields.action_finished(
+        other,
+        &PanelActionDispatch::NotDispatched(PanelActionNotDispatched::Superseded),
+    );
+    assert_eq!(fields.drafts[&key].pending, Some(own));
+    let result = application.submit_and_drive(
+        EditorActionBatch::new(model.revision(), [prepared.action]),
+        Duration::ZERO,
+    );
+    let EditorApplicationActionDispatch::Dispatched(outcome) = &result.actions()[0] else {
+        panic!("the actual Application must dispatch the boolean edit")
+    };
+    fields.action_finished(own, &PanelActionDispatch::Dispatched(outcome.clone()));
+    assert!(!fields.drafts.contains_key(&key));
+    let current = application.current_frame().unwrap();
+    let replacement = paint(&mut controller, &mut fields, &current);
+    let replacement_field = boolean(&controller, &replacement);
+    assert_ne!(field, replacement_field);
+    assert_eq!(fields.drafts[&key].candidate, Candidate::Bool(true));
+    assert!(!fields.drafts[&key].dirty);
+    assert!(matches!(
+        controller.activate(&frame, &field, &current, &mut fields),
+        Err(OwnedInspectorError::RetiredField)
+    ));
+    let semantic = replacement
+        .semantics()
+        .iter()
+        .find(|node| node.key() == &replacement_field)
+        .unwrap();
+    assert_eq!(semantic.name(), "Set false");
+    assert_eq!(semantic.value(), Some("true"));
+    fields.begin_paint(&current);
+    let read_only = controller
+        .compile(
+            &current,
+            &mut fields,
+            replacement.environment(),
+            UiTheme::default(),
+            true,
+        )
+        .unwrap();
+    let read_only_field = boolean(&controller, &read_only);
+    assert!(matches!(
+        controller.activate(&read_only, &read_only_field, &current, &mut fields),
+        Err(OwnedInspectorError::OperationDisabled(
+            InspectorOperation::Toggle
+        ))
+    ));
+    assert_eq!(fields.drafts[&key].candidate, Candidate::Bool(true));
+}
+
 #[test]
 fn compiled_controls_preserve_focus_across_redraw_and_reject_retired_input() {
     let (_project, application) = application();
@@ -223,7 +381,7 @@ fn compiled_controls_preserve_focus_across_redraw_and_reject_retired_input() {
             .count(),
         3
     );
-    assert!(!fields.drafts.keys().any(|key| key.field.as_str() == "flag"));
+    assert!(fields.drafts.keys().any(|key| key.field.as_str() == "flag"));
     let field = input(&controller, &frame, "label");
     let key = field_key(&controller, &frame, &field);
     let token = controller.focus(&frame, &field).unwrap();
@@ -371,8 +529,7 @@ fn pointer_uses_presented_text_origin_and_cannot_apply_a_visible_preedit() {
         .unwrap();
     assert_eq!(
         controller.controls[&key]
-            .text
-            .as_ref()
+            .text()
             .unwrap()
             .editor()
             .selection_bytes(),
@@ -748,6 +905,17 @@ fn late_input_cannot_exceed_the_shared_64_draft_budget_or_use_a_foreign_arc() {
     ));
     assert!(!fields.drafts[&key].dirty);
     assert_eq!(fields.drafts[&key].candidate.copy_text(), "10");
+    let boolean = boolean(&controller, &frame);
+    let boolean_key = controller.live_field(&frame, &boolean).unwrap().key.clone();
+    assert!(matches!(
+        controller.activate(&frame, &boolean, &model, &mut fields),
+        Err(OwnedInspectorError::DraftCapacity)
+    ));
+    assert_eq!(
+        fields.drafts[&boolean_key].candidate,
+        Candidate::Bool(false)
+    );
+    assert!(!fields.drafts[&boolean_key].dirty);
     let mut other = new_controller();
     let foreign = paint(&mut other, &mut FieldEditors::default(), &model);
     assert!(matches!(

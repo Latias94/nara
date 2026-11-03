@@ -128,14 +128,68 @@ impl AuthoringWorkflow<'_> {
 
     fn owned_keyboard_focus(&self, field: &str, action: Option<&str>) -> Result<(), String> {
         let expected = self.owned_test_control(field, action)?;
+        let text_token =
+            self.native
+                .frontend
+                .owned_field_token(expected.panel, &expected.frame, &expected.key);
         let actual = self.native.owned_focused_control_for_test();
         if actual != Some((expected.panel, expected.key)) {
             return Err(format!(
                 "native keyboard focus was {actual:?}; expected enabled control {field:?}/{action:?}"
             ));
         }
-        if self.native.owned_text_focus_for_test() != action.is_none() {
+        if self.native.owned_text_focus_for_test() != action.is_none()
+            || text_token.is_some() != action.is_none()
+        {
             return Err("native text ownership does not match the focused control's role".into());
+        }
+        Ok(())
+    }
+
+    fn owned_keyboard_flag(
+        &self,
+        expected: bool,
+        history: usize,
+        phase: &str,
+    ) -> Result<(), String> {
+        self.owned_test_document(SAVED_LABEL, 10, history, phase)?;
+        let frame = self.frame()?;
+        let actual = frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .and_then(|scene| scene.editor.inspector.selected_entity_view.as_ref())
+            .and_then(|entity| {
+                entity
+                    .components
+                    .iter()
+                    .find(|component| component.component.as_str() == CUSTOM_COMPONENT)
+            })
+            .and_then(|component| {
+                component
+                    .fields
+                    .iter()
+                    .find(|field| field.id.as_str() == "flag")
+            })
+            .and_then(|field| field.value.as_ref());
+        if actual != Some(&ComponentValue::Bool(expected)) {
+            return Err(format!(
+                "{phase}: document flag was {actual:?}; expected Bool({expected})"
+            ));
+        }
+        let action = if expected { "Set false" } else { "Set true" };
+        let probe = self.owned_test_control("flag", Some(action))?;
+        let value = probe
+            .frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &probe.key)
+            .and_then(|node| node.value());
+        let semantic = if expected { "true" } else { "false" };
+        if value != Some(semantic) {
+            return Err(format!(
+                "{phase}: boolean button semantic value was {value:?}; expected {semantic:?}"
+            ));
         }
         Ok(())
     }
@@ -417,6 +471,84 @@ impl AuthoringWorkflow<'_> {
         self.owned_test_document(KEYBOARD_LABEL, 10, 3, "toolbar document Undo")?;
         self.click("Redo")?;
         self.owned_test_document(SAVED_LABEL, 10, 4, "toolbar document Redo")?;
+
+        self.owned_keyboard_flag(false, 4, "before boolean activation")?;
+        self.owned_test_pointer("flag", Some("Set true"), 0.5)?;
+        self.owned_test_mouse(ElementState::Pressed)?;
+        self.owned_keyboard_focus("flag", Some("Set true"))?;
+        self.owned_keyboard_key(NativeKey::Character("!"), Some("!"))?;
+        for ime in [
+            Ime::Enabled,
+            Ime::Preedit("pending".into(), Some((0, 7))),
+            Ime::Commit("true".into()),
+            Ime::Disabled,
+        ] {
+            if self.owned_test_event(WindowEvent::Ime(ime))? {
+                return Err("the boolean button acquired native IME ownership".into());
+            }
+        }
+        self.owned_keyboard_focus("flag", Some("Set true"))?;
+        self.owned_test_draft("flag", None)?;
+        self.owned_test_draft("label", None)?;
+        self.owned_keyboard_flag(false, 4, "boolean text and IME isolation")?;
+        self.owned_test_mouse(ElementState::Released)?;
+        for _ in 0..2 {
+            self.owned_test_mouse(ElementState::Pressed)?;
+            self.owned_test_mouse(ElementState::Released)?;
+            self.owned_keyboard_key(NativeKey::Named(NamedKey::Enter), None)?;
+            self.owned_keyboard_key(NativeKey::Named(NamedKey::Space), Some(" "))?;
+            let queued = self
+                .native
+                .frontend
+                .retained_field_draft(CUSTOM_COMPONENT, "flag");
+            if queued != Some(("true".into(), false, false, true)) {
+                return Err(format!(
+                    "repeated activation before paint replaced the queued boolean: {queued:?}"
+                ));
+            }
+            self.owned_keyboard_focus("flag", Some("Set true"))?;
+            self.owned_keyboard_flag(false, 4, "queued pointer toggle before paint")?;
+        }
+        self.owned_test_paint()?;
+        self.owned_keyboard_flag(true, 5, "pointer boolean exact result")?;
+        self.owned_test_draft("flag", None)?;
+
+        for (action, key, text, expected, history) in [
+            ("Set false", NamedKey::Enter, None, false, 6),
+            ("Set true", NamedKey::Space, Some(" "), true, 7),
+        ] {
+            self.owned_test_select("label")?;
+            self.owned_keyboard_tab(true)?;
+            self.owned_test_paint()?;
+            self.owned_keyboard_focus("flag", Some(action))?;
+            self.owned_keyboard_key(NativeKey::Named(key), text)?;
+            self.owned_keyboard_key(NativeKey::Named(NamedKey::Enter), None)?;
+            self.owned_keyboard_key(NativeKey::Named(NamedKey::Space), Some(" "))?;
+            let queued = self
+                .native
+                .frontend
+                .retained_field_draft(CUSTOM_COMPONENT, "flag");
+            if queued != Some((expected.to_string(), false, false, true)) {
+                return Err(format!(
+                    "repeated keyboard activation changed the exact queued boolean: {queued:?}"
+                ));
+            }
+            self.owned_keyboard_focus("flag", Some(action))?;
+            self.owned_keyboard_flag(
+                !expected,
+                history - 1,
+                "queued keyboard toggle before paint",
+            )?;
+            self.owned_test_paint()?;
+            self.owned_keyboard_flag(expected, history, "keyboard boolean exact result")?;
+            self.owned_test_draft("flag", None)?;
+            self.owned_test_draft("label", None)?;
+        }
+
+        self.click("Undo")?;
+        self.owned_keyboard_flag(false, 6, "toolbar boolean document Undo")?;
+        self.click("Redo")?;
+        self.owned_keyboard_flag(true, 7, "toolbar boolean document Redo")?;
         if self
             .application
             .active_authoring_unavailable_record_manifest()
@@ -449,7 +581,7 @@ impl AuthoringWorkflow<'_> {
                 ("value", ComponentValue::U64(10)),
                 ("label", ComponentValue::String(SAVED_LABEL.into())),
                 ("other", ComponentValue::I64(0)),
-                ("flag", ComponentValue::Bool(false)),
+                ("flag", ComponentValue::Bool(true)),
                 ("seconds", ComponentValue::f64(0.5).unwrap()),
             ])
         {
@@ -474,6 +606,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.click(&format!("entity:{}", entity.as_str()))?;
         self.owned_test_document(SAVED_LABEL, 10, 0, "saved Scene Reopen")?;
+        self.owned_keyboard_flag(true, 0, "saved boolean Scene Reopen")?;
         if self.dirty()?
             || self
                 .application

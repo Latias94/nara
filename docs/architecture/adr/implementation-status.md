@@ -41,6 +41,11 @@ state. Three font-policy controls retain dirty, queued and pending drafts and ex
 results across control replacement. Nine selected Windows/DX12 trajectories pass; the keyboard
 test enters through the production logical-key method and uses an isolated memory clipboard.
 Physical OS key/clipboard delivery and keyboard-only entry from the shell remain unqualified.
+The same [Inspector unit](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md)
+now includes explicit boolean value buttons with original-basis submission, exact result routing
+and retained refusal recovery. Its 19-case owner/native cohort covers repeated activation, source
+history and persisted/reopened values. Structured/reference editing and complete panel parity
+retain their separate open scope.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

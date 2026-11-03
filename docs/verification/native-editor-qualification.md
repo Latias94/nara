@@ -72,8 +72,10 @@ The keyboard trajectory uses the production logical-key entry called by Winit in
 the shared clipboard replaced by an isolated memory backend. It covers Unicode Copy/Cut/Paste,
 failed Cut and invalid Paste preservation, local Undo/Redo, AltGr and modifier handoff, composition
 guards, Tab/Shift+Tab, explicit Enter/Space activation, cancelled pointer gestures and queued-input
-refusal before document history and disk Save/Reopen. It does not read or alter the user's actual
-clipboard or synthesize physical OS keyboard events.
+refusal before document history and disk Save/Reopen. Its boolean value-button controls also
+check keyboard ownership without a text token, repeated-activation refusal, document history and
+saved/reopened values. It does not read or alter the user's actual clipboard or synthesize physical
+OS keyboard events.
 
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
 requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories

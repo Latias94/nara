@@ -115,31 +115,24 @@ impl AuthoringWorkflow<'_> {
         action: Option<&str>,
     ) -> Result<OwnedFieldProbe, String> {
         for (panel, frame, image) in self.native.owned_frames_for_test() {
-            let Some(input) = frame
+            let Some(group) = frame
                 .semantics()
                 .iter()
-                .find(|node| node.role() == UiSemanticRole::TextInput && node.name() == field)
+                .find(|node| node.role() == UiSemanticRole::Group && node.name() == field)
             else {
                 continue;
             };
-            let node = if let Some(action) = action {
-                let parent = input
-                    .parent()
-                    .ok_or("the Inspector input has no semantic field group")?;
-                frame
-                    .semantics()
-                    .iter()
-                    .find(|node| {
-                        node.role() == UiSemanticRole::Button
-                            && node.name() == action
-                            && node.parent() == Some(parent)
-                    })
-                    .ok_or_else(|| {
-                        format!("the presented field {field:?} has no {action} button")
-                    })?
-            } else {
-                input
+            let (role, name) = match action {
+                Some(action) => (UiSemanticRole::Button, action),
+                None => (UiSemanticRole::TextInput, field),
             };
+            let node = frame
+                .semantics()
+                .iter()
+                .find(|node| {
+                    node.role() == role && node.name() == name && node.parent() == Some(group.key())
+                })
+                .ok_or_else(|| format!("the presented field {field:?} has no {role:?} {name:?}"))?;
             let layout = frame
                 .layouts()
                 .iter()
@@ -183,7 +176,7 @@ impl AuthoringWorkflow<'_> {
             });
         }
         Err(format!(
-            "no confirmed Nara Inspector image contains TextInput {field:?}"
+            "no confirmed Nara Inspector image contains field Group {field:?}"
         ))
     }
 
