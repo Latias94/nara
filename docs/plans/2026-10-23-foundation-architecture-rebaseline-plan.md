@@ -74,6 +74,20 @@ exact restore oracle and observational trace consumer below. These changes exten
 not the current compiled-unit acceptance or a parallel roadmap. Qualified mechanisms stay closed;
 no performance or whole-platform support claim follows from this comparative source review.
 
+## November 3 UE6 Direction Review
+
+The [UE6 reconciliation](../research/2026-11-03-ue6-direction-and-nara-architecture.md) separates
+Epic's announced direction from a shipped implementation and from Nara's product requirements.
+Retain Schema-owned meaning, composed source documents, independent flat compiled output,
+Rust-complete gameplay and the Nara-drawn Editor. No second scene hierarchy, mandatory Verse-like
+language, universal rollback runtime or distributed-world implementation is selected.
+
+Strengthen only the existing R4c/R10 execution comparison: define bounded speculative admission,
+recoverable state, execution-attempt identity and effect publication/confirmation before freezing
+the affected phase Interface. ADR 0024 states that qualification boundary; ordinary runtime faults
+keep their current close/reconstruction policy. Complete prediction implementation remains R10
+work, not a new prerequisite for every R4c comparison or the current CP2 extraction workflow.
+
 ## Decisions Made In This Round
 
 - Strategy explicitly includes installable tools and optional-language/prebuilt-Host workflows
@@ -494,6 +508,14 @@ and retained effects independently under the selected rule.
 
 The same motion consumer also supplies R9's discontinuity/captured-history interleaving control;
 select that shared temporal contract before freezing the R4c execution interface.
+
+Also select the bounded prediction admission and effect-publication boundary from R10 before
+that freeze. Ordinary fixed scheduling and ECS access analysis do not make an arbitrary system
+reversible. Distinguish command completion, simulation completion and authoritative confirmation;
+retain the chosen ordinary Ack contract independently of future speculative confirmation.
+Define how an abandoned attempt of the same tick rejects late results, without treating physical
+task cancellation as reversal of its I/O. This gate selects semantics and refusal behavior;
+complete rollback implementation remains the separate R10 qualification.
 
 Acceptance: two independent scopes, independent close, saturation/cancel/late/sub-work,
 uncooperative worker, partial startup, local SDK controller and close cycles/missing dependencies.
@@ -1099,6 +1121,22 @@ different frame grouping and worker completion orders produce the selected autho
 or a truthful unclassified-input refusal. A bounded prediction tracer establishes resimulation
 and effect-suppression seams separately from debugger fresh restore. No cross-platform bit-exact,
 complete network stack or arbitrary VM snapshot claim.
+
+For that tracer, explicitly select recoverable components/resources, entity lifecycle, RNG,
+used system-local state, pending commands, authoritative asynchronous outcomes and participating
+solver state. Restore or reconstruct the selected state through the concrete owner and refuse
+uncovered state/effects. Do not infer qualification from Schema, Rust type registration,
+serial execution or `FixedUpdate` membership; do not build a static purity analyzer.
+
+Use the already planned motion/audio consumer to rerun a corrected tick. Compare complete authoritative
+state checksums; hold an old-attempt result until the replacement attempt exists and prove it is
+rejected. Distinguish attempt identity from the semantic effect identity used across resimulation.
+Discarded attempts must not play audio or perform unmodeled irreversible I/O; confirmed effects
+follow the selected owner's duplicate-suppression policy. Include an unmodeled native operation
+that refuses this prediction scope, and retain the ordinary partial-effect/sticky-fault regression.
+Prove the serial baseline before each actually supported parallel profile and real solver join.
+These controls qualify only this finite state/effect model, not arbitrary Rust/native rollback,
+distributed STM or exactly-once network/file delivery.
 
 The input sub-unit compares global maps, seat-scoped maps and per-device callbacks. Prefer
 seat/action/context aggregation with explicit map revision and device-connection generation.

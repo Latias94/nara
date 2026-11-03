@@ -30,6 +30,9 @@ Rules:
   runtime generation and tick (ADR 0057). An earlier successful tick does not authorize a successor.
   An execution fault can leave partial effects, including deferred commands; the generation must be
   closed and explicitly reconstructed rather than replaying its unacknowledged batch in place.
+- Fixed scheduling, ECS access analysis, serial execution and Schema admission do not establish
+  that arbitrary Rust or native operations can be restored or replayed. Future prediction admits
+  only an explicitly bounded state and effect model qualified by its concrete consumer.
 
 ```text
 Frame:
@@ -51,6 +54,28 @@ Frame:
   Ordered-prefix streams defer later terminals until prior work is terminal when cross-frame
   completion-order independence is required; ready-snapshot sorting alone promises only local
   ordering at one integration boundary.
+
+### Future Prediction Qualification
+
+The [R4c/R10 consumer](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r10-motion-time-repeatability-and-concrete-domain-seams)
+must define its recoverable state before selecting a prediction Interface. Include every state
+that affects its result: selected components/resources, entity lifecycle, RNG, used system-local
+state, pending commands, admitted external outcomes and any participating solver state. A tested
+reconstruction strategy may restore that state; an unmodeled native or external effect refuses
+admission to this prediction scope. This is a qualification boundary, not implemented rollback
+support or a requirement that every ordinary system acquire a purity declaration.
+
+Command consumption, successful simulation and authoritative confirmation are distinct facts.
+A successful speculative tick alone cannot authorize an irreversible effect. The concrete effect
+owner selects deferred publication, suppression or a verified recovery policy. An execution-attempt
+identity rejects stale work from an abandoned run of the same tick; a semantic effect identity
+supports that owner's duplicate-suppression policy across resimulation. Task cancellation does
+not undo completed I/O. Neither identity promises exactly-once external delivery.
+
+Authoring source/history transactions and debugger fresh-process restoration do not establish
+these simulation properties. Real runtime faults retain ADR 0084's sticky-fault and explicit
+close/reconstruction contract. The bounded prediction comparison does not select general STM,
+a distributed runtime, a universal VM snapshot or a mandatory author language.
 
 ## Alternatives Considered
 
