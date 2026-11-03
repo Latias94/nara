@@ -175,7 +175,9 @@ fn partial_grapheme_coverage_cannot_hide_the_selected_faces_actual_missing_glyph
     ] {
         let fonts = if text == "\u{0180}\u{0314}" {
             vec![primary.clone(), fallback.clone()]
-        } else { vec![primary.clone()] };
+        } else {
+            vec![primary.clone()]
+        };
         let mut engine = TextEngine::with_fonts(fonts, TextLimits::default()).unwrap();
         let layout = engine
             .layout(&TextLayoutRequest::new(text, 24.0).unwrap())

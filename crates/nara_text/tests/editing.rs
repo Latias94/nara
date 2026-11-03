@@ -15,6 +15,29 @@ const LEFT: TextEdit = TextEdit::MoveLeft {
 };
 
 #[test]
+fn complex_script_word_navigation_preserves_dictionary_boundaries_and_local_undo() {
+    let mut engine = engine(TextLimits::default());
+    let mut editor = TextEditor::new(&mut engine, "ภาษาไทย", 18.0).unwrap();
+    editor
+        .edit(
+            &mut engine,
+            &TextEdit::MoveRight {
+                extend: true,
+                word: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(editor.selection_bytes(), 0.."ภาษา".len());
+    editor
+        .edit(&mut engine, &TextEdit::Insert("hello".into()))
+        .unwrap();
+    assert_eq!(editor.text(), "helloไทย");
+    editor.edit(&mut engine, &TextEdit::Undo).unwrap();
+    assert_eq!(editor.text(), "ภาษาไทย");
+    assert_eq!(editor.selection_bytes(), 0.."ภาษา".len());
+}
+
+#[test]
 fn empty_buffers_have_owned_geometry_and_no_op_edits_do_not_create_history() {
     let mut engine = engine(TextLimits::default());
     let mut editor = TextEditor::new(&mut engine, "", 18.0).unwrap();
