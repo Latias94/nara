@@ -8,3 +8,6 @@ mod managed;
 
 #[cfg(test)]
 mod prediction;
+
+#[cfg(test)]
+mod collision;

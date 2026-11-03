@@ -11,11 +11,15 @@ publish = false
 
 [workspace.dependencies]
 nara_app = { path = "../../../crates/nara_app" }
+nara_asset = { path = "../../../crates/nara_asset" }
 nara_core = { path = "../../../crates/nara_core" }
+nara_diagnostic = { path = "../../../crates/nara_diagnostic" }
 nara_ecs = { path = "../../../crates/nara_ecs" }
 nara_gameplay = { path = "../../../crates/nara_gameplay" }
 nara_hierarchy = { path = "../../../crates/nara_hierarchy" }
+nara_identity = { path = "../../../crates/nara_identity" }
 nara_reflect = { path = "../../../crates/nara_reflect" }
+nara_scene = { path = "../../../crates/nara_scene" }
 nara_transform = { path = "../../../crates/nara_transform" }
 motion-contract = { path = "contract" }
 motion-animation = { path = "animation" }

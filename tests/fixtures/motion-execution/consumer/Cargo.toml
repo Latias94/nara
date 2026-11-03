@@ -29,4 +29,9 @@ nara_transform.workspace = true
 
 [dev-dependencies]
 blake3 = "1"
-motion-physics = { workspace = true, features = ["checkpoint"] }
+motion-physics = { workspace = true, features = ["authoring", "checkpoint"] }
+nara_asset.workspace = true
+nara_diagnostic.workspace = true
+nara_identity.workspace = true
+nara_scene = { workspace = true, features = ["serde"] }
+tempfile = "3"

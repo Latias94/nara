@@ -67,3 +67,33 @@ chunking and managed shutdown. Uncovered Local, native I/O and configured worker
 before their execution. This closed authored inventory cannot detect arbitrary hidden effects in
 trusted Rust systems. The fixture establishes no general rollback, physical audio-device support,
 cross-platform determinism or production automatic parallel profile.
+
+## Authored collision derivation
+
+The optional `physics/authoring` feature supplies one plugin-specific persistent box definition
+and a concrete Rapier owner. The definition stores world-space center, bounded half width/height
+and fixed/dynamic intent. It contains no native handles or solver state. The consumer installs
+the exact native Schema provider through ordinary App composition, then materializes Scene and
+Prefab documents through public Scene interfaces before deriving native bodies and colliders.
+
+Reconciliation receives the complete selected set of current Scene receipts. It validates every
+receipt, source association and geometry before changing native membership. Generated body,
+collider and numeric debug output retain typed source, occurrence, structured Prefab ancestry,
+component/property selectors and the caller-accepted input revision. Debug vertices come from
+actual collider shapes and poses; a debug capture alone does not certify a contact. The fixed
+simulation test also observes a dynamic body resting on a floor and an actual solver contact.
+
+Source edits, Undo/Redo and disk Save/Reopen use the ordinary exact native binding. Scene source
+synchronization currently replaces that occurrence's activation; the fixture retires those old
+native pairs and derives replacements. It synchronizes only dirty sources, preserving unrelated
+occurrences and their solver state. Unchanged live entities keep native pairs, while an in-place
+changed definition rebuilds its pair and resets dynamics. Retained immutable debug captures remain
+readable across edit, removal and managed close without keeping the old solver objects alive.
+
+Tests additionally cover duplicate definitions, two occurrences of one source, two structured
+Prefab projections, component/entity removal, occurrence unload, invalid source/native values,
+foreign/stale/duplicate receipts and missing-binding refusal at registry freeze with repair of
+the original candidate. This is a translation-only public authoring/derivation workflow. It does
+not qualify Editor widgets, a physics device, affine hierarchy integration, an official production
+backend or a domain cook. The [owning unit](../../../docs/plans/2026-11-04-authored-collision-derivation-plan.md)
+retains the comparison, evidence and limits.

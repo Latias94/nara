@@ -1117,8 +1117,10 @@ than requiring their public topology.
 
 **Design:** D09. **State:** the [joint motion/execution unit](2026-11-03-joint-motion-execution-plan.md)
 has bounded independent, captured-discontinuity Windows/DX12 and same-World prediction/offline-PCM
-qualification. Broader repeatability/effects and generated collision authoring remain open. The
-bounded keyboard/mouse Input endpoint successor is qualified.
+qualification. The [authored collision unit](2026-11-04-authored-collision-derivation-plan.md)
+adds a concrete public Schema/Scene-to-Rapier workflow; its selected scope and qualification stay
+separate from broader repeatability/effects and affine authoring. The bounded keyboard/mouse
+Input endpoint successor is qualified.
 **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver

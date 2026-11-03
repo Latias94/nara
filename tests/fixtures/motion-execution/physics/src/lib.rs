@@ -2,6 +2,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "authoring")]
+pub mod authored;
+
 #[cfg(feature = "checkpoint")]
 mod checkpoint;
 

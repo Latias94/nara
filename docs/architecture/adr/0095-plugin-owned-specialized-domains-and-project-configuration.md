@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-20
-**Last Revised**: 2026-10-23
+**Last Revised**: 2026-11-04
 **Supersedes**: [ADR 0019](0019-physics-strategy.md) and
 [ADR 0030](0030-audio-strategy.md)
 **Refines**: [ADR 0015](0015-editor-tooling-and-dogfooding-boundary.md),
@@ -214,6 +214,32 @@ when the Rust product recipe already provides the complete truth.
 Text or animation may eventually justify a first-party domain crate after a real consumer exists.
 This ADR removes premature topology and cross-provider promises; it does not reject coherent first-
 party modules.
+
+### Source-Derived Native Output
+
+A concrete domain may derive several runtime roles from one persistent definition after ordinary
+Scene materialization. The domain retains the real native output inventory and retires its owned
+objects when the definition or selected occurrence leaves that inventory. A one-time add hook,
+RequiredComponents or authored debug drawing does not by itself prove synchronization or cleanup.
+Persistent codecs describe and construct the admitted configuration; they need not perform native
+solver creation during decoding.
+
+Attribution uses the existing containing source, logical Scene occurrence, structured entity
+provenance, stable component/property selectors and the input revision accepted by the caller.
+Those facts explain a generated role. They do not turn a process-local native handle into durable
+source identity or authorize arbitrary continuity across a replaced Scene activation. Domains
+choose and qualify their own in-place update or replacement policy. Rejected source validation
+preserves its prior revision; a separately rejected native reconciliation retains its concrete
+owner and reports that failure rather than claiming arbitrary native rollback.
+
+The [authored collision consumer](../../plans/2026-11-04-authored-collision-derivation-plan.md)
+uses one exact native `CollisionDefinition` binding and a private post-spawn Rapier owner. It
+derives bodies/colliders and immutable numeric debug geometry from the actual native sets.
+Unchanged live entities retain their pair and dynamics; a changed definition rebuilds its pair.
+The existing public Scene synchronization replaces that selected activation, so its output is
+freshly derived. Unrelated unchanged occurrences retain their entities and solver state. The
+consumer qualifies a concrete integration through public Schema/Scene and managed close; it
+does not select an official backend, generic cook/provider or seamless live physics editing.
 
 ## Alternatives Considered
 
