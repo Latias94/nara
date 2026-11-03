@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-10-26 (configured App retirement and staged admission)
+**Last Revised**: 2026-11-03 (explicit serial automatic execution)
 **Refined By**: ADR 0010: Plugin Lifecycle, Dependencies, and Failure Containment; ADR 0046:
 Plugin Metadata and Default Plugin Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness;
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts
@@ -114,6 +114,18 @@ frame schedules use `App::add_systems`, `App::configure_sets`, and explicit cont
 methods; callers cannot replace their executor, graph, or build-pass inventory. This preserves
 advanced custom-schedule freedom without making a built-in semantic anchor replaceable behind
 seal validation.
+
+Every automatically driven schedule, including Startup and private frame cleanup, explicitly uses
+Bevy's `SingleThreadedExecutor`. Dependency feature unification must not change this policy.
+NonSend systems therefore remain on the managed driver, while domain-owned borrowed solver work
+may run elsewhere and must join before pose publication. Serial ECS execution is not rollback,
+bitwise determinism, or a shared worker budget. Custom schedules remain explicitly driven and
+retain their owner's raw executor policy; Nara does not overwrite that policy during seal.
+
+The [joint motion comparison](../../plans/2026-11-03-joint-motion-execution-plan.md) also exercises
+raw explicit parallel execution, but does not admit a production automatic-parallel profile or
+freeze a new phase-plan interface. Those require their joint temporal/effect and fault gates.
+An unrelated Bevy feature is not an opt-in mechanism for production parallel execution.
 
 For the first-playable schedule-label anchors, seal validation specifically requires automatic
 deferred insertion to remain enabled and reasserts each schedule's final deferred application

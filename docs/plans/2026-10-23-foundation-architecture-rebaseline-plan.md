@@ -492,6 +492,12 @@ Three independently verifiable sub-units:
    Preserve one driver; select success/finalization and retirement boundaries through the joint
    consumer, and reject bad topology before Startup.
 
+The [November 3 joint unit](2026-11-03-joint-motion-execution-plan.md) has the initial three-way
+comparison and thin real borrowed-solver consumer. It retains public sets and narrow consumption
+Ack for that bounded workflow and makes the production automatic serial baseline explicit under
+feature unification. Private raw parallel execution is not a production profile. R4c remains open
+until the shared temporal/effect admission and remaining complete-consumer gates are qualified.
+
 Bring the R10 motion oracle into this comparison before selecting the schedule API: motion intent,
 kinematic target/solve, solver pose commit and spatial publication need an explicit same-tick join.
 Use a deterministic stand-in for initial sequencing, then verify the actual borrowed-job join

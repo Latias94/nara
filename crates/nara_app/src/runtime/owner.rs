@@ -14,8 +14,8 @@ use nara_ecs::{
     World,
     bevy_ecs::error::ErrorHandler,
     bevy_ecs::observer::Observer,
-    bevy_ecs::schedule::Schedules,
-    schedule::{IntoScheduleConfigs, Schedule},
+    bevy_ecs::schedule::{Schedules, SingleThreadedExecutor},
+    schedule::{IntoScheduleConfigs, Schedule, ScheduleLabel},
 };
 
 use crate::{
@@ -237,13 +237,16 @@ impl RuntimeOwnerState {
         initialize_runtime_fault_bridge(&mut world, runtime_fault_reporter.clone());
 
         let mut schedules = Schedules::new();
-        for stage in StartupStage::ALL {
-            schedules.insert(Schedule::new(stage));
+        for label in StartupStage::ALL
+            .into_iter()
+            .map(|stage| stage.intern())
+            .chain(CoreStage::ALL.into_iter().map(|stage| stage.intern()))
+            .chain(std::iter::once(crate::__private::FrameCleanup.intern()))
+        {
+            let mut schedule = Schedule::new(label);
+            schedule.set_executor(SingleThreadedExecutor::new());
+            schedules.insert(schedule);
         }
-        for stage in CoreStage::ALL {
-            schedules.insert(Schedule::new(stage));
-        }
-        schedules.insert(Schedule::new(crate::__private::FrameCleanup));
         schedules
             .get_mut(CoreStage::FixedUpdate)
             .expect("the fixed-update schedule is created above")

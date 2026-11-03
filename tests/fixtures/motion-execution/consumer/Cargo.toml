@@ -1,0 +1,26 @@
+[package]
+name = "motion-execution-consumer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+unified-multi-threaded = ["bevy_ecs/multi_threaded", "dep:bevy_tasks"]
+
+[dependencies]
+bevy_app = { version = "=0.20.0", default-features = false, features = ["std"] }
+bevy_ecs = { version = "=0.20.0", default-features = false }
+bevy_tasks = { version = "=0.20.0", default-features = false, optional = true }
+motion-contract.workspace = true
+motion-animation.workspace = true
+motion-physics.workspace = true
+nara_app.workspace = true
+nara_core.workspace = true
+nara_ecs.workspace = true
+nara_gameplay.workspace = true
+nara_hierarchy.workspace = true
+nara_reflect.workspace = true
+nara_transform.workspace = true

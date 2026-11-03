@@ -441,6 +441,13 @@ sealed frame/fixed plan if public sets cannot express the workflow without priva
 Continue Bevy system access analysis and execution; do not write another ECS scheduler or a
 general looping workflow DSL. Ordinary game authors keep `add_systems`.
 
+The [November 3 bounded comparison](../plans/2026-11-03-joint-motion-execution-plan.md) expresses
+the real same-tick borrowed-solver workflow with public sets and existing plugin prerequisites.
+It therefore retains those mechanisms for this unit, without adopting the private finite-plan
+prototype or replacing the managed owner with Bevy App. Explicit serial automatic execution
+removes dependency-feature policy changes. Raw parallel comparison is not production admission;
+the shared temporal/effect gates remain required before a new interface freeze.
+
 ```rust
 // Candidate only: a domain, not every gameplay author, declares an automatic segment.
 plan.fixed_phase(PhysicsStep).after(MotionIntent).before(SpatialPublication)?;
@@ -448,11 +455,13 @@ plan.fixed_phase(PhysicsStep).after(MotionIntent).before(SpatialPublication)?;
 
 **Invariants and impact.** Seal topology before startup; reject cycles, missing anchors and
 duplicate drive. Declare clock, pause, exact-step, deferred visibility and fault policy. Keep
-one execution owner and an explicit success/finalization rule. Whole successful-tick completion
-before command Ack is a candidate stronger than Accepted ADR 0057's current narrow Ack. Select
-between that stronger boundary and an independently observed tick-success rule through R4c's joint
-motion/failure consumer; reconcile the relevant contracts before phase/executor interface freeze.
-Neither choice rolls back partial World/native effects. Domain render stages need not remain
+one execution owner and an explicit success/finalization rule. The November 3 motion/failure
+consumer retains Accepted ADR 0057's narrow consumption Ack rather than moving it to whole-tick
+completion. Managed drive success/failure remains independently observed; an unrelated later
+failure preserves an already completed Ack and partial effects. Ack is not authoritative
+confirmation. This rejects the stronger whole-success-before-Ack rule for this unit rather than
+silently promising it through scheduling. Neither choice rolls back partial World/native effects.
+Domain render stages need not remain
 hardcoded App knowledge. Default TaskUpdate is an observation cut,
 not the one permissible future authoritative integration point.
 

@@ -1169,6 +1169,10 @@ impl Default for App {
 
 impl App {
     #[must_use]
+    /// Creates configuration with explicitly serial automatically driven schedules.
+    ///
+    /// Bevy dependency features cannot change this policy. Explicit custom schedules retain their
+    /// owner's executor policy; domain-owned borrowed work must join before publishing its result.
     pub fn new() -> Self {
         Self {
             owner: runtime::RuntimeOwner::new(),

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "12b3150686d7e97d51becc1926a9ae9b1cc26dc89c6733bd8ecc459a3d3e2d57"
+source_fingerprint: "27093d988516c501279e69a3c9f06742c4ca14e6e82de3fe46395be861a373ef"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "12b3150686d7e97d51becc1926a9ae9b1cc26dc89c6733bd8ecc459a3d3
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `12b3150686d7e97d51becc1926a9ae9b1cc26dc89c6733bd8ecc459a3d3e2d57`
-- Immutable records: 1234
+- Source fingerprint: `27093d988516c501279e69a3c9f06742c4ca14e6e82de3fe46395be861a373ef`
+- Immutable records: 1235
 - Open lane heads: 2
 
 # Open Registrations
@@ -23,6 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Independent joint motion comparison selects explicit serial automatic execution](verification/2026-11/2026-11-03T130631Z-independent-joint-motion-comparison-selects-explicit-serial-automatic-execution-dda9dc3f7d2e45d6baf30927cce70fc7.md) - Real borrowed solver, three compositions, feature-unified executor regression and narrow Ack evidence; shared temporal and prediction gates remain open.
 - **Verification Evidence**: [Complete public Prefab extraction and native workflow qualification](verification/2026-11/2026-11-03T115127Z-complete-public-prefab-extraction-and-native-workflow-qualification-c440d6b31843411897951e9ba2221a2e.md) - Independent exact extraction, inherited edits and conversion, strict Check and real Play, native widgets and truthful idle observation.
 - **Verification Evidence**: [Recovered extraction process and integrated source owners pass current qualification](verification/2026-11/2026-11-03T094705Z-recovered-extraction-process-and-integrated-source-owners-pass-current-qualification-e6d36a7a778d4f3494963eec011be399.md) - Real CLI-only interruption recovery, corrected capacity diagnostics, current domain coverage and conservative registration pruning.
 - **Verification Evidence**: [Retained extraction save selection corrects and revises the original complete preparation](verification/2026-11/2026-11-03T081849Z-retained-extraction-save-selection-corrects-and-revises-the-original-complete-preparation-74cb3a0454934a70aa008757b2f09c2d.md) - Same-corpus selection correction, actual returned failure custody, public App lifecycle controls and reconciled preconfirmation semantics.
@@ -34,7 +35,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Private extraction future Project and actual final Ready publication preserve unchanged Schema ownership](verification/2026-11/2026-11-03T050808Z-private-extraction-future-project-and-actual-final-ready-publication-preserve-unchanged-schema-ownership-a987c2db3b534dc5a30995e64ff6420d.md) - Private saved Project and actual final manifest qualification; complete live installation remains open.
 - **Verification Evidence**: [Ordinary future extraction inventory retains exact native participation and selected policy](verification/2026-11/2026-11-03T041901Z-ordinary-future-extraction-inventory-retains-exact-native-participation-and-selected-policy-f13e25cb405b450eb945f1eabe557438.md) - Complete Pending future inventory uses ordinary Q metadata admission while preserving original native participation, selected profile, checkpoint owners and cumulative budgets.
 - **Verification Evidence**: [Actual extraction file results enter their original checkpoints without another write](verification/2026-11/2026-11-03T033143Z-actual-extraction-file-results-enter-their-original-checkpoints-without-another-write-feeb247c76364545a38b5f9a2b2a5c6a.md) - Concrete finite checkpoint acceptance retains receipt or observation custody through conversion and nominal refusal, while saved installation and full future Ready remain separate.
-- **Verification Evidence**: [Concrete extraction file publication preserves live checkpoints and actual recovered outcomes](verification/2026-11/2026-11-03T031004Z-concrete-extraction-file-publication-preserves-live-checkpoints-and-actual-recovered-outcomes-6f0201d385c54f368e7e5b7473a05e41.md) - One concrete file loop publishes fixed Q, metadata and sparse original outputs while retaining distinct live/recovered owners, original encoded checkpoints and physical evidence through cleanup and conflict refusal.
 
 # Integration Notes
 

@@ -16,6 +16,15 @@ now have scoped evidence. Shared stock-stage Scene effects have their own comple
 native Scene View and offscreen qualification below; the editable Nara-drawn Inspector remains
 open. Exact native binding and stock-render ownership are retained.
 
+The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
+sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
+consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its
+feature-selected default; explicitly driven custom schedules retain their owner policy. The
+independent workspace verifies real contacts, borrowed same-tick join, deferred poses, NonSend,
+managed fixed/presented samples, Pause/exact Step, and narrow Ack followed by a sticky late fault.
+This establishes neither production automatic parallel support nor a frozen R4c phase interface.
+The joint discontinuity/effect, prediction, generated collision and broader R10 gates remain open.
+
 The [registry ownership unit](../../plans/2026-11-01-component-registry-ownership-plan.md) is
 implemented as `7f69d53` under ADR0081. Consuming `ComponentRegistryBuilder` admission publishes
 the sole `ComponentRegistrySnapshot`; failed admission returns its original candidate and error.

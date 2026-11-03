@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["contract", "animation", "physics", "consumer"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+nara_app = { path = "../../../crates/nara_app" }
+nara_core = { path = "../../../crates/nara_core" }
+nara_ecs = { path = "../../../crates/nara_ecs" }
+nara_gameplay = { path = "../../../crates/nara_gameplay" }
+nara_hierarchy = { path = "../../../crates/nara_hierarchy" }
+nara_reflect = { path = "../../../crates/nara_reflect" }
+nara_transform = { path = "../../../crates/nara_transform" }
+motion-contract = { path = "contract" }
+motion-animation = { path = "animation" }
+motion-physics = { path = "physics" }
