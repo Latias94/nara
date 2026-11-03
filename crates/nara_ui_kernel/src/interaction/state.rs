@@ -250,7 +250,20 @@ fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
         && previous.environment().route_revision() == latest.environment().route_revision()
         && previous.environment().geometry_generation()
             == latest.environment().geometry_generation()
-        && previous.layouts() == latest.layouts()
+        && previous.environment().content_transform() == latest.environment().content_transform()
+        && previous
+            .layouts()
+            .iter()
+            .filter_map(|layout| {
+                layout
+                    .key()
+                    .map(|key| (key, layout.route_parent(), layout.visible()))
+            })
+            .eq(latest.layouts().iter().filter_map(|layout| {
+                layout
+                    .key()
+                    .map(|key| (key, layout.route_parent(), layout.visible()))
+            }))
         && previous.hit_regions() == latest.hit_regions()
         && active_modal_root(previous) == active_modal_root(latest)
 }

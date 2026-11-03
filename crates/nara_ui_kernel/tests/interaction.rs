@@ -1121,7 +1121,7 @@ fn low_node_limit_still_admits_the_complete_pointer_cleanup_batch() {
 }
 
 #[test]
-fn equivalent_presentation_rebinds_pointer_capture_to_the_latest_epoch() {
+fn equivalent_pointer_routes_rebind_capture_across_paint_decoration_changes() {
     let mut compiler = compiler();
     let mut journal = hosted_journal();
     let initial_route = submit(
@@ -1144,11 +1144,15 @@ fn equivalent_presentation_rebinds_pointer_capture_to_the_latest_epoch() {
         )
         .unwrap();
 
-    let latest_route = submit(
-        &mut journal,
-        compile(&mut compiler, &snapshot(false), 1),
-        11,
-    );
+    let decorated = UiAuthoringSnapshotBuilder::new(2)
+        .with_root(base_root().with_child(
+            UiNode::new(UiStyle::absolute(15.0, 15.0, 1.0, 20.0)).with_visual(
+                nara_ui_kernel::UiVisual::role(nara_ui_kernel::UiColorRole::Focus),
+            ),
+        ))
+        .build()
+        .unwrap();
+    let latest_route = submit(&mut journal, compile(&mut compiler, &decorated, 1), 11);
     let rebound = session
         .reconcile_latest_presentation(&journal, SURFACE, &[])
         .unwrap()
@@ -1965,4 +1969,173 @@ fn semantic_snapshot_reports_only_committed_focus() {
             .count(),
         1
     );
+}
+
+fn assert_successor_cancels_pointer_capture(initial: Arc<UiFrame>, successor: Arc<UiFrame>) {
+    assert_eq!(
+        initial.environment().generations(),
+        successor.environment().generations()
+    );
+    let position = UiPoint::new(20.0, 20.0);
+    let initial_hit = initial.hit_test(position).unwrap();
+    let target = initial_hit.key().clone();
+    let successor_hit = successor.hit_test(position).unwrap();
+    assert_eq!(successor_hit.key(), &target);
+    assert_eq!(successor_hit.rect(), initial_hit.rect());
+
+    let mut journal = hosted_journal();
+    let initial_route = submit(&mut journal, initial, 10);
+    let mut session = UiInteractionSession::default();
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    let pressed = session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, position),
+        )
+        .unwrap();
+    assert!(pressed.consumed().unwrap().events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Pressed
+    }));
+
+    let successor_route = submit(&mut journal, successor, 11);
+    let cancelled = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(cancelled.is_reconciliation());
+    assert!(cancelled.events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+    assert!(cancelled.events().iter().all(|event| {
+        !matches!(
+            event.kind(),
+            UiRoutedEventKind::Released { .. } | UiRoutedEventKind::ActivateRequested { .. }
+        )
+    }));
+
+    let released = session
+        .dispatch(
+            &journal,
+            successor_route,
+            pointer_button(UiButtonPhase::Released, position),
+        )
+        .unwrap();
+    assert_eq!(
+        released.rejection(),
+        Some(&UiNonActivation::NoPointerCapture)
+    );
+    assert!(released.consumed().is_none());
+}
+
+#[test]
+fn keyed_ancestor_reparenting_cancels_pointer_capture_with_fixed_generations() {
+    let ancestor = UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0))
+        .with_key(node_key("ancestor"))
+        .with_child(button("first", "First", "first", 10.0, 10.0, true));
+    let parent =
+        UiNode::new(UiStyle::absolute(0.0, 0.0, 320.0, 180.0)).with_key(node_key("parent"));
+    let initial = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                .with_child(parent.clone().with_child(ancestor.clone())),
+        )
+        .build()
+        .unwrap();
+    let successor = UiAuthoringSnapshotBuilder::new(2)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                .with_children([parent, ancestor]),
+        )
+        .build()
+        .unwrap();
+    let mut compiler = compiler();
+    let initial = compile_for_slot(&mut compiler, &initial, 1, 1, 1, 1);
+    let successor = compile_for_slot(&mut compiler, &successor, 1, 1, 1, 1);
+    assert_eq!(initial.hit_regions(), successor.hit_regions());
+
+    assert_successor_cancels_pointer_capture(initial, successor);
+}
+
+#[test]
+fn overlapping_hit_region_reordering_cancels_pointer_capture_with_fixed_generations() {
+    let authored = |revision, lower: [&str; 2]| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                    .with_children(lower.map(|name| button(name, name, name, 10.0, 10.0, true)))
+                    .with_child(button("first", "First", "first", 10.0, 10.0, true)),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let initial = compile_for_slot(&mut compiler, &authored(1, ["second", "third"]), 1, 1, 1, 1);
+    let successor = compile_for_slot(&mut compiler, &authored(2, ["third", "second"]), 1, 1, 1, 1);
+    assert_eq!(initial.hit_regions()[0], successor.hit_regions()[0]);
+    assert_eq!(initial.hit_regions()[1], successor.hit_regions()[2]);
+    assert_eq!(initial.hit_regions()[2], successor.hit_regions()[1]);
+
+    assert_successor_cancels_pointer_capture(initial, successor);
+}
+
+#[test]
+fn clip_rect_changes_cancel_pointer_capture_with_fixed_generations() {
+    let authored = |revision, width| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_child(
+                    UiNode::new(
+                        UiStyle::absolute(0.0, 0.0, width, 100.0)
+                            .with_overflow(nara_ui_kernel::UiOverflow::Clip),
+                    )
+                    .with_child(button("first", "First", "first", 10.0, 10.0, true)),
+                ),
+            )
+            .build()
+            .unwrap()
+    };
+    let mut compiler = compiler();
+    let initial = compile_for_slot(&mut compiler, &authored(1, 80.0), 1, 1, 1, 1);
+    let successor = compile_for_slot(&mut compiler, &authored(2, 60.0), 1, 1, 1, 1);
+    assert!(initial.hit_test(UiPoint::new(70.0, 20.0)).is_some());
+    assert!(successor.hit_test(UiPoint::new(70.0, 20.0)).is_none());
+
+    assert_successor_cancels_pointer_capture(initial, successor);
+}
+
+#[test]
+fn content_transform_changes_cancel_pointer_capture_with_fixed_generations() {
+    let mut compiler = compiler();
+    let authored = snapshot(false);
+    let initial = compile_for_slot(&mut compiler, &authored, 1, 1, 1, 1);
+    let transform = UiSurfaceContentTransform::new(
+        UiSize::new(320.0, 180.0).unwrap(),
+        UiSize::new(320.0, 180.0).unwrap(),
+        nara_ui_kernel::UiSafeAreaInsets::default(),
+        2.0,
+    )
+    .unwrap();
+    let environment = UiEnvironment::for_surface(
+        SURFACE,
+        transform,
+        UiSurfaceGenerations::new(1, 1, 1, 1).unwrap(),
+        1,
+        1,
+    )
+    .unwrap();
+    let successor = compiler
+        .compile(&authored, environment, UiTheme::default())
+        .unwrap();
+    assert_eq!(initial.layouts(), successor.layouts());
+    assert_eq!(initial.hit_regions(), successor.hit_regions());
+
+    assert_successor_cancels_pointer_capture(initial, successor);
 }

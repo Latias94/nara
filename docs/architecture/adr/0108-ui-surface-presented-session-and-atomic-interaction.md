@@ -4,7 +4,8 @@
 **Date**: 2026-08-08
 **Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation, UIF-U3C prepared-submission and
 UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction;
-2026-10-30 by total prepared completion, interaction-basis and endpoint-incarnation restoration
+2026-10-30 by total prepared completion, interaction-basis and endpoint-incarnation restoration;
+2026-11-04 by pointer-route equivalence across text paint changes
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -120,6 +121,14 @@ facts. Any committed input invalidates an already compiled candidate. Equivalent
 may rebind an in-flight pointer gesture to the successor epoch; removal, action/enabled behavior,
 geometry or modal-scope changes cancel it. A label-only change does not cancel a gesture when the
 routing geometry and owning action remain identical.
+
+Pointer-route equivalence compares the exact content transform, slot/route/geometry generations,
+ordered hit regions, stable keyed propagation parents and visibility, and modal scope. Unkeyed
+selection/caret paint and structural indexes alone do not change pointer authority. A Host must
+reconcile the successfully presented successor and reduce its cleanup batch before routing new
+events. It must separately cancel gestures when the owning action changes, an image's actual native
+mapping changes, or presentation authority is lost; equal logical hit rectangles do not prove those
+Host facts.
 
 The conformance baseline admits one active seat owner and one active pointer owner per Surface Slot.
 Keyboard, gamepad and accessibility devices for the same player share that seat identity. A second
