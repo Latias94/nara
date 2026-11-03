@@ -89,8 +89,8 @@ Inspector tab. It shares the original field drafts and exact Application submiss
 Strings and numeric scalars have local editing, composition, explicit Apply/Discard/Reapply/Reset,
 document history and persistence. Boolean fields use explicit value buttons with the same exact
 submission and recovery paths. The reference and scrolling successor below adds root reference
-editing and a bounded picker. Structured values remain visibly read-only; the predecessor stays
-until equivalent complete behavior is qualified for the selected panel.
+editing and a bounded picker; the structured successor adds supported nested value controls.
+The predecessor stays until equivalent complete behavior is qualified for the selected panel.
 
 The original Host draws the panel into a retained image using the existing device/queue and admits
 input only after matching image, occurrence and native-window composite receipts. Equivalent frames
@@ -98,8 +98,8 @@ reuse their exact CPU/GPU output; text paint changes can preserve equivalent poi
 behavior changes, native mapping changes and presentation loss cancel gestures. Native backend
 injection and actual OS IME delivery retain separate evidence boundaries.
 
-Complete selected-panel replacement, keyboard-only shell entry, structured
-editing, a Nara-owned clipped live Scene/tool visual, virtualization, measured idle costs and the
+Complete selected-panel replacement, keyboard-only shell entry,
+a Nara-owned clipped live Scene/tool visual, virtualization, measured idle costs and the
 remaining native platform gates are still open. The optional scalar tab is a checkpoint toward
 those workflows, not completion of R11.
 
@@ -172,7 +172,7 @@ draft/current/view facts even when the text input is fully clipped. Focus, text 
 composition, point input and IME geometry still require the text input's own visible semantics.
 The short-viewport Apply and paged-choice regressions protect this distinction.
 
-The next structural replacement must project the existing `RootDraft`/`ValueDraft` through
+The structural replacement projects the existing `RootDraft`/`ValueDraft` through
 individually incarnated leaf controls, with captured field and child identity. Preserve pending
 Optional/List/Map confirmation, cancellation, local invalid text and exact whole-field Apply
 through real Scene/Prefab consumers. Do not add a parallel form-value store or a speculative
@@ -211,3 +211,71 @@ the unavailable-record manifest after entity/component creation and reacquires f
 old text lifetime is clipped. The final 32-case cohort includes these corrections. No source or
 input validation is relaxed. Actual OS input/IME/clipboard, keyboard scrolling, scrollbar dragging,
 virtualization, complete Inspector parity and the Scene/tool visual retain their separate scope.
+
+## Structured field integration
+
+The private adapter projects the existing candidate tree into controls for supported Optional,
+Record and scalar-item List/Map shapes. Opening a field, choosing a boolean or empty value,
+beginning/confirming/cancelling a child and removing a collection item only change the original
+`RootDraft`/`ValueDraft`. Whole-field Apply/Reapply retains the original Application submission,
+conflict, exact result and document history owner. Pending children and invalid local text remain
+recoverable and cannot publish a partial value.
+
+Each text leaf carries its field owner and a typed draft address. Collection and Optional child
+addresses retain their original `ChildDraft` identity; visible labels and list indices are not
+input identities. The field metadata authorizes whole-field buttons independently of visible leaf
+TextInput semantics. Removing or replacing a child retires its controls immediately. Unaffected
+leaves retain their own text buffers and local Undo/Redo even when a preceding row is removed.
+Pending-to-accepted transitions deliberately establish a new input control lifetime. The map key
+editor is addressed to its exact pending child and preserves an explicitly entered empty key.
+
+The predecessor consumes the same Optional child owner and retains its existing behavior. No
+public form schema, parallel value store or graphics owner is introduced. General keyed-record
+collection controls and unsupported shapes remain outside the existing supported-shape contract.
+Complete selected-panel parity, component/tree operations and the remaining visual/platform gates
+still precede removal of the corresponding Dear Inspector path.
+
+## Structured field qualification
+
+The integration is based on `fa0ca2f`, using the same Windows 11, Rust 1.95.0, root `target`,
+single-job Cargo, DX12 and installed CJK fallback configuration as the reference checkpoint.
+
+| Gate | Result |
+| --- | --- |
+| Draft and field controls | 32/32, `ec1753fc-3aa6-4609-bb4d-9f0beca715bd`; typed addresses, pending admission, retired identities, original scalar/reference controls and two complete Application consumers |
+| Ordinary Editor library | 316/316, `4e0431a7-e561-4bc7-aca9-8921690eed43`; 42 ignored cases excluded |
+| Final owner/native cohort | 16/16, `15000473-89b6-4f66-8f56-86c8504fda20`; two field controls, Project IME backend input and 13 actual Windows/DX12 trajectories |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; warnings remain |
+| Build and formatting | Editor locked build and `cargo fmt --all -- --check` pass |
+| Independent review | No P1/P2 findings in the scoped production review; final integration retains all executed controls |
+
+The new native trajectory applies four non-default structured fields in each of a real Scene and
+Prefab. Invalid Optional/Record numbers and pending List/Map drafts refuse Apply without changing
+source/history. Child confirmation, cancellation and removal remain local until exactly one
+whole-field transaction. Toolbar Undo/Redo, typed saved values, original entity records, unknown
+records and clean Reopen all pass. The predecessor's complete recursive trajectory also passes
+after consuming the same Optional child identity owner.
+
+The final field controls add a composing surviving leaf: sibling removal and whole-field Apply
+refuse, composition cancellation preserves the candidate, and deleting the preceding row keeps
+the surviving control identity, focus token and local Undo. The other control retires cancelled
+and confirmed Optional inputs, refuses stale tokens and uses explicit Reapply after an actual
+Application source conflict. Exact queued/pending/completion observations clear only the original
+field. The final cohort follows these assertions, all fixture corrections and the linear focus
+reducer traversal. It explicitly executes the latest composition assertions and corrected native
+helpers; the ordinary library run uses the same production behavior.
+
+The first native attempt exposed two test assumptions. Pointer events are processed by the owned
+adapter without its text/keyboard consumed return value, so the test now uses the established
+mouse helper and verifies actual state changes. A manifest captured before entity creation also
+contains a different complete placement inventory. Both recursive fixtures now verify original
+unknown entries, overlays and placement order across creation, then capture the complete field
+editing baseline; Save additionally compares every original raw entity record. Missing clipped
+semantics are located by bounded real wheel input through the confirmed image. No product source,
+input or result admission is weakened.
+
+These results qualify the supported value controls and selected Windows backend paths. Nested
+entity-reference picker parity, complete component/tree controls, keyboard-only shell entry,
+the Nara-owned Scene/tool visual, virtualization, measured idle work and actual OS IME/clipboard/
+accessibility/DPI behavior retain their separate requirements. The predecessor and the broader
+foundation Goal remain open.

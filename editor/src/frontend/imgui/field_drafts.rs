@@ -1,6 +1,7 @@
 //! Shared private field drafts for the Editor frontend.
 
 pub(in crate::frontend::imgui) mod references;
+pub(in crate::frontend::imgui) mod structure;
 
 use std::collections::{HashMap, HashSet};
 

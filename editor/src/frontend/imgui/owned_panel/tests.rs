@@ -24,6 +24,7 @@ use super::super::{
 use crate::workspace::EditorPanelInstanceId;
 
 mod references;
+mod structure;
 
 fn fonts() -> Vec<FontFace> {
     let primary = bundled_font_face().unwrap();
@@ -38,7 +39,11 @@ fn fonts() -> Vec<FontFace> {
 }
 
 fn setup() -> (Harness, EditorPanelInstanceId) {
-    let mut harness = Harness::with_project(InteractionProject::new_field_drafts(), 0);
+    setup_project(InteractionProject::new_field_drafts())
+}
+
+fn setup_project(project: InteractionProject) -> (Harness, EditorPanelInstanceId) {
+    let mut harness = Harness::with_project(project, 0);
     let model = harness.application.current_frame().unwrap();
     let scene = model.workspace().active_scene.as_ref().unwrap();
     harness.application.submit_and_drive(

@@ -28,8 +28,8 @@ pub(in crate::frontend::imgui) enum ValueDraft {
         confirmed: bool,
     },
     Optional {
-        value: Option<Box<ValueDraft>>,
-        pending: Option<Box<ValueDraft>>,
+        value: Option<Box<ChildDraft>>,
+        pending: Option<Box<ChildDraft>>,
         chosen: bool,
     },
     List {
@@ -77,9 +77,9 @@ impl ValueDraft {
             Self::Optional { value, pending, .. } => {
                 let mut text = value
                     .as_ref()
-                    .map_or_else(|| "null".to_owned(), |value| value.copy_text());
+                    .map_or_else(|| "null".to_owned(), |value| value.node.copy_text());
                 if let Some(pending) = pending {
-                    text.push_str(&format!("\nUnconfirmed Some: {}", pending.copy_text()));
+                    text.push_str(&format!("\nUnconfirmed Some: {}", pending.node.copy_text()));
                 }
                 text
             }
@@ -151,7 +151,7 @@ impl ValueDraft {
             ComponentValueShape::Optional { value: shape } => Self::Optional {
                 value: source
                     .filter(|value| **value != ComponentValue::Null)
-                    .map(|value| Box::new(Self::from_value(shape, Some(value)))),
+                    .map(|value| Box::new(ChildDraft::new(Self::from_value(shape, Some(value))))),
                 pending: None,
                 chosen: source.is_some(),
             },
@@ -237,7 +237,7 @@ impl ValueDraft {
                 }
                 value
                     .as_ref()
-                    .map_or(Ok(ComponentValue::Null), |value| value.value(shape))?
+                    .map_or(Ok(ComponentValue::Null), |value| value.node.value(shape))?
             }
             (
                 Self::List {

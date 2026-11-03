@@ -3,7 +3,9 @@ use crate::{frontend::imgui::ImguiImageInteraction, workspace::EditorPanelInstan
 use nara_ui_kernel::{UiFrame, UiKey, UiPoint, UiRect, UiSemanticRole};
 use winit::{
     dpi::PhysicalPosition,
-    event::{DeviceId, ElementState, Ime, MouseButton as NativeMouseButton},
+    event::{
+        DeviceId, ElementState, Ime, MouseButton as NativeMouseButton, MouseScrollDelta, TouchPhase,
+    },
 };
 
 const OWNED_LABEL: &str = "draft 中文 café";
@@ -114,6 +116,19 @@ impl AuthoringWorkflow<'_> {
         field: &str,
         action: Option<&str>,
     ) -> Result<OwnedFieldProbe, String> {
+        let (role, name) = match action {
+            Some(action) => (UiSemanticRole::Button, action),
+            None => (UiSemanticRole::TextInput, field),
+        };
+        self.owned_test_named_control(field, role, name)
+    }
+
+    fn owned_test_named_probe(
+        &self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<OwnedFieldProbe, String> {
         for (panel, frame, image) in self.native.owned_frames_for_test() {
             let Some(group) = frame
                 .semantics()
@@ -122,25 +137,25 @@ impl AuthoringWorkflow<'_> {
             else {
                 continue;
             };
-            let (role, name) = match action {
-                Some(action) => (UiSemanticRole::Button, action),
-                None => (UiSemanticRole::TextInput, field),
-            };
-            let node = frame
-                .semantics()
-                .iter()
-                .find(|node| {
-                    node.role() == role && node.name() == name && node.parent() == Some(group.key())
-                })
+            let mut nodes = frame.semantics().iter().filter(|node| {
+                node.role() == role && node.name() == name && node.parent() == Some(group.key())
+            });
+            let node = nodes
+                .next()
                 .ok_or_else(|| format!("the presented field {field:?} has no {role:?} {name:?}"))?;
+            if nodes.next().is_some() {
+                return Err(format!(
+                    "the presented field {field:?} has ambiguous {role:?} {name:?} controls"
+                ));
+            }
             let layout = frame
                 .layouts()
                 .iter()
                 .find(|layout| layout.key() == Some(node.key()))
                 .ok_or("the Inspector semantic control has no compiled layout")?;
-            if !node.enabled() || !layout.visible() || image.occurrence.is_none() {
+            if image.occurrence.is_none() {
                 return Err(format!(
-                    "the Inspector control {field:?}/{action:?} is not enabled and presented"
+                    "the Inspector control {field:?}/{name:?} has no confirmed image occurrence"
                 ));
             }
             if !frame.diagnostics().is_empty() {
@@ -160,13 +175,7 @@ impl AuthoringWorkflow<'_> {
             if image.viewport != main_viewport {
                 return Err("the hidden-window Inspector escaped the primary viewport".into());
             }
-            let rect = match layout.clip_rect() {
-                Some(clip) => layout
-                    .rect()
-                    .intersect(clip)
-                    .ok_or("the Inspector control is fully clipped")?,
-                None => layout.rect(),
-            };
+            let rect = layout.rect();
             return Ok(OwnedFieldProbe {
                 panel,
                 key: node.key().clone(),
@@ -178,6 +187,192 @@ impl AuthoringWorkflow<'_> {
         Err(format!(
             "no confirmed Nara Inspector image contains field Group {field:?}"
         ))
+    }
+
+    pub(super) fn owned_test_named_control(
+        &self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<OwnedFieldProbe, String> {
+        let mut probe = self.owned_test_named_probe(field, role, name)?;
+        let node = probe
+            .frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &probe.key)
+            .ok_or("the Inspector control lost its semantic node")?;
+        let layout = probe
+            .frame
+            .layouts()
+            .iter()
+            .find(|layout| layout.key() == Some(&probe.key))
+            .ok_or("the Inspector control lost its compiled layout")?;
+        if !node.enabled() || !layout.visible() {
+            return Err(format!(
+                "the Inspector control {field:?}/{name:?} is not enabled and presented"
+            ));
+        }
+        probe.rect = match layout.clip_rect() {
+            Some(clip) => layout
+                .rect()
+                .intersect(clip)
+                .ok_or("the Inspector control is fully clipped")?,
+            None => layout.rect(),
+        };
+        Ok(probe)
+    }
+
+    pub(super) fn owned_test_named_enabled(
+        &self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<bool, String> {
+        let probe = self.owned_test_named_probe(field, role, name)?;
+        probe
+            .frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &probe.key)
+            .map(|node| node.enabled())
+            .ok_or_else(|| "the Inspector control lost its semantic node".into())
+    }
+
+    fn owned_test_reveal_named(
+        &mut self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<(), String> {
+        for vertical in [1.0, -1.0] {
+            for _ in 0..48 {
+                if let Ok(visible) = self.owned_test_named_control(field, role, name)
+                    && visible.rect.size().width() > 2.0
+                    && visible.rect.size().height() > 2.0
+                {
+                    return Ok(());
+                }
+                let (_, image) = self.owned_test_inspector_image()?;
+                self.pointer = [
+                    image.viewport_origin[0] + (image.rect.min[0] + image.rect.max[0]) * 0.5,
+                    image.viewport_origin[1] + (image.rect.min[1] + image.rect.max[1]) * 0.5,
+                ];
+                self.paint(|_| {})?;
+                let (before, image) = self.owned_test_inspector_image()?;
+                let local = [
+                    (image.rect.min[0] + image.rect.max[0]) * 0.5,
+                    (image.rect.min[1] + image.rect.max[1]) * 0.5,
+                ];
+                self.pointer = [
+                    image.viewport_origin[0] + local[0],
+                    image.viewport_origin[1] + local[1],
+                ];
+                if !image.owns_native_pointer(&self.native.context, self.pointer) {
+                    return Err("the actual Inspector image is occluded at the wheel target".into());
+                }
+                self.owned_test_event(WindowEvent::CursorMoved {
+                    device_id: DeviceId::dummy(),
+                    position: PhysicalPosition::new(
+                        f64::from(local[0]) * f64::from(image.pixels_per_point),
+                        f64::from(local[1]) * f64::from(image.pixels_per_point),
+                    ),
+                })?;
+                if !self.owned_test_event(WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0.0, vertical),
+                    phase: TouchPhase::Moved,
+                })? {
+                    return Err(
+                        "the confirmed Inspector image did not consume its locating wheel".into(),
+                    );
+                }
+                self.owned_test_paint()?;
+                let (after, _) = self.owned_test_inspector_image()?;
+                if Arc::ptr_eq(&before, &after) {
+                    break;
+                }
+            }
+        }
+        self.owned_test_named_control(field, role, name)
+            .map(|_| ())
+            .map_err(|error| format!("after a bounded Inspector wheel search: {error}"))
+    }
+
+    fn owned_test_inspector_image(&self) -> Result<(Arc<UiFrame>, ImguiImageInteraction), String> {
+        let inspector = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.inspector")
+            .ok_or("the native fixture has no Inspector panel")?
+            .id();
+        let (_, frame, image) = self
+            .native
+            .owned_frames_for_test()
+            .into_iter()
+            .find(|(panel, _, _)| *panel == inspector)
+            .ok_or("the Inspector has no confirmed native image")?;
+        if image.occurrence.is_none() || !frame.diagnostics().is_empty() {
+            return Err("the Inspector image is unconfirmed or contains diagnostics".into());
+        }
+        Ok((frame, image))
+    }
+
+    pub(super) fn owned_test_named_click(&mut self, field: &str, name: &str) -> Result<(), String> {
+        self.owned_test_named_pointer(field, UiSemanticRole::Button, name, 0.5)?;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            self.owned_test_mouse(state)?;
+            self.owned_test_paint()?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn owned_test_named_replace(
+        &mut self,
+        field: &str,
+        name: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        self.owned_test_named_pointer(field, UiSemanticRole::TextInput, name, 1.0)?;
+        self.owned_test_mouse(ElementState::Pressed)?;
+        let probe = self.owned_test_named_control(field, UiSemanticRole::TextInput, name)?;
+        if self.native.owned_focused_control_for_test() != Some((probe.panel, probe.key.clone()))
+            || !self.native.owned_text_focus_for_test()
+        {
+            return Err(format!(
+                "the native pointer did not focus TextInput {field:?}/{name:?}"
+            ));
+        }
+        self.owned_test_named_pointer(field, UiSemanticRole::TextInput, name, 0.0)?;
+        self.owned_test_mouse(ElementState::Released)?;
+        self.owned_test_paint()?;
+        self.owned_test_ime(Ime::Enabled)?;
+        self.owned_test_ime(Ime::Commit(text.into()))?;
+        self.owned_test_named_text(field, name, text)
+    }
+
+    pub(super) fn owned_test_named_text(
+        &self,
+        field: &str,
+        name: &str,
+        expected: &str,
+    ) -> Result<(), String> {
+        let probe = self.owned_test_named_probe(field, UiSemanticRole::TextInput, name)?;
+        let actual = probe
+            .frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &probe.key)
+            .and_then(|node| node.value());
+        if actual != Some(expected) {
+            return Err(format!(
+                "TextInput {field:?}/{name:?}: expected retained text {expected:?}, observed {actual:?}"
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn owned_test_paint(&mut self) -> Result<(), String> {
@@ -238,12 +433,37 @@ impl AuthoringWorkflow<'_> {
         action: Option<&str>,
         horizontal: f32,
     ) -> Result<(), String> {
+        let (role, name) = match action {
+            Some(action) => (UiSemanticRole::Button, action),
+            None => (UiSemanticRole::TextInput, field),
+        };
+        self.owned_test_point_at_named(field, role, name, horizontal)
+    }
+
+    fn owned_test_named_pointer(
+        &mut self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+        horizontal: f32,
+    ) -> Result<(), String> {
+        self.owned_test_reveal_named(field, role, name)?;
+        self.owned_test_point_at_named(field, role, name, horizontal)
+    }
+
+    fn owned_test_point_at_named(
+        &mut self,
+        field: &str,
+        role: UiSemanticRole,
+        name: &str,
+        horizontal: f32,
+    ) -> Result<(), String> {
         self.pointer = self
-            .owned_test_control(field, action)?
+            .owned_test_named_control(field, role, name)?
             .position(horizontal)?
             .0;
         self.paint(|_| {})?;
-        let probe = self.owned_test_control(field, action)?;
+        let probe = self.owned_test_named_control(field, role, name)?;
         let (global, position) = probe.position(horizontal)?;
         self.pointer = global;
         if !probe

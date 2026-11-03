@@ -48,8 +48,18 @@ history and persisted/reopened values. The same unit now adds typed root entity/
 bounded source-local target pages and native wheel scrolling. Clipped text inputs lose text/IME
 authority while visible field buttons retain exact draft/result ownership. Its final 32-case
 owner/native cohort and 308-test ordinary Editor library pass; the unit records native scope,
-review corrections and remaining limits. Structured editing, complete panel parity and broader
-R11/R12 qualification remain open.
+review corrections and remaining limits. Complete panel parity and broader R11/R12 qualification
+remain open; the supported structured-value successor follows below.
+
+The [structured-field successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#structured-field-integration)
+now projects the existing `RootDraft`/`ValueDraft` into Optional, Record and scalar-item List/Map
+controls. Typed addresses retain original child identity, independently incarnated text leaves
+and whole-field submission/result ownership. Pending children and invalid local text remain
+unpublished; deleting a preceding row preserves the surviving leaf's local history. This advances
+the supported value controls with 316 ordinary library tests and the final 16-case owner/native
+cohort, including complete Scene/Prefab history and disk Reopen. It does not complete
+component/tree parity, nested reference pickers, the Nara-owned Scene/tool
+visual, keyboard-only shell entry or broader native/idle/platform qualification.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

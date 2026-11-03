@@ -28,6 +28,7 @@ use thiserror::Error;
 
 use super::PanelSubmissionId;
 use super::authoring;
+use super::field_drafts::structure::{self, DraftAction, DraftInput};
 use super::field_drafts::{
     Candidate, FieldBasis, FieldDraft, FieldEditors, FieldKey, PreparedFieldEdit, source,
 };
@@ -37,6 +38,7 @@ const PANEL_INSET: f32 = 12.0;
 const RETAINED_FRAMES: usize = 3;
 
 mod references;
+mod structured;
 mod viewport;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +70,7 @@ impl InspectorOperation {
         }
     }
 
-    const fn label(self) -> &'static str {
+    pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Apply => "Apply",
             Self::Discard => "Discard",
@@ -93,6 +95,10 @@ pub(super) enum InspectorBinding {
         field: UiKey,
         entity: String,
     },
+    Structure {
+        field: UiKey,
+        action: DraftAction,
+    },
 }
 
 struct FieldControl {
@@ -107,10 +113,10 @@ struct FieldControl {
     buttons: [UiButtonState; InspectorOperation::COUNT],
     reference_open: bool,
     reference_page: usize,
-    references: HashMap<String, ReferenceControl>,
+    references: HashMap<String, ButtonControl>,
 }
 
-struct ReferenceControl {
+struct ButtonControl {
     key: UiKey,
     state: UiButtonState,
 }
@@ -120,7 +126,7 @@ impl FieldControl {
         match &self.input {
             FieldInput::Text(text) => text.key(),
             FieldInput::Boolean(key) => key,
-            FieldInput::ReadOnly => &self.key,
+            FieldInput::Structured(_) | FieldInput::ReadOnly => &self.key,
         }
     }
 
@@ -131,10 +137,61 @@ impl FieldControl {
         }
     }
 
-    fn text_mut(&mut self) -> Option<&mut UiTextField> {
-        match &mut self.input {
-            FieldInput::Text(text) => Some(text),
+    fn text_at(&self, input: &UiKey) -> Option<&UiTextField> {
+        match &self.input {
+            FieldInput::Text(text) if text.key() == input => Some(text),
+            FieldInput::Structured(controls) => controls
+                .inputs
+                .values()
+                .find(|text| text.key() == input)
+                .map(Box::as_ref),
             _ => None,
+        }
+    }
+
+    fn text_at_mut(&mut self, input: &UiKey) -> Option<&mut UiTextField> {
+        match &mut self.input {
+            FieldInput::Text(text) if text.key() == input => Some(text),
+            FieldInput::Structured(controls) => controls
+                .inputs
+                .values_mut()
+                .find(|text| text.key() == input)
+                .map(Box::as_mut),
+            _ => None,
+        }
+    }
+
+    fn text_target(&self, input: &UiKey) -> Option<&DraftInput> {
+        match &self.input {
+            FieldInput::Structured(controls) => controls
+                .inputs
+                .iter()
+                .find_map(|(target, text)| (text.key() == input).then_some(target)),
+            _ => None,
+        }
+    }
+
+    fn texts_mut(&mut self) -> impl Iterator<Item = &mut UiTextField> {
+        let (single, children) = match &mut self.input {
+            FieldInput::Text(text) => (Some(text.as_mut()), None),
+            FieldInput::Structured(controls) => (None, Some(&mut controls.inputs)),
+            _ => (None, None),
+        };
+        single.into_iter().chain(
+            children
+                .into_iter()
+                .flat_map(|inputs| inputs.values_mut().map(Box::as_mut)),
+        )
+    }
+
+    fn is_composing(&self) -> bool {
+        match &self.input {
+            FieldInput::Text(text) => text.editor().is_composing(),
+            FieldInput::Structured(controls) => controls
+                .inputs
+                .values()
+                .any(|text| text.editor().is_composing()),
+            _ => false,
         }
     }
 }
@@ -142,6 +199,7 @@ impl FieldControl {
 enum FieldInput {
     Text(Box<UiTextField>),
     Boolean(UiKey),
+    Structured(Box<structured::StructuredControls>),
     ReadOnly,
 }
 
@@ -183,6 +241,12 @@ struct DisplayedField {
     width: f32,
 }
 
+struct DisplayedInput {
+    field: UiKey,
+    display_text: String,
+    width: f32,
+}
+
 #[derive(Clone)]
 struct DisplayedButton {
     field: UiKey,
@@ -194,6 +258,7 @@ struct DisplayedButton {
 enum InspectorButtonAction {
     Operation(InspectorOperation),
     Reference(String),
+    Structure(DraftAction),
 }
 
 struct CompiledInspector {
@@ -202,6 +267,7 @@ struct CompiledInspector {
     theme: UiTheme,
     projected_fields: HashMap<UiKey, DisplayedField>,
     fields: HashMap<UiKey, DisplayedField>,
+    inputs: HashMap<UiKey, DisplayedInput>,
     buttons: HashMap<UiKey, DisplayedButton>,
 }
 
@@ -288,6 +354,7 @@ impl OwnedInspector {
         }
         let mut nodes = vec![self.label("heading", "Inspector")?];
         let mut displayed = HashMap::new();
+        let mut inputs = HashMap::new();
         let mut buttons = HashMap::new();
         let mut visible = Vec::new();
         if let Some(scene) = model.workspace().active_scene.as_ref() {
@@ -323,6 +390,7 @@ impl OwnedInspector {
                             width,
                             fields,
                             &mut displayed,
+                            &mut inputs,
                             &mut buttons,
                             &scene.editor.inspector.entities,
                         )?);
@@ -363,6 +431,7 @@ impl OwnedInspector {
                     width,
                     fields,
                     &mut displayed,
+                    &mut inputs,
                     &mut buttons,
                     &scene.editor.inspector.entities,
                 )?);
@@ -409,9 +478,15 @@ impl OwnedInspector {
                 .map(|node| (node.key(), node.enabled()))
                 .collect::<HashMap<_, _>>();
             buttons.retain(|key, _| semantics.contains_key(key));
+            inputs.retain(|key, _| semantics.contains_key(key));
             let button_fields = buttons
                 .values()
                 .map(|button| button.field.clone())
+                .chain(
+                    inputs
+                        .values()
+                        .map(|input: &DisplayedInput| input.field.clone()),
+                )
                 .collect::<HashSet<_>>();
             displayed.retain(|key, _| semantics.contains_key(key) || button_fields.contains(key));
             for field in displayed.values_mut() {
@@ -427,9 +502,10 @@ impl OwnedInspector {
             }
         } else {
             displayed.clear();
+            inputs.clear();
             buttons.clear();
             for control in self.controls.values_mut() {
-                if let Some(text) = control.text_mut() {
+                for text in control.texts_mut() {
                     text.blur(&mut self.engine)?;
                     text.set_enabled(false, &mut self.engine)?;
                 }
@@ -444,6 +520,7 @@ impl OwnedInspector {
             theme,
             projected_fields,
             fields: displayed,
+            inputs,
             buttons,
         });
         Ok(frame)
@@ -466,6 +543,10 @@ impl OwnedInspector {
                     field: button.field.clone(),
                     entity: entity.clone(),
                 },
+                InspectorButtonAction::Structure(action) => InspectorBinding::Structure {
+                    field: button.field.clone(),
+                    action: action.clone(),
+                },
             });
         }
         let field = self.live_field(frame, key)?;
@@ -484,15 +565,14 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text_mut()
+            .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         let token = text.focus()?;
-        for (other, control) in &mut self.controls {
-            if other != &key
-                && let Some(text) = control.text_mut()
-                && text.input_token().is_some()
-            {
-                text.blur(&mut self.engine)?;
+        for control in self.controls.values_mut() {
+            for text in control.texts_mut() {
+                if text.key() != field && text.input_token().is_some() {
+                    text.blur(&mut self.engine)?;
+                }
             }
         }
         Ok(token)
@@ -509,7 +589,7 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let text = control
-            .text_mut()
+            .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         Ok(text.blur(&mut self.engine)?)
     }
@@ -529,7 +609,7 @@ impl OwnedInspector {
         control.host_enabled = enabled;
         let allowed = control.allowed;
         let text = control
-            .text_mut()
+            .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if !enabled {
             text.blur(&mut self.engine)?;
@@ -544,7 +624,7 @@ impl OwnedInspector {
     ) -> Result<Option<UiTextInputToken>, OwnedInspectorError> {
         let displayed = self.live_input(frame, field)?;
         Ok(self.controls[&displayed.key]
-            .text()
+            .text_at(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?
             .input_token())
     }
@@ -552,16 +632,21 @@ impl OwnedInspector {
     pub(super) fn cancel_input(&mut self) -> Result<(), OwnedInspectorError> {
         let mut failure = None;
         for control in self.controls.values_mut() {
-            if let Some(text) = control.text_mut()
-                && let Err(error) = text.blur(&mut self.engine)
-            {
-                failure.get_or_insert(error);
+            for text in control.texts_mut() {
+                if let Err(error) = text.blur(&mut self.engine) {
+                    failure.get_or_insert(error);
+                }
             }
             for state in &mut control.buttons {
                 *state = UiButtonState::default();
             }
             for reference in control.references.values_mut() {
                 reference.state = UiButtonState::default();
+            }
+            if let FieldInput::Structured(controls) = &mut control.input {
+                for button in controls.buttons.values_mut() {
+                    button.state = UiButtonState::default();
+                }
             }
         }
         match failure {
@@ -578,7 +663,7 @@ impl OwnedInspector {
     ) -> Result<bool, OwnedInspectorError> {
         let displayed = self.live_input(frame, field)?;
         let text = self.controls[&displayed.key]
-            .text()
+            .text_at(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
@@ -594,9 +679,9 @@ impl OwnedInspector {
         fields: &FieldEditors,
     ) -> Result<Option<String>, OwnedInspectorError> {
         let displayed = self.live_input(frame, field)?;
-        self.check_input(&displayed.key, fields)?;
+        self.check_input(&displayed.key, field, fields)?;
         let text = self.controls[&displayed.key]
-            .text()
+            .text_at(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
@@ -633,17 +718,18 @@ impl OwnedInspector {
         fields: &mut FieldEditors,
     ) -> Result<TextEditOutcome, OwnedInspectorError> {
         let key = self.live_input(frame, field)?.key.clone();
-        self.check_input(&key, fields)?;
+        self.check_input(&key, field, fields)?;
         let control = self
             .controls
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
+        let target = control.text_target(field).cloned();
         let text = control
-            .text_mut()
+            .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         let outcome = text.edit(token, edit, &mut self.engine)?;
         if outcome.text_changed {
-            Self::adopt_text(fields, &key, text.editor().text())?;
+            Self::adopt_text(fields, &key, target.as_ref(), text.editor().text())?;
         }
         Ok(outcome)
     }
@@ -658,15 +744,22 @@ impl OwnedInspector {
         fields: &mut FieldEditors,
     ) -> Result<TextEditOutcome, OwnedInspectorError> {
         let displayed = self.live_input(frame, field)?.clone();
-        self.check_input(&displayed.key, fields)?;
+        self.check_input(&displayed.key, field, fields)?;
+        let input = self
+            .retained(frame)?
+            .inputs
+            .get(field)
+            .ok_or(OwnedInspectorError::UnknownControl)?;
+        let display_text = input.display_text.clone();
         let control = self
             .controls
             .get_mut(&displayed.key)
             .ok_or(OwnedInspectorError::RetiredField)?;
+        let target = control.text_target(field).cloned();
         let text = control
-            .text_mut()
+            .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
-        if displayed.display_text.as_deref() != Some(text.editor().display_text()) {
+        if display_text != text.editor().display_text() {
             return Err(OwnedInspectorError::ChangedProjection);
         }
         if text.editor().is_composing() {
@@ -706,7 +799,12 @@ impl OwnedInspector {
             &mut self.engine,
         )?;
         if outcome.text_changed {
-            Self::adopt_text(fields, &displayed.key, text.editor().text())?;
+            Self::adopt_text(
+                fields,
+                &displayed.key,
+                target.as_ref(),
+                text.editor().text(),
+            )?;
         }
         Ok(outcome)
     }
@@ -720,12 +818,17 @@ impl OwnedInspector {
     ) -> Result<UiRect, OwnedInspectorError> {
         let displayed = self.live_input(frame, field)?;
         let text = self.controls[&displayed.key]
-            .text()
+            .text_at(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         if text.input_token() != Some(token) {
             return Err(UiTextFieldError::StaleInput.into());
         }
-        Ok(text.ime_area(displayed.width)?)
+        let input = self
+            .retained(frame)?
+            .inputs
+            .get(field)
+            .ok_or(OwnedInspectorError::UnknownControl)?;
+        Ok(text.ime_area(input.width)?)
     }
 
     /// Reduces Host-admitted routing facts. Returned intents still require explicit activation.
@@ -738,18 +841,13 @@ impl OwnedInspector {
         if dispatch.frame_revision() != frame.revision() {
             return Err(OwnedInspectorError::ForeignDispatch);
         }
-        let fields = compiled
-            .fields
-            .iter()
-            .map(|(key, field)| (key.clone(), field.key.clone()))
-            .collect::<Vec<_>>();
+        let inputs = compiled.inputs.keys().cloned().collect::<HashSet<_>>();
         let buttons = compiled.buttons.values().cloned().collect::<Vec<_>>();
-        for (input, key) in fields {
-            if let Some(control) = self.controls.get_mut(&key)
-                && control.input_key() == &input
-                && let Some(text) = control.text_mut()
-            {
-                text.reduce_focus(dispatch, &mut self.engine)?;
+        for control in self.controls.values_mut() {
+            for text in control.texts_mut() {
+                if inputs.contains(text.key()) {
+                    text.reduce_focus(dispatch, &mut self.engine)?;
+                }
             }
         }
         let mut intents = UiIntentBatch::default();
@@ -776,6 +874,19 @@ impl OwnedInspector {
                     };
                     &mut reference.state
                 }
+                InspectorButtonAction::Structure(action) => {
+                    let FieldInput::Structured(controls) = &mut control.input else {
+                        continue;
+                    };
+                    let Some(button_state) = controls
+                        .buttons
+                        .get_mut(action)
+                        .filter(|state| state.key == *button.button.key())
+                    else {
+                        continue;
+                    };
+                    &mut button_state.state
+                }
             };
             state.reduce_batch(&button.button, dispatch, &mut intents)?;
         }
@@ -801,6 +912,10 @@ impl OwnedInspector {
             }
             InspectorButtonAction::Reference(entity) => {
                 self.choose_reference(frame, &binding.field, button, &entity, model, fields)?;
+                Ok(None)
+            }
+            InspectorButtonAction::Structure(action) => {
+                self.change_structure(frame, &binding.field, button, &action, model, fields)?;
                 Ok(None)
             }
         }
@@ -858,10 +973,7 @@ impl OwnedInspector {
         if self.read_only || !editable || !control.host_enabled || !control.allowed {
             return Err(OwnedInspectorError::OperationDisabled(operation));
         }
-        if control
-            .text()
-            .is_some_and(|text| text.editor().is_composing())
-        {
+        if control.is_composing() {
             return Err(OwnedInspectorError::Composing);
         }
         if matches!(
@@ -962,16 +1074,20 @@ impl OwnedInspector {
         frame: &Arc<UiFrame>,
         input: &UiKey,
     ) -> Result<&DisplayedField, OwnedInspectorError> {
-        let field = self
-            .retained(frame)?
-            .fields
+        let compiled = self.retained(frame)?;
+        let owner = compiled
+            .inputs
             .get(input)
+            .map_or(input, |input| &input.field);
+        let field = compiled
+            .fields
+            .get(owner)
             .ok_or(OwnedInspectorError::UnknownControl)?;
         let control = self
             .controls
             .get(&field.key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        if control.input_key() != input {
+        if control.input_key() != owner || (input != owner && control.text_at(input).is_none()) {
             return Err(OwnedInspectorError::RetiredField);
         }
         Ok(field)
@@ -983,10 +1099,11 @@ impl OwnedInspector {
         input: &UiKey,
     ) -> Result<&DisplayedField, OwnedInspectorError> {
         let field = self.live_field(frame, input)?;
-        if !frame
-            .semantics()
-            .iter()
-            .any(|node| node.key() == input && node.role() == UiSemanticRole::TextInput)
+        if !self.retained(frame)?.inputs.contains_key(input)
+            || !frame
+                .semantics()
+                .iter()
+                .any(|node| node.key() == input && node.role() == UiSemanticRole::TextInput)
         {
             return Err(OwnedInspectorError::ChangedProjection);
         }
@@ -996,6 +1113,7 @@ impl OwnedInspector {
     fn check_input(
         &self,
         key: &FieldKey,
+        input: &UiKey,
         fields: &FieldEditors,
     ) -> Result<(), OwnedInspectorError> {
         if !fields.has_draft_capacity(key) {
@@ -1009,10 +1127,15 @@ impl OwnedInspector {
             .controls
             .get(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
-        let text = control.text().ok_or(OwnedInspectorError::ReadOnlyField)?;
-        if draft.basis != control.basis
-            || !matches!(&draft.candidate, Candidate::Text(value) if value == text.editor().text())
-        {
+        let text = control
+            .text_at(input)
+            .ok_or(OwnedInspectorError::ReadOnlyField)?;
+        let candidate_text = match (&draft.candidate, control.text_target(input)) {
+            (Candidate::Text(text), None) => Some(text.as_str()),
+            (Candidate::Structured(root), Some(target)) => structure::text(root, target),
+            _ => None,
+        };
+        if draft.basis != control.basis || candidate_text != Some(text.editor().text()) {
             return Err(OwnedInspectorError::ChangedDraft);
         }
         if draft.in_flight() {
@@ -1027,13 +1150,19 @@ impl OwnedInspector {
     fn adopt_text(
         fields: &mut FieldEditors,
         key: &FieldKey,
+        target: Option<&DraftInput>,
         text: &str,
     ) -> Result<(), OwnedInspectorError> {
         let draft = fields
             .drafts
             .get_mut(key)
             .ok_or(OwnedInspectorError::ChangedDraft)?;
-        draft.candidate = Candidate::Text(text.to_owned());
+        match (&mut draft.candidate, target) {
+            (Candidate::Text(value), None) => *value = text.to_owned(),
+            (Candidate::Structured(root), Some(target)) => structure::set_text(root, target, text)
+                .map_err(OwnedInspectorError::InvalidCandidate)?,
+            _ => return Err(OwnedInspectorError::ChangedDraft),
+        }
         draft.dirty = true;
         draft.remove_intent = false;
         draft.error = draft.candidate.value(&draft.basis.field.shape).err();
@@ -1055,6 +1184,7 @@ impl OwnedInspector {
         width: f32,
         fields: &mut FieldEditors,
         displayed: &mut HashMap<UiKey, DisplayedField>,
+        inputs: &mut HashMap<UiKey, DisplayedInput>,
         buttons: &mut HashMap<UiKey, DisplayedButton>,
         entities: &[nara::tooling::SceneInspectorEntityRow],
     ) -> Result<UiNode, OwnedInspectorError> {
@@ -1068,7 +1198,7 @@ impl OwnedInspector {
         }
         let capacity = fields.has_draft_capacity(&key);
         if let Some(basis) = &current {
-            if !fields.drafts.contains_key(&key) && scalar_input(basis) && capacity {
+            if !fields.drafts.contains_key(&key) && supported_input(basis) && capacity {
                 fields
                     .drafts
                     .insert(key.clone(), FieldDraft::new(basis.clone()));
@@ -1123,6 +1253,11 @@ impl OwnedInspector {
                     self.root.clone(),
                     UiLocalKey::runtime("nara.inspector.action", format!("{identity}.Toggle"))?,
                 )?)
+            } else if let Some(draft) = draft
+                && supported_input(&draft.basis)
+                && matches!(draft.candidate, Candidate::Structured(_))
+            {
+                FieldInput::Structured(Box::default())
             } else {
                 FieldInput::ReadOnly
             };
@@ -1149,13 +1284,13 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let identity = control.identity;
-        let current_scalar = current.as_ref().is_some_and(scalar_input);
+        let current_supported = current.as_ref().is_some_and(supported_input);
         control.allowed = editable
-            && current_scalar
+            && current_supported
             && capacity
             && draft.is_some_and(|draft| !draft.incompatible && !draft.in_flight());
         let enabled = control.allowed && control.host_enabled;
-        if let Some(text) = control.text_mut() {
+        for text in control.texts_mut() {
             if !enabled {
                 text.blur(&mut self.engine)?;
             }
@@ -1183,10 +1318,9 @@ impl OwnedInspector {
         let unavailable = control.unavailable.clone();
         let host_enabled = control.host_enabled;
         let boolean = matches!(&control.input, FieldInput::Boolean(_));
+        let structured = matches!(&control.input, FieldInput::Structured(_));
         let has_input = !matches!(&control.input, FieldInput::ReadOnly);
-        let composing = control
-            .text()
-            .is_some_and(|text| text.editor().is_composing());
+        let composing = control.is_composing();
         let display_text = control
             .text()
             .map(|text| text.editor().display_text().to_owned());
@@ -1200,6 +1334,16 @@ impl OwnedInspector {
             ),
         )?];
         if let Some(node) = text_node {
+            inputs.insert(
+                input.clone(),
+                DisplayedInput {
+                    field: input.clone(),
+                    display_text: display_text
+                        .clone()
+                        .ok_or(OwnedInspectorError::ReadOnlyField)?,
+                    width,
+                },
+            );
             children.push(node);
         } else if !boolean {
             children.push(self.label(
@@ -1207,10 +1351,13 @@ impl OwnedInspector {
                 &authoring::value_label(source(&current.as_ref().unwrap_or(basis).field)),
             )?);
         }
+        if structured && let Some(draft) = draft {
+            children.extend(self.structured_nodes(&key, draft, width, inputs, buttons)?);
+        }
         let mut operations = [false; InspectorOperation::COUNT];
         if let Some(draft) = draft {
             let can_edit = editable
-                && current_scalar
+                && current_supported
                 && capacity
                 && has_input
                 && !composing
@@ -1367,7 +1514,7 @@ impl OwnedInspector {
         if let Some(unavailable) = unavailable {
             children.push(self.label(&format!("{identity}.unavailable"), &unavailable)?);
         }
-        if !current_scalar {
+        if !current_supported {
             children.push(self.label(
                 &format!("{identity}.readonly"),
                 if current.is_some() {
@@ -1437,6 +1584,10 @@ fn scalar_input(basis: &FieldBasis) -> bool {
                 ..
             }
         )
+}
+
+fn supported_input(basis: &FieldBasis) -> bool {
+    authoring::value_draft::supported(&basis.field.shape)
 }
 
 fn scalar_text(basis: &FieldBasis) -> bool {

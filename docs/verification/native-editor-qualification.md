@@ -84,6 +84,13 @@ input, clipped hit points, pressed-button cancellation, retained dirty buffers, 
 ordinary history and original-record preservation through Save/Reopen. No image receipt or
 kernel viewport is forged by these native tests.
 
+The structured-field trajectory opens both an ordinary Scene and Prefab through the same shell.
+It edits Optional, Record, scalar List and Map drafts through owned controls and native pointer/IME
+ingress. Invalid and pending values, child cancellation and confirmation preserve the document
+until whole-field Apply. The trajectory then checks exact history, ordinary Undo/Redo, typed disk
+values, original unavailable records and a clean Save/Reopen. The predecessor recursive trajectory
+separately protects the shared Optional child identity change.
+
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
 requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window

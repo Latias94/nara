@@ -92,7 +92,7 @@ impl OwnedInspector {
                     )?;
                     control.references.insert(
                         entity.to_owned(),
-                        ReferenceControl {
+                        ButtonControl {
                             key,
                             state: UiButtonState::default(),
                         },
@@ -148,7 +148,7 @@ impl OwnedInspector {
     ) -> Result<(), OwnedInspectorError> {
         let displayed = self.live_field(frame, field)?.clone();
         let key = &displayed.key;
-        self.check_input(key, fields)?;
+        self.check_input(key, field, fields)?;
         let control = &self.controls[key];
         if !control.reference_open
             || displayed.reference_view != Some((control.reference_open, control.reference_page))
@@ -187,7 +187,7 @@ impl OwnedInspector {
         {
             return Err(OwnedInspectorError::ChangedProjection);
         }
-        Self::adopt_text(fields, key, &format!("scene-local:{entity}"))?;
+        Self::adopt_text(fields, key, None, &format!("scene-local:{entity}"))?;
         self.controls.remove(key);
         Ok(())
     }

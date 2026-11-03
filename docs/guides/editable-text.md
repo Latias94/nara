@@ -98,9 +98,9 @@ fields use Nara drawing and local editing. Boolean values use an explicit `Set t
 button. Entity and asset references use bounded text editing; `Choose target` also offers the
 current document's source-local entities in pages of at most 32 choices. Labels include each
 entity's exact ID to distinguish duplicate names. Choosing a target changes the retained draft;
-explicit Apply publishes it. Structured values remain read-only in this tab; their existing controls
-are available under `Document`. This incremental integration retains the complete predecessor
-Inspector and workspace frontend.
+explicit Apply publishes it. Supported Optional, Record and scalar-item List/Map fields use
+`Edit value` to open a structured draft. Unsupported shapes remain read-only. The complete
+predecessor Inspector remains available under `Document` during this incremental integration.
 
 Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Within the
 active Inspector image, Tab/Shift+Tab move through enabled fields and buttons; Enter or Space
@@ -132,6 +132,14 @@ its active text/IME lifetime and preserves its draft; select the field again aft
 Visible Apply/Discard and target buttons remain usable when their field's text input is above the
 viewport. Resizing or selecting shorter content clamps the scroll position. Keyboard scrolling,
 dragging a scrollbar and generalized virtualization retain their separate implementation scope.
+
+Structured child controls keep unfinished values in the field draft. Confirm or cancel a pending
+Some, list item or map entry before applying the whole field. New children require explicit values;
+empty strings, keys and collections have explicit confirmation controls. Invalid numbers and
+duplicate map keys retain the input for correction. Removing one row preserves the other rows'
+text editing and local Undo/Redo; it revokes the removed row's old input lifetime. Child confirmation
+and cancellation do not change the document. Explicit Apply/Reapply, document Undo/Redo and
+Save/Reopen retain their ordinary whole-field meaning.
 
 The Host uses the bundled primary face and, when configured, one fallback from
 `NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file

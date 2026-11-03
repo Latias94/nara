@@ -137,7 +137,7 @@ fn show_node(
             }
             ui.same_line();
             if button(ui, target, path, "Some...", pending.is_none()) {
-                *pending = Some(Box::new(ValueDraft::new(shape)));
+                *pending = Some(Box::new(ChildDraft::new(ValueDraft::new(shape))));
             }
             if let Some(child) = value {
                 let _child_id = ui.push_id("some");
@@ -148,7 +148,7 @@ fn show_node(
                     entities,
                     &format!("{path}.some"),
                     shape,
-                    child,
+                    &mut child.node,
                     text_owner,
                 );
                 ui.unindent();
@@ -163,11 +163,11 @@ fn show_node(
                     entities,
                     &format!("{path}.new"),
                     shape,
-                    child,
+                    &mut child.node,
                     text_owner,
                 );
                 ui.unindent();
-                let admission = child.value(shape);
+                let admission = child.node.value(shape);
                 if let Err(error) = &admission {
                     ui.text_disabled(error);
                 }
