@@ -56,6 +56,7 @@ mod external_cadence_tests;
 mod input;
 #[cfg(all(test, target_os = "windows"))]
 mod manager_workflow_tests;
+mod owned;
 mod repaint;
 mod retirement;
 #[cfg(all(test, target_os = "windows"))]
@@ -493,6 +494,16 @@ struct ImguiRetainedState {
 }
 
 struct NativeImgui {
+    owned: std::collections::BTreeMap<
+        crate::workspace::EditorPanelInstanceId,
+        owned::OwnedInspectorSurface,
+    >,
+    owned_pending: std::collections::BTreeMap<
+        crate::workspace::EditorPanelInstanceId,
+        Arc<nara_ui_kernel::UiFrame>,
+    >,
+    owned_fonts: Vec<nara_text::FontFace>,
+    owned_input: owned::OwnedInspectorInput,
     window: Arc<Window>,
     context: Context,
     platform: WinitPlatform,
@@ -830,6 +841,10 @@ impl NativeImgui {
         let platform = WinitPlatform::new(&mut context).map_err(imgui_error)?;
         let native_detachment = native_detachment_supported(event_loop);
         let mut native = Self {
+            owned: Default::default(),
+            owned_pending: Default::default(),
+            owned_fonts: owned::font_policy()?,
+            owned_input: Default::default(),
             window,
             context,
             platform,
@@ -1034,6 +1049,7 @@ impl NativeImgui {
         self.gpu
             .begin_window_frame(window_packet, self.frame_index)
             .map_err(platform_gpu_error)?;
+        self.prepare_owned_inspectors(window_packet)?;
         let mut canvas_rebuild_requested = false;
         if !self.frontend.scene_open(application.panel_workspace()) {
             self.scene.retire(&mut self.gpu, &mut self.renderer)?;
@@ -1112,6 +1128,11 @@ impl NativeImgui {
             let submissions = [self.scene.display.clone(), self.game.display.clone()]
                 .into_iter()
                 .flatten()
+                .chain(
+                    self.owned
+                        .values()
+                        .filter_map(|surface| surface.target.display.clone()),
+                )
                 .collect::<Vec<_>>();
             let prepared = self.renderer.prepare(
                 &mut self.gpu,
@@ -1178,6 +1199,13 @@ impl NativeImgui {
             }
         };
         let mut output = frontend_output.expect("a rendered frame has its frontend output");
+        let owned_followup = self.observe_owned_inspectors(
+            &mut output,
+            &outcome,
+            &secondary_outcomes,
+            primary_viewport,
+            &secondary_windows,
+        )?;
         self.presented = outcome.window().is_some()
             || secondary_outcomes
                 .iter()
@@ -1241,7 +1269,8 @@ impl NativeImgui {
             authoring.as_deref(),
             canvas_confirmed,
         );
-        self.ui_followup = canvas_rebuild_requested
+        self.ui_followup = owned_followup
+            || canvas_rebuild_requested
             || scene_promoted
             || canvas_promoted
             || canvas_mapping_changed
@@ -2159,9 +2188,18 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         if !owned {
             return;
         }
-        let forward_to_toolkit = native
-            .input
-            .handle_event(window_id, &event, &native.context);
+        let owned_consumed = match native.handle_owned_event(window_id, &event, &self.application) {
+            Ok(consumed) => consumed,
+            Err(error) => {
+                self.error = Some(error);
+                self.exit_after_native_retirement(event_loop);
+                return;
+            }
+        };
+        let forward_to_toolkit = !owned_consumed
+            && native
+                .input
+                .handle_event(window_id, &event, &native.context);
         let needs_frame = if forward_to_toolkit {
             match native
                 .platform

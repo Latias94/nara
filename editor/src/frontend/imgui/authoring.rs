@@ -40,6 +40,10 @@ impl ImguiAuthoringPanels {
         self.read_only = read_only;
     }
 
+    pub(super) fn hide_document_controls(&mut self) {
+        self.pending_removal = None;
+    }
+
     pub(super) fn retire(&mut self) {
         self.scope = None;
         self.fields.clear();

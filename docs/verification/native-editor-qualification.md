@@ -50,6 +50,31 @@ This proves preedit/draft isolation, one commit and rejection of a late commit a
 field changes. It constructs Winit events directly and does not qualify OS candidate-window
 placement, actual input-method event delivery, or manual cross-window typing.
 
+## Nara Properties Integration
+
+For the incremental Nara-drawn scalar Inspector, select a standalone TrueType CJK fallback
+accepted by the current workspace shell and Nara text owner, then run its trajectory explicitly:
+
+```powershell
+$env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
+cargo +1.95.0 nextest run -p nara-editor -p nara_ui -p nara_winit --features nara_ui/serde,nara_winit/accessibility --lib --locked --run-ignored only -E 'test(native_owned_inspector_pointer_and_ime_drafts_apply_undo_redo_save_and_reopen)' --test-threads=1
+```
+
+Use an actual installed compatible font; an unavailable path or missing glyph diagnostics fail
+this trajectory. Retain the environment and DX12 prerequisites above. The hidden window selects
+`Nara properties`, maps pointer input through confirmed image geometry, edits Chinese/string and
+numeric buffers through Winit IME events, holds Apply across a new presentation, and exercises
+document Undo/Redo and disk Save/Reopen. It also verifies composition isolation/cancellation,
+fresh focus after an outside click, rejection of a commit before the new IME handshake, retained
+input across Inspector tabs and preservation of original unavailable source records.
+
+An unchanged forced repaint must reuse the compiled frame and retained image receipt without
+requesting a continuous follow-up. That observation is not an idle CPU benchmark. This trajectory
+does not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
+placement, detached-window/DPI transfer, clipboard, complete keyboard navigation or accessibility.
+The complete Inspector and Nara-owned Scene/tool visuals remain open under the
+[owning unit](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
+
 ## External Process Scheduling
 
 For changes to external Play cadence, maintenance wake or child-exit presentation, also run:

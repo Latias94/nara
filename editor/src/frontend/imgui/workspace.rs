@@ -319,6 +319,9 @@ impl ImguiEditorPanelContext<'_, '_> {
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
+    pub owned_inspector: Option<super::owned_inspector::OwnedInspector>,
+    pub owned_pending: Vec<super::field_drafts::PreparedFieldEdit>,
+    pub owned_revision: u64,
     pub incarnation: std::sync::Arc<submission::PanelIncarnation>,
     pub panel: Option<Box<dyn ImguiEditorPanel>>,
     pub kind: String,
@@ -338,6 +341,7 @@ pub(super) struct ImguiPanelWidgets {
 pub(super) enum InspectorTab {
     #[default]
     Document,
+    Owned,
     SourceAsset,
     PrefabIntent,
 }

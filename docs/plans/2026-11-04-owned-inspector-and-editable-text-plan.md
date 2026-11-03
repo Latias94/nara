@@ -81,3 +81,22 @@ to the same text owner. This is not a generic form schema or a platform text-inp
 The field and text prerequisites can have a verified commit boundary. The complete selected
 Inspector still requires ordinary Application results, actual Host presentation and native input;
 the broader R11/platform gates remain open after that boundary.
+
+## Native integration checkpoint
+
+The first adapter consumes the shared primitives in the existing workspace's `Nara properties`
+Inspector tab. It shares the original field drafts and exact Application submission results.
+Strings and numeric scalars have local editing, composition, explicit Apply/Discard/Reapply/Reset,
+document history and persistence. Other field shapes remain visibly read-only here; the predecessor
+is retained until equivalent complete behavior is qualified.
+
+The original Host draws the panel into a retained image using the existing device/queue and admits
+input only after matching image, occurrence and native-window composite receipts. Equivalent frames
+reuse their exact CPU/GPU output; text paint changes can preserve equivalent pointer routes, while
+behavior changes, native mapping changes and presentation loss cancel gestures. Native backend
+injection and actual OS IME delivery retain separate evidence boundaries.
+
+Complete selected-panel replacement, clipboard and keyboard navigation, structured/reference
+editing, a Nara-owned clipped live Scene/tool visual, virtualization, measured idle costs and the
+remaining native platform gates are still open. The optional scalar tab is a checkpoint toward
+those workflows, not completion of R11.

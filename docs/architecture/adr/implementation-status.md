@@ -24,6 +24,16 @@ work through the compiler and AccessKit recording bridge. The independent consum
 glyph readback and neutral galleries retain their distinct scopes. This does not complete the
 Nara-drawn Inspector, native IME delivery/candidate placement or broader R11/R12.
 
+Its [native scalar integration](../../knowledge/engineering/verification/2026-11/2026-11-03T192310Z-native-owned-scalar-inspector-and-presented-input-qualification-fc9f002f34ed414e84470bf32a812b8e.md)
+now consumes the shared text/widgets through the existing graphics Host and exact window/image
+composite authority. The optional `Nara properties` tab retains original field drafts, queued and
+admitted result identity, source conflicts and ordinary document history/persistence. Selected
+Windows/DX12 backend injection covers Chinese/string and numeric editing, focus retirement,
+cross-frame Apply and disk Reopen; shared pointer routing excludes paint-only caret/selection changes
+while retaining transform, clipping, propagation and behavior invalidation. Complete panel parity,
+the Nara-owned Scene/tool visual and broader native/idle/platform gates remain open. The predecessor
+remains until those complete workflows pass.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

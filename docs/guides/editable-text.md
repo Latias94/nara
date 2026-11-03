@@ -44,7 +44,8 @@ draft.edit(&mut text, &nara_text::TextEdit::Undo)?;
 assert_eq!(draft.text(), "12");
 ```
 
-Parley supplies visual order, bidi affinities, selection, hit testing and caret geometry. ICU
+Parley supplies visual order, bidi affinities, selection, hit testing and caret geometry. Its
+complex-script segmentation data is enabled without system font discovery. ICU
 grapheme boundaries constrain movement, pointer placement and forward/backward deletion. Shaped
 ligature components do not become independently editable characters. An insertion which joins
 neighboring characters leaves its caret at a complete grapheme boundary.
@@ -89,6 +90,36 @@ submission results. Typing, composition completion and focus loss must not autom
 Explicit Apply, conflict recovery, document Undo/Redo and persistence use the existing Application
 owner. These primitives alone do not qualify the complete
 [Nara-owned Inspector](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
+
+## Native Editor integration
+
+The existing Editor workspace offers a `Nara properties` Inspector tab. Its string and numeric
+fields use Nara drawing and local editing. Boolean, structured and reference values remain
+read-only in this tab; their existing controls are available under `Document`. This is an
+incremental integration, not a replacement of the complete Inspector or workspace frontend.
+
+Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Ctrl+Z/Ctrl+Y
+change the focused buffer. Explicit Apply and non-composing Enter submit that field through the
+ordinary document owner. Escape first cancels composition, then can discard the draft. Losing focus
+or switching Inspector tabs preserves unapplied input. A locally queued or admitted submission
+locks the captured draft until its exact result returns; a refusal preserves it for correction.
+Finish or cancel preedit before pointer selection or Apply. Pointer placement uses the text origin
+from the displayed frame and refuses an unpresented replacement buffer.
+Reapply is explicit after a source conflict. Toolbar Undo/Redo and Save/Reopen continue to affect
+the document.
+
+The Host uses the bundled primary face and, when configured, one fallback from
+`NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file
+accepted by both font backends, such as an installed `simhei.ttf` on Windows. The shared Nara font
+API independently supports collection face selection; that does not extend the shell's font loader.
+An absent fallback does not authorize character substitution or a CJK rendering claim.
+
+The Inspector image uses the existing graphics Host and exact native composite receipt. Unchanged
+fields reuse their compiled frame and retained image. Native focus or presentation loss cancels
+input; focus reacquisition establishes a new text lifetime. IME candidate geometry is mapped through
+the displayed image into its owning window. Backend-injected composition tests establish draft and
+history behavior, while actual OS candidate placement/event delivery, clipboard, complete keyboard
+navigation, detached-window/DPI behavior and text accessibility remain separate qualification work.
 
 The [independent UI consumer](../../tests/fixtures/ui-module-consumer/README.md) exercises local
 editing and field compilation without ECS, Scene, a window or a renderer. Owning tests cover

@@ -129,6 +129,11 @@ impl NativeImgui {
             self.context.save_ini_settings(&mut layout);
             self.close.saved_layout = Some(layout);
             self.input.invalidate(true);
+            self.frontend.cancel_owned_input();
+            self.owned_input = Default::default();
+            self.owned_pending.clear();
+            self.frontend
+                .set_owned_images(self.owned_fonts.clone(), Default::default());
             self.context.end_frame();
             if let Some(drain) = &mut self.close.drain {
                 drain.begin(self.close.device_lost);
@@ -165,6 +170,12 @@ impl NativeImgui {
                 }
                 *target = ImguiTarget::default();
             }
+            for surface in self.owned.values() {
+                if let Some(view) = surface.target.view.as_ref() {
+                    drop(self.gpu.retire_producer(view));
+                }
+            }
+            self.owned.clear();
             self.scene_presenter.retire();
             self.canvas.retire();
             self.close.phase = Phase::Platform;

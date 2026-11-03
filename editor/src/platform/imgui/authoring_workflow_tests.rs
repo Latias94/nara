@@ -38,6 +38,7 @@ mod extension_documents;
 mod field_drafts;
 mod field_overrides;
 mod ordinary_structure;
+mod owned_fields;
 mod prefab_conversion;
 mod prefab_extraction;
 mod recursive_shapes;

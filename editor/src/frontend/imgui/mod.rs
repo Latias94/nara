@@ -7,6 +7,7 @@ use nara::tooling::{
 mod authoring;
 #[cfg(test)]
 mod canvas_admission_tests;
+mod field_drafts;
 mod field_editor;
 mod game;
 #[cfg(test)]
@@ -14,6 +15,10 @@ mod interaction_tests;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
+mod owned_inspector;
+mod owned_panel;
+pub(crate) use owned_inspector::InspectorOperation;
+pub(crate) use owned_panel::ImguiOwnedImage;
 mod prefab_extraction;
 mod prefab_intent;
 mod project;
@@ -47,6 +52,14 @@ pub(crate) struct ImguiViewImage {
 
 #[derive(Default)]
 pub(crate) struct ImguiFrontendOutput {
+    pub(crate) owned_candidates: Vec<(
+        crate::workspace::EditorPanelInstanceId,
+        std::sync::Arc<nara_ui_kernel::UiFrame>,
+    )>,
+    pub(crate) owned_displays: Vec<(
+        crate::workspace::EditorPanelInstanceId,
+        ImguiImageInteraction,
+    )>,
     pub(crate) actions: Option<EditorActionBatch>,
     candidate_serial: Option<u64>,
     pub(crate) project_action: Option<crate::EditorProjectAction>,
@@ -173,6 +186,11 @@ pub(crate) struct ImguiTextOwner {
 }
 
 struct ImguiPanelInput<'frame> {
+    owned_images: &'frame std::collections::BTreeMap<
+        crate::workspace::EditorPanelInstanceId,
+        ImguiOwnedImage,
+    >,
+    owned_fonts: &'frame [nara_text::FontFace],
     frame: &'frame EditorFrameModel,
     ui_authoring: Option<&'frame nara::project_host::EditorUiAuthoringFrame>,
     scene: Option<ImguiViewImage>,
@@ -186,6 +204,9 @@ struct ImguiPanelInput<'frame> {
 /// to EditorApplication and its existing owners, including across native-window replacement.
 #[derive(Default)]
 pub struct ImguiEditorFrontend {
+    owned_images:
+        std::collections::BTreeMap<crate::workspace::EditorPanelInstanceId, ImguiOwnedImage>,
+    owned_fonts: Vec<nara_text::FontFace>,
     identity: std::sync::Arc<()>,
     next_candidate: u64,
     next_submission: u64,
@@ -701,6 +722,8 @@ impl ImguiEditorFrontend {
                 .show(ui, application, &mut output.text_owner);
 
         let input = ImguiPanelInput {
+            owned_images: &self.owned_images,
+            owned_fonts: &self.owned_fonts,
             frame: &frame,
             ui_authoring: authoring
                 .as_deref()
@@ -1073,8 +1096,12 @@ fn paint_source_tool(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
 
 fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     use workspace::InspectorTab;
+    for edit in std::mem::take(&mut context.widgets.owned_pending) {
+        context.submit_field(edit);
+    }
     for (index, (label, tab)) in [
         ("Document", InspectorTab::Document),
+        ("Nara properties", InspectorTab::Owned),
         ("Source asset", InspectorTab::SourceAsset),
         ("Prefab Intent", InspectorTab::PrefabIntent),
     ]
@@ -1096,6 +1123,11 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         ui_interaction_tests::record_control(ui, format!("Inspector tab: {label}"));
     }
     ui.separator();
+    if context.widgets.inspector_tab != InspectorTab::Owned
+        && let Some(inspector) = context.widgets.owned_inspector.as_mut()
+    {
+        let _ = inspector.cancel_input();
+    }
     context
         .widgets
         .authoring
@@ -1104,8 +1136,10 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .widgets
         .ui_authoring
         .synchronize(context.input.ui_authoring);
-    if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
-        context.widgets.authoring.retire();
+    if context.widgets.inspector_tab == InspectorTab::Owned {
+        owned_panel::paint(ui, context);
+    } else if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
+        context.widgets.authoring.hide_document_controls();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(
                 authoring,
@@ -1115,7 +1149,7 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         }
         prefab_intent::show(ui, context);
     } else if context.widgets.inspector_tab == InspectorTab::SourceAsset {
-        context.widgets.authoring.retire();
+        context.widgets.authoring.hide_document_controls();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(
                 authoring,

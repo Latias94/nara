@@ -1210,7 +1210,7 @@ preceding definition qualification nor the private count model substitutes for t
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
-**Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md) begins with qualified shared text/field prerequisites. The complete visual and platform workflows remain open. **Owners:** UI compile/presented sessions, text and frontend.
+**Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md) has qualified shared text/field prerequisites and a scoped native scalar integration. Complete panel parity, Scene/tool visuals and the broader platform workflows remain open. **Owners:** UI compile/presented sessions, text and frontend.
 
 The user clarified the destination: **Nara's own custom-drawn Editor UI**, not embedding a
 reference toolkit. The [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
