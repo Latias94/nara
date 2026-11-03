@@ -21,6 +21,21 @@ pub(crate) struct ImguiOwnedImage {
 }
 
 impl ImguiEditorFrontend {
+    pub(crate) fn scroll_owned_panel(
+        &mut self,
+        panel: EditorPanelInstanceId,
+        frame: &Arc<UiFrame>,
+        delta: f32,
+    ) -> Result<bool, String> {
+        self.presentation
+            .widgets
+            .get_mut(&panel)
+            .and_then(|widgets| widgets.owned_inspector.as_mut())
+            .ok_or("Inspector panel is retired")?
+            .scroll(frame, delta)
+            .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn set_owned_images(
         &mut self,
         fonts: Vec<FontFace>,

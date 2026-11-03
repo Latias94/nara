@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use nara::{
     reflect::{
@@ -33,6 +36,9 @@ const TEXT_SIZE: f32 = 16.0;
 const PANEL_INSET: f32 = 12.0;
 const RETAINED_FRAMES: usize = 3;
 
+mod references;
+mod viewport;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InspectorOperation {
     Apply,
@@ -40,11 +46,14 @@ pub(crate) enum InspectorOperation {
     Reapply,
     Reset,
     Toggle,
+    References,
+    PreviousReferences,
+    NextReferences,
 }
 
 impl InspectorOperation {
     const FOOTER: [Self; 4] = [Self::Apply, Self::Discard, Self::Reapply, Self::Reset];
-    const COUNT: usize = 5;
+    const COUNT: usize = 8;
 
     const fn index(self) -> usize {
         match self {
@@ -53,6 +62,9 @@ impl InspectorOperation {
             Self::Reapply => 2,
             Self::Reset => 3,
             Self::Toggle => 4,
+            Self::References => 5,
+            Self::PreviousReferences => 6,
+            Self::NextReferences => 7,
         }
     }
 
@@ -63,6 +75,9 @@ impl InspectorOperation {
             Self::Reapply => "Reapply",
             Self::Reset => "Reset",
             Self::Toggle => "Toggle",
+            Self::References => "Choose target",
+            Self::PreviousReferences => "Previous targets",
+            Self::NextReferences => "Next targets",
         }
     }
 }
@@ -73,6 +88,10 @@ pub(super) enum InspectorBinding {
     Operation {
         field: UiKey,
         operation: InspectorOperation,
+    },
+    Reference {
+        field: UiKey,
+        entity: String,
     },
 }
 
@@ -86,6 +105,14 @@ struct FieldControl {
     allowed: bool,
     host_enabled: bool,
     buttons: [UiButtonState; InspectorOperation::COUNT],
+    reference_open: bool,
+    reference_page: usize,
+    references: HashMap<String, ReferenceControl>,
+}
+
+struct ReferenceControl {
+    key: UiKey,
+    state: UiButtonState,
 }
 
 impl FieldControl {
@@ -152,14 +179,21 @@ struct DisplayedField {
     draft: Option<DisplayedDraft>,
     display_text: Option<String>,
     operations: [bool; InspectorOperation::COUNT],
+    reference_view: Option<(bool, usize)>,
     width: f32,
 }
 
 #[derive(Clone)]
 struct DisplayedButton {
     field: UiKey,
-    operation: InspectorOperation,
+    action: InspectorButtonAction,
     button: UiButton,
+}
+
+#[derive(Clone)]
+enum InspectorButtonAction {
+    Operation(InspectorOperation),
+    Reference(String),
 }
 
 struct CompiledInspector {
@@ -174,6 +208,8 @@ struct CompiledInspector {
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
 pub(super) struct OwnedInspector {
     root: UiRootKey,
+    content_key: UiKey,
+    scroll_pixels: f32,
     engine: TextEngine,
     compiler: UiCompiler,
     next_identity: u64,
@@ -187,8 +223,14 @@ impl OwnedInspector {
     pub(super) fn new(root: UiRootKey, faces: Vec<FontFace>) -> Result<Self, OwnedInspectorError> {
         let engine = TextEngine::with_fonts(faces.clone(), Default::default())?;
         let compiler = UiCompiler::with_fonts(faces, Default::default())?;
+        let content_key = UiKey::scoped(
+            root.clone(),
+            UiLocalKey::runtime("nara.inspector.content", "fields")?,
+        )?;
         Ok(Self {
             root,
+            content_key,
+            scroll_pixels: 0.0,
             engine,
             compiler,
             next_identity: 1,
@@ -282,6 +324,7 @@ impl OwnedInspector {
                             fields,
                             &mut displayed,
                             &mut buttons,
+                            &scene.editor.inspector.entities,
                         )?);
                         visible.push(key);
                     }
@@ -321,6 +364,7 @@ impl OwnedInspector {
                     fields,
                     &mut displayed,
                     &mut buttons,
+                    &scene.editor.inspector.entities,
                 )?);
                 visible.push(key);
             }
@@ -328,19 +372,8 @@ impl OwnedInspector {
             nodes.push(self.label("empty", "No active document")?);
         }
         self.controls.retain(|key, _| visible.contains(key));
-        let root = UiRoot::new(
-            self.root.clone(),
-            UiLayer::Base,
-            UiStyle::fill()
-                .with_padding(UiEdges::all(PANEL_INSET)?)
-                .with_gap(8.0)
-                .with_overflow(UiOverflow::Clip),
-        )
-        .with_visual(UiVisual::role(UiColorRole::Panel))
-        .with_children(nodes);
-        let snapshot = UiAuthoringSnapshotBuilder::new(self.next_snapshot)
-            .with_root(root)
-            .build()?;
+        let retry_nodes = (self.scroll_pixels > 0.0).then(|| nodes.clone());
+        let mut snapshot = self.viewport_snapshot(nodes)?;
         if let Some(previous) = self.frames.last()
             && previous.snapshot.roots() == snapshot.roots()
             && previous.frame.environment() == environment
@@ -353,8 +386,19 @@ impl OwnedInspector {
             .next_snapshot
             .checked_add(1)
             .ok_or(OwnedInspectorError::IdentityExhausted)?;
-        let frame = self.compiler.compile(&snapshot, environment, theme)?;
+        let mut frame = self.compiler.compile(&snapshot, environment, theme)?;
         self.next_snapshot = next_snapshot;
+        if let Some(nodes) = retry_nodes
+            && self.clamp_scroll(&frame)
+        {
+            snapshot = self.viewport_snapshot(nodes)?;
+            let next_snapshot = self
+                .next_snapshot
+                .checked_add(1)
+                .ok_or(OwnedInspectorError::IdentityExhausted)?;
+            frame = self.compiler.compile(&snapshot, environment, theme)?;
+            self.next_snapshot = next_snapshot;
+        }
         let projected_fields = displayed.clone();
         if frame.root_outcomes().iter().any(|outcome| {
             outcome.key() == &self.root && outcome.status() == UiRootStatus::Published
@@ -364,14 +408,20 @@ impl OwnedInspector {
                 .iter()
                 .map(|node| (node.key(), node.enabled()))
                 .collect::<HashMap<_, _>>();
-            displayed.retain(|key, _| semantics.contains_key(key));
             buttons.retain(|key, _| semantics.contains_key(key));
+            let button_fields = buttons
+                .values()
+                .map(|button| button.field.clone())
+                .collect::<HashSet<_>>();
+            displayed.retain(|key, _| semantics.contains_key(key) || button_fields.contains(key));
             for field in displayed.values_mut() {
                 field.operations = [false; InspectorOperation::COUNT];
             }
             for (key, button) in &buttons {
-                if let Some(field) = displayed.get_mut(&button.field) {
-                    field.operations[button.operation.index()] =
+                if let Some(field) = displayed.get_mut(&button.field)
+                    && let InspectorButtonAction::Operation(operation) = button.action
+                {
+                    field.operations[operation.index()] =
                         semantics.get(key).copied().unwrap_or(false);
                 }
             }
@@ -407,9 +457,15 @@ impl OwnedInspector {
         let compiled = self.retained(frame)?;
         if let Some(button) = compiled.buttons.get(key) {
             self.live_field(frame, &button.field)?;
-            return Ok(InspectorBinding::Operation {
-                field: button.field.clone(),
-                operation: button.operation,
+            return Ok(match &button.action {
+                InspectorButtonAction::Operation(operation) => InspectorBinding::Operation {
+                    field: button.field.clone(),
+                    operation: *operation,
+                },
+                InspectorButtonAction::Reference(entity) => InspectorBinding::Reference {
+                    field: button.field.clone(),
+                    entity: entity.clone(),
+                },
             });
         }
         let field = self.live_field(frame, key)?;
@@ -422,7 +478,7 @@ impl OwnedInspector {
         frame: &Arc<UiFrame>,
         field: &UiKey,
     ) -> Result<UiTextInputToken, OwnedInspectorError> {
-        let key = self.live_field(frame, field)?.key.clone();
+        let key = self.live_input(frame, field)?.key.clone();
         let control = self
             .controls
             .get_mut(&key)
@@ -486,7 +542,7 @@ impl OwnedInspector {
         frame: &Arc<UiFrame>,
         field: &UiKey,
     ) -> Result<Option<UiTextInputToken>, OwnedInspectorError> {
-        let displayed = self.live_field(frame, field)?;
+        let displayed = self.live_input(frame, field)?;
         Ok(self.controls[&displayed.key]
             .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?
@@ -504,6 +560,9 @@ impl OwnedInspector {
             for state in &mut control.buttons {
                 *state = UiButtonState::default();
             }
+            for reference in control.references.values_mut() {
+                reference.state = UiButtonState::default();
+            }
         }
         match failure {
             Some(error) => Err(error.into()),
@@ -517,7 +576,7 @@ impl OwnedInspector {
         field: &UiKey,
         token: UiTextInputToken,
     ) -> Result<bool, OwnedInspectorError> {
-        let displayed = self.live_field(frame, field)?;
+        let displayed = self.live_input(frame, field)?;
         let text = self.controls[&displayed.key]
             .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
@@ -534,7 +593,7 @@ impl OwnedInspector {
         token: UiTextInputToken,
         fields: &FieldEditors,
     ) -> Result<Option<String>, OwnedInspectorError> {
-        let displayed = self.live_field(frame, field)?;
+        let displayed = self.live_input(frame, field)?;
         self.check_input(&displayed.key, fields)?;
         let text = self.controls[&displayed.key]
             .text()
@@ -573,7 +632,7 @@ impl OwnedInspector {
         edit: &TextEdit,
         fields: &mut FieldEditors,
     ) -> Result<TextEditOutcome, OwnedInspectorError> {
-        let key = self.live_field(frame, field)?.key.clone();
+        let key = self.live_input(frame, field)?.key.clone();
         self.check_input(&key, fields)?;
         let control = self
             .controls
@@ -598,7 +657,7 @@ impl OwnedInspector {
         extend: bool,
         fields: &mut FieldEditors,
     ) -> Result<TextEditOutcome, OwnedInspectorError> {
-        let displayed = self.live_field(frame, field)?.clone();
+        let displayed = self.live_input(frame, field)?.clone();
         self.check_input(&displayed.key, fields)?;
         let control = self
             .controls
@@ -659,7 +718,7 @@ impl OwnedInspector {
         field: &UiKey,
         token: UiTextInputToken,
     ) -> Result<UiRect, OwnedInspectorError> {
-        let displayed = self.live_field(frame, field)?;
+        let displayed = self.live_input(frame, field)?;
         let text = self.controls[&displayed.key]
             .text()
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
@@ -703,11 +762,22 @@ impl OwnedInspector {
                 .controls
                 .get_mut(&key)
                 .ok_or(OwnedInspectorError::RetiredField)?;
-            control.buttons[button.operation.index()].reduce_batch(
-                &button.button,
-                dispatch,
-                &mut intents,
-            )?;
+            let state = match &button.action {
+                InspectorButtonAction::Operation(operation) => {
+                    &mut control.buttons[operation.index()]
+                }
+                InspectorButtonAction::Reference(entity) => {
+                    let Some(reference) = control
+                        .references
+                        .get_mut(entity)
+                        .filter(|reference| reference.key == *button.button.key())
+                    else {
+                        continue;
+                    };
+                    &mut reference.state
+                }
+            };
+            state.reduce_batch(&button.button, dispatch, &mut intents)?;
         }
         Ok(intents)
     }
@@ -725,7 +795,15 @@ impl OwnedInspector {
             .get(button)
             .ok_or(OwnedInspectorError::UnknownControl)?
             .clone();
-        self.operate(frame, &binding.field, binding.operation, model, fields)
+        match binding.action {
+            InspectorButtonAction::Operation(operation) => {
+                self.operate(frame, &binding.field, operation, model, fields)
+            }
+            InspectorButtonAction::Reference(entity) => {
+                self.choose_reference(frame, &binding.field, button, &entity, model, fields)?;
+                Ok(None)
+            }
+        }
     }
 
     pub(super) fn operate(
@@ -771,6 +849,12 @@ impl OwnedInspector {
             .controls
             .get(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
+        if displayed
+            .reference_view
+            .is_some_and(|view| view != (control.reference_open, control.reference_page))
+        {
+            return Err(OwnedInspectorError::ChangedProjection);
+        }
         if self.read_only || !editable || !control.host_enabled || !control.allowed {
             return Err(OwnedInspectorError::OperationDisabled(operation));
         }
@@ -779,6 +863,35 @@ impl OwnedInspector {
             .is_some_and(|text| text.editor().is_composing())
         {
             return Err(OwnedInspectorError::Composing);
+        }
+        if matches!(
+            operation,
+            InspectorOperation::References
+                | InspectorOperation::PreviousReferences
+                | InspectorOperation::NextReferences
+        ) {
+            let control = self
+                .controls
+                .get_mut(key)
+                .ok_or(OwnedInspectorError::RetiredField)?;
+            match operation {
+                InspectorOperation::References => {
+                    control.reference_open = !control.reference_open;
+                    control.reference_page = 0;
+                    control.references.clear();
+                }
+                InspectorOperation::PreviousReferences => {
+                    control.reference_page = control.reference_page.saturating_sub(1)
+                }
+                InspectorOperation::NextReferences => {
+                    control.reference_page = control
+                        .reference_page
+                        .checked_add(1)
+                        .ok_or(OwnedInspectorError::IdentityExhausted)?
+                }
+                _ => return Err(OwnedInspectorError::OperationDisabled(operation)),
+            }
+            return Ok(None);
         }
         if draft.incompatible || (draft.conflict && operation != InspectorOperation::Reapply) {
             return Err(OwnedInspectorError::OperationDisabled(operation));
@@ -864,6 +977,22 @@ impl OwnedInspector {
         Ok(field)
     }
 
+    fn live_input(
+        &self,
+        frame: &Arc<UiFrame>,
+        input: &UiKey,
+    ) -> Result<&DisplayedField, OwnedInspectorError> {
+        let field = self.live_field(frame, input)?;
+        if !frame
+            .semantics()
+            .iter()
+            .any(|node| node.key() == input && node.role() == UiSemanticRole::TextInput)
+        {
+            return Err(OwnedInspectorError::ChangedProjection);
+        }
+        Ok(field)
+    }
+
     fn check_input(
         &self,
         key: &FieldKey,
@@ -927,6 +1056,7 @@ impl OwnedInspector {
         fields: &mut FieldEditors,
         displayed: &mut HashMap<UiKey, DisplayedField>,
         buttons: &mut HashMap<UiKey, DisplayedButton>,
+        entities: &[nara::tooling::SceneInspectorEntityRow],
     ) -> Result<UiNode, OwnedInspectorError> {
         if !fields.drafts.contains_key(&key)
             && self
@@ -1008,6 +1138,9 @@ impl OwnedInspector {
                     allowed: false,
                     host_enabled: true,
                     buttons: [UiButtonState::default(); InspectorOperation::COUNT],
+                    reference_open: false,
+                    reference_page: 0,
+                    references: HashMap::new(),
                 },
             );
         }
@@ -1093,6 +1226,22 @@ impl OwnedInspector {
             operations[InspectorOperation::Reset.index()] =
                 can_edit && !draft.conflict && current.as_ref().is_some_and(can_reset);
             operations[InspectorOperation::Toggle.index()] = can_edit && boolean && !draft.conflict;
+            operations[InspectorOperation::References.index()] = can_edit
+                && current
+                    .as_ref()
+                    .is_some_and(|basis| basis.field.shape == ComponentValueShape::EntityRef);
+            if basis.field.shape == ComponentValueShape::EntityRef {
+                for (node, button) in self.reference_nodes(
+                    &key,
+                    &input,
+                    entities,
+                    operations[InspectorOperation::References.index()],
+                    width,
+                )? {
+                    children.push(node);
+                    buttons.insert(button.button.key().clone(), button);
+                }
+            }
             if boolean && let Candidate::Bool(value) = &draft.candidate {
                 let button = UiButton::new(
                     input.clone(),
@@ -1123,7 +1272,7 @@ impl OwnedInspector {
                     input.clone(),
                     DisplayedButton {
                         field: input.clone(),
-                        operation: InspectorOperation::Toggle,
+                        action: InspectorButtonAction::Operation(InspectorOperation::Toggle),
                         button,
                     },
                 );
@@ -1201,7 +1350,7 @@ impl OwnedInspector {
                     button_key,
                     DisplayedButton {
                         field: input.clone(),
-                        operation,
+                        action: InspectorButtonAction::Operation(operation),
                         button,
                     },
                 );
@@ -1222,7 +1371,7 @@ impl OwnedInspector {
             children.push(self.label(
                 &format!("{identity}.readonly"),
                 if current.is_some() {
-                    "Read-only: this panel edits only scalar strings, numbers and booleans"
+                    "Read-only: this field shape is not yet supported by this panel"
                 } else {
                     "This field is not currently projected. Its retained draft is unchanged."
                 },
@@ -1250,6 +1399,10 @@ impl OwnedInspector {
                 basis.field.path.to_string(),
             )?)
             .with_children(children);
+        let reference_view = (basis.field.shape == ComponentValueShape::EntityRef).then(|| {
+            let control = &self.controls[&key];
+            (control.reference_open, control.reference_page)
+        });
         displayed.insert(
             input,
             DisplayedField {
@@ -1258,6 +1411,7 @@ impl OwnedInspector {
                 draft: draft.map(DisplayedDraft::observe),
                 display_text,
                 operations,
+                reference_view,
                 width,
             },
         );
@@ -1288,13 +1442,15 @@ fn scalar_input(basis: &FieldBasis) -> bool {
 fn scalar_text(basis: &FieldBasis) -> bool {
     matches!(
         basis.field.shape,
-        ComponentValueShape::Scalar {
-            kind: ComponentValueKind::String
-                | ComponentValueKind::I64
-                | ComponentValueKind::U64
-                | ComponentValueKind::F64,
-            ..
-        }
+        ComponentValueShape::EntityRef
+            | ComponentValueShape::AssetRef { .. }
+            | ComponentValueShape::Scalar {
+                kind: ComponentValueKind::String
+                    | ComponentValueKind::I64
+                    | ComponentValueKind::U64
+                    | ComponentValueKind::F64,
+                ..
+            }
     )
 }
 
@@ -1358,6 +1514,8 @@ pub(super) enum OwnedInspectorError {
     IdentityExhausted,
     #[error("Inspector viewport has no positive field content width")]
     InvalidViewport,
+    #[error("Inspector scroll delta must be finite")]
+    InvalidScroll,
     #[error("the exact compiled Inspector frame is no longer retained")]
     RetiredFrame,
     #[error("the UI key is not a control in this compiled Inspector frame")]

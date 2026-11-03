@@ -1,5 +1,7 @@
 //! Shared private field drafts for the Editor frontend.
 
+pub(in crate::frontend::imgui) mod references;
+
 use std::collections::{HashMap, HashSet};
 
 use nara::{

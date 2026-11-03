@@ -95,7 +95,10 @@ owner. These primitives alone do not qualify the complete
 
 The existing Editor workspace offers a `Nara properties` Inspector tab. Its string and numeric
 fields use Nara drawing and local editing. Boolean values use an explicit `Set true` or `Set false`
-button. Structured and reference values remain read-only in this tab; their existing controls
+button. Entity and asset references use bounded text editing; `Choose target` also offers the
+current document's source-local entities in pages of at most 32 choices. Labels include each
+entity's exact ID to distinguish duplicate names. Choosing a target changes the retained draft;
+explicit Apply publishes it. Structured values remain read-only in this tab; their existing controls
 are available under `Document`. This incremental integration retains the complete predecessor
 Inspector and workspace frontend.
 
@@ -121,6 +124,14 @@ Repeated activation while its exact submission is queued or pending preserves th
 A refused submission retains the proposed boolean for explicit Apply, Discard or conflict Reapply;
 document Undo/Redo and Save/Reopen include accepted boolean edits. The retained-draft capacity is
 checked again at activation, including when other edits fill it after the displayed frame.
+
+Use the wheel over the Inspector image to reach fields below the viewport. Line and physical-pixel
+scrolling stay within the panel's content bounds. A scroll cancels a pressed button before release,
+including a scroll away and back before another paint. Scrolling a text field out of view revokes
+its active text/IME lifetime and preserves its draft; select the field again after returning.
+Visible Apply/Discard and target buttons remain usable when their field's text input is above the
+viewport. Resizing or selecting shorter content clamps the scroll position. Keyboard scrolling,
+dragging a scrollbar and generalized virtualization retain their separate implementation scope.
 
 The Host uses the bundled primary face and, when configured, one fallback from
 `NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file

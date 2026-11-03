@@ -88,8 +88,9 @@ The first adapter consumes the shared primitives in the existing workspace's `Na
 Inspector tab. It shares the original field drafts and exact Application submission results.
 Strings and numeric scalars have local editing, composition, explicit Apply/Discard/Reapply/Reset,
 document history and persistence. Boolean fields use explicit value buttons with the same exact
-submission and recovery paths. Structured and reference values remain visibly read-only here;
-the predecessor is retained until equivalent complete behavior is qualified.
+submission and recovery paths. The reference and scrolling successor below adds root reference
+editing and a bounded picker. Structured values remain visibly read-only; the predecessor stays
+until equivalent complete behavior is qualified for the selected panel.
 
 The original Host draws the panel into a retained image using the existing device/queue and admits
 input only after matching image, occurrence and native-window composite receipts. Equivalent frames
@@ -97,7 +98,7 @@ reuse their exact CPU/GPU output; text paint changes can preserve equivalent poi
 behavior changes, native mapping changes and presentation loss cancel gestures. Native backend
 injection and actual OS IME delivery retain separate evidence boundaries.
 
-Complete selected-panel replacement, keyboard-only shell entry, structured/reference
+Complete selected-panel replacement, keyboard-only shell entry, structured
 editing, a Nara-owned clipped live Scene/tool visual, virtualization, measured idle costs and the
 remaining native platform gates are still open. The optional scalar tab is a checkpoint toward
 those workflows, not completion of R11.
@@ -147,5 +148,66 @@ No product admission rule is relaxed.
 The keyboard trajectory still uses production logical-key ingress and an isolated memory
 clipboard. Physical OS input/clipboard, IME candidate placement, complete selected-panel parity,
 the Scene/tool visual and the broader R11/R12 platform requirements retain their open scope.
-The next panel replacement work is structured/reference editing and scrolling before removing
-the corresponding predecessor controls.
+The reference and scrolling successor continues below. The corresponding predecessor controls
+remain until complete selected-panel parity.
+
+## Reference and scrolling integration
+
+Entity and asset references reuse the original typed scalar candidate and exact Application
+submission owner. Source-local choices share ID/label projection with the predecessor. The owned
+picker creates at most 32 live choice controls per page, with separate widget incarnations across
+close/reopen and page replacement. Captured menu/page state, field basis, draft and current target
+membership guard selection. Choosing a target retires the old text controls while retaining one
+unpublished canonical candidate; explicit Apply/Reapply retains ordinary result matching.
+
+The private Inspector viewport clips one absolute content tree through the existing Host image.
+Wheel admission requires its confirmed image, native window and actual pointer ownership. Logical
+line and physical-pixel deltas accumulate within captured content bounds. A changed view cancels
+the active pointer gesture immediately, including a scroll away/back before repaint. Content or
+viewport changes clamp the offset with at most one corrective compile; unchanged output reuses
+its retained frame and image. This is wheel scrolling, not generalized UI virtualization.
+
+Field metadata and text-input admission are separate. A visible button retains the field's exact
+draft/current/view facts even when the text input is fully clipped. Focus, text tokens, clipboard,
+composition, point input and IME geometry still require the text input's own visible semantics.
+The short-viewport Apply and paged-choice regressions protect this distinction.
+
+The next structural replacement must project the existing `RootDraft`/`ValueDraft` through
+individually incarnated leaf controls, with captured field and child identity. Preserve pending
+Optional/List/Map confirmation, cancellation, local invalid text and exact whole-field Apply
+through real Scene/Prefab consumers. Do not add a parallel form-value store or a speculative
+public schema/widget provider. Complete native parity precedes removal of the old field paths.
+
+## Reference and scrolling qualification
+
+The integration working tree is based on `a4c5dd0`. Verification uses Windows 11, Rust 1.95.0,
+root `target`, `CARGO_BUILD_JOBS=1`, DX12 and the installed `simhei.ttf` fallback, with serial
+Cargo invocations.
+
+| Gate | Result |
+| --- | --- |
+| Final owner controls and affected native workflows | 32/32, `c25e9dff-50e8-457c-a6de-6af68afdde01`; 20 CPU controls and 12 actual native trajectories |
+| Ordinary Editor library | 308/308, `f1171ab9-99c3-48a1-9daa-e47d61ed38fe`; 41 ignored native cases excluded |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; warnings remain |
+| Editor build and formatting | `cargo build --locked -p nara-editor` and `cargo fmt --all -- --check` pass |
+| Independent review | The clipped-input/visible-button finding is corrected; scoped re-review has no remaining findings |
+
+The CPU controls cover typed asset publication, a 67-entity picker with at most 32 live choices,
+retired menu/page/focus identities, source conflicts, exact submission results and hidden-input
+buttons. Native additions exercise actual reference selection, cancellation, explicit Apply,
+Undo/Redo and Save/Reopen, plus long-panel wheel admission, clipping, dirty-buffer retention,
+pressed-button cancellation and shorter-content clamping. The remaining native cohort includes
+the original owned pointer/IME and keyboard/boolean paths, predecessor reference/field controls,
+Project IME, Canvas, pause/resume, Game input and native view lifecycle/recovery.
+
+Review found that filtering all field metadata by text-input visibility disabled still-visible
+Apply/Discard/choice controls. The correction retains metadata for visible associated buttons
+and independently requires visible TextInput semantics for every text entry and geometry path.
+Both the short Apply viewport and the scrolled second picker page reproduce that boundary.
+
+Two fixture corrections preserve product admission: the asset case now supplies real PNGs and
+valid Image metadata instead of treating a Prefab as generic media; the scrolling case captures
+the unavailable-record manifest after entity/component creation and reacquires focus after the
+old text lifetime is clipped. The final 32-case cohort includes these corrections. No source or
+input validation is relaxed. Actual OS input/IME/clipboard, keyboard scrolling, scrollbar dragging,
+virtualization, complete Inspector parity and the Scene/tool visual retain their separate scope.

@@ -22,7 +22,7 @@ use nara_ui_kernel::{
 };
 use nara_ui_render::UiPresentationPlanner;
 use winit::{
-    event::{ElementState, Ime, MouseButton, WindowEvent},
+    event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
     keyboard::ModifiersState,
     window::WindowId,
 };
@@ -375,26 +375,8 @@ impl NativeImgui {
                         surface.mapping.is_some_and(|(owner, _)| owner == window)
                     })
                 }) {
-                    if let Some(panel) = self.owned_input.pointer_panel.take() {
-                        if let Some(surface) = self.owned.get_mut(&panel) {
-                            if let Some((frame, outcome)) =
-                                surface.dispatch(UiInputEvent::PointerCancelled {
-                                    seat: nara_ui_kernel::UiSeatId::PRIMARY,
-                                    pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-                                })?
-                                && let Some(batch) = outcome.consumed()
-                            {
-                                self.frontend
-                                    .reconcile_owned_input(panel, &frame, batch)
-                                    .map_err(imgui_error)?;
-                            } else {
-                                surface.interaction = UiInteractionSession::default();
-                                self.frontend
-                                    .cancel_owned_panel_input(panel)
-                                    .map_err(imgui_error)?;
-                            }
-                        }
-                        self.owned_input.dragging = false;
+                    if let Some(panel) = self.owned_input.pointer_panel {
+                        self.cancel_owned_pointer(panel)?;
                     }
                 }
             }
@@ -430,6 +412,35 @@ impl NativeImgui {
                 }
             }
             _ => {}
+        }
+        if let WindowEvent::MouseWheel { delta, phase, .. } = event
+            && let Some(panel) = self
+                .owned
+                .keys()
+                .copied()
+                .find(|panel| self.owned_cursor_point(*panel, window, true).is_some())
+        {
+            if !application.ordinary_input_locked() && *phase != TouchPhase::Cancelled {
+                let surface = &self.owned[&panel];
+                if let (Some(frame), Some((_, mapping))) = (&surface.presented, surface.mapping) {
+                    let amount = match delta {
+                        MouseScrollDelta::LineDelta(_, vertical) => -*vertical * 48.0,
+                        MouseScrollDelta::PixelDelta(position) => {
+                            -position.y as f32 / mapping.pixels_per_point
+                                * frame.environment().logical_size().height()
+                                / (mapping.rect.max[1] - mapping.rect.min[1])
+                        }
+                    };
+                    if self
+                        .frontend
+                        .scroll_owned_panel(panel, frame, amount)
+                        .unwrap_or(false)
+                    {
+                        self.cancel_owned_pointer(panel)?;
+                    }
+                }
+            }
+            return Ok(true);
         }
         if matches!(event, WindowEvent::CursorMoved { .. }) {
             let hovered = self
@@ -645,6 +656,31 @@ impl NativeImgui {
             event,
             WindowEvent::Ime(_) | WindowEvent::KeyboardInput { .. }
         ))
+    }
+
+    fn cancel_owned_pointer(&mut self, panel: EditorPanelInstanceId) -> Result<(), EditorRunError> {
+        if self.owned_input.pointer_panel != Some(panel) {
+            return Ok(());
+        }
+        self.owned_input.pointer_panel = None;
+        self.owned_input.dragging = false;
+        if let Some(surface) = self.owned.get_mut(&panel) {
+            if let Some((frame, outcome)) = surface.dispatch(UiInputEvent::PointerCancelled {
+                seat: nara_ui_kernel::UiSeatId::PRIMARY,
+                pointer: nara_ui_kernel::UiPointerId::PRIMARY,
+            })? && let Some(batch) = outcome.consumed()
+            {
+                self.frontend
+                    .reconcile_owned_input(panel, &frame, batch)
+                    .map_err(imgui_error)?;
+            } else {
+                surface.interaction = UiInteractionSession::default();
+                self.frontend
+                    .cancel_owned_panel_input(panel)
+                    .map_err(imgui_error)?;
+            }
+        }
+        Ok(())
     }
 
     fn owned_cursor_point(

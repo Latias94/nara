@@ -23,6 +23,8 @@ use super::super::{
 };
 use crate::workspace::EditorPanelInstanceId;
 
+mod references;
+
 fn fonts() -> Vec<FontFace> {
     let primary = bundled_font_face().unwrap();
     let fallback = FontFace::from_bytes(

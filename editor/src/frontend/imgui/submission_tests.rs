@@ -1423,7 +1423,15 @@ impl Harness {
             application.advance_project_open();
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(application.current_frame().is_some());
+        assert!(
+            application.current_frame().is_some(),
+            "{application:?}; recovery: {:?}",
+            match application.project_shell_model() {
+                Some(crate::app::EditorProjectShellModel::Recovery { diagnostics, .. }) =>
+                    Some(diagnostics),
+                _ => None,
+            }
+        );
         let mut composition = EditorNativeComposition::new();
         let mut evidence = Vec::new();
         for index in 0..count {

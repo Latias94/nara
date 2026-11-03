@@ -40,6 +40,7 @@ mod field_overrides;
 mod ordinary_structure;
 mod owned_fields;
 mod owned_keyboard;
+mod owned_scrolling;
 mod prefab_conversion;
 mod prefab_extraction;
 mod recursive_shapes;

@@ -292,7 +292,7 @@ impl AuthoringWorkflow<'_> {
         self.owned_test_paint()
     }
 
-    fn owned_test_apply(&mut self, field: &str) -> Result<(), String> {
+    pub(super) fn owned_test_apply(&mut self, field: &str) -> Result<(), String> {
         self.owned_test_pointer(field, Some("Apply"), 0.5)?;
         self.owned_test_mouse(ElementState::Pressed)?;
         self.owned_test_paint()?;

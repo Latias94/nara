@@ -44,8 +44,12 @@ Physical OS key/clipboard delivery and keyboard-only entry from the shell remain
 The same [Inspector unit](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md)
 now includes explicit boolean value buttons with original-basis submission, exact result routing
 and retained refusal recovery. Its 19-case owner/native cohort covers repeated activation, source
-history and persisted/reopened values. Structured/reference editing and complete panel parity
-retain their separate open scope.
+history and persisted/reopened values. The same unit now adds typed root entity/asset references,
+bounded source-local target pages and native wheel scrolling. Clipped text inputs lose text/IME
+authority while visible field buttons retain exact draft/result ownership. Its final 32-case
+owner/native cohort and 308-test ordinary Editor library pass; the unit records native scope,
+review corrections and remaining limits. Structured editing, complete panel parity and broader
+R11/R12 qualification remain open.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

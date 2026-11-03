@@ -52,8 +52,8 @@ placement, actual input-method event delivery, or manual cross-window typing.
 
 ## Nara Properties Integration
 
-For the incremental Nara-drawn scalar Inspector, select a standalone TrueType CJK fallback
-accepted by the current workspace shell and Nara text owner, then run both trajectories explicitly:
+For the incremental Nara-drawn Inspector, select a standalone TrueType CJK fallback
+accepted by the current workspace shell and Nara text owner, then run the owned trajectories explicitly:
 
 ```powershell
 $env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
@@ -76,6 +76,13 @@ refusal before document history and disk Save/Reopen. Its boolean value-button c
 check keyboard ownership without a text token, repeated-activation refusal, document history and
 saved/reopened values. It does not read or alter the user's actual clipboard or synthesize physical
 OS keyboard events.
+
+The reference trajectory selects and cancels actual source-local target choices before explicit
+Apply, ordinary Undo/Redo and disk Save/Reopen. The scrolling trajectory uses an actual 18-field
+schema and production Winit wheel ingress. It covers line/physical-pixel motion, invalid/cancelled
+input, clipped hit points, pressed-button cancellation, retained dirty buffers, content shrink,
+ordinary history and original-record preservation through Save/Reopen. No image receipt or
+kernel viewport is forged by these native tests.
 
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
 requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories

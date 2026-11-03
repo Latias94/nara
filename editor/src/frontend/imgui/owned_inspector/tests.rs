@@ -143,6 +143,15 @@ fn paint(
     fields: &mut FieldEditors,
     model: &EditorFrameModel,
 ) -> Arc<UiFrame> {
+    paint_height(controller, fields, model, 1600.0)
+}
+
+fn paint_height(
+    controller: &mut OwnedInspector,
+    fields: &mut FieldEditors,
+    model: &EditorFrameModel,
+    height: f32,
+) -> Arc<UiFrame> {
     fields.begin_paint(model);
     controller
         .compile(
@@ -151,7 +160,7 @@ fn paint(
             UiEnvironment::new(
                 UiSurfaceId::new(91).unwrap(),
                 600.0,
-                1600.0,
+                height,
                 1.0,
                 1,
                 1,
@@ -211,6 +220,160 @@ fn boolean(controller: &OwnedInspector, frame: &Arc<UiFrame>) -> UiKey {
         .expect("the actual boolean field has a toggle control")
         .key()
         .clone()
+}
+
+#[test]
+fn visible_apply_keeps_field_authority_without_hidden_text_ingress() {
+    let (_project, application) = application();
+    let model = application.current_frame().unwrap();
+    let mut controller = new_controller();
+    let mut fields = FieldEditors::default();
+    let full = paint(&mut controller, &mut fields, &model);
+    let field = input(&controller, &full, "label");
+    replace(
+        &mut controller,
+        &mut fields,
+        &full,
+        &field,
+        "visible button draft",
+    );
+    let full = paint(&mut controller, &mut fields, &model);
+    let token = controller.input_token(&full, &field).unwrap().unwrap();
+    let apply = full.semantics().iter().find(|node| matches!(
+        controller.binding(&full, node.key()),
+        Ok(InspectorBinding::Operation { field: target, operation: InspectorOperation::Apply }) if target == field
+    )).unwrap().key().clone();
+    let apply_y = full
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(&apply))
+        .unwrap()
+        .rect()
+        .origin()
+        .y();
+    let short = paint_height(&mut controller, &mut fields, &model, 60.0);
+    assert!(controller.scroll(&short, apply_y).unwrap());
+    let scrolled = paint_height(&mut controller, &mut fields, &model, 60.0);
+    assert!(!scrolled.semantics().iter().any(|node| node.key() == &field));
+    assert!(
+        scrolled
+            .semantics()
+            .iter()
+            .any(|node| node.key() == &apply && node.enabled())
+    );
+    assert!(controller.input_token(&scrolled, &field).is_err());
+    assert!(matches!(
+        controller.edit(
+            &scrolled,
+            &field,
+            token,
+            &TextEdit::Insert("late".into()),
+            &mut fields
+        ),
+        Err(OwnedInspectorError::ChangedProjection)
+    ));
+    let prepared = controller
+        .activate(&scrolled, &apply, &model, &mut fields)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(prepared.action,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
+            command: SceneInspectorCommand::SetField { value: ComponentValue::String(value), .. }, ..
+        }) if value == "visible button draft"
+    ));
+}
+
+#[test]
+fn scrolling_clips_long_fields_preserves_drafts_and_clamps_after_resize() {
+    let (_project, application) = application();
+    let model = application.current_frame().unwrap();
+    let original = model.workspace().active_scene.as_ref().unwrap().revision;
+    let mut controller = new_controller();
+    let mut fields = FieldEditors::default();
+    let frame = paint(&mut controller, &mut fields, &model);
+    let field = input(&controller, &frame, "label");
+    let key = field_key(&controller, &frame, &field);
+    replace(
+        &mut controller,
+        &mut fields,
+        &frame,
+        &field,
+        "retained across scroll",
+    );
+    let short = paint_height(&mut controller, &mut fields, &model, 200.0);
+    assert!(short.diagnostics().is_empty(), "{:?}", short.diagnostics());
+    assert!(controller.scroll(&short, f32::MAX).unwrap());
+    let bottom = paint_height(&mut controller, &mut fields, &model, 200.0);
+    assert!(
+        bottom.diagnostics().is_empty(),
+        "{:?}",
+        bottom.diagnostics()
+    );
+    let content = bottom
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(&controller.content_key))
+        .unwrap();
+    assert!(content.rect().size().height() > 200.0);
+    assert!(content.rect().origin().y() < 0.0);
+    assert_eq!(
+        controller.scroll_pixels,
+        content.rect().size().height() - 200.0
+    );
+    assert!(
+        bottom
+            .semantics()
+            .iter()
+            .any(|node| node.role() == UiSemanticRole::TextInput && node.enabled())
+    );
+    assert!(!controller.scroll(&bottom, 100.0).unwrap());
+    let unchanged = paint_height(&mut controller, &mut fields, &model, 200.0);
+    assert!(Arc::ptr_eq(&unchanged, &bottom));
+    let offset = controller.scroll_pixels;
+    assert!(matches!(
+        controller.scroll(&bottom, f32::NAN),
+        Err(OwnedInspectorError::InvalidScroll)
+    ));
+    assert_eq!(controller.scroll_pixels, offset);
+    assert_eq!(
+        fields.drafts[&key].candidate.copy_text(),
+        "retained across scroll"
+    );
+    assert!(fields.drafts[&key].dirty && !fields.drafts[&key].in_flight());
+    let expanded = paint(&mut controller, &mut fields, &model);
+    assert_eq!(controller.scroll_pixels, 0.0);
+    let content = expanded
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(&controller.content_key))
+        .unwrap();
+    assert_eq!(content.rect().origin().y(), 0.0);
+    assert_eq!(
+        fields.drafts[&key].candidate.copy_text(),
+        "retained across scroll"
+    );
+    let mut foreign_controller = new_controller();
+    let foreign = paint(
+        &mut foreign_controller,
+        &mut FieldEditors::default(),
+        &model,
+    );
+    assert!(matches!(
+        controller.scroll(&foreign, 100.0),
+        Err(OwnedInspectorError::RetiredFrame)
+    ));
+    assert_eq!(controller.scroll_pixels, 0.0);
+    assert_eq!(
+        application
+            .current_frame()
+            .unwrap()
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .revision,
+        original
+    );
 }
 
 #[test]
