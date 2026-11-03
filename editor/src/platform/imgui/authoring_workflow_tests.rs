@@ -41,6 +41,7 @@ mod ordinary_structure;
 mod owned_fields;
 mod owned_keyboard;
 mod owned_nested_references;
+mod owned_recovery;
 mod owned_scrolling;
 mod prefab_conversion;
 mod prefab_extraction;
@@ -378,7 +379,7 @@ impl AuthoringWorkflow<'_> {
             ));
         }
         let document = scene.document;
-        let manifest = self
+        let initial_manifest = self
             .application
             .active_authoring_unavailable_record_manifest()
             .ok_or("the ordinary source has no unavailable-record manifest")?;
@@ -395,6 +396,24 @@ impl AuthoringWorkflow<'_> {
         let created_history = self.history()?;
         self.click("Add Component")?;
         self.click(CUSTOM_COMPONENT)?;
+        let manifest = self
+            .application
+            .active_authoring_unavailable_record_manifest()
+            .ok_or("component creation lost the unavailable-record manifest")?;
+        let mut placements = manifest.source_placements().iter();
+        if manifest.entries() != initial_manifest.entries()
+            || !manifest
+                .overlay_declarations()
+                .eq(initial_manifest.overlay_declarations())
+            || !initial_manifest
+                .source_placements()
+                .iter()
+                .all(|original| placements.any(|placement| placement == original))
+        {
+            return Err(
+                "entity/component creation changed existing unavailable source data".into(),
+            );
+        }
         let initial = self.selected_value()?;
         let added_history = self.history()?;
         self.replace_integer()?;

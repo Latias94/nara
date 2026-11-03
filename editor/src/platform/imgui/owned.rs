@@ -465,9 +465,14 @@ impl NativeImgui {
                     && let Some(batch) = outcome.consumed()
                     && let Some(model) = application.current_frame()
                 {
-                    let _ = self
-                        .frontend
-                        .reduce_owned_input(panel, &frame, batch, &model);
+                    let clipboard = self.clipboard.clone();
+                    let _ = self.frontend.reduce_owned_input(
+                        panel,
+                        &frame,
+                        batch,
+                        &model,
+                        &mut |text| clipboard.write(text),
+                    );
                 }
             }
             if self.owned_input.dragging
@@ -537,9 +542,14 @@ impl NativeImgui {
                     && let Some(batch) = outcome.consumed()
                     && let Some(model) = application.current_frame()
                 {
-                    let _ = self
-                        .frontend
-                        .reduce_owned_input(panel, &frame, batch, &model);
+                    let clipboard = self.clipboard.clone();
+                    let _ = self.frontend.reduce_owned_input(
+                        panel,
+                        &frame,
+                        batch,
+                        &model,
+                        &mut |text| clipboard.write(text),
+                    );
                     if *state == ElementState::Pressed
                         && let Some(hit) = frame.hit_test(point)
                         && self.frontend.owned_field_at(panel, &frame, hit.key())

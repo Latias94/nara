@@ -37,10 +37,12 @@ const TEXT_SIZE: f32 = 16.0;
 const PANEL_INSET: f32 = 12.0;
 const RETAINED_FRAMES: usize = 3;
 
+mod recovery;
 mod references;
 mod structured;
 mod viewport;
 
+use recovery::DisplayedRecovery;
 pub(super) use references::ReferenceAction;
 use references::{ReferenceBinding, ReferencePicker};
 
@@ -81,6 +83,10 @@ impl InspectorOperation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum InspectorBinding {
     Field(FieldKey),
+    Copy {
+        field: UiKey,
+    },
+    DiscardRetainedDrafts,
     Operation {
         field: UiKey,
         operation: InspectorOperation,
@@ -107,6 +113,8 @@ struct FieldControl {
     host_enabled: bool,
     buttons: [UiButtonState; InspectorOperation::COUNT],
     reference: Option<ReferencePicker>,
+    copy_button: UiButtonState,
+    copy_feedback: Option<String>,
 }
 
 struct ButtonControl {
@@ -272,6 +280,7 @@ enum InspectorButtonAction {
     Operation(InspectorOperation),
     Reference(ReferenceBinding),
     Structure(DraftAction),
+    Copy,
 }
 
 struct CompiledInspector {
@@ -282,6 +291,8 @@ struct CompiledInspector {
     fields: HashMap<UiKey, DisplayedField>,
     inputs: HashMap<UiKey, DisplayedInput>,
     buttons: HashMap<UiKey, DisplayedButton>,
+    projected_recovery: Option<DisplayedRecovery>,
+    recovery: Option<DisplayedRecovery>,
 }
 
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
@@ -296,6 +307,7 @@ pub(super) struct OwnedInspector {
     controls: HashMap<FieldKey, FieldControl>,
     frames: Vec<CompiledInspector>,
     read_only: bool,
+    recovery_button: ButtonControl,
 }
 
 impl OwnedInspector {
@@ -305,6 +317,10 @@ impl OwnedInspector {
         let content_key = UiKey::scoped(
             root.clone(),
             UiLocalKey::runtime("nara.inspector.content", "fields")?,
+        )?;
+        let recovery_key = UiKey::scoped(
+            root.clone(),
+            UiLocalKey::runtime("nara.inspector.recovery", "discard")?,
         )?;
         Ok(Self {
             root,
@@ -317,6 +333,10 @@ impl OwnedInspector {
             controls: HashMap::new(),
             frames: Vec::new(),
             read_only: false,
+            recovery_button: ButtonControl {
+                key: recovery_key,
+                state: UiButtonState::default(),
+            },
         })
     }
 
@@ -336,14 +356,25 @@ impl OwnedInspector {
     ) -> Result<Vec<UiKey>, OwnedInspectorError> {
         let previous = self.retained(previous)?;
         let candidate = self.retained(candidate)?;
-        Ok(previous
+        let mut invalidated = previous
             .buttons
             .iter()
             .filter(|(_, button)| {
-                previous.fields.get(&button.field) != candidate.fields.get(&button.field)
+                let before = previous.fields.get(&button.field);
+                let after = candidate.fields.get(&button.field);
+                if matches!(button.action, InspectorButtonAction::Copy) {
+                    before.map(|field| (&field.key, &field.draft))
+                        != after.map(|field| (&field.key, &field.draft))
+                } else {
+                    before != after
+                }
             })
             .map(|(key, _)| key.clone())
-            .collect())
+            .collect::<Vec<_>>();
+        if previous.recovery != candidate.recovery {
+            invalidated.push(self.recovery_button.key.clone());
+        }
+        Ok(invalidated)
     }
 
     #[cfg(test)]
@@ -436,7 +467,20 @@ impl OwnedInspector {
                         right.field.as_str(),
                     ))
             });
+            let mut retained_owner = None;
             for key in retained {
+                let owner = (key.entity.clone(), key.component.clone());
+                if retained_owner.as_ref() != Some(&owner) {
+                    nodes.push(self.label(
+                        &format!("retained.{}", visible.len()),
+                        &format!(
+                            "Retained input: {} / {}",
+                            key.entity.as_str(),
+                            key.component.as_str(),
+                        ),
+                    )?);
+                    retained_owner = Some(owner);
+                }
                 nodes.push(self.field_node(
                     key.clone(),
                     None,
@@ -454,6 +498,10 @@ impl OwnedInspector {
             nodes.push(self.label("empty", "No active document")?);
         }
         self.controls.retain(|key, _| visible.contains(key));
+        let projected_recovery = self.recovery_node(fields, width)?.map(|(node, recovery)| {
+            nodes.insert(1, node);
+            recovery
+        });
         let retry_nodes = (self.scroll_pixels > 0.0).then(|| nodes.clone());
         let mut snapshot = self.viewport_snapshot(nodes)?;
         if let Some(previous) = self.frames.last()
@@ -461,6 +509,7 @@ impl OwnedInspector {
             && previous.frame.environment() == environment
             && previous.theme == theme
             && previous.projected_fields == displayed
+            && previous.projected_recovery == projected_recovery
         {
             return Ok(Arc::clone(&previous.frame));
         }
@@ -482,6 +531,7 @@ impl OwnedInspector {
             self.next_snapshot = next_snapshot;
         }
         let projected_fields = displayed.clone();
+        let mut recovery = projected_recovery.clone();
         if frame.root_outcomes().iter().any(|outcome| {
             outcome.key() == &self.root && outcome.status() == UiRootStatus::Published
         }) {
@@ -492,6 +542,9 @@ impl OwnedInspector {
                 .collect::<HashMap<_, _>>();
             buttons.retain(|key, _| semantics.contains_key(key));
             inputs.retain(|key, _| semantics.contains_key(key));
+            if !semantics.contains_key(&self.recovery_button.key) {
+                recovery = None;
+            }
             let button_fields = buttons
                 .values()
                 .map(|button| button.field.clone())
@@ -517,6 +570,8 @@ impl OwnedInspector {
             displayed.clear();
             inputs.clear();
             buttons.clear();
+            recovery = None;
+            self.recovery_button.state = UiButtonState::default();
             for control in self.controls.values_mut() {
                 for text in control.texts_mut() {
                     text.blur(&mut self.engine)?;
@@ -535,6 +590,8 @@ impl OwnedInspector {
             fields: displayed,
             inputs,
             buttons,
+            projected_recovery,
+            recovery,
         });
         Ok(frame)
     }
@@ -545,6 +602,9 @@ impl OwnedInspector {
         key: &UiKey,
     ) -> Result<InspectorBinding, OwnedInspectorError> {
         let compiled = self.retained(frame)?;
+        if key == &self.recovery_button.key && compiled.recovery.is_some() {
+            return Ok(InspectorBinding::DiscardRetainedDrafts);
+        }
         if let Some(button) = compiled.buttons.get(key) {
             self.live_field(frame, &button.field)?;
             return Ok(match &button.action {
@@ -560,6 +620,9 @@ impl OwnedInspector {
                 InspectorButtonAction::Structure(action) => InspectorBinding::Structure {
                     field: button.field.clone(),
                     action: action.clone(),
+                },
+                InspectorButtonAction::Copy => InspectorBinding::Copy {
+                    field: button.field.clone(),
                 },
             });
         }
@@ -654,6 +717,7 @@ impl OwnedInspector {
             for state in &mut control.buttons {
                 *state = UiButtonState::default();
             }
+            control.copy_button = UiButtonState::default();
             if let Some(reference) = &mut control.reference {
                 reference.cancel_input();
             }
@@ -666,6 +730,7 @@ impl OwnedInspector {
                 }
             }
         }
+        self.recovery_button.state = UiButtonState::default();
         match failure {
             Some(error) => Err(error.into()),
             None => Ok(()),
@@ -747,6 +812,7 @@ impl OwnedInspector {
         let outcome = text.edit(token, edit, &mut self.engine)?;
         if outcome.text_changed {
             Self::adopt_text(fields, &key, target.as_ref(), text.editor().text())?;
+            control.copy_feedback = None;
         }
         Ok(outcome)
     }
@@ -822,6 +888,7 @@ impl OwnedInspector {
                 target.as_ref(),
                 text.editor().text(),
             )?;
+            control.copy_feedback = None;
         }
         Ok(outcome)
     }
@@ -860,6 +927,7 @@ impl OwnedInspector {
         }
         let inputs = compiled.inputs.keys().cloned().collect::<HashSet<_>>();
         let buttons = compiled.buttons.values().cloned().collect::<Vec<_>>();
+        let recovery = compiled.recovery.clone();
         for control in self.controls.values_mut() {
             for text in control.texts_mut() {
                 if inputs.contains(text.key()) {
@@ -868,6 +936,12 @@ impl OwnedInspector {
             }
         }
         let mut intents = UiIntentBatch::default();
+        if let Some(recovery) = recovery {
+            let button = self.recovery_control(&recovery)?;
+            self.recovery_button
+                .state
+                .reduce_batch(&button, dispatch, &mut intents)?;
+        }
         for button in buttons {
             let Ok(displayed) = self.live_field(frame, &button.field) else {
                 continue;
@@ -916,6 +990,7 @@ impl OwnedInspector {
                     };
                     &mut button_state.state
                 }
+                InspectorButtonAction::Copy => &mut control.copy_button,
             };
             state.reduce_batch(&button.button, dispatch, &mut intents)?;
         }
@@ -929,6 +1004,10 @@ impl OwnedInspector {
         model: &EditorFrameModel,
         fields: &mut FieldEditors,
     ) -> Result<Option<PreparedFieldEdit>, OwnedInspectorError> {
+        if button == &self.recovery_button.key {
+            self.discard_retained(frame, fields)?;
+            return Ok(None);
+        }
         let binding = self
             .retained(frame)?
             .buttons
@@ -947,6 +1026,7 @@ impl OwnedInspector {
                 self.change_structure(frame, &binding.field, button, &action, model, fields)?;
                 Ok(None)
             }
+            InspectorButtonAction::Copy => Err(OwnedInspectorError::HostClipboardRequired),
         }
     }
 
@@ -1018,6 +1098,9 @@ impl OwnedInspector {
             };
             *value = !*value;
             draft.remove_intent = false;
+            if let Some(control) = self.controls.get_mut(key) {
+                control.copy_feedback = None;
+            }
         }
         draft.dirty = true;
         let target = &draft.basis.target;
@@ -1269,6 +1352,8 @@ impl OwnedInspector {
                     buttons: [UiButtonState::default(); InspectorOperation::COUNT],
                     reference: (basis.field.shape == ComponentValueShape::EntityRef)
                         .then(ReferencePicker::default),
+                    copy_button: UiButtonState::default(),
+                    copy_feedback: None,
                 },
             );
         }
@@ -1313,6 +1398,7 @@ impl OwnedInspector {
         let boolean = matches!(&control.input, FieldInput::Boolean(_));
         let structured = matches!(&control.input, FieldInput::Structured(_));
         let has_input = !matches!(&control.input, FieldInput::ReadOnly);
+        let has_text = control.text().is_some();
         let composing = control.is_composing();
         let display_text = control
             .text()
@@ -1448,10 +1534,18 @@ impl OwnedInspector {
                         ),
                     )?);
                 }
-                children.push(self.label(
-                    &format!("{identity}.retained"),
-                    &format!("Retained: {}", draft.candidate.copy_text()),
-                )?);
+                if !has_text {
+                    let retained = draft.candidate.copy_text();
+                    let end = retained
+                        .char_indices()
+                        .nth(128)
+                        .map_or(retained.len(), |(offset, _)| offset);
+                    let suffix = if end < retained.len() { "…" } else { "" };
+                    children.push(self.label(
+                        &format!("{identity}.retained"),
+                        &format!("Retained: {}{suffix}", &retained[..end]),
+                    )?);
+                }
             }
             if draft.remove_intent {
                 children.push(self.label(
@@ -1513,6 +1607,41 @@ impl OwnedInspector {
                 )
                 .with_children(actions),
             );
+            if draft.dirty || draft.incompatible {
+                let button_key = UiKey::scoped(
+                    self.root.clone(),
+                    UiLocalKey::runtime("nara.inspector.copy", identity.to_string())?,
+                )?;
+                let button = UiButton::new(
+                    button_key.clone(),
+                    "Copy retained input",
+                    UiActionId::new("Copy retained input")?,
+                )?;
+                let state = self.controls[&key].copy_button;
+                children.push(
+                    button.authored_node(
+                        &self.root,
+                        UiStyle::flex()
+                            .with_width(UiDimension::Px(width))
+                            .with_height(UiDimension::Px(30.0))
+                            .with_flex_shrink(0.0),
+                        UiVisual::role(button_color(state, &button)),
+                        UiBrush::Role(UiColorRole::PrimaryText),
+                        TEXT_SIZE,
+                    )?,
+                );
+                buttons.insert(
+                    button_key,
+                    DisplayedButton {
+                        field: input.clone(),
+                        action: InspectorButtonAction::Copy,
+                        button,
+                    },
+                );
+                if let Some(feedback) = &self.controls[&key].copy_feedback {
+                    children.push(self.label(&format!("{identity}.copy-feedback"), feedback)?);
+                }
+            }
         }
         if let Some(unavailable) = unavailable {
             children.push(self.label(&format!("{identity}.unavailable"), &unavailable)?);
@@ -1693,6 +1822,8 @@ pub(super) enum OwnedInspectorError {
     ChangedProjection,
     #[error("this field is read-only")]
     ReadOnlyField,
+    #[error("copying retained input requires the Host clipboard")]
+    HostClipboardRequired,
     #[error("the retained field draft budget is exhausted")]
     DraftCapacity,
     #[error("this field already has an exact pending submission")]

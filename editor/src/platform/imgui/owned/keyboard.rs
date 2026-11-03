@@ -102,9 +102,12 @@ impl NativeImgui {
             && let Some(batch) = outcome.consumed()
             && let Some(model) = application.current_frame()
         {
+            let clipboard = self.clipboard.clone();
             let _ = self
                 .frontend
-                .reduce_owned_input(panel, &frame, batch, &model);
+                .reduce_owned_input(panel, &frame, batch, &model, &mut |text| {
+                    clipboard.write(text)
+                });
         }
         Ok(())
     }

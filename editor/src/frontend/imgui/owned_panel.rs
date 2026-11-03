@@ -62,6 +62,7 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         dispatch: &UiDispatchBatch,
         model: &EditorFrameModel,
+        clipboard: &mut dyn FnMut(&str) -> Result<(), String>,
     ) -> Result<(), String> {
         let widgets = self
             .presentation
@@ -76,6 +77,27 @@ impl ImguiEditorFrontend {
             .dispatch(frame, dispatch)
             .map_err(|error| error.to_string())?;
         for intent in intents.intents() {
+            match inspector
+                .binding(frame, intent.target())
+                .map_err(|error| error.to_string())?
+            {
+                InspectorBinding::Copy { .. } => {
+                    let text = inspector
+                        .copy_draft(frame, intent.target(), &widgets.authoring.fields)
+                        .map_err(|error| error.to_string())?;
+                    inspector
+                        .copy_finished(frame, intent.target(), clipboard(&text))
+                        .map_err(|error| error.to_string())?;
+                    continue;
+                }
+                InspectorBinding::DiscardRetainedDrafts => {
+                    inspector
+                        .activate(frame, intent.target(), model, &mut widgets.authoring.fields)
+                        .map_err(|error| error.to_string())?;
+                    continue;
+                }
+                _ => {}
+            }
             if widgets.owned_pending.len() == 64 {
                 break;
             }

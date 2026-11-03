@@ -147,6 +147,20 @@ Cancelling or replacing the child retires its picker and text input together. Ch
 preserves the other leaves' text buffers and local Undo/Redo. Reference menus page independently;
 closing, reopening or changing a page refuses queued events from the earlier menu view.
 
+Use `Copy retained input` to recover a whole draft, including invalid text and unfinished children.
+It remains available when the field is incompatible, temporarily unprojected or waiting for an
+exact submission result. It copies committed candidate data through the Host clipboard; IME
+preedit is excluded. A clipboard failure is shown beside the control and preserves the draft,
+validation/submission error, local history and source. Editing the candidate clears old copy
+feedback. Retained rows identify their original entity, component and field.
+Values refused by the text control use a bounded read-only preview; Copy still recovers the
+complete retained input.
+
+At the retained-draft limit, `Discard retained field drafts` releases the displayed set of
+unsubmitted drafts. It preserves queued and pending edits and their original completion IDs.
+A changed draft set refuses an earlier button event; review the current panel and retry. This
+local recovery action does not change the document or Undo/Redo history.
+
 The Host uses the bundled primary face and, when configured, one fallback from
 `NARA_EDITOR_CJK_FONT`. During coexistence with the workspace shell, use a standalone TrueType file
 accepted by both font backends, such as an installed `simhei.ttf` on Windows. The shared Nara font

@@ -307,9 +307,9 @@ The old root-only menu flags and field-operation variants are removed. This is a
 consumer refactor; shared UI controls, source formats and public field APIs are unchanged. Full
 component/tree parity, the clipped Scene/tool visual and broader R11/R12 gates remain separate.
 
-The remaining selected-field parity work must include the predecessor's explicit retained-input
-copy path, including incompatible or temporarily unprojected drafts, and retained-budget recovery.
-Inspect `FieldEditors::show_requested_recovery`/`show_recovery` before deleting that field path.
+The retained-input copy and capacity successor below addresses the predecessor's
+`FieldEditors::show_requested_recovery`/`show_recovery` recovery paths. Keep their original
+unavailable and incompatible input semantics when removing the corresponding field path.
 The ordinary source-tool facet and clipped live Scene remain complete-workflow consumers of the
 same submission/history owners; supporting every value shape does not qualify those visual paths.
 
@@ -355,3 +355,86 @@ run supersedes it for this integration. This evidence does not qualify actual OS
 clipboard delivery, native accessibility, keyboard-only shell entry, virtualized control counts,
 idle costs or the Nara-owned live Scene/tool visual. Complete selected-field/component parity and
 the broader foundation Goal remain open.
+
+## Retained input and capacity recovery
+
+The owned panel copies the existing `Candidate::copy_text` representation through a synchronous,
+fallible callback to the Host's existing clipboard. Copy has a presented button and exact field,
+draft and control incarnation, without requiring editable source data or a live text/IME token.
+Invalid and unfinished structured candidates remain lossless under the existing recovery format.
+Queued/pending, incompatible, unprojected and text-limit-refused drafts retain this read path.
+Composition preedit is never adopted or copied as committed input. The Host result changes only
+control feedback; it cannot overwrite a candidate, validation/submission error, operation result,
+selection, source or document history. Editing the candidate clears the old copy feedback.
+
+At capacity, a panel-local recovery button captures the exact dirty, non-in-flight draft set.
+Activation compares that set before deleting any entry. A changed basis, candidate, queued/pending
+state or newly eligible draft refuses the whole earlier action. Matching recovery removes only
+those drafts and their controls; clean unrelated controls and original queued/pending completion
+IDs survive. The compiled recovery snapshot participates in frame reuse and pointer invalidation.
+Recovery and Copy remain reachable when the document-submission queue is full. No clipboard queue,
+replacement value store, generic effect framework or document transaction is introduced.
+
+Copy follows the existing Apply/Discard/Reapply/Reset footer in keyboard order. Retained rows name
+their original entity/component/field instead of appearing to belong to the new selection. These
+recovery controls advance selected-field parity; the source-tool facet, clipped live Scene,
+complete component/tree behavior and broader native/idle/platform requirements remain open.
+
+Copy invalidation follows the original field incarnation and committed draft snapshot. Cancelling
+preedit or changing the source-edit buttons' enabled state cannot invalidate an unchanged Copy
+operation. The shared pointer coordinator compares ordered hit identities and geometry separately
+from enabled state; exact captured-target interactivity and the existing route, mapping, modal and
+explicit invalidation checks still apply. Disabling the captured target cancels its gesture.
+Retained rows share an entity/component heading and avoid repeating a scalar candidate already
+shown in its text control, keeping the existing finite glyph budget unchanged. A candidate
+refused by the text control uses a bounded UTF-8 preview instead of sending its complete
+text back through the same compiler limit; Copy retains the original complete representation.
+
+## Recovery qualification
+
+This successor is based on `5b58527`, with Windows 11, Rust 1.95.0, the root `target`,
+single-job serial Cargo, DX12 and the installed `simhei.ttf` fallback.
+
+| Gate | Result |
+| --- | --- |
+| Ordinary Editor library | 326/326, `8640c504-d7e2-4342-af6d-aa551150399c`; 44 ignored cases excluded |
+| Shared UI, kernel and widgets | 240/240, `58b71fd8-078b-4683-a494-90a2eac4f874`, including unrelated-enable and captured-target-disable controls |
+| Independent UI consumer | 7/7, `410dcc94-91f3-4772-9991-00a6ee2d39e6`, without ECS, Scene or renderer dependencies |
+| Selected native trajectories | 17 passing cases in `0ad06ba2-238d-416b-b990-26f458242cd0`, plus the corrected ordinary Scene/Prefab case 1/1 in `11a7e984-8b56-4a0b-9f69-9d8f7f0be4ac`; 18 distinct trajectories qualified |
+| Independent review | Composition/Copy cancellation corrected; final bounded production and regression review has no remaining P1/P2 findings |
+| Correctness Clippy | Editor and UI kernel, all targets/all features, pass `-D clippy::correctness`; warnings remain |
+| Build and formatting | Editor locked build and `cargo fmt --all -- --check` pass |
+| Documents | Changed local Markdown targets and `git diff --check` pass |
+
+The five recovery CPU controls are included in the ordinary Editor result. They cover invalid
+scalar and oversized retained input, preedit exclusion, fallible feedback isolation, read-only
+Copy, pending Optional/List/Map input, removed components, stale controls and exact recovery of
+the 64-draft budget. Old snapshots refuse atomically; clean controls, queued work and two original
+pending IDs survive, while recovered controls and text tokens retire.
+
+The new native trajectory uses actual pointer/IME ingress to create all 64 dirty fields in a
+65-field schema. It clicks the displayed recovery button, refuses retired input and edits the
+previously disabled field without source, history, selection, unavailable-record or project-file
+changes. Its other workflow copies Chinese and invalid numeric input, excludes preedit, refuses
+a clipboard write, retries, preserves local Undo/Redo and recovers unprojected and removed fields.
+Both use the isolated Host memory clipboard. The final native cohort additionally executes the
+earlier owned field/keyboard/reference/scrolling/structured paths, predecessor field and recursive
+paths, Project IME, pause/Game/view lifecycle and retained Scene/Canvas controls.
+
+Initial qualification exposed duplicated retained-value rendering exceeding the existing glyph
+budget, then composition cancellation re-enabling sibling buttons and cancelling Copy's press.
+The final source removes redundant rendering, bounds the refused-input preview and corrects the
+owning input comparisons without widening resource limits. The added raw-pointer regression
+initially expected a widget activation from the kernel; it now checks exact routed release and
+cancellation, with the actual native Copy proving the widget/Host effect.
+
+The ordinary native case had captured its complete manifest before authorized entity creation.
+It now verifies original unknown entries, overlays and placement order across creation, then
+captures the complete editing baseline. Existing exact Save/Reopen manifest and original raw
+entity checks remain. Only that test changed after the 17 passing native trajectories, and its
+focused rerun passes; the full 18-case invocation itself had one fixture failure.
+
+These results cover the recorded Windows backend paths and existing finite model limits. They
+do not qualify actual OS IME/clipboard delivery, candidate placement, accessibility, DPI transfer,
+keyboard-only shell entry, virtualization, idle costs or the Nara-owned Scene/tool visual.
+Complete component/tree parity, R11/R12 and the broader foundation Goal remain open.

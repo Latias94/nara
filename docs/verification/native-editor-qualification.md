@@ -97,6 +97,15 @@ pending-child confirmation and whole-field Apply, then ordinary Undo/Redo, typed
 and original unavailable records through clean Reopen. Its pointer and locating wheel events use
 the production owned image path; OS input-method delivery retains the separate limits below.
 
+The retained-input recovery trajectory uses an isolated memory clipboard for Chinese/string and
+invalid numeric drafts. It checks preedit exclusion, refused writes and retry, local Undo/Redo,
+unprojected fields and incompatible fields after actual component removal. A separate 65-field
+schema reaches the 64-draft limit through native pointer and IME ingress, activates the presented
+global recovery button, rejects retired input and edits the previously refused field. Recovery
+preserves source, document history, selection, original unavailable records and project files.
+CPU controls separately cover exact recovery snapshot refusal and queued/pending completion IDs;
+this native trajectory does not manufacture those asynchronous states or touch the OS clipboard.
+
 An unchanged forced repaint must reuse the compiled frame and retained image receipt without
 requesting a continuous follow-up. That observation is not an idle CPU benchmark. These trajectories
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window

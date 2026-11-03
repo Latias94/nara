@@ -279,6 +279,7 @@ impl OwnedInspector {
             .controls
             .get_mut(key)
             .ok_or(OwnedInspectorError::RetiredField)?;
+        control.copy_feedback = None;
         if let FieldInput::Structured(controls) = &mut control.input {
             controls.synchronize(&rows);
         }

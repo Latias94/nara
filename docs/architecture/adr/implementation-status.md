@@ -71,6 +71,18 @@ cohort include exact Application controls and complete Scene/Prefab history/pers
 complete selected Inspector and broader R11/R12
 requirements remain open.
 
+The [retained-input recovery successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#retained-input-and-capacity-recovery)
+adds whole-candidate Copy through the existing fallible Host clipboard, including incompatible,
+unprojected, text-limit-refused and in-flight drafts. Clipboard feedback preserves the original
+validation/submission error and local history. Exact captured-set recovery releases only dirty,
+unsubmitted drafts and retains queued/pending operation identities. Copy survives composition
+cancellation and unrelated buttons becoming enabled; captured-target disablement, geometry,
+mapping, modal and explicit behavior invalidation retain their original protections. The owning
+unit records 326 ordinary Editor, 240 shared UI and seven independent-consumer controls, plus
+18 distinct selected native trajectories, including a corrected ordinary-case rerun. It retains
+the remaining complete-panel, Scene/tool,
+virtualization, idle and actual OS/platform requirements.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

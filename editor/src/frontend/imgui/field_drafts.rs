@@ -204,16 +204,22 @@ pub(super) struct PreparedFieldEdit {
 }
 
 impl FieldEditors {
+    pub(super) fn retained_count(&self) -> usize {
+        self.drafts
+            .values()
+            .filter(|draft| draft.dirty || draft.in_flight())
+            .count()
+    }
+
+    pub(super) fn at_capacity(&self) -> bool {
+        self.retained_count() >= MAX_RETAINED_FIELD_DRAFTS
+    }
+
     pub(super) fn has_draft_capacity(&self, key: &FieldKey) -> bool {
         self.drafts
             .get(key)
             .is_some_and(|draft| draft.dirty || draft.in_flight())
-            || self
-                .drafts
-                .values()
-                .filter(|draft| draft.dirty || draft.in_flight())
-                .count()
-                < MAX_RETAINED_FIELD_DRAFTS
+            || !self.at_capacity()
     }
 
     pub(super) fn clear(&mut self) {

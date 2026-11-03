@@ -583,12 +583,12 @@ impl OwnedInspector {
                 &format!("scene-local:{entity}"),
             )?;
             if let Some(target) = &binding.input {
-                if let FieldInput::Structured(controls) = &mut self
+                let control = self
                     .controls
                     .get_mut(key)
-                    .ok_or(OwnedInspectorError::RetiredField)?
-                    .input
-                {
+                    .ok_or(OwnedInspectorError::RetiredField)?;
+                control.copy_feedback = None;
+                if let FieldInput::Structured(controls) = &mut control.input {
                     controls.inputs.remove(target);
                     controls.references.remove(target);
                 }
