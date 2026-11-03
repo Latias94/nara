@@ -264,7 +264,14 @@ fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
                     .key()
                     .map(|key| (key, layout.route_parent(), layout.visible()))
             }))
-        && previous.hit_regions() == latest.hit_regions()
+        && previous
+            .hit_regions()
+            .iter()
+            .map(|region| (&region.key, region.rect, region.clip_rect))
+            .eq(latest
+                .hit_regions()
+                .iter()
+                .map(|region| (&region.key, region.rect, region.clip_rect)))
         && active_modal_root(previous) == active_modal_root(latest)
 }
 

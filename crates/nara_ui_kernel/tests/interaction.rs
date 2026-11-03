@@ -1195,6 +1195,123 @@ fn equivalent_pointer_routes_rebind_capture_across_paint_decoration_changes() {
 }
 
 #[test]
+fn pointer_capture_survives_enabling_an_unrelated_target_but_not_disabling_its_owner() {
+    let authored = |revision, first_enabled, second_enabled| {
+        UiAuthoringSnapshotBuilder::new(revision)
+            .with_root(
+                UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                    button("first", "First", "first", 10.0, 10.0, first_enabled),
+                    button("second", "Second", "second", 110.0, 10.0, second_enabled),
+                ]),
+            )
+            .build()
+            .unwrap()
+    };
+    for (first_enabled, second_enabled) in [(true, true), (false, false)] {
+        let mut compiler = compiler();
+        let initial = compile_for_slot(&mut compiler, &authored(1, false, true), 1, 1, 1, 1);
+        let successor = compile_for_slot(
+            &mut compiler,
+            &authored(2, first_enabled, second_enabled),
+            1,
+            1,
+            1,
+            1,
+        );
+        assert_eq!(
+            initial.environment().generations(),
+            successor.environment().generations()
+        );
+        assert!(
+            initial
+                .hit_regions()
+                .iter()
+                .map(|region| (region.key(), region.rect()))
+                .eq(successor
+                    .hit_regions()
+                    .iter()
+                    .map(|region| (region.key(), region.rect())))
+        );
+
+        let mut journal = hosted_journal();
+        let initial_route = submit(&mut journal, initial, 10);
+        let mut session = UiInteractionSession::default();
+        session
+            .reconcile_latest_presentation(&journal, SURFACE, &[])
+            .unwrap()
+            .unwrap();
+        let target = exact_key("base", "second");
+        let position = UiPoint::new(120.0, 20.0);
+        let pressed = session
+            .dispatch(
+                &journal,
+                initial_route,
+                pointer_button(UiButtonPhase::Pressed, position),
+            )
+            .unwrap();
+        assert!(pressed.consumed().unwrap().events().iter().any(|event| {
+            event.target() == &target
+                && event.phase() == UiRoutePhase::Target
+                && event.kind() == &UiRoutedEventKind::Pressed
+        }));
+
+        let successor_route = submit(&mut journal, successor, 11);
+        let reconciled = session
+            .reconcile_latest_presentation(&journal, SURFACE, &[])
+            .unwrap()
+            .unwrap();
+        assert!(reconciled.is_reconciliation());
+        let released = session
+            .dispatch(
+                &journal,
+                successor_route,
+                pointer_button(UiButtonPhase::Released, position),
+            )
+            .unwrap();
+
+        if second_enabled {
+            assert!(reconciled.events().is_empty());
+            let released = released.consumed().unwrap();
+            assert!(!released.is_reconciliation());
+            let releases = released
+                .events()
+                .iter()
+                .filter(|event| {
+                    event.phase() == UiRoutePhase::Target
+                        && event.kind() == &UiRoutedEventKind::Released { inside: true }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(releases.len(), 1);
+            assert_eq!(releases[0].target(), &target);
+            assert!(
+                released
+                    .events()
+                    .iter()
+                    .all(|event| event.kind() != &UiRoutedEventKind::Cancelled)
+            );
+        } else {
+            assert!(reconciled.events().iter().any(|event| {
+                event.target() == &target
+                    && event.phase() == UiRoutePhase::Target
+                    && event.kind() == &UiRoutedEventKind::Cancelled
+            }));
+            assert!(reconciled.events().iter().all(|event| {
+                !matches!(
+                    event.kind(),
+                    UiRoutedEventKind::Released { .. }
+                        | UiRoutedEventKind::ActivateRequested { .. }
+                )
+            }));
+            assert_eq!(
+                released.rejection(),
+                Some(&UiNonActivation::NoPointerCapture)
+            );
+            assert!(released.consumed().is_none());
+        }
+    }
+}
+
+#[test]
 fn pointer_capture_cannot_cross_presentation_generations() {
     let mut compiler = compiler();
     let mut journal = hosted_journal();
