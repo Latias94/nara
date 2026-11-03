@@ -31,14 +31,18 @@ pub(crate) const MAX_HISTORY_LINEAGES: usize = 64;
 ///
 /// Keep this value with the temporal renderer and clone it into its immutable captures. Resetting
 /// slots or replacing effects does not start another lineage or clear its successful watermark.
+/// Each clone freezes its semantic revision; cloning an old capture cannot refresh that revision.
+/// The domain must clone the current owner atomically with its semantic sample, using its own
+/// synchronization rather than relying on a later policy admission or Host preparation.
 #[derive(Clone, Debug)]
-pub struct WgpuHistoryLineage(pub(crate) Arc<HistoryLineage>);
+pub struct WgpuHistoryLineage(pub(crate) Arc<HistoryLineage>, u64);
 
 #[derive(Debug)]
 pub(crate) struct HistoryLineage {
     pub(crate) id: u64,
     pub(crate) source: RenderFrameSourceGeneration,
     first_backend: AtomicU64,
+    revision: AtomicU64,
 }
 
 impl WgpuHistoryLineage {
@@ -46,11 +50,53 @@ impl WgpuHistoryLineage {
         let id = NEXT_HISTORY_LINEAGE
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .map_err(|_| WgpuRenderProgramError::IdentityExhausted)?;
-        Ok(Self(Arc::new(HistoryLineage {
-            id,
-            source,
-            first_backend: AtomicU64::new(0),
-        })))
+        Ok(Self(
+            Arc::new(HistoryLineage {
+                id,
+                source,
+                first_backend: AtomicU64::new(0),
+                revision: AtomicU64::new(0),
+            }),
+            0,
+        ))
+    }
+
+    /// Cuts semantic continuity without replacing the lineage, its Views or successful watermark.
+    ///
+    /// Mutate the domain's original current owner before taking subsequent semantic samples.
+    /// Previously cloned captures remain stale, even if first admitted or prepared after this cut;
+    /// only clones of the updated owner carry the new revision. Stale aliases cannot advance or
+    /// resample the current revision and return [`WgpuRenderProgramError::StaleHistory`]. Revision
+    /// exhaustion returns [`WgpuRenderProgramError::IdentityExhausted`] without changing the owner.
+    ///
+    /// This does not empty any Host history slots. Call [`crate::WgpuRenderHost::reset_history`]
+    /// explicitly where predecessor storage must also be invalidated. Ordinary slot reset remains
+    /// local to that Host realization and does not invalidate all original captures.
+    ///
+    /// This CPU cut is not rollback or a cross-thread linearized native submission/publication
+    /// transaction. Hosts check the frozen revision before native work and at final history
+    /// validation; a racing cut cannot undo submitted work or retract already published output.
+    /// A cut after final validation may still be followed by that transaction's publication.
+    /// Strict ordering between a cut and the whole Host transaction requires domain synchronization.
+    pub fn discontinue(&mut self) -> Result<(), WgpuRenderProgramError> {
+        self.validate_current()?;
+        let next = self
+            .1
+            .checked_add(1)
+            .ok_or(WgpuRenderProgramError::IdentityExhausted)?;
+        self.0
+            .revision
+            .compare_exchange(self.1, next, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| WgpuRenderProgramError::StaleHistory)?;
+        self.1 = next;
+        Ok(())
+    }
+
+    pub(crate) fn validate_current(&self) -> Result<(), WgpuRenderProgramError> {
+        if self.0.revision.load(Ordering::Acquire) != self.1 {
+            return Err(WgpuRenderProgramError::StaleHistory);
+        }
+        Ok(())
     }
 
     #[must_use]

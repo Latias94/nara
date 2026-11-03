@@ -42,6 +42,8 @@ pub trait WgpuRenderPolicy: Send + Sync + 'static {
 
     /// Selects the original CPU temporal clock retained by this capture, if any.
     /// It is evaluated at input admission, never through a later installed policy.
+    /// Return the clone frozen with the domain's semantic sample, not a clone of a later current
+    /// owner. Admission must not refresh a pre-discontinuity capture's semantic revision.
     fn history_lineage(&self, _capture: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
         None
     }
@@ -226,6 +228,9 @@ impl<P: WgpuRenderPolicy> WgpuPolicyInstallation<P> {
             self.definition.0.policy.history_lineage(&capture)
         }))
         .map_err(|_| WgpuRenderProgramError::PolicyPanicked)?;
+        if let Some(lineage) = &lineage {
+            lineage.validate_current()?;
+        }
         Ok(Arc::new(TypedPolicyCapture::<P> {
             admission: Arc::clone(&self.admission),
             definition: Arc::clone(&self.definition.0),
@@ -295,6 +300,7 @@ impl WgpuRenderInput {
     }
 
     /// Preserves the exact captured meaning while adapting an equal-sized window to an image.
+    /// It neither refreshes the frozen history revision nor revives a discontinued capture.
     pub fn with_image_target(
         &self,
         target: RenderImagePacket,
@@ -622,9 +628,16 @@ impl<P: WgpuRenderPolicy> CapturedPolicy for TypedPolicyCapture<P> {
     }
 
     fn validate(&self, packet: &RenderFramePacket) -> Result<(), WgpuRenderProgramError> {
+        if let Some(lineage) = &self.lineage {
+            lineage.validate_current()?;
+        }
         self.definition
             .policy
-            .validate_capture(packet, &self.capture)
+            .validate_capture(packet, &self.capture)?;
+        if let Some(lineage) = &self.lineage {
+            lineage.validate_current()?;
+        }
+        Ok(())
     }
 
     fn bind(
@@ -906,6 +919,7 @@ impl PolicyInstances {
             };
             let history = match (history_owner, input.lineage.as_ref()) {
                 (Some(owner), Some(lineage)) if owner.id == lineage.0.id => {
+                    lineage.validate_current()?;
                     Some(history_declarations.pin(owner, input.packet().frame_index())?)
                 }
                 (None, None) if history_declarations.is_empty() => None,
@@ -919,6 +933,9 @@ impl PolicyInstances {
                     history: history.as_ref(),
                 },
             )?;
+            if let Some(lineage) = &input.lineage {
+                lineage.validate_current()?;
+            }
             match &history {
                 Some(history) => history.validate_bindings(&output.program, &output.history)?,
                 None if output.history.is_empty() => {}

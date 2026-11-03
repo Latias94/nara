@@ -1615,6 +1615,9 @@ impl WgpuRenderHost {
 
     /// Explicitly empties selected slots while preserving their original successful watermark.
     /// Already prepared candidates retain their old basis and will refuse after this reset.
+    /// This Host-local reset does not invalidate captures that have not yet been prepared. Use
+    /// [`crate::WgpuHistoryLineage::discontinue`] on the domain's current owner for a semantic cut,
+    /// and explicitly reset the affected slots as well when their predecessor must be discarded.
     pub fn reset_history(
         &mut self,
         producer: &WgpuRenderProducer,
@@ -1698,6 +1701,7 @@ impl WgpuRenderHost {
             .get_mut(&id)
             .ok_or(WgpuRenderHostError::ProducerClosed)?;
         let history_index = if let Some(lineage) = &input.lineage {
+            lineage.validate_current()?;
             if lineage.source_generation() != input.packet().source_generation() {
                 return Err(crate::WgpuRenderProgramError::HistoryDeclaration.into());
             }
@@ -2158,6 +2162,7 @@ impl WgpuRenderHost {
     ) -> Result<(), WgpuRenderHostError> {
         match (&built.lineage, &built.history) {
             (Some(lineage), Some(history)) => {
+                lineage.validate_current()?;
                 let realization = self
                     .views
                     .get(&producer)

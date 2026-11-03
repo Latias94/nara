@@ -17,4 +17,7 @@ nara_render = { path = "../../../crates/nara_render", default-features = false }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]
+motion-contract = { path = "../motion-execution/contract" }
+motion-animation = { path = "../motion-execution/animation" }
+motion-physics = { path = "../motion-execution/physics" }
 wgpu = "=30.0.1"

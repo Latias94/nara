@@ -163,6 +163,308 @@ fn image_packet(frame_index: u64) -> RenderFramePacket {
     .unwrap()
 }
 
+struct LineagePolicy;
+
+impl WgpuRenderPolicy for LineagePolicy {
+    type Capture = crate::WgpuHistoryLineage;
+    type Bindings = ();
+
+    fn history_lineage(&self, capture: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
+        Some(capture.clone())
+    }
+
+    fn bind(
+        &self,
+        _: &Self::Capture,
+        _: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        _: &(),
+        _: &Self::Capture,
+        context: WgpuPolicyBuildContext<'_>,
+    ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
+        clear_program(context, wgpu::Color::BLACK, None)
+    }
+}
+
+fn cpu_history(lineage: &crate::WgpuHistoryLineage) -> crate::history::HistoryRealization {
+    let budget = Arc::new(crate::output::OutputBudget::default());
+    crate::history::HistoryRealization::new(lineage, 1, budget.reserve(0).unwrap())
+}
+
+fn build_temporal(
+    cpu: &mut CpuInstanceSet,
+    input: &WgpuRenderInput,
+    history: &crate::history::HistoryRealization,
+) -> Result<BuiltPolicy, WgpuRenderProgramError> {
+    cpu.instances.build(
+        input,
+        cpu.backend_instance_id,
+        cpu.producer,
+        &cpu.closed,
+        FORMAT,
+        Some(history),
+    )
+}
+
+#[test]
+fn semantic_cut_rejects_late_admission_first_preparation_and_retained_history() {
+    let packet = image_packet(7);
+    let mut lineage = crate::WgpuHistoryLineage::new(packet.source_generation()).unwrap();
+    let original_id = lineage.0.id;
+    let mut stale_alias = lineage.clone();
+    let raw = Arc::new(lineage.clone());
+    let installation = WgpuPolicyDefinition::new(LineagePolicy).install().unwrap();
+    let accepted = installation
+        .capture(packet.clone(), Arc::clone(&raw))
+        .unwrap();
+    let unprepared = installation
+        .capture(packet.clone(), Arc::clone(&raw))
+        .unwrap();
+    let mut history = cpu_history(&lineage);
+    let mut cpu = CpuInstanceSet::new(1);
+    let before_reset = build_temporal(&mut cpu, &accepted, &history).unwrap();
+    drop(history.state.reset(&[]).unwrap());
+    assert!(lineage.validate_current().is_ok());
+    assert!(matches!(
+        history
+            .state
+            .validate(&before_reset.history.as_ref().unwrap().basis),
+        Err(crate::history::HistoryError::StaleBasis)
+    ));
+    let retained = build_temporal(&mut cpu, &accepted, &history).unwrap();
+
+    let other = crate::WgpuHistoryLineage::new(packet.source_generation()).unwrap();
+    let other_input = installation
+        .capture(packet.clone(), Arc::new(other.clone()))
+        .unwrap();
+    let other_history = cpu_history(&other);
+    let other_retained = build_temporal(&mut cpu, &other_input, &other_history).unwrap();
+
+    lineage.discontinue().unwrap();
+    assert_eq!(lineage.0.id, original_id);
+    assert_eq!(lineage.source_generation(), packet.source_generation());
+    assert_eq!(
+        lineage.empty_reason(2),
+        crate::WgpuEmptyHistoryReason::DeviceRecreated
+    );
+    assert!(matches!(
+        stale_alias.discontinue(),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        stale_alias.clone().validate_current(),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        installation.capture(packet.clone(), raw),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        WgpuRenderInput::from_capture(packet.clone(), Arc::clone(&accepted.capture)),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        build_temporal(&mut cpu, &accepted, &history),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        build_temporal(&mut cpu, &unprepared, &history),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    let mut fresh_cpu = CpuInstanceSet::new(2);
+    let fresh_history = cpu_history(&lineage);
+    assert!(matches!(
+        build_temporal(&mut fresh_cpu, &unprepared, &fresh_history),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        retained.lineage.as_ref().unwrap().validate_current(),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(
+        history
+            .state
+            .validate(&retained.history.as_ref().unwrap().basis)
+            .is_ok()
+    );
+    assert!(
+        other_retained
+            .lineage
+            .as_ref()
+            .unwrap()
+            .validate_current()
+            .is_ok()
+    );
+    assert!(
+        other_history
+            .state
+            .validate(&other_retained.history.as_ref().unwrap().basis)
+            .is_ok()
+    );
+    assert!(build_temporal(&mut cpu, &other_input, &other_history).is_ok());
+
+    let current = installation
+        .capture(packet.clone(), Arc::new(lineage.clone()))
+        .unwrap();
+    let mut built = build_temporal(&mut cpu, &current, &history).unwrap();
+    drop(
+        history
+            .state
+            .commit(&mut built.history.as_mut().unwrap().basis, &[])
+            .unwrap(),
+    );
+    lineage.discontinue().unwrap();
+    let repeated = installation.capture(packet, Arc::new(lineage)).unwrap();
+    assert!(matches!(
+        build_temporal(&mut cpu, &repeated, &history),
+        Err(WgpuRenderProgramError::HistoryAlreadyConsumed)
+    ));
+}
+
+#[test]
+fn image_adaptation_preserves_the_original_frozen_semantic_revision() {
+    use nara_window::{Window, WindowId, WindowResolution};
+
+    let runtime = nara_app::RuntimeInstance::start(nara_app::App::new()).unwrap();
+    let mut window = Window::new("temporal CPU adaptation", WindowResolution::new(2, 2));
+    window.id = WindowId::new(74);
+    let viewport = ViewportRect::new(0, 0, 2, 2).unwrap();
+    let mut views = ExtractedViews::default();
+    views.push(ExtractedView {
+        id: nara_render::RenderViewId::try_acquire().unwrap(),
+        camera_entity: Entity::PLACEHOLDER,
+        target: RenderTarget::PrimaryWindow,
+        viewport,
+        mapping: ViewMapping2d::orthographic(Mat3::IDENTITY, 2.0, viewport).unwrap(),
+        order: 0,
+        load: ViewLoadOp::Clear(Color::BLACK),
+    });
+    let packet = nara_render::build_render_frame_packet(
+        runtime.generation(),
+        7,
+        Some(window.id),
+        [&window],
+        &views,
+    )
+    .unwrap()
+    .unwrap();
+    let mut lineage = crate::WgpuHistoryLineage::new(packet.source_generation()).unwrap();
+    let installation = WgpuPolicyDefinition::new(LineagePolicy).install().unwrap();
+    let input = installation
+        .capture(packet, Arc::new(lineage.clone()))
+        .unwrap();
+    let target = RenderImagePacket::new(
+        RenderImage2d::allocate_handle().unwrap(),
+        Extent2d::new(2, 2).unwrap(),
+    )
+    .unwrap();
+    let adapted = input.with_image_target(target).unwrap();
+    assert!(Arc::ptr_eq(&input.capture, &adapted.capture));
+    lineage.discontinue().unwrap();
+    assert!(matches!(
+        input.with_image_target(target),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    let mut cpu = CpuInstanceSet::new(1);
+    let history = cpu_history(&lineage);
+    assert!(matches!(
+        build_temporal(&mut cpu, &adapted, &history),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    runtime.finish().unwrap();
+}
+
+#[derive(Clone, Copy)]
+enum CutDuring {
+    Validate,
+    Bind,
+    Build,
+}
+
+struct CuttingPolicy {
+    current: Mutex<crate::WgpuHistoryLineage>,
+    during: CutDuring,
+}
+
+impl WgpuRenderPolicy for CuttingPolicy {
+    type Capture = crate::WgpuHistoryLineage;
+    type Bindings = ();
+
+    fn history_lineage(&self, capture: &Self::Capture) -> Option<crate::WgpuHistoryLineage> {
+        Some(capture.clone())
+    }
+
+    fn validate_capture(
+        &self,
+        _: &RenderFramePacket,
+        _: &Self::Capture,
+    ) -> Result<(), WgpuRenderProgramError> {
+        if matches!(self.during, CutDuring::Validate) {
+            self.current.lock().unwrap().discontinue()?;
+        }
+        Ok(())
+    }
+
+    fn bind(
+        &self,
+        _: &Self::Capture,
+        _: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<(), WgpuRenderProgramError> {
+        if matches!(self.during, CutDuring::Bind) {
+            self.current.lock().unwrap().discontinue()?;
+        }
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        _: &(),
+        _: &Self::Capture,
+        context: WgpuPolicyBuildContext<'_>,
+    ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
+        if matches!(self.during, CutDuring::Build) {
+            self.current.lock().unwrap().discontinue()?;
+        }
+        clear_program(context, wgpu::Color::BLACK, None)
+    }
+}
+
+#[test]
+fn semantic_cut_inside_policy_callbacks_cannot_publish_a_new_basis_or_bindings() {
+    for during in [CutDuring::Validate, CutDuring::Bind, CutDuring::Build] {
+        let packet = image_packet(11);
+        let lineage = crate::WgpuHistoryLineage::new(packet.source_generation()).unwrap();
+        let captured = Arc::new(lineage.clone());
+        let installation = WgpuPolicyDefinition::new(CuttingPolicy {
+            current: Mutex::new(lineage.clone()),
+            during,
+        })
+        .install()
+        .unwrap();
+        if matches!(during, CutDuring::Validate) {
+            assert!(matches!(
+                installation.capture(packet, captured),
+                Err(WgpuRenderProgramError::StaleHistory)
+            ));
+        } else {
+            let input = installation.capture(packet, captured).unwrap();
+            let mut cpu = CpuInstanceSet::new(1);
+            let history = cpu_history(&lineage);
+            assert!(matches!(
+                build_temporal(&mut cpu, &input, &history),
+                Err(WgpuRenderProgramError::StaleHistory)
+            ));
+            assert!(cpu.instances.is_empty());
+            assert!(history.state.prepare(11, &[]).is_ok());
+        }
+    }
+}
+
 fn capture(tag: u32) -> Arc<ClearCapture> {
     Arc::new(ClearCapture {
         tag,

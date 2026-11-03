@@ -1113,8 +1113,10 @@ than requiring their public topology.
 
 ## R10: Motion, Time, Repeatability And Concrete Domain Seams
 
-**Design:** D09. **State:** motion/repeatability not started; the bounded keyboard/mouse Input
-endpoint successor is qualified. **Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
+**Design:** D09. **State:** the [joint motion/execution and captured-discontinuity unit](2026-11-03-joint-motion-execution-plan.md)
+has bounded independent and Windows/DX12 qualification; repeatability/effect admission and domain
+authoring remain open. The bounded keyboard/mouse Input endpoint successor is qualified.
+**Owners:** Input and concrete Physics/Animation/Audio/Network integrations.
 
 Implement a bounded motion consumer with root-motion intent, kinematic target, dynamic solver
 pose, parent edits and interpolation. Define query/callback freshness and temporal authority.

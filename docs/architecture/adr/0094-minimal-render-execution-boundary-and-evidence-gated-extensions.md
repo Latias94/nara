@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-01 (original typed policy bindings and captured View/history transactions)
+**Last Revised**: 2026-11-03 (captured semantic discontinuity eligibility)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -257,6 +257,30 @@ snapshot of actual Feature owners, pins complete predecessor/empty-slot revision
 program. A latest-instance map cannot reinterpret an older accepted input. Candidate-driven
 membership changes publish with the candidate; failed preparation preserves last-good membership.
 Explicit reset/revocation retains its separate invalidation meaning.
+
+A domain's semantic discontinuity is distinct from Host-local slot reset. The current original
+CPU `WgpuHistoryLineage` may advance its semantic revision with `discontinue`; every earlier clone
+retains its frozen revision and becomes ineligible for current history execution. Clone the current
+lineage together with the original domain sample under that domain's synchronization. Later
+admission, image-target adaptation or first preparation cannot refresh an old sample. Reject stale
+captures before binding and revalidate their original revision before native work and final history
+publication. Ordinary reset remains local to selected slots and does not make all unprepared
+captures stale. Where a cut invalidates predecessor pixels as well, explicitly reset those slots.
+
+The lineage identity, successful-capture watermark, View lifetimes, original published reads and
+original submission custody survive the cut. A stale alias cannot advance or resample the current
+revision. This choice refuses old captures instead of rendering them into current history; it does
+not require a second temporal registry or recreating the lineage on every teleport. Retaining only
+prepare-time slot revisions was rejected because a pre-cut capture first prepared after reset can
+otherwise adopt the new basis. Replacing the entire lineage was rejected because it loses continuity
+of the original deduplication and realization ownership. No automatic classification of camera,
+shader, material or motion edits is inferred: the concrete effect owner chooses its compatibility.
+
+CPU discontinuation cannot retract native work already submitted or output already published.
+The final revision check is not a cross-thread transaction with a concurrent cut; a cut after that
+check may precede the transaction's publication. Domains requiring strict order serialize the cut
+with the whole Host operation. Existing rejected-native-attempt cleanup still owns its original
+submission prefix; a stale result is not permission to drop physical custody.
 
 One opaque move-only candidate owns original input, program, bindings, history basis, target facts
 and ordinary budget guards without borrowing the Host across calls. Retry returns that same value;

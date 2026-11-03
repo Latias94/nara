@@ -70,3 +70,26 @@ command and captures/acknowledges it, publishes the solved spatial cut, then fau
 same schedule. The drive fails and remains sticky; the Ack and deferred effects remain. Therefore
 Ack does not certify whole-tick success or authoritative confirmation. The stronger D07 rule is
 not selected. New borrowed solver work must finish before its pose commit, independently of Ack.
+
+## Shared temporal selection
+
+Retain the existing `WgpuHistoryLineage` as the CPU temporal owner. Ordinary Host slot reset
+invalidates an already prepared basis but intentionally does not fence every unprepared capture.
+For an effect-incompatible semantic cut, `discontinue` advances that lineage's revision while its
+previous clones remain frozen. New admission, first preparation, target adaptation and candidate
+submission cannot refresh an old sample. Reset only the affected slots through the existing Host;
+the lineage identity, successful watermark, other slots and retained output/submission owners stay.
+ADR0094 records alternatives and the requirement to serialize complete Host operations when a
+domain needs strict ordering against cross-thread cuts; revision checks do not undo native work.
+
+The existing independent two-View history consumer now uses the real borrowed motion authors.
+Original Presented stamp, poses, virtual shader time, real time, interpolation and pause state
+travel in one immutable typed capture. The shader receives quantized original virtual time.
+Its native test interleaves zero/multiple ticks, delayed execution, Pause, solver correction plus
+KeepLocal reparent, exact Step, stale unprepared/prepared captures, selective first-View reset,
+unaffected second-View history and another independent lineage. Numeric float histories and final
+pixels are read through the actual Host and compared with the existing CPU accumulation oracle.
+This does not classify all camera/shader/material edits or qualify native window presentation.
+
+The bounded prediction/effect consumer and its explicit state/refusal/confirmation model remain
+the next gate. No generic rollback or mandatory effect API is introduced by this temporal fix.

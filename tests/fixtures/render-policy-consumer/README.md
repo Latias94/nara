@@ -131,6 +131,21 @@ rather than a lifetime registration ceiling. It also retrieves the final typed o
 imports. Fresh-Host recovery explicitly starts empty `DeviceRecreated` history, without claiming
 reconstruction of the old temporal pixels.
 
+The joint motion regression reuses the independent animation and Rapier fixture authors from
+`../motion-execution`. It freezes the actual Presented spatial stamp, poses, virtual shader time,
+real time, interpolation fraction and pause state together. Two fixed ticks plus a half-step,
+zero-tick presentation, Pause and exact Step supply different captured samples. Shader phase is
+quantized from that original virtual time; delayed Host execution never samples the live clock.
+KeepLocal reparent and a solver-owned kinematic correction run before the next fixed history pair.
+
+It retains both an unprepared input and an already prepared candidate before `discontinue()`.
+Both refuse after the cut, as does late admission of the original raw typed capture. Only the
+first View's two histories reset; the other View continues its exact predecessor chain. The
+successor and same-tick presentation match all four float histories and final pixels against the
+CPU oracle. An independent lineage also continues, old output reads remain exact, and the original
+submission prefix remains observable through retirement. This is offscreen Windows/DX12 evidence;
+it adds no native-window, general prediction, camera-cut or material-generation claim.
+
 `examples/history_window.rs` runs that same policy through ordinary managed Runtime capture and
 native presentation. Two ordinary Camera components supply actual extracted View IDs. The first
 capture fixes original topology and lineage. Three actual presented receipts supply the next

@@ -23,7 +23,15 @@ feature-selected default; explicitly driven custom schedules retain their owner 
 independent workspace verifies real contacts, borrowed same-tick join, deferred poses, NonSend,
 managed fixed/presented samples, Pause/exact Step, and narrow Ack followed by a sticky late fault.
 This establishes neither production automatic parallel support nor a frozen R4c phase interface.
-The joint discontinuity/effect, prediction, generated collision and broader R10 gates remain open.
+The joint discontinuity successor below retains its own native evidence; effect admission,
+prediction, generated collision and broader R10 gates remain open.
+
+The same unit adds semantic discontinuation to the existing CPU history lineage. Original clones
+cannot be refreshed through late admission, first preparation, target adaptation or retained
+candidate submission. Ordinary per-slot reset stays distinct. The independent two-View consumer
+joins actual fixed/presented Rapier motion and captured virtual shader time with selective reset,
+old-output reads and original submission custody. Its scope is offscreen Windows/DX12; general
+cross-thread publication atomicity, camera/material compatibility and rollback remain unqualified.
 
 The [registry ownership unit](../../plans/2026-11-01-component-registry-ownership-plan.md) is
 implemented as `7f69d53` under ADR0081. Consuming `ComponentRegistryBuilder` admission publishes

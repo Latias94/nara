@@ -6,6 +6,8 @@
 mod accumulation;
 #[path = "support/history_readback.rs"]
 mod history_readback;
+#[path = "support/motion.rs"]
+mod motion;
 
 use std::sync::Arc;
 
@@ -284,6 +286,296 @@ fn assert_consumed(error: WgpuRenderHostError) {
         ),
         "an already published capture stays consumed after reset: {error}"
     );
+}
+
+struct MotionPolicy(HistoryPolicy);
+
+struct MotionCapture {
+    history: Arc<accumulation::HistoryCapture>,
+    sample: motion::MotionFrame,
+}
+
+impl WgpuRenderPolicy for MotionPolicy {
+    type Capture = MotionCapture;
+    type Bindings = accumulation::HistoryBindings;
+
+    fn history_lineage(&self, capture: &Self::Capture) -> Option<WgpuHistoryLineage> {
+        Some(capture.history.lineage.clone())
+    }
+
+    fn bind(
+        &self,
+        capture: &Self::Capture,
+        context: &mut WgpuPolicyBindingContext<'_>,
+    ) -> Result<Self::Bindings, WgpuRenderProgramError> {
+        self.0.bind(&capture.history, context)
+    }
+
+    fn validate_capture(
+        &self,
+        packet: &nara_render::RenderFramePacket,
+        capture: &Self::Capture,
+    ) -> Result<(), WgpuRenderProgramError> {
+        assert_eq!(capture.history.phase, capture.sample.phase());
+        assert_eq!(
+            packet.source_generation().runtime_generation(),
+            capture.sample.stamp.runtime_generation
+        );
+        assert_eq!(
+            capture.sample.stamp.phase,
+            nara::transform::SpatialSnapshotPhase::Presented
+        );
+        self.0.validate_capture(packet, &capture.history)
+    }
+
+    fn build(
+        &self,
+        bindings: &Self::Bindings,
+        capture: &Self::Capture,
+        context: WgpuPolicyBuildContext<'_>,
+    ) -> Result<WgpuPolicyProgram, WgpuRenderProgramError> {
+        self.0.build(bindings, &capture.history, context)
+    }
+}
+
+fn motion_input(
+    installation: &WgpuPolicyInstallation<MotionPolicy>,
+    lineage: &WgpuHistoryLineage,
+    topology: &Topology,
+    target: RenderImagePacket,
+    frame: u64,
+    sample: motion::MotionFrame,
+    predecessors: [Predecessor; 4],
+) -> WgpuRenderInput {
+    let history = topology.capture(lineage, sample.phase(), false, predecessors);
+    let packet = history.packet(frame, target);
+    installation
+        .capture(packet, Arc::new(MotionCapture { history, sample }))
+        .unwrap()
+}
+
+#[test]
+#[ignore = "requires selected native hardware/backend; adapter acquisition failure fails, never skips"]
+fn motion_capture_discontinuity_fences_late_preparation_and_preserves_other_view_and_submission() {
+    use nara::core::Vec2;
+    use nara_app::FixedTime;
+    use std::time::Duration;
+
+    require_native_selection();
+    let mut motion = motion::MotionRuntime::new();
+    let zero = motion.drive(Duration::ZERO);
+    assert_eq!(zero.stamp.tick, 0);
+    let multiple = motion.drive(FixedTime::DEFAULT_TIMESTEP * 2 + FixedTime::DEFAULT_TIMESTEP / 2);
+    assert_eq!(multiple.stamp.tick, 2);
+    assert!((multiple.interpolation_alpha - 0.5).abs() < 1e-5);
+    assert!((multiple.kinematic.x - 0.375).abs() < 1e-5);
+    let no_tick = motion.drive(Duration::ZERO);
+    assert_eq!(no_tick.stamp.tick, multiple.stamp.tick);
+    assert_eq!(no_tick.virtual_elapsed, multiple.virtual_elapsed);
+    assert_eq!(no_tick.kinematic, multiple.kinematic);
+
+    let source = RenderFrameSourceGeneration::from(multiple.stamp.runtime_generation.unwrap());
+    let mut lineage = WgpuHistoryLineage::new(source).unwrap();
+    let topology = Topology::new();
+    let definition = WgpuPolicyDefinition::new(MotionPolicy(HistoryPolicy::new()));
+    let installation = definition.install().unwrap();
+    let mut host = WgpuRenderHost::offscreen().with_resource_byte_limit(RESOURCE_LIMIT);
+    let producer = host.create_producer().unwrap();
+    host.prepare_policy(&producer, &definition).unwrap();
+    let target = RenderImagePacket::new(
+        RenderImage2d::allocate_handle().unwrap(),
+        Extent2d::new(WIDTH, HEIGHT).unwrap(),
+    )
+    .unwrap();
+    let other_definition = WgpuPolicyDefinition::new(HistoryPolicy::new());
+    let other = Stream::new(&mut host, &other_definition);
+    let mut reader = Reader::new(&mut host);
+    begin(&mut host, 1);
+    admit(&mut host, &producer, source, target);
+    other.admit(&mut host);
+    let first_input = motion_input(
+        &installation,
+        &lineage,
+        &topology,
+        target,
+        1,
+        multiple,
+        [UNINITIALIZED; 4],
+    );
+    let first = host.prepare(&producer, &first_input).unwrap();
+    let first = host.submit_candidate(&producer, first).unwrap();
+    let original_prefix = first.outputs().submitted_prefix().clone();
+    let mut oracle = Oracle::zero();
+    oracle.advance(&topology, multiple.phase());
+    let first = Record {
+        published: first,
+        source,
+        topology: topology.clone(),
+        oracle: oracle.clone(),
+    };
+    let other_input = other.input(1, 3, false, [UNINITIALIZED; 4]);
+    let mut other_oracle = Oracle::zero();
+    other_oracle.advance(&other.topology, 3);
+    let other_first = other.record(other.submit(&mut host, &other_input), &other_oracle);
+
+    let unprepared = motion_input(
+        &installation,
+        &lineage,
+        &topology,
+        target,
+        2,
+        no_tick,
+        [Predecessor::Frame(1); 4],
+    );
+    let prepared_input = motion_input(
+        &installation,
+        &lineage,
+        &topology,
+        target,
+        3,
+        no_tick,
+        [Predecessor::Frame(1); 4],
+    );
+    let prepared = host.prepare(&producer, &prepared_input).unwrap();
+    let raw_late = Arc::new(MotionCapture {
+        history: topology.capture(&lineage, no_tick.phase(), false, [Predecessor::Frame(1); 4]),
+        sample: no_tick,
+    });
+    let raw_packet = raw_late.history.packet(3, target);
+    motion.pause();
+    let paused = motion.drive(Duration::from_secs(1));
+    assert!(paused.paused);
+    assert_eq!(paused.virtual_elapsed, multiple.virtual_elapsed);
+    assert!(paused.real_elapsed > no_tick.real_elapsed);
+    assert!((paused.kinematic.x - 0.5).abs() < 1e-5);
+
+    lineage.discontinue().unwrap();
+    let resets = topology.views[0]
+        .effects
+        .iter()
+        .map(|effect| {
+            WgpuHistoryReset::texture::<HistoryColor, _>(
+                &topology.views[0].history_view,
+                &effect.declaration,
+                HISTORY_SLOT,
+                history_descriptor(),
+            )
+        })
+        .collect::<Vec<_>>();
+    host.reset_history(&producer, &lineage, &resets).unwrap();
+    assert!(matches!(
+        host.prepare(&producer, &unprepared).unwrap_err(),
+        WgpuRenderHostError::Program(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(matches!(
+        installation.capture(raw_packet, raw_late),
+        Err(WgpuRenderProgramError::StaleHistory)
+    ));
+    let refused = host.submit_candidate(&producer, prepared).unwrap_err();
+    assert!(matches!(
+        refused.error,
+        WgpuRenderHostError::Program(WgpuRenderProgramError::StaleHistory)
+    ));
+    assert!(!refused.is_retryable());
+    assert!(std::ptr::eq(
+        refused
+            .candidate
+            .input()
+            .captured::<MotionPolicy>()
+            .unwrap(),
+        prepared_input.captured::<MotionPolicy>().unwrap()
+    ));
+    drop(refused);
+    assert_eq!(
+        first_input.captured::<MotionPolicy>().unwrap().sample,
+        multiple
+    );
+    settle(&original_prefix);
+    assert_record(&mut host, &mut reader, &first);
+
+    motion.correct_and_reparent(Vec2::new(8.0, 2.0));
+    let (exact_stamp, exact_poses) = motion.exact_step();
+    assert_eq!(exact_stamp.tick, 3);
+    assert_eq!(
+        exact_stamp.phase,
+        nara::transform::SpatialSnapshotPhase::Fixed
+    );
+    assert!((exact_poses[0].x - 8.25).abs() < 1e-5);
+    let corrected = motion.drive(Duration::ZERO);
+    assert_eq!(corrected.stamp.tick, 3);
+    assert_eq!(corrected.stamp.frame, exact_stamp.frame + 1);
+    assert!(corrected.paused);
+    assert!((corrected.kinematic.x - 8.25).abs() < 1e-5);
+    assert_eq!(corrected.fixed_positions, exact_poses);
+    assert_eq!(corrected.kinematic, exact_poses[0]);
+    assert_eq!(corrected.dynamic, exact_poses[1]);
+    begin(&mut host, 2);
+    let post_cut = motion_input(
+        &installation,
+        &lineage,
+        &topology,
+        target,
+        4,
+        corrected,
+        [RESET, RESET, Predecessor::Frame(1), Predecessor::Frame(1)],
+    );
+    let candidate = host.prepare(&producer, &post_cut).unwrap();
+    let published = host.submit_candidate(&producer, candidate).unwrap();
+    oracle.reset(0, 0);
+    oracle.reset(0, 1);
+    oracle.advance(&topology, corrected.phase());
+    let post_cut = Record {
+        published,
+        source,
+        topology: topology.clone(),
+        oracle: oracle.clone(),
+    };
+    let other_input = other.input(2, 6, false, [Predecessor::Frame(1); 4]);
+    other_oracle.advance(&other.topology, 6);
+    let other_second = other.record(other.submit(&mut host, &other_input), &other_oracle);
+
+    let same_tick = motion.drive(Duration::ZERO);
+    assert_eq!(same_tick.stamp.tick, corrected.stamp.tick);
+    assert_eq!(same_tick.virtual_elapsed, corrected.virtual_elapsed);
+    assert_eq!(same_tick.phase(), corrected.phase());
+    let next_input = motion_input(
+        &installation,
+        &lineage,
+        &topology,
+        target,
+        5,
+        same_tick,
+        [Predecessor::Frame(4); 4],
+    );
+    let next = host.prepare(&producer, &next_input).unwrap();
+    let next = host.submit_candidate(&producer, next).unwrap();
+    oracle.advance(&topology, same_tick.phase());
+    let next = Record {
+        published: next,
+        source,
+        topology,
+        oracle,
+    };
+    for record in [&first, &post_cut, &next, &other_first, &other_second] {
+        assert_record(&mut host, &mut reader, record);
+    }
+    assert_consumed(host.prepare(&producer, &next_input).unwrap_err());
+    settle(&original_prefix);
+    settle(&host.retire_producer(&producer).unwrap());
+    other.retire(&mut host);
+    reader.retire(&mut host);
+    drop((
+        first,
+        post_cut,
+        next,
+        other_first,
+        other_second,
+        original_prefix,
+    ));
+    finish(&mut host);
+    assert_eq!(host.retained_resource_bytes(), 0);
+    assert_eq!(host.retained_candidate_metadata_bytes(), 0);
+    motion.finish();
 }
 
 #[test]

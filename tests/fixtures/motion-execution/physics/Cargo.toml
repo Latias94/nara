@@ -1,5 +1,6 @@
 [package]
 name = "motion-physics"
+workspace = ".."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

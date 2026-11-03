@@ -199,6 +199,19 @@ Publication advances all slots and the lineage watermark together. Reset, regrou
 handoff and effect replacement do not erase successful-capture deduplication. Reset with explicit
 `WgpuHistoryReset` requests before preparing a descriptor-incompatible successor.
 
+For teleport, correction or another effect-incompatible timeline cut, call `discontinue()` on the
+domain's current `WgpuHistoryLineage` before sampling the successor. Clone that updated owner with
+the exact spatial sample, shader clock domain and interpolation state. Earlier clones remain stale
+even when their first policy admission or Host preparation occurs later. A stale clone cannot
+refresh itself. `with_image_target` preserves the same eligibility. Existing published outputs
+remain readable through their original owners.
+
+Discontinuation does not empty predecessor slots: use `reset_history` for the affected View/effect
+slots as well. A normal resize/slot reset alone only invalidates prepared bases; it does not reject
+every unprepared capture or reset another View's history. Choose those meanings explicitly for
+the effect. Coordinate cuts with complete Host operations if strict ordering is needed across
+threads; the revision checks cannot undo native work or retract already published output.
+
 A successful publication cannot be accumulated again after later surface/display failure. UI,
 READY, picking and physical completion remain separate outcomes. Retained display retries use
 `submit_candidate_for_display`, which returns both candidate and original UI sidecar on refusal.

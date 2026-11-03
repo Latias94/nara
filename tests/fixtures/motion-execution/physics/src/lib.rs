@@ -176,6 +176,15 @@ impl Solver {
         self.sample
     }
 
+    pub fn correct_kinematic(&mut self, position: Vec2) {
+        let translation = Vector::new(position.x, position.y);
+        self.bodies[self.kinematic].set_translation(translation, true);
+        self.bodies[self.kinematic].set_next_kinematic_translation(translation);
+        self.sample.kinematic = position;
+        self.target = position;
+        self.joined_tick = None;
+    }
+
     fn step(&mut self, tick: u64) {
         if self.mode == SolverMode::StandIn {
             self.sample = Sample {
