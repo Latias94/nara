@@ -122,7 +122,7 @@ impl TextEditOutcome {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum TextEditError {
-    #[error("text editing requires the original ordered font set and resource limits")]
+    #[error("text editing requires the configured ordered font set and original resource limits")]
     EngineMismatch,
     #[error(transparent)]
     Layout(#[from] TextLayoutError),
@@ -181,8 +181,9 @@ enum HistoryChange {
 /// total, each admitted under the text engine's byte limit. Preedit retains the exact original
 /// editor, including its selection and cursor affinities, without recording a history entry.
 /// Commit replaces that original selection once and records at most one local edit.
-/// The font set, font order, resource limits and logical size are fixed at construction. Another
-/// engine can drive the editor only when its complete font set and limits match exactly.
+/// Resource limits and logical size are fixed at construction. Another engine can drive ordinary
+/// edits only when its complete font set and limits match exactly. [`Self::reconfigure_fonts`]
+/// explicitly adopts another ordered font set after validating every retained editing state.
 ///
 /// Other editing and navigation actions first cancel active composition and then operate on the
 /// restored committed state. A caller ending a focus lifetime should send `CancelComposition`.
@@ -225,6 +226,56 @@ impl TextEditor {
             paint: OnceLock::new(),
             geometry,
         })
+    }
+
+    /// Adopts an explicitly configured font set without replacing the buffer or local history.
+    ///
+    /// The receiver must keep the original resource limits. Current display, composition origin,
+    /// and all retained Undo/Redo layouts are reshaped and admitted before any state is adopted.
+    /// This is bounded by the existing 32-entry history limit, but is not an incremental operation.
+    /// Refusal preserves the editor, its paint snapshot, and its previous engine association.
+    ///
+    /// Success keeps text, cursor affinities, composition and history without recording an edit.
+    /// A changed ordered font set invalidates paint provenance even when the glyphs are unchanged.
+    /// Reusing the same complete configuration performs no shaping and preserves that provenance.
+    /// Field/Host owners separately coordinate new compilation, presentation and geometric input.
+    /// Raster/target-scale admission remains a later operation and may independently refuse.
+    pub fn reconfigure_fonts(
+        &mut self,
+        engine: &mut TextEngine,
+    ) -> Result<TextEditOutcome, TextEditError> {
+        if self.limits != engine.limits {
+            return Err(TextEditError::EngineMismatch);
+        }
+        let font_ids = engine.font_ids().collect::<Vec<_>>();
+        if self.font_ids == font_ids {
+            return Ok(TextEditOutcome::default());
+        }
+        let mut candidate = self.clone();
+        let (layout, geometry) = reproject_editor_fonts(engine, &mut candidate.editor)?;
+        for retained in candidate
+            .composition_origin
+            .iter_mut()
+            .chain(candidate.undo.iter_mut())
+            .chain(candidate.redo.iter_mut())
+        {
+            reproject_editor_fonts(engine, retained)?;
+        }
+        let outcome = TextEditOutcome {
+            display_changed: true,
+            selection_changed: self.editor.raw_selection().anchor()
+                != candidate.editor.raw_selection().anchor()
+                || self.editor.raw_selection().focus() != candidate.editor.raw_selection().focus()
+                || self.geometry.caret != geometry.caret
+                || self.geometry.selection_rects != geometry.selection_rects,
+            ..TextEditOutcome::default()
+        };
+        candidate.font_ids = font_ids;
+        candidate.layout = layout;
+        candidate.geometry = geometry;
+        candidate.paint = OnceLock::new();
+        *self = candidate;
+        Ok(outcome)
     }
 
     pub fn edit(
@@ -633,6 +684,15 @@ fn move_to_grapheme_boundary(
             (true, true) => driver.select_right(),
         }
     }
+}
+
+fn reproject_editor_fonts(
+    engine: &mut TextEngine,
+    editor: &mut PlainEditor<()>,
+) -> Result<(TextLayout, EditorGeometry), TextEditError> {
+    validate_text(engine, editor.raw_text())?;
+    engine.configure_editor(editor);
+    project_editor(engine, editor)
 }
 
 fn project_editor(

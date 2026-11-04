@@ -89,6 +89,18 @@ impl UiTextField {
         self.enabled
     }
 
+    /// Reconfigures the local editor while retaining this field, focus token and enabled state.
+    ///
+    /// All editing layouts must fit the original limits under the new fonts. No document edit or
+    /// focus transition is generated. Raster/target-scale admission remains separate. The caller
+    /// updates its compiler/planner fonts and publishes new geometry before admitting its input.
+    pub fn reconfigure_fonts(
+        &mut self,
+        engine: &mut TextEngine,
+    ) -> Result<TextEditOutcome, UiTextFieldError> {
+        Ok(self.editor.reconfigure_fonts(engine)?)
+    }
+
     /// Opens one focus lifetime after the Host has established focus for this live field.
     pub fn focus(&mut self) -> Result<UiTextInputToken, UiTextFieldError> {
         if !self.enabled {

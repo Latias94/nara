@@ -56,8 +56,26 @@ The grapheme ceiling is checked against the complete proposed text before enteri
 shaper, including when insertion or deletion joins neighboring text. Every operation adopts its buffer,
 selection, layout, composition and history together after complete validation. A rejected
 operation preserves the previous observations and history. Another engine may drive an existing
-editor only with the same ordered font identities and complete limits; the logical size stays
-fixed for that editor.
+editor for ordinary actions only with the currently configured ordered font identities and
+original complete limits; the logical size stays fixed for that editor.
+
+`TextEditor::reconfigure_fonts(&mut replacement_engine)` explicitly changes the ordered font
+selection. The replacement engine must keep the original limits. Reconfiguration reshapes and
+admits layouts of the current display, composition origin and every retained Undo/Redo state
+before adopting anything. Refusal preserves all editor observations, history, cached paint and
+the previous font association. This complete-state operation can reshape up to 34 bounded
+buffers. Reusing the same font set/order and limits is a no-op and preserves paint identity.
+Glyph raster/target-scale admission remains separate and may refuse later painting; successful
+layout reconfiguration alone grants no draw or presentation authority.
+
+Success retains committed text, preedit, selection/affinities and local history without recording
+an edit. Paint receives new font provenance even if the changed fallback is unused. Earlier paint
+snapshots stay immutable and can still be consumed under their original ordered font selection.
+`UiTextField::reconfigure_fonts` adds the same operation while retaining its live field key,
+focus token and enabled state. The caller must coordinate matching compiler/planner fonts and
+publish/admit the resulting geometry through its existing Host; this local operation does not
+replace that presentation or input handoff. The current native Editor font policy is still fixed
+at construction; this interface alone does not qualify live Editor font switching.
 
 `Preedit` changes `display_text()` and its layout while `text()` retains the original committed
 buffer. Its optional cursor endpoints are UTF-8 byte offsets relative to the proposed preedit.

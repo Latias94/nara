@@ -67,6 +67,15 @@ platform-window destruction pass all 48 lifetimes in three release processes. Wh
 residuals vary despite constant logical Host payloads; short observations do not establish
 UI-exclusive memory, a leak bound, long-running stability or R11a's remaining budgets.
 
+The [local font reconfiguration prerequisite](../../guides/editable-text.md#local-editing)
+adds explicit text/field font adoption under the original size/limits, retaining local edit and
+focus ownership. Independent public CPU consumption exercises real fallback/order changes,
+compiled semantics and new geometry. Backend offscreen readback retains old/new glyph packets
+on one device/queue, including after their text engines are released. These are separate pieces
+of evidence: the public field consumer uses local focus admission, and the GPU fixture consumes
+a text snapshot. They do not qualify the native Editor's all-panel font transaction, presented
+input/IME handoff, a general typography service or an incremental performance improvement.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

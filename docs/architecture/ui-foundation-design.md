@@ -304,6 +304,13 @@ compatible fallback. Prepared text avoids reshaping its editing source, but wind
 still scans the admitted layout and rasterizes distinct placed keys. These are current mechanisms,
 not evidence of zero idle work, persistent incremental layout or a performance improvement.
 
+The [editable-text interface](../guides/editable-text.md#local-editing) adds explicit local font
+reconfiguration while retaining a field's edit/focus state. It revalidates current, preedit-origin
+and bounded history layouts under the new ordered fonts; previous paint keeps its own font
+provenance. Raster and presentation admission remain separate. The current Editor Host still
+constructs native font/planner policy once and replaces controllers if that font list changes;
+atomic all-panel adoption and old/new geometry input handoff remain R11b work.
+
 ### GPUI mechanisms to compare
 
 The [November 4 local source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-4-state-reuse-and-component-mechanisms)

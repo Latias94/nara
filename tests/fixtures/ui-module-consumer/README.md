@@ -14,6 +14,15 @@ cancels preedit without changing its committed buffer, rejects input from an ear
 performs local Undo/Redo and compiles the exact committed semantic value. It does not admit native
 focus or qualify an Inspector, OS input-method delivery or platform accessibility.
 
+The font-reconfiguration consumers explicitly replace/reorder real font faces while keeping a
+field's key, focus token, draft, selection, preedit and local history. They compile the resulting
+fractionally scaled/clipped field, verify committed semantics and exact glyph/raster provenance,
+then use its new geometry for point editing. Different resource limits refuse without replacing
+the editor; matching limits permit a retry. Adding the fallback changes a missing intersection
+glyph into supported output. These callers use public `UiTextField::focus`, not private journal
+submission, so they qualify local field/compile consumption rather than presented input routing
+or live native Editor font switching.
+
 The separate Cargo workspace and lockfile keep this dependency graph independent of the engine
 and the broader module-consumer project. Building alongside their ECS, Scene or renderer
 dependencies would weaken this isolation check.

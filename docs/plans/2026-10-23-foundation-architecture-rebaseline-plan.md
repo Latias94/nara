@@ -1433,6 +1433,14 @@ post-cleanup delay may manufacture a lower residual observation.
 R1 continues to own closed-panel semantic command/menu/shortcut registration; UI hosting consumes
 that contribution rather than creating another command registry.
 
+Actual typography changes require preserving the text owner before whole-Host replacement.
+The bounded text/field prerequisite explicitly reconfigures ordered fonts under the original
+limits and logical size, atomically admitting current/preedit/history states without replacing
+field identity or adding an edit. Independent public consumption must prove real glyph/fallback
+changes, immutable prior paint provenance, refusal/retry and input lifetime continuity. This does
+not close the native all-panel font transaction: the Host must still coordinate compiler/planner,
+old/new presented geometry and routed input without silently dropping drafts or pending results.
+
 **Files:** `editor/src/platform/composition.rs`, `editor/src/frontend/imgui/workspace.rs`,
 `editor/src/platform/imgui/owned.rs` and keyboard/IME adapters, their actual successor modules,
 `crates/nara_ui_render/Cargo.toml` and `crates/nara_ui_render/src/integration.rs`,
@@ -1492,6 +1500,39 @@ Before claiming compatibility with a named external toolkit, qualify its actual 
 adapter separately. Shipping an official ImGui/egui package or stable plugin ABI is not required.
 Optional embedding/coexistence qualification does not gate the independent default's replacement
 unless that capability is explicitly part of the selected support claim.
+
+#### Local font reconfiguration prerequisite qualification
+
+At source base `6395ae0` plus this prerequisite, the shared text/field interface adopts new ordered
+fonts without replacing buffers, preedit, local history, field keys or focus tokens. Current,
+composition-origin and all 32 retained history layouts must pass under the original limits and
+logical size before adoption. Raster/target-scale admission remains separate, including a tested
+layout-success/raster-refusal case. Same configuration is a no-op; changed unused fallback still
+requires fresh paint provenance.
+
+| Qualification | Result | Nextest run |
+| --- | --- | --- |
+| Full text/kernel/widgets/render regression, including ten new text-owner and two field cases | 252/252 | `951dc87c-0556-49a1-bb98-76ebea30a4fe` |
+| Expanded combining/ZWJ/ligature selection case in both font-change directions | 1/1 | `d0a3c112-1c9f-460e-a6c8-555885ec9cf0` |
+| Independent public text/kernel/widgets consumer, including three actual font-change workflows | 10/10 | `6078cfd7-790f-4758-a929-bdff052f58dc` |
+| UI backend routing/capture and real GPU readback cohort | 32/32 | `a62aacd1-f3a2-4375-9bdc-09c8a8ebb7a1` |
+
+The independent consumer uses public local field focus, committed semantics, freshly compiled
+fractional/clip geometry, point editing and actual glyph masks without Editor/App/ECS/platform
+dependencies. It does not submit journal presentation receipts. The new GPU case consumes a
+`TextEditor` snapshot through matching compiler/planner fonts and reuses one existing device,
+queue and texture cache for old/new/old draws. Single-face coverage and actual clipped ink are
+checked; retained packet/atlas pixels survive source-editor/engine release. Its expected pixel
+placement uses packet rects and compiled raster keys, so it is not an independent absolute
+position/subpixel or rasterizer proof. Public field consumption and backend snapshot rendering
+are complementary evidence, not one native field/Host workflow.
+
+Independent correctness/testing reviews find no P1/P2. Public component layout/drawing, live
+all-panel font adoption, old/new presented input/IME handoff, typography costs and the complete
+R11a/R11b-f acceptance remain open. This prerequisite selects no incremental cache optimization.
+Correctness Clippy for all five affected crates with all targets/features and for the independent
+consumer passes. Root/independent formatting, diff checks and 1,052 local link targets across the
+six changed current documents pass. Existing warning categories outside correctness remain.
 
 ### R11c: Complex document editor, custom drawing and multiple Views
 

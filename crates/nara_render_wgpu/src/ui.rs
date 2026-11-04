@@ -1062,6 +1062,347 @@ mod tests {
     }
 
     #[test]
+    fn reconfigured_editor_snapshot_retains_clipped_gpu_pixels_and_old_font_packets() {
+        use nara_text::{TextEditor, TextWindowError};
+        use nara_ui_kernel::UiPreparedText;
+
+        use crate::{
+            quad::{
+                WgpuQuadPipelineDrawRef, create_material_bind_group_layout,
+                create_quad_batch_buffers, create_quad_pipeline,
+                create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
+            },
+            readback_tests::ReadbackGpu,
+            texture::WgpuSpriteTextureCache,
+        };
+
+        const SIZE: f32 = 24.0;
+        const SCALE: f32 = 1.25;
+        let primary = bundled_font_face().unwrap();
+        let fallback = FontFace::from_bytes(
+            include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            0,
+        )
+        .unwrap();
+        let faces = vec![primary.clone(), fallback.clone()];
+        let mut original_engine = TextEngine::new(primary.clone(), Default::default()).unwrap();
+        let mut replacement_engine =
+            TextEngine::with_fonts(faces.clone(), Default::default()).unwrap();
+        let mut editor = TextEditor::new(&mut original_engine, "A\u{2229}", SIZE).unwrap();
+        let old_snapshot = editor.paint_snapshot();
+        let selection = editor.selection();
+
+        // These single-face engines supply independent glyph IDs and coverage, without using
+        // the editing layout's atlas or the presentation planner's rasterizer.
+        let mut primary_rasterizer = TextEngine::new(primary.clone(), Default::default()).unwrap();
+        let mut fallback_rasterizer =
+            TextEngine::new(fallback.clone(), Default::default()).unwrap();
+        let primary_layout = primary_rasterizer
+            .layout(&TextLayoutRequest::new("A", SIZE).unwrap())
+            .unwrap();
+        let fallback_layout = fallback_rasterizer
+            .layout(&TextLayoutRequest::new("\u{2229}", SIZE).unwrap())
+            .unwrap();
+        assert_ne!(fallback_layout.glyphs()[0].key().glyph_id(), 0);
+
+        let target = RenderTarget::Window(WindowId::PRIMARY);
+        let gpu = ReadbackGpu::new();
+        let texture_layout = create_quad_texture_bind_group_layout(&gpu.device).unwrap();
+        let material_layout = create_material_bind_group_layout(&gpu.device).unwrap();
+        let mut texture_cache = WgpuSpriteTextureCache::default();
+        let mut frame_index = 0;
+        // Every readback uses the original device/queue and texture cache, including old
+        // packets replayed after the new fonts have drawn and their source owners are gone.
+        let mut render = |packet: &Arc<UiPaintPacket>| {
+            let batches = collect_ui_quad_batches(
+                std::slice::from_ref(packet),
+                target,
+                Some(WindowId::PRIMARY),
+                readback_viewport(),
+            )
+            .unwrap();
+            frame_index += 1;
+            texture_cache.begin_frame(frame_index);
+            gpu.render_to_rgba(|device, _, format, output_view, encoder, preparation| {
+                let pipelines = crate::required_quad_pipeline_keys(&batches, format)
+                    .into_iter()
+                    .map(|key| {
+                        let pipeline =
+                            create_quad_pipeline(device, key, &texture_layout, &material_layout)?;
+                        Ok(WgpuQuadPipelineDrawRef {
+                            alpha_mode: key.alpha_mode,
+                            material: key.material,
+                            pipeline: pipeline.pipeline,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, crate::WgpuRenderError>>()?;
+                let buffers = create_quad_batch_buffers(
+                    preparation,
+                    &batches,
+                    &texture_layout,
+                    &material_layout,
+                    &mut texture_cache,
+                    frame_index,
+                )
+                .unwrap();
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("nara_reconfigured_editor_readback"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: output_view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                        multiview_mask: None,
+                    });
+                    draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, readback_viewport());
+                }
+                Ok(())
+            })
+            .unwrap()
+            .0
+        };
+
+        let mut packets = Vec::new();
+        let mut readbacks = Vec::new();
+        let mut old_page_pixels = Vec::new();
+        for refreshed in [false, true] {
+            if refreshed {
+                let outcome = editor.reconfigure_fonts(&mut replacement_engine).unwrap();
+                assert!(outcome.display_changed);
+                assert!(!outcome.text_changed && !outcome.composition_changed);
+                assert_eq!(editor.text(), "A\u{2229}");
+                assert_eq!(editor.logical_size(), SIZE);
+                assert_eq!(editor.selection(), selection);
+                original_engine
+                    .validate_paint_snapshot(&old_snapshot, SCALE)
+                    .unwrap();
+                assert_eq!(
+                    replacement_engine.validate_paint_snapshot(&old_snapshot, SCALE),
+                    Err(TextWindowError::FontSetMismatch),
+                );
+            }
+            let snapshot = editor.paint_snapshot();
+            assert_eq!(old_snapshot.same_source(&snapshot), !refreshed);
+            if refreshed {
+                assert_eq!(
+                    original_engine.validate_paint_snapshot(&snapshot, SCALE),
+                    Err(TextWindowError::FontSetMismatch),
+                );
+            }
+            let fonts = if refreshed {
+                faces.clone()
+            } else {
+                vec![primary.clone()]
+            };
+            let revision = if refreshed { 2 } else { 1 };
+            let node = UiNode::new(UiStyle::absolute(4.25, 3.5, 24.0, 40.0))
+                .with_key(UiLocalKey::runtime("wgpu-editor-font-refresh", "label").unwrap())
+                .with_prepared_text(
+                    UiPreparedText::new(snapshot)
+                        .with_brush(UiBrush::Solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+                );
+            let authored = UiAuthoringSnapshotBuilder::new(revision)
+                .with_root(
+                    UiRoot::new(
+                        UiRootKey::runtime("wgpu-editor-font-refresh", "root").unwrap(),
+                        UiLayer::Base,
+                        UiStyle::fill(),
+                    )
+                    .with_child(node),
+                )
+                .build()
+                .unwrap();
+            let environment = UiEnvironment::new(
+                UiSurfaceId::new(1).unwrap(),
+                READBACK_EXTENT as f32 / SCALE,
+                READBACK_EXTENT as f32 / SCALE,
+                SCALE,
+                1,
+                1,
+                1,
+                revision,
+            )
+            .unwrap();
+            let frame = UiCompiler::with_fonts(fonts.clone(), Default::default())
+                .unwrap()
+                .compile(&authored, environment, UiTheme::default())
+                .unwrap();
+            let layout = frame
+                .paint()
+                .iter()
+                .find_map(|primitive| match primitive {
+                    UiPaintPrimitive::Text { layout, .. } => Some(layout),
+                    UiPaintPrimitive::Rect { .. } => None,
+                })
+                .expect("the editor snapshot must reach text paint");
+            let keys = layout
+                .glyphs()
+                .iter()
+                .map(|glyph| glyph.key())
+                .collect::<Vec<_>>();
+            assert_eq!(keys.len(), 2);
+            assert!(keys.iter().all(|key| key.physical_size() == SIZE * SCALE));
+            assert_eq!(keys[0].face_id(), primary.id());
+            assert_eq!(
+                keys[0].glyph_id(),
+                primary_layout.glyphs()[0].key().glyph_id()
+            );
+            if refreshed {
+                assert!(layout.diagnostics().is_empty());
+                assert_eq!(keys[1].face_id(), fallback.id());
+                assert_eq!(
+                    keys[1].glyph_id(),
+                    fallback_layout.glyphs()[0].key().glyph_id()
+                );
+            } else {
+                assert_eq!(keys[1].face_id(), primary.id());
+                assert_eq!(keys[1].glyph_id(), 0);
+                assert_eq!(
+                    layout.diagnostics(),
+                    &[TextDiagnostic::MissingGlyph { scalar: '\u{2229}' }],
+                );
+            }
+            let rasters = [
+                primary_rasterizer.rasterize(keys[0]).unwrap(),
+                if refreshed {
+                    fallback_rasterizer.rasterize(keys[1]).unwrap()
+                } else {
+                    primary_rasterizer.rasterize(keys[1]).unwrap()
+                },
+            ];
+            let packet =
+                nara_ui_render::UiPresentationPlanner::with_fonts(fonts, Default::default())
+                    .unwrap()
+                    .plan(frame, target, &Default::default())
+                    .unwrap();
+            let glyphs = packet
+                .primitives()
+                .iter()
+                .map(|primitive| match primitive {
+                    UiPacketPrimitive::Glyph { rect, clip, .. } => (
+                        *rect,
+                        clip.expect("prepared text must retain its content clip"),
+                    ),
+                    UiPacketPrimitive::Rect { .. } => panic!("the fixture draws only editor text"),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(glyphs.len(), 2);
+            assert!(glyphs[0].0.max_x() <= glyphs[1].0.min_x());
+            let text_clip = UiPacketRect::new(5, 4, 35, 54).unwrap();
+            let mut expected_alpha = vec![0_u8; (READBACK_EXTENT * READBACK_EXTENT) as usize];
+            let mut visible_ink = [0_usize; 2];
+            let mut clipped_ink = [0_usize; 2];
+            for (index, ((rect, clip), raster)) in glyphs.iter().zip(&rasters).enumerate() {
+                assert_eq!(
+                    (rect.width(), rect.height()),
+                    (raster.width(), raster.height())
+                );
+                assert!(rect.min_x() >= 0 && rect.min_y() >= 0);
+                assert!(rect.max_x() <= READBACK_EXTENT as i32);
+                assert!(rect.max_y() <= READBACK_EXTENT as i32);
+                assert_eq!(rect.intersect(text_clip), Some(*clip));
+                for row in 0..raster.height() {
+                    for column in 0..raster.width() {
+                        let x = rect.min_x() + column as i32;
+                        let y = rect.min_y() + row as i32;
+                        let alpha = raster.mask()[(row * raster.width() + column) as usize];
+                        if (clip.min_x()..clip.max_x()).contains(&x)
+                            && (clip.min_y()..clip.max_y()).contains(&y)
+                        {
+                            expected_alpha[(y as u32 * READBACK_EXTENT + x as u32) as usize] =
+                                alpha;
+                            visible_ink[index] += usize::from(alpha != 0);
+                        } else {
+                            clipped_ink[index] += usize::from(alpha != 0);
+                        }
+                    }
+                }
+            }
+            assert!(visible_ink[0] > 0 && visible_ink[1] > 0);
+            if refreshed {
+                assert!(
+                    clipped_ink[1] > 0,
+                    "clipping must remove actual fallback ink"
+                );
+            }
+            let pixels = render(&packet);
+            for (index, (pixel, expected)) in pixels
+                .chunks_exact(READBACK_BYTES_PER_PIXEL as usize)
+                .zip(expected_alpha)
+                .enumerate()
+            {
+                assert!(
+                    pixel[3].abs_diff(expected) <= 1,
+                    "refreshed={refreshed}, GPU alpha at ({}, {}) was {}, expected single-face coverage {}",
+                    index % READBACK_EXTENT as usize,
+                    index / READBACK_EXTENT as usize,
+                    pixel[3],
+                    expected,
+                );
+            }
+            if !refreshed {
+                old_page_pixels = packet
+                    .glyph_pages()
+                    .iter()
+                    .map(|page| page.pixels().to_vec())
+                    .collect::<Vec<_>>();
+            }
+            packets.push(packet);
+            readbacks.push(pixels);
+        }
+
+        let UiPacketPrimitive::Glyph {
+            clip: Some(clip), ..
+        } = &packets[1].primitives()[1]
+        else {
+            panic!("the refreshed packet must retain the clipped fallback glyph")
+        };
+        assert!(
+            (clip.min_y()..clip.max_y()).any(|y| {
+                (clip.min_x()..clip.max_x()).any(|x| {
+                    readback_pixel(&readbacks[0], x as u32, y as u32)[3]
+                        != readback_pixel(&readbacks[1], x as u32, y as u32)[3]
+                })
+            }),
+            "the refreshed fallback region must differ from the old missing glyph",
+        );
+        assert_eq!(
+            packets[0]
+                .glyph_pages()
+                .iter()
+                .map(|page| page.pixels().to_vec())
+                .collect::<Vec<_>>(),
+            old_page_pixels,
+        );
+        assert_eq!(render(&packets[0]), readbacks[0]);
+
+        drop(editor);
+        drop(original_engine);
+        drop(replacement_engine);
+        drop(primary_rasterizer);
+        drop(fallback_rasterizer);
+        assert_eq!(old_snapshot.display_text(), "A\u{2229}");
+        assert_eq!(render(&packets[1]), readbacks[1]);
+        assert_eq!(render(&packets[0]), readbacks[0]);
+        assert_eq!(
+            packets[0]
+                .glyph_pages()
+                .iter()
+                .map(|page| page.pixels().to_vec())
+                .collect::<Vec<_>>(),
+            old_page_pixels,
+        );
+    }
+
+    #[test]
     fn image_target_ui_packets_match_only_their_exact_target() {
         let first = RenderTarget::Image(nara_render::RenderImage2d::allocate_handle().unwrap());
         let second = RenderTarget::Image(nara_render::RenderImage2d::allocate_handle().unwrap());

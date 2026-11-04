@@ -48,7 +48,16 @@ not independently define editable characters. Preedit is visible but does
 not replace the committed buffer or enter its local history. Cancellation restores the original
 selection and text; confirmation replaces that selection once. A rejected operation cannot adopt
 partial buffer, layout, selection or history changes. Local buffer Undo/Redo remains independent
-of document history, and the receiving engine must retain the original font/limit configuration.
+of document history. Ordinary edits require the currently adopted ordered fonts and original
+resource limits. An explicit local font reconfiguration may atomically reshape and admit layouts
+of the current display, composition origin and all bounded Undo/Redo states before adopting another
+ordered font set. It preserves buffers, compatible selection/affinities, composition and history
+without recording an edit; any refused state keeps the previous editor and font association.
+Logical size and limits remain fixed. Already published paint snapshots retain their original
+font provenance; a changed font set requires a new snapshot even when no visible glyph changes.
+Field identity/focus, matching compiler/planner configuration and presentation/input handoff
+remain with their original callers. Raster and target-scale admission remain separate and can
+refuse later painting. This is not a mutable global font service.
 Field focus lifetimes, platform IME/clipboard, semantic Apply and document history remain outside
 this text owner. Native candidate placement and a complete Editor workflow need their own evidence.
 Complete proposed text is checked before shaping, including a 32-scalar-per-grapheme ceiling for
