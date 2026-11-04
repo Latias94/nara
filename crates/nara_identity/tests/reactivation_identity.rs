@@ -1,3 +1,5 @@
+#![cfg(feature = "runtime")]
+
 use bevy_ecs::{
     lifecycle::Remove,
     observer::{Observer, On},

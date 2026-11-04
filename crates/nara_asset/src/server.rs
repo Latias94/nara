@@ -6,6 +6,7 @@ use std::{
     mem::size_of,
 };
 
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 
 use crate::{
@@ -126,7 +127,8 @@ impl Error for AssetError {}
 /// Source paths alias only their source's primary product. Concrete content owners may reserve
 /// primary or auxiliary products without authoring paths. A binding proves neither actual content
 /// existence, codec compatibility nor residency; those remain the content owner's responsibility.
-#[derive(Debug, Clone, PartialEq, Eq, Resource)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct AssetServer {
     paths: HashMap<AssetSourcePath, AssetId>,
     reverse_paths: HashMap<AssetId, AssetSourcePath>,
@@ -323,11 +325,13 @@ impl AssetServer {
     }
 
     #[must_use]
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn id_for_path(&self, path: &AssetSourcePath) -> Option<AssetId> {
         self.paths.get(path).copied()
     }
 
     #[must_use]
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn id_for_stable_id(&self, stable_id: StableAssetId) -> Option<AssetId> {
         let primary = AssetProductRef::new(stable_id, ImportedProductId::PRIMARY).ok()?;
         self.products.get(&primary).copied()

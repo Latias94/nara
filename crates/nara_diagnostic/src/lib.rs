@@ -1,5 +1,9 @@
 //! Bounded, privacy-preserving diagnostics and numeric pressure observations.
 //!
+//! Reports and CPU observation stores are available without App or ECS dependencies. The `runtime`
+//! feature enables ECS resources and App plugins. The independent `serde` feature enables value
+//! serialization without runtime integration.
+//!
 //! Engine-owned identities are source-authored rather than runtime strings:
 //!
 //! ```compile_fail
@@ -11,6 +15,7 @@
 
 mod field;
 mod identity;
+#[cfg(feature = "runtime")]
 mod plugin;
 mod pressure;
 mod report;
@@ -22,6 +27,7 @@ pub use identity::{
     IdentityErrorReason, PressureMetricId, PressureSourceId, PublicDiagnosticIdentifier,
     SafeDisplayText, SafeSummary, SafeTextError, SafeTextErrorReason,
 };
+#[cfg(feature = "runtime")]
 pub use plugin::{
     DIAGNOSTICS_PLUGIN_DECLARATION, DIAGNOSTICS_PLUGIN_ID, DiagnosticCleanupSet, DiagnosticsPlugin,
     plugin,
@@ -56,16 +62,19 @@ pub const MAX_DIAGNOSTIC_DRAFT_TEXT_BYTES: usize = 1_024;
 pub const MAX_SAFE_STATIC_TEXT_BYTES: usize = 1_024;
 
 pub mod prelude {
+    #[cfg(feature = "runtime")]
+    pub use crate::DiagnosticsPlugin;
+    #[cfg(feature = "runtime")]
     pub use crate::plugin::plugin;
     pub use crate::{
         Diagnostic, DiagnosticCode, DiagnosticDedupePolicy, DiagnosticDomain, DiagnosticField,
         DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport,
-        DiagnosticReportSettings, DiagnosticSeverity, DiagnosticsPlugin, PressureMeasurement,
-        PressureMetricId, PressureMetricKind, PressureSourceId, PressureUnit,
-        PublicDiagnosticIdentifier, RuntimeDiagnosticDraft, RuntimeDiagnosticEntry,
-        RuntimeDiagnosticFilter, RuntimeDiagnosticRetention, RuntimeDiagnostics,
-        RuntimeDiagnosticsSettings, RuntimePressureSettings, RuntimePressureSnapshotDraft,
-        RuntimePressureSnapshots, SafeDisplayText, SafeSummary,
+        DiagnosticReportSettings, DiagnosticSeverity, PressureMeasurement, PressureMetricId,
+        PressureMetricKind, PressureSourceId, PressureUnit, PublicDiagnosticIdentifier,
+        RuntimeDiagnosticDraft, RuntimeDiagnosticEntry, RuntimeDiagnosticFilter,
+        RuntimeDiagnosticRetention, RuntimeDiagnostics, RuntimeDiagnosticsSettings,
+        RuntimePressureSettings, RuntimePressureSnapshotDraft, RuntimePressureSnapshots,
+        SafeDisplayText, SafeSummary,
     };
 }
 

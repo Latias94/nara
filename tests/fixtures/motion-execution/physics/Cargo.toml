@@ -18,7 +18,7 @@ nara_app.workspace = true
 nara_core.workspace = true
 nara_diagnostic = { workspace = true, optional = true }
 nara_ecs.workspace = true
-nara_identity = { workspace = true, optional = true }
+nara_identity = { workspace = true, optional = true, features = ["runtime"] }
 nara_reflect = { workspace = true, optional = true }
 nara_scene = { workspace = true, optional = true }
 nara_transform.workspace = true

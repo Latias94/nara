@@ -1,24 +1,25 @@
 use std::{num::NonZeroU32, sync::Arc};
 
-use nara_asset::{
-    AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
-    StableAssetId,
-};
+use nara_asset::{AssetProductRef, ImportedProductId, StableAssetId};
+#[cfg(feature = "runtime")]
+use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath};
 use nara_core::ByteLimit;
 use nara_image::{
-    ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageCookError, ImageCookLimits,
-    ImageCookSettings, ImageCookTarget, ImageExtent, ImageFormat, ImageImportSettings,
-    ImageImporter, ImageOversizePolicy, cook_runtime_image,
+    ImageAsset, ImageColorSpace, ImageCookError, ImageCookLimits, ImageCookSettings,
+    ImageCookTarget, ImageExtent, ImageFormat, ImageOversizePolicy, cook_runtime_image,
 };
+#[cfg(feature = "runtime")]
+use nara_image::{ImageBytesImportRequest, ImageImportSettings, ImageImporter};
 
-#[cfg(feature = "serde")]
+#[cfg(all(feature = "runtime", feature = "serde"))]
 use nara_asset::RuntimeAssetCodec;
-#[cfg(feature = "serde")]
+#[cfg(all(feature = "runtime", feature = "serde"))]
 use nara_image::ImageRuntimeCodec;
 
 const SOURCE: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const AUXILIARY: &str = "37277e38-0824-42ee-a574-24ce57aee588";
 
+#[cfg(feature = "runtime")]
 #[test]
 fn real_png_cooks_to_distinct_4k_and_2k_runtime_products_with_the_same_identity() {
     let extent = ImageExtent::new(4096, 1);
@@ -378,6 +379,7 @@ fn pattern_pixels(extent: ImageExtent) -> Vec<u8> {
         .collect()
 }
 
+#[cfg(feature = "runtime")]
 fn rgba_png(extent: ImageExtent, pixels: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut encoder = png::Encoder::new(&mut bytes, extent.width, extent.height);

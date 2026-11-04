@@ -1524,9 +1524,78 @@ WGPU/Winit/Dear or filesystem/task installation. Value-only Window identity may 
 existing owner if its runtime integration is absent. Preserve typed resource identity, nominal
 slot revisions, retained pixels/import leases, deferred retry and late-outcome disposal. Then
 reuse the complete native `ui_surface` consumer with real captured Image content, and verify the
-default game installation still selects its original plugins. This is the next dependency unit;
-its code, exact shape and qualification remain unimplemented. Public panel attachment and the
+default game installation still selects its original plugins. Public panel attachment and the
 independent Editor are later complete consumers, not consequences of a manifest change.
+
+The selected implementation separates values and runtime installation inside the existing
+Asset, Identity, Diagnostic, Image, Render, Window and UI Render owners. Default features stay
+empty; explicit `runtime` enables App/World integration and conditional ECS derives. Diagnostic
+CPU values remain neutral so Asset/Image codecs keep their existing typed diagnostics without
+pulling in the diagnostic plugin. Image's `render-prepare` exposes capture/resource values;
+its automatic prepare system additionally needs runtime. Render's original View identity/error
+definitions stay shared while World extraction moves behind runtime. The UI presenter and
+World adapter use one private backend-custody module. Runtime product/dependent manifests select
+their actual integration requirements explicitly; no new package, raw-ID namespace or facade
+compatibility layer is added. ADR0102 owns this decision. The qualification below distinguishes
+neutral library consumption, installed Runtime behavior and actual native presentation; public
+panel attachment and the complete independent Editor remain separate R11b consumers.
+
+Pure/serialization qualification exposes two additional values incorrectly hidden by the
+original reload module: `AssetSourceRoot` and the bounded `AssetSourceChanges` queue. They now
+live in neutral modules under the same Asset owner and root public paths. Runtime reload uses
+those exact definitions; its path/canonicalization, metadata coalescing, admission and overflow
+rules are unchanged. All nine queue tests move with their owner and still run without runtime.
+The first test build catches the moved test's missing `LoadState` import; restoring the explicit
+import preserves every assertion. An independent source review confirms the extraction without
+new P1/P2 findings. Earlier review also removes unnecessary runtime feature requests from
+Material and the value-only Image edges in Sprite/Tilemap, and fixes the independent native
+fixture's optional clip intersection before its actual build and run.
+
+Executed qualification uses Rust 1.95.0 on Windows 11, serial Cargo and the shared root `target`:
+
+| Scope | Executed result |
+| --- | --- |
+| Seven owning crates, no runtime features, independent serialization plus Image `render-prepare` | 317/317, no skips; run `33bb9d6b-23cf-484f-bb74-d6f2d98d009a` |
+| Same owners plus game UI and WGPU, all features | 1,165/1,165, 57 skipped; run `ed927c16-a489-4f77-b1f5-d6ea75502195` |
+| Default game UI library without serialization | 124/124, no skips; run `ef43608f-7979-45b5-9068-1b4b13f01542` |
+| Independently locked UI component/presentation library | 30/30, no skips; run `36c0540c-5ac3-4815-99eb-a04fdb84736b` |
+| Root product capabilities, independent normal/build graphs with and without serialization, public-prelude positive/negative consumers | 14/14, no skips; run `1f9f5abb-a5fc-4f4e-b7f4-0ad21c6b5385` |
+| Actual independent Windows/DX12 surface trajectory and separate failure controls | 2/2, no skips; run `5e35a0ee-074a-4319-b10c-0b705f05e7b4` |
+| Editor library plus public panel, authoring-loop and first-game integrations | 410/410, 61 skipped; run `cd7f8e0d-6c6a-4bf7-9975-18be9eae7f73` |
+| Selected actual Windows/DX12 Editor authoring, Canvas, Scene/Game, panel, cadence, recovery and close trajectories | 33/33, 426 outside this filter; run `d00fb9a7-2105-4299-a436-67b3b5fea5ef` |
+| Actual WGPU typed UI Feature metadata/budget, mixed mesh/quad pixels, sRGB, allocation refusal/retry and retirement | 4/4, 455 outside this filter; run `333a40af-76c4-4ce2-af46-91b60b2c07d7` |
+
+The native consumer imports the same procedural Image library and preserves all 19 actual
+presentations, 18 journal commits, keyed text/layout/curve/drag/wheel assertions and four
+error/panic child modes. It checks the original typed resource, shared pixels, metadata and
+retention in the submitted packet plus visible Image geometry and actual presentation. There
+is no new Image readback oracle. Native pointer/IME/logical-key delivery is injected. The six
+new independent CPU tests use an explicitly simulated trusted backend and cannot establish
+native presentation by themselves. These cohorts overlap; their counts are not additive.
+
+All 20 independent fixture locks resolve offline for the Windows host. Inspection finds no
+existing package-version changes: the UI library adds 31 package records for neutral presentation,
+the native lock records its four added library dependency edges, and the root lock removes three unused
+Image dev-dependency edges. An initial unfiltered offline metadata request reaches an uncached
+`js-sys` version in another fixture; target-filtered resolution completes without an upgrade.
+The all-target normal/build dependency assertions above retain their separate scope.
+The seven owning crates also pass an all-target check with no default or requested features;
+that check includes their dev dependencies and is not the neutral production-closure assertion.
+All-target, whole-workspace checks pass independently for module-consumer, behavior-languages,
+motion-execution, render-policy-consumer, render-program-consumer and
+render-composition-consumer under their own locked offline graphs. Native Render frame capture
+and Window handle consumers explicitly request their existing `runtime` integration instead of
+depending on a backend's incidental feature propagation. These checks establish compilation;
+they do not rerun those fixtures' distinct ignored native or language-execution trajectories.
+The native surface consumer also passes its locked offline all-target check after explicit
+Render/Window feature selection. Correctness Clippy passes all targets/all features for the
+seven owners, game UI, WGPU and Editor, plus the independent presentation library's all targets.
+The actual default Editor executable builds successfully. Root and both UI/native fixture
+format checks pass; changed-document local file targets resolve, with remote URLs and anchors
+outside that file-existence check. These are not warning-free checks:
+existing style/dead-code warnings and neutral-mode unused import-budget helpers remain. No
+timing, memory improvement, general foreign-frontend hosting or complete R11b/foundation claim
+follows from this dependency prerequisite.
 
 #### Custom child-measurement and layout prerequisite
 
@@ -1999,7 +2068,7 @@ Feature/program/output contracts. Do not wait for a full material system or nati
 render Feature/output adapters and planned
 `tests/fixtures/editor-ui-host-consumer/tests/graph_document.rs`. Extend actual
 `tests/fixtures/render-composition-consumer/tests/composition.rs` and
-`crates/nara_render/src/tests/view_lifecycle.rs` only for changed shared behavior.
+`crates/nara_render/src/runtime/tests/view_lifecycle.rs` only for changed shared behavior.
 
 **Approach:** use a finite typed node/link document with composable property controls, custom
 connections, pan/zoom and a retained preview as pressure for future Shader Graph-like editors.

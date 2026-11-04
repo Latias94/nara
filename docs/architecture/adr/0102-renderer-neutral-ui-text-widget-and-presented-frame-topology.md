@@ -3,7 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-08-04
 **Last Revised**: 2026-11-05
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption; 2026-11-05 by explicit neutral value consumption and runtime installation
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -73,8 +73,31 @@ substitute for that retirement authority.
 Interaction, field reducers, platform input mapping and domain edits remain caller-owned.
 The adapter supplies the public backend bridge previously unavailable to independent consumers;
 hidden first-party test-presenter factories remain restricted to their named conformance glue.
-It does not qualify a toolkit-independent panel attachment, neutral presentation dependency
-closure, native platform-input delivery or a complete independent Editor.
+The presenter interface alone does not qualify toolkit-independent panel attachment, its neutral
+dependency closure, native platform-input delivery or a complete independent Editor. The
+following value/integration contract owns the dependency separation and its qualification.
+
+### Value consumption and runtime installation
+
+The neutral presentation path consumes the original Render target/resource values, Asset
+handles/store revisions, captured Image pixels and backend outcome permits. These values do not
+require installing an App, World, filesystem, task service or window backend. Their existing
+packages expose CPU/value consumption independently of explicit `runtime` integration features;
+`serde` serialization does not implicitly enable runtime installation. Runtime products select
+their required features on actual dependency edges rather than relying on workspace unification.
+
+The UI presenter and Runtime adapter share one outcome-custody implementation. Moving that
+implementation out of ECS integration changes neither permit identity nor abandonment, retry,
+late-result or physical-completion responsibilities. Image snapshots retain the same shared
+pixel storage and original external/import-budget lifetime owners. Asset slot revisions preserve
+their nominal store and mutation identities; a matching version or hash cannot substitute for
+that exact association. Window IDs and Render targets remain the same types in their current
+owners. No neutral-only raw-ID namespace or replacement resource allocator is introduced.
+
+The [R11b dependency prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#neutral-presentation-consumption-prerequisite)
+owns independent locked dependency, Image custody, presenter and native-consumer qualification.
+The selected feature separation is a contract; its implementation evidence does not follow from
+the manifest alone. Complete panel hosting and the independent Editor remain separate consumers.
 
 ### Captured custom geometry in the original paint stream
 

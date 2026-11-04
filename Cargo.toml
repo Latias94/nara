@@ -145,21 +145,21 @@ blake3 = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
-nara_asset = { workspace = true, optional = true }
+nara_asset = { workspace = true, optional = true, features = ["runtime"] }
 nara_asset_watch = { workspace = true, optional = true }
 nara_core = { workspace = true, optional = true }
-nara_diagnostic = { workspace = true, optional = true }
+nara_diagnostic = { workspace = true, optional = true, features = ["runtime"] }
 nara_ecs = { workspace = true, optional = true }
 nara_fs = { workspace = true, optional = true }
 nara_hierarchy = { workspace = true, optional = true }
-nara_image = { workspace = true, optional = true }
-nara_identity = { workspace = true, optional = true }
+nara_image = { workspace = true, optional = true, features = ["runtime"] }
+nara_identity = { workspace = true, optional = true, features = ["runtime"] }
 nara_input = { workspace = true, optional = true }
 nara_gameplay = { workspace = true, optional = true }
 nara_material = { workspace = true, optional = true }
 nara_project = { workspace = true, optional = true }
 nara_reflect = { workspace = true, optional = true }
-nara_render = { workspace = true, optional = true }
+nara_render = { workspace = true, optional = true, features = ["runtime"] }
 nara_render_wgpu = { workspace = true, optional = true }
 nara_scene = { workspace = true, optional = true }
 nara_sprite = { workspace = true, optional = true }
@@ -169,8 +169,8 @@ nara_tasks = { workspace = true, optional = true }
 nara_tooling = { workspace = true, optional = true }
 nara_transform = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true }
-nara_ui_render = { workspace = true, optional = true }
-nara_window = { workspace = true, optional = true }
+nara_ui_render = { workspace = true, optional = true, features = ["runtime"] }
+nara_window = { workspace = true, optional = true, features = ["runtime"] }
 nara_winit = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

@@ -574,6 +574,67 @@ fn independently_locked_ui_module_consumer_has_a_neutral_dependency_closure() {
 }
 
 #[test]
+fn independent_ui_presentation_library_has_no_runtime_dependency() {
+    let manifest =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ui-module-consumer/Cargo.toml");
+    for features in [
+        "presentation",
+        "presentation,nara_asset/serde,nara_image/serde,nara_render/serde",
+    ] {
+        let tree = cargo_tree_for_manifest(
+            &manifest,
+            "nara-ui-module-consumer",
+            &[
+                "--features",
+                features,
+                "-e",
+                "normal,build",
+                "--target",
+                "all",
+            ],
+        );
+        for package in [
+            "nara_asset",
+            "nara_identity",
+            "nara_diagnostic",
+            "nara_image",
+            "nara_render",
+            "nara_text",
+            "nara_ui_kernel",
+            "nara_ui_widgets",
+            "nara_ui_render",
+            "nara_window",
+        ] {
+            assert_present(&tree, package);
+        }
+        for package in [
+            "nara",
+            "nara_app",
+            "nara_ecs",
+            "bevy_ecs",
+            "bevy_app",
+            "nara_tasks",
+            "nara_fs",
+            "nara_scene",
+            "nara_project",
+            "nara_ui",
+            "nara-editor",
+            "nara_render_wgpu",
+            "nara_winit",
+            "raw-window-handle",
+            "dear-imgui-rs",
+            "dear-imgui-sys",
+            "dear-imgui-wgpu",
+            "dear-imgui-winit",
+            "wgpu",
+            "winit",
+        ] {
+            assert_not_present(&tree, package);
+        }
+    }
+}
+
+#[test]
 fn independent_native_ui_presenter_has_no_dear_or_runtime_ui_adapter_dependency() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/render-output-consumer/Cargo.toml");

@@ -27,7 +27,10 @@ use nara_ui_kernel::{
 };
 use nara_ui_module_consumer::curve_canvas::{CurveCanvas, CurveCanvasState};
 use nara_ui_module_consumer::keyed_editors::{EditorRow, KeyedEditors};
-use nara_ui_render::{UiPreparedImages, UiSurfacePresentationEvent, UiSurfacePresenter};
+use nara_ui_module_consumer::presentation::{CapturedUiImage, SWATCH_RGBA, capture_swatch};
+use nara_ui_render::{
+    UiPacketFill, UiPacketPrimitive, UiSurfacePresentationEvent, UiSurfacePresenter,
+};
 use nara_ui_widgets::{
     UiButton, UiButtonState, UiIntent, UiIntentBatch, UiStateHandle, UiStateTextInput, UiTextField,
     UiTextFieldError, UiTextInputToken,
@@ -184,6 +187,7 @@ struct Probe {
     compiler: UiCompiler,
     text: TextEngine,
     controls: Controls,
+    image: CapturedUiImage,
     interaction: UiInteractionSession,
     route: Option<UiRouteStamp>,
     pending: Option<WgpuUiImageSubmission>,
@@ -223,6 +227,8 @@ impl Probe {
         let font = bundled_font_face()?;
         let mut text = TextEngine::new(font.clone(), Default::default())?;
         let controls = Controls::new(1, "12", &mut text)?;
+        let image = capture_swatch(Arc::new(()))
+            .map_err(|error| -> Box<dyn std::error::Error> { error })?;
         let gpu = Graphics::new(&window)?;
         let surface = UiSurfaceId::new(91).unwrap();
         let presenter = UiSurfacePresenter::with_fonts(
@@ -242,6 +248,7 @@ impl Probe {
             font,
             text,
             controls,
+            image,
             interaction: UiInteractionSession::default(),
             route: None,
             pending: None,
@@ -343,7 +350,13 @@ impl Probe {
                     UiStyle::absolute(12.0, 72.0, 150.0, 40.0),
                 )?)
         };
-        let mut builder = UiAuthoringSnapshotBuilder::new(self.presents as u64 + 1).with_root(base);
+        let mut builder = UiAuthoringSnapshotBuilder::new(self.presents as u64 + 1)
+            .with_root(base)
+            .with_root(self.image.authored_root(
+                UiRootKey::runtime("independent-native-ui", "procedural-image")?,
+                UiLayer::Base,
+                UiStyle::absolute(316.0, 160.0, 32.0, 32.0),
+            ));
         if self.keyed.is_none() && self.controls.popup {
             builder = builder.with_root(
                 UiRoot::new(
@@ -410,8 +423,40 @@ impl Probe {
         let window = window_packet(&self.window);
         gpu.host.begin_window_frame(window, gpu.frame)?;
         if let Some(frame) = candidate {
-            let backend = self.presenter.prepare(frame, &UiPreparedImages::new())?;
+            let backend = self
+                .presenter
+                .prepare(frame, &self.image.prepared_images())?;
             let (packets, sidecar) = WgpuUiSubmission::capture(backend);
+            assert_eq!(packets.len(), 1);
+            let [captured] = packets[0].images() else {
+                return Err(
+                    io::Error::other("the original UI packet lost its procedural image").into(),
+                );
+            };
+            assert_eq!(captured.id(), self.image.id());
+            assert_eq!(captured.snapshot(), self.image.snapshot());
+            assert_eq!(
+                captured.snapshot().identity().key().asset_id(),
+                self.image.handle().id(),
+            );
+            assert_eq!(
+                captured.snapshot().resource().pixels(),
+                SWATCH_RGBA.as_slice()
+            );
+            assert_eq!(
+                captured.snapshot().resource().pixels().as_ptr(),
+                self.image.snapshot().resource().pixels().as_ptr(),
+            );
+            assert!(captured.snapshot().resource().has_retention_owner());
+            assert!(packets[0].primitives().iter().any(|primitive| {
+                matches!(primitive, UiPacketPrimitive::Rect {
+                    fill: Some(UiPacketFill::Image { image_index: 0, .. }), rect, clip, ..
+                } if (*clip).map_or(Some(*rect), |clip| rect.intersect(clip)).is_some_and(|visible| {
+                    visible.min_x() >= 0 && visible.min_y() >= 0
+                        && visible.max_x() <= gpu.target.extent().width as i32
+                        && visible.max_y() <= gpu.target.extent().height as i32
+                }))
+            }));
             let viewport = ViewportRect::from_extent(gpu.target.extent()).unwrap();
             let mut views = ExtractedViews::default();
             views.push(ExtractedView {
@@ -1826,7 +1871,7 @@ fn main() -> Result<()> {
     }
     terminal.map_err(io::Error::other)?;
     println!(
-        "UI_SURFACE_OK native_presentations=19 journal_commits=18 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_drag_across_presentations=true curve_wheel_units_anchored=true curve_retired=true input_delivery=injected_pointer_ime_and_logical_keys"
+        "UI_SURFACE_OK native_presentations=19 journal_commits=18 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_drag_across_presentations=true curve_wheel_units_anchored=true curve_retired=true captured_image_presented=true image_qualification=packet_resource_and_actual_presentation input_delivery=injected_pointer_ime_and_logical_keys"
     );
     Ok(())
 }

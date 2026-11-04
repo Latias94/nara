@@ -1,8 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(any(feature = "runtime", test))]
+use std::collections::BTreeSet;
 
-use nara_image::{ImageAsset, PreparedImageSnapshot, PreparedImages};
+use nara_image::PreparedImageSnapshot;
+#[cfg(any(feature = "runtime", test))]
+use nara_image::{ImageAsset, PreparedImages};
 use nara_render::RenderResourceKey;
-use nara_ui_kernel::{UiFrame, UiImageId, UiPaintPrimitive, UiResolvedBrush};
+use nara_ui_kernel::UiImageId;
+#[cfg(any(feature = "runtime", test))]
+use nara_ui_kernel::{UiFrame, UiPaintPrimitive, UiResolvedBrush};
 
 #[derive(Debug, Default)]
 pub struct UiPreparedImages {
@@ -20,6 +26,7 @@ impl UiPreparedImages {
         self.insert_snapshot(id, snapshot);
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn capture(
         referenced: &BTreeSet<UiImageId>,
         prepared: Option<&PreparedImages>,
@@ -90,6 +97,7 @@ pub(super) enum UiPreparedImageError {
     },
 }
 
+#[cfg(any(feature = "runtime", test))]
 pub(crate) fn collect_referenced_image_ids(
     frames: &[std::sync::Arc<UiFrame>],
 ) -> BTreeSet<UiImageId> {

@@ -1,7 +1,11 @@
 //! Resource-complete backend-neutral paint packets for immutable UI frames.
+//!
+//! CPU planning, captured Image resources and the surface presenter need no App/ECS installation.
+//! The `runtime` feature adds the existing game/runtime plugin and World exchange.
 
-// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 mod atlas;
+mod backend;
+#[cfg(feature = "runtime")]
 mod integration;
 mod limits;
 mod packet;
@@ -10,10 +14,11 @@ mod surface;
 #[cfg(test)]
 mod surface_tests;
 
+pub use backend::UiPresentationIntegrationError;
+#[cfg(feature = "runtime")]
 pub use integration::{
-    UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats,
-    UiPresentationIntegrationError, UiRenderPlugin, compile_ui_paint_packets,
-    drain_ui_presentation_outcomes, plugin,
+    UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats, UiRenderPlugin,
+    compile_ui_paint_packets, drain_ui_presentation_outcomes, plugin,
 };
 pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
 pub use packet::{
@@ -35,15 +40,19 @@ pub use surface::{UiSurfacePresentationError, UiSurfacePresentationEvent, UiSurf
 pub mod __private {
     use std::sync::Arc;
 
-    pub use crate::integration::{
+    pub use crate::backend::{
         UiBackendOutcomePermit, UiBackendOutcomeReceiver, UiBackendPresentationFrame,
-        UiBackendSubmission, UiBackendSubmissionBatchBindError, UiBackendSubmissionReader,
-        UiCompletedBackendOutcome, UiPaintPacketSnapshots, UiPresentationOutcomes,
-        UiPresentationPlannerClaim, UiPresentationRoute, UiPresentationRouteError,
-        UiSubmittedBackendSubmission, abort_ui_planned_packet, backend_outcome_receiver,
-        bind_backend_submission_batch, commit_ui_backend_outcome, commit_ui_backend_outcomes,
-        commit_ui_backend_presentation, discard_ui_backend_acceptance, presentation_planner_claim,
-        replace_ui_backend_frame, replace_ui_presentation_routes, snapshot_ui_paint_packets,
+        UiBackendSubmission, UiBackendSubmissionBatchBindError, UiCompletedBackendOutcome,
+        UiPresentationOutcomes, UiSubmittedBackendSubmission, bind_backend_submission_batch,
+        discard_ui_backend_acceptance,
+    };
+    #[cfg(feature = "runtime")]
+    pub use crate::integration::{
+        UiBackendSubmissionReader, UiPaintPacketSnapshots, UiPresentationPlannerClaim,
+        UiPresentationRoute, UiPresentationRouteError, abort_ui_planned_packet,
+        backend_outcome_receiver, commit_ui_backend_outcome, commit_ui_backend_outcomes,
+        commit_ui_backend_presentation, presentation_planner_claim, replace_ui_backend_frame,
+        replace_ui_presentation_routes, snapshot_ui_paint_packets,
         take_ui_backend_presentation_frame,
     };
     pub use crate::planner::UiPlannedPacketAbortOutcome;
@@ -133,32 +142,40 @@ pub mod __private {
 }
 
 pub mod prelude {
+    #[cfg(feature = "runtime")]
     pub use crate::UiRenderPlugin;
 }
 
 /// Explicit Host/backend integration surface kept out of ordinary gameplay imports.
-/// Backend collectors use [`UiBackendSubmissionReader`](crate::advanced::UiBackendSubmissionReader)
-/// only after destination admission, then return its original one-shot outcomes with
-/// [`commit_ui_backend_outcomes`](crate::advanced::commit_ui_backend_outcomes).
+///
+/// Neutral surface consumers retain the original move-only submissions and completions. With
+/// `runtime`, World collectors use `UiBackendSubmissionReader` only after destination admission,
+/// then return their original one-shot outcomes through `commit_ui_backend_outcomes`.
 pub mod advanced {
-    pub use crate::integration::{
+    pub use crate::backend::{
         UiBackendPresentationFrame, UiBackendSubmission, UiBackendSubmissionBatchBindError,
-        UiBackendSubmissionReader, UiCompletedBackendOutcome, UiSubmittedBackendSubmission,
-        bind_backend_submission_batch, commit_ui_backend_outcome, commit_ui_backend_outcomes,
+        UiCompletedBackendOutcome, UiSubmittedBackendSubmission, bind_backend_submission_batch,
+    };
+    #[cfg(feature = "runtime")]
+    pub use crate::integration::{
+        UiBackendSubmissionReader, commit_ui_backend_outcome, commit_ui_backend_outcomes,
         take_ui_backend_presentation_frame,
     };
     pub use crate::packet::{UiPreparedBackendSubmission, UiSubmittedBackendPresentation};
     pub use crate::{
         OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
         UiPacketFill, UiPacketImage, UiPacketMesh, UiPacketMeshVertex, UiPacketPrimitive,
-        UiPacketRect, UiPacketUv, UiPaintCompileStats, UiPaintPacket, UiPaintPacketIdentity,
-        UiPreparedImages, UiPresentationAttemptId, UiPresentationAttemptIdentity,
-        UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
-        UiPresentationCapabilityGeneration, UiPresentationContentError, UiPresentationEpoch,
-        UiPresentationIntegrationError, UiPresentationLimits, UiPresentationLimitsError,
-        UiPresentationOutcome, UiPresentationPlanner, UiPresentationPlannerCreateError,
-        UiPresentationRetryIdentity, UiPresentationRuntimeGeneration, UiPresentationWorkStats,
-        compile_ui_paint_packets, drain_ui_presentation_outcomes,
+        UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages,
+        UiPresentationAttemptId, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+        UiPresentationBackendGeneration, UiPresentationCapabilityGeneration,
+        UiPresentationContentError, UiPresentationEpoch, UiPresentationIntegrationError,
+        UiPresentationLimits, UiPresentationLimitsError, UiPresentationOutcome,
+        UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRetryIdentity,
+        UiPresentationRuntimeGeneration, UiPresentationWorkStats,
+    };
+    #[cfg(feature = "runtime")]
+    pub use crate::{
+        UiPaintCompileStats, compile_ui_paint_packets, drain_ui_presentation_outcomes,
     };
 }
 

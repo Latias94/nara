@@ -76,7 +76,7 @@ or interaction repair. They are not estimates of security exposure or production
 
 ### A01 — P2: Metadata Changes Can Be Lost During Event Coalescing
 
-**Trace.** [source_changes.rs](../../crates/nara_asset/src/reload/source_changes.rs#L225) replaces
+**Trace.** [source_changes.rs](../../crates/nara_asset/src/source_changes.rs) replaces
 the prior same-path change with the last enum; its batch entry does likewise at line 287.
 [Image reload](../../crates/nara_image/src/reload.rs#L615) treats the outcomes differently:
 `Modified` reuses accepted Image settings, while `MetaModified` reads the current sidecar.

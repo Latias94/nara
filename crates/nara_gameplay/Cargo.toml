@@ -9,7 +9,7 @@ license.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
-nara_identity.workspace = true
+nara_identity = { workspace = true, features = ["runtime"] }
 nara_input.workspace = true
 bevy_ecs.workspace = true
 serde = { workspace = true, optional = true }

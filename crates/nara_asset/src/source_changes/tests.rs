@@ -1,4 +1,8 @@
 use super::*;
+use crate::{
+    AssetEventKind, AssetEventLimits, AssetEventPushOutcome, AssetEvents, AssetId, AssetStates,
+    AssetVersion, LoadState,
+};
 
 #[test]
 fn source_changes_coalesce_duplicate_frame_events() {

@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 nara_app.workspace = true
-nara_asset.workspace = true
+nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
 nara_ecs.workspace = true
 nara_hierarchy.workspace = true
@@ -22,10 +22,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 nara_image = { workspace = true, features = ["render-prepare"] }
-nara_render.workspace = true
+nara_render = { workspace = true, features = ["runtime"] }
 nara_transform.workspace = true
-nara_ui_render.workspace = true
-nara_window.workspace = true
+nara_ui_render = { workspace = true, features = ["runtime"] }
+nara_window = { workspace = true, features = ["runtime"] }
 
 [features]
 default = []

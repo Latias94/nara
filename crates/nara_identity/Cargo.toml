@@ -6,10 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-bevy_ecs.workspace = true
+bevy_ecs = { workspace = true, optional = true }
 getrandom.workspace = true
 nara_core.workspace = true
-nara_ecs.workspace = true
+nara_ecs = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 uuid.workspace = true
@@ -23,4 +23,5 @@ serde_json.workspace = true
 
 [features]
 default = []
+runtime = ["dep:bevy_ecs", "dep:nara_ecs"]
 serde = ["dep:serde", "nara_core/serde"]

@@ -4,6 +4,7 @@ use std::{
 };
 
 use nara_core::ItemLimit;
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 use thiserror::Error;
 
@@ -342,7 +343,8 @@ impl RuntimePressureSnapshotsSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Resource)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct RuntimePressureSnapshots {
     settings: RuntimePressureSettings,
     snapshots: BTreeMap<PressureSourceId, RuntimePressureSnapshot>,
@@ -439,6 +441,7 @@ impl RuntimePressureSnapshots {
         }
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn maintain(&mut self, current_frame: u64) {
         let RuntimePressureRetention::FrameWindow(_) = self.settings.retention else {
             return;

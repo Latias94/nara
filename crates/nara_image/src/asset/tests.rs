@@ -2,10 +2,9 @@ use super::*;
 
 use std::collections::HashSet;
 
-use nara_asset::{
-    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets,
-    ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion,
-};
+#[cfg(feature = "runtime")]
+use nara_asset::{AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets};
+use nara_asset::{ImportDependencyDigest, ImportRecipe, ImporterId, ImporterVersion};
 
 use crate::budget::{ImageImportCharge, ImageImportPixelLease};
 use crate::{ImageImportBudgetHost, ImageImportLimits, PreparedImageResource};
@@ -40,6 +39,212 @@ fn processed(selection: ImportedProductId, color_space: ImageColorSpace) -> Imag
         vec![24, 120, 220, 255],
     )
     .unwrap()
+}
+
+#[test]
+fn image_source_metadata_rejects_a_mismatched_settings_hash() {
+    let metadata = source(
+        "textures/player.png",
+        b"image-source",
+        ImageColorSpace::Srgb,
+    );
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let import_recipe = metadata.import_recipe().clone();
+    let actual = import_recipe.settings_hash();
+
+    let error =
+        ImageSourceMetadata::new(metadata.path().clone(), settings, import_recipe).unwrap_err();
+
+    assert_eq!(
+        error,
+        ImageSourceMetadataCreateError::SettingsHashMismatch {
+            expected: settings.settings_hash(),
+            actual,
+        }
+    );
+}
+
+#[test]
+fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
+    let metadata = || {
+        source(
+            "textures/direct-image.png",
+            b"source",
+            ImageColorSpace::Srgb,
+        )
+    };
+    for extent in [ImageExtent::new(0, 1), ImageExtent::new(1, 0)] {
+        assert_eq!(
+            ImageAsset::from_import(metadata(), extent, ImageFormat::Rgba8, Vec::new())
+                .unwrap_err(),
+            ImageAssetCreateError::ZeroExtent { extent }
+        );
+    }
+    assert_eq!(
+        ImageAsset::from_import(
+            metadata(),
+            ImageExtent::new(u32::MAX, u32::MAX),
+            ImageFormat::Rgba8,
+            Vec::new(),
+        )
+        .unwrap_err(),
+        ImageAssetCreateError::ByteLengthOverflow {
+            extent: ImageExtent::new(u32::MAX, u32::MAX),
+        }
+    );
+    for (pixels, expected, actual) in [(vec![0; 3], 4, 3), (vec![0; 5], 4, 5)] {
+        assert_eq!(
+            ImageAsset::from_import(
+                metadata(),
+                ImageExtent::new(1, 1),
+                ImageFormat::Rgba8,
+                pixels,
+            )
+            .unwrap_err(),
+            ImageAssetCreateError::PixelLengthMismatch {
+                extent: ImageExtent::new(1, 1),
+                expected,
+                actual,
+            }
+        );
+    }
+}
+
+#[test]
+fn image_asset_reuses_the_admitted_pixel_allocation() {
+    let pixels = vec![24, 120, 220, 255];
+    let admitted_allocation = pixels.as_ptr();
+    let image = ImageAsset::from_import(
+        source("textures/player.png", b"allocation", ImageColorSpace::Srgb),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        pixels,
+    )
+    .unwrap();
+
+    assert_eq!(image.pixels().as_ptr(), admitted_allocation);
+}
+
+#[test]
+fn shared_image_pixels_retain_their_lifetime_owner_until_runtime_release() {
+    let mut image = processed(ImportedProductId::PRIMARY, ImageColorSpace::Srgb);
+    let owner = Arc::new(());
+    let weak = Arc::downgrade(&owner);
+
+    assert!(image.share_retained().is_none());
+    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
+    assert!(!image.try_attach_retention_owner(Arc::new(())));
+    let shared = image.share_retained().unwrap();
+    drop(owner);
+
+    assert!(weak.upgrade().is_some());
+    assert_eq!(shared.pixels().as_ptr(), image.pixels().as_ptr());
+    drop(image);
+    assert!(weak.upgrade().is_some());
+    drop(shared);
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
+    let mut image = processed(ImportedProductId::PRIMARY, ImageColorSpace::Srgb);
+    let old_bytes = [24, 120, 220, 255];
+    let owner = Arc::new(());
+    let weak = Arc::downgrade(&owner);
+    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
+
+    let old_allocation = image.pixels().as_ptr();
+    let prepared = PreparedImageResource::from_image(&image);
+    let replacement = ImageAsset::from_import(
+        source(
+            "textures/direct-image.png",
+            b"source",
+            ImageColorSpace::Srgb,
+        ),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        vec![255, 32, 16, 255],
+    )
+    .unwrap();
+    let replacement_prepared = PreparedImageResource::from_image(&replacement);
+
+    drop(owner);
+    drop(image);
+
+    assert!(prepared.has_retention_owner());
+    assert!(weak.upgrade().is_some());
+    assert_eq!(prepared.pixels(), old_bytes);
+    assert_eq!(prepared.pixels().as_ptr(), old_allocation);
+    assert_eq!(replacement_prepared.pixels(), [255, 32, 16, 255]);
+    assert_ne!(replacement_prepared.pixels().as_ptr(), old_allocation);
+
+    drop(prepared);
+    assert!(weak.upgrade().is_none());
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {
+    let image = ImageAsset::from_import(
+        source("textures/player.png", b"source", ImageColorSpace::Srgb),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        vec![24, 120, 220, 255],
+    )
+    .unwrap();
+
+    let encoded = serde_json::to_value(&image).unwrap();
+    assert_eq!(
+        encoded.get("pixels"),
+        Some(&serde_json::json!([24, 120, 220, 255])),
+    );
+
+    let decoded = serde_json::from_value::<ImageAsset>(encoded).unwrap();
+    assert_eq!(decoded, image);
+    assert_eq!(decoded.pixels(), &[24, 120, 220, 255]);
+    assert!(!std::ptr::eq(decoded.pixels(), image.pixels()));
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_asset_deserialization_reuses_the_constructor_validation() {
+    let image = ImageAsset::from_import(
+        source(
+            "textures/direct-image.png",
+            b"source",
+            ImageColorSpace::Srgb,
+        ),
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        vec![24, 120, 220, 255],
+    )
+    .unwrap();
+    let valid = serde_json::to_value(image).unwrap();
+
+    let mut zero = valid.clone();
+    zero["extent"]["width"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
+
+    let mut zero = valid.clone();
+    zero["extent"]["height"] = serde_json::json!(0);
+    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
+
+    let mut overflow = valid.clone();
+    overflow["extent"]["width"] = serde_json::json!(u32::MAX);
+    overflow["extent"]["height"] = serde_json::json!(u32::MAX);
+    assert!(serde_json::from_value::<ImageAsset>(overflow).is_err());
+
+    let mut undersized = valid.clone();
+    undersized["pixels"] = serde_json::json!([24, 120, 220]);
+    assert!(serde_json::from_value::<ImageAsset>(undersized).is_err());
+
+    let mut mismatched_recipe = valid.clone();
+    mismatched_recipe["source"]["settings"]["color_space"] = serde_json::json!("linear");
+    assert!(serde_json::from_value::<ImageAsset>(mismatched_recipe).is_err());
+
+    let mut oversized = valid;
+    oversized["pixels"] = serde_json::json!([24, 120, 220, 255, 0]);
+    assert!(serde_json::from_value::<ImageAsset>(oversized).is_err());
 }
 
 #[test]
@@ -251,6 +456,7 @@ fn shared_owner_preserves_an_existing_import_budget_lease() {
     assert!(weak.upgrade().is_none());
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn source_reload_requires_matching_real_provenance_before_reusing_settings() {
     let record = AssetRecord::new(

@@ -2,13 +2,17 @@ use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_ecs::{Resource, SystemSet, schedule::IntoScheduleConfigs};
 
+use crate::source_changes::{AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges};
 use crate::{AssetDependencyGraph, AssetEvents, AssetServer, AssetStates, ProjectAssetDatabase};
 
 mod diagnostics;
 mod requests;
 mod resolution;
-mod source_changes;
 
+#[cfg(test)]
+use crate::AssetSourceRoot;
+#[cfg(test)]
+use requests::ImageReloadRegistration;
 pub use requests::{
     AssetLoadGeneration, AssetLoadGenerations, AssetReloadRequest,
     AssetReloadRequestAdmissionError, AssetReloadRequestId, AssetReloadRequestKind,
@@ -17,13 +21,6 @@ pub use requests::{
     register_image_reload_consumer,
 };
 use resolution::{reject_unclaimed_asset_reload_requests, resolve_asset_source_changes};
-pub use source_changes::{
-    AssetSourceChange, AssetSourceChangeAdmissionError, AssetSourceChangeKind,
-    AssetSourceChangeLimitKind, AssetSourceChangeLimits, AssetSourceChanges, AssetSourceRoot,
-};
-
-#[cfg(test)]
-use requests::ImageReloadRegistration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum AssetTaskUpdateSet {

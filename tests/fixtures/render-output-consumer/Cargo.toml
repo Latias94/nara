@@ -12,16 +12,16 @@ resolver = "3"
 [dependencies]
 nara_core = { path = "../../../crates/nara_core", default-features = false }
 nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }
-nara_render = { path = "../../../crates/nara_render", default-features = false }
+nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]
-nara-ui-module-consumer = { path = "../ui-module-consumer" }
+nara-ui-module-consumer = { path = "../ui-module-consumer", default-features = false, features = ["presentation"] }
 nara_text = { path = "../../../crates/nara_text", default-features = false }
 nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = false }
 nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false }
 nara_ui_widgets = { path = "../../../crates/nara_ui_widgets", default-features = false }
-nara_window = { path = "../../../crates/nara_window", default-features = false }
+nara_window = { path = "../../../crates/nara_window", default-features = false, features = ["runtime"] }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-ui"] }
 wgpu = "=30.0.1"
 winit = "=0.30.13"

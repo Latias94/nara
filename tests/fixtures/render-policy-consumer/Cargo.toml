@@ -13,7 +13,7 @@ resolver = "3"
 nara = { path = "../../..", default-features = false, features = ["desktop-winit", "render-wgpu"] }
 nara_app = { path = "../../../crates/nara_app", default-features = false }
 nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }
-nara_render = { path = "../../../crates/nara_render", default-features = false }
+nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]

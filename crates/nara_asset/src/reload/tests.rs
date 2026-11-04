@@ -1,13 +1,10 @@
 use super::*;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, sync::Arc};
 
 use crate::{
-    AssetDependencyGraph, AssetEventKind, AssetEventLimits, AssetEventPushOutcome, AssetEvents,
-    AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetSourcePath, AssetStates, AssetVersion,
-    Assets, ImportRecipeDigest, LoadState, ProjectAssetDatabase, StableAssetId,
+    AssetDependencyGraph, AssetEventKind, AssetEvents, AssetId, AssetRecord, AssetServer,
+    AssetSourceKind, AssetSourcePath, AssetStates, AssetVersion, Assets, ImportRecipeDigest,
+    LoadState, ProjectAssetDatabase, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_ecs::ResMut;
@@ -105,5 +102,3 @@ fn install_test_reload_consumer(app: &mut App) {
 mod requests;
 #[path = "tests_resolution.rs"]
 mod resolution;
-#[path = "tests_source_changes.rs"]
-mod source_changes;

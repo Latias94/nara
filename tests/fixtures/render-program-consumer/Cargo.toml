@@ -10,7 +10,7 @@ publish = false
 resolver = "3"
 
 [dependencies]
-nara_render = { path = "../../../crates/nara_render", default-features = false }
+nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]

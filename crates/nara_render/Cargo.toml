@@ -7,17 +7,26 @@ license.workspace = true
 
 [dependencies]
 blake3.workspace = true
-nara_app.workspace = true
+nara_app = { workspace = true, optional = true }
 nara_asset.workspace = true
 nara_core.workspace = true
-nara_ecs.workspace = true
-nara_hierarchy.workspace = true
-nara_reflect.workspace = true
-nara_transform.workspace = true
+nara_ecs = { workspace = true, optional = true }
+nara_hierarchy = { workspace = true, optional = true }
+nara_reflect = { workspace = true, optional = true }
+nara_transform = { workspace = true, optional = true }
 nara_window.workspace = true
 serde = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [features]
 default = []
+runtime = [
+    "dep:nara_app",
+    "dep:nara_ecs",
+    "dep:nara_hierarchy",
+    "dep:nara_reflect",
+    "dep:nara_transform",
+    "nara_asset/runtime",
+    "nara_window/runtime",
+]
 serde = ["dep:serde", "nara_asset/serde", "nara_core/serde", "nara_window/serde"]

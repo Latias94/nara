@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use nara_core::{ByteLimit, ItemLimit};
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 use thiserror::Error;
 
@@ -565,7 +566,8 @@ impl DiagnosticReportStats {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Resource)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct DiagnosticReport {
     settings: DiagnosticReportSettings,

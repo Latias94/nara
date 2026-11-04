@@ -16,7 +16,7 @@ use crate::{
     UiPresentationIntegrationError, UiPresentationLimits, UiPresentationOutcome,
     UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRuntimeGeneration,
     UiPresentationWorkStats,
-    integration::{
+    backend::{
         UiBackendPresentationFrame, UiBackendSubmission, UiCompletedBackendOutcome,
         UiPresentationOutcomes,
     },

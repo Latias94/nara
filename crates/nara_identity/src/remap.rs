@@ -1,10 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
+#[cfg(any(feature = "runtime", test))]
+use std::collections::BTreeSet;
 
 use thiserror::Error;
 
+#[cfg(feature = "runtime")]
+use crate::SceneIdentitySnapshot;
 use crate::{
-    EntityReference, RuntimeEntityReference, SceneEntityId, SceneIdentitySnapshot,
-    WorldEntityLocator, WorldIdentityDomainId,
+    EntityReference, RuntimeEntityReference, SceneEntityId, WorldEntityLocator,
+    WorldIdentityDomainId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +18,7 @@ pub struct EntityReferenceRemap {
 }
 
 impl EntityReferenceRemap {
+    #[cfg(feature = "runtime")]
     fn between_scene_snapshots(
         source: &SceneIdentitySnapshot,
         target: &SceneIdentitySnapshot,
@@ -51,6 +56,7 @@ impl EntityReferenceRemap {
         Self::complete(expected_sources, entries)
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn complete(
         expected_sources: impl IntoIterator<Item = RuntimeEntityReference>,
         entries: impl IntoIterator<Item = (RuntimeEntityReference, RuntimeEntityReference)>,
@@ -155,6 +161,7 @@ impl EntityReferenceRemap {
     }
 }
 
+#[cfg(any(feature = "runtime", test))]
 const fn same_reference_axis(
     source: &RuntimeEntityReference,
     target: &RuntimeEntityReference,
@@ -171,6 +178,7 @@ const fn same_reference_axis(
     )
 }
 
+#[cfg(any(feature = "runtime", test))]
 fn durable_reference(reference: &RuntimeEntityReference) -> EntityReference {
     match reference {
         RuntimeEntityReference::Scene { entity, .. } => EntityReference::SceneLocal {
@@ -190,6 +198,7 @@ pub struct WorldEntityLocatorRemap {
 }
 
 impl WorldEntityLocatorRemap {
+    #[cfg(feature = "runtime")]
     const fn new(
         source_domain: WorldIdentityDomainId,
         target_domain: WorldIdentityDomainId,
@@ -202,6 +211,7 @@ impl WorldEntityLocatorRemap {
         }
     }
 
+    #[cfg(feature = "runtime")]
     pub fn between_scene_snapshots(
         source: &SceneIdentitySnapshot,
         target: &SceneIdentitySnapshot,

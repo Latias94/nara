@@ -4,6 +4,7 @@ use std::{
     num::NonZeroU64,
 };
 
+#[cfg(feature = "runtime")]
 use nara_ecs::Component;
 use thiserror::Error;
 use uuid::Uuid;
@@ -12,7 +13,8 @@ use crate::{AuthoredEntityReference, IdentityAllocationError};
 
 pub const MAX_PERSISTENT_RUNTIME_NAMESPACE_BYTES: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Component)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "runtime", derive(Component))]
 pub struct SceneEntityId(String);
 
 impl SceneEntityId {
@@ -131,10 +133,12 @@ impl SceneInstanceId {
             .ok_or(IdentityAllocationError::Zero)
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) const fn from_non_zero(raw: NonZeroU64) -> Self {
         Self(raw)
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) const fn non_zero(self) -> NonZeroU64 {
         self.0
     }
@@ -170,6 +174,7 @@ impl<'de> serde::Deserialize<'de> for SceneInstanceId {
 pub struct WorldIdentityDomainId(NonZeroU64);
 
 impl WorldIdentityDomainId {
+    #[cfg(feature = "runtime")]
     pub(crate) const fn from_non_zero(raw: NonZeroU64) -> Self {
         Self(raw)
     }
@@ -376,6 +381,7 @@ impl RuntimeEntityIncarnation {
         self.0.get()
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) const fn from_non_zero(value: NonZeroU64) -> Self {
         Self(value)
     }

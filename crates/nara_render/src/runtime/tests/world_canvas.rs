@@ -321,24 +321,6 @@ fn extraction_uses_canvas_extent_without_changing_native_window() {
 }
 
 #[test]
-fn canvas_constructor_rejects_empty_extents_and_nonfinite_bars() {
-    assert!(WorldCanvas::new(0, 180).is_none());
-    assert!(WorldCanvas::new(320, 0).is_none());
-    assert!(
-        WorldCanvas::new(320, 180)
-            .unwrap()
-            .with_bar_color(Color::rgb(f32::NAN, 0.0, 0.0))
-            .is_none()
-    );
-    assert!(
-        WorldCanvas::new(320, 180)
-            .unwrap()
-            .with_bar_color(Color::rgba(0.0, 0.0, 0.0, f32::INFINITY))
-            .is_none()
-    );
-}
-
-#[test]
 fn native_world_pointer_uses_the_presented_camera_without_canvas_configuration() {
     let mut world = World::new();
     let window = Window {

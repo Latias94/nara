@@ -5,7 +5,7 @@ use nara_ui_kernel::{
     UiNode, UiRoot, UiRootKey, UiStyle, UiTheme, UiVisual,
 };
 
-fn frame(surface: u64, source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
+pub(crate) fn frame(surface: u64, source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
     let node = UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
         .with_key(UiLocalKey::runtime("packet-retention", "node").unwrap())
         .with_visual(visual);
@@ -54,7 +54,7 @@ fn packet_world() -> World {
     world
 }
 
-fn prepared_submission(
+pub(crate) fn prepared_submission(
     packet: Arc<UiPaintPacket>,
     admission_id: u64,
     presentation_epoch: u64,
@@ -405,10 +405,11 @@ fn identical_submission_identities_cannot_return_into_a_replacement_outcome_owne
         old_submission.content_rejected("old".to_owned()),
     )
     .expect_err("equal value identities do not authorize a different reserved storage owner");
-    assert_eq!(old.pending_backend_count(), 1);
+    assert_eq!(old.receiver.pending_backend_count(), 1);
     assert_eq!(
         world
             .resource::<UiPresentationOutcomes>()
+            .receiver
             .pending_backend_count(),
         1
     );
@@ -461,7 +462,7 @@ fn dropping_an_external_frame_returns_its_original_reserved_outcomes_after_resou
     let mut original = world.remove_resource::<UiPresentationOutcomes>().unwrap();
     world.insert_resource(UiPresentationOutcomes::default());
     drop(external);
-    assert_eq!(original.pending_backend_count(), 0);
+    assert_eq!(original.receiver.pending_backend_count(), 0);
     let original = original.drain().unwrap();
     assert_eq!(original.len(), 1);
     assert!(
@@ -473,45 +474,6 @@ fn dropping_an_external_frame_returns_its_original_reserved_outcomes_after_resou
             .unwrap()
             .is_empty()
     );
-}
-
-#[test]
-fn outcome_storage_survives_its_world_resource_until_the_last_abandoned_permission() {
-    let mut world = packet_world();
-    compile_ui_paint_packets(
-        &mut world,
-        &[frame(
-            1,
-            1,
-            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
-        )],
-    )
-    .unwrap();
-    let packet = world
-        .resource::<UiPresentationState>()
-        .0
-        .planned(RenderTarget::Window(WindowId::PRIMARY))
-        .unwrap();
-    let submissions = [
-        prepared_submission(Arc::clone(&packet), 93, 9),
-        prepared_submission(packet, 94, 10),
-    ];
-    let permits = world
-        .resource_mut::<UiPresentationOutcomes>()
-        .reserve_backend(&submissions)
-        .unwrap();
-    let mut external = submissions
-        .into_iter()
-        .zip(permits)
-        .map(|(submission, permit)| UiBackendSubmission::pair(submission, permit).unwrap())
-        .collect::<Vec<_>>();
-    let retained = Arc::downgrade(&external[0].permit.owner);
-    drop(world.remove_resource::<UiPresentationOutcomes>().unwrap());
-    drop(world);
-    drop(external.pop());
-    assert!(retained.upgrade().is_some());
-    drop(external);
-    assert!(retained.upgrade().is_none());
 }
 
 #[test]
@@ -639,6 +601,7 @@ fn replacing_outcome_ingress_before_transfer_refuses_without_consuming_the_origi
     assert_eq!(
         world
             .resource::<UiPresentationOutcomes>()
+            .receiver
             .pending_backend_count(),
         0
     );
@@ -743,8 +706,8 @@ fn mixed_owner_batch_refuses_before_any_commit_and_abandonment_remains_owner_loc
             b.content_rejected("b".to_owned()),
         ])
         .unwrap_err();
-    assert_eq!(original.pending_backend_count(), 2);
-    assert_eq!(foreign.pending_backend_count(), 1);
+    assert_eq!(original.receiver.pending_backend_count(), 2);
+    assert_eq!(foreign.receiver.pending_backend_count(), 1);
     drop(returned);
     original.commit_backend(a.next().unwrap().content_rejected("second".to_owned()));
     let original = original.drain().unwrap();

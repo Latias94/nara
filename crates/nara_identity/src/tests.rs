@@ -1,9 +1,12 @@
+#[cfg(feature = "runtime")]
 use nara_core::ItemLimit;
+#[cfg(feature = "runtime")]
 use std::{
     cell::Cell,
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[cfg(feature = "runtime")]
 use nara_ecs::{
     Entity, Resource, World,
     bevy_ecs::lifecycle::{Despawn, Insert, Remove},
@@ -11,28 +14,36 @@ use nara_ecs::{
     system::ResMut,
 };
 
+#[cfg(feature = "runtime")]
 use crate::__private::{
     AdditionalRetirementIdentityError, validate_additional_retirement_identity_axes,
 };
+#[cfg(feature = "runtime")]
 use crate::domain::{
     prepare_exact_entity_retirement, prepare_exact_scene_instance_replacement,
     prepare_exact_scene_instance_retirement,
 };
+#[cfg(feature = "runtime")]
 use crate::{
-    EntityLookup, EntityReference, EntityReferenceRemap, IdentityAllocationError,
-    IdentityDomainError, IdentityRemapError, MonotonicNonZeroU64Allocator, PersistentRuntimeId,
-    PersistentRuntimeNamespaceId, PersistentRuntimeReference, RuntimeEntityIncarnation,
-    RuntimeEntityReference, SceneEntityId, SceneInstanceId, TombstoneCause, WorldEntityLocator,
-    WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings, adopt_identity_entity,
+    EntityLookup, IdentityDomainError, TombstoneCause, WorldEntityLocator, WorldEntityToken,
+    WorldIdentityDomain, WorldIdentityDomainSettings, adopt_identity_entity,
     allocate_world_identity_domain_id_from, register_persistent_identity, register_scene_instance,
     resolve_in_world, retire_identity_entity, retire_identity_entity_with_disposition,
     spawn_identity_entity,
 };
+use crate::{
+    EntityReference, EntityReferenceRemap, IdentityAllocationError, IdentityRemapError,
+    MonotonicNonZeroU64Allocator, RuntimeEntityIncarnation, RuntimeEntityReference, SceneEntityId,
+    SceneInstanceId,
+};
+#[cfg(any(feature = "runtime", feature = "serde"))]
+use crate::{PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference};
 
 fn scene_id(value: &str) -> SceneEntityId {
     SceneEntityId::new(value).unwrap()
 }
 
+#[cfg(any(feature = "runtime", feature = "serde"))]
 fn persistent_ref(value: &str) -> PersistentRuntimeReference {
     PersistentRuntimeReference::new(
         PersistentRuntimeNamespaceId::new("runtime").unwrap(),
@@ -40,6 +51,7 @@ fn persistent_ref(value: &str) -> PersistentRuntimeReference {
     )
 }
 
+#[cfg(feature = "runtime")]
 fn settings(claims: usize, tombstones: usize) -> WorldIdentityDomainSettings {
     WorldIdentityDomainSettings::new(
         ItemLimit::new(claims).unwrap(),
@@ -48,6 +60,7 @@ fn settings(claims: usize, tombstones: usize) -> WorldIdentityDomainSettings {
     )
 }
 
+#[cfg(feature = "runtime")]
 fn world_with_domain(claims: usize, tombstones: usize) -> World {
     let mut world = World::new();
     let domain = WorldIdentityDomain::new(&world, settings(claims, tombstones)).unwrap();
@@ -55,10 +68,12 @@ fn world_with_domain(claims: usize, tombstones: usize) -> World {
     world
 }
 
+#[cfg(feature = "runtime")]
 fn spawn_token(world: &mut World) -> WorldEntityToken {
     spawn_identity_entity(world).unwrap()
 }
 
+#[cfg(feature = "runtime")]
 fn with_domain<T>(
     world: &mut World,
     mutate: impl FnOnce(&mut World, &mut WorldIdentityDomain) -> T,
@@ -69,6 +84,7 @@ fn with_domain<T>(
     result
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_accepts_entities_without_semantic_axes() {
     let mut world = world_with_domain(8, 2);
@@ -80,6 +96,7 @@ fn additional_retirement_identity_preflight_accepts_entities_without_semantic_ax
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_rejects_active_scene_axis() {
     let mut world = world_with_domain(8, 2);
@@ -98,6 +115,7 @@ fn additional_retirement_identity_preflight_rejects_active_scene_axis() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_rejects_persistent_axis() {
     let mut world = world_with_domain(8, 2);
@@ -120,6 +138,7 @@ fn additional_retirement_identity_preflight_rejects_persistent_axis() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_rejects_duplicate_and_missing_entities() {
     let mut world = world_with_domain(8, 2);
@@ -141,6 +160,7 @@ fn additional_retirement_identity_preflight_rejects_duplicate_and_missing_entiti
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_rejects_unavailable_or_foreign_world_domain() {
     let world_without_domain = World::new();
@@ -167,6 +187,7 @@ fn additional_retirement_identity_preflight_rejects_unavailable_or_foreign_world
     assert!(target_world.get_entity(target_entity).is_ok());
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn additional_retirement_identity_preflight_rejects_a_foreign_world_token_with_matching_bits() {
     let mut local_world = world_with_domain(8, 2);
@@ -206,6 +227,7 @@ fn monotonic_allocator_rejects_zero_and_exhaustion_atomically() {
     assert_eq!(allocator, exhausted);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn world_domain_allocator_issues_the_last_id_once_then_fails_atomically() {
     let allocator = AtomicU64::new(u64::MAX);
@@ -223,6 +245,7 @@ fn world_domain_allocator_issues_the_last_id_once_then_fails_atomically() {
     assert_eq!(allocator.load(Ordering::Relaxed), 0);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn runtime_incarnation_allocator_never_wraps_or_reuses_its_last_value() {
     let allocator = AtomicU64::new(u64::MAX);
@@ -241,6 +264,7 @@ fn runtime_incarnation_allocator_never_wraps_or_reuses_its_last_value() {
     assert!(RuntimeEntityIncarnation::new(0).is_err());
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_allocator_issues_the_last_id_once_then_fails_atomically() {
     let mut world = world_with_domain(3, 1);
@@ -257,6 +281,7 @@ fn scene_instance_allocator_issues_the_last_id_once_then_fails_atomically() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn bidirectional_registration_rejects_both_collision_directions_atomically() {
     let mut world = world_with_domain(16, 4);
@@ -299,6 +324,7 @@ fn bidirectional_registration_rejects_both_collision_directions_atomically() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn local_domain_can_adopt_candidates_before_the_resource_is_published() {
     let mut world = World::new();
@@ -320,6 +346,7 @@ fn local_domain_can_adopt_candidates_before_the_resource_is_published() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn entity_adoption_rejects_a_marker_owned_by_another_domain() {
     let mut world = World::new();
@@ -334,6 +361,7 @@ fn entity_adoption_rejects_a_marker_owned_by_another_domain() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_batch_rejects_duplicate_ids_and_entities_without_claiming_an_instance() {
     let mut world = world_with_domain(16, 4);
@@ -373,6 +401,7 @@ fn scene_batch_rejects_duplicate_ids_and_entities_without_claiming_an_instance()
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn equal_entity_bits_in_two_worlds_never_alias_and_scene_local_requires_context() {
     let mut first_world = world_with_domain(16, 4);
@@ -438,6 +467,7 @@ fn equal_entity_bits_in_two_worlds_never_alias_and_scene_local_requires_context(
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn foreign_world_token_never_aliases_equal_entity_bits_in_the_target_world() {
     let mut source_world = world_with_domain(8, 2);
@@ -468,6 +498,7 @@ fn foreign_world_token_never_aliases_equal_entity_bits_in_the_target_world() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn moving_a_domain_resource_cannot_rebind_its_tokens_to_another_world() {
     let mut source_world = world_with_domain(8, 2);
@@ -506,6 +537,7 @@ fn moving_a_domain_resource_cannot_rebind_its_tokens_to_another_world() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn moving_a_domain_resource_cannot_resolve_an_equal_bits_unrelated_entity() {
     let mut source_world = world_with_domain(8, 2);
@@ -537,6 +569,7 @@ fn moving_a_domain_resource_cannot_resolve_an_equal_bits_unrelated_entity() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn despawned_token_cannot_register_or_consume_identity_claims() {
     let mut world = world_with_domain(8, 2);
@@ -559,6 +592,7 @@ fn despawned_token_cannot_register_or_consume_identity_claims() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn world_resolution_detects_direct_despawn_as_a_stale_registration() {
     let mut world = world_with_domain(8, 2);
@@ -576,6 +610,7 @@ fn world_resolution_detects_direct_despawn_as_a_stale_registration() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn persistent_uuid_identity_is_scoped_by_namespace() {
     let mut world = world_with_domain(8, 2);
@@ -611,6 +646,7 @@ fn persistent_uuid_identity_is_scoped_by_namespace() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn parallel_fork_remaps_every_scene_reference_as_a_group() {
     let mut source_world = world_with_domain(32, 8);
@@ -660,6 +696,7 @@ fn parallel_fork_remaps_every_scene_reference_as_a_group() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn same_timeline_restore_resolves_recorded_reference_to_a_fresh_entity_slot() {
     let mut source_world = world_with_domain(16, 4);
@@ -703,6 +740,7 @@ fn same_timeline_restore_resolves_recorded_reference_to_a_fresh_entity_slot() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
     let source_persistent_reference = persistent_ref("77777777-7777-4777-8777-777777777777");
@@ -792,6 +830,7 @@ fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn retirement_remains_typed_after_detail_eviction_and_identity_is_never_reused() {
     let mut world = world_with_domain(32, 1);
@@ -855,6 +894,7 @@ fn retirement_remains_typed_after_detail_eviction_and_identity_is_never_reused()
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn retirement_sequence_exhaustion_is_failure_atomic() {
     let mut world = world_with_domain(8, 2);
@@ -891,6 +931,7 @@ fn retirement_sequence_exhaustion_is_failure_atomic() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_replacement_retires_the_old_group_and_publishes_the_new_group() {
     let mut world = world_with_domain(16, 8);
@@ -926,6 +967,7 @@ fn scene_instance_replacement_retires_the_old_group_and_publishes_the_new_group(
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn prepared_exact_scene_replacement_preserves_authority_until_commit() {
     let mut world = world_with_domain(16, 8);
@@ -974,6 +1016,7 @@ fn prepared_exact_scene_replacement_preserves_authority_until_commit() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn prepared_exact_scene_retirement_preserves_authority_until_commit() {
     let mut world = world_with_domain(16, 8);
@@ -1009,6 +1052,7 @@ fn prepared_exact_scene_retirement_preserves_authority_until_commit() {
     ));
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn prepared_exact_entity_retirement_preserves_authority_until_commit() {
     let mut world = world_with_domain(16, 8);
@@ -1045,9 +1089,11 @@ fn prepared_exact_entity_retirement_preserves_authority_until_commit() {
     ));
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Resource, Default)]
 struct RetirementObserverRuns(u32);
 
+#[cfg(feature = "runtime")]
 #[test]
 fn world_identity_operations_preserve_custody_and_retirement_incarnations() {
     let mut world = world_with_domain(16, 8);
@@ -1106,6 +1152,7 @@ fn world_identity_operations_preserve_custody_and_retirement_incarnations() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn exact_entity_preparation_rejects_resource_observers_before_any_effect() {
     for insert in [false, true] {
@@ -1163,6 +1210,7 @@ fn exact_entity_preparation_rejects_resource_observers_before_any_effect() {
     }
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn world_registration_borrows_the_installed_domain_without_resource_lifecycle() {
     let mut world = world_with_domain(16, 8);
@@ -1207,6 +1255,7 @@ fn world_registration_borrows_the_installed_domain_without_resource_lifecycle() 
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn world_identity_operations_reject_a_domain_moved_from_another_world() {
     let mut source = world_with_domain(16, 8);
@@ -1246,6 +1295,7 @@ fn world_identity_operations_reject_a_domain_moved_from_another_world() {
     assert!(source.get_entity(token.entity()).is_ok());
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn atomic_scene_replacement_rejects_old_entity_observer_before_publication() {
     let mut world = world_with_domain(16, 8);
@@ -1288,6 +1338,7 @@ fn atomic_scene_replacement_rejects_old_entity_observer_before_publication() {
     assert_eq!(domain.locators_for_token(&world, new_token).unwrap(), None);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn atomic_scene_replacement_validates_the_complete_retirement_set() {
     let mut world = world_with_domain(32, 16);
@@ -1389,6 +1440,7 @@ fn atomic_scene_replacement_validates_the_complete_retirement_set() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn active_scene_instance_capture_validates_and_freezes_current_membership() {
     let mut world = world_with_domain(16, 8);
@@ -1420,6 +1472,7 @@ fn active_scene_instance_capture_validates_and_freezes_current_membership() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_replacement_candidate_failure_preserves_the_old_group_and_allocator() {
     let mut world = world_with_domain(16, 8);
@@ -1466,6 +1519,7 @@ fn scene_instance_replacement_candidate_failure_preserves_the_old_group_and_allo
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_replacement_retirement_failure_does_not_publish_or_consume_an_instance() {
     let mut world = world_with_domain(16, 8);
@@ -1513,6 +1567,7 @@ fn scene_instance_replacement_retirement_failure_does_not_publish_or_consume_an_
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_can_retire_after_one_member_was_already_despawned() {
     let mut world = world_with_domain(16, 8);
@@ -1560,6 +1615,7 @@ fn scene_instance_can_retire_after_one_member_was_already_despawned() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_lifetime_claim_budget_is_independent_of_persistent_records() {
     let mut world = world_with_domain(2, 1);
@@ -1586,6 +1642,7 @@ fn scene_lifetime_claim_budget_is_independent_of_persistent_records() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_instance_preflight_rejects_oversized_groups_without_mutation() {
     let world = world_with_domain(2, 1);
@@ -1602,6 +1659,7 @@ fn scene_instance_preflight_rejects_oversized_groups_without_mutation() {
     assert_eq!(domain.stats(), before);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn scene_registration_stops_consuming_input_when_the_claim_budget_is_exceeded() {
     let mut world = world_with_domain(3, 1);
@@ -1636,6 +1694,7 @@ fn scene_registration_stops_consuming_input_when_the_claim_budget_is_exceeded() 
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn reverse_lookup_returns_every_registered_identity_axis() {
     let mut world = world_with_domain(4, 2);
@@ -1666,6 +1725,7 @@ fn reverse_lookup_returns_every_registered_identity_axis() {
     });
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn registered_locators_are_sorted_by_semantic_identity() {
     let mut world = world_with_domain(8, 2);
@@ -1713,6 +1773,7 @@ fn explicit_reference_remap_rejects_an_incomplete_source_set() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn empty_scene_instance_is_a_non_reusable_lifetime_claim() {
     let mut world = world_with_domain(1, 1);
@@ -1761,6 +1822,7 @@ fn durable_and_runtime_references_roundtrip_without_runtime_entity_bits() {
     );
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn entity_type_remains_local_to_lookup_results() {
     fn assert_runtime_entity(_: Entity) {}
@@ -1777,6 +1839,7 @@ fn entity_type_remains_local_to_lookup_results() {
     assert_runtime_entity(resolved);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn authored_references_require_source_interpretation_even_with_live_scene_context() {
     use crate::{

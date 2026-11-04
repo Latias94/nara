@@ -1,14 +1,19 @@
 //! Backend-neutral image assets and PNG-first importing.
+//!
+//! Image content and Runtime codecs need no App/ECS installation. `render-prepare` adds captured
+//! resource values; `runtime` enables PNG import/reload services and, with `render-prepare`, the
+//! automatic preparation plugin. The independent `serde` feature enables serialization.
 
-// Bevy derives resolve this path; Nara's ECS facade remains the actual dependency.
 mod asset;
 mod budget;
 mod content;
 mod cook;
+#[cfg(feature = "runtime")]
 mod import;
 mod limits;
 #[cfg(any(feature = "render-prepare", test))]
 mod prepare;
+#[cfg(feature = "runtime")]
 mod reload;
 mod runtime;
 mod settings;
@@ -23,6 +28,7 @@ pub use cook::{
     ImageCookError, ImageCookLimits, ImageCookSettings, ImageCookTarget, ImageOversizePolicy,
     cook_runtime_image,
 };
+#[cfg(feature = "runtime")]
 pub use import::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportError,
     ImageImportStage, ImageImportedAsset, ImageImporter, ImageImporterCreateError,
@@ -33,12 +39,17 @@ pub use limits::{
     IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageImportBudgetError, ImageImportLimitKind,
     ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
 };
+#[cfg(all(feature = "runtime", feature = "render-prepare"))]
+pub use prepare::runtime::{
+    IMAGE_PREPARE_PLUGIN_DECLARATION, IMAGE_PREPARE_PLUGIN_ID, ImagePreparePlugin,
+    ImagePrepareStats, prepare_images,
+};
 #[cfg(any(feature = "render-prepare", test))]
 pub use prepare::{
-    IMAGE_PREPARE_PLUGIN_DECLARATION, IMAGE_PREPARE_PLUGIN_ID, ImagePreparePlugin,
-    ImagePrepareStats, PreparedImageResource, PreparedImageSnapshot, PreparedImages,
-    image_content_hash, image_resource_key, prepare_images,
+    PreparedImageResource, PreparedImageSnapshot, PreparedImages, image_content_hash,
+    image_resource_key,
 };
+#[cfg(feature = "runtime")]
 pub use reload::{
     IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, IMAGE_SOURCE_PLUGIN_DECLARATION,
     IMAGE_SOURCE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats, ImageSourcePlugin,
@@ -49,5 +60,5 @@ pub use runtime::ImageDomain;
 pub use runtime::ImageRuntimeCodec;
 pub use settings::ImageImportSettings;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 mod tests;

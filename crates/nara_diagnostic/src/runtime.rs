@@ -5,6 +5,7 @@ use std::{
 };
 
 use nara_core::{ByteLimit, ItemLimit};
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 use thiserror::Error;
 
@@ -637,7 +638,8 @@ pub struct RuntimeTracingCursor {
     next_sequence: Option<u64>,
 }
 
-#[derive(Clone, Resource)]
+#[derive(Clone)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct RuntimeDiagnostics {
     settings: RuntimeDiagnosticsSettings,
     order: VecDeque<u64>,
@@ -889,6 +891,7 @@ impl RuntimeDiagnostics {
         }
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn maintain(&mut self, current_frame: u64) {
         let RuntimeDiagnosticRetention::FrameWindow(_) = self.settings.retention else {
             return;

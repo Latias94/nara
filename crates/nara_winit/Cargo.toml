@@ -13,7 +13,7 @@ nara_core.workspace = true
 nara_ecs.workspace = true
 nara_input.workspace = true
 nara_ui_kernel = { workspace = true, optional = true }
-nara_window.workspace = true
+nara_window = { workspace = true, features = ["runtime"] }
 thiserror = { workspace = true, optional = true }
 winit.workspace = true
 

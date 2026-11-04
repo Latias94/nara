@@ -112,10 +112,15 @@ The current package `nara-editor` still includes Dear/Winit/WGPU dependencies an
 trait is Dear-specific. This target diagram does not claim that the portable Editor composition
 or independent panel-hosting successor already exists. Module/crate extraction follows an actual
 independent dependency closure and consumer, with direct migration of replaced interfaces.
-`nara_ui_render` also currently packages its neutral planner with unconditional App/ECS/window
-integration. Preserve that existing adapter's behavior while separating its dependency closure
-from the neutral packet/planner path during R11b; the current UI-only consumer covers text,
-kernel and widgets, not this presentation closure.
+The [R11b dependency prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#neutral-presentation-consumption-prerequisite)
+separates the neutral packet/planner/presenter from App/ECS installation inside the current
+owners. Asset, Identity, Diagnostic, Image, Render, Window and UI Render use explicit `runtime`
+features for their integration; ordinary value consumption and serialization need not install
+those services. The same target/resource identities, pixel retention and backend permit storage
+serve both paths. The independently locked UI consumer's optional presentation library supplies
+the complete capture/plan/present/input/retire pressure; its dependency and native evidence is
+recorded separately from this selected contract. No additional package or universal resource
+namespace is required by the separation.
 
 The dependency contract is `text <- kernel <- controlled widgets`, with product adapters above
 those modules. The neutral presentation planner consumes kernel/text and render resource facts;

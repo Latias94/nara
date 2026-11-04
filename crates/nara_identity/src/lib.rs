@@ -1,6 +1,11 @@
 //! Stable semantic identity and world-scoped runtime lookup for nara.
+//!
+//! Value identities and references are available without App or ECS dependencies. The `runtime`
+//! feature enables ECS components, World identity domains, and Scene transaction support.
+//! The independent `serde` feature enables value serialization without runtime integration.
 
 mod allocator;
+#[cfg(feature = "runtime")]
 mod domain;
 mod reference;
 mod remap;
@@ -8,6 +13,7 @@ mod source;
 mod types;
 
 pub use allocator::IdentityAllocationError;
+#[cfg(feature = "runtime")]
 pub use domain::{
     EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats, IdentityTombstone,
     IdentityTombstoneSubject, PersistentRetirementDisposition, SceneIdentitySnapshot,
@@ -39,6 +45,7 @@ pub use types::{
 /// scene owner can compose them; they are excluded from the root product facade and carry no
 /// external compatibility promise.
 #[doc(hidden)]
+#[cfg(feature = "runtime")]
 pub mod __private {
     pub use crate::domain::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError, PreparedEntityRetirement,
@@ -55,7 +62,7 @@ pub mod __private {
 
 #[cfg(test)]
 pub(crate) use allocator::MonotonicNonZeroU64Allocator;
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime"))]
 pub(crate) use domain::allocate_world_identity_domain_id_from;
 
 #[cfg(test)]

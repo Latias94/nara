@@ -172,18 +172,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn viewport_rejects_empty_extents() {
+        assert_eq!(ViewportRect::new(0, 0, 0, 720), None);
+        assert_eq!(ViewportRect::new(0, 0, 1280, 0), None);
+        assert_eq!(
+            ViewportRect::new(0, 0, 1280, 720).unwrap().extent(),
+            Extent2d {
+                width: 1280,
+                height: 720,
+            }
+        );
+    }
+
+    #[test]
     fn image_target_identity_is_distinct_per_view_and_stable_during_resize() {
         let first = RenderImage2d::allocate_handle().unwrap();
         let second = RenderImage2d::allocate_handle().unwrap();
-        let initial =
-            crate::__private::editor_viewport_image_target(first, Extent2d::new(64, 64).unwrap())
-                .unwrap();
-        let resized =
-            crate::__private::editor_viewport_image_target(first, Extent2d::new(128, 64).unwrap())
-                .unwrap();
+        let initial = RenderImagePacket::new(first, Extent2d::new(64, 64).unwrap()).unwrap();
+        let resized = RenderImagePacket::new(first, Extent2d::new(128, 64).unwrap()).unwrap();
 
         assert_ne!(first.id(), second.id());
         assert_eq!(initial.image(), resized.image());
         assert_ne!(initial.extent(), resized.extent());
+    }
+
+    #[test]
+    fn image_packet_rejects_zero_extent_with_the_frame_packet_error() {
+        let image = RenderImage2d::allocate_handle().unwrap();
+        for extent in [
+            Extent2d {
+                width: 0,
+                height: 64,
+            },
+            Extent2d {
+                width: 64,
+                height: 0,
+            },
+        ] {
+            assert_eq!(
+                RenderImagePacket::new(image, extent),
+                Err(crate::RenderFramePacketError::ImageTargetHasZeroExtent)
+            );
+        }
+    }
+
+    #[cfg(feature = "runtime")]
+    #[test]
+    fn editor_image_target_retains_the_public_packet_identity_and_validation() {
+        let image = RenderImage2d::allocate_handle().unwrap();
+        let another_image = RenderImage2d::allocate_handle().unwrap();
+        let extent = Extent2d::new(64, 64).unwrap();
+        let initial = crate::__private::editor_viewport_image_target(image, extent).unwrap();
+        let resized =
+            crate::__private::editor_viewport_image_target(image, Extent2d::new(128, 64).unwrap())
+                .unwrap();
+        assert_ne!(image.id(), another_image.id());
+        assert_eq!(initial.image(), resized.image());
+        assert_ne!(initial.extent(), resized.extent());
+        assert_eq!(initial, RenderImagePacket::new(image, extent).unwrap());
+        assert_eq!(
+            crate::__private::editor_viewport_image_target(
+                image,
+                Extent2d {
+                    width: 0,
+                    height: 64,
+                }
+            ),
+            Err(crate::RenderFramePacketError::ImageTargetHasZeroExtent)
+        );
     }
 }

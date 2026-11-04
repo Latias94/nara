@@ -6,12 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-nara_asset.workspace = true
+nara_asset = { workspace = true, features = ["runtime"] }
 nara_core.workspace = true
-nara_diagnostic.workspace = true
+nara_diagnostic = { workspace = true, features = ["runtime"] }
 nara_ecs.workspace = true
 nara_fs.workspace = true
-nara_identity.workspace = true
+nara_identity = { workspace = true, features = ["runtime"] }
 nara_reflect.workspace = true
 nara_scene = { workspace = true, features = ["serde"] }
 thiserror.workspace = true

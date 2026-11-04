@@ -5,7 +5,9 @@ Its direct engine dependencies are `nara_render_wgpu` without default features, 
 `nara_core` and `nara_ecs`, also without default features. WGPU 30.0.1 is used only by the native
 tests for trusted readback and native-adapter timestamp capability checks. The separate native
 UI example enables the stock UI render feature and consumes text/kernel/widgets/presentation plus
-Winit through test dependencies. It requires no Dear, game UI ECS adapter, Editor or root product.
+Winit through test dependencies. It enables `ui-module-consumer`'s optional `presentation`
+feature and imports its normal library code. It requires no Dear, game UI ECS adapter, Editor or
+root product.
 
 The offscreen workflows create no gameplay Runtime, ECS World, native window, surface or event loop.
 The render Host creates each move-only `WgpuRenderProducer`; configuration, submission and
@@ -52,6 +54,24 @@ field/button/popup frame and returns its original backend outcomes after actual 
 The existing `WgpuRenderHost` owns the device, producer, output and physical native-use retirement.
 The original `WgpuUiImageSubmission::display()` occurrence is the only one used to complete its
 presentation; mirror displays cannot substitute for its composite receipt.
+
+Every scene also authors a visible 32-by-32 image at logical `(316, 160)`, inside the original
+360-by-200 window. It calls the exact `presentation::capture_swatch` helper from the independent
+UI library, which constructs 2-by-2 sRGB RGBA8 pixels in top-left red, top-right green, bottom-left
+blue and bottom-right yellow order with an external lifetime owner. The normal library publishes
+the procedural Image through `Assets::commit_loaded`, captures it and inserts that complete value
+into `UiPreparedImages`. Each original submitted packet must match the library's typed handle and
+complete resource identity, retaining exact shared pixels and their owner plus a visible image
+paint primitive.
+The same input remains present across Host reconstruction and every later keyed/curve/input stage.
+No additional device, journal or image submission is created for this image.
+
+`ImagePainter` draws the submitted output; the shared `window_gpu::assert_pixels` oracle checks
+a fixed 32-by-16 clear/split output and cannot directly inspect this complete UI scene.
+Image acceptance here is therefore exact submitted-packet
+resource presence plus the original actual window presentation, explicitly reported as
+`image_qualification=packet_resource_and_actual_presentation`. This is not pixel-readback evidence
+for the swatch. The separate offscreen output tests retain their existing GPU readback coverage.
 
 Only after the presenter drains that original one-shot acceptance may the caller route input
 through its read-only frame journal. Compilation, planning and offscreen submission alone grant
@@ -105,9 +125,12 @@ cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-output-
 
 Injected native events and normalized routing qualify this consumer's input adapter; they do not
 establish physical OS input-method/candidate delivery, accessibility or an independent Editor.
-The presentation crate's combined App/ECS/render/image dependency closure remains explicit even
-though this adapter installs no game UI plugin or World. This is a finite presentation prerequisite,
-not the whole R11b panel attachment or a completed neutral presentation split.
+The separate UI library's base graph still selects text/kernel/widgets; its optional presentation
+graph selects Asset/Image/Render/UI-render values without a Runtime feature. This native executable
+adds the actual WGPU/Winit backend through its own development graph. Its original trajectory still
+requires all 19 actual presentations, 18 journal commits, popup/text/IME/keyed/layout/curve/drag/wheel
+assertions, error/panic controls and original Host retirement. Source changes alone do not qualify
+the dependency split, native execution, whole R11b panel attachment or an independent Editor.
 
 ## Workflows And Assertions
 

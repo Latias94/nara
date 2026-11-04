@@ -1,0 +1,633 @@
+use nara_app::{
+    __RuntimeDriverPort, App, AppExitRequests, CoreStage, Plugin, PluginError, RuntimeDriverScope,
+    RuntimeWorldAccessError,
+};
+use nara_ecs::{
+    Query, ResMut, Resource, World,
+    schedule::{IntoScheduleConfigs, SystemSet},
+};
+
+#[cfg(test)]
+use crate::WindowId;
+use crate::{
+    PresentMode, PrimaryWindow, PrimaryWindowId, Window, WindowCloseRequests, WindowEvent,
+    WindowEvents, WindowMode, backend,
+};
+
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
+pub enum WindowSet {
+    ApplyEvents,
+}
+
+/// First-party input token for the synchronized platform event path.
+///
+/// The private field prevents callers from bypassing [`push_window_driver_event`] and publishing
+/// an observation without also queueing its retained window-state update.
+#[doc(hidden)]
+pub struct __WindowDriverEvent(WindowEvent);
+
+impl __RuntimeDriverPort for WindowEvents {
+    type Input = __WindowDriverEvent;
+    type Output = ();
+
+    fn apply_driver_input(&mut self, input: Self::Input) {
+        self.push(input.0);
+    }
+}
+
+const MAX_PENDING_WINDOW_EVENTS: usize = 4_096;
+
+#[derive(Debug, Default, Resource)]
+struct PendingWindowEvents(Vec<WindowEvent>);
+
+impl __RuntimeDriverPort for PendingWindowEvents {
+    type Input = WindowEvent;
+    type Output = Result<(), WindowDriverEventError>;
+
+    fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
+        if self.0.len() >= MAX_PENDING_WINDOW_EVENTS {
+            return Err(WindowDriverEventError::CapacityExceeded);
+        }
+        self.0.push(input);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum WindowDriverEventError {
+    #[error("managed window driver access failed")]
+    Access(#[from] RuntimeWorldAccessError),
+    #[error("the bounded window driver event queue is full")]
+    CapacityExceeded,
+}
+
+pub fn apply_window_event(world: &mut World, event: &WindowEvent) {
+    let window_id = event.window_id();
+    if matches!(event, WindowEvent::CloseRequested { .. }) {
+        if !world.contains_resource::<WindowCloseRequests>() {
+            world.insert_resource(WindowCloseRequests::default());
+        }
+        world
+            .resource_mut::<WindowCloseRequests>()
+            .request(window_id);
+    }
+
+    let mut query = world.query::<&mut Window>();
+
+    for mut window in query.iter_mut(world) {
+        if window_event_changes_window(&window, event) {
+            apply_window_event_to_window(&mut window, event);
+        }
+    }
+}
+
+fn window_event_changes_window(window: &Window, event: &WindowEvent) -> bool {
+    if window.id != event.window_id() {
+        return false;
+    }
+
+    match event {
+        WindowEvent::Resized { resolution, .. } => window.resolution != *resolution,
+        WindowEvent::Focused { focused, .. } => window.focused != *focused,
+        WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+            window.resolution.scale_factor != *scale_factor
+        }
+        WindowEvent::Created { .. }
+        | WindowEvent::CloseRequested { .. }
+        | WindowEvent::Closed { .. }
+        | WindowEvent::RedrawRequested { .. } => false,
+    }
+}
+
+fn apply_window_event_to_window(window: &mut Window, event: &WindowEvent) {
+    match event {
+        WindowEvent::Resized { resolution, .. } => {
+            window.resolution = *resolution;
+        }
+        WindowEvent::Focused { focused, .. } => {
+            window.focused = *focused;
+        }
+        WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+            window.resolution.scale_factor = *scale_factor;
+        }
+        WindowEvent::Created { .. }
+        | WindowEvent::CloseRequested { .. }
+        | WindowEvent::Closed { .. }
+        | WindowEvent::RedrawRequested { .. } => {}
+    }
+}
+
+pub fn push_window_event(world: &mut World, event: WindowEvent) {
+    if !world.contains_resource::<WindowEvents>() {
+        world.insert_resource(WindowEvents::default());
+    }
+    apply_window_event(world, &event);
+    world.resource_mut::<WindowEvents>().push(event);
+}
+
+pub fn push_window_driver_event(
+    scope: &mut RuntimeDriverScope<'_>,
+    event: WindowEvent,
+) -> Result<(), WindowDriverEventError> {
+    scope.__apply_port::<PendingWindowEvents>(event.clone())??;
+    scope.__apply_port::<WindowEvents>(__WindowDriverEvent(event))?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowPlugin {
+    pub primary_window: Option<Window>,
+}
+
+pub const WINDOW_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.window");
+const WINDOW_PLUGIN_DEFINITION_ID: nara_app::PluginDefinitionId =
+    nara_app::PluginDefinitionId::new("nara.window.configured", 1);
+const WINDOW_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
+    &[nara_app::PluginProductCapability::new("desktop-winit")];
+pub const WINDOW_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
+    nara_app::PluginDeclaration::new(WINDOW_PLUGIN_ID, nara_app::PluginCategory::Platform)
+        .requires_product_capabilities(WINDOW_PRODUCT_REQUIREMENTS);
+
+/// Creates a repeatable window plugin definition from primary-window data.
+#[must_use]
+pub fn plugin(primary_window: Option<Window>) -> nara_app::PluginDefinition {
+    let canonical_configuration = window_plugin_configuration(primary_window.as_ref());
+    nara_app::PluginDefinition::infallible::<WindowPlugin, _>(
+        WINDOW_PLUGIN_DEFINITION_ID,
+        canonical_configuration,
+        move || WindowPlugin {
+            primary_window: primary_window.clone(),
+        },
+    )
+}
+
+fn window_plugin_configuration(primary_window: Option<&Window>) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(
+        primary_window.map_or(32, |window| 96_usize.saturating_add(window.title.len())),
+    );
+    bytes.extend_from_slice(b"nara.window.plugin-config.v1\0");
+    let Some(window) = primary_window else {
+        bytes.push(0);
+        return bytes;
+    };
+    bytes.push(1);
+    bytes.extend_from_slice(&window.id.get().to_le_bytes());
+    bytes.extend_from_slice(&(window.title.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(window.title.as_bytes());
+    bytes.extend_from_slice(&window.resolution.physical_width.to_le_bytes());
+    bytes.extend_from_slice(&window.resolution.physical_height.to_le_bytes());
+    bytes.extend_from_slice(&window.resolution.scale_factor.to_bits().to_le_bytes());
+    bytes.push(match window.mode {
+        WindowMode::Windowed => 0,
+        WindowMode::BorderlessFullscreen => 1,
+        WindowMode::Fullscreen => 2,
+    });
+    bytes.push(match window.present_mode {
+        PresentMode::AutoVsync => 0,
+        PresentMode::AutoNoVsync => 1,
+        PresentMode::Fifo => 2,
+        PresentMode::Immediate => 3,
+        PresentMode::Mailbox => 4,
+    });
+    bytes.push(u8::from(window.resizable));
+    bytes.push(u8::from(window.focused));
+    bytes
+}
+
+impl Default for WindowPlugin {
+    fn default() -> Self {
+        Self {
+            primary_window: Some(Window::default()),
+        }
+    }
+}
+
+impl Plugin for WindowPlugin {
+    fn declaration() -> &'static nara_app::PluginDeclaration {
+        &WINDOW_PLUGIN_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.init_resource::<WindowEvents>()?;
+        app.init_resource::<PendingWindowEvents>()?;
+        app.init_resource::<WindowCloseRequests>()?;
+        app.init_resource::<backend::BackendWindowHandles>()?;
+        app.insert_resource(PrimaryWindowId::default())?;
+
+        if let Some(window) = &self.primary_window {
+            let primary_id = window.id;
+            app.insert_resource(PrimaryWindowId(primary_id))?;
+            app.world_mut()?.spawn((window.clone(), PrimaryWindow));
+        }
+        app.add_systems(
+            CoreStage::First,
+            apply_pending_window_events.in_set(WindowSet::ApplyEvents),
+        )?;
+        app.add_systems(
+            CoreStage::Last,
+            (
+                request_exit_for_uncancelled_close,
+                clear_window_frame_events,
+            )
+                .chain(),
+        )?;
+        Ok(())
+    }
+}
+
+fn apply_pending_window_events(
+    mut pending: ResMut<PendingWindowEvents>,
+    mut close_requests: ResMut<WindowCloseRequests>,
+    mut windows: Query<&mut Window>,
+) {
+    for event in pending.0.drain(..) {
+        if matches!(event, WindowEvent::CloseRequested { .. }) {
+            close_requests.request(event.window_id());
+        }
+        if matches!(
+            &event,
+            WindowEvent::Resized { .. }
+                | WindowEvent::Focused { .. }
+                | WindowEvent::ScaleFactorChanged { .. }
+        ) {
+            for mut window in &mut windows {
+                if window_event_changes_window(&window, &event) {
+                    apply_window_event_to_window(&mut window, &event);
+                }
+            }
+        }
+    }
+}
+
+fn request_exit_for_uncancelled_close(
+    close_requests: ResMut<WindowCloseRequests>,
+    mut exit_requests: ResMut<AppExitRequests>,
+) {
+    if close_requests.has_uncancelled() {
+        exit_requests.request_exit();
+    }
+}
+
+fn clear_window_frame_events(
+    mut events: ResMut<WindowEvents>,
+    mut close_requests: ResMut<WindowCloseRequests>,
+) {
+    events.clear();
+    close_requests.clear();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WindowResolution;
+    use nara_ecs::bevy_ecs::query::Changed;
+    use std::time::Duration;
+
+    #[derive(Debug, Default, Resource)]
+    struct ChangedWindowIds(Vec<WindowId>);
+
+    impl __RuntimeDriverPort for ChangedWindowIds {
+        type Input = ();
+        type Output = ();
+
+        fn apply_driver_input(&mut self, (): Self::Input) {
+            self.0.clear();
+        }
+    }
+
+    fn record_changed_windows(
+        changed: Query<&Window, Changed<Window>>,
+        mut ids: ResMut<ChangedWindowIds>,
+    ) {
+        ids.0.extend(changed.iter().map(|window| window.id));
+    }
+
+    #[test]
+    fn window_plugin_spawns_primary_window_data() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+
+        assert_eq!(
+            app.world().resource::<PrimaryWindowId>().0,
+            WindowId::PRIMARY
+        );
+        assert!(
+            !app.world()
+                .resource::<backend::BackendWindowHandles>()
+                .is_registered(WindowId::PRIMARY)
+        );
+
+        let world = app.world_mut().expect("app should allow world mutation");
+        let mut query = world.query::<(&Window, &PrimaryWindow)>();
+        let windows = query.iter(world).collect::<Vec<_>>();
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].0.id, WindowId::PRIMARY);
+    }
+
+    #[test]
+    fn window_plugin_definition_binds_canonical_window_configuration() {
+        let window = Window::new("configured", WindowResolution::new(960, 540));
+        let first = plugin(Some(window.clone()));
+        let repeated = plugin(Some(window.clone()));
+        let changed = plugin(Some(Window::new(
+            "changed",
+            WindowResolution::new(960, 540),
+        )));
+
+        assert_eq!(first.key(), repeated.key());
+        assert_ne!(first.key(), changed.key());
+
+        let plan = nara_app::PluginPlan::resolve(first).unwrap();
+        let app = plan.instantiate().unwrap();
+        let mut query = app
+            .world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<Window>());
+
+        assert_eq!(query.next(), Some(&window));
+        assert_eq!(query.next(), None);
+    }
+
+    #[test]
+    fn resize_event_updates_matching_window_and_records_event() {
+        let mut world = World::new();
+        world.insert_resource(WindowEvents::default());
+        world.spawn((Window::default(), PrimaryWindow));
+
+        let resolution = WindowResolution::new(640, 480);
+        push_window_event(
+            &mut world,
+            WindowEvent::Resized {
+                window_id: WindowId::PRIMARY,
+                resolution,
+            },
+        );
+
+        let mut query = world.query::<&Window>();
+        let window = query.single(&world).unwrap();
+
+        assert_eq!(window.resolution, resolution);
+        assert_eq!(world.resource::<WindowEvents>().as_slice().len(), 1);
+    }
+
+    #[test]
+    fn focus_event_updates_window_and_close_event_records_frame_request() {
+        let mut world = World::new();
+        world.spawn((Window::default(), PrimaryWindow));
+
+        push_window_event(
+            &mut world,
+            WindowEvent::Focused {
+                window_id: WindowId::PRIMARY,
+                focused: false,
+            },
+        );
+        push_window_event(
+            &mut world,
+            WindowEvent::CloseRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+
+        let mut query = world.query::<&Window>();
+        let window = query.single(&world).unwrap();
+
+        assert!(!window.focused);
+        assert!(
+            world
+                .resource::<WindowCloseRequests>()
+                .is_requested(WindowId::PRIMARY)
+        );
+    }
+
+    #[test]
+    fn direct_events_mark_only_semantically_changed_windows() {
+        let mut world = World::new();
+        world.spawn(Window::default());
+        let secondary_id = WindowId::new(2);
+        world.spawn(Window::default().with_id(secondary_id));
+        world.clear_trackers();
+
+        apply_window_event(
+            &mut world,
+            &WindowEvent::RedrawRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+        let mut changed = world.query_filtered::<&Window, Changed<Window>>();
+        assert!(changed.iter(&world).next().is_none());
+
+        let resolution = WindowResolution::new(640, 480);
+        apply_window_event(
+            &mut world,
+            &WindowEvent::Resized {
+                window_id: WindowId::PRIMARY,
+                resolution,
+            },
+        );
+        let changed_ids = changed
+            .iter(&world)
+            .map(|window| window.id)
+            .collect::<Vec<_>>();
+        assert_eq!(changed_ids, [WindowId::PRIMARY]);
+
+        world.clear_trackers();
+        apply_window_event(
+            &mut world,
+            &WindowEvent::Resized {
+                window_id: WindowId::PRIMARY,
+                resolution,
+            },
+        );
+        assert!(changed.iter(&world).next().is_none());
+        assert!(world.iter_entities().any(|entity| {
+            entity
+                .get::<Window>()
+                .is_some_and(|window| window.id == secondary_id)
+        }));
+    }
+
+    #[test]
+    fn driver_events_change_only_the_matching_window_when_state_changes() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        let secondary_id = WindowId::new(2);
+        app.world_mut()
+            .unwrap()
+            .spawn(Window::default().with_id(secondary_id));
+        app.insert_resource(ChangedWindowIds::default()).unwrap();
+        app.add_systems(CoreStage::Update, record_changed_windows)
+            .unwrap();
+        let candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
+            .unwrap()
+            .admit(
+                app.seal().unwrap(),
+                nara_app::RuntimeObligationLedger::new(),
+                nara_app::RuntimeClosePolicy::default(),
+            )
+            .unwrap();
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
+            .unwrap();
+
+        runtime
+            .with_driver_scope(|scope| {
+                push_window_driver_event(
+                    scope,
+                    WindowEvent::RedrawRequested {
+                        window_id: WindowId::PRIMARY,
+                    },
+                )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
+            .unwrap()
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+
+        assert!(runtime.world().resource::<ChangedWindowIds>().0.is_empty());
+
+        runtime
+            .with_driver_scope(|scope| {
+                push_window_driver_event(
+                    scope,
+                    WindowEvent::Resized {
+                        window_id: WindowId::PRIMARY,
+                        resolution: WindowResolution::new(640, 480),
+                    },
+                )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
+            .unwrap()
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+
+        assert_eq!(
+            runtime.world().resource::<ChangedWindowIds>().0,
+            [WindowId::PRIMARY]
+        );
+        runtime
+            .with_driver_scope(|scope| {
+                scope.__apply_port::<ChangedWindowIds>(()).unwrap();
+                push_window_driver_event(
+                    scope,
+                    WindowEvent::Resized {
+                        window_id: WindowId::PRIMARY,
+                        resolution: WindowResolution::new(640, 480),
+                    },
+                )
+            })
+            .map(|outcome| {
+                assert!(outcome.post_operation_fault.is_none());
+                outcome.output
+            })
+            .unwrap()
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert!(runtime.world().resource::<ChangedWindowIds>().0.is_empty());
+
+        let secondary = runtime
+            .world()
+            .iter_entities()
+            .filter_map(|entity| entity.get::<Window>())
+            .find(|window| window.id == secondary_id);
+        assert!(secondary.is_some());
+    }
+
+    fn cancel_primary_close(mut close_requests: ResMut<WindowCloseRequests>) {
+        close_requests.cancel(WindowId::PRIMARY);
+    }
+
+    #[test]
+    fn close_request_can_be_cancelled_before_last_stage_exit_request() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        app.add_systems(CoreStage::Update, cancel_primary_close)
+            .expect("app should accept systems");
+        push_window_event(
+            app.world_mut().expect("app should allow world mutation"),
+            WindowEvent::CloseRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let outcome = runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        assert_eq!(outcome.frame().unwrap().exit, None);
+        assert!(
+            !runtime
+                .world()
+                .resource::<WindowCloseRequests>()
+                .is_requested(WindowId::PRIMARY)
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<WindowEvents>()
+                .as_slice()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn uncancelled_close_request_becomes_app_exit_request() {
+        let mut app = App::new();
+        app.add_plugin(WindowPlugin::default()).unwrap();
+        push_window_event(
+            app.world_mut().expect("app should allow world mutation"),
+            WindowEvent::CloseRequested {
+                window_id: WindowId::PRIMARY,
+            },
+        );
+
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let outcome = runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        assert_eq!(
+            outcome.frame().unwrap().exit,
+            Some(nara_app::AppExit::Requested)
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<WindowEvents>()
+                .as_slice()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
+    }
+
+    #[test]
+    fn backend_handle_registry_starts_empty() {
+        let handles = backend::BackendWindowHandles::default();
+
+        assert!(!handles.is_registered(WindowId::PRIMARY));
+    }
+
+    #[test]
+    fn cloned_backend_handles_share_one_authority_registry() {
+        let handles = backend::BackendWindowHandles::default();
+        let clone = handles.clone();
+        let independent = backend::BackendWindowHandles::default();
+
+        assert!(handles.shares_authority_with(&clone));
+        assert!(!handles.shares_authority_with(&independent));
+    }
+}

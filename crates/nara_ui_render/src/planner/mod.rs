@@ -18,6 +18,7 @@ mod images;
 mod lowering;
 
 pub use images::UiPreparedImages;
+#[cfg(any(feature = "runtime", test))]
 pub(crate) use images::collect_referenced_image_ids;
 use lowering::{lower_packet, preflight_content};
 
@@ -359,6 +360,7 @@ impl UiPresentationPlanner {
         }
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn snapshot_planned_packets(&self) -> Vec<Arc<UiPaintPacket>> {
         let mut packets = self
             .targets
@@ -369,6 +371,7 @@ impl UiPresentationPlanner {
         packets
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn snapshot_presented_packets(&self) -> Vec<Arc<UiPaintPacket>> {
         let mut packets = self
             .targets
@@ -390,6 +393,7 @@ pub enum UiPlannedPacketAbortOutcome {
     IgnoredUnrouted,
 }
 
+#[cfg(any(feature = "runtime", test))]
 fn sort_packets(packets: &mut [Arc<UiPaintPacket>]) {
     packets.sort_by_key(|packet| {
         (
@@ -399,6 +403,7 @@ fn sort_packets(packets: &mut [Arc<UiPaintPacket>]) {
     });
 }
 
+#[cfg(any(feature = "runtime", test))]
 fn render_target_order_key(target: RenderTarget) -> (u8, u64) {
     match target {
         RenderTarget::PrimaryWindow => (0, 0),

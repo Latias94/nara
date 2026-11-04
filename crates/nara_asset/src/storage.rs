@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
@@ -212,7 +213,8 @@ impl Debug for AssetSlotRevision {
     }
 }
 
-#[derive(Debug, Resource)]
+#[derive(Debug)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct Assets<T: Asset> {
     store_revision: Arc<()>,
     values: HashMap<AssetId, T>,

@@ -4,8 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[cfg(feature = "runtime")]
 use nara_app::{App, CoreStage, RealTime};
 use nara_core::{ByteLimit, ItemLimit};
+#[cfg(feature = "runtime")]
 use nara_ecs::{
     Resource,
     schedule::IntoScheduleConfigs,
@@ -14,16 +16,17 @@ use nara_ecs::{
 use tracing::{Event, Metadata, Subscriber, field::Visit, span};
 
 use crate::{
-    Diagnostic, DiagnosticCleanupSet, DiagnosticCode, DiagnosticDomain, DiagnosticField,
-    DiagnosticFieldClass, DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport,
-    DiagnosticReportSettings, DiagnosticSettingsError, DiagnosticSeverity, DiagnosticValueRef,
-    DiagnosticsPlugin, PressureMeasurement, PressureMetricId, PressureMetricKind,
-    PressurePublishRejection, PressureSourceId, PressureUnit, PublicDiagnosticIdentifier,
-    RuntimeDiagnosticDraft, RuntimeDiagnosticFilter, RuntimeDiagnosticRetention,
-    RuntimeDiagnostics, RuntimeDiagnosticsSettings, RuntimePressureSettings,
-    RuntimePressureSnapshotDraft, RuntimePressureSnapshots, RuntimePublishOutcome, SafeDisplayText,
-    SafeSummary,
+    Diagnostic, DiagnosticCode, DiagnosticDomain, DiagnosticField, DiagnosticFieldClass,
+    DiagnosticFieldKey, DiagnosticProducer, DiagnosticReport, DiagnosticReportSettings,
+    DiagnosticSettingsError, DiagnosticSeverity, DiagnosticValueRef, PressureMeasurement,
+    PressureMetricId, PressureMetricKind, PressurePublishRejection, PressureSourceId, PressureUnit,
+    PublicDiagnosticIdentifier, RuntimeDiagnosticDraft, RuntimeDiagnosticFilter,
+    RuntimeDiagnosticRetention, RuntimeDiagnostics, RuntimeDiagnosticsSettings,
+    RuntimePressureSettings, RuntimePressureSnapshotDraft, RuntimePressureSnapshots,
+    RuntimePublishOutcome, SafeDisplayText, SafeSummary,
 };
+#[cfg(feature = "runtime")]
+use crate::{DiagnosticCleanupSet, DiagnosticsPlugin};
 
 fn items(value: usize) -> ItemLimit {
     ItemLimit::new(value).expect("test limits are non-zero")
@@ -1450,6 +1453,7 @@ fn pressure_retention_expires_by_frame_and_stats_saturate() {
     assert_eq!(snapshots.stats().expired_snapshots(), u64::MAX);
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn diagnostics_plugin_installs_headless_resources_and_frame_retention() {
     let runtime = runtime_settings(8, 4096).with_retention(
@@ -1493,11 +1497,13 @@ fn diagnostics_plugin_installs_headless_resources_and_frame_retention() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "runtime")]
 #[derive(Default, Resource)]
 struct FirstStagePublishProbe {
     outcome: Option<RuntimePublishOutcome>,
 }
 
+#[cfg(feature = "runtime")]
 fn publish_after_diagnostic_retention(
     real_time: Res<RealTime>,
     mut diagnostics: ResMut<RuntimeDiagnostics>,
@@ -1511,6 +1517,7 @@ fn publish_after_diagnostic_retention(
     }
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn first_stage_retention_runs_before_declared_producers() {
     let runtime = runtime_settings(1, 4096).with_retention(

@@ -6,13 +6,20 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-bevy_ecs.workspace = true
-nara_app.workspace = true
-nara_ecs.workspace = true
-raw-window-handle.workspace = true
+bevy_ecs = { workspace = true, optional = true }
+nara_app = { workspace = true, optional = true }
+nara_ecs = { workspace = true, optional = true }
+raw-window-handle = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-thiserror.workspace = true
+thiserror = { workspace = true, optional = true }
 
 [features]
 default = []
+runtime = [
+    "dep:bevy_ecs",
+    "dep:nara_app",
+    "dep:nara_ecs",
+    "dep:raw-window-handle",
+    "dep:thiserror",
+]
 serde = ["dep:serde"]

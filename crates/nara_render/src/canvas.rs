@@ -1,14 +1,18 @@
 use nara_core::Color;
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 
-use crate::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d};
+use crate::{DisplayMapping2d, Extent2d};
+#[cfg(feature = "runtime")]
+use crate::{DisplayRect, DisplayScale};
 
 /// Optional fixed raster extent for the world, independent of the native window and runtime UI.
 ///
 /// The finished world uses nearest sampling and integer physical scaling when it fits. Smaller
 /// windows downscale the complete image fractionally. Simulation and camera coordinates remain
-/// fractional. Insert this resource directly or supply it to [`crate::plugin`].
-#[derive(Debug, Clone, Copy, PartialEq, Resource)]
+/// fractional. With `runtime`, insert this resource directly or supply it to `nara_render::plugin`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct WorldCanvas {
     extent: Extent2d,
     bar_color: Color,
@@ -58,6 +62,7 @@ pub struct WorldCanvasFrame {
 }
 
 impl WorldCanvasFrame {
+    #[cfg(feature = "runtime")]
     pub(crate) fn new(
         canvas: WorldCanvas,
         resolution: nara_window::WindowResolution,
@@ -94,7 +99,31 @@ impl WorldCanvasFrame {
         self.canvas.bar_color
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) const fn canvas(self) -> WorldCanvas {
         self.canvas
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canvas_constructor_rejects_empty_extents_and_nonfinite_bars() {
+        assert!(WorldCanvas::new(0, 180).is_none());
+        assert!(WorldCanvas::new(320, 0).is_none());
+        assert!(
+            WorldCanvas::new(320, 180)
+                .unwrap()
+                .with_bar_color(Color::rgb(f32::NAN, 0.0, 0.0))
+                .is_none()
+        );
+        assert!(
+            WorldCanvas::new(320, 180)
+                .unwrap()
+                .with_bar_color(Color::rgba(0.0, 0.0, 0.0, f32::INFINITY))
+                .is_none()
+        );
     }
 }

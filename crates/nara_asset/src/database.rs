@@ -4,6 +4,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 use nara_identity::{
     SourceDocumentBindingError, SourceDocumentKey, SourceDocumentKind, SourceDocumentOrigin,
@@ -164,6 +165,7 @@ impl AssetRecord {
         Ok(())
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn retained_bytes(&self) -> Option<usize> {
         self.path
             .retained_bytes()
@@ -270,7 +272,8 @@ impl Display for AssetDatabaseError {
 impl Error for AssetDatabaseError {}
 
 /// A canonical source index without an implicit authored-reference scope.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Resource)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct ProjectAssetDatabase {
     by_path: BTreeMap<AssetSourcePath, AssetRecord>,
     by_stable_id: BTreeMap<StableAssetId, AssetSourcePath>,

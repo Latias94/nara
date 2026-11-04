@@ -366,26 +366,6 @@ fn import_uncommitted(
     try_import_uncommitted(importer, record, source_bytes).unwrap()
 }
 
-fn import_uncommitted_with_settings(
-    importer: &ImageImporter,
-    record: &AssetRecord,
-    source_bytes: &[u8],
-    settings: ImageImportSettings,
-) -> ImageImportedAsset {
-    let mut server = AssetServer::new();
-    let handle = server.reserve_record::<ImageAsset>(record).unwrap();
-    importer
-        .import_image(
-            bytes_request_with_settings(record, source_bytes, settings),
-            handle,
-            AssetVersion::ZERO,
-            &server,
-            &Assets::default(),
-            &AssetStates::default(),
-        )
-        .unwrap()
-}
-
 fn loaded_image_store(
     importer: &ImageImporter,
     record: &AssetRecord,
@@ -1859,69 +1839,7 @@ fn shared_host_freezes_one_overlap_ceiling_for_different_importer_limits() {
     ));
 }
 
-#[test]
-fn code_first_prepared_capture_binds_the_actual_slot_without_a_managed_catalog() {
-    let handle = nara_asset::allocate_anonymous_handle::<ImageAsset>().unwrap();
-    let mut images = Assets::default();
-    let mut states = AssetStates::default();
-    let mut events = AssetEvents::default();
-    let image = |pixels: Vec<u8>| {
-        ImageAsset::new(
-            ImageExtent::new(1, 1),
-            ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
-            pixels,
-        )
-        .unwrap()
-    };
-    assert!(PreparedImageSnapshot::capture(handle, &images, &states).is_none());
-    images.insert(handle, image(vec![255, 0, 0, 255]));
-    assert!(PreparedImageSnapshot::capture(handle, &images, &states).is_none());
-    images
-        .commit_loaded(
-            handle,
-            image(vec![255, 0, 0, 255]),
-            &mut states,
-            &mut events,
-            None,
-            None,
-        )
-        .unwrap();
-    let first = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
-    let same = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
-    assert_eq!(first.identity(), same.identity());
-    assert_eq!(
-        first.resource().pixels().as_ptr(),
-        same.resource().pixels().as_ptr()
-    );
-
-    images.insert(handle, image(vec![0, 255, 0, 255]));
-    let second = PreparedImageSnapshot::capture(handle, &images, &states).unwrap();
-    assert_eq!(
-        first.identity().asset_version(),
-        second.identity().asset_version()
-    );
-    assert_ne!(
-        first.identity().content_hash(),
-        second.identity().content_hash()
-    );
-    assert_ne!(
-        first.identity().slot_revision(),
-        second.identity().slot_revision()
-    );
-    assert_eq!(first.resource().pixels(), &[255, 0, 0, 255]);
-    assert_eq!(second.resource().pixels(), &[0, 255, 0, 255]);
-
-    let mut prepared = PreparedImages::default();
-    assert!(prepared.insert(first.clone()).is_none());
-    let retained = prepared.get(image_resource_key(handle)).unwrap().clone();
-    assert_eq!(prepared.insert(second.clone()), Some(first));
-    drop(images);
-    drop(prepared);
-    assert_eq!(retained.resource().pixels(), &[255, 0, 0, 255]);
-    assert_eq!(second.resource().pixels(), &[0, 255, 0, 255]);
-}
-
+#[cfg(feature = "render-prepare")]
 #[test]
 fn prepare_system_writes_backend_neutral_image_resource() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -1937,6 +1855,7 @@ fn prepare_system_writes_backend_neutral_image_resource() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn retained_publication_prepares_during_loading_and_after_reload_failure() {
     for fail_attempt in [false, true] {
@@ -1977,6 +1896,7 @@ fn retained_publication_prepares_during_loading_and_after_reload_failure() {
     }
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pixels() {
     for prepare_before_invalidation in [false, true] {
@@ -2018,6 +1938,7 @@ fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pi
     }
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     let record = image_record("textures/player.png");
@@ -2156,6 +2077,7 @@ fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -2207,6 +2129,7 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn unchanged_image_snapshot_reuses_the_prepared_resource() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -2233,6 +2156,7 @@ fn unchanged_image_snapshot_reuses_the_prepared_resource() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn direct_image_replacement_reprepares_when_asset_version_and_content_are_unchanged() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -2281,6 +2205,7 @@ fn direct_image_replacement_reprepares_when_asset_version_and_content_are_unchan
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn prepare_system_invalidates_when_image_descriptor_changes() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -2326,6 +2251,7 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
     runtime.finish().unwrap();
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn prepare_system_removes_prepared_resources_for_removed_images() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
@@ -2392,6 +2318,7 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         .unwrap()
         .source_hash();
     assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
+    #[cfg(feature = "render-prepare")]
     assert!(
         runtime
             .world()
@@ -2430,8 +2357,11 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
             .high_water_publication_overlap_bytes(),
         image.pixels().len()
     );
-    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
-    assert_eq!(runtime.world().resource::<PreparedImages>().len(), 1);
+    #[cfg(feature = "render-prepare")]
+    {
+        assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
+        assert_eq!(runtime.world().resource::<PreparedImages>().len(), 1);
+    }
     assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
@@ -3484,6 +3414,7 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
         .resource::<AssetStates>()
         .state(handle.id())
         .map(|state| state.load_state().clone());
+    #[cfg(feature = "render-prepare")]
     let prepared_removed = runtime
         .world()
         .resource::<PreparedImages>()
@@ -3500,6 +3431,7 @@ fn image_plugin_coalesced_removal_and_recreation_preserves_metadata_dirtiness() 
     );
     assert!(removed);
     assert_eq!(removed_state, Some(LoadState::Removed));
+    #[cfg(feature = "render-prepare")]
     assert!(prepared_removed);
     assert_budget_released(budget);
 }
@@ -3679,6 +3611,7 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .is_none();
+    #[cfg(feature = "render-prepare")]
     let prepared_removed = runtime
         .world()
         .resource::<PreparedImages>()
@@ -3748,6 +3681,7 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
         .resource::<AssetServer>()
         .get_handle::<ImageAsset>(handle.id());
     let applied = runtime.world().resource::<ImageReloadStats>().applied;
+    #[cfg(feature = "render-prepare")]
     let prepared = runtime
         .world()
         .resource::<PreparedImages>()
@@ -3758,7 +3692,9 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
     remove_temp_root(&temp_root);
 
     assert_eq!(removed_version.raw(), previous_version.raw() + 1);
-    assert!(removed && prepared_removed);
+    assert!(removed);
+    #[cfg(feature = "render-prepare")]
+    assert!(prepared_removed);
     assert_eq!(removed_count, 1);
     assert!(failed_absent);
     assert!(matches!(
@@ -3776,6 +3712,7 @@ fn image_plugin_recovers_a_removed_image_from_same_identity_metadata() {
     );
     assert_eq!(claimed, Some(handle));
     assert_eq!(applied, 1);
+    #[cfg(feature = "render-prepare")]
     assert!(prepared);
     assert_budget_released(budget);
 }
@@ -3961,6 +3898,7 @@ fn image_plugin_removal_cannot_mint_recovery_after_a_post_resolution_state_write
         .world()
         .resource::<AssetStates>()
         .version(handle.id());
+    #[cfg(feature = "render-prepare")]
     let prepared_absent = runtime
         .world()
         .resource::<PreparedImages>()
@@ -3974,6 +3912,7 @@ fn image_plugin_removal_cannot_mint_recovery_after_a_post_resolution_state_write
     assert!(matches!(state, Some((LoadState::Failed { message }, None))
         if message == "image.reload-settings-missing"));
     assert_eq!(version, rejected_version);
+    #[cfg(feature = "render-prepare")]
     assert!(prepared_absent);
     assert_eq!(applied, 0);
     assert_budget_released(budget);
@@ -4261,6 +4200,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
             .usable_version(),
         Some(last_good_version)
     );
+    #[cfg(feature = "render-prepare")]
     assert!(
         runtime
             .world()
@@ -4348,6 +4288,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
             .usable_version(),
         None
     );
+    #[cfg(feature = "render-prepare")]
     assert!(
         runtime
             .world()
@@ -4401,6 +4342,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
             .usable_version()
             .is_some()
     );
+    #[cfg(feature = "render-prepare")]
     assert_eq!(
         runtime
             .world()
@@ -6017,6 +5959,7 @@ fn image_plugin_removes_runtime_and_prepared_image() {
             .load_state(),
         &LoadState::Removed
     );
+    #[cfg(feature = "render-prepare")]
     assert!(
         runtime
             .world()
@@ -6024,26 +5967,11 @@ fn image_plugin_removes_runtime_and_prepared_image() {
             .get(image_resource_key(handle))
             .is_none()
     );
+    #[cfg(feature = "render-prepare")]
     assert!(runtime.world().resource::<PreparedImages>().is_empty());
 
     remove_temp_root(&temp_root);
     runtime.finish().unwrap();
-}
-
-#[test]
-fn content_hash_changes_when_content_descriptor_changes() {
-    let record = image_record("textures/player.png");
-    let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
-    let image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
-    let changed = import_uncommitted_with_settings(
-        &ImageImporter::default(),
-        &record,
-        &bytes,
-        ImageImportSettings::new(ImageColorSpace::Linear),
-    )
-    .into_image();
-
-    assert_ne!(image_content_hash(&image), image_content_hash(&changed));
 }
 
 fn direct_image_source() -> ImageSourceMetadata {
@@ -6058,26 +5986,6 @@ fn direct_image_source() -> ImageSourceMetadata {
     .unwrap()
 }
 
-#[test]
-fn image_source_metadata_rejects_a_mismatched_settings_hash() {
-    let record = image_record("textures/player.png");
-    let source_bytes = b"image-source";
-    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
-    let import_recipe = test_import_recipe(&record, source_bytes);
-    let actual = import_recipe.settings_hash();
-
-    let error =
-        ImageSourceMetadata::new(record.path().clone(), settings, import_recipe).unwrap_err();
-
-    assert_eq!(
-        error,
-        ImageSourceMetadataCreateError::SettingsHashMismatch {
-            expected: settings.settings_hash(),
-            actual,
-        }
-    );
-}
-
 fn test_import_recipe(record: &AssetRecord, source_bytes: &[u8]) -> ImportRecipe {
     ImportRecipe::new(
         record.stable_id(),
@@ -6087,208 +5995,6 @@ fn test_import_recipe(record: &AssetRecord, source_bytes: &[u8]) -> ImportRecipe
         ImporterVersion::new(1),
         ImageImportSettings::default().settings_hash(),
     )
-}
-
-#[test]
-fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
-    for extent in [ImageExtent::new(0, 1), ImageExtent::new(1, 0)] {
-        assert_eq!(
-            ImageAsset::from_import(
-                direct_image_source(),
-                extent,
-                ImageFormat::Rgba8,
-                Vec::new(),
-            )
-            .unwrap_err(),
-            ImageAssetCreateError::ZeroExtent { extent }
-        );
-    }
-    assert_eq!(
-        ImageAsset::from_import(
-            direct_image_source(),
-            ImageExtent::new(u32::MAX, u32::MAX),
-            ImageFormat::Rgba8,
-            Vec::new(),
-        )
-        .unwrap_err(),
-        ImageAssetCreateError::ByteLengthOverflow {
-            extent: ImageExtent::new(u32::MAX, u32::MAX),
-        }
-    );
-    for (pixels, expected, actual) in [(vec![0; 3], 4, 3), (vec![0; 5], 4, 5)] {
-        assert_eq!(
-            ImageAsset::from_import(
-                direct_image_source(),
-                ImageExtent::new(1, 1),
-                ImageFormat::Rgba8,
-                pixels,
-            )
-            .unwrap_err(),
-            ImageAssetCreateError::PixelLengthMismatch {
-                extent: ImageExtent::new(1, 1),
-                expected,
-                actual,
-            }
-        );
-    }
-}
-
-#[test]
-fn image_asset_reuses_the_admitted_pixel_allocation() {
-    let record = image_record("textures/player.png");
-    let source_bytes = b"image allocation fixture";
-    let import_recipe = test_import_recipe(&record, source_bytes);
-    let pixels = vec![24, 120, 220, 255];
-    let admitted_allocation = pixels.as_ptr();
-
-    let image = ImageAsset::from_import(
-        ImageSourceMetadata::new(
-            record.path().clone(),
-            ImageImportSettings::default(),
-            import_recipe,
-        )
-        .unwrap(),
-        ImageExtent::new(1, 1),
-        ImageFormat::Rgba8,
-        pixels,
-    )
-    .unwrap();
-
-    assert_eq!(image.pixels().as_ptr(), admitted_allocation);
-}
-
-#[test]
-fn shared_image_pixels_retain_their_lifetime_owner_until_runtime_release() {
-    struct RetentionProbe(Arc<std::sync::atomic::AtomicBool>);
-
-    impl Drop for RetentionProbe {
-        fn drop(&mut self) {
-            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    let record = image_record("textures/player.png");
-    let bytes = rgba_png(1, 1, &[24, 120, 220, 255]);
-    let mut image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
-    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let owner = Arc::new(RetentionProbe(Arc::clone(&dropped)));
-
-    assert!(image.share_retained().is_none());
-    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
-    assert!(!image.try_attach_retention_owner(Arc::new(())));
-    let shared = image.share_retained().unwrap();
-    drop(owner);
-
-    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(shared.pixels().as_ptr(), image.pixels().as_ptr());
-    drop(image);
-    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
-    drop(shared);
-    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
-}
-
-#[test]
-fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
-    struct RetentionProbe(Arc<std::sync::atomic::AtomicBool>);
-
-    impl Drop for RetentionProbe {
-        fn drop(&mut self) {
-            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-
-    let record = image_record("textures/player.png");
-    let old_bytes = [24, 120, 220, 255];
-    let mut image = import_uncommitted(
-        &ImageImporter::default(),
-        &record,
-        &rgba_png(1, 1, &old_bytes),
-    )
-    .into_image();
-    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let owner = Arc::new(RetentionProbe(Arc::clone(&dropped)));
-    assert!(image.try_attach_retention_owner(Arc::clone(&owner)));
-
-    let old_allocation = image.pixels().as_ptr();
-    let prepared = PreparedImageResource::from_image(&image);
-    let replacement = ImageAsset::from_import(
-        direct_image_source(),
-        ImageExtent::new(1, 1),
-        ImageFormat::Rgba8,
-        vec![255, 32, 16, 255],
-    )
-    .unwrap();
-    let replacement_prepared = PreparedImageResource::from_image(&replacement);
-
-    drop(owner);
-    drop(image);
-
-    assert!(prepared.has_retention_owner());
-    assert!(!dropped.load(std::sync::atomic::Ordering::SeqCst));
-    assert_eq!(prepared.pixels(), old_bytes);
-    assert_eq!(prepared.pixels().as_ptr(), old_allocation);
-    assert_eq!(replacement_prepared.pixels(), [255, 32, 16, 255]);
-    assert_ne!(replacement_prepared.pixels().as_ptr(), old_allocation);
-
-    drop(prepared);
-    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst));
-}
-
-#[cfg(feature = "serde")]
-#[test]
-fn shared_image_pixels_keep_the_canonical_byte_content_wire_shape() {
-    let record = image_record("textures/player.png");
-    let bytes = rgba_png(1, 1, &[24, 120, 220, 255]);
-    let image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
-
-    let encoded = serde_json::to_value(&image).unwrap();
-    assert_eq!(
-        encoded.get("pixels"),
-        Some(&serde_json::json!([24, 120, 220, 255])),
-    );
-
-    let decoded = serde_json::from_value::<ImageAsset>(encoded).unwrap();
-    assert_eq!(decoded, image);
-    assert_eq!(decoded.pixels(), &[24, 120, 220, 255]);
-    assert!(!std::ptr::eq(decoded.pixels(), image.pixels()));
-}
-
-#[cfg(feature = "serde")]
-#[test]
-fn image_asset_deserialization_reuses_the_constructor_validation() {
-    let image = ImageAsset::from_import(
-        direct_image_source(),
-        ImageExtent::new(1, 1),
-        ImageFormat::Rgba8,
-        vec![24, 120, 220, 255],
-    )
-    .unwrap();
-    let valid = serde_json::to_value(image).unwrap();
-
-    let mut zero = valid.clone();
-    zero["extent"]["width"] = serde_json::json!(0);
-    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
-
-    let mut zero = valid.clone();
-    zero["extent"]["height"] = serde_json::json!(0);
-    assert!(serde_json::from_value::<ImageAsset>(zero).is_err());
-
-    let mut overflow = valid.clone();
-    overflow["extent"]["width"] = serde_json::json!(u32::MAX);
-    overflow["extent"]["height"] = serde_json::json!(u32::MAX);
-    assert!(serde_json::from_value::<ImageAsset>(overflow).is_err());
-
-    let mut undersized = valid.clone();
-    undersized["pixels"] = serde_json::json!([24, 120, 220]);
-    assert!(serde_json::from_value::<ImageAsset>(undersized).is_err());
-
-    let mut mismatched_recipe = valid.clone();
-    mismatched_recipe["source"]["settings"]["color_space"] = serde_json::json!("linear");
-    assert!(serde_json::from_value::<ImageAsset>(mismatched_recipe).is_err());
-
-    let mut oversized = valid;
-    oversized["pixels"] = serde_json::json!([24, 120, 220, 255, 0]);
-    assert!(serde_json::from_value::<ImageAsset>(oversized).is_err());
 }
 
 #[test]
@@ -6315,6 +6021,7 @@ fn unpublished_byte_preflight_matches_the_import_memory_plan() {
     assert_eq!(image, *imported.image());
 }
 
+#[cfg(feature = "render-prepare")]
 fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
@@ -6341,14 +6048,6 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
         )
         .unwrap();
     let mut app = App::new();
-    app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
-        nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin::default(),
-    ))
-    .unwrap();
     app.add_plugin(ImagePreparePlugin).unwrap();
     app.init_resource::<ImagePipelinePort>().unwrap();
     app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
@@ -6363,6 +6062,7 @@ fn app_with_image_plugin(asset_root: &Path, record: AssetRecord) -> App {
     app_with_image_plugin_config(asset_root, [record], TaskPoolConfig::default())
 }
 
+#[cfg(feature = "render-prepare")]
 #[test]
 fn native_image_storage_prepares_procedural_pixels_without_source_resources_or_tasks() {
     let mut app = App::new();
@@ -6582,16 +6282,13 @@ fn app_with_image_source_directory(
     app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
         .unwrap();
     app.add_plugins((
-        nara_reflect::ComponentRegistryPlugin,
         nara_tasks::TaskPlugin::default(),
         (nara_asset::AssetPlugin, nara_asset::AssetSourcePlugin),
-        nara_hierarchy::HierarchyPlugin,
-        nara_transform::TransformPlugin,
-        nara_render::RenderComponentsPlugin,
-        nara_render::RenderPlugin::default(),
-        (ImagePlugin, ImagePreparePlugin),
+        ImagePlugin,
     ))
     .unwrap();
+    #[cfg(feature = "render-prepare")]
+    app.add_plugin(ImagePreparePlugin).unwrap();
     app.add_plugins(plugin.with_source_directory(source_directory))
         .unwrap();
     {

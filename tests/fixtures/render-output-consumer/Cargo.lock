@@ -1529,8 +1529,12 @@ version = "0.0.0"
 dependencies = [
  "lyon_path",
  "lyon_tessellation",
+ "nara_asset",
+ "nara_image",
+ "nara_render",
  "nara_text",
  "nara_ui_kernel",
+ "nara_ui_render",
  "nara_ui_widgets",
 ]
 

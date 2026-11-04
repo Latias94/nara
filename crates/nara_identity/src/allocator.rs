@@ -1,3 +1,4 @@
+#[cfg(any(feature = "runtime", test))]
 use std::num::NonZeroU64;
 
 use thiserror::Error;
@@ -11,10 +12,12 @@ pub enum IdentityAllocationError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(any(feature = "runtime", test))]
 pub(crate) struct MonotonicNonZeroU64Allocator {
     next: Option<NonZeroU64>,
 }
 
+#[cfg(any(feature = "runtime", test))]
 impl MonotonicNonZeroU64Allocator {
     pub(crate) fn from_next_raw(raw: u64) -> Result<Self, IdentityAllocationError> {
         let next = NonZeroU64::new(raw).ok_or(IdentityAllocationError::Zero)?;
@@ -31,6 +34,7 @@ impl MonotonicNonZeroU64Allocator {
         Ok(current)
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn reserve(&mut self, value: NonZeroU64) {
         let Some(next) = self.next else {
             return;

@@ -7,29 +7,35 @@ license.workspace = true
 
 [dependencies]
 blake3.workspace = true
-nara_app.workspace = true
+nara_app = { workspace = true, optional = true }
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true
-nara_ecs.workspace = true
-nara_fs.workspace = true
+nara_ecs = { workspace = true, optional = true }
+nara_fs = { workspace = true, optional = true }
 nara_render = { workspace = true, optional = true }
-nara_tasks.workspace = true
-png = "=0.18.1"
+nara_tasks = { workspace = true, optional = true }
+png = { version = "=0.18.1", optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
 image.workspace = true
-nara_hierarchy.workspace = true
-nara_reflect.workspace = true
 nara_render.workspace = true
-nara_transform.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
 [features]
 default = []
+runtime = [
+    "dep:nara_app",
+    "dep:nara_ecs",
+    "dep:nara_fs",
+    "dep:nara_tasks",
+    "dep:png",
+    "nara_asset/runtime",
+    "nara_diagnostic/runtime",
+]
 render-prepare = ["dep:nara_render"]
 serde = [
     "dep:serde",

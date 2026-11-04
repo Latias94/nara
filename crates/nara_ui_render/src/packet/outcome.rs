@@ -66,6 +66,7 @@ impl UiPresentationAttemptIdentity {
         })
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) const fn unrouted(packet: UiPaintPacketIdentity) -> Self {
         Self(UiPresentationAttemptKind::Planned {
             packet,

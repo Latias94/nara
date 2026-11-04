@@ -14,10 +14,10 @@ nara_app.workspace = true
 nara_ecs.workspace = true
 nara_image = { workspace = true, optional = true, features = ["render-prepare"] }
 nara_material = { workspace = true, optional = true }
-nara_render.workspace = true
+nara_render = { workspace = true, features = ["runtime"] }
 nara_sprite_render = { workspace = true, optional = true }
-nara_ui_render = { workspace = true, optional = true }
-nara_window.workspace = true
+nara_ui_render = { workspace = true, optional = true, features = ["runtime"] }
+nara_window = { workspace = true, features = ["runtime"] }
 pollster.workspace = true
 thiserror.workspace = true
 wgpu.workspace = true

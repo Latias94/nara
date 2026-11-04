@@ -9,9 +9,17 @@ publish = false
 [workspace]
 resolver = "3"
 
+[features]
+default = []
+presentation = ["dep:nara_asset", "dep:nara_image", "dep:nara_render", "dep:nara_ui_render"]
+
 [dependencies]
 lyon_path = "=1.0.16"
 lyon_tessellation = "=1.0.16"
-nara_text = { path = "../../../crates/nara_text" }
-nara_ui_kernel = { path = "../../../crates/nara_ui_kernel" }
-nara_ui_widgets = { path = "../../../crates/nara_ui_widgets" }
+nara_asset = { path = "../../../crates/nara_asset", default-features = false, optional = true }
+nara_image = { path = "../../../crates/nara_image", default-features = false, features = ["render-prepare"], optional = true }
+nara_render = { path = "../../../crates/nara_render", default-features = false, optional = true }
+nara_text = { path = "../../../crates/nara_text", default-features = false }
+nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = false }
+nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false, optional = true }
+nara_ui_widgets = { path = "../../../crates/nara_ui_widgets", default-features = false }

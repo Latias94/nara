@@ -1,4 +1,8 @@
 //! Asset identity, project metadata, typed handles, and in-memory asset tables.
+//!
+//! Asset values, storage, source data, and Runtime codecs are available without App or ECS
+//! dependencies. The `runtime` feature enables ECS resources, reload services, and App plugins.
+//! The independent `serde` feature enables source formats without runtime integration.
 
 #[cfg(feature = "serde")]
 mod build;
@@ -11,10 +15,13 @@ mod import;
 mod import_recipe;
 mod product_identity;
 mod reference;
+#[cfg(feature = "runtime")]
 mod reload;
 mod revision;
 mod runtime_codec;
 mod server;
+mod source_changes;
+mod source_root;
 mod state;
 mod storage;
 
@@ -48,19 +55,23 @@ pub use nara_identity::{
 };
 pub use product_identity::{AssetProductIdentityError, AssetProductRef, ImportedProductId};
 pub use reference::AssetReferenceDemand;
+#[cfg(feature = "runtime")]
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, ASSET_SOURCE_PLUGIN_DECLARATION,
     ASSET_SOURCE_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations, AssetPlugin,
     AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestAdmissionError,
     AssetReloadRequestId, AssetReloadRequestKind, AssetReloadRequestLimitKind,
-    AssetReloadRequestLimits, AssetReloadRequests, AssetSourceChange,
-    AssetSourceChangeAdmissionError, AssetSourceChangeKind, AssetSourceChangeLimitKind,
-    AssetSourceChangeLimits, AssetSourceChanges, AssetSourcePlugin, AssetSourceRoot,
-    AssetTaskUpdateSet, ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
+    AssetReloadRequestLimits, AssetReloadRequests, AssetSourcePlugin, AssetTaskUpdateSet,
+    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
     register_image_reload_consumer,
 };
 pub use runtime_codec::{AssetDomain, AssetRuntimeError, AssetRuntimeLimits, RuntimeAssetCodec};
 pub use server::{AssetError, AssetServer};
+pub use source_changes::{
+    AssetSourceChange, AssetSourceChangeAdmissionError, AssetSourceChangeKind,
+    AssetSourceChangeLimitKind, AssetSourceChangeLimits, AssetSourceChanges,
+};
+pub use source_root::AssetSourceRoot;
 pub use state::{
     AssetDependencyGraph, AssetEvent, AssetEventKind, AssetEventLimits, AssetEventPushOutcome,
     AssetEvents, AssetPublicationRevision, AssetState, AssetStateError, AssetStateRevision,

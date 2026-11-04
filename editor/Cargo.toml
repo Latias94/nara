@@ -19,7 +19,7 @@ nara = { path = "..", default-features = false, features = ["desktop-winit", "pr
 nara_render_wgpu = { workspace = true, features = ["editor-imgui"] }
 nara_text.workspace = true
 nara_ui_kernel.workspace = true
-nara_ui_render.workspace = true
+nara_ui_render = { workspace = true, features = ["runtime"] }
 nara_ui_widgets.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

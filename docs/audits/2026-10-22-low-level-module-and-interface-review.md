@@ -132,7 +132,7 @@ actual extraction, and assert that an unchanged frame does not rebuild the fores
 [`capture_with_settings`](../../crates/nara_image/src/import/publication.rs#L143) takes settings
 from the last usable Image. [`accepted_reload_settings`](../../crates/nara_image/src/reload.rs#L687)
 reads metadata for `MetaModified`, but normally uses those published settings for `Modified`.
-[`drain_coalesced`](../../crates/nara_asset/src/reload/source_changes.rs#L387) retains metadata
+[`drain_coalesced`](../../crates/nara_asset/src/source_changes.rs) retains metadata
 dirtiness only within one drained batch.
 
 With an sRGB publication, admit a Linear metadata reload and hold its worker. On a later frame,

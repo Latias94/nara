@@ -6,6 +6,7 @@ use std::{
 };
 
 use nara_core::ItemLimit;
+#[cfg(feature = "runtime")]
 use nara_ecs::Resource;
 
 use crate::revision::{RevisionCounter, RevisionIdentity};
@@ -222,7 +223,8 @@ impl Default for AssetState {
     }
 }
 
-#[derive(Debug, Resource)]
+#[derive(Debug)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct AssetStates {
     store_revision: Arc<()>,
     image_reload_authority: Option<Arc<()>>,
@@ -309,6 +311,7 @@ impl AssetStates {
         })
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn observe_source_removal(&mut self, id: AssetId) {
         self.removed_sources
             .insert(id, self.metadata_change_revision(id).cloned());
@@ -321,6 +324,7 @@ impl AssetStates {
         self.advance_publication_revision(id);
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn observe_image_source_removal(&mut self, id: AssetId) {
         let current = self.take_image_recovery_revision(id);
         self.observe_source_removal(id);
@@ -357,6 +361,7 @@ impl AssetStates {
         AssetStateRevision::new(&self.store_revision, self.state_revisions.get(&id))
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn bind_image_reload_authority(&mut self, authority: &Arc<()>) {
         if self
             .image_reload_authority
@@ -371,6 +376,7 @@ impl AssetStates {
         self.image_reload_authority = Some(Arc::clone(authority));
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn image_recovery_continuity(
         &self,
         id: AssetId,
@@ -523,6 +529,7 @@ impl AssetStates {
         version
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn set_loading_for_image_reload(&mut self, id: AssetId) -> AssetVersion {
         let current = self.take_image_recovery_revision(id);
         let version = self.set_loading(id);
@@ -545,6 +552,7 @@ impl AssetStates {
         Ok(version)
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) fn reject_reload_request(
         &mut self,
         id: AssetId,
@@ -559,6 +567,7 @@ impl AssetStates {
         version
     }
 
+    #[cfg(feature = "runtime")]
     pub(crate) fn reject_image_reload_capacity(
         &mut self,
         id: AssetId,
@@ -770,7 +779,8 @@ pub enum AssetEventPushOutcome {
 /// drain admitted events. If state transitions exceed the item ceiling, later events are
 /// suppressed and `requires_rescan` remains sticky until the owner completes a full `AssetStates`
 /// rescan and calls `complete_rescan`. The queue is observational runtime state, not replay input.
-#[derive(Debug, Resource)]
+#[derive(Debug)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct AssetEvents {
     limits: AssetEventLimits,
     discarded_events: u64,
@@ -853,7 +863,8 @@ impl AssetEvents {
     }
 }
 
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Default)]
+#[cfg_attr(feature = "runtime", derive(Resource))]
 pub struct AssetDependencyGraph {
     source_to_recipes: BTreeMap<StableAssetId, BTreeSet<ImportRecipeDigest>>,
     recipe_to_sources: BTreeMap<ImportRecipeDigest, BTreeSet<StableAssetId>>,

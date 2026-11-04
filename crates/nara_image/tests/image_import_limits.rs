@@ -1,3 +1,5 @@
+#![cfg(feature = "runtime")]
+
 use std::{
     fs::{self, File},
     num::{NonZeroU32, NonZeroU64},

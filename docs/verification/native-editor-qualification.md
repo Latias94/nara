@@ -61,6 +61,17 @@ must settle an actual pending submission before reporting cleanup success. These
 qualify a non-Nara frontend, general Editor attachment, native OS event delivery or an independent
 Editor Shell. The ordinary Editor trajectories below retain their distinct composition scope.
 
+The neutral-dependency successor imports the separate UI library's `presentation` feature and
+its procedural four-color Image. Require the original typed handle, nominal store/slot revision,
+exact shared pixel allocation, color space and retention owner in the submitted packet, plus
+the visible Image primitive and actual presentation. Preserve the complete 19-presentation/
+18-journal-commit trajectory and four error/panic child modes. This establishes packet resource
+identity and actual presentation; it adds no Image pixel-readback oracle. Check the library's
+normal/build dependency graph independently, with and without `serde`, to exclude App/ECS,
+filesystem/task services, game UI, Editor and concrete native backends. The native executable
+selects its WGPU/Winit backend separately. CPU simulated completions and dependency checks retain
+their own scope; none grants native input, complete public panel hosting or performance evidence.
+
 The independently authored keyed composite additionally runs under its public `MeasuredColumn`
 layout, using current title/child intrinsic sizes and scoped exact placement rather than
 row-index absolute coordinates. Preserve the full 11-presentation/ten-commit trajectory,

@@ -11,6 +11,8 @@ use std::sync::Arc;
 pub mod curve_canvas;
 pub mod keyed_editors;
 pub mod measured_column;
+#[cfg(feature = "presentation")]
+pub mod presentation;
 
 pub type StatusLabelError = Box<dyn std::error::Error + Send + Sync + 'static>;
 

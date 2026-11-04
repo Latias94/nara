@@ -1,17 +1,20 @@
-use std::{collections::BTreeSet, sync::Arc};
+#[cfg(feature = "runtime")]
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
+#[cfg(feature = "runtime")]
 use image::ImageEncoder;
 use nara_asset::{
-    AssetDomain, AssetProductRef, AssetRecord, AssetSourceKind, AssetSourcePath, ImportedProductId,
-    RuntimeAssetCodec, StableAssetId,
+    AssetDomain, AssetProductRef, ImportedProductId, RuntimeAssetCodec, StableAssetId,
 };
+#[cfg(feature = "runtime")]
+use nara_asset::{AssetRecord, AssetSourceKind, AssetSourcePath};
 use serde_json::{Value, json};
 
 use super::{ImageDomain, ImageRuntimeCodec, codec};
-use crate::{
-    ImageAsset, ImageBytesImportRequest, ImageColorSpace, ImageExtent, ImageFormat,
-    ImageImportSettings, ImageImporter,
-};
+use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
+#[cfg(feature = "runtime")]
+use crate::{ImageBytesImportRequest, ImageImportSettings, ImageImporter};
 
 const SOURCE: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 const OTHER_SOURCE: &str = "371f8e14-9392-4fb2-85b3-2f0c7fe3ff24";
@@ -159,6 +162,7 @@ fn anonymous_images_cannot_be_encoded_or_claim_product_membership() {
     }
 }
 
+#[cfg(feature = "runtime")]
 #[test]
 fn png_import_cooks_to_identical_pixels_without_source_or_import_provenance() {
     let pixels = [0, 127, 128, 255, 34, 68, 102, 136];

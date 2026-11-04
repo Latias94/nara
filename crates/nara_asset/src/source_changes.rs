@@ -2,88 +2,14 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
     error::Error,
     fmt::{self, Display, Formatter},
-    path::{Component, Path, PathBuf},
 };
 
 use nara_core::{ByteLimit, ItemLimit};
-use nara_ecs::Resource;
 
-use crate::{AssetDatabaseError, AssetPath, AssetPathScope, AssetSourcePath};
+use crate::AssetSourcePath;
 
 const DEFAULT_MAX_SOURCE_CHANGES: usize = 4_096;
 const DEFAULT_MAX_SOURCE_CHANGE_BYTES: usize = 4 * 1024 * 1024;
-
-/// A native directory paired with its owned logical source scope.
-#[derive(Debug, Clone, PartialEq, Eq, Resource)]
-pub struct AssetSourceRoot {
-    root: PathBuf,
-    scope: AssetPathScope,
-}
-
-impl AssetSourceRoot {
-    #[must_use]
-    pub fn new(root: impl Into<PathBuf>, scope: AssetPathScope) -> Self {
-        Self {
-            root: root.into(),
-            scope,
-        }
-    }
-
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    #[must_use]
-    pub const fn scope(&self) -> &AssetPathScope {
-        &self.scope
-    }
-
-    /// Derives a path relative to this native root, refusing locations outside its exact scope.
-    pub fn source_path(&self, path: &AssetSourcePath) -> Result<PathBuf, AssetDatabaseError> {
-        let local = self
-            .scope
-            .relative_path(path)
-            .ok_or(AssetDatabaseError::SourceOutsideRoot)?;
-        Ok(local
-            .split('/')
-            .fold(self.root.clone(), |path, segment| path.join(segment)))
-    }
-
-    /// Observes an existing native source within this root and returns its canonical location.
-    pub fn logical_path_from_source_path(
-        &self,
-        source_path: impl AsRef<Path>,
-    ) -> Result<AssetSourcePath, AssetDatabaseError> {
-        let root = self
-            .root
-            .canonicalize()
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
-        let source = source_path
-            .as_ref()
-            .canonicalize()
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
-        let relative = source
-            .strip_prefix(root)
-            .map_err(|_| AssetDatabaseError::SourceOutsideRoot)?;
-
-        let mut segments = Vec::new();
-        for component in relative.components() {
-            match component {
-                Component::Normal(segment) => {
-                    segments.push(segment.to_str().ok_or(AssetDatabaseError::NonUtf8Path)?);
-                }
-                Component::CurDir => {}
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    return Err(AssetDatabaseError::SourceOutsideRoot);
-                }
-            }
-        }
-        let local = AssetPath::new(segments.join("/"))
-            .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))?;
-        Ok(self.scope.resolve(&local))
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AssetSourceChangeKind {
@@ -123,6 +49,7 @@ impl AssetSourceChange {
         self.observation.metadata_dirty
     }
 
+    #[cfg(any(feature = "runtime", test))]
     pub(crate) const fn metadata_after_removal(&self) -> bool {
         matches!(
             self.observation.last_invalidation,
@@ -247,7 +174,8 @@ fn checked_source_change_limit(
 /// their owned logical-path capacity
 /// until the next resolve stage drains the complete map. This authoring request intent is not
 /// replay-recordable gameplay state.
-#[derive(Debug, Resource)]
+#[derive(Debug)]
+#[cfg_attr(feature = "runtime", derive(nara_ecs::Resource))]
 pub struct AssetSourceChanges {
     limits: AssetSourceChangeLimits,
     retained_payload_bytes: usize,
@@ -478,3 +406,6 @@ impl AssetSourceChanges {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests;
