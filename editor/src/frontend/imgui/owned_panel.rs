@@ -28,6 +28,19 @@ pub(crate) struct ImguiOwnedImage {
 }
 
 impl ImguiEditorFrontend {
+    #[cfg(test)]
+    pub(crate) fn owned_inspector_work_for_test(
+        &self,
+        panel: EditorPanelInstanceId,
+    ) -> Option<([u64; 4], nara_ui_kernel::UiCompileWorkStats)> {
+        self.presentation
+            .widgets
+            .get(&panel)?
+            .owned_inspector
+            .as_ref()
+            .map(OwnedInspector::work_for_test)
+    }
+
     pub(crate) fn scroll_owned_panel(
         &mut self,
         panel: EditorPanelInstanceId,

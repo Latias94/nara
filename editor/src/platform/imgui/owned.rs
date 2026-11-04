@@ -302,6 +302,16 @@ impl OwnedPanelSurface {
 
 impl NativeImgui {
     #[cfg(test)]
+    pub(super) fn owned_planner_work_for_test(
+        &self,
+        panel: EditorPanelInstanceId,
+    ) -> Option<nara_ui_render::UiPresentationWorkStats> {
+        self.owned
+            .get(&panel)
+            .map(|surface| surface.planner.work_stats())
+    }
+
+    #[cfg(test)]
     pub(super) fn owned_frames_for_test(
         &self,
     ) -> Vec<(EditorPanelInstanceId, Arc<UiFrame>, ImguiImageInteraction)> {

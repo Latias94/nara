@@ -2,6 +2,7 @@
 
 mod canvas;
 mod source_continuity;
+mod work_costs;
 
 use canvas::{install_canvas_button, observe_canvas_button};
 
@@ -362,6 +363,17 @@ fn run_input_workflow(
     project: &Path,
     canvas_buttons: bool,
 ) -> Result<InputObservation, String> {
+    run_game_workflow(event_loop, project, canvas_buttons, |workflow| {
+        workflow.run()
+    })
+}
+
+fn run_game_workflow<T>(
+    event_loop: &ActiveEventLoop,
+    project: &Path,
+    canvas_buttons: bool,
+    run: impl FnOnce(GameInputWorkflow<'_>) -> Result<T, String>,
+) -> Result<T, String> {
     let intent = game_view_intent()?;
     let window = hidden_window(event_loop, "Nara native Game input workflow")
         .map_err(|error| error.to_string())?;
@@ -402,7 +414,7 @@ fn run_input_workflow(
         .panel_workspace_mut()
         .layout_mut()
         .place(game_panel, crate::workspace::EditorPanelPlacement::Floating);
-    let result = GameInputWorkflow {
+    let result = run(GameInputWorkflow {
         native: &mut native,
         application: &mut application,
         event_loop,
@@ -411,8 +423,7 @@ fn run_input_workflow(
         stage: "initial workspace",
         canvas_buttons,
         interaction: String::new(),
-    }
-    .run();
+    });
     let graphics = finish_graphics_for_test(&mut native);
     drop(native);
     drop(window);

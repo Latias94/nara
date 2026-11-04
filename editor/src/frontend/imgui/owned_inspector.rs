@@ -329,6 +329,19 @@ pub(super) struct OwnedInspector {
 }
 
 impl OwnedInspector {
+    #[cfg(test)]
+    pub(super) fn work_for_test(&self) -> ([u64; 4], nara_ui_kernel::UiCompileWorkStats) {
+        (
+            [
+                self.work.compile_calls,
+                self.work.built_snapshots,
+                self.work.authored_nodes,
+                self.work.reused_frames,
+            ],
+            self.compiler.work_stats(),
+        )
+    }
+
     pub(super) fn new(root: UiRootKey, faces: Vec<FontFace>) -> Result<Self, OwnedInspectorError> {
         let engine = TextEngine::with_fonts(faces.clone(), Default::default())?;
         let compiler = UiCompiler::with_fonts(faces, Default::default())?;

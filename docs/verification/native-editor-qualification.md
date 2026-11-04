@@ -49,6 +49,37 @@ needs its actual adapter; an official Nara extension package is not required. In
 semantic actions and screenshots do not establish actual OS candidate delivery, pointer hit
 testing or native accessibility respectively. Native detachment keeps separate platform evidence.
 
+## UI Work Probes
+
+The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work
+and separate debug/release CPU distributions. Its opt-in native probe reuses the trusted compiled
+Game input fixture and the existing hidden-window Host; it performs no external Cargo build or
+project-code reload. Run it separately from the correctness trajectories when measuring work:
+
+```powershell
+$env:CARGO_BUILD_JOBS='1'
+$env:CARGO_TARGET_DIR=Join-Path (Get-Location) 'target'
+$env:WGPU_BACKEND='dx12'
+$env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
+cargo +1.95.0 nextest run --locked --cargo-profile release -p nara-editor --lib --run-ignored only -E 'test(measure_native_static_inspector_beside_advancing_game)' --test-threads=1 --nocapture
+```
+
+The probe keeps 16 warmup and 128 sampled moving-Game frames. Every sampled original Game image
+and retained Inspector image must have matching composite receipts in that same primary-window
+frame. Inspector frame/image identity, compilation/planning work and authoring values/history
+stay unchanged. Timed owner drive, cursor ingress and native redraw cover the complete selected
+window, not isolated UI work. Completion spans owner-drive start through the original queue's
+callback, including polling delay; it is neither GPU timestamp duration nor display latency.
+Observe actual native/Dear/panel scale and extent separately and reject geometry drift. After
+completion drain, recheck the original device through the Host health boundary. Completed queue
+callbacks and unchanged epochs are insufficient on terminal loss. The probe then destroys that
+drained device outside all measured intervals and requires exact `DeviceLost` refusal with no
+namespace replacement; original graphics/application retirement must still complete.
+Logical Host retention/backend payload observations do not measure process allocations or complete
+driver residency. Report cold setup, warm distributions, instrumentation/maintenance and physical
+cleanup separately. The actual composition remains Dear-based with hosted Nara panels; this does
+not qualify an independent self-drawn shell, pure-ImGui reference, OS input or cross-platform costs.
+
 ## Environment
 
 Use Windows with an interactive desktop, Rust 1.95.0 and an actual DX12-capable adapter.
