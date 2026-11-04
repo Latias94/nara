@@ -1390,7 +1390,9 @@ Open was refused by startup source preparation before a Session existed; this is
 separately rather than hidden by widening admission. Three release native repetitions now retain
 the exact Inspector beside an advancing Game for 128 matching current primary composites, with
 observed geometry, original-device health and actual terminal-loss refusal. This remains the
-current Dear-hosted composition, with repeated description work. Allocation/full upload/GPU
+current Dear-hosted composition, with repeated description work. Separate opt-in allocation
+processes reuse the CPU workloads and count current-thread Rust requests; unchanged frame reuse
+still allocates/frees temporary descriptions. Full process/native allocation/retention, upload/GPU
 timestamps, OS input/display latency, remaining matched workloads and fixed numeric budgets keep
 R11a open; neither an independent frontend nor a cache improvement is claimed.
 

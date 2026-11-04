@@ -8,6 +8,8 @@ publish = false
 
 [features]
 default = []
+# Enables the private allocator only in the library test executable, for separate cost runs.
+ui-work-allocation-probes = []
 
 [dependencies]
 dear-imgui-rs = { workspace = true, features = ["system-clipboard"] }

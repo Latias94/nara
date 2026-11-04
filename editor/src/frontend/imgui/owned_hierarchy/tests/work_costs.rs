@@ -73,6 +73,7 @@ fn measure_owned_hierarchy_logical_rows_at_a_fixed_viewport() {
         let before = owner.work;
         let compiler = owner.compiler.work_stats();
         let elapsed = crate::frontend::imgui::owned_work::measure_calls(
+            &format!("hierarchy_read_only_projection_{count}"),
             || {
                 let next = owner
                     .compile(&model, environment(800.0), UiTheme::default(), true)

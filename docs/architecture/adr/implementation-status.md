@@ -36,7 +36,8 @@ checks. Debug/release CPU probes distinguish frame reuse from repeated descripti
 full-source startup allowance refusal separate from read-only 10,000/100,000-row projection costs.
 Three release native repetitions now keep the exact static Inspector and advancing Game in the
 same 128 current window frames, with actual geometry, original-device health and terminal-loss
-refusal controls. Description work remains repeated. Allocation/full upload/GPU timestamps,
+refusal controls. Separate current-thread requested-allocation probes quantify temporary churn
+without changing production allocators. Full process/native retention, upload/GPU timestamps,
 OS input/display latency and fixed budgets still keep R11a open. The pinned Zed/Open-GPUI study
 refines state/invalidation and collection consumers without selecting their ownership/dependencies.
 No cache optimization or independent frontend is qualified; R11b-f remain unimplemented.

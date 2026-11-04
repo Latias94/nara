@@ -6,6 +6,9 @@ mod platform;
 mod supervised_play;
 pub mod workspace;
 
+#[cfg(all(test, feature = "ui-work-allocation-probes"))]
+mod allocation_probe;
+
 pub use app::{
     EditorApplication, EditorApplicationActionDispatch, EditorApplicationActionNotDispatched,
     EditorApplicationConstructionSubmission, EditorApplicationOpenError,

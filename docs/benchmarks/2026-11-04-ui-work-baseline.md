@@ -109,6 +109,71 @@ their timing difference is not a claimed implementation improvement. Selecting o
 process would discard observed cost. Native active-View and allocation/GPU attribution remain
 separate below.
 
+## Separate Requested-Allocation Probe
+
+`ui-work-allocation-probes` enables a private `System`-delegating allocator **only in the Editor
+library test executable**. It is absent from ordinary timing builds and production binaries.
+The same ignored CPU probe calls and correctness oracles are reused; no separate synthetic UI
+implementation is measured. Each call observes successful Rust allocator requests on the current
+thread, then disables observation before storing/reporting the sample. Setup, initial projection,
+warmup, sample buffers and output are outside these windows. Local-edit input formatting remains
+inside the call, matching that timing workload's existing boundary.
+
+`alloc` and `alloc_zeroed` have separate call counts. Successful `realloc` counts the full new
+request as allocated and the full old request as freed; a failed allocation/reallocation does
+not change these facts. Net bytes may be negative when a call frees storage allocated before its
+window. The reported maximum is **the maximum individual call's requested live-byte growth
+relative to that call's entry**, not total retained bytes. Summing window net changes does not
+account for work/destruction outside those windows and is not a process retention or leak proof.
+
+The scope excludes other threads, native-library allocations outside Rust's allocator, allocator
+usable-size/metadata/fragmentation, process RSS, GPU allocation and driver residency. Constant TLS
+and plain counters avoid allocating during observation; unwind cleanup closes the scope. The
+allocator tests verify known zeroed/reallocated sizes, release of pre-existing storage and
+other-thread exclusion. Timings printed by this opt-in executable include observation overhead
+and are marked `true_not_timing_baseline`; use the ordinary-feature timing processes above for
+latency, not an allocation-enabled run as a faster/slower implementation comparison.
+
+```powershell
+$env:CARGO_BUILD_JOBS='1'
+$env:CARGO_TARGET_DIR=Join-Path (Get-Location) 'target'
+cargo +1.95.0 nextest run --locked --cargo-profile release -p nara-editor --lib --features ui-work-allocation-probes --run-ignored only -E 'test(measure_owned_inspector_unchanged_and_local_edit_work) | test(measure_owned_hierarchy_logical_rows_at_a_fixed_viewport)' --test-threads=1 --nocapture
+```
+
+Three separate serial release processes pass both probes. The static workloads have identical
+requested-allocation counts in all three processes. Local-edit process 2 has 128 additional
+allocations and frees, totaling 4,096 additional requested bytes; the observation does not
+identify their cause. The variation is retained below rather than choosing one process.
+
+All bytes are exact requested **bytes**, not KiB or allocator usable sizes. Calls are ordered
+**alloc / alloc_zeroed / realloc / dealloc**; totals cover the stated sample group.
+
+| Workload | Calls | Allocated bytes | Freed bytes | Summed net bytes | Max individual-call growth bytes |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Unchanged Inspector, 512 calls, all processes | 257,536 / 0 / 10,752 / 257,536 | 53,550,080 | 53,550,080 | 0 | 59,103 |
+| Local edit, 128 calls, processes 1 and 3 | 242,593 / 128 / 20,992 / 241,120 | 77,610,069 | 77,226,175 | 383,894 | 201,302 |
+| Local edit, 128 calls, process 2 | 242,721 / 128 / 20,992 / 241,248 | 77,614,165 | 77,230,271 | 383,894 | 201,302 |
+| Unchanged 10,000-row read-only projection, 512 calls, all processes | 147,968 / 0 / 12,800 / 147,968 | 39,993,344 | 39,993,344 | 0 | 42,349 |
+| Unchanged 100,000-row read-only projection, 512 calls, all processes | 147,968 / 0 / 12,800 / 147,968 | 39,994,368 | 39,994,368 | 0 | 42,351 |
+
+Thus each unchanged Inspector call performs **503 alloc + 21 realloc** requests, accounting for
+**104,590 requested bytes**, before returning the unchanged frame. Each Hierarchy call performs
+**289 alloc + 25 realloc** requests and **78,112 / 78,114 bytes** in the two populations. The
+static calls balance their scoped allocations/frees, but balanced totals do not eliminate churn
+or establish process retention. Bounded visible layout/storage can coexist with the measured
+full-population scan time. The 128 local edits leave positive scoped net requests; this short
+group neither attributes all retained owners nor proves a leak or a long-run plateau.
+
+Runs: `9bf505b6-6a1d-4993-8c4e-96fdacb2b822`, `368cf563-0cca-49a3-9244-aa7d6ef4771d`,
+`ac11012d-6e3a-4680-aa44-ba843abca319`. Allocator plus owner debug tests pass **50/50**
+(`da9dd47d-80f0-487b-86bc-c73fd5170167`); the two allocator controls also pass optimized
+(`145d1a7b-9b86-4494-bc58-13eef773d61d`). Ordinary-feature owner tests remain **48/48**
+(`f8d87568-30d8-4b3a-bc42-96f49f97afd2`). Focused independent review finds no P1/P2.
+The private observer is absent from production and adds no dependency or allocation authority.
+Correctness Clippy with all targets/features and root formatting also pass. This adds a measured
+current-thread request cell, not full process/native retention or quantitative observer-overhead
+qualification; those remain separate R11a work.
+
 ## Native Window Protocol
 
 The native probe uses the existing hidden-window Windows/DX12 Host and trusted compiled Game
@@ -118,6 +183,10 @@ sampled 20 ms owner drives. The source Inspector is read-only during Play. Every
 the sprite to move within the visible Game image, the Runtime frame and image version to advance,
 and the original Game and unchanged Inspector occurrences to be composited in that same current
 primary-window frame. Source values, selection, revisions, history and dirty state cannot change.
+
+Use ordinary features for native timing as well. An allocation-enabled test executable still
+delegates each Rust allocation through its observer even outside active counting windows; it is
+not the ordinary native timing baseline and does not automatically report native allocations.
 
 The probe records separate owner-drive, cursor-flush and native-redraw wall times. The cursor is
 injected through the existing native fixture; this is not OS input latency. Completion spans the
@@ -188,7 +257,7 @@ is zero and submitted instance demand is 160 bytes per sampled transaction. The 
 Runtime surface telemetry reports **zero samples and tracked resource bytes in this native
 lane**. Its native UI packet counters are also zero. Those facts do not mean zero native UI work,
 GPU allocations or residency; the exact original queue callbacks and real composite receipts
-provide the separate completion/presentation proof. Process/Rust allocations, complete native
+provide the separate completion/presentation proof. Full native/process allocations, complete native
 backend upload bytes, driver residency, GPU timestamps and OS input/display latency remain open.
 
 The two original Game/Runtime-UI correctness trajectories also pass after sharing their existing
