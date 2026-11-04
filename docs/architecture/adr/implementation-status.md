@@ -59,6 +59,14 @@ consumers preserve their original pixel/buffer and retirement oracles alongside 
 Inspector change pressure separately exposes repeated compile/text work for color/palette and
 environment changes without claiming actual font substitution or an incremental-cache win.
 
+The [repeated native lifetime probe](../../benchmarks/2026-11-04-ui-work-baseline.md#repeated-native-lifetime-process-memory)
+uses that same complete workload across healthy and actual device-loss teardown. It keeps
+whole-process private commit, shared/private Working Set and lifetime peaks distinct from Host
+payload accounting. Exact original cleanup, fresh Host identity, weak Rust-window release and
+platform-window destruction pass all 48 lifetimes in three release processes. Whole-process
+residuals vary despite constant logical Host payloads; short observations do not establish
+UI-exclusive memory, a leak bound, long-running stability or R11a's remaining budgets.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

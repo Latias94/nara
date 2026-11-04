@@ -1416,6 +1416,17 @@ The font case does not substitute actual fonts/fallback; native input/display, f
 retention and final numeric budgets remain open. These observations add no reuse optimization or
 new telemetry/budget owner.
 
+The [repeated native lifetime probe](../benchmarks/2026-11-04-ui-work-baseline.md#repeated-native-lifetime-process-memory)
+extends this same complete Inspector/Game workflow across healthy and actual device-loss
+retirement. It observes whole-process private commit and Working Set before construction, live
+and after teardown, beside the existing logical Host payloads. Original cleanup, fresh Host
+identity, weak Rust-window release, exact platform-window destruction and source bytes remain
+required in every cycle. Three ordinary release processes pass all 48 complete lifetimes; their
+36 measured lifetimes keep process/path distributions and observed residual variation explicit.
+Keep these short observations separate from UI-exclusive retention, full GPU memory,
+long-running leak/plateau evidence and numeric memory budgets. No allocator trim or additional
+post-cleanup delay may manufacture a lower residual observation.
+
 ### R11b: Public panel hosting and component composition
 
 **Dependencies:** R11a and the current qualified Application/Session query/result contracts.

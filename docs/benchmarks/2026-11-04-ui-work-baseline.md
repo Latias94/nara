@@ -520,6 +520,113 @@ categories remain outside the correctness gate. Full process memory, Dear write 
 image-producer GPU intervals, actual font substitution, OS input/display latency and fixed
 numeric budgets remain unqualified; this follow-up does not complete R11a or R11b-f.
 
+## Repeated Native Lifetime Process Memory
+
+`measure_native_repeated_lifetime_memory` reuses the complete ordinary static-Inspector /
+advancing-Game workload in sequential native lifetimes. One process runs 4 warmup lifetimes and
+12 measured lifetimes, alternating healthy graphics retirement and destruction of the original
+drained device. Every lifetime still has 16 warmup and 128 sampled moving frames, the original
+image/composite/window and queue-completion associations, unchanged source/history and Inspector
+identity/work, fixed geometry, and final original-device health. Device-loss lifetimes additionally
+require exact terminal-loss refusal with an unchanged namespace. The original harness completes
+graphics and Session retirement and drops Native/window/Application before reporting success.
+The probe verifies a distinct Host identity and a released weak Rust window in every cycle;
+source Scene and Prefab bytes remain identical across cycles.
+This is the existing Dear-hosted composition, not an independent self-drawn Editor.
+
+Windows `K32GetProcessMemoryInfo` captures detached process values immediately before native
+construction, after the complete workload but before graphics cleanup, and at the first
+about-to-wait boundary after the original teardown and exact platform-window destruction.
+Per-frame observation vectors are dropped before the live snapshot. A bounded, preallocated
+vector retains only scalar cycle facts and geometry; it owns no native resources.
+The live snapshot for a loss cycle follows the explicit device-loss control; a healthy cycle
+still owns its healthy device at the corresponding boundary. These are labeled separately.
+
+[`PROCESS_MEMORY_COUNTERS_EX`](https://learn.microsoft.com/en-us/windows/win32/api/psapi/ns-psapi-process_memory_counters_ex)
+defines `PrivateUsage` as private process **commit**, not physical/private resident bytes.
+Current Working Set includes shared and private pages, as described in Microsoft's
+[process working-set documentation](https://learn.microsoft.com/en-us/windows/win32/procthread/process-working-set).
+Lifetime peaks include fixture construction, native setup and all warmups; they are not reset.
+Host-retained payload, candidate metadata and backend-tracked texture/instance bytes remain
+separate logical observations, not complete native/driver/GPU residency.
+
+The probe adds no allocator trim, working-set reduction or arbitrary delay after cleanup. Each
+lifetime returns to Winit before the next begins. Require the exact retired window's `Destroyed`
+event, then a subsequent about-to-wait boundary and a read-only `IsWindow` query confirming that
+its HWND is absent. Record that dispatch interval separately, with a finite failure deadline.
+Post-teardown values can still include allocator, driver and deferred-release effects; they do
+not isolate UI ownership or identify the cause of residual growth. The measurements exclude
+neither observer/setup allocations nor shared native mappings. Short repeated lifetimes do not
+establish a plateau, leak bound or long-running steady state, and add no memory budget or cache
+policy.
+
+The initial debug probe passes 1/1 (`74fd21bc-038e-486e-bf37-7c7ae4633833`), but source review
+finds that Winit 0.30.13 posts its Windows destruction request from `Window::drop`. That first
+probe runs all lifetimes inside one callback, so weak Rust-window release does not qualify the
+HWND/platform boundary. Exclude its process numbers from the final baseline. The corrected
+event-driven probe and both original ordinary/GPU-marker controls then pass **3/3**
+(`2d8c8a2d-1e5c-4f53-b43e-4438bf982efc`), including 16 exact platform-destruction checks and
+the original complete old-lane oracles. Independent correctness and testing reviews find no
+P1/P2 after this correction. The missing-event timeout and live-HWND refusal paths have source
+review evidence; no fault-injected native execution of those observer failures is claimed.
+
+At source base `714d7b4` plus this probe/retirement refactor, three separate serial ordinary
+release processes each pass **1/1**: `4366dadf-8408-4e04-92c4-22af3e14cc06`,
+`00b0a363-3fd7-4e59-870b-585cd5296a88`, `a22b9439-3715-4dcb-8d06-4ad59a53bb4d`.
+Each reports `debug_assertions=false`, allocation-probe feature disabled and no GPU-marker
+instrumentation. The first optimized rebuild takes 16 min 46 s, outside all native observations;
+test wall times are 65.26 / 65.09 / 65.44 s. Hardware, fonts and exact geometry match the native
+protocol above. All **48 lifetimes** preserve every original workload and cleanup guard; the
+**36 measured lifetimes** provide six healthy and six loss observations per process.
+
+Cells below are **minimum–maximum MiB** (`1 MiB = 1,048,576 bytes`), over the six measured
+lifetimes in that process/path. Commit and Working Set are different process quantities; do not
+sum them. The loss live boundary follows device destruction, as specified above.
+
+| Process / retirement | Live private commit | Live Working Set | After private commit | After Working Set |
+| --- | --- | --- | --- | --- |
+| 1 / healthy | 640.96–779.83 | 439.92–520.38 | 202.59–504.41 | 212.22–391.82 |
+| 1 / loss | 686.95–783.41 | 443.00–528.18 | 221.21–480.69 | 257.22–396.68 |
+| 2 / healthy | 600.84–774.75 | 383.48–646.23 | 235.75–477.90 | 266.99–361.59 |
+| 2 / loss | 536.60–793.41 | 434.82–520.63 | 232.43–485.80 | 239.21–342.96 |
+| 3 / healthy | 618.29–743.29 | 390.36–492.94 | 210.28–513.20 | 247.08–357.77 |
+| 3 / loss | 538.39–800.22 | 306.34–533.67 | 225.23–501.91 | 209.45–376.23 |
+
+Retain both endpoint directions rather than selecting one low observation. These cells are
+**private commit / Working Set MiB**; both endpoint columns follow loss retirement. Peaks cover
+the full process lifetime, including setup and all warmups, not only the 12 measured cycles.
+
+| Process | After last warmup, cycle 3 | After final measured, cycle 15 | Lifetime peaks at final observation |
+| --- | --- | --- | --- |
+| 1 | 461.87 / 462.75 | 221.21 / 257.22 | 828.31 / 575.17 |
+| 2 | 464.74 / 466.41 | 289.96 / 327.41 | 830.27 / 696.23 |
+| 3 | 304.11 / 171.53 | 501.91 / 376.23 | 830.65 / 549.94 |
+
+Every lifetime has the same sampled Host-retained payload maximum **17,271,176 bytes** and
+live retained payload **17,263,176 bytes**. Candidate metadata and the existing backend-tracked
+texture/instance/total payload gauges are zero in this workload; those narrow gauges do not
+cover complete native allocation. Measured return-to-Winit through post-destruction dispatch
+intervals range **0.6388–0.8900 / 0.6135–1.5544 / 0.7266–1.6593 ms** across processes 1/2/3.
+They include scheduling/event dispatch and the later about-to-wait boundary, not isolated
+`DestroyWindow` execution.
+
+Whole-process residuals vary substantially despite constant logical Host payload observations.
+The third process ends above its post-warmup observation while the first two end below theirs.
+These observations establish neither convergence nor a leak cause, and do not qualify a numeric
+memory budget. Allocator/native/driver and product retention need separate attribution before
+selecting an optimization. Full native allocations, exclusive UI retention, complete GPU
+residency and long-running behavior remain open alongside R11a's other missing metrics/budgets.
+After measurement, equivalent conditional spellings are normalized for Clippy; no workload,
+sampling, ownership or destruction boundary changes follow the recorded release observations.
+Final Editor correctness Clippy with all targets/features, root formatting and **1,042 local
+Markdown link targets** in the four changed documents pass. Other existing Clippy warning
+categories remain outside the correctness gate. This completes the bounded process-observation
+prerequisite, not R11a, R11b-f or the complete R11/R12 acceptance.
+
+```powershell
+cargo +1.95.0 nextest run --locked --cargo-profile release -p nara-editor --lib --run-ignored only -E 'test(measure_native_repeated_lifetime_memory)' --test-threads=1 --nocapture
+```
+
 ## Full Source Open Refusal
 
 The initial attempt used an actual project with 10,000 empty source entities. Open entered

@@ -5,6 +5,7 @@
 //! redraw and callback/polling delay, not isolated GPU execution or display latency.
 
 pub(super) mod gpu;
+mod memory;
 
 use super::*;
 
@@ -79,7 +80,7 @@ impl ApplicationHandler for WorkCostHost<'_> {
                 self.project,
                 false,
                 &requirements,
-                |workflow| workflow.static_inspector_work_costs(self.primary_gpu_timestamps),
+                |mut workflow| workflow.static_inspector_work_costs(self.primary_gpu_timestamps),
             ));
         }
         event_loop.exit();
@@ -150,6 +151,13 @@ struct WorkCostObservation {
     maintenance_ns: u64,
     completion_drain_ns: u64,
     primary_gpu: Option<gpu::PrimaryGpuObservation>,
+    retirement: WorkRetirement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkRetirement {
+    Healthy,
+    DestroyOriginalDevice,
 }
 
 impl GameInputWorkflow<'_> {
@@ -497,8 +505,19 @@ impl GameInputWorkflow<'_> {
     }
 
     fn static_inspector_work_costs(
-        mut self,
+        &mut self,
         primary_gpu_timestamps: bool,
+    ) -> Result<WorkCostObservation, String> {
+        self.inspector_work_costs(
+            primary_gpu_timestamps,
+            WorkRetirement::DestroyOriginalDevice,
+        )
+    }
+
+    fn inspector_work_costs(
+        &mut self,
+        primary_gpu_timestamps: bool,
+        retirement: WorkRetirement,
     ) -> Result<WorkCostObservation, String> {
         self.stage = "static Inspector work baseline setup";
         // Configure before this workflow's first submission, and do not reset at the sample
@@ -752,10 +771,21 @@ impl GameInputWorkflow<'_> {
             maintenance_ns,
             completion_drain_ns,
             primary_gpu,
+            retirement,
         };
-        // Refusal control after every measured interval: destroy that same drained device,
-        // keep its namespace unchanged and require the exact terminal-loss error. Cleanup
-        // still runs through run_game_workflow's original graphics/application owners.
+        if retirement == WorkRetirement::DestroyOriginalDevice {
+            self.destroy_work_original_device(&observed.backend_before)?;
+        }
+        Ok(observed)
+    }
+
+    fn destroy_work_original_device(
+        &mut self,
+        original: &WgpuRuntimeHostFacts,
+    ) -> Result<(), String> {
+        // Refusal control after all samples: destroy that same drained device, keep its
+        // namespace unchanged and require the exact terminal-loss error. Cleanup still runs
+        // through run_game_workflow's original graphics/application owners.
         self.native
             .gpu
             .wait_for_idle()
@@ -771,19 +801,19 @@ impl GameInputWorkflow<'_> {
         device.destroy();
         self.native.close.device_lost = true;
         // with_device polls and checks the actual backend loss signal before granting access.
-        let lost = self.work_original_device_is_healthy(&observed.backend_before);
+        let lost = self.work_original_device_is_healthy(original);
         let lost_facts = self.native.gpu.runtime_facts();
         if !matches!(
             lost,
             Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
-        ) || lost_facts.backend_instance_id != observed.backend_before.backend_instance_id
-            || lost_facts.device_epoch != observed.backend_before.device_epoch
+        ) || lost_facts.backend_instance_id != original.backend_instance_id
+            || lost_facts.device_epoch != original.device_epoch
         {
             return Err(format!(
                 "the final health boundary accepted or misclassified the destroyed original device: result={lost:?}, facts={lost_facts:?}"
             ));
         }
-        Ok(observed)
+        Ok(())
     }
 }
 
@@ -812,8 +842,10 @@ impl WorkCostObservation {
             self.primary_gpu.is_some()
         );
         println!(
-            "NATIVE_WORK geometry={:?} stable_every_sample=true final_original_device_healthy=true destroyed_original_device_refused=true loss_control_after_all_samples=true",
-            self.geometry
+            "NATIVE_WORK geometry={:?} stable_every_sample=true final_original_device_healthy=true retirement={:?} destroyed_original_device_refused={}",
+            self.geometry,
+            self.retirement,
+            self.retirement == WorkRetirement::DestroyOriginalDevice
         );
         println!(
             "NATIVE_WORK owner_drive_ns={:?} cursor_flush_ns={:?} native_redraw_ns={:?}",

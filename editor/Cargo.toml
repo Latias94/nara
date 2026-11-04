@@ -35,6 +35,9 @@ nara_tasks = { workspace = true, features = ["test-support"] }
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
 rustix = { workspace = true, features = ["event", "fs", "process"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_ProcessStatus"] }
+
 [target.'cfg(windows)'.dependencies]
 dunce.workspace = true
 windows-sys = { workspace = true, features = [

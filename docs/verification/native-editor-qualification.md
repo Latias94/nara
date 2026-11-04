@@ -102,6 +102,31 @@ command reordering around timestamp writes; a marker interval is not a strict is
 guarantee or a substitute for presentation receipts. Missing capability or invalid/missing sample
 fails the complete lane rather than dropping samples or silently disabling the queries.
 
+The separate `measure_native_repeated_lifetime_memory` probe repeats the complete ordinary
+Inspector/Game workload across 4 warmup and 12 measured native lifetimes in one process. Each
+lifetime retains its own 16 warmup / 128 sampled frames and original receipt, source/history,
+geometry and health assertions. Alternate healthy graphics retirement with destruction of that
+same drained device and exact terminal-loss refusal. Require a fresh Host identity, original
+graphics/Session cleanup and release of the Rust window in every cycle. Neither path restarts
+the process or relaxes the workload.
+
+Use the same environment and release command above with the memory probe's name, in separate
+serial processes when collecting a baseline. `K32GetProcessMemoryInfo` samples the whole process
+before native construction, after the workload but before graphics cleanup, and immediately after
+the original harness has dropped Native/window/Application and the platform window is destroyed.
+Return each lifetime to Winit, require its exact `Destroyed` event, and capture at the following
+about-to-wait boundary only after `IsWindow` confirms that the HWND is absent. Rust weak-reference
+release alone is insufficient because Winit posts the Windows destruction request. Record the
+dispatch interval separately and check a finite missing-event deadline when the event loop
+returns; it does not preempt a blocked native callback. Drop per-frame observer vectors before
+the live observation; retain only a preallocated, bounded set of detached cycle facts.
+Report process private **commit** and current Working Set separately from lifetime peaks and
+Host/backend logical payloads. Working Set includes shared pages, and peaks include setup and
+warmups. The probe adds no post-cleanup sleep, allocator trim or working-set reduction. These
+short repeated lifetimes do not qualify exclusive UI memory, complete GPU residency, a plateau,
+a leak bound or long-running behavior. The device-loss live boundary follows the explicit loss
+control, whereas the healthy boundary still owns a healthy device; retain that label in comparisons.
+
 ## Environment
 
 Use Windows with an interactive desktop, Rust 1.95.0 and an actual DX12-capable adapter.
