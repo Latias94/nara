@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-04 (Nara-owned ordinary Inspector/Hierarchy and selected-panel replacement scope)
+**Last Revised**: 2026-11-04 (Nara-owned panels, user-authored UI attachment and automation ownership)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -104,11 +104,12 @@ implementation and matching public/native qualification.
 Future custom UI reuses these semantic boundaries and render-view handoff, but may replace all widget, layout, focus and docking code.
 Sharing rendering does not require sharing the runtime game's complete UI toolkit.
 
-The October 27 user clarification selects a Nara-owned custom-drawn Editor frontend as the
-future destination, not embedding Fyrox, Masonry or another toolkit. References inform concepts;
-the existing Dear frontend remains the qualified predecessor until matching workflows are
-replaced. This direction does not require complete UI work before independent Scene/language
-foundation development or introduce a second document/history authority.
+The October 27 clarification selects a Nara-owned custom-drawn Editor frontend as the default
+destination. The November 4 clarification also requires sufficient public attachment interfaces
+for users to integrate another UI implementation into a panel. This does not require Nara to
+ship an ImGui extension or embed a foreign toolkit as its default. The existing Dear frontend
+remains the qualified predecessor until matching workflows are replaced. Neither direction
+introduces a second document/history authority or blocks independent Scene/language work.
 
 ### Independent document domains share the workspace lifecycle
 
@@ -232,6 +233,58 @@ rejects selected Host facets before mutation. It cannot silently discard an exec
 configuration. See the [extension ergonomics plan](../../plans/2026-10-22-public-extension-ergonomics-plan.md).
 Completed project replacement requests presentation even when no action or persistence result
 changed during its final poll. Waiting on unchanged owners alone remains quiet.
+
+### Public panel hosting and custom UI implementations
+
+The target panel contract separates a contribution's document/query/command access from its
+frontend's content, interaction and rendering. `ImguiEditorPanel` is the current selected
+frontend interface, not the permanent shape of all Editor extensions. Refactor its replacement
+through public consumers; exposing private `OwnedPanelSurface` fields is not that replacement.
+
+Workspace owns contribution and panel-instance identity, document targeting, placement and
+versioned layout preferences. Each frontend owns its internal control tree or immediate context,
+drafts and local interaction. Host owns native windows, seat-level focus/capture/IME arbitration,
+clipboard, cursor, refresh scheduling and admitted render execution. The attachment supplies
+current bounds/clip/scale, lifecycle observations, routed input and text-service capabilities,
+frame demand, owned render output and exact presentation feedback. Popups outside a panel need
+an admitted overlay placement and input scope; internal drawing cannot escape the panel's clip
+or claim another window. An implementation may declare unsupported capabilities explicitly.
+
+The contract preserves compatible panel state across relocation and GPU reconstruction, and
+retires routes, composition, queued results and resource uses on the actual instance/endpoint
+transition. A matching label or panel kind cannot authorize input for a replacement incarnation.
+Provider-local focus is distinct from Host arbitration between providers. The same output and
+coordinate mapping must govern drawing, hit testing and semantic bounds. Toolkits may retain
+their own trees and render through admitted packets or retained images; they need not lower
+every control into `UiNode`. Image composition alone does not qualify input or text integration.
+
+Nara supplies documented Host ports and independently compiled conformance consumers. An official
+ImGui/egui extension, stable binary ABI, native code hot-unload and arbitrary project-code loading
+are not consequences of this contract. Claims of compatibility with a named toolkit require a
+real adapter and the matching capability tests, separately from generic Host conformance.
+
+### Complex editors and programmable interaction
+
+Graph, timeline and similar editors compose panel-local controls, custom drawing and existing
+render Views around a document-domain owner. A shader graph's authored nodes, ports and links
+belong to that domain; its compiled material belongs to the shader/content owner. The UI graph
+and GPU resource-dependency graph are different facts. Neither becomes a universal graph in
+the UI kernel. Menu, shortcut and panel activation refer to the same admitted semantic command;
+closing a panel must not implicitly remove an independently registered command.
+
+Domain automation uses existing Application/Session queries, preparation, actions and exact
+operation outcomes. Visible-UI automation observes and targets the presented control incarnation
+and uses the same UI dispatch and Host input arbitration as interactive use. It cannot claim to
+test a button by bypassing its controller and submitting a document mutation directly. Semantic
+observations carry stable identity, role/value/actions, state and mapped bounds rather than labels
+or coordinates alone. Absent semantic support is an explicit capability outcome.
+
+Tests and future agent/debug clients need request-specific completion and a subsequent matching
+observation; dispatch acceptance is not Save, compilation, presentation or physical-close completion.
+A live preview may never become globally idle, so waits target a named outcome/revision and have
+bounded cancellation. Transport, agent servers and a general scripting protocol remain separate
+delivery work. The [UI design](../ui-foundation-design.md) and [R11 sequence](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11-ui-content-association-text-admission-and-platform-qualification)
+specify the unimplemented successors and their evidence boundaries.
 
 ### Complete field edits through exact owner results
 
@@ -821,7 +874,9 @@ qualified separately in the implementation ledger.
 The replacement becomes the default only after the plan's actual Nara texture, authoring, input, lifecycle and feature-parity gates pass.
 If a mandatory capability fails, retain the current production frontend and resolve the concrete blocker before porting the rest.
 Passing one probe does not claim a complete replacement or native support on untested platforms.
-Once replacement parity passes, remove the superseded frontend rather than preserving a permanent compatibility product.
+Once replacement parity passes, remove the superseded default frontend. Optional user-authored
+panel frontends use the public attachment contract; they do not preserve the displaced default
+Shell or require a permanent ImGui-shaped compatibility interface.
 
 The ordinary Scene/Prefab Inspector is a selected panel replacement within that migration.
 Nara owns its default Document controls, field drafts' input buffers, component composition,

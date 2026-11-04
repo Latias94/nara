@@ -8,6 +8,27 @@ replacement, frame cadence or supervised lifecycle ownership, select the traject
 the affected behavior. A focused result establishes only that tested scope.
 Documentation-only changes do not require another native qualification run.
 
+## UI Architecture Successor Scope
+
+The [R11a-e sequence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+and [UI design](../architecture/ui-foundation-design.md) add unimplemented public panel-hosting,
+custom-drawing, observation/operation and measured-reuse targets. Existing results below retain
+their original scope. Select actual successor native trajectories when those capabilities land:
+
+- Two independently compiled frontend implementations share one Host; transfer focus, IME,
+  capture and an admitted popup, then close/recreate one with pending input/output.
+- Two logical Views remain independent through panel relocation, fractional scale, clipping,
+  resize and output retirement. Multiple Render Views alone do not qualify UI Surface aggregation.
+- Public semantic targeting and real pointer/key/text routes reach the ordinary controllers;
+  distinguish those paths and match the original domain result plus later presented observation.
+- Static/dynamic, collection and lifecycle costs meet the workload/hardware budgets fixed by
+  R11a. Record construction, layout, shaping, raster, upload, GPU and latency/memory separately.
+
+A finite Host conformance frontend does not establish ImGui/egui compatibility. A named toolkit
+needs its actual adapter; an official Nara extension package is not required. Injected IME,
+semantic actions and screenshots do not establish actual OS candidate delivery, pointer hit
+testing or native accessibility respectively. Native detachment keeps separate platform evidence.
+
 ## Environment
 
 Use Windows with an interactive desktop, Rust 1.95.0 and an actual DX12-capable adapter.

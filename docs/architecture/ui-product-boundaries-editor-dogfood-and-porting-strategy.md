@@ -2,7 +2,7 @@
 
 **Status**: Explanatory Guide
 **Date**: 2026-07-16
-**Last Revised**: 2026-10-17
+**Last Revised**: 2026-11-04
 **Normative Authority**: ADR 0015, ADR 0025, ADR 0041, ADR 0047, ADR 0078, ADR 0094, ADR 0114, ADR 0117 and [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md)
 **Host Foundations**: Accepted ADRs 0082 and 0084, with their later focused refinements
 **Related Open Questions**: OQ-001, OQ-003, OQ-004, OQ-010, OQ-022, and OQ-031
@@ -13,7 +13,9 @@ The completed [Editor Foundation and Frontends plan](../plans/2026-10-16-1229-re
 The original direct dear-imgui-rs 0.20.0 integration and candidate frontend passed the recorded
 Windows adoption and parity gates. The normal-entry migration and removal of the superseded
 frontend are tracked in [U8 progress](../research/2026-10-16-editor-foundation/u8-migration-progress.md).
-A future custom frontend remains unbuilt and is not an acceptance claim of that work.
+Subsequent Nara-drawn selected panels have their own qualification. Complete custom workspace,
+public multi-implementation panel hosting and performance remain separate targets; the original
+frontend migration does not qualify them.
 The [0.21 upgrade plan](../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) owns the published-backend
 migration; its fresh verification is recorded in the implementation ledger.
 
@@ -33,8 +35,10 @@ The direction is:
 
 1. keep game UI and editor UI as separate product layers;
 2. share only narrow services or pure algorithms after their semantics are proven equal;
-3. qualify Dear ImGui through actual Editor parity, then keep one production frontend and remove the superseded adapter;
-4. let Nara UI dogfood one complete editor panel only after the runtime UI is ready;
+3. retain the qualified predecessor until matching Nara-owned default workflows pass, then remove
+   that displaced default; optional user-authored panel frontends use public Host interfaces;
+4. qualify complete Editor panels against their own requirements without waiting for whole-game
+   UI readiness; reuse shared fundamentals where the actual consumer proves their fit;
 5. use Open GPUI, egui, and Dear ImGui as evidence and selective implementation sources, not as
    authorities over Nara documents, Hosts, or render backends;
 6. leave the final editor topology open until real game and editor tracers decide it.
@@ -153,9 +157,13 @@ These are capability categories, not proposed Rust traits. Exact interfaces wait
 
 ## Editor UI Direction
 
-The early editor should continue using egui. This is a product decision about iteration speed, not a
-decision that egui owns Nara's editor model. The adapter consumes immutable tooling models and
-returns typed commands through the existing validation and undo path.
+The selected default is Nara's own custom-drawn Editor. Current Dear Shell/registered panels and
+qualified Nara panels keep their actual evidence scope; early egui-first wording is historical.
+Frontends consume immutable tooling models and use the existing validation, result and Undo
+owners. Nara supplies sufficient public panel/Host interfaces for user-authored implementations;
+it need not ship an official ImGui extension. The revised [UI design](ui-foundation-design.md)
+defines component, custom-drawing, automation and measured-work targets without imposing one
+toolkit tree or the game's ECS adapter on every Editor contribution.
 
 Editor contributions should grow by role rather than through one broad mutable `EditorPlugin`
 context:

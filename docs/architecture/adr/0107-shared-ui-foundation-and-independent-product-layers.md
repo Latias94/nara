@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-10-27 (Nara-owned Editor frontend direction; product owners unchanged)
+**Last Revised**: 2026-11-04 (independent UI products, state ownership and user-authored panel frontends)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -40,13 +40,15 @@ flowchart TB
     Foundation[Renderer-neutral Runtime UI Foundation]
     EditorDomain[Editor domain + workspace]
     EditorShell[Editor shell]
-    Frontend[Selected Dear ImGui frontend]
+    Frontend[Nara-owned Editor frontend]
+    Extension[Optional user-authored panel frontend]
     Shared[Proven shared fundamentals]
     Host[Editor/Runtime Host]
 
     Game --> Runtime --> Foundation
     EditorDomain --> EditorShell
     EditorShell --> Frontend --> Host
+    EditorShell --> Extension --> Host
     Foundation -. selective reuse .-> Shared
     Frontend -. consumer evidence .-> Shared
     Shared --> Host
@@ -64,14 +66,15 @@ flowchart TB
 - The Host/platform owns native windows, surfaces, seats, focus/capture arbitration, IME, clipboard,
   GPU generation, Viewport leases and Play Runtime lifecycle, with controlled adapter delegation
   under ADR 0118. Domain owners retain authoring mutation and history authority.
-- The selected Dear ImGui frontend owns its text-edit buffers, invalid drafts, caret, selection,
-  composition and scrolling. Runtime UI owns its own presented geometry and semantics. Sharing
+- Each panel frontend owns its text-edit buffers, invalid drafts, caret, selection, composition
+  and scrolling. The current Dear predecessor and qualified Nara panels retain their recorded
+  scope. Runtime UI owns its own presented geometry and semantics. Sharing
   native input arbitration does not route Editor controls through game ECS actions.
 - egui-first authoring and Game View records are historical bounded evidence, not the current
   frontend choice or heterogeneous Nara UI proof. Current frontend and platform scope is recorded
   in ADR 0118's implementation ledger and native qualification records.
-- Runtime UI and Editor delivery are technically independent. No Nara UI Inspector is a required
-  successor, and no current milestone presumes eventual toolkit convergence.
+- Runtime UI and Editor delivery are technically independent. The Nara-owned Editor destination
+  does not require convergence with the game's complete toolkit or adoption of its ECS adapter.
 - Public crates follow demonstrated dependency direction. A first concrete owner contract can
   precede a second implementation; broader shared/portable claims need matching consumer evidence.
 
@@ -80,6 +83,29 @@ automatically provide editable text; mature shaping or edit-buffer implementatio
 without importing another product's document or widget ownership. IME preedit never mutates an
 authoring document. Focus loss, panel retirement and source replacement follow explicit frontend
 and owner policies, with a committed composition using the normal semantic edit path.
+
+### Dependency direction and execution model
+
+Game UI and Editor UI are separate products over selectively shared fundamentals. The existing
+`nara_text`, `nara_ui_kernel`, `nara_ui_widgets` and `nara_ui_render` boundaries may serve both
+when their contracts fit. They must not acquire Editor documents, workspace placement, project
+execution or a game-specific ECS dependency. `nara_ui` remains the Scene/ECS game-UI adapter;
+an Editor panel must not depend on it merely to obtain text, layout, controls or presentation.
+Editor component composition belongs above these fundamentals and below document-specific tools.
+A separate crate is warranted by an independent dependency closure, not by this layer diagram alone.
+
+State ownership, description construction and scheduling are separate choices. Nara-owned Editor
+UI retains panel/control incarnations, editing state and reusable artifacts across compatible
+updates. Authors may compose short-lived declarative descriptions; the implementation invalidates
+the affected structure, layout, text, paint or semantics rather than requiring a complete rebuild
+for every Host frame. This selects an execution contract, not a public retained-node graph,
+reactive language or universal cross-toolkit Widget trait. Cache algorithms and layout storage
+remain replaceable behind that contract under ADR 0109.
+
+An optional panel frontend may use retained, immediate or hybrid internals. ADR 0118 owns its
+Host attachment. Providing that attachment is a Nara responsibility; shipping an official ImGui,
+egui or other toolkit extension is not required. The default Nara frontend and optional
+user-authored frontends share document and Host authority without sharing their internal trees.
 
 ### Evidence and non-prerequisites
 
@@ -101,9 +127,10 @@ study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) adds pinn
 Xilem/Masonry source observations; Unity 6.0's [EditorWindow
 guide](https://docs.unity3d.com/6000.0/Documentation/Manual/UIE-HowTo-CreateEditorWindow.html)
 grounds explicit UI reconstruction/state restoration, not automatic state survival. The user
-selected Nara's own custom-drawn Editor frontend as the destination; reference toolkits inform
-mechanisms, not an embedding shortlist. Concrete runtime mechanics remain future implementation
-work. Current Dear support stays until qualified replacement; this does not require a shared
+selected Nara's own custom-drawn Editor frontend as the default destination; optional user-authored
+toolkit attachment is a separate supported design target. Concrete panel-hosting, component and
+performance successors remain unqualified until their public consumers pass. Current Dear
+support stays until qualified replacement; this does not require a shared
 game/Editor toolkit. Nara does not inherit external App/Window/Entity, Node/Object/Variant,
 global-service, toolkit-ID or public
 render-topology ownership models. The reproducible pressure matrix lives in the non-normative

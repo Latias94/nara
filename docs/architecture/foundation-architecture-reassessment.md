@@ -556,7 +556,7 @@ same-Runtime prediction rollback; that is a separate state/effect model. Server 
 not itself implement networking. Tick event freshness is not app-frame tracker freshness.
 
 The [UE6 review](../research/2026-11-03-ue6-direction-and-nara-architecture.md) sharpens that
-boundary: [ADR 0024](adr/0024-determinism-fixed-update-and-replay-policy.md#future-prediction-qualification)
+boundary: [ADR 0024](adr/0024-determinism-fixed-update-and-replay-policy.md#bounded-prediction-qualification)
 requires concrete recoverable-state/effect qualification, while R4c/R10 select attempt and
 confirmation semantics before freezing the affected execution Interface. This adds no implicit
 rollback right to an ordinary Rust system and leaves runtime-fault recovery unchanged.
@@ -1026,15 +1026,29 @@ by changing frontend strategy.
 
 ### Updated Custom UI And Language Research
 
-The October 27 conversation additions and subsequent user clarification select a **Nara-owned
-custom-drawn Editor UI direction**, not third-party toolkit embedding. Its runtime design still
-needs implementation and qualification; no official language was selected. The
+The October 27 conversation additions select a **Nara-owned custom-drawn default Editor UI**.
+The November 4 clarification additionally requires public interfaces for user-authored UI
+implementations; it does not ask Nara to ship an official ImGui extension. Selected Nara panels
+have since qualified their own workflows, while public panel hosting, complete workspace and
+performance still need implementation and evidence. No official language was selected. The
 [custom UI study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
 and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
 trace the proposals to primary sources. Keep three independent choices explicit: widget state
 ownership, UI description/update style, and pixel/platform integration. Retained widgets can
 support declarative rebuilding; neither retained storage nor a shared GPU API proves integration,
 virtualization, IME correctness or unload safety.
+
+The revised [UI design](ui-foundation-design.md) develops that target: independent Editor/game
+products over selective text/kernel/widget/presentation fundamentals; retained interaction state
+and reusable artifacts with declarative composition/local invalidation; public frontend Host
+attachment; document-backed custom drawing and multiple logical Views; and structured observation
+plus normal UI operation for tests and future agents. Reuse the current Render Feature/program,
+retained-output and semantic command owners. A shader graph document is not a GPU resource graph.
+R11a-e in the [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+order work/cost baseline, hosting, complex-editor pressure, public UI operation and measured
+consolidation. Numeric budgets are fixed with the baseline before optimization; none are measured
+by this design update. Full Shader Graph, agent transports and official foreign-toolkit packages
+are not current deliverables. Native detachment retains separate platform evidence.
 
 | Proposal | Nara disposition | Evidence still needed |
 | --- | --- | --- |

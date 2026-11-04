@@ -14,6 +14,15 @@ editable controls. Do not embed another UI runtime or create a second graphics o
 broader virtualization, native IME/accessibility/DPI and idle-cost gates retain their full scope;
 an internal text prerequisite alone does not complete the visual workflow or full R11.
 
+The subsequent November 4 architecture clarification keeps those qualified selected-panel
+results. Remaining work follows [R11a-e](2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline):
+establish work/cost budgets, public panel hosting and component composition, a bounded complex
+editor/custom-draw/multiple-View consumer, public UI observation/operation, then measured reuse
+and remaining replacement. The [UI design](../architecture/ui-foundation-design.md) records
+Editor/game dependency separation and state ownership. This selected-panel plan does not qualify
+those successors or require an official ImGui extension; future user-authored frontends use the
+Host contract rather than changing the default Inspector's controls.
+
 ## Text and control decisions
 
 Reuse the pinned Parley 0.11.0 layout/editor primitives for cluster movement, selection and hit
@@ -987,7 +996,7 @@ actual OS candidate-window delivery, accessibility, detached-window DPI or anoth
 The displaced Dear UI tree/forms and raw action-index observation state are removed. Specialized
 Inspector gestures and Canvas chrome, workspace replacement, offscreen keyboard traversal,
 complete scan/allocation/raster/idle cost attribution and broader OS/platform evidence remain
-open. Full R11/R12 and the foundation Goal stay active.
+open. Full R11/R12 remains incomplete; execution state is managed outside this plan.
 
 Final Editor build, all-target/all-feature `-D clippy::correctness`, root formatting and both
 independent-workspace formatting checks pass; existing warnings remain. Diff checks pass and

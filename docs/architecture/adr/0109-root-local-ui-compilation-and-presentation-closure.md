@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
+**Last Revised**: 2026-11-04 (invalidation ownership and measured Editor reuse target)
 **Amended**: 2026-08-09 by the UIF-U2 unpresented-candidate retirement clarification and UIF-U2C/
 UIF-U3C corrections
 **Owner**: UI authoring builder, UI compiler, text budget, presentation planner, WGPU UI adapter
@@ -99,6 +100,28 @@ flowchart LR
   generations and is superseded by a newer admitted attempt. Target faults retire their target or
   slot; device loss retires its GPU generation. The backend-outcome queue has one Host consumer;
   every issued permit is consumed exactly once or closed fail-closed before its owner retires.
+
+### Invalidation and performance ownership
+
+Last-good fallback is a correctness mechanism, not evidence of incremental layout or low idle
+cost. Nara-owned Editor consumers require reusable work with explicit structural, layout, text,
+paint and semantic dependencies. A paint-only change must not force unrelated text measurement
+or layout. Dynamic View output may request composition without rebuilding an unchanged panel.
+Private persistent layout storage, subtree reuse or description reconstruction may evolve behind
+the same immutable frame, exact presentation and failure contracts.
+
+Each cache needs an owning lifetime, complete dependency key, bounded retained bytes and an
+invalidation/eviction policy. Font/fallback and metrics affect text/layout; scale and placement
+affect raster realization; theme colors affect paint. Revision labels alone cannot hide changed
+content. Failed work and stale generations cannot publish a new active route. Reuse must preserve
+the current hit/focus/semantic projection rather than treating inert fallback as an active cache.
+
+Compiler, planner, backend and Host scheduling report their own work and costs. Hard node/glyph/
+atlas limits do not establish a frame-time or memory SLA, and frame reuse checked after rebuilding
+descriptions does not establish zero idle work. R11 fixes numeric workload/hardware budgets before
+optimization, measures cold/warm and static/dynamic cases, and keeps collection, comparison,
+layout, shaping, raster, upload, composition and presentation attribution separate. These are
+target contracts; the current compiler's root cache does not qualify the full successor.
 
 ### Root Failure Algebra
 

@@ -90,6 +90,14 @@ work, not a new prerequisite for every R4c comparison or the current CP2 extract
 
 ## Decisions Made In This Round
 
+The November 4 UI clarification deepens R11/R12 in place. The default Editor remains Nara-drawn;
+the engine supplies public attachment interfaces so users can integrate another UI implementation.
+An official ImGui extension is not a deliverable. Shader Graph-like documents, automation and
+multiple logical Views constrain ownership and dependencies now; complete graph products,
+agent transports, component catalogues and native multi-window support remain staged work.
+The revised [UI design](../architecture/ui-foundation-design.md), ADRs0107/0109/0118 and the R11a-e
+units below separate those decisions from their still-unimplemented contracts and cost evidence.
+
 - Strategy explicitly includes installable tools and optional-language/prebuilt-Host workflows
   alongside a complete independently usable Rust path.
 - ADR 0119 replaces 0004's obsolete reflection authority: Nara Schema is semantic authority;
@@ -163,6 +171,9 @@ R8 render composition + R9a View / color / captured-time facts qualify together
 R6 shader inputs + selected R8 seam -> R9b durable shader/material resources
 R9c retained geometry is a separate measured mechanism
 R10 joint motion oracle -> R4c phase/executor selection -> selected R10 domain qualification
+R11a work/cost baseline -> R11b public panel hosting -> R11c complex-editor/custom-draw pressure
+R11b + existing exact actions -> R11d public UI observation/operation -> R11e measured consolidation
+R11c + R11d -> R11e; logical Views reuse R8/R9, native detach keeps separate platform qualification
 every changed seam -> matching R11 / R12 integration, deletion and current documentation
 ```
 
@@ -1236,8 +1247,10 @@ Workspace and remaining specialized-panel replacement, offscreen keyboard traver
 full matching/idle/allocation/GPU cost measurements and broader OS/platform qualification remain
 open. **Owners:** UI compile/presented sessions, text and frontend.
 
-The user clarified the destination: **Nara's own custom-drawn Editor UI**, not embedding a
-reference toolkit. The [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
+The default destination is **Nara's own custom-drawn Editor UI**. Users may integrate another UI
+implementation through public panel/Host ports; Nara need not supply an official ImGui extension.
+That optional attachment is distinct from embedding a reference toolkit as the default. The
+[source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
 informs the [owned runtime direction](../architecture/foundation-architecture-reassessment.md#updated-custom-ui-and-language-research).
 Preserve current semantic owners and use Dear's existing workflow behavior as the replacement baseline. Design
 Nara-owned controls, identity, interaction, layout and drawing. Mature text/layout primitives
@@ -1286,8 +1299,9 @@ these observations before replacing the selected frontend:
 
 Keep this work independent of Scene data-family delivery and pure semantic tools. Qualify the
 owned runtime incrementally through these workflows, then remove superseded frontend code
-when matching complete workflows pass. The current Dear adapter is a working predecessor,
-not a competing intended final toolkit or a requirement for permanent coexistence.
+when matching complete workflows pass. The current Dear adapter is a working predecessor.
+Its retirement removes the displaced default frontend, while a user-authored optional frontend
+uses the new public attachment; neither requires a permanent ImGui-shaped core interface.
 
 Repair exact theme revision/content association and Canvas/Runtime conflict admission (earlier
 F7/F8). Move glyph preparation reservations ahead of raster allocation where the model can prove
@@ -1310,6 +1324,169 @@ accessibility is not evidence of Editor assistive-technology support.
 Delete duplicate state machines and ambiguous theme identity. A source study alone does not
 justify deleting the working frontend or claim its native capability has transferred.
 
+### R11a: Execution model, dependency closure and work baseline
+
+**Goal:** establish the state/invalidation and cost contract before further catalogue or workspace
+expansion. ADR0107 selects persistent interaction/artifacts with declarative composition and local
+invalidation for Nara-owned Editor UI. Runtime game UI, Editor components and document-specific
+tools keep independent product ownership. Optional frontends choose their internal mode.
+
+**Files:** `crates/nara_ui_kernel/src/compiler/`, `crates/nara_text/src/paint.rs`,
+`crates/nara_ui_render/src/planner/`, current `editor/src/frontend/imgui/owned_*` controllers and
+their manifests. Extend `tests/fixtures/ui-module-consumer/` for dependency closure; add planned
+`editor/tests/ui_work_costs.rs` for matched frontend work attribution. Reuse current native
+qualification and R12 observation facilities rather than inventing a benchmark or tracing kernel.
+
+**Approach and verification:**
+
+1. Record current description construction/comparison, layout, shaping, raster, allocation,
+   upload and composition costs, including work before an unchanged-frame fast path. Attribute
+   the existing last-good cache separately from active incremental reuse.
+2. Fix reference hardware, source/toolchain, build mode, font/DPI, cold/warm workloads, sample
+   counts and numeric CPU/GPU/input-latency/retained-byte budgets before optimization. Commit
+   that table with the measured baseline; do not infer budgets from this unmeasured design update.
+3. Compare a static Inspector beside a live View, a local field/color change, and 10,000/100,000
+   logical rows at the same viewport. Count live controls and layout separately from filtering.
+4. Verify that text/kernel/widgets need no Editor/project/ECS facts, the game's `nara_ui` adapter
+   needs no Editor, and Editor components do not import that adapter merely for controls. Record
+   `nara_ui_render`'s current combined neutral planner and App/ECS/window integration for R11b.
+
+Success is a reproducible baseline and executable work-count assertions, not a performance win.
+No particular persistent layout arena, reactive language, public cache key or new crate is frozen.
+
+### R11b: Public panel hosting and component composition
+
+**Dependencies:** R11a and the current qualified Application/Session query/result contracts.
+R1 continues to own closed-panel semantic command/menu/shortcut registration; UI hosting consumes
+that contribution rather than creating another command registry.
+
+**Files:** `editor/src/platform/composition.rs`, `editor/src/frontend/imgui/workspace.rs`,
+`editor/src/platform/imgui/owned.rs` and keyboard/IME adapters, their actual successor modules,
+`crates/nara_ui_render/Cargo.toml` and `crates/nara_ui_render/src/integration.rs`,
+`tests/fixtures/module-consumer/editor-panel-consumer/` and planned
+`tests/fixtures/editor-ui-host-consumer/` with a separately compiled `tests/panel_lifecycle.rs`.
+
+**Approach:** replace the ImGui-specific public composition shape with contribution/document
+access plus per-instance frontend attachment and finite Host services. Ordinary component authors
+compose reusable Nara controls without manually rebuilding journal, reducer and text-lifetime
+plumbing. Low-level custom implementations retain access to the documented geometry, input,
+text-service, overlay, refresh, output/resource and presentation-feedback contracts. Preserve the
+existing domain and GPU owners; private field visibility changes alone do not satisfy the goal.
+Separate the neutral packet/planner dependency closure from its current App/ECS/window plugin
+integration, retaining that game/runtime adapter through an explicit installation path. Whether
+this needs feature gating or an extracted crate follows the independent presentation consumer;
+the dependency result, rather than a prescribed package count, is the acceptance contract.
+
+**Test scenarios:**
+
+- Independently compile and attach Nara content and a small non-Nara frontend through the public
+  contract. Each draws, edits text, opens an admitted popup and reports its own actions without
+  private engine changes. This qualifies finite Host conformance, not every foreign toolkit.
+- Transfer keyboard/IME/capture between the two implementations. Close one during composition,
+  pointer capture and queued output; late input/results cannot reach a same-kind replacement.
+- Relocate and reconstruct GPU state while preserving compatible panel state. Target change,
+  layout reset and unsupported capabilities follow explicit retirement/refusal outcomes.
+- Keep an independently registered semantic command usable with its panel closed, through R1's
+  contribution and the original edit/history/result owner.
+
+Before claiming compatibility with a named external toolkit, qualify its actual user-authored
+adapter separately. Shipping an official ImGui/egui package or stable plugin ABI is not required.
+
+### R11c: Complex document editor, custom drawing and multiple Views
+
+**Dependencies:** R11b, existing `EditorExtensionDocument` lifecycle and selected R8/R9 render
+Feature/program/output contracts. Do not wait for a full material system or native multi-window.
+
+**Files:** the component/custom-draw owner selected by R11b, `crates/nara_ui_render/`, current
+render Feature/output adapters and planned
+`tests/fixtures/editor-ui-host-consumer/tests/graph_document.rs`. Extend actual
+`tests/fixtures/render-composition-consumer/tests/composition.rs` and
+`crates/nara_render/src/tests/view_lifecycle.rs` only for changed shared behavior.
+
+**Approach:** use a finite typed node/link document with composable property controls, custom
+connections, pan/zoom and a retained preview as pressure for future Shader Graph-like editors.
+The document validates links and owns one transaction/Undo/persistence path. The panel owns
+transient connection/selection/view state; a compile/preview consumer retains exact source and
+request identity. Reuse render Features and immutable outputs for geometry/effects, with explicit
+bounds/clip/color/alpha/resource closure. No universal graph, UI-owned compiler or new GPU owner.
+
+**Test scenarios:**
+
+- Create, connect and edit typed nodes; reject an invalid link without mutation; Undo/Redo and
+  Save/Reopen preserve the exact graph. Two panel instances retain independent transient state.
+- Pan/zoom and clip a curved connection and node control at fractional scale; paint, pointer
+  capture and semantic bounds use the same admitted mapping.
+- Display two logical Views in one window with independent producer/output/input lifetimes;
+  relocate one and reject its old display route while the other continues.
+- Complete an old preview request after a newer graph edit or close; retain appropriate last-good
+  diagnostics/output without publishing that old result as current.
+
+This is a bounded architectural consumer, not delivery of a full Shader Graph product. Existing
+multiple Render Views do not qualify multiple UI Surface Slots on one target; reconcile ADR0108
+and the relevant runtime adapter before changing their existing aggregation rules.
+
+### R11d: Public observation and visible-UI operation
+
+**Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can
+join after R11c; the first ordinary field workflow does not wait for a complete graph editor.
+
+**Files:** current `crates/nara_ui_kernel/src/interaction/semantics.rs` and `journal.rs` as reused
+contracts, Editor panel/Host observation and input adapters, planned
+`tests/fixtures/editor-ui-host-consumer/tests/ui_operations.rs` and an appropriate actual native
+trajectory under `editor/src/platform/imgui/`. Reuse rather than publicize test-only receipt issuers.
+
+**Approach:** expose structured observation and operation through the same production ports for
+tests and future agent/debug adapters. Identify presented panel/control incarnation, route,
+role/value/state/actions and mapped bounds. Keep domain automation, UI semantic actions and
+physical pointer/key/text routing distinguishable; all retain their actual owners and results.
+
+**Test scenarios:**
+
+- Find two same-label controls in different panel/document scopes and operate exactly one.
+  Recycle/filter its row; an old observation refuses rather than retargeting the replacement.
+- Edit and Apply through the visible controller, then match its original outcome, one Undo and
+  exact Save/Reopen. Compare with the independent domain-command path without substituting it
+  for the UI test. Verify blocked/disabled/covered pointer input separately from semantic action.
+- Wait for one named persistence or preview result and a subsequent matching presented state
+  while an unrelated View keeps animating. Exercise timeout/cancellation and stale operation IDs.
+- Move keyboard focus into/out of text, cancel composition and close the panel through Host
+  routing. Unsupported provider semantics are explicit; no action creates its own input authority.
+
+Public CPU/hosted tests establish operation contracts; native rendering/input, actual OS IME and
+assistive-technology support keep their separate evidence. An agent/MCP server or remote-control
+transport is deferred; the public test driver is the initial real consumer.
+
+### R11e: Measured reuse, remaining replacement and extension qualification
+
+**Dependencies:** R11a baseline/budgets, R11b-d consumers and the existing selected-panel parity.
+Optimize private layout/cache/render implementations against those same public consumers. Keep
+R12's independently authored and native/platform evidence distinct from maintainer execution.
+
+**Files:** the owning compiler/text/frontend/planner/backend modules identified by R11a;
+`editor/tests/ui_work_costs.rs`, shared owner tests, the independent UI/panel/render fixtures and
+`docs/verification/native-editor-qualification.md`. Update the current cost record with actual
+distributions rather than creating registry snapshots or multiplying benchmark scripts.
+
+**Test scenarios and exit:**
+
+- After warm-up, static subtrees beside active Views avoid repeated description construction,
+  layout, shaping and unchanged glyph uploads. Count comparison and composition work honestly.
+- Local paint/interaction changes preserve unrelated text/layout; font/constraint/DPI changes
+  invalidate exactly their dependent work. Failed/rejected work preserves the original route rules.
+- Live collection work scales with visible/overscan/pinned-edit rows. Attribute model refresh,
+  filtering and index construction separately; clipping alone is not virtualization.
+- Actual retained CPU/GPU bytes plateau through repeated attach/close/rehost and device recovery;
+  output resources and original completion obligations retire through their existing owners.
+- Meet R11a's fixed numeric budgets in the selected workloads. Report cold/warm distributions,
+  P50/P95/P99 scope, cache hits/misses/evictions, allocation bytes, invalidation reasons, copies,
+  submissions, refusal behavior and diagnostic overhead. Missing measurements keep this unit open.
+
+Continue specialized panels/workspace, component breadth, Docking and native detachment through
+these qualified interfaces. Delete each displaced default path only after matched workflow parity.
+Future font/effect/component work may change private algorithms without exposing their storage or
+reopening document, Host or render ownership. Full R11/R12 remains open until its complete scope
+has matching evidence; this design update neither reopens qualified units nor claims the successor.
+
 ## R12: Consumer Integration And Canonical Contract Consolidation
 
 **Design:** D01, D18. **State:** consumer integration accompanies the qualified owner units;
@@ -1319,6 +1496,13 @@ the registry ownership sub-unit is qualified; the complete production/consolidat
 For the selected completed units, run independent direct/renamed/public consumers and relevant
 root/Editor/native paths serially. Verify unknown data, exact operation results, content/identity
 retention, close and old-generation rejection together. Review adapters, not only owner unit tests.
+
+R11b-d add public panel/hosted-UI and observation/operation consumers to that integration. Compare
+UI, semantic-command and future agent use through the same domain owners and exact outcomes.
+Keep capability coverage explicit per frontend: a semantic snapshot does not prove pointer hit
+testing, OS IME, native accessibility or third-party toolkit compatibility. The independently
+authored task below can later exercise a user-authored adapter without making an official ImGui
+extension or agent server part of this refactor's current delivery.
 
 Name the Rust capture/rebuild/restore successor explicitly. The game owns checkpoint data and
 compatibility; supervised Play owns build, immutable executable generation and process lifecycle.

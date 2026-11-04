@@ -1,9 +1,10 @@
 # UI Foundation Design
 
-**Status**: Design blueprint
+**Status**: Design blueprint; qualified mechanisms and unimplemented targets are distinguished below
 **Date**: 2026-08-08
-**Owners**: UI Foundation, Runtime UI, Editor Host
-**Authority**: This document is non-normative. Durable ownership and failure decisions live in ADR 0102 and ADR 0107-0109; execution order lives in the active UI Foundation Correction plan.
+**Last Revised**: 2026-11-04
+**Owners**: UI Foundation, Runtime UI, Editor frontend, Editor Host
+**Authority**: This document is non-normative. Durable contracts live in ADR 0102, ADR 0107-0109 and ADR 0118. Current execution order belongs to R11/R12 in the [foundation rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md); the UI Foundation Correction plan is completed lineage.
 
 ## Purpose
 
@@ -13,18 +14,26 @@ foundation must be deep: callers provide a small set of typed facts and receive
 an immutable result whose ordering, interaction, semantics, resource ownership,
 and failure outcome are already resolved.
 
-The Reference Game is a late acceptance carrier. It is not the authority for
-shared interfaces. Neutral examples and module-owned tests establish the
-foundation first; product work may expose a missing capability, but a shared
-change requires a named invariant and independent pressure.
+The default Editor is Nara-drawn. Users must be able to attach another UI implementation through
+public Host/panel interfaces without changing engine-private code. Nara need not distribute an
+official ImGui extension. Complex graph/timeline tools and future automation constrain those
+interfaces before broad component-library work; complete products and transports can follow later.
+
+The Reference Game is one acceptance carrier, not the sole authority for shared interfaces.
+Named game, Editor and independent-author consumers establish the required contracts. Preserve
+existing domain, Input and render owners; do not add a universal widget tree or another GPU graph.
 
 ## Target topology
 
 ```mermaid
 flowchart LR
-    Authoring[Scene/Prefab or EditorSnapshot]
-    Model[Typed product UI model]
-    Adapter[Runtime or Editor adapter]
+    Authoring[Scene/Prefab and game UI model]
+    Runtime[nara_ui game adapter]
+    Domain[Editor document and commands]
+    Components[Editor component composition]
+    Native[Nara panel frontend]
+    External[User-authored panel frontend]
+    Shell[Editor workspace and panel hosting]
     Kernel[nara_ui_kernel\ncompile + session]
     Text[nara_text\nshape + raster facts]
     Widgets[nara_ui_widgets\ncontrolled reducers]
@@ -36,9 +45,14 @@ flowchart LR
     Intent[Typed semantic intents]
     Host[Host-owned surface and lifecycle]
 
-    Authoring --> Adapter
-    Model --> Adapter
-    Adapter --> Kernel
+    Authoring --> Runtime
+    Runtime --> Kernel
+    Runtime --> Widgets
+    Domain --> Components --> Native
+    Native --> Widgets
+    Native --> Kernel
+    Shell --> Native
+    Shell --> External
     Text --> Kernel
     Widgets --> Kernel
     Kernel --> Planner
@@ -46,16 +60,46 @@ flowchart LR
     Host --> Kernel
     Host --> Planner
     Planner --> Backend --> Receipt
+    External --> Backend
+    External --> Host
     Receipt --> Kernel
     Timeline --> Kernel --> Intent
-    Intent --> Model
+    Intent --> Runtime
+    Intent --> Domain
 ```
+
+The arrows describe data/ownership handoffs, not Rust dependency edges or required new crates. Shared text,
+kernel, controlled widgets and presentation remain free of Editor, project execution and
+game-specific ECS facts. `nara_ui` owns the game's Scene/ECS projection; an Editor component must
+not import that adapter merely to draw or edit text. Editor components compose shared mechanisms
+and domain-neutral interaction; document-specific graphs and inspectors consume them above that
+layer. External frontends may bypass Nara layout/widgets while using the same Host admission.
+Actual backend work follows the existing render-program/Feature and retained-output contracts.
+
+The current package `nara-editor` still includes Dear/Winit/WGPU dependencies and its public panel
+trait is Dear-specific. This target diagram does not claim that the portable Editor composition
+or independent panel-hosting successor already exists. Module/crate extraction follows an actual
+independent dependency closure and consumer, with direct migration of replaced interfaces.
+`nara_ui_render` also currently packages its neutral planner with unconditional App/ECS/window
+integration. Preserve that existing adapter's behavior while separating its dependency closure
+from the neutral packet/planner path during R11b; the current UI-only consumer covers text,
+kernel and widgets, not this presentation closure.
+
+The dependency contract is `text <- kernel <- controlled widgets`, with product adapters above
+those modules. The neutral presentation planner consumes kernel/text and render resource facts;
+App/ECS/window installation and concrete device execution are adapters above it. Editor component
+composition depends on the shared modules it uses; game projection and Editor domain modules do
+not depend on one another. These directions are compile/consumer assertions in R11a/b.
 
 ## Shared Foundation Interface
 
 The public seam is intentionally expressed as three operations. Names are
 design vocabulary; the implementation plan may select different Rust names if
 the invariants remain identical.
+
+These are Nara Foundation operations, not a universal protocol imposed on every foreign frontend.
+Host attachment admits a foreign implementation's own output and interaction capabilities without
+requiring it to translate its complete control tree into `UiNode`.
 
 ```text
 compile(authoring_snapshot, environment, limits)
@@ -84,7 +128,7 @@ actions.
 
 ### Conformance visibility
 
-The frozen public inventory and the first-party conformance implementation are not identical.
+The qualified public inventory and the first-party conformance implementation are not identical.
 `layout_gallery` and [`ui-module-consumer`](../../tests/fixtures/ui-module-consumer/) use only ordinary public Interfaces. Headless runtime and
 presentation conformance must also prove the Host-only acceptance path, so their local presenter
 glue may use doc-hidden first-party seams that can stage and consume non-forgeable authority. Those
@@ -183,10 +227,164 @@ Editor UI is a separate product layer:
 Editor document -> EditorSnapshot -> EditorActionEnvelope -> applied/rejected/conflict
 ```
 
-The first shell is single-window, fixed-layout and egui-first. It owns Scene
-Tree, Inspector, Undo/Save/Reopen, Play/Stop and Diagnostics. A future Nara UI
-Inspector is an evidence trial, not a prior architectural commitment. Docking,
-detached native windows and multi-viewport are later plans owned by the Host.
+The Nara-drawn Editor is the selected default. Ordinary Inspector, source Hierarchy, specialized
+UI Hierarchy and Scene controls have scoped qualification; remaining specialized panels and
+workspace replacement retain their separate work. Dear supplies the current surrounding Shell
+and registered source-built panel interface. Historical egui-first, fixed-layout records do not
+describe this destination or establish today's capability scope.
+
+Workspace owns stable panel/document placement and preference restoration. Frontends own their
+content and compatible instance state. Host owns windows and cross-frontend platform arbitration.
+Docking within a window, several logical render Views and native detached windows are different
+capabilities. Reuse existing View/output ownership for the first two; native detachment additionally
+requires actual window, DPI, IME, focus, GPU-loss and close evidence.
+
+## State, composition and invalidation
+
+Select persistent interaction state and reusable execution artifacts with declarative composition
+and local invalidation for Nara-owned Editor UI. Retain field incarnation, composition, selection
+and scroll under their existing owners. Rebuilding a short-lived description must not recreate
+those owners. The public component interface should hide routine key scoping, event/reducer
+plumbing and compatible-state retention from ordinary authors; custom layout/drawing remains a
+lower-level capability. No public retained-node arena, reconciliation algorithm or reactive
+language is selected by this design.
+
+| Changed dependency | Required invalidation scope |
+| --- | --- |
+| Child membership/order, key or incarnation | Affected structural reconciliation, routing and dependent layout/semantics |
+| Available constraints or intrinsic metrics | Affected layout/measurement and downstream geometry |
+| Text, font/fallback, shaping features or wrap constraints | Affected shaping/measurement; raster realization follows its own scale/placement keys |
+| Color/brush or compatible visual state | Affected paint; preserve compatible layout/text |
+| Focus, enabled state, value or action availability | Affected interaction/semantics and required paint |
+| New live View image | Image/output use and composition; unchanged panel structure/text need not rebuild |
+
+Each cache has an owner, complete dependency identity, byte accounting, eviction and retirement
+policy. Revision numbers do not replace content association. Keep layout reuse, text-layout
+reuse, placed raster keys, atlas residency and native pipeline reuse separate. Cache loss may
+cost work but cannot change document results or revive retired input. A retained last-good visual
+is inert recovery, not an active incremental-layout result.
+
+Current panel code can reconstruct descriptions and compare them before returning an unchanged
+frame. Current kernel compilation flattens roots and creates a Taffy tree; its root cache provides
+compatible fallback. Prepared text avoids reshaping its editing source, but window preparation
+still scans the admitted layout and rasterizes distinct placed keys. These are current mechanisms,
+not evidence of zero idle work, persistent incremental layout or a performance improvement.
+
+## Panel hosting and optional frontend implementations
+
+The extension interface has three cooperating parts: contribution/document access, panel-instance
+attachment and UI-implementation services. The first reuses Application/Session queries,
+preparation, exact commands and outcomes. The second binds stable contribution/instance/document
+identity to placement and lifecycle. The third provides the finite Host capabilities below.
+Exact Rust types and crate placement remain implementation decisions tested by public consumers.
+
+| Host contract | Frontend responsibility and observable result |
+| --- | --- |
+| Attachment and lifecycle | Create one instance, observe visibility/target/relocation/retirement, preserve only explicitly compatible state |
+| Geometry and composition | Consume bounds, clip, scale and mapping generation; return owned output with exact resource/use lifetime and presentation feedback |
+| Input and platform services | Consume routed pointer/key/text with endpoint/incarnation identity; request focus/capture, cursor, clipboard and IME through Host arbitration |
+| Overlay placement | Request a popup/menu scope beyond panel bounds; Host admits clipping, stacking, modal behavior and dismissal |
+| Refresh and scheduling | Request an immediate update, deadline or active animation; Host coalesces work without polling every static panel |
+| Semantics and diagnostics | Expose supported roles, identities, values, actions and mapped bounds; identify unsupported operations and report attributable work |
+
+Local focus/capture belongs to the frontend; Host arbitrates between frontends and windows. A
+frontend cannot capture input merely because it drew an image. Attachments and pending outputs
+retain actual instance, endpoint, target and GPU lineage. Closing a panel with a held pointer,
+composition, queued result or in-flight output retires its route before a replacement can receive
+input. Relocation and native reconstruction follow an explicit preserve/cancel policy.
+
+An immediate implementation can own its context and internal IDs; a retained implementation can
+own its tree. Neither becomes document identity. An admitted image path may add an offscreen
+target; a direct-render path must close the same clip/color/alpha/resource contracts through the
+existing renderer. Count copies and submissions rather than promising zero overhead. Optional
+frontends do not own the application's event loop, an independent default Device/Queue or the
+global Dock manager. Required capabilities fail explicitly before publication.
+
+First qualification uses independently compiled real Nara and non-Nara content through the same
+public attachment, including drawing, text input, a popup and retirement. A small conformance
+frontend proves that finite Host contract, not compatibility with every toolkit. A named toolkit
+support claim additionally requires its actual user-authored adapter and matching native tests.
+No official ImGui package, universal Widget IR, binary ABI or executable unload service is implied.
+
+## Complex editors, custom drawing and render composition
+
+Use a bounded document-backed node/link editor as architectural pressure for future Shader Graph,
+animation and timeline products. Its domain owns typed nodes/ports/links, validation, history and
+persistence. Panel state owns pan/zoom, selection, pending connection and property drafts. Content
+or shader owners own compilation requests, diagnostics and preview artifacts against the exact
+source revision. A completed old compilation cannot replace the current graph's preview.
+
+The consumer needs composable controls plus custom geometry, clipping, transforms, pointer
+capture, keyboard actions and semantic representation of nodes/ports/connections. The existing
+kernel paint vocabulary is finite; provide custom drawing through an owning capability rather
+than expanding a central enum for each tool. Reuse existing render Feature/program and retained
+image-output seams for previews/effects. A graph document, its UI topology and the renderer's
+resource-dependency graph retain different owners; add no universal graph or second scheduler.
+
+Exercise two logical Views in one window: graph preview beside Scene or another preview, with
+independent camera/selection/output generations. Moving a panel cannot change producer View
+identity; sharing a rendered capture cannot grant the second display the first display's input
+authority. Later Docking and multi-window transfer build on that distinction. Existing multiple
+Render Views do not qualify several UI Surface Slots on one target: ADR 0108's current slot rule
+and the game's window-to-Surface index keep their scope. Reconcile the owning contract before
+changing that aggregation; separate panel outputs may use distinct admitted targets meanwhile.
+Full shader-node catalogues, shader-language generation, rich timelines and visual authoring
+products are deferred.
+
+## Automation, tests and future agent/debug clients
+
+Keep two operation paths and compare their final domain outcomes:
+
+- Domain automation reads explicit document bases and submits existing semantic queries/edits.
+  It observes original results, history, Save/Reopen and close through their current owners.
+- Visible-UI operation observes the currently presented semantic tree, targets an exact control
+  incarnation/route, and invokes its normal UI action or Host input route. It exercises focus,
+  drafts and controller lowering; a direct document action cannot stand in for a button test.
+
+The observation includes document/panel scope, presented revision, live identity, role, name,
+value, enabled/focused/selected state, actions and clip-correct bounds. Repeated labels and recycled
+rows remain distinguishable. Supported providers expose the same observation/operation contract;
+missing semantic or text capability is explicit. Semantic actions reuse existing UI dispatch,
+and pointer/key/text injection reuses Host arbitration. No tool mints presentation authority.
+
+Operations return their own admission/completion identities. Tests wait for the requested domain
+outcome and a matching later observation, with bounded timeout/cancellation; a perpetually
+animating preview is not a reason to wait for global idle. Async compilation, persistence and
+physical close keep their different terminal conditions. Diagnostics correlate the operation,
+panel, presented frame and render transaction without becoming another source of truth.
+
+An independent public test driver is the first consumer. A future agent may wrap those same
+operations; no MCP server, remote-control transport, global string command bus or second mutation
+path is required now. UI semantic snapshots are not proof of native accessibility, and injected
+IME events are not proof of actual OS composition/candidate-window behavior.
+
+## Cost and refactor acceptance
+
+Before changing a measured mechanism, record hardware, source/toolchain, build mode, font/DPI,
+logical/physical size, cold/warm state, workload, sample count and numeric CPU/GPU/latency/memory
+ceilings. Fix the endpoint and budgets before comparing alternatives. R11 must establish these
+numbers; this source/design update has measured none. A private investigation trigger or short
+test duration is not a public frame-time SLA.
+
+| Workload | Required observation |
+| --- | --- |
+| Static panels beside an active preview | Description construction/comparison, layout, shaping, raster, upload and composition counted separately; unchanged subtrees do no repeated construction/layout/shaping/upload after warm-up |
+| 10,000 versus 100,000 logical rows at fixed viewport | Live controls/layout scale with visible plus declared overscan/pinned edit rows; filtering/reindexing cost is attributed separately |
+| One hover, field edit or color change | Recompute only actual dependencies; unrelated panels preserve compatible text/layout |
+| Resize, font/fallback or DPI change | Correct invalidation, mapped hit/semantics and honest rebuild cost; no stale-cache success |
+| Two Views and two UI implementations | Per-provider/phase CPU, GPU work, output targets/copies/submissions and event-to-present distributions |
+| Repeated attach/close/rehost and device recovery | CPU/GPU retained bytes plateau within owner budgets; old routes/results cannot affect replacements |
+
+Report P50/P95/P99 only with adequate distributions and run-to-run variation; retain cold spikes
+and refusal/eviction counts. Identify cache hits/misses, invalidation reasons and allocation bytes.
+Measure enabled/disabled diagnostics overhead and dropped observations. Resource ceilings are
+not speed evidence. In-process extension CPU scheduling is cooperative; measurement does not
+preempt arbitrary native code. Any future isolation promise needs its own execution boundary.
+
+Refactor acceptance is preservation of public consumer behavior, owner results, dependency closure
+and these budgets while replacing private layout/cache/render algorithms. It does not freeze
+today's internal trees, packets or crate count. New component/effect/docking breadth must use
+the qualified ports rather than reopen private Host access in each consumer.
 
 ## Reference pressure matrix
 
@@ -201,9 +399,33 @@ reference checkout; the pinned commit and path are the stable anchor.
 | Godot `4173760f` | `scene/gui/control.h`; `scene/gui/base_button.cpp`; `editor/editor_undo_redo_manager.cpp`; `editor/docks/editor_dock_manager.cpp` | UIF-U1 controlled focus/disabled assertions and EFI document/undo workflow | theme breadth, richer controls and docking after the first complete panel | Node/Object/Variant identity and global services |
 | Bevy `e8b3598f` | `crates/bevy_ui/src/interaction_states.rs`; `crates/bevy_ui_widgets/src/button.rs`; `crates/bevy_ui/src/ui_node.rs` | UIF-U1 controlled reducer and disabled activation assertions; UIF-U2 borrows algorithms, not topology | layout/text/widget algorithms admitted by measured workloads | SubApp/RenderWorld public topology, entity persistence, wide default plugins |
 
-Unity UI Toolkit remains a secondary product-organization analogy, not admission evidence, until a
-primary source/version and neutral Nara assertion are pinned. A reference implementation is evidence,
-not authority or a license to copy code.
+The entries above preserve their original source baselines. November 4 pressure adds upstream Zed
+GPUI `dd3437011469d5c2ec8c821a84cc999979625697`: `crates/gpui/src/element.rs` separates
+composition from custom layout/prepaint/paint, and `crates/gpui/src/view.rs` makes cached-view
+invalidation explicit. This is distinct from the Open-GPUI fork. egui
+`fc9d66dda742d722eedaa8684d23f86369cf8e5f` separates `Widget`/`Response`, superficial `Memory`
+and visible-row construction; neither pattern grants document authority.
+
+Official Unity 6.0 [custom EditorWindow](https://docs.unity.com/en-us/engine/6000.0/manual/uitoolkits/uielements/uie-support-for-editor-ui/uie-how-to-create-editor-window)
+and [IMGUI migration](https://docs.unity.com/en-us/engine/6000.0/manual/uitoolkits/uielements/uie-migration-guides/uie-imgui-migration)
+documents distinguish contributed content, framework lifecycle, explicit state restoration and
+directional `IMGUIContainer` embedding. This is Unity's IMGUI, not Dear ImGui interoperability.
+Epic's [Slate editor-window guide](https://dev.epicgames.com/documentation/en-us/unreal-engine/slate-editor-window-quickstart-guide-for-unreal-engine),
+[invalidation](https://dev.epicgames.com/documentation/en-us/unreal-engine/invalidation-in-slate-and-umg-for-unreal-engine)
+and [Slate Insights](https://dev.epicgames.com/documentation/en-us/unreal-engine/slate-insights-in-unreal-engine)
+documents, checked November 4, separate tab contribution, widget composition, cache invalidation
+and observable update causes. These sources pressure the Nara contracts above; they qualify no
+Nara plugin, native platform, automation port or performance result.
+
+Godot `fefec82d74b46f5e6cc31f373071058f80a5cbee` adds concrete graph pressure through
+`doc/classes/GraphEdit.xml`, `doc/classes/GraphNode.xml` and
+`modules/visual_shader/editor/visual_shader_editor_plugin.cpp`: composable node content,
+connection requests and domain-validated Undo remain distinct. At the egui pin above,
+`crates/egui_kittest/src/node.rs` distinguishes physical pointer clicks from semantic AccessKit
+actions, while `src/lib.rs` waits for repaint convergence. GPUI's `Element` semantic children
+and `app/visual_test_context.rs` expose custom-drawn semantics and controlled test progression.
+Nara adopts the distinction between semantic and physical paths and request-specific completion;
+it does not treat convergence as completion of Save or compilation.
 
 ## Component admission map
 
@@ -224,12 +446,16 @@ composite is allowed without turning it into a shared widget.
 
 ## Scale and layout contract
 
-The first product slice uses a `960 x 540` logical design space and the standard
+The first Runtime product slice uses a `960 x 540` logical design space and the standard
 physical targets `1280 x 720`, `1920 x 1080`, and `2560 x 1440`. Transient
 non-16:9 desktop resize is handled by the closed `SurfaceContentTransform`
 letterbox/pillarbox mapping above. This admits neither a 4:3 product target nor
 adaptive/responsive layout. Arbitrary render/input scale setters are removed in
 favor of the transform's validated forward and inverse mappings.
+
+That authored Runtime policy is not a fixed-resolution Editor layout contract. Editor panels
+consume current admitted bounds and scale. Responsive layout, cross-window transfer and native
+platform support are qualified independently rather than inferred from this Runtime baseline.
 
 ## Success measures
 
