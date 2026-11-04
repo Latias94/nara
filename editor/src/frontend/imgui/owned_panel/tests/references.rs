@@ -235,7 +235,7 @@ fn apply_exactly(
     let widgets = &harness.frontend.presentation.widgets[&panel];
     let target = widgets.authoring.fields.drafts[&key].basis.target.clone();
     assert_eq!(target.base_revision(), scene.revision);
-    let [queued] = widgets.owned_pending.as_slice() else {
+    let [super::super::OwnedSubmission::Field(queued)] = widgets.owned_pending.as_slice() else {
         panic!("one explicit field operation must queue one edit")
     };
     assert_eq!(queued.key, key);

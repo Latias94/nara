@@ -220,7 +220,14 @@ mod tests {
         )
         .unwrap();
         let frame = inspector
-            .compile(&model, &mut fields, environment, UiTheme::default(), false)
+            .compile(
+                &model,
+                &mut fields,
+                environment,
+                UiTheme::default(),
+                false,
+                None,
+            )
             .unwrap();
         let open = frame
             .semantics()
@@ -234,7 +241,14 @@ mod tests {
             .unwrap();
         fields.begin_paint(&model);
         let frame = inspector
-            .compile(&model, &mut fields, environment, UiTheme::default(), false)
+            .compile(
+                &model,
+                &mut fields,
+                environment,
+                UiTheme::default(),
+                false,
+                None,
+            )
             .unwrap();
         let toggle = frame
             .semantics()

@@ -98,6 +98,7 @@ fn paint(
             .unwrap(),
             UiTheme::default(),
             read_only,
+            None,
         )
         .unwrap()
 }

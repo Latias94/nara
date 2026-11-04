@@ -40,11 +40,14 @@ const RETAINED_FRAMES: usize = 3;
 mod recovery;
 mod references;
 mod structured;
+mod tools;
 mod viewport;
 
 use recovery::DisplayedRecovery;
 pub(super) use references::ReferenceAction;
 use references::{ReferenceBinding, ReferencePicker};
+pub(super) use tools::ToolAction;
+use tools::{DisplayedTool, ToolBasis, ToolControl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InspectorOperation {
@@ -87,6 +90,10 @@ pub(super) enum InspectorBinding {
         field: UiKey,
     },
     DiscardRetainedDrafts,
+    SourceTool {
+        field: UiKey,
+        action: ToolAction,
+    },
     Operation {
         field: UiKey,
         operation: InspectorOperation,
@@ -115,6 +122,7 @@ struct FieldControl {
     reference: Option<ReferencePicker>,
     copy_button: UiButtonState,
     copy_feedback: Option<String>,
+    tool: Option<ToolControl>,
 }
 
 struct ButtonControl {
@@ -259,6 +267,7 @@ struct DisplayedField {
     display_text: Option<String>,
     operations: [bool; InspectorOperation::COUNT],
     reference_views: HashMap<Option<DraftInput>, u64>,
+    tool: Option<DisplayedTool>,
     width: f32,
 }
 
@@ -281,6 +290,7 @@ enum InspectorButtonAction {
     Reference(ReferenceBinding),
     Structure(DraftAction),
     Copy,
+    SourceTool(ToolAction),
 }
 
 struct CompiledInspector {
@@ -390,6 +400,7 @@ impl OwnedInspector {
         environment: UiEnvironment,
         theme: UiTheme,
         read_only: bool,
+        tool_presentation: Option<&super::source_tool::OwnedSourceToolPresentation>,
     ) -> Result<Arc<UiFrame>, OwnedInspectorError> {
         self.read_only = read_only;
         let width = environment.logical_size().width() - 2.0 * PANEL_INSET;
@@ -427,6 +438,10 @@ impl OwnedInspector {
                             && authoring::editing_enabled(model)
                             && component.access.is_editable()
                             && field.capabilities.contains(&ComponentCapability::Edit);
+                        let tool_basis = ToolBasis::capture(model, &key, &basis).filter(|_| {
+                            component.access.is_editable()
+                                && field.capabilities.contains(&ComponentCapability::Edit)
+                        });
                         nodes.push(self.field_node(
                             key.clone(),
                             Some(basis),
@@ -437,6 +452,9 @@ impl OwnedInspector {
                             &mut inputs,
                             &mut buttons,
                             &scene.editor.inspector.entities,
+                            tool_basis,
+                            tool_presentation,
+                            model,
                         )?);
                         visible.push(key);
                     }
@@ -491,6 +509,9 @@ impl OwnedInspector {
                     &mut inputs,
                     &mut buttons,
                     &scene.editor.inspector.entities,
+                    None,
+                    tool_presentation,
+                    model,
                 )?);
                 visible.push(key);
             }
@@ -624,6 +645,10 @@ impl OwnedInspector {
                 InspectorButtonAction::Copy => InspectorBinding::Copy {
                     field: button.field.clone(),
                 },
+                InspectorButtonAction::SourceTool(action) => InspectorBinding::SourceTool {
+                    field: button.field.clone(),
+                    action: *action,
+                },
             });
         }
         let field = self.live_field(frame, key)?;
@@ -718,6 +743,9 @@ impl OwnedInspector {
                 *state = UiButtonState::default();
             }
             control.copy_button = UiButtonState::default();
+            if let Some(tool) = &mut control.tool {
+                tool.buttons = [UiButtonState::default(); 2];
+            }
             if let Some(reference) = &mut control.reference {
                 reference.cancel_input();
             }
@@ -776,7 +804,7 @@ impl OwnedInspector {
     }
 
     pub(super) fn input_error(
-        &self,
+        &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
         token: UiTextInputToken,
@@ -785,9 +813,17 @@ impl OwnedInspector {
     ) {
         if self.input_token(frame, field).ok().flatten() == Some(token)
             && let Ok(displayed) = self.live_field(frame, field)
-            && let Some(draft) = fields.drafts.get_mut(&displayed.key)
         {
-            draft.error = Some(error);
+            let key = displayed.key.clone();
+            if let Some(tool) = self
+                .controls
+                .get_mut(&key)
+                .and_then(|control| control.tool.as_mut())
+            {
+                tool.error = Some(error);
+            } else if let Some(draft) = fields.drafts.get_mut(&key) {
+                draft.error = Some(error);
+            }
         }
     }
 
@@ -806,13 +842,18 @@ impl OwnedInspector {
             .get_mut(&key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let target = control.text_target(field).cloned();
+        let tool_parameter = control.tool.is_some();
         let text = control
             .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
         let outcome = text.edit(token, edit, &mut self.engine)?;
         if outcome.text_changed {
-            Self::adopt_text(fields, &key, target.as_ref(), text.editor().text())?;
-            control.copy_feedback = None;
+            if tool_parameter {
+                control.tool.as_mut().expect("tool parameter exists").error = None;
+            } else {
+                Self::adopt_text(fields, &key, target.as_ref(), text.editor().text())?;
+                control.copy_feedback = None;
+            }
         }
         Ok(outcome)
     }
@@ -839,6 +880,7 @@ impl OwnedInspector {
             .get_mut(&displayed.key)
             .ok_or(OwnedInspectorError::RetiredField)?;
         let target = control.text_target(field).cloned();
+        let tool_parameter = control.tool.is_some();
         let text = control
             .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
@@ -882,13 +924,17 @@ impl OwnedInspector {
             &mut self.engine,
         )?;
         if outcome.text_changed {
-            Self::adopt_text(
-                fields,
-                &displayed.key,
-                target.as_ref(),
-                text.editor().text(),
-            )?;
-            control.copy_feedback = None;
+            if tool_parameter {
+                control.tool.as_mut().expect("tool parameter exists").error = None;
+            } else {
+                Self::adopt_text(
+                    fields,
+                    &displayed.key,
+                    target.as_ref(),
+                    text.editor().text(),
+                )?;
+                control.copy_feedback = None;
+            }
         }
         Ok(outcome)
     }
@@ -991,6 +1037,13 @@ impl OwnedInspector {
                     &mut button_state.state
                 }
                 InspectorButtonAction::Copy => &mut control.copy_button,
+                InspectorButtonAction::SourceTool(action) => {
+                    &mut control
+                        .tool
+                        .as_mut()
+                        .ok_or(OwnedInspectorError::ChangedProjection)?
+                        .buttons[action.index()]
+                }
             };
             state.reduce_batch(&button.button, dispatch, &mut intents)?;
         }
@@ -1027,6 +1080,7 @@ impl OwnedInspector {
                 Ok(None)
             }
             InspectorButtonAction::Copy => Err(OwnedInspectorError::HostClipboardRequired),
+            InspectorButtonAction::SourceTool(_) => Err(OwnedInspectorError::SourceToolRequired),
         }
     }
 
@@ -1193,13 +1247,6 @@ impl OwnedInspector {
         input: &UiKey,
         fields: &FieldEditors,
     ) -> Result<(), OwnedInspectorError> {
-        if !fields.has_draft_capacity(key) {
-            return Err(OwnedInspectorError::DraftCapacity);
-        }
-        let draft = fields
-            .drafts
-            .get(key)
-            .ok_or(OwnedInspectorError::ChangedDraft)?;
         let control = self
             .controls
             .get(key)
@@ -1207,6 +1254,23 @@ impl OwnedInspector {
         let text = control
             .text_at(input)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
+        if let Some(tool) = &control.tool {
+            if tool.submitting {
+                return Err(OwnedInspectorError::Pending);
+            }
+            return if control.allowed && control.host_enabled {
+                Ok(())
+            } else {
+                Err(OwnedInspectorError::ReadOnlyField)
+            };
+        }
+        if !fields.has_draft_capacity(key) {
+            return Err(OwnedInspectorError::DraftCapacity);
+        }
+        let draft = fields
+            .drafts
+            .get(key)
+            .ok_or(OwnedInspectorError::ChangedDraft)?;
         let candidate_text = match (&draft.candidate, control.text_target(input)) {
             (Candidate::Text(text), None) => Some(text.as_str()),
             (Candidate::Structured(root), Some(target)) => structure::text(root, target),
@@ -1264,6 +1328,9 @@ impl OwnedInspector {
         inputs: &mut HashMap<UiKey, DisplayedInput>,
         buttons: &mut HashMap<UiKey, DisplayedButton>,
         entities: &[nara::tooling::SceneInspectorEntityRow],
+        tool_basis: Option<ToolBasis>,
+        tool_presentation: Option<&super::source_tool::OwnedSourceToolPresentation>,
+        model: &EditorFrameModel,
     ) -> Result<UiNode, OwnedInspectorError> {
         if !fields.drafts.contains_key(&key)
             && self
@@ -1275,7 +1342,11 @@ impl OwnedInspector {
         }
         let capacity = fields.has_draft_capacity(&key);
         if let Some(basis) = &current {
-            if !fields.drafts.contains_key(&key) && supported_input(basis) && capacity {
+            if tool_basis.is_none()
+                && !fields.drafts.contains_key(&key)
+                && supported_input(basis)
+                && capacity
+            {
                 fields
                     .drafts
                     .insert(key.clone(), FieldDraft::new(basis.clone()));
@@ -1285,15 +1356,19 @@ impl OwnedInspector {
             }
         }
         let draft = fields.drafts.get(&key);
-        let basis = draft
-            .map(|draft| &draft.basis)
-            .or(current.as_ref())
-            .ok_or(OwnedInspectorError::ChangedDraft)?;
+        let basis = if tool_basis.is_some() {
+            current.as_ref()
+        } else {
+            draft.map(|draft| &draft.basis).or(current.as_ref())
+        }
+        .ok_or(OwnedInspectorError::ChangedDraft)?;
         let replace = self.controls.get(&key).is_none_or(|control| {
             control.basis != *basis
+                || control.tool.as_ref().map(|tool| &tool.basis) != tool_basis.as_ref()
                 || control.had_draft != draft.is_some()
-                || matches!((control.text(), draft), (Some(text), Some(draft))
+                || (tool_basis.is_none() && matches!((control.text(), draft), (Some(text), Some(draft))
                     if !matches!(&draft.candidate, Candidate::Text(value) if value == text.editor().text()))
+                )
         });
         if replace {
             let identity = self.next_identity;
@@ -1305,7 +1380,15 @@ impl OwnedInspector {
                 UiLocalKey::runtime("nara.inspector.field", identity.to_string())?,
             )?;
             let mut unavailable = None;
-            let input = if let Some(draft) = draft
+            let input = if let Some(tool) = &tool_basis {
+                FieldInput::Text(Box::new(UiTextField::new(
+                    self.root.clone(),
+                    tool.label.clone(),
+                    &tool.initial.to_string(),
+                    TEXT_SIZE,
+                    &mut self.engine,
+                )?))
+            } else if let Some(draft) = draft
                 && scalar_text(&draft.basis)
                 && let Candidate::Text(value) = &draft.candidate
             {
@@ -1354,6 +1437,7 @@ impl OwnedInspector {
                         .then(ReferencePicker::default),
                     copy_button: UiButtonState::default(),
                     copy_feedback: None,
+                    tool: tool_basis.map(ToolControl::new),
                 },
             );
         }
@@ -1363,10 +1447,19 @@ impl OwnedInspector {
             .ok_or(OwnedInspectorError::RetiredField)?;
         let identity = control.identity;
         let current_supported = current.as_ref().is_some_and(supported_input);
-        control.allowed = editable
-            && current_supported
-            && capacity
-            && draft.is_some_and(|draft| !draft.incompatible && !draft.in_flight());
+        control.allowed = if let Some(tool) = &mut control.tool {
+            if tool_presentation.is_some_and(|presentation| presentation.enabled) {
+                tool.submitting = false;
+            }
+            editable
+                && tool_presentation.is_some_and(|presentation| presentation.enabled)
+                && !tool.submitting
+        } else {
+            editable
+                && current_supported
+                && capacity
+                && draft.is_some_and(|draft| !draft.incompatible && !draft.in_flight())
+        };
         let enabled = control.allowed && control.host_enabled;
         for text in control.texts_mut() {
             if !enabled {
@@ -1398,7 +1491,9 @@ impl OwnedInspector {
         let boolean = matches!(&control.input, FieldInput::Boolean(_));
         let structured = matches!(&control.input, FieldInput::Structured(_));
         let has_input = !matches!(&control.input, FieldInput::ReadOnly);
-        let has_text = control.text().is_some();
+        let tool_parameter = control.tool.is_some();
+        let tool_label = control.tool.as_ref().map(|tool| tool.basis.label.clone());
+        let has_text = control.text().is_some() && !tool_parameter;
         let composing = control.is_composing();
         let display_text = control
             .text()
@@ -1412,6 +1507,9 @@ impl OwnedInspector {
                 if basis.field.required { " *" } else { "" }
             ),
         )?];
+        if let Some(label) = tool_label {
+            children.push(self.label(&format!("{identity}.tool.label"), &label)?);
+        }
         if let Some(node) = text_node {
             inputs.insert(
                 input.clone(),
@@ -1434,8 +1532,15 @@ impl OwnedInspector {
             children.extend(self.structured_nodes(&key, draft, width, inputs, buttons, entities)?);
         }
         let mut operations = [false; InspectorOperation::COUNT];
+        let tool = self
+            .tool_nodes(&key, width, tool_presentation, model, buttons)?
+            .map(|(nodes, displayed)| {
+                children.extend(nodes);
+                displayed
+            });
         if let Some(draft) = draft {
             let can_edit = editable
+                && !tool_parameter
                 && current_supported
                 && capacity
                 && has_input
@@ -1524,7 +1629,7 @@ impl OwnedInspector {
                     "Conflict: review the current value before choosing Reapply.",
                 )?);
             }
-            if draft.conflict || draft.incompatible {
+            if draft.conflict || draft.incompatible || (tool_parameter && draft.dirty) {
                 if let Some(current) = &current {
                     children.push(self.label(
                         &format!("{identity}.current"),
@@ -1655,7 +1760,7 @@ impl OwnedInspector {
                     "This field is not currently projected. Its retained draft is unchanged."
                 },
             )?);
-        } else if !capacity {
+        } else if !capacity && !tool_parameter {
             children.push(self.label(
                 &format!("{identity}.capacity"),
                 "Field draft capacity reached. Discard retained edits to enable another field.",
@@ -1700,6 +1805,7 @@ impl OwnedInspector {
                 display_text,
                 operations,
                 reference_views,
+                tool,
                 width,
             },
         );
@@ -1824,6 +1930,8 @@ pub(super) enum OwnedInspectorError {
     ReadOnlyField,
     #[error("copying retained input requires the Host clipboard")]
     HostClipboardRequired,
+    #[error("this control requires the source-tool submission owner")]
+    SourceToolRequired,
     #[error("the retained field draft budget is exhausted")]
     DraftCapacity,
     #[error("this field already has an exact pending submission")]

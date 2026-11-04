@@ -83,6 +83,15 @@ unit records 326 ordinary Editor, 240 shared UI and seven independent-consumer c
 the remaining complete-panel, Scene/tool,
 virtualization, idle and actual OS/platform requirements.
 
+The [source-tool property successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#source-tool-property-integration)
+now consumes the existing finite integer facet in the Nara-drawn property row. Parameter input
+uses its own local text lifetime, while ordinary source drafts retain their original recovery
+basis. Original activation/property/request actions share the existing ordered Authoring ledger
+and one Session candidate with the ordinary tool panel. The owning unit records actual C# native
+review, history, replacement, fallback and Save/Reopen evidence. This is a concrete property
+consumer of ADRs0047/0118, without a new public control taxonomy or a second prepared edit owner.
+Complete component/tree parity and the clipped Nara Scene visual remain unfinished.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

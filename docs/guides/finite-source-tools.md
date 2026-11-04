@@ -653,6 +653,15 @@ never reused as the tool parameter or automatically published on fallback. Child
 text, not widget identities. The finite facet carries no drawing toolkit objects and does not define
 a recursive widget language. Nara's own custom-drawn Editor runtime remains separate work.
 
+The Inspector's `Nara properties` tab consumes the same finite facet with a local text parameter.
+Enter a valid i64 and choose `Prepare property proposal`; typing and IME composition do not
+change the source. The displayed review borrows the original Session candidate. Either the
+property's `Accept reviewed proposal` or the ordinary Source Tool panel accepts that exact
+request. Local Undo/Redo edits the parameter, while the document toolbar changes source history.
+Replacing or hiding the control retires its parameter input. A retained ordinary field draft
+keeps Copy/Discard and explicit conflict recovery after fallback. The surrounding Editor and
+remaining Nara-owned Scene/tool workflows retain their separate qualification.
+
 ## Finite Protocol
 
 Each invocation reads one JSON request from stdin until EOF and emits one JSON reply to stdout
@@ -717,8 +726,8 @@ The independently built consumer in
 the actual C# EnemyStats executable. Run `python tests/fixtures/behavior-languages/run.py` to build
 the artifacts and execute the Session consumers; Windows additionally runs the selected ignored
 Application consumer with those same artifacts. It is a concrete protocol example, not an official C# SDK.
-Add `--native-editor` on Windows to select the actual DX12 inline property/panel, history,
-Save and fresh Open trajectory with those artifacts. Ordinary test runs do not execute this
-ignored native case. The [owner plan](../plans/2026-10-28-finite-source-tool-owner-plan.md) and
+Add `--native-editor` on Windows to select both the ordinary and Nara-owned DX12 property/panel,
+history, Save and fresh Open trajectories with those artifacts. Ordinary test runs do not execute
+these ignored native cases. The [owner plan](../plans/2026-10-28-finite-source-tool-owner-plan.md) and
 [inline facet plan](../plans/2026-10-28-inline-source-tool-facet-plan.md) identify their respective
 qualification scope.

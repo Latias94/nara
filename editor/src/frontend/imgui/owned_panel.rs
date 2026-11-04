@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use dear_imgui_rs::Ui;
-use nara::tooling::EditorFrameModel;
+use nara::tooling::{EditorFrameModel, EditorSourceToolAction};
 use nara_text::{FontFace, TextEdit};
 use nara_ui_kernel::{
     UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRootKey, UiSize,
@@ -13,6 +13,11 @@ use crate::workspace::EditorPanelInstanceId;
 
 use super::owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspector};
 use super::{ImguiEditorFrontend, ImguiEditorPanelContext, ImguiViewImage};
+
+pub(super) enum OwnedSubmission {
+    Field(super::field_drafts::PreparedFieldEdit),
+    SourceTool(EditorSourceToolAction),
+}
 
 #[derive(Clone)]
 pub(crate) struct ImguiOwnedImage {
@@ -96,6 +101,23 @@ impl ImguiEditorFrontend {
                         .map_err(|error| error.to_string())?;
                     continue;
                 }
+                InspectorBinding::SourceTool { field, .. } => {
+                    if widgets.owned_pending.len() == 64 {
+                        break;
+                    }
+                    let action = inspector
+                        .source_tool_action(frame, intent.target(), model)
+                        .map_err(|error| error.to_string())?;
+                    if let Some(action) = widgets.authoring.source_tool.offer_owned(action) {
+                        inspector
+                            .tool_queued(frame, &field)
+                            .map_err(|error| error.to_string())?;
+                        widgets
+                            .owned_pending
+                            .push(OwnedSubmission::SourceTool(action));
+                    }
+                    continue;
+                }
                 _ => {}
             }
             if widgets.owned_pending.len() == 64 {
@@ -105,7 +127,7 @@ impl ImguiEditorFrontend {
                 .activate(frame, intent.target(), model, &mut widgets.authoring.fields)
                 .map_err(|error| error.to_string())?
             {
-                widgets.owned_pending.push(edit);
+                widgets.owned_pending.push(OwnedSubmission::Field(edit));
             }
         }
         Ok(())
@@ -283,7 +305,7 @@ impl ImguiEditorFrontend {
         error: String,
     ) {
         if let Some(widgets) = self.presentation.widgets.get_mut(&panel)
-            && let Some(inspector) = widgets.owned_inspector.as_ref()
+            && let Some(inspector) = widgets.owned_inspector.as_mut()
         {
             inspector.input_error(frame, field, token, &mut widgets.authoring.fields, error);
         }
@@ -343,6 +365,32 @@ impl ImguiEditorFrontend {
         if widgets.owned_pending.len() == 64 {
             return Err("Inspector submission capacity reached".into());
         }
+        let inspector = widgets
+            .owned_inspector
+            .as_mut()
+            .ok_or("Inspector controls are absent")?;
+        if inspector.is_tool_input(frame, field) {
+            if operation == InspectorOperation::Discard {
+                return inspector
+                    .discard_tool_input(frame, field)
+                    .map_err(|error| error.to_string());
+            }
+            if operation != InspectorOperation::Apply {
+                return Err("The tool parameter requires an explicit proposal".into());
+            }
+            let action = inspector
+                .prepare_tool_input(frame, field, model)
+                .map_err(|error| error.to_string())?;
+            if let Some(action) = widgets.authoring.source_tool.offer_owned(action) {
+                inspector
+                    .tool_queued(frame, field)
+                    .map_err(|error| error.to_string())?;
+                widgets
+                    .owned_pending
+                    .push(OwnedSubmission::SourceTool(action));
+            }
+            return Ok(());
+        }
         let edit = widgets
             .owned_inspector
             .as_mut()
@@ -356,7 +404,7 @@ impl ImguiEditorFrontend {
             )
             .map_err(|error| error.to_string())?;
         if let Some(edit) = edit {
-            widgets.owned_pending.push(edit);
+            widgets.owned_pending.push(OwnedSubmission::Field(edit));
         }
         Ok(())
     }
@@ -450,6 +498,16 @@ pub(super) fn paint(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .map_err(|error| error.to_string())
     })();
     let candidate = environment.and_then(|environment| {
+        let review = context
+            .preparation
+            .as_ref()
+            .ok()
+            .and_then(|session| session.source_tool_review());
+        let tools = context.widgets.authoring.source_tool.owned_presentation(
+            context.input.frame,
+            review.as_ref(),
+            !context.input.read_only && super::authoring::editing_enabled(context.input.frame),
+        );
         context
             .widgets
             .owned_inspector
@@ -461,6 +519,7 @@ pub(super) fn paint(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
                 environment,
                 UiTheme::default(),
                 context.input.read_only,
+                Some(&tools),
             )
             .map_err(|error| error.to_string())
     });

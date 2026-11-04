@@ -310,8 +310,8 @@ component/tree parity, the clipped Scene/tool visual and broader R11/R12 gates r
 The retained-input copy and capacity successor below addresses the predecessor's
 `FieldEditors::show_requested_recovery`/`show_recovery` recovery paths. Keep their original
 unavailable and incompatible input semantics when removing the corresponding field path.
-The ordinary source-tool facet and clipped live Scene remain complete-workflow consumers of the
-same submission/history owners; supporting every value shape does not qualify those visual paths.
+The source-tool property integration below supplies the ordinary finite facet consumer of the
+same submission/history owners. The clipped live Scene retains its separate complete visual gate.
 
 ## Shared reference picker qualification
 
@@ -377,8 +377,9 @@ replacement value store, generic effect framework or document transaction is int
 
 Copy follows the existing Apply/Discard/Reapply/Reset footer in keyboard order. Retained rows name
 their original entity/component/field instead of appearing to belong to the new selection. These
-recovery controls advance selected-field parity; the source-tool facet, clipped live Scene,
-complete component/tree behavior and broader native/idle/platform requirements remain open.
+recovery controls advance selected-field parity; the source-tool facet successor follows below.
+The clipped live Scene, complete component/tree behavior and broader native/idle/platform
+requirements remain open.
 
 Copy invalidation follows the original field incarnation and committed draft snapshot. Cancelling
 preedit or changing the source-edit buttons' enabled state cannot invalidate an unchanged Copy
@@ -438,3 +439,72 @@ These results cover the recorded Windows backend paths and existing finite model
 do not qualify actual OS IME/clipboard delivery, candidate placement, accessibility, DPI transfer,
 keyboard-only shell entry, virtualization, idle costs or the Nara-owned Scene/tool visual.
 Complete component/tree parity, R11/R12 and the broader foundation Goal remain open.
+
+## Source-tool property integration
+
+The selected Nara property row consumes the already admitted finite integer facet. Its parameter
+uses the existing local text owner and remains separate from the ordinary source-field draft.
+Invalid parameters and composition cannot prepare a proposal. Explicit Prepare captures the
+original activation, complete property target and parsed i64 parameter. Exact Session review
+rows are borrowed for presentation; Accept retains only the original request identity.
+
+Field and source-tool actions share the existing panel queue and ordered Authoring submission
+ledger. The existing source-tool controller retains offered/pending admission and exact result
+feedback. No prepared candidate, inverse executor, result bus, universal control schema or
+replacement source-value store is introduced. The ordinary tool panel can accept the same
+candidate prepared through the Nara property, and the Nara property can accept that shared review.
+
+Activation, source, Schema and target replacement retire the parameter control and its text
+lifetime. A hidden ordinary dirty draft keeps its original basis, Copy/Discard and conflict
+recovery; it never becomes a tool parameter or publishes automatically when the facet retires.
+Nonmatching fields retain the ordinary Nara editor. This completes another consumer of the
+selected property path; complete component/tree parity, the clipped Nara Scene visual and the
+broader R11/R12 gates remain open.
+
+The actual child fixture uses distinct declared IDs and storage paths: `health`/`armor` identify
+property proposals, while `wire_health`/`wire_armor` locate their visible Nara rows. The first
+native attempts confused those facts, then observed terminal Session completion before the
+following confirmed Inspector image. The fixture now uses the actual Schema paths and the
+established finite presentation pump after terminal observation. Production identity, admission
+and presentation checks are unchanged by these fixture corrections.
+
+## Source-tool property qualification
+
+The successor is based on `69cb29c`, using Windows 11, Rust 1.95.0, root `target`, serial
+single-job Cargo, DX12 and the installed `simhei.ttf` fallback. The actual .NET 10 Host and
+EnemyStats v1 child build successfully into the existing target directory.
+
+| Gate | Result |
+| --- | --- |
+| Ordinary Editor library | 330/330, `80d32adc-5392-4f21-ad20-e931e4d01afa`; 45 ignored cases excluded |
+| Selected native cohort | 17/17, `e6812078-6e2f-45f6-b4fe-145aafe48a80`, including both actual C# property/panel consumers |
+| Independent review | Scoped source-tool, parameter, queue, review and control-retirement review has no P1/P2 findings |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; warnings remain |
+| Build and formatting | Editor locked build and `cargo fmt --all -- --check` pass |
+| Documents and runner | Changed local Markdown targets, `git diff --check` and runner Python syntax pass |
+
+Four owner controls exercise invalid and canonical i64 parameters, exact original activation and
+property target, queued-input refusal, composition, failed input isolation, retired controls,
+activation/source replacement and ordinary dirty conflict recovery. The full library run includes
+the pre-existing exact Application result, clipboard, structured-field and capacity controls.
+
+The new actual native workflow first retains an ordinary `health=137` draft without changing
+source/history, then activates the installed tool. Its Nara parameter prepares a real `+25`
+proposal while the ordinary armor field remains editable. The exact Session patch/inverse is
+observed from the property and ordinary Source Tool panel, accepted once, and follows one
+Undo/Redo. A second proposal is accepted through the Nara button. Actual replacement and disable
+retire old tokens and reject late IME; fallback restores the original dirty draft with explicit
+conflict recovery. Discard changes only that draft. Save, physical Close, clean Open, original
+project code and public Rust materialization all pass. The final cohort also executes predecessor
+property/panel, owned scalar/keyboard/reference/structure/recovery/scrolling, Project IME,
+pause/Game/view-lifecycle and retained Scene/Canvas trajectories.
+
+The runner's `--native-editor` selection now includes both property consumers; its Python syntax
+is checked. This integration rebuilds the actual Host/child and runs the recorded native tests
+directly. It does not rerun the runner's entire language/module/catalog matrix or establish a new
+language/Host support claim. Shared UI production code is unchanged in this successor; the
+preceding recovery unit retains its separately recorded shared/independent consumer results.
+
+The complete selected Inspector, component/tree controls, clipped Nara Scene visual,
+virtualization, idle measurements and actual OS IME/clipboard/accessibility/DPI qualification
+remain open. These concrete property workflows do not complete R11/R12 or the foundation Goal.

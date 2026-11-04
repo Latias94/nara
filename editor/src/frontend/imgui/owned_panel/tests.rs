@@ -239,7 +239,7 @@ fn reordered_fonts_preserve_queued_apply_and_drafts_after_admission_refusal() {
     let widgets = &harness.frontend.presentation.widgets[&panel];
     assert!(widgets.owned_inspector.is_none());
     assert_eq!(widgets.owned_revision, 0);
-    let [queued] = widgets.owned_pending.as_slice() else {
+    let [super::OwnedSubmission::Field(queued)] = widgets.owned_pending.as_slice() else {
         panic!("font replacement must retain the queued Apply")
     };
     assert_eq!(queued.key, value_key);

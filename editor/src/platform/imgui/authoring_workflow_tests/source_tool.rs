@@ -32,7 +32,10 @@ use nara::{
         SceneInspectorReadOnlyReason,
     },
 };
+use nara_ui_kernel::UiSemanticRole;
+use winit::event::Ime;
 
+use super::owned_fields::OwnedFieldProbe;
 use super::*;
 use crate::frontend::imgui::{control_clip, control_visible};
 use crate::workspace::{EditorPanelInstanceId, EditorPanelPlacement, EditorPanelTarget};
@@ -280,18 +283,30 @@ struct SourceToolObservation {
 
 struct SourceToolApplication<'a> {
     fixture: &'a SourceToolFixture,
+    owned_inspector: bool,
     result: Option<Result<(SourceToolObservation, u64), String>>,
 }
 
 #[test]
 #[ignore = "requires Windows DX12 and actual installed EnemyStats images with managed Host approval"]
 fn native_source_tool_inline_property_and_panel_share_review_history_and_persistence() {
+    qualify_native_source_tool(false);
+}
+
+#[test]
+#[ignore = "requires Windows DX12 and actual installed EnemyStats images with managed Host approval"]
+fn native_owned_inspector_source_tool_property_and_panel_share_review_history_and_persistence() {
+    qualify_native_source_tool(true);
+}
+
+fn qualify_native_source_tool(owned_inspector: bool) {
     let fixture = SourceToolFixture::new().unwrap();
     let mut builder = EventLoop::builder();
     builder.with_any_thread(true);
     let event_loop = builder.build().unwrap();
     let mut application = SourceToolApplication {
         fixture: &fixture,
+        owned_inspector,
         result: None,
     };
     event_loop.run_app(&mut application).unwrap();
@@ -324,13 +339,13 @@ impl ApplicationHandler for SourceToolApplication<'_> {
             self.result = Some((|| {
                 let observed =
                     run_native_workflow(event_loop, &self.fixture.project.root, |workflow| {
-                        workflow.run_source_tool(self.fixture)
+                        workflow.run_source_tool(self.fixture, self.owned_inspector)
                     })?;
                 // run_native_workflow finishes graphics, physically retires the Session and drops
                 // the old Application before a completely fresh Open can acquire saved source.
                 let presents =
                     run_native_workflow(event_loop, &self.fixture.project.root, |workflow| {
-                        workflow.reopen_source_tool(self.fixture, &observed)
+                        workflow.reopen_source_tool(self.fixture, &observed, self.owned_inspector)
                     })?;
                 Ok((observed, presents))
             })());
@@ -642,6 +657,7 @@ impl AuthoringWorkflow<'_> {
                 {
                     return Err(format!("the actual C# tool failed: {view:?}"));
                 }
+                self.owned_test_paint()?;
                 return Ok(view);
             }
             if Instant::now() >= deadline {
@@ -824,9 +840,83 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
+    fn require_owned_source_tool_review(
+        &self,
+        request: &EditorSourceToolRequestId,
+        health: i64,
+    ) -> Result<(), String> {
+        self.require_source_tool_review(request, health)?;
+        let frame = self.frame()?;
+        let review = frame
+            .source_tool()
+            .review
+            .as_ref()
+            .ok_or("the owned property has no shared review")?;
+        for text in [
+            review.title.to_string(),
+            format!("enemy / {STATS} / health: {health}"),
+            format!("enemy / {STATS} / armor: 10"),
+        ] {
+            self.owned_test_named_enabled("wire_health", UiSemanticRole::Text, &text)?;
+        }
+        if !self.owned_test_named_enabled(
+            "wire_health",
+            UiSemanticRole::Button,
+            "Accept reviewed proposal",
+        )? {
+            return Err("the owned property cannot accept its exact shared review".into());
+        }
+        Ok(())
+    }
+
+    fn replace_source_tool_parameter(
+        &mut self,
+        owned_inspector: bool,
+        text: &str,
+    ) -> Result<(), String> {
+        if owned_inspector {
+            self.owned_test_named_replace("wire_health", "Health bonus", text)
+        } else {
+            self.replace_text(BONUS_INPUT, text)
+        }
+    }
+
+    fn owned_source_tool_input(&self) -> Result<OwnedFieldProbe, String> {
+        let input = self.owned_test_named_control(
+            "wire_health",
+            UiSemanticRole::TextInput,
+            "Health bonus",
+        )?;
+        if self
+            .native
+            .frontend
+            .owned_field_token(input.panel, &input.frame, &input.key)
+            .is_none()
+            || !self.native.owned_text_focus_for_test()
+        {
+            return Err("the actual tool parameter has no live native text input to retire".into());
+        }
+        Ok(input)
+    }
+
+    fn require_retired_source_tool_input(&mut self, input: &OwnedFieldProbe) -> Result<(), String> {
+        if self
+            .native
+            .frontend
+            .owned_field_token(input.panel, &input.frame, &input.key)
+            .is_some()
+            || self.native.owned_text_focus_for_test()
+            || self.owned_test_event(WindowEvent::Ime(Ime::Commit("777".into())))?
+        {
+            return Err("a retired source-tool parameter still admits native text input".into());
+        }
+        self.owned_test_paint()
+    }
+
     fn run_source_tool(
         mut self,
         fixture: &SourceToolFixture,
+        owned_inspector: bool,
     ) -> Result<SourceToolObservation, String> {
         self.open_source_tool_document()?;
         self.adopt_installed_source_tool_owner(fixture)?;
@@ -856,6 +946,21 @@ impl AuthoringWorkflow<'_> {
         {
             return Err("ordinary Open unexpectedly created an installed selection".into());
         }
+        if owned_inspector {
+            self.click("Inspector tab: Nara properties")?;
+            self.owned_test_paint()?;
+            self.owned_test_named_text("wire_health", "wire_health", "100")?;
+            self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
+            self.owned_test_named_replace("wire_health", "wire_health", "137")?;
+            if self.native.frontend.retained_field_draft(STATS, "health")
+                != Some(("137".into(), false, false, false))
+                || self.selected_stats()? != (100, 10)
+                || self.history()? != 0
+                || self.dirty()?
+            {
+                return Err("ordinary owned input published before the facet was enabled".into());
+            }
+        }
         let ready = self.enable_installed_source_tool(fixture)?;
         let enabled = ready.selection.as_ref().unwrap().desired.clone().unwrap();
         let selection_bytes =
@@ -870,9 +975,10 @@ impl AuthoringWorkflow<'_> {
             || active
                 .integer_property()
                 .is_none_or(|facet| facet.label() != "Health bonus")
-            || control_rect(BONUS_INPUT).is_none()
-            || control_rect(&format!("field:{STATS}:health")).is_some()
-            || control_rect(&format!("field:{STATS}:armor")).is_none()
+            || (!owned_inspector
+                && (control_rect(BONUS_INPUT).is_none()
+                    || control_rect(&format!("field:{STATS}:health")).is_some()
+                    || control_rect(&format!("field:{STATS}:armor")).is_none()))
         {
             return Err(format!(
                 "the health proposal facet did not replace only its admitted generic row: active={active:?}, parameter={:?}, health={:?}, armor={:?}",
@@ -881,16 +987,49 @@ impl AuthoringWorkflow<'_> {
                 control_rect(&format!("field:{STATS}:armor")),
             ));
         }
+        if owned_inspector {
+            self.owned_test_named_control(
+                "wire_health",
+                UiSemanticRole::TextInput,
+                "Health bonus",
+            )?;
+            self.owned_test_named_text(
+                "wire_health",
+                "Health bonus",
+                &active.integer_property().unwrap().initial().to_string(),
+            )?;
+            self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
+            if !self.owned_test_named_enabled(
+                "wire_armor",
+                UiSemanticRole::TextInput,
+                "wire_armor",
+            )? || self
+                .owned_test_named_enabled("wire_health", UiSemanticRole::TextInput, "wire_health")
+                .is_ok()
+                || self.native.frontend.retained_field_draft(STATS, "health")
+                    != Some(("137".into(), false, false, false))
+            {
+                return Err(
+                    "the owned facet exposed or discarded its hidden ordinary draft".into(),
+                );
+            }
+        }
         let initial_history = self.history()?;
         let initial_health = self.selected_stats()?.0;
-        self.replace_text(BONUS_INPUT, "25")?;
-        self.click(PROPERTY_PREVIEW)?;
+        self.replace_source_tool_parameter(owned_inspector, "25")?;
+        if owned_inspector {
+            self.owned_test_named_click("wire_health", "Prepare property proposal")?;
+        } else {
+            self.click(PROPERTY_PREVIEW)?;
+        }
         let view = self.settle_actual_source_tool()?;
         let request = view
             .request
             .ok_or("the real Inspector Preview submitted no request")?;
         self.require_source_tool_review(&request, 125)?;
-        if control_rect(PROPERTY_ACCEPT).is_none() {
+        if owned_inspector {
+            self.require_owned_source_tool_review(&request, 125)?;
+        } else if control_rect(PROPERTY_ACCEPT).is_none() {
             return Err(
                 "the actual Inspector did not paint the Session review acceptance control".into(),
             );
@@ -966,6 +1105,37 @@ impl AuthoringWorkflow<'_> {
             );
         }
 
+        if owned_inspector {
+            self.click("Undo")?;
+            self.replace_source_tool_parameter(true, "25")?;
+            self.owned_test_named_click("wire_health", "Prepare property proposal")?;
+            let view = self.settle_actual_source_tool()?;
+            let owned_request = view
+                .request
+                .ok_or("the owned property submitted no second actual child request")?;
+            self.require_owned_source_tool_review(&owned_request, 125)?;
+            if owned_request == request
+                || self.selected_stats()? != (100, 10)
+                || self.history()? != 0
+                || fs::read(&source).map_err(|error| error.to_string())? != original_bytes
+            {
+                return Err("the owned property did not prepare a fresh uncommitted review".into());
+            }
+            self.owned_test_named_click("wire_health", "Accept reviewed proposal")?;
+            if self.frame()?.source_tool().review.is_some()
+                || self
+                    .application
+                    .source_tool_review()
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+                || self.selected_stats()? != (125, 10)
+                || self.history()? != 1
+                || fs::read(&source).map_err(|error| error.to_string())? != original_bytes
+            {
+                return Err("owned acceptance did not consume exactly one shared candidate".into());
+            }
+        }
+
         // A useful panel action uses the same explicit request/review/acceptance pipeline.
         self.click("entity:recruit")?;
         self.application
@@ -1003,7 +1173,12 @@ impl AuthoringWorkflow<'_> {
         }
 
         self.click("entity:enemy")?;
-        self.replace_text(BONUS_INPUT, "999")?;
+        self.replace_source_tool_parameter(owned_inspector, "999")?;
+        let replaced_input = if owned_inspector {
+            Some(self.owned_source_tool_input()?)
+        } else {
+            None
+        };
         if self.frame()?.source_tool().request.as_ref() != Some(&attach_request) {
             return Err("typing an unsubmitted parameter draft executed a child".into());
         }
@@ -1021,8 +1196,32 @@ impl AuthoringWorkflow<'_> {
         {
             return Err("the replacement inherited its predecessor's request or activation".into());
         }
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
+        if let Some(input) = &replaced_input {
+            self.require_retired_source_tool_input(input)?;
+            let current = self.owned_test_named_control(
+                "wire_health",
+                UiSemanticRole::TextInput,
+                "Health bonus",
+            )?;
+            if current.key == input.key {
+                return Err("tool replacement reused its retired parameter control".into());
+            }
+            self.owned_test_named_text(
+                "wire_health",
+                "Health bonus",
+                &replacement
+                    .active
+                    .as_ref()
+                    .unwrap()
+                    .integer_property()
+                    .unwrap()
+                    .initial()
+                    .to_string(),
+            )?;
+        } else {
+            self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
+            self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
+        }
         for _ in 0..3 {
             self.paint(|_| {})?;
         }
@@ -1034,7 +1233,12 @@ impl AuthoringWorkflow<'_> {
         {
             return Err("an old parameter draft submitted after actual tool replacement".into());
         }
-        self.replace_text(BONUS_INPUT, "333")?;
+        self.replace_source_tool_parameter(owned_inspector, "333")?;
+        let disabled_input = if owned_inspector {
+            Some(self.owned_source_tool_input()?)
+        } else {
+            None
+        };
         self.application
             .panel_workspace_mut()
             .layout_mut()
@@ -1043,8 +1247,10 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
         self.source_tool_control(PANEL_DISABLE)?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
+        if !owned_inspector {
+            self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
+            self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
+        }
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
@@ -1087,9 +1293,10 @@ impl AuthoringWorkflow<'_> {
             || disabled.has_pending_work()
             || disabled.request.is_some()
             || disabled.review.is_some()
-            || control_rect(BONUS_INPUT).is_some()
-            || control_rect(&format!("field:{STATS}:health")).is_none()
-            || control_rect(&format!("field:{STATS}:armor")).is_none()
+            || (!owned_inspector
+                && (control_rect(BONUS_INPUT).is_some()
+                    || control_rect(&format!("field:{STATS}:health")).is_none()
+                    || control_rect(&format!("field:{STATS}:armor")).is_none()))
             || after_disable
                 .schema
                 .as_ref()
@@ -1102,6 +1309,45 @@ impl AuthoringWorkflow<'_> {
                 "disable replayed an old draft or failed to restore the admitted generic editor"
                     .into(),
             );
+        }
+        if let Some(input) = &disabled_input {
+            self.require_retired_source_tool_input(input)?;
+            self.owned_test_named_text("wire_health", "wire_health", "137")?;
+            self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
+            if self
+                .owned_test_named_enabled("wire_health", UiSemanticRole::TextInput, "Health bonus")
+                .is_ok()
+                || self.native.frontend.retained_field_draft(STATS, "health")
+                    != Some(("137".into(), true, false, false))
+                || self.owned_test_named_enabled("wire_health", UiSemanticRole::Button, "Apply")?
+                || !self.owned_test_named_enabled(
+                    "wire_health",
+                    UiSemanticRole::Button,
+                    "Reapply",
+                )?
+                || self.selected_stats()? != (125, 10)
+                || self.history()? != 2
+                || fs::read(&source).map_err(|error| error.to_string())? != original_bytes
+            {
+                return Err(
+                    "facet fallback lost or automatically published its ordinary source draft"
+                        .into(),
+                );
+            }
+            self.owned_test_named_click("wire_health", "Discard")?;
+            self.owned_test_named_text("wire_health", "wire_health", "125")?;
+            if self
+                .native
+                .frontend
+                .retained_field_draft(STATS, "health")
+                .is_some()
+                || self.selected_stats()? != (125, 10)
+                || self.history()? != 2
+            {
+                return Err(
+                    "discarding the restored ordinary draft changed source or history".into(),
+                );
+            }
         }
         self.click("Save")?;
         self.settle_persistence()?;
@@ -1124,6 +1370,29 @@ impl AuthoringWorkflow<'_> {
                 != selection_bytes
         {
             return Err("explicit re-enable did not restore the same installed selection".into());
+        }
+        if owned_inspector {
+            self.owned_test_named_text(
+                "wire_health",
+                "Health bonus",
+                &reenabled
+                    .active
+                    .as_ref()
+                    .ok_or("explicit re-enable did not activate the installed tool")?
+                    .integer_property()
+                    .ok_or("explicit re-enable did not restore the property facet")?
+                    .initial()
+                    .to_string(),
+            )?;
+            if reenabled.request.is_some()
+                || reenabled.review.is_some()
+                || self.selected_stats()? != (125, 10)
+                || self.history()? != 2
+                || self.dirty()?
+                || read_scene(&source)? != saved
+            {
+                return Err("re-enabling the facet replayed input after source Save".into());
+            }
         }
         if project_code
             != fs::read(fixture.project.root.join("src/lib.rs"))
@@ -1151,12 +1420,27 @@ impl AuthoringWorkflow<'_> {
         mut self,
         fixture: &SourceToolFixture,
         observed: &SourceToolObservation,
+        owned_inspector: bool,
     ) -> Result<u64, String> {
         self.open_source_tool_document()?;
+        if owned_inspector {
+            self.click("Inspector tab: Nara properties")?;
+            self.owned_test_paint()?;
+            self.owned_test_named_text("wire_health", "wire_health", "125")?;
+            self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
+            if self
+                .owned_test_named_enabled("wire_health", UiSemanticRole::TextInput, "Health bonus")
+                .is_ok()
+            {
+                return Err(
+                    "fresh Open exposed a property facet without explicit activation".into(),
+                );
+            }
+        }
         if self.selected_stats()? != (125, 10)
             || self.history()? != 0
             || self.dirty()?
-            || control_rect(&format!("field:{STATS}:health")).is_none()
+            || (!owned_inspector && control_rect(&format!("field:{STATS}:health")).is_none())
             || read_scene(&fixture.project.root.join(SCENE))? != observed.saved
         {
             return Err(
@@ -1165,6 +1449,10 @@ impl AuthoringWorkflow<'_> {
             );
         }
         self.click("entity:recruit")?;
+        if owned_inspector {
+            self.owned_test_named_text("wire_health", "wire_health", "100")?;
+            self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
+        }
         if self.selected_stats()? != (100, 10) || self.history()? != 0 {
             return Err("fresh Open lost the panel-authored attached Stats".into());
         }

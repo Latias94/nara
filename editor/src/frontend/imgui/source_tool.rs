@@ -15,6 +15,9 @@ use nara::{
 
 use super::{ImguiTextOwner, PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
 
+mod owned;
+pub(super) use owned::OwnedSourceToolPresentation;
+
 const MAX_NAME_BYTES: usize = 256;
 const MAX_FEEDBACK_CHARS: usize = 1024;
 
@@ -667,33 +670,7 @@ impl SourceToolWidgets {
         // Borrow the exact candidate. Never derive replacement writes from the parameter draft.
         ui.text_wrapped(review.title());
         for operation in &review.patch().operations {
-            match operation {
-                ScenePatchOperation::SetField {
-                    entity,
-                    component,
-                    field,
-                    value,
-                    ..
-                } => {
-                    ui.text_wrapped(format!(
-                        "{} / {} / {}: {}",
-                        entity.as_str(),
-                        component.as_str(),
-                        field.as_str(),
-                        super::authoring::value_label(Some(value))
-                    ));
-                }
-                ScenePatchOperation::AddEntity { entity } => {
-                    ui.text_wrapped(format!("Create entity {}", entity.id.as_str()))
-                }
-                ScenePatchOperation::SetPlacements { .. } => {
-                    ui.text_wrapped("Update source hierarchy")
-                }
-                ScenePatchOperation::AddComponent {
-                    entity, component, ..
-                } => ui.text_wrapped(format!("Add {} to {}", component.as_str(), entity.as_str())),
-                other => ui.text_wrapped(format!("{other:?}")),
-            }
+            ui.text_wrapped(operation_label(operation));
         }
         let source_matches = basis == Some(&summary.basis);
         let intent_matches = match &summary.intent {
@@ -736,6 +713,32 @@ impl SourceToolWidgets {
                 )
             })
             .flatten()
+    }
+}
+
+fn operation_label(operation: &ScenePatchOperation) -> String {
+    match operation {
+        ScenePatchOperation::SetField {
+            entity,
+            component,
+            field,
+            value,
+            ..
+        } => format!(
+            "{} / {} / {}: {}",
+            entity.as_str(),
+            component.as_str(),
+            field.as_str(),
+            super::authoring::value_label(Some(value))
+        ),
+        ScenePatchOperation::AddEntity { entity } => {
+            format!("Create entity {}", entity.id.as_str())
+        }
+        ScenePatchOperation::SetPlacements { .. } => "Update source hierarchy".to_owned(),
+        ScenePatchOperation::AddComponent {
+            entity, component, ..
+        } => format!("Add {} to {}", component.as_str(), entity.as_str()),
+        other => format!("{other:?}"),
     }
 }
 

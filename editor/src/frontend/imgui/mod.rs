@@ -935,6 +935,17 @@ impl ImguiEditorFrontend {
                     .inspector_tab = workspace::InspectorTab::SourceAsset;
             }
         }
+        for (panel, widgets) in &mut self.presentation.widgets {
+            if (widgets.inspector_tab != workspace::InspectorTab::Owned
+                || !output
+                    .owned_candidates
+                    .iter()
+                    .any(|(owner, _)| owner == panel))
+                && let Some(inspector) = widgets.owned_inspector.as_mut()
+            {
+                inspector.retire_tool_controls();
+            }
+        }
         show_dirty_close_dialog(ui, &frame, &mut actions);
         output.actions = Some(EditorActionBatch::new(frame.revision(), actions));
         let serial = self.next_candidate;
@@ -1097,7 +1108,15 @@ fn paint_source_tool(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
 fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     use workspace::InspectorTab;
     for edit in std::mem::take(&mut context.widgets.owned_pending) {
-        context.submit_field(edit);
+        match edit {
+            owned_panel::OwnedSubmission::Field(edit) => context.submit_field(edit),
+            owned_panel::OwnedSubmission::SourceTool(action) => {
+                if let Some(action) = context.widgets.authoring.source_tool.offer_owned(action) {
+                    let result = context.submit_authoring(EditorAction::SourceTool(action));
+                    context.widgets.authoring.source_tool.admitted(result);
+                }
+            }
+        }
     }
     for (index, (label, tab)) in [
         ("Document", InspectorTab::Document),

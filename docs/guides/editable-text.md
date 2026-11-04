@@ -156,6 +156,13 @@ feedback. Retained rows identify their original entity, component and field.
 Values refused by the text control use a bounded read-only preview; Copy still recovers the
 complete retained input.
 
+An admitted source-tool integer facet replaces only its matching field's input with the declared
+proposal parameter. Local editing and Undo/Redo affect that parameter; Enter or `Prepare property
+proposal` requests a review, and Escape resets the parameter after cancelling composition. The
+property and ordinary Source Tool panel observe and accept the same Session candidate. Ordinary
+dirty source input remains separate and retains Copy/Discard and explicit conflict recovery when
+the facet is disabled. See the [source-tool guide](finite-source-tools.md#panel-and-integer-property-facet).
+
 At the retained-draft limit, `Discard retained field drafts` releases the displayed set of
 unsubmitted drafts. It preserves queued and pending edits and their original completion IDs.
 A changed draft set refuses an earlier button event; review the current panel and retry. This

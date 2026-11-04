@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use dear_imgui_rs::{Condition, Context, Key, MouseButton};
 use nara::{
     asset::AssetRef,
@@ -12,16 +14,22 @@ use nara::{
         SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityRecord,
     },
     tooling::{
-        EditorAuthoringReadiness, EditorFrameClock, EditorPersistenceView, EditorPlayState,
-        EditorPlayView, EditorProjectContentView, EditorProjectReadinessView, EditorProjectView,
-        EditorReopenTarget, EditorRuntimeAvailability, EditorSourceToolIntegerProperty,
-        EditorSourceToolView, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceIntentView,
-        SceneInspectorCommand,
+        EditorAction, EditorAuthoringReadiness, EditorDocumentMutation, EditorFrameClock,
+        EditorPersistenceView, EditorPlayState, EditorPlayView, EditorProjectContentView,
+        EditorProjectReadinessView, EditorProjectView, EditorReopenTarget,
+        EditorRuntimeAvailability, EditorSourceToolIntegerProperty, EditorSourceToolView,
+        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceIntentView, SceneInspectorCommand,
     },
 };
+use nara_text::{TextEdit, bundled_font_face};
+use nara_ui_kernel::{
+    UiEnvironment, UiFrame, UiKey, UiRootKey, UiSemanticRole, UiSurfaceId, UiTheme,
+};
+use nara_ui_widgets::UiTextInputToken;
 
 use super::super::{
     field_editor::FieldEditors,
+    owned_inspector::{OwnedInspector, OwnedInspectorError},
     submission::{self, PanelOrigin, Recipient},
     ui_interaction_tests::{clear_controls, control_rect},
 };
@@ -29,6 +37,7 @@ use super::*;
 
 const COMPONENT: &str = "test.source-tool.Amount";
 const FIELD: &str = "amount";
+const PARAMETER_LABEL: &str = "Increment###child-metadata";
 
 struct Fixture {
     context: Context,
@@ -152,7 +161,7 @@ impl Fixture {
                 ComponentFieldId::new(FIELD),
                 "increment".to_owned(),
                 // Metadata containing ImGui's identity syntax must remain plain display text.
-                "Increment###child-metadata".to_owned(),
+                PARAMETER_LABEL.to_owned(),
                 7,
             )
             .unwrap()
@@ -470,4 +479,456 @@ fn unknown_submission_results_do_not_settle_the_controllers_own_pending_action()
             .unwrap()
             .contains("no longer active")
     );
+}
+
+fn owned_inspector() -> OwnedInspector {
+    OwnedInspector::new(
+        UiRootKey::runtime("editor.inspector", "source-tool-tests").unwrap(),
+        vec![bundled_font_face().unwrap()],
+    )
+    .unwrap()
+}
+
+fn paint_owned(fixture: &mut Fixture, inspector: &mut OwnedInspector) -> Arc<UiFrame> {
+    fixture.fields.begin_paint(&fixture.frame);
+    fixture
+        .tools
+        .begin_paint(&fixture.frame, fixture.frame.workspace().active_document);
+    let presentation = fixture.tools.owned_presentation(&fixture.frame, None, true);
+    let frame = inspector
+        .compile(
+            &fixture.frame,
+            &mut fixture.fields,
+            UiEnvironment::new(
+                UiSurfaceId::new(91).unwrap(),
+                600.0,
+                1600.0,
+                1.0,
+                1,
+                1,
+                1,
+                1,
+            )
+            .unwrap(),
+            UiTheme::default(),
+            false,
+            Some(&presentation),
+        )
+        .unwrap();
+    fixture.tools.end_paint();
+    frame
+}
+
+fn owned_control(frame: &UiFrame, role: UiSemanticRole, name: &str) -> UiKey {
+    let group = frame
+        .semantics()
+        .iter()
+        .find(|node| node.role() == UiSemanticRole::Group && node.name() == FIELD)
+        .expect("the amount field has an owned group");
+    frame
+        .semantics()
+        .iter()
+        .find(|node| {
+            node.role() == role && node.name() == name && node.parent() == Some(group.key())
+        })
+        .unwrap_or_else(|| panic!("missing owned control: {FIELD}/{name}"))
+        .key()
+        .clone()
+}
+
+fn replace_owned(
+    inspector: &mut OwnedInspector,
+    fixture: &mut Fixture,
+    frame: &Arc<UiFrame>,
+    input: &UiKey,
+    value: &str,
+) -> UiTextInputToken {
+    let token = inspector.focus(frame, input).unwrap();
+    inspector
+        .edit(
+            frame,
+            input,
+            token,
+            &TextEdit::SelectAll,
+            &mut fixture.fields,
+        )
+        .unwrap();
+    inspector
+        .edit(
+            frame,
+            input,
+            token,
+            &TextEdit::Insert(value.into()),
+            &mut fixture.fields,
+        )
+        .unwrap();
+    token
+}
+
+#[test]
+fn owned_parameter_composition_and_control_retirement_preserve_the_ordinary_draft() {
+    let mut fixture = Fixture::new();
+    fixture.type_text(&format!("field:{COMPONENT}:{FIELD}"), "123");
+    let generic = fixture.fields.retained_text(COMPONENT, FIELD).unwrap();
+    let source = fixture.workspace.authoring_model();
+    fixture.activate(true);
+    let mut inspector = owned_inspector();
+    let frame = paint_owned(&mut fixture, &mut inspector);
+    let input = owned_control(&frame, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    let token = replace_owned(&mut inspector, &mut fixture, &frame, &input, "25");
+    inspector
+        .edit(
+            &frame,
+            &input,
+            token,
+            &TextEdit::Preedit {
+                text: "preedit".into(),
+                cursor: Some((0, 7)),
+            },
+            &mut fixture.fields,
+        )
+        .unwrap();
+    let composing = paint_owned(&mut fixture, &mut inspector);
+    assert!(
+        inspector
+            .prepare_tool_input(&composing, &input, &fixture.frame)
+            .is_err()
+    );
+    inspector.input_error(
+        &composing,
+        &input,
+        token,
+        &mut fixture.fields,
+        "clipboard refused".into(),
+    );
+    assert!(
+        fixture
+            .fields
+            .drafts
+            .values()
+            .all(|draft| draft.error.is_none())
+    );
+    inspector.retire_tool_controls();
+    assert!(
+        inspector
+            .edit(
+                &composing,
+                &input,
+                token,
+                &TextEdit::Commit("late".into()),
+                &mut fixture.fields
+            )
+            .is_err()
+    );
+    let replacement = paint_owned(&mut fixture, &mut inspector);
+    let current = owned_control(&replacement, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    assert_ne!(current, input);
+    assert_eq!(
+        replacement
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &current)
+            .unwrap()
+            .value(),
+        Some("7")
+    );
+    assert_eq!(
+        fixture.fields.retained_text(COMPONENT, FIELD).unwrap(),
+        generic
+    );
+    assert_eq!(fixture.workspace.authoring_model(), source);
+}
+
+#[test]
+fn owned_integer_parameter_is_local_validated_and_protected_after_queueing() {
+    let mut fixture = Fixture::new();
+    let source = fixture.workspace.authoring_model();
+    let generic_key = fixture.fields.drafts.keys().next().unwrap().clone();
+    let generic = fixture.fields.drafts[&generic_key].candidate.clone();
+    fixture.activate(true);
+    let activation = fixture
+        .frame
+        .source_tool()
+        .active
+        .as_ref()
+        .unwrap()
+        .id()
+        .clone();
+    let target = EditorPropertyTarget {
+        basis: document_basis(&fixture.frame, generic_key.document).unwrap(),
+        entity: generic_key.entity.clone(),
+        component: generic_key.component.clone(),
+        property: ComponentPropertyPath::new(generic_key.field.clone()),
+    };
+    let mut inspector = owned_inspector();
+    let frame = paint_owned(&mut fixture, &mut inspector);
+    let input = owned_control(&frame, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    replace_owned(&mut inspector, &mut fixture, &frame, &input, "-");
+    let invalid = paint_owned(&mut fixture, &mut inspector);
+    let prepare = owned_control(
+        &invalid,
+        UiSemanticRole::Button,
+        "Prepare property proposal",
+    );
+    assert!(
+        inspector
+            .source_tool_action(&invalid, &prepare, &fixture.frame)
+            .is_err()
+    );
+    assert!(fixture.tools.offered.is_none());
+    assert_eq!(fixture.fields.drafts[&generic_key].candidate, generic);
+    assert_eq!(fixture.workspace.authoring_model(), source);
+
+    let token = replace_owned(&mut inspector, &mut fixture, &invalid, &input, "00025");
+    let valid = paint_owned(&mut fixture, &mut inspector);
+    let prepare = owned_control(&valid, UiSemanticRole::Button, "Prepare property proposal");
+    let action = inspector
+        .source_tool_action(&valid, &prepare, &fixture.frame)
+        .unwrap();
+    assert!(matches!(
+        &action,
+        EditorSourceToolAction::IntegerProperty {
+            activation: original, target: original_target, value: 25,
+        } if original == &activation && original_target == &target
+    ));
+    let action = fixture.tools.offer_owned(action).unwrap();
+    assert!(matches!(
+        fixture.tools.offered,
+        Some(SubmissionKind::Integer)
+    ));
+    inspector.tool_queued(&valid, &input).unwrap();
+    assert!(matches!(
+        inspector.edit(
+            &valid,
+            &input,
+            token,
+            &TextEdit::Insert("9".into()),
+            &mut fixture.fields,
+        ),
+        Err(OwnedInspectorError::Pending)
+    ));
+    assert!(
+        inspector
+            .source_tool_action(&valid, &prepare, &fixture.frame)
+            .is_err()
+    );
+    assert!(fixture.tools.offer_owned(action).is_none());
+    assert!(fixture.tools.integer.is_none());
+    assert_eq!(fixture.fields.drafts.len(), 1);
+    assert_eq!(fixture.fields.drafts[&generic_key].candidate, generic);
+    assert!(fixture.fields.retained_text(COMPONENT, FIELD).is_none());
+    assert_eq!(fixture.workspace.authoring_model(), source);
+}
+
+#[test]
+fn owned_activation_replacement_retires_tokens_and_preserves_generic_dirty_input() {
+    let mut fixture = Fixture::new();
+    fixture.type_text(&format!("field:{COMPONENT}:{FIELD}"), "123");
+    let generic = fixture.fields.retained_text(COMPONENT, FIELD).unwrap();
+    let source = fixture.workspace.authoring_model();
+    fixture.activate(true);
+    let mut inspector = owned_inspector();
+    let frame = paint_owned(&mut fixture, &mut inspector);
+    let input = owned_control(&frame, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    let token = replace_owned(&mut inspector, &mut fixture, &frame, &input, "99");
+    let original = paint_owned(&mut fixture, &mut inspector);
+    let prepare = owned_control(
+        &original,
+        UiSemanticRole::Button,
+        "Prepare property proposal",
+    );
+
+    fixture.activate(true);
+    assert!(
+        inspector
+            .source_tool_action(&original, &prepare, &fixture.frame)
+            .is_err()
+    );
+    let replacement = paint_owned(&mut fixture, &mut inspector);
+    let replacement_input = owned_control(&replacement, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    assert_ne!(replacement_input, input);
+    assert!(
+        inspector
+            .edit(
+                &original,
+                &input,
+                token,
+                &TextEdit::Insert("late".into()),
+                &mut fixture.fields,
+            )
+            .is_err()
+    );
+    inspector.focus(&replacement, &replacement_input).unwrap();
+    assert!(
+        inspector
+            .edit(
+                &replacement,
+                &replacement_input,
+                token,
+                &TextEdit::Insert("late".into()),
+                &mut fixture.fields,
+            )
+            .is_err()
+    );
+    let prepare = owned_control(
+        &replacement,
+        UiSemanticRole::Button,
+        "Prepare property proposal",
+    );
+    assert!(matches!(
+        inspector
+            .source_tool_action(&replacement, &prepare, &fixture.frame)
+            .unwrap(),
+        EditorSourceToolAction::IntegerProperty { activation, value: 7, .. }
+            if &activation == fixture.frame.source_tool().active.as_ref().unwrap().id()
+    ));
+
+    fixture.frame = publish(
+        &mut fixture.clock,
+        &fixture.workspace,
+        EditorSourceToolView::default(),
+    );
+    let restored = paint_owned(&mut fixture, &mut inspector);
+    let generic_input = owned_control(&restored, UiSemanticRole::TextInput, FIELD);
+    assert_eq!(
+        restored
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &generic_input)
+            .unwrap()
+            .value(),
+        Some("123")
+    );
+    assert_eq!(
+        fixture.fields.retained_text(COMPONENT, FIELD).unwrap(),
+        generic
+    );
+    assert!(fixture.tools.integer.is_none());
+    assert_eq!(fixture.workspace.authoring_model(), source);
+}
+
+#[test]
+fn owned_source_change_retires_tool_input_and_restores_generic_conflict_recovery() {
+    let mut fixture = Fixture::new();
+    let mut inspector = owned_inspector();
+    let generic = paint_owned(&mut fixture, &mut inspector);
+    let generic_input = owned_control(&generic, UiSemanticRole::TextInput, FIELD);
+    replace_owned(
+        &mut inspector,
+        &mut fixture,
+        &generic,
+        &generic_input,
+        "123",
+    );
+    fixture.activate(true);
+    let frame = paint_owned(&mut fixture, &mut inspector);
+    let input = owned_control(&frame, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    let token = replace_owned(&mut inspector, &mut fixture, &frame, &input, "25");
+    let original = paint_owned(&mut fixture, &mut inspector);
+    let prepare = owned_control(
+        &original,
+        UiSemanticRole::Button,
+        "Prepare property proposal",
+    );
+    let action = inspector
+        .source_tool_action(&original, &prepare, &fixture.frame)
+        .unwrap();
+    let EditorSourceToolAction::IntegerProperty {
+        activation,
+        target,
+        value: 25,
+    } = &action
+    else {
+        panic!("the owned parameter must produce an exact integer property action")
+    };
+    let activation = activation.clone();
+    let target = target.clone();
+    assert!(
+        fixture
+            .workspace
+            .apply_authoring_command(EditorWorkspaceCommand::ApplyInspectorCommand {
+                document: target.basis.document,
+                base_revision: target.basis.revision,
+                command: SceneInspectorCommand::SetField {
+                    entity: target.entity.clone(),
+                    component: target.component.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new(FIELD),
+                    value: ComponentValue::I64(15),
+                },
+            })
+            .applied
+    );
+    fixture.frame = publish(
+        &mut fixture.clock,
+        &fixture.workspace,
+        fixture.frame.source_tool().clone(),
+    );
+    let changed_source = fixture.workspace.authoring_model();
+    assert!(
+        inspector
+            .source_tool_action(&original, &prepare, &fixture.frame)
+            .is_err()
+    );
+    let replacement = paint_owned(&mut fixture, &mut inspector);
+    let replacement_input = owned_control(&replacement, UiSemanticRole::TextInput, PARAMETER_LABEL);
+    assert_ne!(replacement_input, input);
+    assert!(
+        inspector
+            .edit(
+                &original,
+                &input,
+                token,
+                &TextEdit::Insert("late".into()),
+                &mut fixture.fields,
+            )
+            .is_err()
+    );
+    assert_eq!(
+        fixture.fields.retained_text(COMPONENT, FIELD).unwrap(),
+        ("123".into(), true, false, false)
+    );
+    assert!(matches!(
+        action,
+        EditorSourceToolAction::IntegerProperty {
+            activation: original_activation, target: original_target, value: 25,
+        } if original_activation == activation && original_target == target
+    ));
+
+    fixture.frame = publish(
+        &mut fixture.clock,
+        &fixture.workspace,
+        EditorSourceToolView::default(),
+    );
+    let restored = paint_owned(&mut fixture, &mut inspector);
+    let generic_input = owned_control(&restored, UiSemanticRole::TextInput, FIELD);
+    assert_eq!(
+        restored
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &generic_input)
+            .unwrap()
+            .value(),
+        Some("123")
+    );
+    let apply = owned_control(&restored, UiSemanticRole::Button, "Apply");
+    assert!(
+        inspector
+            .activate(&restored, &apply, &fixture.frame, &mut fixture.fields)
+            .is_err()
+    );
+    let reapply = owned_control(&restored, UiSemanticRole::Button, "Reapply");
+    let prepared = inspector
+        .activate(&restored, &reapply, &fixture.frame, &mut fixture.fields)
+        .unwrap()
+        .expect("explicit Reapply retains the ordinary field recovery path");
+    assert!(matches!(
+        prepared.action,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
+            document, base_revision,
+            command: SceneInspectorCommand::SetField { value: ComponentValue::I64(123), .. },
+        }) if document == target.basis.document
+            && base_revision == fixture.frame.workspace().active_scene.as_ref().unwrap().revision
+    ));
+    assert_eq!(fixture.workspace.authoring_model(), changed_source);
 }

@@ -153,7 +153,8 @@ def main():
                 [
                     "cargo", "+1.95.0", "nextest", "run", "-p", "nara-editor",
                     "--all-features", "--lib", "--locked", "--run-ignored", "only", "-E",
-                    "test(native_source_tool_inline_property_and_panel_share_review_history_and_persistence)",
+                    "test(native_source_tool_inline_property_and_panel_share_review_history_and_persistence) | "
+                    "test(native_owned_inspector_source_tool_property_and_panel_share_review_history_and_persistence)",
                     "--test-threads=1", "--status-level", "fail", "--final-status-level", "fail",
                 ],
                 cwd=root, env=native_environment, check=True,

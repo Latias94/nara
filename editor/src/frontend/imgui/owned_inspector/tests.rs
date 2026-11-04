@@ -170,6 +170,7 @@ fn paint_height(
             .unwrap(),
             UiTheme::default(),
             false,
+            None,
         )
         .unwrap()
 }
@@ -504,6 +505,7 @@ fn boolean_activation_retains_refused_candidates_and_uses_exact_application_resu
             replacement.environment(),
             UiTheme::default(),
             true,
+            None,
         )
         .unwrap();
     let read_only_field = boolean(&controller, &read_only);

@@ -225,12 +225,19 @@ python tests/fixtures/behavior-languages/run.py --native-editor
 
 The runner builds the real child artifacts, executes the window-free language/Session consumers
 and the selected Application consumer, then runs
-`native_source_tool_inline_property_and_panel_share_review_history_and_persistence` with DX12.
-That hidden-window trajectory prepares through the health property control and accepts through
+`native_source_tool_inline_property_and_panel_share_review_history_and_persistence` and
+`native_owned_inspector_source_tool_property_and_panel_share_review_history_and_persistence`
+with DX12.
+These hidden-window trajectories prepare through the health property control and accept through
 the shared Source Tool panel, verifies a single Undo/Redo, the ordinary armor control, Attach,
 activation/parameter retirement, generic fallback, Save, physical Close and fresh Open. Rust
 materializes the saved component data through public Scene bindings. Both native scopes must
-present. The current fixture begins with a native-only bundle and preserved unknown EnemyStats
+present. The Nara-owned trajectory additionally accepts a fresh review through its own controls
+and preserves an ordinary dirty health draft across facet replacement and disabled fallback.
+It locates visible controls by their Schema paths (`wire_health`/`wire_armor`) while proposals
+retain the declared field IDs (`health`/`armor`). Terminal Session completion and the following
+confirmed Nara image presentation are observed separately.
+The current fixture begins with a native-only bundle and preserved unknown EnemyStats
 records. It prepares/reviews/adopts the installed owner through the public Application before
 enabling the tool, verifies source/history/checkpoint preservation and old-basis rejection, then
 runs existing Inspector/panel interactions. This qualifies native Application adoption, not a
@@ -242,7 +249,7 @@ probing or activating it, and the panel's Disable saved selection persists Disab
 execution. Installed DLLs remain in place in this durable workflow; the independent session-only
 consumer separately proves invocation from captured bytes after removing the installed entry.
 This is a bounded installed-selection trajectory, not the full install/update/remove UI, a language
-SDK, executable gameplay publications or the future custom-drawn UI runtime. Record actual results
+SDK, executable gameplay publications or the complete custom-drawn UI runtime. Record actual results
 for this source revision; earlier evidence retains its original development/captured-image scope.
 Integrated installations now use `.nara/source-tools/artifacts/<name>`. The independent Session
 consumer additionally imports a declared text template into an ordinary project copy and verifies
