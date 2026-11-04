@@ -161,6 +161,12 @@ impl NativeImgui {
             self.close.phase = Phase::Views;
         }
         if self.close.phase == Phase::Views {
+            #[cfg(all(test, target_os = "windows"))]
+            if let Some(mut timestamps) = self.primary_gpu_timestamps.take() {
+                // The original drain settled both sampled paints and any readback copy, even
+                // when sampling, mapping or device health failed. Only now cancel/drop mapping.
+                timestamps.retire_after_drain();
+            }
             // Successful bulk shutdown already revoked texture registrations and adapter bindings.
             // No fallible per-texture unregister is needed at the final aggregate boundary.
             for target in [&mut self.scene, &mut self.game] {
@@ -265,7 +271,20 @@ pub(super) fn initialize_native_for_test(
     event_loop: &ActiveEventLoop,
     window: Arc<Window>,
 ) -> Result<NativeImgui, String> {
-    NativeImgui::new(event_loop, window).map_err(|failure| {
+    initialize_native_with_requirements_for_test(
+        event_loop,
+        window,
+        &WgpuDeviceRequirements::default(),
+    )
+}
+
+#[cfg(test)]
+pub(super) fn initialize_native_with_requirements_for_test(
+    event_loop: &ActiveEventLoop,
+    window: Arc<Window>,
+    requirements: &WgpuDeviceRequirements,
+) -> Result<NativeImgui, String> {
+    NativeImgui::new_with_device_requirements(event_loop, window, requirements).map_err(|failure| {
         let (error, native) = failure.into_parts();
         let cleanup = native.map(|mut native| finish_graphics_for_test(&mut native));
         match cleanup {

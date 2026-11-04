@@ -1,10 +1,10 @@
 # UI Work Observation Baseline
 
-Status: the first R11a work-observation and dependency prerequisite, measured against `3bcb83e`
-plus the accompanying implementation. This is not the complete R11a baseline or a performance
-improvement. The [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
-still requires native active-View, allocation, upload/GPU, latency and numeric
-budget evidence before the measured-reuse work.
+Status: partial R11a baseline, beginning at `3bcb83e` with source revisions and later CPU/native
+observations identified below. This is not a complete R11a baseline or a performance improvement.
+The [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+still requires full native allocation/retention, upload/GPU attribution, OS input/display latency,
+remaining matched workloads and numeric budgets before measured reuse.
 
 ## Observation Contract
 
@@ -265,6 +265,115 @@ setup/retirement harness (`becf4af8-f519-4145-89d8-68ae842cd914`, 2/2). The focu
 review finds no remaining P1/P2 after the final-health correction. This native baseline records
 remaining description work and measurement limits; it does not select a cache implementation or
 claim R11a's remaining metrics/budgets, an independent self-drawn Editor or complete R11/R12.
+
+## Primary Window GPU Markers
+
+This follow-up starts at `cecd98b` plus the accompanying native requirement/diagnostic
+implementation. The native requirement API is committed at `d368c20`; the private marker
+implementation accompanies this record. A native frontend now declares features/limits through the existing
+`WgpuRenderHost::request_device_requirements` before acquisition, sharing the original closed
+Feature request. Late refusal never replaces a healthy device or broadens recovery. The public
+independent output consumer uses distinct timestamp contributions, actual query execution/map,
+unchanged output pixels, late refusal and original retirement; this is a real native adapter
+consumer rather than a dummy render Feature added to request capabilities.
+
+The new ignored `measure_native_primary_gpu_timestamps_beside_advancing_game` requests
+`TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS` before renderer initialization. It reuses the
+complete 16-warmup/128-sample trajectory, geometry, source/history, exact composite/work and queue
+completion oracles. It writes two timestamps around the original primary paint in the same
+window encoder, followed by one resolve into that sample's aligned slot. It adds no sampled
+render pass, submission or serialization; marker/resolve work is diagnostic overhead.
+
+All 256 queries and both 32,768-byte resolve/readback buffers remain with the original Native
+owner until its real graphics drain, including on failed encoding, mapping, timeout or device
+loss. One setup submission and one final readback-copy submission are outside samples. Readback
+requires the actual successful map callback and original copy-prefix completion; every pair
+must match its sampled window/Runtime frame and backend/device epoch. Reject non-increasing or
+wrapped pairs as a whole run, never drop individual samples. Recheck original-device health
+after readback and keep the actual destroyed-device refusal/cleanup control.
+
+The markers describe **primary UI/composition paint only**. They exclude Game/image-producer
+GPU work, acquire, present, scanout and other windows. WGPU 30 explicitly permits encoder-command
+reordering around timestamp writes depending on backend/driver; these are diagnostic intervals,
+not strict isolated execution guarantees. Period converts ticks to nanoseconds but does not
+establish nanosecond precision. Existing receipts independently prove drawing/presentation.
+Query buffers are separately reported diagnostic payload, outside existing backend payload
+gauges; no complete GPU-memory or Dear-private-upload claim follows.
+
+The timestamp-enabled lane marks its CPU/completion times instrumented. Its device request also
+differs from the ordinary lane. Their difference does not isolate observer overhead, and these
+numbers do not replace the ordinary CPU/native baseline. No cache/performance optimization is
+introduced. Full R11a GPU/upload/input/retention attribution and numeric budgets remain open.
+
+The first Windows/DX12 debug qualification is **4/4** (`80b551b8-9d6c-4f8e-9ae9-452f2803ad79`):
+new timestamp lane, ordinary cost lane and both original Game/Runtime-UI workflows. All 128
+query pairs map successfully; period is 1 ns/tick and primary-marker P50/P95/P99/max is
+53.248 / 54.272 / 55.296 / 55.296 µs. This debug result is correctness evidence, not the final
+optimized cost distribution. Focused lifetime/reliability review finds no P1/P2.
+
+Three separate serial release invocations subsequently pass **both** the marker and ordinary
+lanes, with 128 complete samples per lane each time. Hardware, fonts and actual geometry match
+the final native protocol above: RTX 4090/DX12, driver `32.0.16.2101`, 2,400 × 1,650 physical
+window, native scale 1.5 and actual panel environment scale 1. Every run retains all 128 query
+pairs, actual map success, original copy completion, final health and destroyed-device refusal
+through physical cleanup. Work counts and source/receipt/geometry assertions remain unchanged.
+
+Cells are **P50 / P95 / P99 / max**. GPU marker values use µs; owner/redraw values use ms.
+
+| Interval and lane | Process 1 | Process 2 | Process 3 |
+| --- | --- | --- | --- |
+| Primary GPU markers, µs | 53.248 / 54.272 / 55.296 / 55.296 | 53.248 / 54.272 / 54.272 / 55.296 | 53.248 / 54.272 / 55.296 / 55.296 |
+| Owner drive, instrumented, ms | 0.2291 / 0.2795 / 0.3067 / 0.4696 | 0.2331 / 0.2937 / 0.3718 / 0.3787 | 0.2279 / 0.2697 / 0.5079 / 0.5173 |
+| Native redraw, instrumented, ms | 33.0321 / 33.2583 / 33.3778 / 33.7819 | 33.0240 / 33.2653 / 33.3704 / 33.4400 | 33.0277 / 33.3309 / 33.5877 / 33.9253 |
+| Owner drive, ordinary, ms | 0.2273 / 0.2668 / 0.2876 / 0.3062 | 0.2309 / 0.3690 / 0.5201 / 0.5269 | 0.2291 / 0.2844 / 0.4643 / 0.4651 |
+| Native redraw, ordinary, ms | 33.0251 / 33.3451 / 33.4368 / 33.5366 | 33.0154 / 33.4557 / 33.6897 / 33.7954 | 33.0293 / 33.2952 / 33.6041 / 33.8492 |
+
+Release runs: `abf3d99c-c04e-4d95-828e-f9a31de7ebd1`, `99b4a450-c986-4ccc-993a-8bac80064959`,
+`4b3555c2-e2b5-4d22-a11c-ce5d0fe67ea9`; each is 2/2. End readback wall times are 1.4420 /
+1.6643 / 1.2124 ms, outside sampled CPU/completion timers. Period is 1 ns/tick in each process.
+Each marker run uses two 32,768-byte buffers, one setup submission and one final readback-copy
+submission outside samples. It adds no sampled render pass/submission. Background pacing is not isolated;
+the primary interval cannot explain all redraw wall time or establish a display-rate cap.
+
+```powershell
+cargo +1.95.0 nextest run --locked --cargo-profile release -p nara-editor --lib --run-ignored only -E 'test(measure_native_primary_gpu_timestamps_beside_advancing_game) | test(measure_native_static_inspector_beside_advancing_game)' --test-threads=1 --nocapture
+```
+
+Final source verification includes **390/390** render-WGPU library tests
+(`c09b57d4-9de5-48f2-b14a-4b45c9f10cf7`), **3/3** selected actual loss/permit/recovery tests
+(`676e433a-ba27-4dc6-87f7-ecfcbf4dab51`) and **4/4** independent public native-output/adapter
+workflows (`4a3bece7-e52a-4868-9a17-5ba55a3973d9`). The public error classification now names
+both declaration sources: `DeviceRequirements` replaces the pre-1.0 `FeatureRequirements`
+variant. The first compile exposed one remaining Runtime caller of the removed private helper;
+it now uses the same request entry and the final full library verification above passes.
+The affected default Editor Inspector, Hierarchy, specialized Canvas and native
+detach/loss/recovery/retirement trajectories pass **4/4**
+(`bc6e1a65-dfab-4970-b8d7-d35bd8d7c1da`). Correctness Clippy for render-WGPU and Editor with all
+targets/features, plus root and independent-consumer formatting, pass. Upload/source inspection
+and independent API/lifetime reviews remain distinct from these executed runtime results.
+
+## Upload And Copy Observation Boundaries
+
+Source inspection uses the actual locked registry package `dear-imgui-wgpu 0.21.0`, checksum
+`c1c57f3a9f0d5957700a55018ae93aa049db5c6865d6f7ffc6f82a9df3eb560b` in
+[Cargo.lock](../../Cargo.lock), rather than assuming a `repo-ref` HEAD matches the dependency.
+The following are source mechanisms and observation gaps, not measured transfer totals:
+
+| Owner/path | Source-confirmed work | Current observation boundary |
+| --- | --- | --- |
+| Dear `texture/upload.rs` | Create/update builds a new managed texture and writes the full padded RGBA image; updates first merge into retained pixels | No public write-call/byte counter. Dirty-rectangle bytes cannot stand in for actual write payload |
+| Dear `frame_resources.rs`, `renderer/draw.rs`, `uniforms.rs` | Render preparation packs/writes vertex and index data and an 80-byte uniform; frame resources are acquired per pass and the arena is cleared on epoch change | No public upload or retained-buffer byte getter. The source does not establish cross-epoch buffer reuse or driver release |
+| [Native external image registration](../../crates/nara_render_wgpu/src/host/imgui.rs) | Registers an existing texture view and retains its exact display/output lease | Registration itself does not upload/copy the image. Count its producer work separately |
+| [Nara texture cache](../../crates/nara_render_wgpu/src/texture.rs) | Image/glyph success/reuse events and a per-frame successful-cache upload allowance | Test-only counters omit some issued writes before a later failure. Allowance is not a complete actual-write counter |
+| [Native preparation](../../crates/nara_render_wgpu/src/preparation.rs), [buffer allocation](../../crates/nara_render_wgpu/src/allocation.rs) | Texture writes and mapped-at-creation instance/material initialization | Initialized payload and Queue writes are different work; neither currently exposes complete issued-byte observations |
+| [Program preservation](../../crates/nara_render_wgpu/src/program/native.rs) | Encodes texture/buffer preservation copies; stock UI composition can preserve Scene color into its output | GPU copies are distinct from CPU upload and currently have no complete calls/bytes observation |
+
+Future Nara observations belong at these existing owners' actual write, initialization and copy
+sites. Keep issued work after later failure visible, with the current Host transaction reset
+boundary. Do not relabel instance demand, retained budget, draw totals or successful-cache events
+as measured writes. The locked Dear API cannot provide its private values; keep them unmeasured
+until an actual dependency contract supplies them. This work changes no vendor/registry source
+and introduces no Queue wrapper or replacement telemetry owner to infer unavailable data.
 
 ## Full Source Open Refusal
 

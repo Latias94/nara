@@ -42,6 +42,15 @@ OS input/display latency and fixed budgets still keep R11a open. The pinned Zed/
 refines state/invalidation and collection consumers without selecting their ownership/dependencies.
 No cache optimization or independent frontend is qualified; R11b-f remain unimplemented.
 
+The [native frontend capability/primary GPU prerequisite](../../benchmarks/2026-11-04-ui-work-baseline.md#primary-window-gpu-markers)
+adds declaration through the existing Host before acquisition, sharing the original closed
+request, late refusal and recovery rules. The independent adapter proves actual timestamp query
+readback and unchanged output pixels. Three release repetitions also preserve the complete
+static-Inspector/advancing-Game native oracles while observing primary-paint markers. These
+diagnostics retain original resources through physical drain and keep whole-GPU, upload,
+input/display latency and retention gaps open. They do not qualify public component/panel hosting
+or the independent self-drawn Editor.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

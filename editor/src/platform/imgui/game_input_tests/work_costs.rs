@@ -4,6 +4,8 @@
 //! owner drive through observation of the original queue's completion callback; it includes
 //! redraw and callback/polling delay, not isolated GPU execution or display latency.
 
+pub(super) mod gpu;
+
 use super::*;
 
 use std::{sync::mpsc, time::Instant};
@@ -28,12 +30,23 @@ const MAX_HOST_COMPLETIONS: usize = 512;
 #[test]
 #[ignore = "whole-window Windows/WGPU work baseline; run serially in release with captured output"]
 fn measure_native_static_inspector_beside_advancing_game() -> Result<(), String> {
+    measure_native_work_costs(false)
+}
+
+#[test]
+#[ignore = "instrumented primary paint GPU markers; run serially in release with captured output"]
+fn measure_native_primary_gpu_timestamps_beside_advancing_game() -> Result<(), String> {
+    measure_native_work_costs(true)
+}
+
+fn measure_native_work_costs(primary_gpu_timestamps: bool) -> Result<(), String> {
     let project = UiProject::new();
     let mut builder = EventLoop::builder();
     builder.with_any_thread(true);
     let event_loop = builder.build().map_err(|error| error.to_string())?;
     let mut host = WorkCostHost {
         project: &project.0,
+        primary_gpu_timestamps,
         result: None,
     };
     let event_loop_result = event_loop.run_app(&mut host);
@@ -49,17 +62,24 @@ fn measure_native_static_inspector_beside_advancing_game() -> Result<(), String>
 
 struct WorkCostHost<'a> {
     project: &'a Path,
+    primary_gpu_timestamps: bool,
     result: Option<Result<WorkCostObservation, String>>,
 }
 
 impl ApplicationHandler for WorkCostHost<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_none() {
-            self.result = Some(run_game_workflow(
+            let requirements = if self.primary_gpu_timestamps {
+                gpu::device_requirements()
+            } else {
+                WgpuDeviceRequirements::default()
+            };
+            self.result = Some(run_game_workflow_with_device_requirements(
                 event_loop,
                 self.project,
                 false,
-                |workflow| workflow.static_inspector_work_costs(),
+                &requirements,
+                |workflow| workflow.static_inspector_work_costs(self.primary_gpu_timestamps),
             ));
         }
         event_loop.exit();
@@ -129,6 +149,7 @@ struct WorkCostObservation {
     backend_after: WgpuRuntimeHostFacts,
     maintenance_ns: u64,
     completion_drain_ns: u64,
+    primary_gpu: Option<gpu::PrimaryGpuObservation>,
 }
 
 impl GameInputWorkflow<'_> {
@@ -475,7 +496,10 @@ impl GameInputWorkflow<'_> {
         Ok(())
     }
 
-    fn static_inspector_work_costs(mut self) -> Result<WorkCostObservation, String> {
+    fn static_inspector_work_costs(
+        mut self,
+        primary_gpu_timestamps: bool,
+    ) -> Result<WorkCostObservation, String> {
         self.stage = "static Inspector work baseline setup";
         // Configure before this workflow's first submission, and do not reset at the sample
         // boundary. Backend lifetime peaks therefore include setup; sampled maxima are separate.
@@ -483,6 +507,9 @@ impl GameInputWorkflow<'_> {
             WgpuBackendTelemetryConfig::new(256, MAX_HOST_COMPLETIONS as u32)
                 .map_err(|error| error.to_string())?,
         );
+        if primary_gpu_timestamps {
+            gpu::enable_primary_gpu_timestamps(self.native)?;
+        }
         self.settle()?;
         self.presents += super::super::authoring_workflow_tests::hierarchy_click(
             self.native,
@@ -560,6 +587,9 @@ impl GameInputWorkflow<'_> {
         let mut maintenance_ns = 0_u64;
         self.stage = "static Inspector beside moving Game sampled frames";
         for index in 0..SAMPLE_FRAMES {
+            if let Some(timestamps) = self.native.primary_gpu_timestamps.as_mut() {
+                timestamps.arm_sample(index)?;
+            }
             let (frame_started, cpu) = self.work_paint()?;
             // Read demand/retention before observer-side maintenance can retire old payloads.
             let transaction = self.native.gpu.frame_transaction_stats();
@@ -621,6 +651,9 @@ impl GameInputWorkflow<'_> {
                     "the sample lost its backend epoch or exact native frame transaction".into(),
                 );
             }
+            if let Some(timestamps) = self.native.primary_gpu_timestamps.as_mut() {
+                timestamps.confirm_sample(index, window, runtime_frame)?;
+            }
             samples.push(CostSample {
                 owner_drive_ns: cpu[0],
                 cursor_flush_ns: cpu[1],
@@ -675,6 +708,10 @@ impl GameInputWorkflow<'_> {
             }
         }
         self.work_source_unchanged(&source)?;
+        // The optional marker readback uses the original Host after all timed frames and exact
+        // completion associations. It cannot substitute for receipts or final device health.
+        let primary_gpu =
+            self.read_primary_gpu_timestamps(&samples, &backend_before, &mut host_completions)?;
         // A completed queue callback can also arrive on terminal loss. Re-enter the original
         // Host's health boundary after draining, outside all sampled CPU/completion timers.
         if !self
@@ -714,6 +751,7 @@ impl GameInputWorkflow<'_> {
             backend_after,
             maintenance_ns,
             completion_drain_ns,
+            primary_gpu,
         };
         // Refusal control after every measured interval: destroy that same drained device,
         // keep its namespace unchanged and require the exact terminal-loss error. Cleanup
@@ -763,9 +801,15 @@ fn cost_percentiles(mut values: Vec<u64>) -> [u64; 4] {
 
 impl WorkCostObservation {
     fn report(&self) {
+        let timing_lane = if self.primary_gpu.is_some() {
+            "primary_gpu_timestamps_instrumented"
+        } else {
+            "ordinary_cpu_completion_baseline"
+        };
         println!(
-            "NATIVE_WORK static_inspector_advancing_game warmup={WARMUP_FRAMES} samples={} owner_delta_ms=20 input=D_held_for_16_plus_128_frames percentile_order=p50,p95,p99,max scope=whole_native_window",
-            self.samples.len()
+            "NATIVE_WORK static_inspector_advancing_game warmup={WARMUP_FRAMES} samples={} owner_delta_ms=20 input=D_held_for_16_plus_128_frames percentile_order=p50,p95,p99,max scope=whole_native_window timing_lane={timing_lane} cpu_and_completion_timings_instrumented={}",
+            self.samples.len(),
+            self.primary_gpu.is_some()
         );
         println!(
             "NATIVE_WORK geometry={:?} stable_every_sample=true final_original_device_healthy=true destroyed_original_device_refused=true loss_control_after_all_samples=true",
@@ -875,6 +919,9 @@ impl WorkCostObservation {
                 [first.runtime_frame, last.runtime_frame],
                 [first.center_x, last.center_x]
             );
+        }
+        if let Some(primary_gpu) = &self.primary_gpu {
+            primary_gpu.report();
         }
     }
 }

@@ -1396,6 +1396,16 @@ still allocates/frees temporary descriptions. Full process/native allocation/ret
 timestamps, OS input/display latency, remaining matched workloads and fixed numeric budgets keep
 R11a open; neither an independent frontend nor a cache improvement is claimed.
 
+The [native capability/timestamp prerequisite](../benchmarks/2026-11-04-ui-work-baseline.md#primary-window-gpu-markers)
+now contributes frontend device requirements through the existing `WgpuRenderHost` before its
+first acquisition, sharing the closed Feature request and late-refusal/recovery rules. Its
+independent native adapter proves actual query readback, unchanged pixels and physical retirement.
+Three release repetitions preserve both complete 128-frame lanes and original receipts, marking
+only primary window drawing in its original encoder. Timestamp reordering/observer limitations,
+unmeasured image-producer GPU/upload work and absent Dear write counters remain explicit. This
+concrete device seam is not R11b's component/panel-hosting interface; primary timestamps alone do
+not complete R11a.
+
 ### R11b: Public panel hosting and component composition
 
 **Dependencies:** R11a and the current qualified Application/Session query/result contracts.

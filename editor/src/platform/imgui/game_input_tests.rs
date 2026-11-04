@@ -5,6 +5,7 @@ mod source_continuity;
 mod work_costs;
 
 use canvas::{install_canvas_button, observe_canvas_button};
+pub(super) use work_costs::gpu::PrimaryGpuTimestamps;
 
 use std::{path::Path, sync::Arc, time::Duration};
 
@@ -20,8 +21,8 @@ use nara::{
     project_host::{EditorGameViewCandidateIdentity, TrustedCompiledEditorProjectIntent},
     render::{Camera2d, DisplayRect},
     render_wgpu::{
-        WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuRenderInput, WgpuStockPolicy,
-        WgpuSubmittedImageReceipt,
+        WgpuDeviceRequirements, WgpuDisplayOccurrence, WgpuImageCompositeReceipt, WgpuRenderInput,
+        WgpuStockPolicy, WgpuSubmittedImageReceipt,
     },
     sprite::Sprite,
     sprite_render::__private::SpriteBatches,
@@ -46,7 +47,10 @@ use super::{
     NativeImgui,
     canvas_tests::retire_application,
     lifecycle_tests::hidden_window,
-    retirement::{finish_graphics_for_test, initialize_native_for_test},
+    retirement::{
+        finish_graphics_for_test, initialize_native_for_test,
+        initialize_native_with_requirements_for_test,
+    },
 };
 use crate::{
     EditorApplication, EditorLaunchOptions,
@@ -374,10 +378,30 @@ fn run_game_workflow<T>(
     canvas_buttons: bool,
     run: impl FnOnce(GameInputWorkflow<'_>) -> Result<T, String>,
 ) -> Result<T, String> {
+    run_game_workflow_with_device_requirements(
+        event_loop,
+        project,
+        canvas_buttons,
+        &WgpuDeviceRequirements::default(),
+        run,
+    )
+}
+
+fn run_game_workflow_with_device_requirements<T>(
+    event_loop: &ActiveEventLoop,
+    project: &Path,
+    canvas_buttons: bool,
+    requirements: &WgpuDeviceRequirements,
+    run: impl FnOnce(GameInputWorkflow<'_>) -> Result<T, String>,
+) -> Result<T, String> {
     let intent = game_view_intent()?;
     let window = hidden_window(event_loop, "Nara native Game input workflow")
         .map_err(|error| error.to_string())?;
-    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
+    let mut native = initialize_native_with_requirements_for_test(
+        event_loop,
+        Arc::clone(&window),
+        requirements,
+    )?;
     native.layout_loaded = true;
     let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);

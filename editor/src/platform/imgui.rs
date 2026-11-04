@@ -16,9 +16,10 @@ use nara::{
     },
     render_wgpu::{
         __private::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer},
-        WgpuGpuRetirement, WgpuImageCompositeReceipt, WgpuImageDisplay, WgpuImageTargetActivation,
-        WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer,
-        WgpuSubmittedImageReceipt, WgpuUiImageSubmission, WgpuWindowFrame, WgpuWindowFrameOutcome,
+        WgpuDeviceRequirements, WgpuGpuRetirement, WgpuImageCompositeReceipt, WgpuImageDisplay,
+        WgpuImageTargetActivation, WgpuImageTargetIdentity, WgpuRenderHost, WgpuRenderHostError,
+        WgpuRenderProducer, WgpuSubmittedImageReceipt, WgpuUiImageSubmission, WgpuWindowFrame,
+        WgpuWindowFrameOutcome,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -606,6 +607,8 @@ struct NativeImgui {
     lifecycle_frame: Option<(WgpuWindowFrameOutcome, Vec<WgpuWindowFrameOutcome>)>,
     #[cfg(all(test, target_os = "windows"))]
     submitted_game_observation: Option<game_input_tests::SubmittedGameObservation>,
+    #[cfg(all(test, target_os = "windows"))]
+    primary_gpu_timestamps: Option<game_input_tests::PrimaryGpuTimestamps>,
 }
 
 struct ImguiRenderer(Option<WgpuEditorImguiRenderer>);
@@ -886,13 +889,24 @@ impl NativeImgui {
         event_loop: &ActiveEventLoop,
         window: Arc<Window>,
     ) -> Result<Self, NativeInitializationFailure> {
+        Self::new_with_device_requirements(event_loop, window, &WgpuDeviceRequirements::default())
+    }
+
+    fn new_with_device_requirements(
+        event_loop: &ActiveEventLoop,
+        window: Arc<Window>,
+        requirements: &WgpuDeviceRequirements,
+    ) -> Result<Self, NativeInitializationFailure> {
         // Context teardown may own deferred renderer resources after an initialization error.
         // Declare the engine GPU owner first so those resources retire before it on every return.
-        let gpu = WgpuRenderHost::new(
+        let mut gpu = WgpuRenderHost::new(
             NaraWindowId::PRIMARY,
             WindowHandleProvider::new(Arc::clone(&window)),
         )
         .map_err(platform_gpu_error)?;
+        // Contribute exact prerequisites before initialize_graphics first borrows the device.
+        gpu.request_device_requirements(requirements)
+            .map_err(platform_gpu_error)?;
         let mut context = Context::create();
         context
             .set_ini_filename(None::<std::path::PathBuf>)
@@ -954,6 +968,8 @@ impl NativeImgui {
             lifecycle_frame: None,
             #[cfg(all(test, target_os = "windows"))]
             submitted_game_observation: None,
+            #[cfg(all(test, target_os = "windows"))]
+            primary_gpu_timestamps: None,
         };
         if let Err(error) = native.initialize_graphics(native_detachment) {
             return Err(NativeInitializationFailure::retained(error, native));
@@ -1237,13 +1253,29 @@ impl NativeImgui {
             }
             let prepared = prepared?;
             let renderer = &mut self.renderer;
+            #[cfg(all(test, target_os = "windows"))]
+            let primary_gpu_timestamps = &mut self.primary_gpu_timestamps;
+            #[cfg(all(test, target_os = "windows"))]
+            let display_frame_index = self.frame_index;
             let outcome = self
                 .gpu
                 .present_window(
                     window_packet,
                     self.frame_index,
                     &submissions,
-                    |frame| renderer.paint(prepared, frame),
+                    |frame| {
+                        #[cfg(all(test, target_os = "windows"))]
+                        if let Some(timestamps) = primary_gpu_timestamps.as_mut() {
+                            return timestamps.paint(
+                                renderer,
+                                prepared,
+                                frame,
+                                window_packet,
+                                display_frame_index,
+                            );
+                        }
+                        renderer.paint(prepared, frame)
+                    },
                     || self.window.pre_present_notify(),
                 )
                 .map_err(platform_gpu_error)?;

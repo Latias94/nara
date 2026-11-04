@@ -80,6 +80,21 @@ driver residency. Report cold setup, warm distributions, instrumentation/mainten
 cleanup separately. The actual composition remains Dear-based with hosted Nara panels; this does
 not qualify an independent self-drawn shell, pure-ImGui reference, OS input or cross-platform costs.
 
+The separate `measure_native_primary_gpu_timestamps_beside_advancing_game` lane requests
+`TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS` through the original Host before device
+initialization. It retains the same 16 warmup and 128 complete sampled frames, exact receipts,
+original-device health, actual terminal-loss refusal and physical close. It brackets primary
+paint in the same encoder, adding no sampled pass or submission; resolving queries is observer
+work. Mapping must report actual success and the original copy prefix must complete before
+reading all 128 pairs. Query/buffer ownership survives failures until the original graphics drain.
+
+Run that lane separately using the same ordinary Cargo features and native environment above.
+Its CPU/completion times are instrumented. GPU markers exclude Game/image-producer rendering,
+acquire/present/scanout, other windows and Dear's private upload bytes. WGPU 30 permits encoder
+command reordering around timestamp writes; a marker interval is not a strict isolated execution
+guarantee or a substitute for presentation receipts. Missing capability or invalid/missing sample
+fails the complete lane rather than dropping samples or silently disabling the queries.
+
 ## Environment
 
 Use Windows with an interactive desktop, Rust 1.95.0 and an actual DX12-capable adapter.
