@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
-**Last Revised**: 2026-11-03 (captured semantic discontinuity eligibility)
+**Last Revised**: 2026-11-04 (shared Feature/native frontend device requirements)
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -161,7 +161,8 @@ cross-owner composition work; this subsection does not promote that entire propo
   capture and reports retain their original definition through actual cleanup. No current registry
   lookup can retarget old work. Closing an instance refuses new admission without invalidating
   another instance or releasing its submitted uses.
-- Requirements aggregate before device acquisition, using WGPU's direction for every limit.
+- Requirements from immutable Feature definitions and native frontend initialization aggregate
+  in the same Host before device acquisition, using WGPU's direction for every limit.
   Adapter support, requested and actually enabled capabilities remain distinct. A late subset may
   fit the original enabled request; a new requirement explicitly needs Host reconstruction or
   refuses. It cannot silently replace a healthy device or broaden recovery's original request.

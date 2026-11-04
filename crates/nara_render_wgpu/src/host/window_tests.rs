@@ -2,6 +2,44 @@ use super::*;
 use std::time::{Duration, Instant};
 
 #[test]
+fn native_frontend_requirements_do_not_acquire_and_closed_host_refuses_them() {
+    let mut host = WgpuRenderHost::offscreen();
+    let base = crate::WgpuDeviceRequirements::new(
+        wgpu::Features::TIMESTAMP_QUERY,
+        wgpu::Limits::default(),
+    );
+    let encoder_queries = crate::WgpuDeviceRequirements::new(
+        wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS,
+        wgpu::Limits::default(),
+    );
+    host.request_device_requirements(&base).unwrap();
+    host.request_device_requirements(&encoder_queries).unwrap();
+    assert_eq!(host.backend.state(), crate::WgpuBackendState::Uninitialized);
+    assert_eq!(host.device_epoch(), 0);
+    assert_eq!(host.frame_transaction_stats(), Default::default());
+
+    let experimental = crate::WgpuDeviceRequirements::new(
+        wgpu::Features::all_experimental_mask(),
+        wgpu::Limits::default(),
+    );
+    assert!(matches!(
+        host.request_device_requirements(&experimental),
+        Err(WgpuRenderHostError::DeviceRequirements(
+            crate::WgpuDeviceRequirementsError::ExperimentalFeaturesUnsupported { .. }
+        ))
+    ));
+    assert_eq!(host.device_epoch(), 0);
+    host.request_device_requirements(&base).unwrap();
+    assert!(host.poll_retirement().unwrap());
+    assert!(matches!(
+        host.request_device_requirements(&experimental),
+        Err(WgpuRenderHostError::Backend(
+            WgpuRenderError::BackendUnavailable
+        ))
+    ));
+}
+
+#[test]
 fn producer_slot_storage_stays_bounded_on_a_native_callback_sized_stack() {
     std::thread::Builder::new()
         .stack_size(256 * 1024)

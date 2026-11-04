@@ -3,7 +3,7 @@
 This standalone workspace consumes the production image-output Host through public APIs only.
 Its direct engine dependencies are `nara_render_wgpu` without default features, `nara_render`,
 `nara_core` and `nara_ecs`, also without default features. WGPU 30.0.1 is used only by the native
-tests for trusted readback of an output's borrowed texture view. No toolkit, submitter, root
+tests for trusted readback and native-adapter timestamp capability checks. No toolkit, submitter, root
 product, scene serialization or platform-runner feature is enabled.
 
 The consumer creates no gameplay Runtime, ECS World, native window, surface or event loop.
@@ -68,7 +68,14 @@ not a browser or window-presentation qualification.
   and rejects the foreign old output for both display and native access. It neither injects nor
   claims actual device-loss recovery, and does not test released-input recovery unavailability.
 
-Readback imports the exact output through `submit_image_use`. Its callback only allocates the
+`native_adapter_requirements_enable_queries_without_replacing_the_device_or_outputs` additionally
+contributes timestamp capabilities before acquisition, executes and maps real queries under the
+original Host, admits a late subset and refuses a broader request without replacing the device.
+Red output pixels survive those native uses and final retirement rejects new declarations.
+This is capability, exact output and readback acceptance, not a timing benchmark or full GPU
+profiling claim; the selected adapter must support both encoder timestamp capabilities.
+
+Pixel readback imports the exact output through `submit_image_use`. Its callback only allocates the
 readback buffer and encodes a texture-to-buffer copy; the Host submits and retains imported output
 leases on the returned native prefix. The consumer never calls `Queue::submit`, mutates or destroys
 the imported texture, or uses a producer's current target to find old pixels. It starts mapping

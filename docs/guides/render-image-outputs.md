@@ -99,6 +99,18 @@ pipeline state from `WgpuWindowDeviceScope`. That borrowed scope shares the orig
 queue, enabled requirements and retirement owner. It does not grant independent submission.
 The same Host may also initialize window-free and later accept real registered windows.
 
+Before any operation acquires that device, contribute frontend-native requirements with
+`host.request_device_requirements(&WgpuDeviceRequirements::new(features, limits))`. They join
+the same closed request as render Feature definitions. For example, an adapter using encoder
+timestamp commands declares `TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS` before its first
+`with_device` or offscreen submission. Declaring requirements does not acquire or prove support;
+actual acquisition checks the selected Adapter and enabled device. A late subset can proceed,
+but a new capability cannot silently replace a healthy device or broaden its recovery request.
+After retirement the Host rejects declarations, and actual original-device loss stays `DeviceLost`.
+Prerequisite refusals use `WgpuRenderHostError::DeviceRequirements`, covering both native
+frontend and render Feature declarations. Acquisition/backend failures retain their separate
+typed cause. This replaces the narrower pre-1.0 `FeatureRequirements` variant.
+
 Admit `WgpuImageDisplay` with a frontend-owned immutable snapshot of destination, placement,
 clip, DPI and role. A changed snapshot gets a fresh occurrence; a passive mirror has its own
 occurrence. Pass those exact displays to `present_window`. Its `WgpuWindowFrame` exposes native

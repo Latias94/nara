@@ -264,8 +264,8 @@ pub enum WgpuRenderHostError {
     Backend(#[from] WgpuRenderError),
     #[error(transparent)]
     Program(crate::WgpuRenderProgramError),
-    #[error("render Feature requirements were refused: {0}")]
-    FeatureRequirements(crate::WgpuDeviceRequirementsError),
+    #[error("render device requirements were refused: {0}")]
+    DeviceRequirements(crate::WgpuDeviceRequirementsError),
     #[error(transparent)]
     WindowTarget(#[from] WindowTargetError),
     #[error("the Editor viewport submission requires an image-target render packet")]
@@ -372,7 +372,7 @@ impl WgpuRenderHostError {
     pub const fn is_content_rejected(&self) -> bool {
         matches!(self.backend_error(), Some(error) if error.is_content_rejection())
             || matches!(self, Self::Program(error) if !matches!(error, crate::WgpuRenderProgramError::ResourceCapacity | crate::WgpuRenderProgramError::CandidateCapacity | crate::WgpuRenderProgramError::Backend(_)))
-            || matches!(self, Self::FeatureRequirements(_))
+            || matches!(self, Self::DeviceRequirements(_))
     }
 }
 
@@ -605,7 +605,7 @@ impl WgpuUiSubmission {
             }
             WgpuRenderHostError::ExpectedImageTarget
             | WgpuRenderHostError::Program(_)
-            | WgpuRenderHostError::FeatureRequirements(_)
+            | WgpuRenderHostError::DeviceRequirements(_)
             | WgpuRenderHostError::TargetGenerationExhausted
             | WgpuRenderHostError::SourceHandoffGenerationExhausted
             | WgpuRenderHostError::PresentationGenerationExhausted
@@ -1226,6 +1226,32 @@ impl WgpuRenderHost {
         }
     }
 
+    /// Contributes a native frontend's device requirements before the first acquisition.
+    ///
+    /// Requirements join the same closed request as render Feature definitions. This operation
+    /// does not acquire a device or enable all Adapter-supported features. Call it before
+    /// [`Self::with_device`], target preparation or the first frame. After acquisition, only a
+    /// subset of the original request is admitted; broader requirements need explicit Host
+    /// reconstruction. Refusal never replaces a healthy device or changes recovery's request.
+    pub fn request_device_requirements(
+        &mut self,
+        requirements: &crate::WgpuDeviceRequirements,
+    ) -> Result<(), WgpuRenderHostError> {
+        if self.backend.runtime_close_started() {
+            return Err(WgpuRenderError::BackendUnavailable.into());
+        }
+        // Preserve an original-device failure rather than reporting a late-request refusal.
+        self.backend.check_device_health()?;
+        self.backend
+            .request_device_requirements(requirements)
+            .map_err(|error| match error {
+                crate::WgpuDeviceRequirementsError::BackendUnavailable => {
+                    WgpuRenderHostError::Backend(WgpuRenderError::BackendUnavailable)
+                }
+                error => WgpuRenderHostError::DeviceRequirements(error),
+            })
+    }
+
     /// Adds a real native target to this device owner. Its surface is checked against the
     /// already selected Adapter on first use; incompatibility never replaces a healthy device.
     pub fn register_window(
@@ -1449,7 +1475,7 @@ impl WgpuRenderHost {
         input: &crate::WgpuRenderInput,
     ) -> Result<WgpuImageOutput, WgpuRenderHostError> {
         let view_id = self.producer_id(producer)?;
-        self.admit_policy_requirements(input.requirements())?;
+        self.request_device_requirements(input.requirements())?;
         let namespace = self.prepare_namespace(None)?;
         self.submit_image_in_namespace(view_id, &namespace, input, None)
     }
@@ -1462,7 +1488,7 @@ impl WgpuRenderHost {
         input: &crate::WgpuRenderInput,
     ) -> Result<crate::WgpuRenderCandidate, WgpuRenderHostError> {
         let id = self.producer_id(producer)?;
-        self.admit_policy_requirements(input.requirements())?;
+        self.request_device_requirements(input.requirements())?;
         let namespace = self.prepare_namespace(None)?;
         self.prepare_candidate_in_namespace(id, &namespace, input, EDITOR_IMAGE_FORMAT, true)
     }
@@ -1610,7 +1636,7 @@ impl WgpuRenderHost {
         definition: &crate::WgpuPolicyDefinition<P>,
     ) -> Result<(), WgpuRenderHostError> {
         self.producer_id(producer)?;
-        self.admit_policy_requirements(definition.device_requirements())
+        self.request_device_requirements(definition.device_requirements())
     }
 
     /// Explicitly empties selected slots while preserving their original successful watermark.
@@ -1671,23 +1697,6 @@ impl WgpuRenderHost {
         realization.leases = next_leases;
         drop(retired);
         Ok(())
-    }
-
-    fn admit_policy_requirements(
-        &mut self,
-        requirements: &crate::WgpuDeviceRequirements,
-    ) -> Result<(), WgpuRenderHostError> {
-        // A lost original device is an execution failure, not a healthy device's
-        // refusal to broaden its enabled request. Preserve that structured cause.
-        self.backend.check_device_health()?;
-        self.backend
-            .request_device_requirements(requirements)
-            .map_err(|error| match error {
-                crate::WgpuDeviceRequirementsError::BackendUnavailable => {
-                    WgpuRenderHostError::Backend(WgpuRenderError::BackendUnavailable)
-                }
-                error => WgpuRenderHostError::FeatureRequirements(error),
-            })
     }
 
     fn build_policy(
@@ -1784,7 +1793,7 @@ impl WgpuRenderHost {
             Arc::clone(&producer.closed),
             definition,
         )?;
-        self.admit_policy_requirements(definition.device_requirements())?;
+        self.request_device_requirements(definition.device_requirements())?;
         Ok(instance)
     }
 
@@ -2552,7 +2561,7 @@ impl WgpuRenderHost {
             Err(error) => return Err(WgpuUiSubmitFailure { error, ui }),
         };
         let submitted = (|| {
-            self.admit_policy_requirements(input.requirements())?;
+            self.request_device_requirements(input.requirements())?;
             let namespace = self.prepare_namespace(None)?;
             self.submit_image_in_namespace(view_id, &namespace, input, Some(&mut ui))
         })();

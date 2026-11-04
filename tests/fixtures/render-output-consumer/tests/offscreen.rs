@@ -17,9 +17,10 @@ use nara_render::{
     build_image_render_frame_packet,
 };
 use nara_render_wgpu::{
-    WgpuImageOutput, WgpuImageTargetIdentity, WgpuPolicyDefinition, WgpuPolicyInstallation,
-    WgpuRenderHost, WgpuRenderHostError, WgpuRenderInput, WgpuRenderProducer,
-    WgpuRenderProgramError, WgpuStockCapture, WgpuStockPolicy, WgpuSubmissionPrefix,
+    WgpuDeviceRequirements, WgpuDeviceRequirementsError, WgpuImageOutput, WgpuImageTargetIdentity,
+    WgpuPolicyDefinition, WgpuPolicyInstallation, WgpuRenderHost, WgpuRenderHostError,
+    WgpuRenderInput, WgpuRenderProducer, WgpuRenderProgramError, WgpuStockCapture, WgpuStockPolicy,
+    WgpuSubmissionPrefix,
 };
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -30,6 +31,153 @@ const RED_BYTES: [u8; 4] = [255, 0, 0, 255];
 const GREEN_BYTES: [u8; 4] = [0, 255, 0, 255];
 const BLUE_BYTES: [u8; 4] = [0, 0, 255, 255];
 const WHITE_BYTES: [u8; 4] = [255; 4];
+
+#[test]
+#[ignore = "requires a native GPU supporting timestamp queries; unavailable features fail the prerequisite"]
+fn native_adapter_requirements_enable_queries_without_replacing_the_device_or_outputs() {
+    let mut host = WgpuRenderHost::offscreen();
+    let instance = host.backend_instance_id();
+    host.request_device_requirements(&WgpuDeviceRequirements::new(
+        wgpu::Features::TIMESTAMP_QUERY,
+        wgpu::Limits::default(),
+    ))
+    .unwrap();
+    let required =
+        wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+    host.request_device_requirements(&WgpuDeviceRequirements::new(
+        wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS,
+        wgpu::Limits::default(),
+    ))
+    .unwrap();
+    assert_eq!(host.device_epoch(), 0);
+    let policy = WgpuPolicyDefinition::new(WgpuStockPolicy::new())
+        .install()
+        .unwrap();
+    let source = source();
+    let view = RenderViewId::try_acquire().unwrap();
+    let target = image_target(16, 16);
+    begin(&mut host, 1);
+    let producer = host.create_producer().unwrap();
+    admit(&mut host, &producer, source, target);
+    let output = host
+        .submit(&producer, &input(&policy, source, view, 1, target, RED))
+        .unwrap();
+    let epoch = host.device_epoch();
+    assert_pixels(&mut host, &output, RED_BYTES);
+    host.request_device_requirements(&WgpuDeviceRequirements::new(
+        wgpu::Features::TIMESTAMP_QUERY,
+        wgpu::Limits::default(),
+    ))
+    .unwrap();
+    assert!(matches!(
+        host.request_device_requirements(&WgpuDeviceRequirements::new(
+            required | wgpu::Features::TEXTURE_COMPRESSION_BC,
+            wgpu::Limits::default(),
+        )),
+        Err(WgpuRenderHostError::DeviceRequirements(
+            WgpuDeviceRequirementsError::ReconstructionRequired
+                | WgpuDeviceRequirementsError::UnsupportedFeatures { .. }
+        ))
+    ));
+    assert_eq!(
+        (host.backend_instance_id(), host.device_epoch()),
+        (instance, epoch)
+    );
+
+    let ((device, period, queries, scratch, resolved, readback), prefix) = host
+        .submit_image_use(
+            std::slice::from_ref(&output),
+            |device, queue, encoder, _| {
+                assert!(device.features().contains(required));
+                let queries = device.create_query_set(&wgpu::QuerySetDescriptor {
+                    label: Some("native-adapter-query-proof"),
+                    ty: wgpu::QueryType::Timestamp,
+                    count: 2,
+                });
+                let scratch = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("native-adapter-private-work"),
+                    size: 4096,
+                    usage: wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                let resolved = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("native-adapter-query-resolve"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
+                let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("native-adapter-query-readback"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                encoder.write_timestamp(&queries, 0);
+                encoder.clear_buffer(&scratch, 0, None);
+                encoder.write_timestamp(&queries, 1);
+                encoder.resolve_query_set(&queries, 0..2, &resolved, 0);
+                encoder.copy_buffer_to_buffer(&resolved, 0, &readback, 0, 16);
+                Ok((
+                    device.clone(),
+                    queue.get_timestamp_period(),
+                    queries,
+                    scratch,
+                    resolved,
+                    readback,
+                ))
+            },
+        )
+        .unwrap();
+    assert!(period.is_finite() && period > 0.0);
+    let (sender, receiver) = mpsc::sync_channel(1);
+    readback.map_async(wgpu::MapMode::Read, .., move |result| {
+        let _ = sender.try_send(result);
+    });
+    let deadline = Instant::now() + TIMEOUT;
+    loop {
+        let _ = prefix.poll().unwrap();
+        device.poll(wgpu::PollType::Poll).unwrap();
+        match receiver.try_recv() {
+            Ok(result) => {
+                result.unwrap();
+                break;
+            }
+            Err(TryRecvError::Empty) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "native timestamp mapping timed out"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(TryRecvError::Disconnected) => panic!("native timestamp callback disappeared"),
+        }
+    }
+    settle(&prefix);
+    {
+        let bytes = readback.get_mapped_range(..).unwrap();
+        let start = u64::from_le_bytes(bytes[0..8].try_into().unwrap());
+        let end = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        assert!(
+            end > start,
+            "actual timestamp queries must bracket the native work"
+        );
+        println!(
+            "NATIVE_ADAPTER_QUERY original_instance={instance} epoch={epoch} period_ns={period} ticks={start}..{end} scope=capability_and_readback_not_a_timing_benchmark"
+        );
+    }
+    readback.unmap();
+    drop((queries, scratch, resolved, readback, device));
+    assert_pixels(&mut host, &output, RED_BYTES);
+    settle(&host.retire_producer(&producer).unwrap());
+    drop(output);
+    finish(&mut host);
+    assert!(matches!(
+        host.request_device_requirements(&WgpuDeviceRequirements::default()),
+        Err(WgpuRenderHostError::Backend(
+            nara_render_wgpu::WgpuRenderError::BackendUnavailable
+        ))
+    ));
+}
 
 #[test]
 #[ignore = "requires an explicitly selected native GPU; adapter failure fails the prerequisite"]

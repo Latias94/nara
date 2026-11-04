@@ -280,7 +280,7 @@ impl WgpuRenderHost {
             );
             return Ok(());
         }
-        self.admit_policy_requirements(input.requirements())?;
+        self.request_device_requirements(input.requirements())?;
         match &self.handles {
             Some(original) if !original.shares_authority_with(handles) => {
                 return Err(WgpuRenderProgramError::feature(

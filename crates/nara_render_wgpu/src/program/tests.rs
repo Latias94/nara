@@ -339,7 +339,7 @@ fn enabled_device_hard_limits_are_content_refusals_while_budget_pressure_can_def
     let budget = WgpuRenderHostError::Program(WgpuRenderProgramError::ResourceCapacity);
     assert!(budget.is_deferred());
     assert!(!budget.is_content_rejected());
-    let structural = WgpuRenderHostError::FeatureRequirements(
+    let structural = WgpuRenderHostError::DeviceRequirements(
         crate::WgpuDeviceRequirementsError::ReconstructionRequired,
     );
     assert!(structural.is_content_rejected());

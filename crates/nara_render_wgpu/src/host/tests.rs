@@ -2165,6 +2165,10 @@ fn native_loss_rejects_old_outputs_and_new_host_replays_the_original_input() {
         original.prepare_policy(&original_producer, stock_policy().definition()),
         Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
     ));
+    assert!(matches!(
+        original.request_device_requirements(&crate::WgpuDeviceRequirements::default()),
+        Err(WgpuRenderHostError::Backend(WgpuRenderError::DeviceLost))
+    ));
     drain_submission_prefix(&original.retire_producer(&original_producer).unwrap());
 
     let mut replacement = WgpuRenderHost::offscreen();

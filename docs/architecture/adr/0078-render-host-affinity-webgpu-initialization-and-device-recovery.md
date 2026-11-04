@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-11-01 (coherent device domain and public native-window composition)
+**Last Revised**: 2026-11-04 (native frontend declarations in the original closed device request)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
@@ -63,7 +63,13 @@ The concrete public native frontend boundary includes bounded window painting an
 of exact output leases under that same Host. Public window scopes borrow its original device,
 queue, encoder and acquired target; they do not transfer submission or presentation authority.
 Initialization callbacks obey the original closed capability request and retain their own renderer
-resources through original-device retirement. Actual registered surfaces remain adapter-checked,
+resources through original-device retirement. A native frontend declares its concrete features
+and limits through `WgpuRenderHost::request_device_requirements` before initialization acquires
+the device. These values join the same request as immutable Render Feature definitions; they
+neither acquire a device nor enable every Adapter-supported capability. A late compatible subset
+may proceed, while broader requirements require explicit reconstruction or refuse. Device loss
+remains an execution failure and a closed Host admits no new declaration. Actual registered
+surfaces remain adapter-checked,
 target-local responsibilities. The Host bounds its complete per-attempt metadata before native
 work, binds original custody after callback or encoding failure, and publishes window/composite
 facts only after the actual destination succeeds. This finite exact-wgpu integration replaces the
