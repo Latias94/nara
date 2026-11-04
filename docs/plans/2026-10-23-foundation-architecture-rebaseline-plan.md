@@ -1406,6 +1406,16 @@ unmeasured image-producer GPU/upload work and absent Dear write counters remain 
 concrete device seam is not R11b's component/panel-hosting interface; primary timestamps alone do
 not complete R11a.
 
+The next [native-work and change-pressure observations](../benchmarks/2026-11-04-ui-work-baseline.md#upload-and-copy-observation-boundaries)
+record returned preparation Queue requests, successful initial mapped copies and encoded
+whole-resource Preserve copies in the existing Host transaction, retaining reached work after
+later failure. An independent graph/Feature consumer checks exact counts, retries, aggregation,
+reset and unchanged pixel/buffer/retirement outcomes. CPU Inspector pressure covers hover color,
+palette, font environment revision, DPI and width while preserving source/history/draft identity.
+The font case does not substitute actual fonts/fallback; native input/display, full process
+retention and final numeric budgets remain open. These observations add no reuse optimization or
+new telemetry/budget owner.
+
 ### R11b: Public panel hosting and component composition
 
 **Dependencies:** R11a and the current qualified Application/Session query/result contracts.

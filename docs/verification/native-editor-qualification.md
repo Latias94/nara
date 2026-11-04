@@ -80,6 +80,13 @@ driver residency. Report cold setup, warm distributions, instrumentation/mainten
 cleanup separately. The actual composition remains Dear-based with hosted Nara panels; this does
 not qualify an independent self-drawn shell, pure-ImGui reference, OS input or cross-platform costs.
 
+Native probes also print the existing Host transaction's `native_work()` snapshot: returned
+Nara preparation Queue requests, successful nonempty mapped initialization and encoded graph
+Preserve copies. Keep payload versus aligned storage bytes distinct. Later failure or cleanup
+does not refund reached work; the next transaction resets it. These counts exclude Dear/private
+native callbacks and arbitrary Feature commands, and do not measure hardware transfer, GPU
+execution or resident bytes. Pair them with the original exact presentation/workload assertions.
+
 The separate `measure_native_primary_gpu_timestamps_beside_advancing_game` lane requests
 `TIMESTAMP_QUERY | TIMESTAMP_QUERY_INSIDE_ENCODERS` through the original Host before device
 initialization. It retains the same 16 warmup and 128 complete sampled frames, exact receipts,

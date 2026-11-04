@@ -857,8 +857,26 @@ impl WorkCostObservation {
         );
         let mut totals = [0_u64; 9];
         let mut maxima = [0_u64; 8];
+        let mut native_totals = [0_u64; 11];
         for sample in &self.samples {
             let work = sample.transaction;
+            let native = work.native_work();
+            let values = [
+                native.issued_buffer_write_calls,
+                native.issued_buffer_write_bytes,
+                native.issued_texture_write_calls,
+                native.issued_texture_write_bytes,
+                native.initialized_buffer_calls,
+                native.initialized_buffer_payload_bytes,
+                native.initialized_buffer_storage_bytes,
+                native.encoded_buffer_copy_commands,
+                native.encoded_buffer_copy_bytes,
+                native.encoded_texture_copy_commands,
+                native.encoded_texture_copy_bytes,
+            ];
+            for (total, value) in native_totals.iter_mut().zip(values) {
+                *total = total.saturating_add(value);
+            }
             let values = [
                 work.packet_admissions(),
                 work.packet_rejections(),
@@ -889,6 +907,9 @@ impl WorkCostObservation {
         }
         println!(
             "NATIVE_WORK transaction_totals_order=admissions,rejections,acquire_attempts,acquires,submissions,presents,ui_packets,ui_primitives,ui_glyph_primitives values={totals:?}"
+        );
+        println!(
+            "NATIVE_WORK native_issued_totals_order=buffer_write_calls,buffer_write_bytes,texture_write_calls,texture_write_bytes,initialized_buffer_calls,initialized_payload_bytes,initialized_storage_bytes,encoded_buffer_copy_commands,encoded_buffer_copy_bytes,encoded_texture_copy_commands,encoded_texture_copy_bytes values={native_totals:?} scope=Nara_preparation_and_program_Preserve_only excluded=Dear_and_native_callbacks_and_Feature_internal_commands_not_measured_hardware_transfer_or_residency"
         );
         println!(
             "NATIVE_WORK sampled_maxima_order=retained_resource_bytes,candidate_metadata_bytes,backend_current_texture_bytes,backend_current_instance_bytes,backend_current_total_bytes,submitted_instance_demand_bytes,pending_host_completions,pending_resource_retirements values={maxima:?}"

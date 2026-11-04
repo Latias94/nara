@@ -51,6 +51,14 @@ diagnostics retain original resources through physical drain and keep whole-GPU,
 input/display latency and retention gaps open. They do not qualify public component/panel hosting
 or the independent self-drawn Editor.
 
+The [Nara issued-work observation](../../benchmarks/2026-11-04-ui-work-baseline.md#upload-and-copy-observation-boundaries)
+extends the existing transaction snapshot with helper Queue requests, mapped initialization and
+graph Preserve copies. Later failure/cleanup never refunds reached work, and external native
+callbacks, arbitrary Feature commands and Dear stay outside its scope. Independent program
+consumers preserve their original pixel/buffer and retirement oracles alongside exact counts.
+Inspector change pressure separately exposes repeated compile/text work for color/palette and
+environment changes without claiming actual font substitution or an incremental-cache win.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

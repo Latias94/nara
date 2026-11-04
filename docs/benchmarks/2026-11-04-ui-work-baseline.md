@@ -109,6 +109,101 @@ their timing difference is not a claimed implementation improvement. Selecting o
 process would discard observed cost. Native active-View and allocation/GPU attribution remain
 separate below.
 
+## CPU Change Pressure
+
+Native-work prerequisite source: `8a574b8`. The accompanying Editor probe source and this record
+share the measured working state; no cache optimization separates the repetitions.
+
+The follow-up probe keeps the same real Application/Session four-field Inspector, 600 × 1,600
+logical viewport, default limits and fixed bundled single face. Setup makes one local string
+draft (`retained R11a draft`) but no source/history edit. Each scenario preconstructs 16 warmup
+and 128 measured inputs. Calls include applying the prepared local state, `begin_paint`,
+description/comparison, complete compilation, frame replacement and fresh-frame/publication
+assertions. Full geometry/semantics, draft/token, source bytes, history and local Undo/Redo
+oracles run outside timing/allocation windows. The samples add no Session submission.
+
+| Scenario | Input change and scope |
+| --- | --- |
+| Local color | Alternate two real hover reducer states prepared outside observation; one Toggle brush switches between secondary-text and panel color, without activation |
+| Palette | Change panel/primary-text colors with a matching distinct theme/environment revision on every call |
+| Font environment revision | Change only the font environment revision; actual single face, size and fallback stay fixed. This is invalidation pressure, not typography/fallback substitution |
+| DPI | Alternate environment scale 1.5/1.0 with advancing presentation revision; validate physical rectangles against the environment mapping |
+| Width | Alternate logical width 720/600 with advancing presentation revision; validate the field-width delta and preserved semantic identity |
+
+Each adjacent input differs and every call must publish a fresh diagnostic-free frame. The
+current controller/kernel performs full layout/text work for these changes; the assertions make
+that baseline explicit rather than claiming paint-only reuse. Compatible field incarnation,
+draft and local editing history must survive. A changed palette at the same numeric revision
+cannot use the unchanged-frame path; a theme/environment revision mismatch rejects compilation
+before layout and preserves the previous frame. The two cases have different outcomes.
+
+Compiler text observations remain nested within compiler totals. Direct Parley editing work
+keeps its documented exclusion. These are CPU description/compile measurements, not native
+input, final pixels or platform DPI-transition evidence. Real typography/fallback replacement,
+font-size changes and timing/byte budgets remain separate open cells.
+The current native font policy is selected at construction. The private frontend's
+`set_owned_images` drops its controllers when ordered face IDs change, and Inspector text size
+is a fixed constant. Those paths do not provide a live typography/fallback update preserving the
+existing edit-buffer incarnation. R11b's scoped text/style consumer must settle that transition;
+changing only an environment revision here cannot qualify it.
+
+Initial debug qualification passes **51/51** Inspector/Hierarchy owner tests, including the three
+new pressure/counter-oracle cases. The ignored CPU pressure and two complete native probes then
+pass **3/3** (`c9a64669-e881-4c78-a897-e8e94fe9fb7b`). Each pressure case builds 6,144 description
+and layout nodes over 128 calls, performs 128 layout passes / 9,344 measurement callbacks and
+2,560 text layout requests, submitting 29,696 UTF-8 source bytes and visiting 29,568 shaped glyphs.
+Local color, palette, font-revision and width cases have identical text work: 2,816 raster calls,
+234,368 output bytes and 2,816 paint-window glyph visits. The DPI case has 2,688 raster calls
+and 332,736 output bytes with the same glyph visits. Compiler text is included in these totals;
+the separate editor engine has no newly counted direct-layout work. Retained compatible edit
+buffers do not imply reuse of the compiler's full description/layout/text work.
+
+Three separate serial ordinary-feature release invocations pass the pressure probe and both
+complete native lanes each time (**3/3** per invocation). Hardware/toolchain match the earlier
+protocol; the CPU pressure uses the fixed single bundled font, while native probes keep their
+separately declared fallback/geometry. Every pressure scenario retains identical compiler/text
+work across processes. Cells are **P50 / P95 / P99 µs** over each 128-call group:
+
+| Pressure | Process 1 | Process 2 | Process 3 |
+| --- | --- | --- | --- |
+| Local hover color | 655.0 / 746.7 / 771.9 | 647.3 / 747.9 / 906.8 | 642.2 / 792.6 / 855.1 |
+| Theme palette | 652.9 / 755.4 / 884.1 | 644.0 / 757.0 / 844.7 | 648.4 / 810.4 / 895.7 |
+| Font environment revision only | 645.4 / 717.1 / 751.4 | 650.4 / 778.7 / 855.9 | 652.0 / 774.4 / 866.3 |
+| DPI environment | 637.2 / 712.9 / 777.6 | 636.2 / 709.7 / 839.2 | 640.0 / 754.2 / 899.3 |
+| Width constraints | 639.3 / 740.3 / 839.6 | 644.7 / 811.9 / 864.7 | 638.5 / 714.6 / 808.3 |
+
+Runs: `dd47129e-3e5a-4cc2-bc20-5cfb0ba19904`, `a57c8274-9146-482d-9551-f79777ef91fd`,
+`05a27bb7-c631-4cd4-911f-beafdca19fea`. These are baseline observations with ordinary background
+work, no isolated tail guarantee, no selected numeric budget and no optimization between profiles.
+The full-compile assertions describe this revision's baseline; later measured reuse must preserve
+the separate brush/geometry/semantic/draft/history oracles rather than retain full compilation as
+a product requirement.
+
+```powershell
+cargo +1.95.0 nextest run --locked --cargo-profile release -p nara-editor --lib --run-ignored only -E 'test(measure_owned_inspector_change_pressure)' --test-threads=1 --nocapture
+```
+
+The same probe repeats in three separate allocation-enabled release processes, using the
+[requested-allocation scope below](#separate-requested-allocation-probe). All three pass.
+Cells are totals over **128 calls**; call order is **alloc / alloc_zeroed / realloc / dealloc**.
+Allocated and freed bytes balance within every measured group; all groups have summed net zero
+and maximum individual-call growth **193,994 bytes**. That is neither total retention nor RSS.
+
+| Pressure group | Processes | Calls | Allocated and freed bytes, each | Allocated bytes per call |
+| --- | --- | --- | ---: | ---: |
+| Local color, palette, font revision, width (each separately) | 1 and 3 | 230,528 / 128 / 17,920 / 230,656 | 74,414,464 | 581,363 |
+| Same four groups (each separately) | 2 | 230,656 / 128 / 17,920 / 230,784 | 74,418,560 | 581,395 |
+| DPI | 1 and 3 | 230,272 / 128 / 17,920 / 230,400 | 74,607,104 | 582,868 |
+| DPI | 2 | 230,400 / 128 / 17,920 / 230,528 | 74,611,200 | 582,900 |
+
+Process 2 adds one 32-byte allocation/free per call in each group; the observation does not
+identify the cause. Runs: `279fbf9e-490b-4362-ac82-86a9c5c72c8c`,
+`328b5a33-aeb1-4ad8-bd37-c303016e7ae7`, `09494254-9030-4243-bec8-e8d41173709b`.
+The allocator controls plus all ordinary pressure-oracle tests also pass **7/7**
+(`fd0172fa-c4a8-4002-ac3d-03fd471807f8`). Allocation-enabled time samples include observation
+overhead and do not replace the ordinary-feature distributions above. Balanced temporary
+allocations are still work; no cache optimization, plateau or no-leak claim follows.
+
 ## Separate Requested-Allocation Probe
 
 `ui-work-allocation-probes` enables a private `System`-delegating allocator **only in the Editor
@@ -354,7 +449,7 @@ and independent API/lifetime reviews remain distinct from these executed runtime
 
 ## Upload And Copy Observation Boundaries
 
-Source inspection uses the actual locked registry package `dear-imgui-wgpu 0.21.0`, checksum
+Initial inspection at `20d1af2` uses the actual locked registry package `dear-imgui-wgpu 0.21.0`, checksum
 `c1c57f3a9f0d5957700a55018ae93aa049db5c6865d6f7ffc6f82a9df3eb560b` in
 [Cargo.lock](../../Cargo.lock), rather than assuming a `repo-ref` HEAD matches the dependency.
 The following are source mechanisms and observation gaps, not measured transfer totals:
@@ -374,6 +469,56 @@ boundary. Do not relabel instance demand, retained budget, draw totals or succes
 as measured writes. The locked Dear API cannot provide its private values; keep them unmeasured
 until an actual dependency contract supplies them. This work changes no vendor/registry source
 and introduces no Queue wrapper or replacement telemetry owner to infer unavailable data.
+
+The subsequent Nara observation implementation adds a detached `WgpuNativeWorkStats` value to
+the existing Host transaction snapshot. `NativePreparation` records the actual returned Queue
+helper calls and complete data-slice lengths, including work followed by a failed view or other
+refusal. Successful nonempty initial mapped buffer copies count separately, before later custody
+retention can fail; payload bytes exclude padding while aligned storage bytes include it.
+The existing graph initializer counts encoded whole-resource Preserve texture/buffer commands
+and native-format bytes, including an encoder discarded after later failure. Attempt-local work
+joins the original backend after the existing panic boundary. No new mutable observer owner,
+Queue wrapper, callback, resource reservation or publication permission is introduced.
+
+Counters saturate and reset with the existing Host transaction. Retrying or executing another
+program in that transaction accumulates work; completion, cleanup and allocation refunds do not
+subtract it. A Queue helper invocation that panics before returning is excluded. The snapshot
+excludes native callback work, commands encoded inside arbitrary Features, clears/shader writes,
+third-party renderer work and driver overhead. Native API requests and encoded copy sizes do not
+prove hardware transfer or GPU execution; retained budget and instance demand remain distinct.
+The full 128-frame native probes now print this bounded scope beside their original receipts.
+
+The first debug native observation in both ordinary and GPU-marker lanes records zero helper
+Queue writes during the 128 warmed moving-Game samples, **256 initial mapped buffer copies**
+with **20,480 payload/storage bytes**, and **128 texture Preserve commands totaling 91,496,448
+bytes**. This is two mapped buffers / 160 bytes and one 584 × 306 × 4-byte Preserve per sampled
+frame. Zero helper texture writes means that warm scope reused its textures; it does not include
+Dear uploads, native callbacks or arbitrary Feature commands and is not a zero-total-upload claim.
+The GPU marker lane's diagnostic resolve/readback is outside this scope, not silently counted
+as a Nara program Preserve.
+The three ordinary release repetitions listed in the pressure section each preserve these exact
+counts in **both** native lanes. Each marker run resolves all 128 pairs and retains its existing
+health/loss/cleanup checks; P95 markers are 55.296 / 55.296 / 54.272 µs across the three processes. These complete
+workflows verify the changed observations without attributing GPU execution or lifetime resource
+gauges to the issued-byte values.
+
+Qualification includes the initial full render-WGPU library **391/391**
+(`f83b2ba4-d8af-40f3-89c1-451e672d1c64`), then **20/20** affected resource/count boundary tests
+after review (`cda92467-bcee-4012-bab3-137dbb9b8ebf`), **2/2** actual preflight/refused-upload
+native programs (`6d1e938d-a6b3-4e5e-9deb-503a28e980de`) and **8/8** independent graph/Feature
+consumer cases (`50a7d947-7aba-4cff-af35-81d0d58c0926`). The boundary additions verify zero
+work before custody/budget refusal, empty returned writes, normally returned invalid native
+requests, failed allocation before mapping, no-copy empty buffers, aligned mapped payloads,
+later-retention refusal, upload-before-failed-view, discarded Preserve work, detached snapshots,
+saturation and next-transaction reset. No new failure injection owner was added. Independent
+correctness and testing reviews found no P1/P2; their requested boundary assertions are included
+in these executed tests.
+The complete native Canvas workflow and detached-window/device-recovery/retirement control pass
+**2/2** (`d2796042-1926-4e84-a84c-e5b5d319e2ae`). Correctness Clippy for render-WGPU/Editor with
+all targets/features and root/independent-consumer formatting also pass. Other existing warning
+categories remain outside the correctness gate. Full process memory, Dear write counters,
+image-producer GPU intervals, actual font substitution, OS input/display latency and fixed
+numeric budgets remain unqualified; this follow-up does not complete R11a or R11b-f.
 
 ## Full Source Open Refusal
 
