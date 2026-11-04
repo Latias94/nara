@@ -2,8 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-10-27 (research scope evidence; iteration decision unchanged)
-**Owner**: Rust authoring, executable/runtime hosts, optional scripting adapter packages
+**Last Revised**: 2026-11-04 (explicit Editor extension iteration and reconstruction scope)
+**Owner**: Rust authoring, executable/runtime hosts, Editor Host, optional scripting adapter packages
 **Supersedes**: [ADR 0021](0021-scripting-and-wasm-boundary.md)
 **Related**: ADR 0034, ADR 0039, ADR 0042, ADR 0045, ADR 0076, ADR 0084, ADR 0086
 **Revisit Trigger**: A named author workflow, focused external evidence or measured iteration cost
@@ -90,6 +90,31 @@ until measured with the reference game and is not part of the runtime correctnes
   generic/inline, or failed compatibility cases fall back to rebuild and runtime reconstruction.
 - The integration must disclose toolchain/version support and memory growth. It must not claim
   rollback after a patch has committed unless Nara itself implements and verifies that transaction.
+
+### Editor extension iteration
+
+Apply the same change-class distinction to explicit Editor extension development. Data/layout
+updates, reconstructing a UI with compatible state and replacing executable Rust code have
+different contracts. Declarative composition alone establishes none of the native reload paths.
+The reliable source-built baseline is automated candidate build, supervised Editor process
+restart and validated owner/UI restoration under ADR0118; its implementation remains open.
+Faster data-description or compatible-body paths may be optional, measured additions.
+
+Keep UI implementation state separate from document content/history, source-publication custody
+and workspace preferences. Restore only explicitly versioned, bounded owner data. Unsupported
+dirty state or incompatible unfinished drafts refuse/defer before old state is lost; reloading
+cannot silently Save, Discard or clear history. Live route/capture/IME, GPU and code pointers are
+recreated. UI-only reconstruction and replacement of code owning documents/codecs are separate
+compatibility cases. All code-backed calls, tasks, vtables, destructors and resources must retire
+before an optional in-process adapter can reclaim their generation.
+
+Compiler failure preserves the active Editor. After teardown, failed startup/restoration uses
+the retained last-good artifact and usable recovery data; this is recovery, not in-memory
+transactional rollback. Measure compile/link, capture, physical retirement, startup, restore and
+first correct presented result separately. R12's game checkpoint/Play consumer does not qualify
+this [R11f Editor workflow](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11f-editor-extension-editbuildreconstruct).
+No scripting language, public serialized widget tree, stable native ABI or hot-unload service is
+required for the baseline.
 
 ### Optional scripting and sandbox adapters
 
@@ -205,6 +230,7 @@ hot-reload claim.
 | Quiescent application | No patch applies during an active schedule or participating callback/task | runtime state-machine tests |
 | Adapter locality | Adapter-only lifecycle/VM types remain outside core until the shared-consumer gate is met | dependency and API review |
 | Adapter security honesty | Every scripting Adapter publishes enforceable capability/resource/fault limits and never uses `sandbox` without target-specific enforcement evidence | Adapter conformance and hostile-module tests |
+| Editor extension iteration | Actual changed panel code reaches matching presentation after build/reconstruction, with declared dirty-content/history/UI restoration and safe refusal/recovery | R11f independent/native trajectory and separate change-to-result costs |
 
 Numeric latency gates are set after the first reference-game baseline. A patch prototype must
 outperform ordinary incremental rebuild plus restart for its supported edit class to remain a

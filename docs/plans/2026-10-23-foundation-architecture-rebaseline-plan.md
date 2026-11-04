@@ -95,8 +95,11 @@ the engine supplies public attachment interfaces so users can integrate another 
 An official ImGui extension is not a deliverable. Shader Graph-like documents, automation and
 multiple logical Views constrain ownership and dependencies now; complete graph products,
 agent transports, component catalogues and native multi-window support remain staged work.
-The revised [UI design](../architecture/ui-foundation-design.md), ADRs0107/0109/0118 and the R11a-e
+The revised [UI design](../architecture/ui-foundation-design.md), ADRs0093/0107/0109/0118 and the R11a-f
 units below separate those decisions from their still-unimplemented contracts and cost evidence.
+The component-interface follow-up adds scoped identity/effects, repeatable preparation and an
+explicit custom layout/draw contract. R11f names Editor extension edit/build/reconstruct separately
+from R12's game/Play restoration; declarative syntax alone qualifies no native reload.
 
 - Strategy explicitly includes installable tools and optional-language/prebuilt-Host workflows
   alongside a complete independently usable Rust path.
@@ -174,6 +177,7 @@ R10 joint motion oracle -> R4c phase/executor selection -> selected R10 domain q
 R11a work/cost baseline -> R11b public panel hosting -> R11c complex-editor/custom-draw pressure
 R11b + existing exact actions -> R11d public UI observation/operation -> R11e measured consolidation
 R11c + R11d -> R11e; logical Views reuse R8/R9, native detach keeps separate platform qualification
+R11b + R11d + existing build/close/persistence owners -> R11f Editor edit/build/reconstruct
 every changed seam -> matching R11 / R12 integration, deletion and current documentation
 ```
 
@@ -1350,6 +1354,10 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 4. Verify that text/kernel/widgets need no Editor/project/ECS facts, the game's `nara_ui` adapter
    needs no Editor, and Editor components do not import that adapter merely for controls. Record
    `nara_ui_render`'s current combined neutral planner and App/ECS/window integration for R11b.
+5. Attribute existing repeated preparation, local work and theme/typography changes. Extend the
+   same baseline with scoped component/custom-draw cases when R11b/c supplies them; their
+   unimplemented cells do not block R11a. Idle refresh demand and queue/retention limits remain
+   explicit; native extension execution is cooperative, not preemptively time-bounded.
 
 Success is a reproducible baseline and executable work-count assertions, not a performance win.
 No particular persistent layout arena, reactive language, public cache key or new crate is frozen.
@@ -1377,6 +1385,14 @@ integration, retaining that game/runtime adapter through an explicit installatio
 this needs feature gating or an extracted crate follows the independent presentation consumer;
 the dependency result, rather than a prescribed package count, is the acceptance contract.
 
+Qualify component composition separately from whole-frontend hosting. Scoped keyed state hides
+ordinary identity/reducer/text lifetime work; explicit update/effects are separate from repeatable
+compose/measure/paint. Custom layout can measure/place children without exposing the layout
+arena. Third-party components consume scoped theme/text services, supported motion/keyboard
+input, hit/semantic facts and admitted drawing/resources without modifying a central widget enum.
+The current button event vocabulary and Rect/Text output do not satisfy that complete contract.
+Keep exact trait shapes provisional until the independent composite/custom component uses them.
+
 **Test scenarios:**
 
 - Independently compile and attach Nara content and a small non-Nara frontend through the public
@@ -1388,6 +1404,13 @@ the dependency result, rather than a prescribed package count, is the acceptance
   layout reset and unsupported capabilities follow explicit retirement/refusal outcomes.
 - Keep an independently registered semantic command usable with its panel closed, through R1's
   contribution and the original edit/history/result owner.
+- Independently author a composite with two same-label keyed editors. Reorder, insert, filter
+  and change one state type/document binding; compatible drafts remain correctly associated,
+  collisions/incompatible reuse are explicit and retired tokens cannot act on replacements.
+- Repeat a sizing/composition pass without repeating a command, task or subscription. Close
+  with a local async request pending; its original result retires without reaching a replacement.
+- Override one library's scoped style and change typography/fallback. Preserve unrelated style
+  and work; measure the required layout/text invalidation separately from color-only paint.
 
 Before claiming compatibility with a named external toolkit, qualify its actual user-authored
 adapter separately. Shipping an official ImGui/egui package or stable plugin ABI is not required.
@@ -1420,6 +1443,10 @@ bounds/clip/color/alpha/resource closure. No universal graph, UI-owned compiler 
   relocate one and reject its old display route while the other continues.
 - Complete an old preview request after a newer graph edit or close; retain appropriate last-good
   diagnostics/output without publishing that old result as current.
+- Build the custom canvas/connection component outside the engine, using public child
+  measurement/layout, draw, pointer motion/capture, wheel/keyboard and semantic contracts.
+  Draw a curved path and useful keyboard-operable node/port semantics without adding a
+  graph-specific kernel enum. Rejected geometry/resource/capability work cannot publish input.
 
 This is a bounded architectural consumer, not delivery of a full Shader Graph product. Existing
 multiple Render Views do not qualify multiple UI Surface Slots on one target; reconcile ADR0108
@@ -1487,6 +1514,60 @@ Future font/effect/component work may change private algorithms without exposing
 reopening document, Host or render ownership. Full R11/R12 remains open until its complete scope
 has matching evidence; this design update neither reopens qualified units nor claims the successor.
 
+### R11f: Editor extension edit/build/reconstruct
+
+**Dependencies:** R11b attachment/state scopes, R11d matching presentation observations and
+existing build, persistence and physical-close owners. This is distinct from R12's Play checkpoint
+workflow. Exact source-built composition and recovery types follow the bounded experiment;
+no native ABI or process supervisor framework is frozen by this plan.
+
+**Files:** the actual Editor launch/composition and build/close/persistence owners selected by
+the experiment, planned `tests/fixtures/editor-ui-host-consumer/tests/editor_iteration.rs` and
+the corresponding native trajectory. Reuse existing Cargo artifact/diagnostic handling and task
+custody; do not add a UI-specific executor, language interpreter or compiler-analysis verifier.
+
+**Approach:** first deliver an explicitly started development workflow that builds a candidate
+Editor, captures consistent supported owner/UI recovery data, supervises Editor restart and
+reports restoration plus correct presented UI. Keep document owners unchanged in the first UI
+code experiment. Separate saved content/checkpoint/history, workspace preferences, opt-in
+versioned component state and disposable interaction/resource state. Unsupported dirty owners,
+incompatible drafts or active publication refuse/defer before losing the old state. No implicit
+Save/Discard or history reset is an acceptable substitute. A broader document-owner-code update
+needs its own compatibility/reconstruction evidence.
+
+Capture happens against the actual current state after candidate construction; revalidate its
+source/owner basis before handover. Follow existing Save/Close decisions and physical retirement,
+without granting old and new processes concurrent source-publication rights. Keep a last-good
+artifact and usable recovery capture until restore/presentation succeeds. Failure after teardown
+may relaunch that artifact; it does not promise uninterrupted windows or transactional rollback.
+Fresh incarnations reject every predecessor route/result; OS IME/capture, code pointers, tasks and
+GPU handles are never deserialized as live objects. Native function patching or reloadable data
+descriptions are optional later accelerators with separate supported change classes.
+
+**Test scenarios and exit:**
+
+- Edit an independently compiled panel's layout/control behavior; the explicit workflow builds
+  changed source and presents the new behavior automatically. GPU reconstruction or unchanged
+  executable Restart is not this test.
+- Preserve one dirty Scene and one inactive document's declared compatible content/checkpoint/
+  history, plus panel placement and opted-in drafts. Undo and subsequent Save/Reopen match the
+  chosen owner oracle. Refuse unsupported owner/state versions without losing the active state.
+- Fail compile/link and retain the current usable Editor plus diagnostics. Fail capture, restore
+  and startup separately, and prove the exact last-good recovery route without publishing an
+  unqualified candidate or writing a recovery snapshot into project source files.
+- Change component state shape; supported codec migration is explicit, otherwise preserve a
+  recoverable dirty draft or refuse. Cancel composition/held input, physically retire old scoped
+  callbacks/tasks/resources and reject delayed old-generation results after reconstruction.
+- Change only drawing/behavior code while keeping state and layout equal. Invalidate code-derived
+  caches/registrations so the new presentation and action run the candidate implementation.
+- Record hardware/toolchain/change class, P50/P95 change-to-correct-result and separate compile/
+  link, capture, retirement, startup, restore and first-presentation costs. Set numeric budgets
+  from the baseline before optimizing; include repeated-run retained memory and recovery costs.
+
+This workflow is unimplemented. Neither optional scripting nor universal native hot reload is a
+prerequisite. Completion requires the actual independent/native path and its failures, not a file
+watcher or a successful build log; full R11/R12 remains open.
+
 ## R12: Consumer Integration And Canonical Contract Consolidation
 
 **Design:** D01, D18. **State:** consumer integration accompanies the qualified owner units;
@@ -1511,6 +1592,8 @@ capture/build/restore failures. Reconcile ADR 0116's current one-READY launch pr
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
 saved-source receipts and exact last-good scope. Unchanged Restart is not recompilation, and
 successful launch is not the correct playable-result endpoint.
+R11f separately owns Editor extension reconstruction and its document/UI recovery oracle; neither
+workflow can substitute for the other one's compatibility or correct-result evidence.
 
 Name the game-owned checkpoint DTO and exact restored-state oracle. The current Two Level
 checkpoint reconstructs live position, velocity, input and simulation tick; restoring an authored

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-04 (independent UI products, state ownership and user-authored panel frontends)
+**Last Revised**: 2026-11-04 (independent UI products, component execution and user-authored frontends)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -106,6 +106,35 @@ An optional panel frontend may use retained, immediate or hybrid internals. ADR 
 Host attachment. Providing that attachment is a Nara responsibility; shipping an official ImGui,
 egui or other toolkit extension is not required. The default Nara frontend and optional
 user-authored frontends share document and Host authority without sharing their internal trees.
+
+### Component extension and execution
+
+The Nara component interface supports composing controls and authoring new components through
+lower-level layout, drawing, interaction, text and semantics. Creating a component library does
+not require inheriting first-party high-level controls. Foreign frontend attachment remains a
+different interface under ADR0118; it need not translate its controls into Nara components.
+
+Compatible retained component state is scoped by panel instance, parent and explicit key rather
+than label, row index or transient description address. Incompatible state type/version or
+document binding starts a new incarnation unless an explicit compatible migration applies.
+Public layout/cache/reconciliation storage is not part of this contract. Exact Rust types and
+key helpers require independent composition/custom-component consumers before freeze.
+
+Nara-owned composition, measurement and painting can be skipped or repeated. Their invocation
+count cannot publish document edits, spawn tasks or install subscriptions. Admitted interaction
+and exact results drive explicit state/effect updates; compatible private caches may still change
+during preparation. Foreign adapters retain their own event model but must not duplicate a
+business effect through repeated sizing/composition. Component-owned listeners, timers and work
+have scoped release/cancellation and original result identity; frame borrows cannot outlive their
+scope in background work. Existing task and document owners remain authoritative.
+
+Custom layout/drawing supplies finite constraints/placements, mapped hit/semantic facts and
+resource-complete render contributions through the current owners. Scoped theme and typography
+inputs have explicit invalidation dependencies. Drawing, keyboard/text behavior, semantic support
+and platform integration remain separately declared capabilities. The current Rect/Text vocabulary
+and Button/TextField reducers do not establish this complete extension interface.
+These are successor design requirements. Existing qualified controlled widgets/panels retain
+their bounded interfaces; the independent component/custom-layout consumers remain unimplemented.
 
 ### Evidence and non-prerequisites
 

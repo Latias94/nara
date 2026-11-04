@@ -10,7 +10,7 @@ Documentation-only changes do not require another native qualification run.
 
 ## UI Architecture Successor Scope
 
-The [R11a-e sequence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+The [R11a-f sequence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
 and [UI design](../architecture/ui-foundation-design.md) add unimplemented public panel-hosting,
 custom-drawing, observation/operation and measured-reuse targets. Existing results below retain
 their original scope. Select actual successor native trajectories when those capabilities land:
@@ -23,6 +23,15 @@ their original scope. Select actual successor native trajectories when those cap
   distinguish those paths and match the original domain result plus later presented observation.
 - Static/dynamic, collection and lifecycle costs meet the workload/hardware budgets fixed by
   R11a. Record construction, layout, shaping, raster, upload, GPU and latency/memory separately.
+- An independently authored composite/custom canvas measures children, draws clipped geometry,
+  handles motion/wheel/keyboard and exposes semantic operations through public interfaces.
+  Repeat sizing/composition without duplicate commands/tasks/subscriptions; reorder keyed state
+  without moving drafts to another item. Scoped style changes do not alter another library.
+- R11f actually changes source-built panel code, builds and reconstructs the Editor, then observes
+  the changed UI and declared document/history/draft recovery. Exercise compile, capture, startup
+  and restore failures, unsupported state refusal, fresh input incarnations and last-good recovery.
+  Record change-to-correct-presentation separately from build success. Existing GPU reconstruction
+  and supervised Play tests do not qualify this currently unimplemented workflow.
 
 A finite Host conformance frontend does not establish ImGui/egui compatibility. A named toolkit
 needs its actual adapter; an official Nara extension package is not required. Injected IME,

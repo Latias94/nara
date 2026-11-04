@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-04 (Nara-owned panels, user-authored UI attachment and automation ownership)
+**Last Revised**: 2026-11-04 (custom component hosting, scoped effects and Editor iteration ownership)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -262,6 +262,41 @@ Nara supplies documented Host ports and independently compiled conformance consu
 ImGui/egui extension, stable binary ABI, native code hot-unload and arbitrary project-code loading
 are not consequences of this contract. Claims of compatibility with a named toolkit require a
 real adapter and the matching capability tests, separately from generic Host conformance.
+
+Component composition and custom layout/drawing follow ADR0107. Host input must support the
+actual motion, scrolling, keyboard and text needs of the admitted custom consumer; a button-only
+dispatch batch or a texture is insufficient. Overlay/modal scope, shortcut priority, drag/capture
+handoff and IME cancellation remain Host-coordinated. A custom-drawn control exposes useful
+semantic interaction or an explicit unsupported capability, independently of its visual output.
+Capabilities are checked before attachment/output publication rather than discovered through a
+silent fallback. A trusted in-process frontend remains cooperative native code, not a sandbox.
+
+### Editor extension edit/build/reconstruct
+
+Editor extension iteration is a distinct author workflow under ADR0093, not a consequence of
+declarative syntax, GPU reconstruction or the game's checkpoint/Play path. The reliable baseline
+builds a source-built Editor candidate, then supervises restart and validated recovery. Explicit
+development-mode admission owns this work; ordinary Open still loads no project code.
+
+The UI interface separates replaceable descriptions/implementation state from document owners
+and opt-in bounded versioned UI recovery data. The first experiment changes UI code while keeping
+document owners compatible. Capturing unsaved content, saved checkpoints and supported history
+is each document owner's responsibility; unsupported dirty state, incompatible drafts or active
+publication defers/refuses before losing the old owner. No implicit Save/Discard, history reset
+or restoration of live pointers/IME/capture/GPU objects is permitted. A restored UI obtains new
+routes and incarnations. Replacing document-owner code needs its own compatibility evidence.
+
+Build failure leaves the current Editor usable. Candidate restore/activation failure retains the
+last-good artifact and usable captured recovery state; after teardown, recovery may relaunch that
+artifact. This does not promise uninterrupted old-process availability or transactional rollback.
+Handover follows existing source-publication and physical-close authority. Native hot replacement
+needs separate compatibility, quiescence and physical code-lifetime proof, including retained
+callbacks, tasks, vtables, drop glue and render work; stale-result fencing alone is insufficient.
+
+The [R11f workflow](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11f-editor-extension-editbuildreconstruct)
+must qualify actual edit-to-present behavior, state recovery, failures and costs before support
+is claimed. These are design contracts; automatic Editor restart/recovery and native code reload
+are not implemented by the current source-built composition.
 
 ### Complex editors and programmable interaction
 
@@ -938,6 +973,8 @@ The qualification probe and complete migration are separate milestones, and an u
 |---|---|
 | GUI-independent application | No selected-toolkit types in application/project state; existing project lifecycle tests pass |
 | Useful source extension | A separately compiled panel installs, acts and closes through the same path as built-ins |
+| Custom component interface | Independent composite/canvas consumers use public scoped state, child measurement, drawing/input/semantics and original domain results without engine patches |
+| Editor extension iteration | Changed panel code builds and appears through R11f reconstruction; supported dirty content/history/drafts restore, failures preserve a usable recovery path |
 | Generic construction | Custom component add/remove/Undo/Save/Reopen succeeds in Scene and Prefab without project execution |
 | Ordinary structure | Stable-ID reparent/reorder preserves unavailable semantics; reference-safe subtree Delete and exact Undo/Redo survive Save/Reopen and ordinary Check/Play |
 | Independent render views | Concurrent actual Scene/Game rendering with correct focus, resize and retirement |

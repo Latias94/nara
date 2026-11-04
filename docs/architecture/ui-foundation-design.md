@@ -257,6 +257,7 @@ language is selected by this design.
 | Color/brush or compatible visual state | Affected paint; preserve compatible layout/text |
 | Focus, enabled state, value or action availability | Affected interaction/semantics and required paint |
 | New live View image | Image/output use and composition; unchanged panel structure/text need not rebuild |
+| Component implementation or state-schema generation | Invalidate code-derived descriptions, layout/paint/semantic work and callback registrations unless explicit compatibility proves reuse; do not retain stale function pointers as cached data |
 
 Each cache has an owner, complete dependency identity, byte accounting, eviction and retirement
 policy. Revision numbers do not replace content association. Keep layout reuse, text-layout
@@ -269,6 +270,84 @@ frame. Current kernel compilation flattens roots and creates a Taffy tree; its r
 compatible fallback. Prepared text avoids reshaping its editing source, but window preparation
 still scans the admitted layout and rasterizes distinct placed keys. These are current mechanisms,
 not evidence of zero idle work, persistent incremental layout or a performance improvement.
+
+## Interface readiness and component authoring
+
+The existing foundation proves useful ownership and presentation contracts, not a general-purpose
+component library interface. November 4 source inspection identifies these concrete limits:
+
+| Current surface | Evidence | Missing pressure before a broad extension claim |
+| --- | --- | --- |
+| Source-built panel registration | `ImguiEditorPanel::show` in [workspace.rs](../../editor/src/frontend/imgui/workspace.rs) and `register_panel` in [composition.rs](../../editor/src/platform/composition.rs) | Toolkit-independent attachment, lifecycle and capability admission |
+| Authored layout | [UiNode](../../crates/nara_ui_kernel/src/authoring.rs) and private text measurement in [root compilation](../../crates/nara_ui_kernel/src/compiler/root.rs) | Custom intrinsic measurement/layout without exposing Taffy storage |
+| Drawing | `UiPaintPrimitive::Rect`/`Text` in [frame.rs](../../crates/nara_ui_kernel/src/frame.rs) | Bounded paths/geometry and admitted custom-render participation |
+| Interaction | `UiRoutedEventKind` in [types.rs](../../crates/nara_ui_kernel/src/interaction/types.rs) | Routed motion coordinates, scroll/gesture and keyboard services sufficient for a custom canvas; current button batches alone do not provide them |
+| Controlled widgets | [widgets](../../crates/nara_ui_widgets/src/lib.rs) expose Button and TextField | Reusable composition, scoped state and lifecycle plumbing for ordinary extension authors |
+| Semantics | Finite roles/actions in [authoring.rs](../../crates/nara_ui_kernel/src/authoring.rs) | An independently authored composite/graph with keyboard and meaningful semantic interaction |
+
+These are interface gaps and unqualified capabilities, not claims that the existing bounded
+consumers are incorrect. Extending the appropriate owner may change the current vocabulary;
+keeping today's small enums is not a compatibility requirement.
+
+Expose three authoring levels: compose existing controls; create components using layout,
+interaction, text, semantics and drawing services; attach a complete foreign frontend. A new
+component library need not inherit first-party high-level controls. A foreign frontend need not
+adopt Nara's component interface. Keep contribution/document access separate from all three.
+
+The following phases constrain the Nara component interface without prescribing a public trait,
+macro language or number of methods:
+
+| Phase | Allowed responsibility | Publication rule |
+| --- | --- | --- |
+| Update | Reduce an admitted event/result into component state and explicit requests | Domain changes use original prepared commands/results; effects have their own scope and identity |
+| Compose | Describe children, local properties and stable identities from state | May run zero or several times; no document edit, task spawn or subscription may depend on its invocation count |
+| Measure/layout | Resolve finite constraints, intrinsic size/baseline and child placement | May repeat during sizing; mutate only private compatible work/candidate state |
+| Paint/hit/semantics | Produce ordered visual, interaction and semantic facts at the resolved geometry | No business mutation or unscoped callback registration; failed/unpresented work grants no new input authority |
+
+Cached artifacts can be updated behind these phases. Physical events are delivered once through
+their admitted route; repeated composition cannot repeat their business effect. Foreign
+immediate frontends may use their own response/event model, but their adapter must preserve that
+delivery/result rule across sizing passes and discarded output. First draw is not a mount event.
+
+Component identity is scoped by panel instance, parent component and explicit sibling key;
+repeated labels, list position and source line are insufficient for reorderable content. Compatible
+state stays with that identity across short-lived descriptions. Duplicate keys are diagnosed.
+A state-type/version or document-binding change requires explicit compatible migration or a fresh
+incarnation; Rust `TypeId`, pointers and generated hashes are not cross-build persistence formats.
+Virtualization keeps active editing/focus and logical collection navigation explicit rather than
+retargeting a recycled row. Ordinary authors should not manually reproduce token/journal maps.
+
+Event listeners, subscriptions, timers and async work have an owning component/panel scope and
+explicit release policy. Work consumes owned immutable observations, not frame borrows; results
+retain their original document/request/incarnation and cannot update a replacement. Logical
+cancellation and physical return remain distinct. This reuses existing task custody rather than
+adding a UI executor. Pure local callbacks are allowed; they do not acquire document authority.
+
+Custom layout can measure children and return finite placements without accessing a public
+retained arena. Custom drawing carries bounds, clips, transforms, order, color/alpha meaning,
+resource dependencies and budget charges through existing render owners. Hit and semantic facts
+use that same mapping. Path tessellation/mesh work and renderer-specific programs have explicit
+capabilities; an arbitrary callback inside paint is not a portable or lifetime-complete contract.
+Native code and callback/drop glue remain loaded until every retained use and its resource
+reclamation physically completes.
+
+Scoped theme/style inputs allow library defaults and local overrides without mutating a global
+theme. Typography, fallback, locale/direction, density and accessibility preferences participate
+in the dependencies they actually change; color-only changes preserve compatible measurement.
+Custom visuals still need keyboard/text behavior, semantic actions and an explicit unsupported
+capability outcome. Painting pixels alone does not provide those services. The first composite
+and custom-drawn consumers determine the minimum required tokens, roles and gestures; no CSS
+engine, complete theme language or catalogue of every platform gesture is selected in advance.
+
+### Interface alternatives
+
+| Alternative | Benefit | Cost and disposition |
+| --- | --- | --- |
+| One immediate `show(context)` entry for all concerns | Very easy ordinary calls and custom painter access | State identity, repeated-pass effects and cache dependencies remain caller burdens; insufficient as the whole Nara contract |
+| Public retained objects with mutable layout/render internals | Direct control over a rich desktop tree | Exposes storage, ownership and reconciliation to extensions; makes later implementation changes expensive; rejected as the public foundation |
+| Scoped persistent state, declarative composition and explicit custom-layout/draw access | Ordinary controls hide lifecycle plumbing; specialized components retain control; internals can change | Requires the independent composite and canvas consumers in R11b/c before exact Rust types freeze; selected target |
+
+This selection does not restrict an optional frontend's own immediate/retained implementation.
 
 ## Panel hosting and optional frontend implementations
 
@@ -331,6 +410,73 @@ changing that aggregation; separate panel outputs may use distinct admitted targ
 Full shader-node catalogues, shader-language generation, rich timelines and visual authoring
 products are deferred.
 
+## Editor extension iteration and reconstruction
+
+Declarative composition makes UI reconstruction easier to express; it does not load new native
+code or make an old Rust state layout compatible. Source-built Editor panels currently compile
+into the executable and have no automatic code-reload workflow. ADR0093's game/Play restoration
+does not qualify Editor extension iteration. Treat it as the separate R11f consumer under
+[ADR0093](adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md) and
+[ADR0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md).
+
+| Change | Candidate path | State contract |
+| --- | --- | --- |
+| Theme, layout or other admitted data | Owner-validated data update | Retain compatible state and invalidate actual dependencies; no arbitrary expression interpreter implied |
+| UI composition or compatible code body | Rebuild/reconstruct baseline; optional proven faster path | Only explicitly compatible component state may be retained/restored |
+| State layout, signature, dependency or registration change; unknown case | Fresh executable/process generation | Restore versioned owner data or refuse; never reinterpret old allocations |
+
+The reliable source-built baseline is automated build followed by supervised Editor restart and
+validated restoration, separate from supervised Play. A developer explicitly starts this workflow;
+ordinary project Open remains data-only. A later data-description or native-patch adapter may
+improve supported change classes without becoming required for Editor development.
+
+```mermaid
+sequenceDiagram
+    participant Dev as Extension author
+    participant Build as Build supervisor
+    participant Old as Current Editor generation
+    participant New as Candidate Editor generation
+    Dev->>Build: Change source in explicit development mode
+    Build->>Build: Build and identify candidate artifact
+    alt Build rejected
+        Build-->>Dev: Diagnostics; current Editor continues
+    else Candidate built
+        Build->>Old: Request consistent, bounded recovery capture
+        Old-->>Build: Capture or explicit refusal
+        Note over Old,New: Drain/cancel effects; obey native teardown and restore compatibility
+        Build->>New: Start candidate with supported owner recovery data
+        New-->>Build: Restore result and matching presented UI, or failure
+        Build-->>Dev: Outcome, retained/reset state and recovery route
+    end
+```
+
+The sequence describes the successful capture path. Capture refusal leaves the current Editor
+running. Build success is not activation success. Keep the last-good artifact and usable recovery
+capture until the candidate's actual restore/presentation outcome. After old-process teardown,
+failure may require relaunching that artifact; uninterrupted old windows and transactional rollback
+are not implied. No two processes gain concurrent source-publication authority during handover.
+
+Capture separates owner data, workspace preferences, opt-in component state and disposable work.
+Document owners define restoration of unsaved content, saved checkpoints and supported history;
+unsupported dirty owners or in-flight publication cause a safe deferral/refusal rather than an
+implicit Save, Discard or history reset. Reload cannot bypass existing persistence/Close decisions.
+UI state codecs are bounded and explicitly versioned, not mandatory serialization of every object.
+An incompatible dirty draft needs a recoverable representation or refusal before its old owner is
+lost. Focus routes, OS IME sessions, pressed pointers, tasks, GPU handles and code pointers are not
+restored as live objects; establish fresh incarnations and cancel/reconcile transient interaction.
+
+Scope the first experiment to a UI-only change with unchanged document owners. Replacing code
+that implements document/history/codec behavior is a different compatibility case: keeping its
+memory alive is insufficient. Old callbacks, tasks, vtables, destructors and retained native work
+must physically finish before their code may be reclaimed. A generation check only rejects late
+results. Process isolation/restart remains the fallback; stable native ABI and hot unload are not
+prerequisites for this workflow.
+
+R11f measures change-to-correct-presented-result P50/P95, with compile/link, capture, retirement,
+startup and restore costs separated. It tests compatible UI changes, invalid source, incompatible
+state and failed restoration. A watcher, successful build or GPU reconstruction alone is not
+acceptance. Implementation is still open.
+
 ## Automation, tests and future agent/debug clients
 
 Keep two operation paths and compare their final domain outcomes:
@@ -374,6 +520,8 @@ test duration is not a public frame-time SLA.
 | Resize, font/fallback or DPI change | Correct invalidation, mapped hit/semantics and honest rebuild cost; no stale-cache success |
 | Two Views and two UI implementations | Per-provider/phase CPU, GPU work, output targets/copies/submissions and event-to-present distributions |
 | Repeated attach/close/rehost and device recovery | CPU/GPU retained bytes plateau within owner budgets; old routes/results cannot affect replacements |
+| Repeated sizing/composition and local async work | One admitted input has one business effect; no duplicate subscriptions/tasks, work on retired scope or borrowed frame state in tasks |
+| Editor extension source change | Build/capture/retire/start/restore and first correct presentation measured separately; refused or failed attempts preserve recoverable owner state |
 
 Report P50/P95/P99 only with adequate distributions and run-to-run variation; retain cold spikes
 and refusal/eviction counts. Identify cache hits/misses, invalidation reasons and allocation bytes.
@@ -427,6 +575,36 @@ and `app/visual_test_context.rs` expose custom-drawn semantics and controlled te
 Nara adopts the distinction between semantic and physical paths and request-specific completion;
 it does not treat convergence as completion of Save or compilation.
 
+The component/reload follow-up inspects those exact egui/Zed pins and Dear ImGui
+`9d0b72573a27d860280811d58ef9ed62f4d46c05` (`1.93.1 WIP`, source evidence rather than a selected
+Nara dependency). Its transferable mechanisms and limits are:
+
+| Primary-source mechanism | Nara consequence and limit |
+| --- | --- |
+| egui [Widget/Response](https://github.com/emilk/egui/blob/fc9d66dda742d722eedaa8684d23f86369cf8e5f/crates/egui/src/widgets/mod.rs#L58-L119) and [allocated painter](https://github.com/emilk/egui/blob/fc9d66dda742d722eedaa8684d23f86369cf8e5f/crates/egui/src/ui.rs#L1496-L1500) | Pair ordinary composition with explicit layout/interaction/drawing access; a fluent builder alone supplies no lifecycle or effect policy |
+| egui [persistent versus automatic IDs](https://github.com/emilk/egui/blob/fc9d66dda742d722eedaa8684d23f86369cf8e5f/crates/egui/src/ui.rs#L909-L924) and Dear ImGui [ID collision/scoping FAQ](https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/docs/FAQ.md#L449-L529) | Stable scoped object identity for reorderable state; no persistence promise from labels, indices, pointers or source locations |
+| egui [two-pass test](https://github.com/emilk/egui/blob/fc9d66dda742d722eedaa8684d23f86369cf8e5f/crates/egui/src/context.rs#L5334-L5349) increments an external counter twice after one discard | Repeated build is observable and visual discard does not roll back external effects; this does not establish duplicate delivery of a click |
+| Dear ImGui [public InvisibleButton](https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.h#L643-L648) and [canvas demo](https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui_demo.cpp#L10682-L10721) | Geometry allocation, coordinates, hover/active state and capture are useful public extension services; no requirement to depend on private widget helpers |
+| GPUI [typed Element phases](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/element.rs#L52-L105) and [canvas adapter](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/canvas.rs#L8-L87) | Separate retained state, frame-local layout data and drawing; borrow the mechanism without adopting GPUI App/Entity ownership |
+| GPUI [state keys and typed retention](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L4586-L4696) and [explicit notify](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/context.rs#L215-L218) | Define retention and invalidation together; mutation and redraw are separate obligations, and runtime type identity is not a reload codec |
+
+This GPUI revision also contains a real optional native-patch integration: the
+[hot-reload feature](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/Cargo.toml#L51-L57)
+uses Subsecond `=0.7.10`; [render dispatch](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/view.rs#L339-L354)
+resolves `HotFn`, while [patch transport/application](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/hot_reload.rs#L15-L107)
+checks build/process identity, applies between foreground updates and refreshes windows. A full
+reload message requests a restart; the inspected integration does not establish arbitrary entity
+layout migration. The matching [Subsecond 0.7.10 documentation](https://docs.rs/subsecond/0.7.10/subsecond/)
+separately limits workspace patch scope, struct-layout changes, static initialization and
+thread-local behavior. [Dioxus 0.7](https://dioxuslabs.com/learn/0.7/essentials/ui/hotreload/)
+also distinguishes RSX description changes from experimental Rust patching. This is evidence for
+an explicit optional integration, not reload provided by declarative syntax.
+
+These are static source/document observations checked November 4. No reference-framework build,
+live patch, component port or Nara performance/compatibility test was run for this design update.
+The source investigation uses the local read-only checkouts. Remote permalinks point to those
+same commits for readers without `repo-ref`; no moving upstream branch is the evidence baseline.
+
 ## Component admission map
 
 The vocabulary is staged rather than speculative:
@@ -477,3 +655,6 @@ platform support are qualified independently rather than inferred from this Runt
 | Runtime and Editor abstractions converge too early | Share only immutable facts, semantics and reducers; keep adapters and commands separate |
 | Public vocabulary outruns backend support | Capability closure occurs before packet acceptance; unsupported authoring fails early |
 | Future widgets force a breaking change | Admit by workload and version typed state/semantic contracts before broadening |
+| Declarative syntax is mistaken for safe native reload | Separate data, reconstruction and code replacement; prove state compatibility and physical code retirement |
+| A custom-draw escape bypasses input, semantics or resource ownership | Qualify one independent composite/canvas through public geometry, interaction, semantics and render capabilities |
+| A small-looking interface exports hidden caller obligations | Verify repeated-pass behavior, scoped identity/effects and dependency closure through independent authorship |

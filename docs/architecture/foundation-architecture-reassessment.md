@@ -1044,9 +1044,14 @@ and reusable artifacts with declarative composition/local invalidation; public f
 attachment; document-backed custom drawing and multiple logical Views; and structured observation
 plus normal UI operation for tests and future agents. Reuse the current Render Feature/program,
 retained-output and semantic command owners. A shader graph document is not a GPU resource graph.
-R11a-e in the [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+R11a-f in the [rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
 order work/cost baseline, hosting, complex-editor pressure, public UI operation and measured
-consolidation. Numeric budgets are fixed with the baseline before optimization; none are measured
+consolidation, with explicit Editor extension edit/build/reconstruct as a distinct consumer.
+Scoped keyed component state/effects, repeatable composition/measurement and custom layout/draw
+access constrain the interface before freeze. Declarative descriptions do not migrate native
+state layouts; R11f restores only versioned supported owner/UI data and keeps safe refusal and
+last-good recovery distinct from R12's game/Play workflow. These successors are unimplemented.
+Numeric budgets are fixed with the baseline before optimization; none are measured
 by this design update. Full Shader Graph, agent transports and official foreign-toolkit packages
 are not current deliverables. Native detachment retains separate platform evidence.
 
