@@ -222,7 +222,13 @@ impl SceneImageWorkflow<'_> {
         loop {
             self.paint()?;
             match self.displayed() {
-                Ok(receipt) => return Ok(receipt),
+                Ok(receipt) if !self.native.ui_followup => return Ok(receipt),
+                Ok(_) if Instant::now() >= deadline => {
+                    return Err(
+                        "the Scene pixels presented but its hosted panel did not settle".into(),
+                    );
+                }
+                Ok(_) => {}
                 Err(error) if Instant::now() >= deadline => return Err(error),
                 Err(_) => std::thread::sleep(Duration::from_millis(1)),
             }
@@ -456,7 +462,7 @@ impl SceneImageWorkflow<'_> {
         if self
             .native
             .scene_presenter
-            .promote(
+            .promote_target(
                 &self.native.scene,
                 [old_receipt],
                 mapping,

@@ -330,7 +330,11 @@ pub(super) struct ImguiPanelWidgets {
     pub authoring: super::authoring::ImguiAuthoringPanels,
     pub project: super::project::ImguiProjectPanels,
     pub ui_authoring: super::ui_authoring::ImguiUiAuthoringPanels,
-    pub scene_view: super::view::ImguiSceneView,
+    pub scene_view: Option<super::view::OwnedSceneView>,
+    pub scene_pick: Option<(
+        std::sync::Arc<nara_ui_kernel::UiFrame>,
+        super::view::SceneViewPick,
+    )>,
     pub game_view: super::game::ImguiGameView,
     pub prefab_intent: super::prefab_intent::ImguiPrefabIntent,
     pub source_tool: super::source_tool::SourceToolWidgets,

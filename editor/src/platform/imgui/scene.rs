@@ -58,7 +58,7 @@ impl ImguiScenePresenter {
                 && matches_target(target, &prepared.display, prepared.texture)
         }) || self.presented.as_ref().is_some_and(|presented| {
             presented.content == content
-                && matches_target(target, &presented.display, presented.texture)
+                && matches_output(target, &presented.display)
                 && self.authority.token(
                     candidate.document(),
                     candidate.revision(),
@@ -130,7 +130,7 @@ impl ImguiScenePresenter {
                 && matches_target(target, &prepared.display, prepared.texture)
         } else if let Some(presented) = self.presented.as_ref() {
             requested_extent == Some(presented.receipt.image().target().extent())
-                && matches_target(target, &presented.display, presented.texture)
+                && matches_output(target, &presented.display)
                 && self.authority.token(
                     scene.document,
                     scene.revision,
@@ -171,6 +171,8 @@ impl ImguiScenePresenter {
     pub(super) fn promote(
         &mut self,
         target: &ImguiTarget,
+        display: &WgpuImageDisplay,
+        texture: ExternalTextureId,
         receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
         mapping: DisplayMapping2d,
         expected_content: Option<&EditorPreviewContentStamp>,
@@ -178,19 +180,9 @@ impl ImguiScenePresenter {
         if !self.require_current_content(expected_content) {
             return Ok(false);
         }
-        let Some(display) = target.display.as_ref() else {
-            self.retire();
-            return Ok(false);
-        };
         let submission = display.receipt();
-        let Some(texture) = target.texture else {
-            self.retire();
-            return Ok(false);
-        };
-        if !matches_target(target, display, texture)
-            || mapping.target() != submission.target().extent()
-        {
-            self.retire();
+        if !matches_output(target, display) || mapping.target() != submission.target().extent() {
+            self.hide();
             return Ok(false);
         }
         let Some(receipt) = receipts.into_iter().find(|receipt| {
@@ -204,12 +196,11 @@ impl ImguiScenePresenter {
         if self
             .prepared
             .as_ref()
-            .is_some_and(|prepared| prepared.display == *display)
+            .is_some_and(|prepared| prepared.submission == submission)
         {
             let prepared = self.prepared.take().expect("the exact Scene is prepared");
             if prepared.submission != receipt.image()
-                || prepared.display.occurrence() != receipt.occurrence()
-                || prepared.texture != texture
+                || display.occurrence() != receipt.occurrence()
             {
                 self.retire();
                 return Err(imgui_error(
@@ -224,7 +215,7 @@ impl ImguiScenePresenter {
                 content: prepared.content,
                 token,
                 receipt,
-                display: prepared.display,
+                display: display.clone(),
                 mapping,
                 texture,
                 confirmed: true,
@@ -234,11 +225,13 @@ impl ImguiScenePresenter {
         let Some(presented) = self.presented.as_mut() else {
             return Ok(false);
         };
-        if presented.display != *display || presented.texture != texture {
+        if presented.display.output() != display.output() {
             return Ok(false);
         }
         let was_confirmed = presented.confirmed;
-        let mapping_changed = presented.mapping != mapping;
+        let mapping_changed = presented.mapping != mapping
+            || presented.display != *display
+            || presented.texture != texture;
         if mapping_changed {
             presented.token = self
                 .authority
@@ -246,9 +239,39 @@ impl ImguiScenePresenter {
                 .map_err(imgui_error)?;
             presented.mapping = mapping;
         }
+        presented.display = display.clone();
+        presented.texture = texture;
         presented.receipt = receipt;
         presented.confirmed = true;
         Ok(mapping_changed || !was_confirmed)
+    }
+
+    pub(super) fn hide(&mut self) {
+        if let Some(presented) = self.presented.as_mut() {
+            presented.confirmed = false;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn promote_target(
+        &mut self,
+        target: &ImguiTarget,
+        receipts: impl IntoIterator<Item = WgpuImageCompositeReceipt>,
+        mapping: DisplayMapping2d,
+        expected_content: Option<&EditorPreviewContentStamp>,
+    ) -> Result<bool, EditorRunError> {
+        let Some((display, texture)) = target.display.as_ref().zip(target.texture) else {
+            self.hide();
+            return Ok(false);
+        };
+        self.promote(
+            target,
+            display,
+            texture,
+            receipts,
+            mapping,
+            expected_content,
+        )
     }
 
     pub(super) fn resolve_pick(
@@ -316,6 +339,15 @@ fn matches_target(
     texture: ExternalTextureId,
 ) -> bool {
     target.matches_display(display) && target.texture == Some(texture)
+}
+
+fn matches_output(target: &ImguiTarget, display: &WgpuImageDisplay) -> bool {
+    target.texture.is_some()
+        && target
+            .display
+            .as_ref()
+            .is_some_and(|source| source.output() == display.output())
+        && display.output().is_current()
 }
 
 fn presentation_image(receipt: WgpuImageCompositeReceipt) -> EditorPresentationImage {
@@ -1126,7 +1158,7 @@ mod binding_tests {
                     _ => self
                         .native
                         .scene_presenter
-                        .promote(
+                        .promote_target(
                             &self.native.scene,
                             [receipt],
                             changed_mapping,
@@ -1152,7 +1184,7 @@ mod binding_tests {
                 if self
                     .native
                     .scene_presenter
-                    .promote(
+                    .promote_target(
                         &self.native.scene,
                         [receipt],
                         changed_mapping,
@@ -1236,7 +1268,7 @@ mod binding_tests {
                         .to_owned(),
                 );
             }
-            self.paint()?;
+            self.wait_for_scene_presentation()?;
             let frame = self.application.current_frame().unwrap();
             if !self.native.scene_presenter.is_presented(
                 &self.native.scene,

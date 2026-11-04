@@ -814,18 +814,17 @@ impl GameInputWorkflow<'_> {
                 receipt.image() == submitted.image && receipt.occurrence() == submitted.occurrence
             })
             .ok_or("the exact Runtime sprite/UI image was not actually composited")?;
+        let (_, _, scene_display, _, _) = self
+            .native
+            .owned_scene_snapshot_for_test()
+            .ok_or("the concurrent Scene has no confirmed Nara display")?;
         let scene = primary
             .composites()
             .iter()
             .copied()
             .find(|receipt| {
                 Some(receipt.image()) == self.native.scene.submitted
-                    && self
-                        .native
-                        .scene
-                        .display
-                        .as_ref()
-                        .is_some_and(|display| receipt.occurrence() == display.occurrence())
+                    && receipt.occurrence() == scene_display.occurrence()
             })
             .ok_or("Game omitted the concurrent independent Scene composite")?
             .image();

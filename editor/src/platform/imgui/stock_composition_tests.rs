@@ -4,7 +4,6 @@
 //! harness owns only real Editor source/actions, native presentation and their exact joins.
 
 use std::{
-    ffi::CString,
     fs,
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
@@ -12,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dear_imgui_rs::{ConfigFlags, Context, MouseButton};
+use dear_imgui_rs::{ConfigFlags, Context};
 use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     reflect::{ComponentFieldId, ComponentRegistryBuilder, ComponentTypeId, ComponentValue},
@@ -34,8 +33,8 @@ use nara_stock_composition_consumer::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
-    event::WindowEvent,
+    dpi::{LogicalSize, PhysicalPosition},
+    event::{DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     platform::windows::EventLoopBuilderExtWindows,
     window::{Window, WindowId},
@@ -307,13 +306,10 @@ impl Workflow<'_> {
         if !self.is_presented() {
             return Err("cannot inspect an unpresented Scene".into());
         }
-        let display = self
+        let (_, _, display, _, _) = self
             .native
-            .scene
-            .display
-            .as_ref()
-            .ok_or("the Scene owner retained no exact display")?
-            .clone();
+            .owned_scene_snapshot_for_test()
+            .ok_or("the Scene owner retained no exact sampled Nara placement")?;
         let composite = self.composite(&display)?;
         // Read the actual Scene View's selected final storage. No replay or new policy can
         // substitute for these pixels; wrong semantic markers must still refuse this lease.
@@ -608,18 +604,51 @@ impl Workflow<'_> {
                 .selected_entity
                 .is_none()
         );
-        let point = authoring_center(self.native, self.application)?;
-        self.paint(point, |_| {})?;
-        self.paint(point, |context| {
-            context
-                .io_mut()
-                .add_mouse_button_event(MouseButton::Left, true)
-        })?;
-        self.paint(point, |context| {
-            context
-                .io_mut()
-                .add_mouse_button_event(MouseButton::Left, false)
-        })?;
+        let (_, _, _, mapping, clip) = self
+            .native
+            .owned_scene_snapshot_for_test()
+            .ok_or("the actual Scene has no confirmed Nara placement")?;
+        let content = mapping.content_rect();
+        let point = [
+            (content.min[0].max(clip.min[0]) + content.max[0].min(clip.max[0])) * 0.5,
+            (content.min[1].max(clip.min[1]) + content.max[1].min(clip.max[1])) * 0.5,
+        ];
+        for _ in 0..3 {
+            self.paint(point, |_| {})?;
+        }
+        let origin = self.native.context.main_viewport().pos();
+        let scale = self.native.context.io().display_framebuffer_scale()[0];
+        self.native
+            .handle_owned_event(
+                self.native.window.id(),
+                &WindowEvent::CursorMoved {
+                    device_id: DeviceId::dummy(),
+                    position: PhysicalPosition::new(
+                        f64::from((point[0] - origin[0]) * scale),
+                        f64::from((point[1] - origin[1]) * scale),
+                    ),
+                },
+                self.application,
+            )
+            .map_err(|error| error.to_string())?;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            if !self
+                .native
+                .handle_owned_event(
+                    self.native.window.id(),
+                    &WindowEvent::MouseInput {
+                        device_id: DeviceId::dummy(),
+                        state,
+                        button: MouseButton::Left,
+                    },
+                    self.application,
+                )
+                .map_err(|error| error.to_string())?
+            {
+                return Err("the actual Nara Scene did not consume its native pick button".into());
+            }
+            self.paint(point, |_| {})?;
+        }
         let frame = self
             .application
             .current_frame()
@@ -795,47 +824,6 @@ impl Workflow<'_> {
         );
         Ok(())
     }
-}
-
-fn authoring_center(
-    native: &NativeImgui,
-    application: &EditorApplication,
-) -> Result<[f32; 2], String> {
-    let workspace = application.panel_workspace();
-    let panel = workspace
-        .layout()
-        .instances()
-        .iter()
-        .find(|panel| panel.kind() == "nara.authoring-view" && panel.is_visible())
-        .ok_or("the real Authoring pane is not visible")?;
-    let title = workspace
-        .registry()
-        .descriptor(panel.kind())
-        .ok_or("the Authoring pane has no descriptor")?
-        .title();
-    let name = CString::new(format!("{title}###nara-panel-{}", panel.id().0))
-        .map_err(|error| error.to_string())?;
-    native
-        .context
-        .binding()
-        .try_with_bound_context(|| {
-            // SAFETY: only this live, bound test Context's native pane geometry is borrowed. No
-            // pointer escapes, no OS input is injected, and no GPU resource is accessed here.
-            unsafe {
-                let window = dear_imgui_rs::sys::igFindWindowByName(name.as_ptr());
-                let Some(window) = window.as_ref() else {
-                    return Err("the real Authoring window was not drawn".into());
-                };
-                if !window.Active || window.Hidden {
-                    return Err("the real Authoring window is hidden".into());
-                }
-                Ok([
-                    (window.WorkRect.Min.x + window.WorkRect.Max.x) * 0.5,
-                    (window.WorkRect.Min.y + window.WorkRect.Max.y) * 0.5,
-                ])
-            }
-        })
-        .map_err(|error| error.to_string())?
 }
 
 fn write_scene(project: &Path) -> Result<(), String> {

@@ -497,14 +497,14 @@ struct ImguiRetainedState {
 struct NativeImgui {
     owned: std::collections::BTreeMap<
         crate::workspace::EditorPanelInstanceId,
-        owned::OwnedInspectorSurface,
+        owned::OwnedPanelSurface,
     >,
     owned_pending: std::collections::BTreeMap<
         crate::workspace::EditorPanelInstanceId,
-        Arc<nara_ui_kernel::UiFrame>,
+        owned::OwnedPanelCandidate,
     >,
     owned_fonts: Vec<nara_text::FontFace>,
-    owned_input: owned::OwnedInspectorInput,
+    owned_input: owned::OwnedPanelInput,
     clipboard: clipboard::EditorClipboard,
     window: Arc<Window>,
     context: Context,
@@ -1054,7 +1054,7 @@ impl NativeImgui {
         self.gpu
             .begin_window_frame(window_packet, self.frame_index)
             .map_err(platform_gpu_error)?;
-        self.prepare_owned_inspectors(window_packet)?;
+        self.prepare_owned_panels(window_packet)?;
         let mut canvas_rebuild_requested = false;
         if !self.frontend.scene_open(application.panel_workspace()) {
             self.scene.retire(&mut self.gpu, &mut self.renderer)?;
@@ -1138,6 +1138,11 @@ impl NativeImgui {
                         .values()
                         .filter_map(|surface| surface.target.display.clone()),
                 )
+                .chain(
+                    self.owned
+                        .values()
+                        .filter_map(|surface| surface.scene_display().cloned()),
+                )
                 .collect::<Vec<_>>();
             let prepared = self.renderer.prepare(
                 &mut self.gpu,
@@ -1179,6 +1184,15 @@ impl NativeImgui {
             Ok(rendered) => rendered,
             Err(error) => {
                 self.input.invalidate(false);
+                self.scene_presenter.hide();
+                self.cancel_owned_scene_drag();
+                for (panel, surface) in &mut self.owned {
+                    surface.invalidate();
+                    surface.hide_scene();
+                    self.frontend
+                        .cancel_owned_panel_input(*panel)
+                        .map_err(imgui_error)?;
+                }
                 if let Some(output) = frontend_output.take() {
                     let authoring = application.current_ui_authoring_frame();
                     if let Some(batch) = self
@@ -1204,7 +1218,7 @@ impl NativeImgui {
             }
         };
         let mut output = frontend_output.expect("a rendered frame has its frontend output");
-        let owned_followup = self.observe_owned_inspectors(
+        let owned_followup = self.observe_owned_panels(
             &mut output,
             &outcome,
             &secondary_outcomes,
@@ -1254,16 +1268,25 @@ impl NativeImgui {
                     && Some(receipt.occurrence()) == output.authoring_occurrence
             })
             .collect::<Vec<_>>();
-        let scene_promoted = if let Some(mapping) = output.scene_mapping {
-            self.scene_presenter.promote(
-                &self.scene,
-                authoring_receipts.iter().copied(),
-                mapping,
-                application.current_scene_preview_content_stamp().as_ref(),
-            )?
-        } else {
-            false
-        };
+        let scene_display = self
+            .owned
+            .values()
+            .filter_map(|surface| surface.confirmed_scene())
+            .find(|(display, _)| Some(display.occurrence()) == output.authoring_occurrence);
+        let scene_promoted =
+            if let Some((mapping, (display, texture))) = output.scene_mapping.zip(scene_display) {
+                self.scene_presenter.promote(
+                    &self.scene,
+                    display,
+                    texture,
+                    authoring_receipts.iter().copied(),
+                    mapping,
+                    application.current_scene_preview_content_stamp().as_ref(),
+                )?
+            } else {
+                self.scene_presenter.hide();
+                false
+            };
         let canvas_promoted = self.canvas.promote(&self.scene, authoring_receipts)?;
         let authoring = application.current_ui_authoring_frame();
         let canvas_confirmed = authoring

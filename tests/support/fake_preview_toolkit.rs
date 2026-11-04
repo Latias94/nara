@@ -612,7 +612,7 @@ fn fake_toolkit_revokes_old_geometry_for_independent_context_changes() {
 }
 
 #[test]
-fn fake_toolkit_redisplay_rebinds_the_same_completed_image_to_its_new_uv_mapping() {
+fn fake_toolkit_redisplay_rebinds_the_same_output_to_its_new_occurrence_and_uv_mapping() {
     let project = TestProject::new("fake-toolkit-redisplay");
     let mut editor = EditorProjectSession::open_trusted_compiled(
         project.capability(),
@@ -642,10 +642,14 @@ fn fake_toolkit_redisplay_rebinds_the_same_completed_image_to_its_new_uv_mapping
                 max: [0.9, 0.8],
             })
             .unwrap();
-        toolkit.displayed = Some((document, revision, image, redisplayed_mapping));
+        let redisplayed_image = EditorPresentationImage {
+            display_occurrence: image.display_occurrence + 1000,
+            ..image
+        };
+        toolkit.displayed = Some((document, revision, redisplayed_image, redisplayed_mapping));
         let next = toolkit
             .presentation
-            .redisplay(token, image, redisplayed_mapping)
+            .redisplay(token, redisplayed_image, redisplayed_mapping)
             .expect("redisplaying an unchanged completed image must bind its actual new mapping");
         assert_ne!(next, token);
         assert!(toolkit.presentation.pick(token, [260.0, 170.0]).is_err());
@@ -701,7 +705,7 @@ fn fake_toolkit_redisplay_rejects_foreign_stale_or_changed_image_authority() {
                 .redisplay(foreign_token, image, initial_mapping),
             Err(EditorPresentationError::StaleToken)
         );
-        for change in 0..5 {
+        for change in 0..7 {
             let mut changed = image;
             match change {
                 0 => changed.frame_index += 1,
@@ -709,6 +713,8 @@ fn fake_toolkit_redisplay_rejects_foreign_stale_or_changed_image_authority() {
                 2 => changed.source_handoff_generation += 1,
                 3 => changed.device_epoch += 1,
                 4 => changed.backend_instance_id += 1,
+                5 => changed.output_version += 1,
+                6 => changed.display_occurrence = 0,
                 _ => unreachable!(),
             }
             assert_eq!(
@@ -737,11 +743,20 @@ fn fake_toolkit_redisplay_rejects_foreign_stale_or_changed_image_authority() {
                 max: [0.75, 0.75],
             })
             .unwrap();
+        assert_eq!(
+            toolkit.presentation.redisplay(token, image, next_mapping),
+            Err(EditorPresentationError::ImageMismatch),
+            "a changed placement requires a fresh display occurrence"
+        );
+        let next_image = EditorPresentationImage {
+            display_occurrence: image.display_occurrence + 1000,
+            ..image
+        };
         let next = toolkit
             .presentation
-            .redisplay(token, image, next_mapping)
+            .redisplay(token, next_image, next_mapping)
             .unwrap();
-        toolkit.displayed = Some((document, revision, image, next_mapping));
+        toolkit.displayed = Some((document, revision, next_image, next_mapping));
         assert_eq!(
             toolkit
                 .presentation
@@ -754,7 +769,7 @@ fn fake_toolkit_redisplay_rejects_foreign_stale_or_changed_image_authority() {
             Some(entity)
         );
 
-        let mut wrong_image = image;
+        let mut wrong_image = next_image;
         wrong_image.frame_index += 1;
         assert!(
             toolkit

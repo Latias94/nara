@@ -111,8 +111,37 @@ requesting a continuous follow-up. That observation is not an idle CPU benchmark
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
 placement, physical OS key/clipboard delivery, keyboard-only entry from the surrounding shell,
 detached-window/DPI transfer or accessibility.
-The complete Inspector and Nara-owned Scene/tool visuals remain open under the
+The complete Inspector and broader Nara-owned tool visuals remain open under the
 [owning unit](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
+
+## Nara Scene Integration
+
+For the Nara-drawn ordinary Scene toolbar and viewport, run the direct-sampling trajectories:
+
+```powershell
+$env:WGPU_BACKEND='dx12'
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_owned_scene_)' --test-threads=1
+```
+
+The original Scene output and Nara chrome must be sampled in the same actual native window
+frame. The Scene placement has a distinct display occurrence; a same-output mirror cannot
+substitute its immutable mapping. Winit wheel and middle-button input exercise pointer-anchored
+zoom, pan and the Nara Reset View button. Outside-content and toolbar input do not move the
+camera, and replaced mappings cannot authorize the old pick.
+The same-sized floating-panel move additionally preserves the exact CPU frame and chrome route
+while invalidating the Scene sample. A click during that refusal cannot borrow the next frame's
+confirmation; a new click after the actual replacement sample succeeds.
+
+The source trajectory clicks a real Sprite, applies an ordinary source edit and Undo, resizes
+the native window and closes the Scene panel. It reads the exact GPU output before and after
+these operations and verifies that retained predecessor pixels remain immutable after retirement.
+Those readbacks are test observations; the product's viewport does not copy pixels through CPU
+memory. The original Scene/Canvas priority, independent Scene effects, image-reimport and native
+view-lifecycle trajectories below remain required for changes to their affected boundaries.
+
+These tests qualify their injected native input and GPU/window receipts. Full Inspector parity,
+virtualization, measured idle and retirement costs, actual OS IME/accessibility and broader
+platform claims retain their separate gates.
 
 ## External Process Scheduling
 

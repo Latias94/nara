@@ -191,7 +191,7 @@ impl EditorPreviewPresentation {
         Ok(token)
     }
 
-    /// Rebinds an already presented image after the adapter displays it with a new mapping.
+    /// Rebinds an already presented output to its actual new display occurrence or mapping.
     ///
     /// This does not accept new image content or revive invalidated geometry. The adapter must
     /// first confirm another actual display of the exact image, then replace its old token with
@@ -207,7 +207,16 @@ impl EditorPreviewPresentation {
             .as_mut()
             .filter(|current| current.valid && current.token == token)
             .ok_or(EditorPresentationError::StaleToken)?;
-        if current.image != image || mapping.target() != image.target.extent() {
+        let expected = EditorPresentationImage {
+            display_occurrence: image.display_occurrence,
+            ..current.image
+        };
+        if expected != image
+            || image.display_occurrence == 0
+            || mapping.target() != image.target.extent()
+            || (current.mapping != mapping
+                && current.image.display_occurrence == image.display_occurrence)
+        {
             return Err(EditorPresentationError::ImageMismatch);
         }
         let id = NEXT_PRESENTATION_ID
@@ -217,6 +226,7 @@ impl EditorPreviewPresentation {
             .map_err(|_| EditorPresentationError::IdentityExhausted)?;
         let token = EditorPresentedToken(id);
         current.token = token;
+        current.image = image;
         current.mapping = mapping;
         Ok(token)
     }

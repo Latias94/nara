@@ -508,3 +508,100 @@ preceding recovery unit retains its separately recorded shared/independent consu
 The complete selected Inspector, component/tree controls, clipped Nara Scene visual,
 virtualization, idle measurements and actual OS IME/clipboard/accessibility/DPI qualification
 remain open. These concrete property workflows do not complete R11/R12 or the foundation Goal.
+
+## Owned Scene integration
+
+The selected Scene replacement uses the existing hosted panel surface for Nara's compiled
+toolbar, status and viewport geometry. Reset, picking and bounded pan/zoom belong to that
+control owner. The native adapter retains the exact Scene output beside the panel frame;
+neither `UiImageId` nor a CPU image snapshot receives GPU custody.
+
+Choose direct sampling at the original window compositor. Emit the opaque panel chrome and
+the Scene image inside its reserved, non-overlapping viewport in the original window draw-list
+position. Intersect the viewport clip with the parent window clip. This preserves the existing
+popup and secondary-window ordering without a readback, a nested image-permission protocol or
+another graphics owner. Arbitrarily interleaved overlays are outside this two-placement packet;
+they would need an ordered drawing packet rather than silently flattening overlapping layers.
+
+The Scene sample has its own exact display occurrence and external binding. Keep its source
+output, local layout/UV/clip and native destination snapshot together. A changed placement
+retires that occurrence before reestablishing input. Scene preview acceptance, content stamps,
+revision-bound picking and physical completion remain with their original owners. Confirm the
+panel and Scene samples in the actual same-window presentation before routing viewport input.
+The neutral preview owner rebinds the same immutable output to its new nonzero occurrence and
+mapping with a fresh token, rejecting every changed output fact and the old token. A previously
+sampled passive source cannot dispose a newer accepted candidate while its panel image is still
+being prepared.
+Viewport pointer admission checks the current confirmed native sample and its exact clip before
+the reducer can queue a pick. Rebinding refuses that event immediately; it cannot borrow a later
+receipt even when the CPU frame, source and local mapping remain equal. The chrome toolbar keeps
+its independent route, and a consumed control event does not fall through to the shell or Game.
+
+Qualification must include real Windows/DX12 source edits and Undo, UV pan/zoom/reset, clipped
+and outside-content refusal, stale mapping/receipt refusal, retained old output pixels, source
+and panel retirement, and the existing Scene/Canvas priority controls. Record actual allocation
+and additional-pass behavior separately from any unmeasured performance claim. This integration
+does not close full Inspector parity, virtualization or the remaining R11/R12 platform gates.
+
+## Owned Scene qualification
+
+Qualified on Windows/DX12 on November 4 with Rust 1.95.0, one Cargo invocation at a time,
+`CARGO_BUILD_JOBS=1` and the root `target`. The ordinary source-tool cases reused the actual
+prebuilt .NET 10 Host and EnemyStats v1 artifacts. CJK controls used the configured standalone
+`simhei.ttf` fallback. No registry record or separate verification shard was added.
+
+| Check | Result |
+| --- | --- |
+| Final Editor library | 341/341, 48 ignored; `efe1a825-d139-4e6c-b19a-33ee24deb9e5` |
+| Public preview presentation consumer | 4/4 in `editor_persistence` with root all features; `3f0b9fb0-050b-47b6-b6e9-9202f5cee64e` |
+| Selected native integration cohort | 21/21; `6c89ad6f-c94e-4576-bdfb-16a15b8b01cd` |
+| Final native image-clip follow-up | 9/9; `424bd16d-ecdf-4ec5-9c23-a32bd273d1b2` |
+| Independent review | The occurrence-rebind P1 and queued-pick P2 are corrected; final bounded production review has no remaining P1/P2 |
+| Correctness Clippy | Editor all targets/all features pass `-D clippy::correctness`; warnings remain, including the existing shared error-size policy |
+| Build and formatting | `cargo build --locked -p nara-editor` and `cargo fmt --all -- --check` pass |
+
+The final library includes the toolkit-free Scene controls, exact retained-frame routing,
+pointer-anchored and accumulated prepaint camera input, Reset, tiny panels, letterbox and
+ancestor-clip refusal, keyboard non-picking and invalidated viewport behavior. The existing
+default-layout test still requires both central panes to draw during preparation, before any
+native panel image exists.
+
+Three new real native trajectories establish original-output sampling through a distinct
+placement occurrence and a same-window chrome receipt; native wheel, middle drag and Reset;
+actual Sprite picking, ordinary edit/Undo, window resize and panel close; and same-sized panel
+movement with a queued click during the refused rebind interval. The last control preserves the
+exact CPU frame and independent toolbar route, refuses the old event before queuing, then
+requires a new click after the replacement sample. GPU numeric observations verify actual source
+pixels and immutable retained predecessors after edit, Undo, resize and retirement.
+
+The 21-case cohort also covers ordinary Scene/Prefab persistence, all selected owned Inspector
+controls and recovery, both actual C# source-tool property paths, Project composition input,
+pause/Resume and exact Game input/Step, detached Game/native recovery, retained Scene/Prefab
+binding, UI Canvas priority, image reimport and the independent multi-pass Scene effect. The
+final nine-case follow-up reruns the three new Scene cases and the affected Game/lifecycle,
+retained binding, Canvas, reimport and effect consumers after constraining native sampling to
+the intersection of image content, viewport clip and parent window clip.
+
+Review exposed a real ownership mismatch: redisplay previously required the entire old image
+fact, including occurrence, although a changed placement requires a new occurrence. The preview
+owner now accepts only the same immutable output facts with the confirmed fresh occurrence,
+updates the exact image/mapping and replaces the token. The public consumer protects foreign,
+zero, changed-output, stale-token and same-occurrence/moved-mapping refusals. Another correction
+keeps a newer accepted candidate while the hosted panel still displays an older output.
+
+Initial native qualification also exposed fixture assumptions: the generic Inspector project
+did not declare the built-in Sprite/Transform schema owners, and several predecessor controls
+compared actual samples against the producer's now-passive source occurrence. The fixture now
+composes the real admitted owner snapshots; the tests observe the actual Nara placement and
+use native input rather than Dear Scene item events. Image reuse waits for the finite hosted
+chrome preparation to settle before asserting one native queue submission. These corrections
+preserve the original source, exact output and native-presentation assertions.
+
+The product adds a panel-sized chrome output when its compiled frame changes and samples the
+Scene output directly; it does not read back, copy or upload Scene pixels. Unchanged CPU frames
+and chrome outputs are reused, and native source-reimport controls verify settled image reuse.
+Per-output retention remains charged to the original Host; explicit close and retained pixel
+tests observe retirement without another GPU owner. This is not a measured idle, allocation-tail
+or retirement-latency result. Complete Inspector/component/tree parity, virtualization, actual
+OS IME/candidate placement, accessibility, Scene detached-window/DPI qualification and broader
+R11/R12/foundation requirements remain open.

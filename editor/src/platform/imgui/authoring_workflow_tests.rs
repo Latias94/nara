@@ -42,6 +42,7 @@ mod owned_fields;
 mod owned_keyboard;
 mod owned_nested_references;
 mod owned_recovery;
+mod owned_scene;
 mod owned_scrolling;
 mod prefab_conversion;
 mod prefab_extraction;

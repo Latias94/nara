@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
-**Last Revised**: 2026-11-01 (native compositor facts and immutable interaction mapping)
+**Last Revised**: 2026-11-04 (owned Scene controls and direct native composition)
 **Owner**: Editor Host, `nara_render`, and `nara_render_wgpu`
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -15,6 +15,7 @@
 **Selected Design**: [Render Host Ownership And Production Transition](../render-host-ownership-design.md), implementation step3
 **Current Implementation Evidence**: [Immutable outputs, owned producers and original native prefixes](../../knowledge/engineering/verification/2026-10/2026-10-31T121248Z-immutable-render-outputs-owning-producers-and-original-native-prefix-qualification-1b4de7f4305740698abba87b589f9459.md)
 and [shared stock composition with actual native Scene effects](../../knowledge/engineering/verification/2026-11/2026-11-01T013746Z-shared-stock-composition-original-captures-and-native-scene-effects-qualification-2f250ecb33b24b5091f28a141cd6b244.md)
+and [owned Scene controls with direct native sampling](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#owned-scene-qualification)
 **Historical Implementation Plan**: [Editor Scene Composition and Scene View v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md)
 **Historical Initial Implementation**: `1f97c48` (`feat(editor): establish scene view gpu execution`)
 **Historical Completed Implementation**: `f99de44` (`feat(editor): prove scene authoring trajectory`)
@@ -165,6 +166,25 @@ snapshot with that occurrence, and joins that original snapshot with the Host re
 substitute the current mapping or use one occurrence for two independently positioned mirrors.
 Changing destination/mapping/role admits a new occurrence. The Host neither parses command buffers
 nor proves shader inverses; the same split applies to Nara-drawn composition without a toolkit.
+
+The Nara-owned Scene panel retains its compiled chrome frame and exact Scene output as separate
+native compositor inputs. Its viewport layout, UV and clip are renderer-neutral control facts;
+the adapter retains the physical lease and admits a distinct display occurrence for that
+placement. Directly sample both images in the original window drawing order, intersecting the
+viewport with the window clip. Opaque chrome precedes its non-overlapping viewport sample;
+this finite composition does not authorize flattening arbitrary interleaved overlays. Dear may
+remain the surrounding shell and final native drawing adapter without owning Scene controls.
+No readback, CPU image upload or GPU handle in `UiImageId` participates in this path.
+
+The actual same-window chrome and Scene samples must both succeed before the hosted viewport
+can interact. Keep the source output and the immutable local/native placement together. A changed
+native destination, clip or DPI retires the old occurrence before a fresh placement restores
+interaction. A retained passive image or another occurrence cannot complete the previous
+mapping. Scene preview geometry and revision admission remain with the original preview owner.
+That owner may rebind the same immutable output after the adapter confirms its fresh nonzero
+display occurrence. Every output/target/source/epoch fact remains equal, a changed mapping
+requires a different occurrence, and the new presentation token invalidates the old token.
+Redisplay neither accepts new content nor revives geometry already invalidated by another source.
 
 The serialized display transaction is:
 

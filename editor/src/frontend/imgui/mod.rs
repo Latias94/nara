@@ -17,8 +17,10 @@ pub(crate) use interaction_tests::InteractionProject;
 mod layout;
 mod owned_inspector;
 mod owned_panel;
+mod owned_scene;
 pub(crate) use owned_inspector::InspectorOperation;
 pub(crate) use owned_panel::ImguiOwnedImage;
+pub(crate) use view::SceneViewPlacement;
 mod prefab_extraction;
 mod prefab_intent;
 mod project;
@@ -75,6 +77,7 @@ pub(crate) struct ImguiFrontendOutput {
         crate::workspace::EditorPanelTarget,
     )>,
     pub(crate) scene_mapping: Option<nara::render::DisplayMapping2d>,
+    pub(crate) scene_clip: Option<nara::render::DisplayRect>,
     pub(crate) scene_pick_point: Option<[f32; 2]>,
     pub(crate) scene_camera_changed: bool,
     pub(crate) authoring_viewport: Option<dear_imgui_rs::Id>,
@@ -219,6 +222,8 @@ pub struct ImguiEditorFrontend {
     layout_lifecycle: Option<std::sync::Arc<()>>,
     #[cfg(test)]
     test_game_detached: Option<bool>,
+    #[cfg(test)]
+    test_scene_placement: Option<([f32; 2], [f32; 2])>,
     reset_windows: bool,
 }
 
@@ -582,12 +587,18 @@ impl ImguiEditorFrontend {
         #[cfg(test)]
         {
             self.test_game_detached = None;
+            self.test_scene_placement = None;
         }
     }
 
     #[cfg(test)]
     pub(crate) fn place_test_game(&mut self, detached: bool) {
         self.test_game_detached = Some(detached);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn place_test_scene(&mut self, position: [f32; 2], size: [f32; 2]) {
+        self.test_scene_placement = Some((position, size));
     }
 
     pub(crate) fn scene_open(&self, workspace: &crate::workspace::EditorPanelWorkspace) -> bool {
@@ -788,6 +799,16 @@ impl ImguiEditorFrontend {
                     None => {}
                 }
             }
+            #[cfg(test)]
+            if instance.kind() == "nara.authoring-view"
+                && let Some((test_position, _)) = self.test_scene_placement
+            {
+                floating = true;
+                ui.set_next_window_dock_id(0.into());
+                ui.set_next_window_viewport(ui.main_viewport().id());
+                position = test_position;
+                position_condition = Condition::Always;
+            }
             if !floating && let Some(dock) = placement_docks.get(&instance.placement()) {
                 ui.set_next_window_dock_id_with_cond(*dock, Condition::FirstUseEver);
             }
@@ -803,6 +824,14 @@ impl ImguiEditorFrontend {
                 .size([size[0] * scale, size[1] * scale], condition);
             #[cfg(test)]
             let window = window.flags(dear_imgui_rs::WindowFlags::NO_FOCUS_ON_APPEARING);
+            #[cfg(test)]
+            let window = if instance.kind() == "nara.authoring-view"
+                && let Some((_, test_size)) = self.test_scene_placement
+            {
+                window.size(test_size, Condition::Always)
+            } else {
+                window
+            };
             let window = if floating {
                 window.position(position, position_condition)
             } else {
@@ -1226,24 +1255,7 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
         context.output.scene_extent = canvas.desired_extent;
         context.output.canvas_pick_uv = canvas.pick_uv;
     } else {
-        let frame = context.input.frame;
-        let unsaved = frame.scene_preview_unsaved_dependencies();
-        ui.text_disabled(format!("Unsaved Prefab dependencies: {unsaved}"));
-        let editing = !context.input.read_only
-            && frame
-                .scene_preview_document()
-                .is_some_and(|document| frame.workspace().active_document == Some(document));
-        let scene = context.widgets.scene_view.show(
-            ui,
-            context.input.scene,
-            context.input.canvas_presented,
-            editing,
-        );
-        context.output.scene_extent = scene.desired_extent;
-        context.output.scene_mapping = scene.mapping;
-        context.output.authoring_occurrence = scene.occurrence;
-        context.output.scene_pick_point = scene.pick_point;
-        context.output.scene_camera_changed = scene.camera_changed;
+        owned_scene::paint(ui, context);
     }
 }
 

@@ -4,7 +4,7 @@ use winit::keyboard::{Key, NamedKey};
 
 use super::*;
 
-impl OwnedInspectorSurface {
+impl OwnedPanelSurface {
     fn focused_control(&self) -> Result<Option<UiKey>, EditorRunError> {
         let Some(route) = self.route else {
             return Ok(None);

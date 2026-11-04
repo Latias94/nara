@@ -28,6 +28,9 @@ use winit::{
 };
 
 mod keyboard;
+mod scene;
+pub(super) use scene::OwnedPanelCandidate;
+use scene::OwnedSceneSample;
 
 use crate::{
     frontend::imgui::{ImguiFrontendOutput, ImguiImageInteraction, ImguiOwnedImage},
@@ -59,7 +62,7 @@ pub(super) fn font_policy() -> Result<Vec<FontFace>, EditorRunError> {
 }
 
 #[derive(Default)]
-pub(super) struct OwnedInspectorInput {
+pub(super) struct OwnedPanelInput {
     focus: Option<OwnedTextFocus>,
     keyboard: Option<(EditorPanelInstanceId, WindowId)>,
     cursor: Option<(WindowId, winit::dpi::PhysicalPosition<f64>)>,
@@ -67,6 +70,7 @@ pub(super) struct OwnedInspectorInput {
     ime_ready: bool,
     dragging: bool,
     pointer_panel: Option<EditorPanelInstanceId>,
+    scene_drag: Option<scene::OwnedSceneDrag>,
 }
 
 #[derive(Clone)]
@@ -78,7 +82,7 @@ struct OwnedTextFocus {
     window: WindowId,
 }
 
-pub(super) struct OwnedInspectorSurface {
+pub(super) struct OwnedPanelSurface {
     pub(super) target: ImguiTarget,
     generation: EditorRenderGeneration,
     image: nara::asset::Handle<RenderImage2d>,
@@ -92,9 +96,10 @@ pub(super) struct OwnedInspectorSurface {
     interaction: UiInteractionSession,
     route: Option<UiRouteStamp>,
     mapping: Option<(WindowId, ImguiImageInteraction)>,
+    scene: Option<OwnedSceneSample>,
 }
 
-impl OwnedInspectorSurface {
+impl OwnedPanelSurface {
     pub(super) fn new(fonts: Vec<FontFace>) -> Result<Self, EditorRunError> {
         let (journal, authority) =
             nara_ui_kernel::__private::new_hosted_frame_journal(Default::default())
@@ -102,10 +107,10 @@ impl OwnedInspectorSurface {
         Ok(Self {
             target: ImguiTarget::default(),
             generation: EditorRenderGeneration::try_acquire()
-                .ok_or_else(|| imgui_error("Inspector render generation exhausted"))?,
+                .ok_or_else(|| imgui_error("Owned panel render generation exhausted"))?,
             image: RenderImage2d::allocate_handle().map_err(imgui_error)?,
             view: RenderViewId::try_acquire()
-                .ok_or_else(|| imgui_error("Inspector View identity exhausted"))?,
+                .ok_or_else(|| imgui_error("Owned panel View identity exhausted"))?,
             planner: UiPresentationPlanner::with_fonts(fonts, Default::default())
                 .map_err(imgui_error)?,
             policy: WgpuStockCaptureAdapter::stock().map_err(imgui_error)?,
@@ -116,17 +121,20 @@ impl OwnedInspectorSurface {
             interaction: UiInteractionSession::default(),
             route: None,
             mapping: None,
+            scene: None,
         })
     }
 
     pub(super) fn prepare(
         &mut self,
-        frame: Arc<UiFrame>,
+        candidate: OwnedPanelCandidate,
         gpu: &mut WgpuRenderHost,
         renderer: &mut ImguiRenderer,
         window: RenderWindowPacket,
         frame_index: u64,
     ) -> Result<(), EditorRunError> {
+        self.prepare_scene(candidate.scene, gpu, renderer)?;
+        let frame = candidate.frame;
         if self
             .pending
             .as_ref()
@@ -385,6 +393,12 @@ impl NativeImgui {
             | WindowEvent::Destroyed
             | WindowEvent::Resized(_)
             | WindowEvent::ScaleFactorChanged { .. } => {
+                if self.owned.values().any(|surface| {
+                    surface.scene_display().is_some()
+                        && surface.mapping.is_some_and(|(owner, _)| owner == window)
+                }) {
+                    self.scene_presenter.hide();
+                }
                 if self
                     .owned_input
                     .keyboard
@@ -409,9 +423,13 @@ impl NativeImgui {
                         .map_err(imgui_error)?;
                     surface.interaction = UiInteractionSession::default();
                     surface.invalidate();
+                    surface.hide_scene();
                 }
             }
             _ => {}
+        }
+        if let Some(consumed) = self.handle_owned_scene_event(window, event, application)? {
+            return Ok(consumed);
         }
         if let WindowEvent::MouseWheel { delta, phase, .. } = event
             && let Some(panel) = self
@@ -465,6 +483,11 @@ impl NativeImgui {
                     && let Some(batch) = outcome.consumed()
                     && let Some(model) = application.current_frame()
                 {
+                    let admitted = self.owned[&panel]
+                        .scene_point_is_visible(point)
+                        .then_some(point);
+                    self.frontend
+                        .set_owned_scene_pointer(panel, &frame, admitted);
                     let clipboard = self.clipboard.clone();
                     let _ = self.frontend.reduce_owned_input(
                         panel,
@@ -508,6 +531,7 @@ impl NativeImgui {
             ..
         } = event
         {
+            let mut pointer_consumed = false;
             let candidate = if *state == ElementState::Released {
                 self.owned_input.pointer_panel.and_then(|panel| {
                     self.owned_cursor_point(panel, window, false)
@@ -542,6 +566,12 @@ impl NativeImgui {
                     && let Some(batch) = outcome.consumed()
                     && let Some(model) = application.current_frame()
                 {
+                    pointer_consumed = true;
+                    let admitted = self.owned[&panel]
+                        .scene_point_is_visible(point)
+                        .then_some(point);
+                    self.frontend
+                        .set_owned_scene_pointer(panel, &frame, admitted);
                     let clipboard = self.clipboard.clone();
                     let _ = self.frontend.reduce_owned_input(
                         panel,
@@ -600,6 +630,9 @@ impl NativeImgui {
             if *state == ElementState::Released {
                 self.owned_input.dragging = false;
                 self.owned_input.pointer_panel = None;
+            }
+            if pointer_consumed {
+                return Ok(true);
             }
         }
         if let WindowEvent::KeyboardInput { event, .. } = event {
@@ -786,7 +819,7 @@ impl NativeImgui {
         Ok(())
     }
 
-    pub(super) fn prepare_owned_inspectors(
+    pub(super) fn prepare_owned_panels(
         &mut self,
         window: RenderWindowPacket,
     ) -> Result<(), EditorRunError> {
@@ -799,33 +832,41 @@ impl NativeImgui {
         for panel in retired {
             if self
                 .owned_input
+                .scene_drag
+                .as_ref()
+                .is_some_and(|drag| drag.panel == panel)
+            {
+                self.owned_input.scene_drag = None;
+            }
+            if self
+                .owned_input
                 .keyboard
                 .is_some_and(|(owner, _)| owner == panel)
             {
                 self.cancel_owned_focus()?;
             }
             if let Some(mut surface) = self.owned.remove(&panel) {
-                surface.target.retire(&mut self.gpu, &mut self.renderer)?;
+                surface.retire(&mut self.gpu, &mut self.renderer)?;
             }
         }
-        for (panel, frame) in std::mem::take(&mut self.owned_pending) {
+        for (panel, candidate) in std::mem::take(&mut self.owned_pending) {
             if self
                 .owned
                 .get(&panel)
-                .and_then(OwnedInspectorSurface::displayed_frame)
+                .and_then(OwnedPanelSurface::displayed_frame)
                 .is_some_and(|old| {
-                    old.environment().surface_id() != frame.environment().surface_id()
+                    old.environment().surface_id() != candidate.frame.environment().surface_id()
                 })
             {
                 let mut surface = self
                     .owned
                     .remove(&panel)
                     .expect("replaced Inspector is retained");
-                surface.target.retire(&mut self.gpu, &mut self.renderer)?;
+                surface.retire(&mut self.gpu, &mut self.renderer)?;
             }
             if !self.owned.contains_key(&panel) {
                 self.owned
-                    .insert(panel, OwnedInspectorSurface::new(self.owned_fonts.clone())?);
+                    .insert(panel, OwnedPanelSurface::new(self.owned_fonts.clone())?);
             }
             let surface = self
                 .owned
@@ -833,7 +874,7 @@ impl NativeImgui {
                 .expect("Inspector surface was created");
             surface.target.release_obsolete(&mut self.renderer)?;
             surface.prepare(
-                frame,
+                candidate,
                 &mut self.gpu,
                 &mut self.renderer,
                 window,
@@ -849,6 +890,7 @@ impl NativeImgui {
                     ImguiOwnedImage {
                         frame: Arc::clone(surface.displayed_frame()?),
                         image: surface.image()?,
+                        scene: surface.scene_image(),
                     },
                 ))
             })
@@ -858,7 +900,7 @@ impl NativeImgui {
         Ok(())
     }
 
-    pub(super) fn observe_owned_inspectors(
+    pub(super) fn observe_owned_panels(
         &mut self,
         output: &mut ImguiFrontendOutput,
         primary: &nara::render_wgpu::WgpuWindowFrameOutcome,
@@ -868,6 +910,15 @@ impl NativeImgui {
     ) -> Result<bool, EditorRunError> {
         self.owned_pending = std::mem::take(&mut output.owned_candidates)
             .into_iter()
+            .map(|(panel, frame)| {
+                let scene =
+                    self.frontend
+                        .owned_scene_placement(panel, &frame)
+                        .and_then(|placement| {
+                            scene::OwnedSceneSource::capture(placement, self.scene.display.as_ref())
+                        });
+                (panel, OwnedPanelCandidate { frame, scene })
+            })
             .collect();
         let mut cancel_focus = false;
         for (panel, surface) in &mut self.owned {
@@ -886,6 +937,7 @@ impl NativeImgui {
                 });
             let Some((native, window, mapping)) = mapping else {
                 surface.invalidate();
+                surface.hide_scene();
                 surface.mapping = None;
                 self.frontend
                     .cancel_owned_panel_input(*panel)
@@ -927,6 +979,17 @@ impl NativeImgui {
                     || old.viewport_origin != mapping.viewport_origin
                     || old.pixels_per_point != mapping.pixels_per_point
             });
+            surface.observe_scene(
+                output,
+                native,
+                window,
+                mapping,
+                primary
+                    .composites()
+                    .iter()
+                    .chain(secondary.iter().flat_map(|outcome| outcome.composites()))
+                    .copied(),
+            );
             if surface.route.is_none() {
                 self.frontend
                     .cancel_owned_panel_input(*panel)
@@ -984,8 +1047,12 @@ impl NativeImgui {
         Ok(self.owned_pending.iter().any(|(panel, candidate)| {
             self.owned
                 .get(panel)
-                .and_then(OwnedInspectorSurface::displayed_frame)
-                .is_none_or(|current| !Arc::ptr_eq(current, candidate))
+                .and_then(OwnedPanelSurface::displayed_frame)
+                .is_none_or(|current| !Arc::ptr_eq(current, &candidate.frame))
+                || self
+                    .owned
+                    .get(panel)
+                    .is_some_and(OwnedPanelSurface::scene_needs_rebind)
         }) || self
             .owned
             .keys()

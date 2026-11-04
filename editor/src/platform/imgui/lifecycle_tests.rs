@@ -148,11 +148,12 @@ impl NativeLifecycleProof {
             }
             let scene = native.scene.submitted;
             let game = native.game.submitted;
+            let scene_display = native
+                .owned_scene_snapshot_for_test()
+                .map(|(_, _, display, _, _)| display);
             let primary_scene = outcome.composites().iter().any(|receipt| {
                 Some(receipt.image()) == scene
-                    && native
-                        .scene
-                        .display
+                    && scene_display
                         .as_ref()
                         .is_some_and(|display| display.occurrence() == receipt.occurrence())
             });

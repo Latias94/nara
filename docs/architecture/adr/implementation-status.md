@@ -90,7 +90,18 @@ basis. Original activation/property/request actions share the existing ordered A
 and one Session candidate with the ordinary tool panel. The owning unit records actual C# native
 review, history, replacement, fallback and Save/Reopen evidence. This is a concrete property
 consumer of ADRs0047/0118, without a new public control taxonomy or a second prepared edit owner.
-Complete component/tree parity and the clipped Nara Scene visual remain unfinished.
+Complete component/tree parity remains unfinished; the Scene successor follows below.
+
+The [owned Scene successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#owned-scene-integration)
+replaces ordinary Scene controls with Nara's compiled toolbar and viewport. Its native adapter
+directly samples the original immutable Scene output beside the chrome image in the same Host
+and actual window drawing order. Distinct placement occurrences and confirmed native clip/input
+mapping preserve source geometry and revoke old or queued rebind-period picks. The selected
+Windows/DX12 cohort qualifies real pan/zoom/reset, source picking/edit/Undo, unchanged-output
+reuse, retained predecessor pixels after native resize and retirement, source-tool properties,
+Scene/Canvas priority, image reimport, independent Scene effects and Game/view lifecycle. This
+does not complete selected Inspector parity, virtualization, measured idle/retirement costs or
+actual OS IME/accessibility and broader platform qualification.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

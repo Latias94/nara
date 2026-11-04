@@ -6,6 +6,18 @@ is one open occurrence with its own target and presentation state; the workspace
 those instances across editor windows. Closing a panel does not close its document. Scene View
 presents authored content, while Game View presents a running game's output.
 
+The built-in ordinary Scene View uses Nara-drawn Reset View, status and viewport controls.
+Scroll over the visible Scene image to zoom around the pointer, drag with the middle mouse
+button to pan, and use Reset View to restore the full image. Picking is available only after
+the exact image and panel have been presented and the retained Scene is the active document.
+Letterboxing, clipped regions and stale source or placement mappings do not authorize picks.
+The authoring Canvas retains its separate controls and presentation priority for UI documents.
+
+The existing native Host renders the Nara panel and directly samples the retained Scene image
+in the workspace shell's drawing order. Scene pixels are not read back or uploaded into a CPU
+UI image. The shell still owns docking and native-window placement; Nara owns the Scene panel's
+layout and interactions. This does not qualify a complete Nara replacement for every Editor panel.
+
 Native panel extensions are trusted Rust code compiled into an Editor executable. Opening a
 project does not compile or load its code. Register a panel descriptor and its Dear ImGui state
 factory together through `EditorNativeComposition`:

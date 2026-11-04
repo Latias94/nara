@@ -23,6 +23,7 @@ pub(super) enum OwnedSubmission {
 pub(crate) struct ImguiOwnedImage {
     pub(crate) frame: Arc<UiFrame>,
     pub(crate) image: ImguiViewImage,
+    pub(crate) scene: Option<ImguiViewImage>,
 }
 
 impl ImguiEditorFrontend {
@@ -54,6 +55,8 @@ impl ImguiEditorFrontend {
         {
             for widgets in self.presentation.widgets.values_mut() {
                 widgets.owned_inspector = None;
+                widgets.scene_view = None;
+                widgets.scene_pick = None;
                 widgets.owned_revision = 0;
             }
         }
@@ -74,6 +77,15 @@ impl ImguiEditorFrontend {
             .widgets
             .get_mut(&panel)
             .ok_or("Inspector panel is retired")?;
+        if let Some(scene) = widgets.scene_view.as_mut() {
+            if let Some(pick) = scene
+                .dispatch(frame, dispatch)
+                .map_err(|error| error.to_string())?
+            {
+                widgets.scene_pick = Some((Arc::clone(frame), pick));
+            }
+            return Ok(());
+        }
         let inspector = widgets
             .owned_inspector
             .as_mut()
@@ -139,6 +151,21 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         dispatch: &UiDispatchBatch,
     ) -> Result<(), String> {
+        if let Some(scene) = self
+            .presentation
+            .widgets
+            .get_mut(&panel)
+            .and_then(|widgets| widgets.scene_view.as_mut())
+        {
+            if scene
+                .dispatch(frame, dispatch)
+                .map_err(|error| error.to_string())?
+                .is_some()
+            {
+                return Err("Scene cleanup cannot activate picking".into());
+            }
+            return Ok(());
+        }
         let inspector = self
             .presentation
             .widgets
@@ -160,6 +187,22 @@ impl ImguiEditorFrontend {
         previous: &Arc<UiFrame>,
         candidate: &Arc<UiFrame>,
     ) -> Vec<UiKey> {
+        if let Some(scene) = self
+            .presentation
+            .widgets
+            .get(&panel)
+            .and_then(|widgets| widgets.scene_view.as_ref())
+        {
+            return scene
+                .invalidated_controls(previous, candidate)
+                .unwrap_or_else(|_| {
+                    previous
+                        .hit_regions()
+                        .iter()
+                        .map(|region| region.key().clone())
+                        .collect()
+                });
+        }
         self.presentation
             .widgets
             .get(&panel)
@@ -178,6 +221,12 @@ impl ImguiEditorFrontend {
         &mut self,
         panel: EditorPanelInstanceId,
     ) -> Result<(), String> {
+        if let Some(widgets) = self.presentation.widgets.get_mut(&panel) {
+            widgets.scene_pick = None;
+            if let Some(scene) = widgets.scene_view.as_mut() {
+                scene.cancel_input().map_err(|error| error.to_string())?;
+            }
+        }
         if let Some(inspector) = self
             .presentation
             .widgets
@@ -343,6 +392,10 @@ impl ImguiEditorFrontend {
 
     pub(crate) fn cancel_owned_input(&mut self) {
         for widgets in self.presentation.widgets.values_mut() {
+            widgets.scene_pick = None;
+            if let Some(scene) = widgets.scene_view.as_mut() {
+                let _ = scene.cancel_input();
+            }
             if let Some(inspector) = widgets.owned_inspector.as_mut() {
                 let _ = inspector.cancel_input();
             }
