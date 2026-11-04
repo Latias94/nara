@@ -154,8 +154,11 @@ separate under ADR 0014. Native Unicode/composition, keyboard focus, DPI, detach
 accessibility need evidence for the capability changed. Backend hidden-window IME tests do not
 prove OS candidate-window placement, and Runtime accessibility is not Editor accessibility proof.
 
-Reference projects are comparative pressure, not implementation authority. Open-GPUI may inform
-stable-key, frame-journal, virtualization and logical-docking behavior; Dear ImGui may inform
+Reference projects are comparative pressure, not implementation authority. Zed GPUI is the primary
+state, notification and cached-artifact reference; Open-GPUI informs reusable component composition,
+stable keys, virtualization and logical docking. The pinned source study distinguishes retained
+entities, short-lived descriptions, cached-view replay and layout/text/raster work; it does not
+select GPUI ownership, a dependency or persistent layout storage for Nara. Dear ImGui may inform
 Editor adapter and viewport failure handling; Godot may inform Control and author workflows; Bevy
 may inform algorithms and controlled widgets. The [custom-drawn Editor UI
 study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) adds pinned Fyrox and

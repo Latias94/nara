@@ -145,6 +145,8 @@ lacked these explicit health/geometry guards and are superseded for the final na
 
 ## Final Native Release Repetition
 
+Native probe source: `a9345ad411ac0222a1bf87674cc939bf9346a40a`.
+
 Three separate serial release processes run the final probe, including the health check, exact
 loss refusal and original cleanup. Adapter: NVIDIA GeForce RTX 4090, DX12, driver
 `32.0.16.2101`; CPU/OS/toolchain match the CPU protocol above. Each process warms 16 frames,

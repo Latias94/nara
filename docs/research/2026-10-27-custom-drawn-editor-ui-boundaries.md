@@ -5,7 +5,8 @@ The user subsequently clarified the target: **Nara's own custom-drawn Editor UI*
 another toolkit. References supply concepts and counterexamples, not an adoption shortlist.
 This is reference research, not runtime qualification. **Source fact** means inspected code;
 **inference** means recommendation; **unverified** means no build/native/performance/unload experiment.
-Sparse checkouts stayed unchanged; omitted files were read online at the same pin. Official docs checked today.
+For the October 27 review, sparse checkouts stayed unchanged; omitted files were read online at
+the same pin. The November 4 mechanism follow-up below inspects local source only.
 
 ## Baselines
 
@@ -14,10 +15,11 @@ Sparse checkouts stayed unchanged; omitted files were read online at the same pi
 | Fyrox | `https://github.com/FyroxEngine/Fyrox.git` | `f008e4c2cdfdcda7b37bf8534d0df8de155748f6` |
 | Xilem/Masonry | `https://github.com/linebender/xilem.git` | `271a27a6d4a930f7878d404f9014e3c50a3a9b88` |
 | egui, integration alternative | `https://github.com/emilk/egui` | `86099aca1276fe786921992c8d5a68914ee79bec` |
-| Open GPUI, limited alternative check | `https://github.com/Latias94/open-gpui` | `689db5b49b33a5b2e64ba332bff72c98e70092bb` |
+| Open GPUI, component/virtualizer follow-up on November 4 | `https://github.com/Latias94/open-gpui` | `689db5b49b33a5b2e64ba332bff72c98e70092bb` |
+| Zed GPUI, state/invalidation/cache follow-up on November 4 | `https://github.com/zed-industries/zed` | `dd3437011469d5c2ec8c821a84cc999979625697` |
 
-Nara context is `refactor/scene-data-representation` at `65402b9206b26555787e4da5b7f7abd1a0c048fa`.
-Only dependency pins are compared: `winit =0.30.13`, `wgpu =30.0.1` ([local manifest][nara-deps]).
+October 27 Nara context is `refactor/scene-data-representation` at `65402b9206b26555787e4da5b7f7abd1a0c048fa`.
+That dependency comparison uses `winit =0.30.13`, `wgpu =30.0.1` ([local manifest][nara-deps]).
 The incumbent Editor is Dear ImGui, not egui; it remains the product/control baseline.
 Open GPUI denotes the pinned fork, **not** current upstream Zed GPUI.
 
@@ -160,6 +162,192 @@ No widget tree, generation scheme, teardown hook or plugin example proves safe n
 Trait objects, closures, queued payloads and destructors can retain code independently of node removal.
 Host-owned data/commands or process isolation are candidates, not safety receipts. No native/performance/unload claim is made.
 
+## November 4: State, Reuse And Component Mechanisms
+
+This bounded follow-up uses **Zed GPUI for state, invalidation and cached work**, and
+**Open-GPUI for reusable component composition and virtualizer integration**. Both local HEADs
+and origin remotes match the full pins above; both reference working trees were clean when
+inspected. All source links in this section identify those commits. No reference was built,
+downloaded, adopted or subjected to native/performance qualification.
+
+The selected Nara route remains an **independently runnable self-drawn Editor** over existing
+Application/Session, Host and render owners. Keep the actual Dear Editor separately selectable
+as a model/workflow reference. A required hybrid first-party migration or an official ImGui
+extension does not follow from these mechanisms. The current [UI design](../architecture/ui-foundation-design.md)
+and [R11 plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
+own that route; this section adds source evidence and proposed implementation implications.
+
+### Zed: State Identity Is Separate From Element Construction
+
+**Source facts:** these lifetimes coexist; a retained/immediate binary loses the useful distinctions.
+
+| Layer | Actual lifetime and identity | Consequence |
+| --- | --- | --- |
+| Model/view state | `Entity<T>` is a strong typed handle to application-managed state; it can be downgraded. A renderable entity implements `Render::render(&mut self, ...)`. | State can outlive a description or row element. The entity owner and retained strong handles still determine lifetime ([entity][zed-entity], [render contracts][zed-element]). |
+| Composition description | `RenderOnce::render(self, ...)` consumes a component recipe. Ordinary rendering constructs elements for layout/prepaint/paint. | Rebuilding a fluent description does not imply rebuilding model state; retaining state does not avoid description work ([element phases and components][zed-element]). |
+| Phase-local work | `RequestLayoutState` passes to prepaint/paint; `PrepaintState` passes to paint. | These associated types describe a draw's phase handoff, not an automatic cross-frame state/cache contract ([Element][zed-element]). |
+| Element-associated state | `with_element_state` uses `(GlobalElementId, TypeId)`; `use_keyed_state` retains an `Entity<S>` under an element path. `use_state` defaults to caller location. Unaccessed state is not carried into the next frame. | Keys must be unique in their containing namespace. Consecutive rendering retains compatible state; a virtualized-away element needs another owner if its state must survive. Caller location/index is insufficient for reorderable rows ([state API][zed-element-state], [frame transfer][zed-state-transfer]). |
+
+Entity-backed views introduce a scoped element identity; using the same entity for sibling views
+in the same scope collides. Nesting scopes identities, rather than making labels globally unique
+([View identity][zed-view-identity]). Runtime `TypeId` provides typed lookup, not a persisted state
+schema or a hot-reload migration format. **Nara inference:** separate domain item/property key,
+panel/component incarnation and description position; explicitly retain or retire draft, caret,
+selection and composition when an item leaves the active range.
+
+### Zed: Notification And Cached Work Have Explicit Boundaries
+
+**Source facts:** `Entity::update` and `cx.listener` give callbacks access to mutable state; neither
+automatically calls `notify`. `Entity::write` does notify. A state-changing listener, observer or
+async completion must arrange notification of the entity whose visible cached output changed.
+Keyed local state installs an observer that forwards its notifications to the containing view
+([update/listener][zed-update], [listener adapter][zed-listener], [write][zed-entity],
+[keyed-state forwarding][zed-keyed-notify]). The supplied text editor demonstrates the dependency
+edge: it observes its separate `Entity<String>`, clamps the cursor after an external write, and
+calls its own `cx.notify()` because the cached editor is keyed on the editor's notification
+([concrete observer][zed-editor-observer]). An arbitrary model read is not proof that every
+dependent cached view will be invalidated automatically.
+
+Reads/leases record accessed entity IDs. At draw completion, the App records which windows
+currently access them; `App::notify` invalidates those live windows and schedules observers.
+The window drains dirty entity IDs and marks their rendered view ancestry dirty using the prior
+dispatch tree. This is entity/view identity, not field-level dependency tracking. Cached-view
+replay restores its accessed-entity set so the window stays subscribed even when its render
+does not run ([entity reads/leases][zed-entity-access], [access tracking][zed-access], [notify routing][zed-notify],
+[dirty ancestry][zed-dirty], [cached view][zed-view-cache]). Explicit observers remain necessary
+where a separate model must invalidate the consuming cached view.
+
+| Reused artifact | Source-confirmed hit/miss boundary | Work and ownership limit |
+| --- | --- | --- |
+| Cached view subtree | Opt-in `Entity::cached`/`AnyView::cached`; compare bounds, content mask, inherited text style and opacity; require no dirty view or full refresh. Inspector picking disables caching. | Caller supplies a definite layout size: contents are not rendered to infer it on a hit. Props/dependencies outside the key require notification. A miss renders/layouts the subtree; it is not a general diff of all component fields ([API][zed-view-identity], [cache implementation][zed-view-cache]). |
+| Recorded prepaint/paint ranges | Replay hitboxes, dispatch subtree/focus, accessed state, text-layout uses, deferred draws, listeners/input handlers, tab stops and scene primitives into the next frame. | Reuse preserves more than pixels, but copying/moving/replaying recorded ranges costs work proportional to those records. It is not a framebuffer cache or a zero-cost frame; presentation/GPU work remains separate ([prepaint/paint replay][zed-frame-replay]). |
+| Layout | A cached view still requests an outer layout node; unchanged internal work can be skipped through cached output. The window clears the layout engine after drawing, and `TaffyLayoutEngine::clear` clears its Taffy tree. | This pin does **not** demonstrate a persistent whole-tree incremental layout arena across frames. Preserving a view's output and preserving Taffy nodes are different mechanisms ([cached outer layout][zed-view-cache], [draw completion][zed-draw-finish], [layout engine][zed-layout]). |
+| Shaped/wrapped lines | Current/previous-frame caches use text, font size, font runs, wrap/forced width; font-generation changes invalidate cached entries. Cached-subtree replay records reused line ranges. | Exact compatible requests avoid reshaping; unused entries age out at frame turnover. This is separate from edit-buffer state and raster residency ([line cache][zed-lines], [line request/key][zed-line-key]). |
+| Raster bounds and atlas tiles | `RenderGlyphParams` identifies font/glyph/size/subpixel variant/scale/rendering mode/dilation. Glyph painting asks the atlas to build/rasterize on a missing key; occupied entries return a tile. | A tile hit can avoid rasterization/upload while scene construction still occurs. Atlas removal/device-loss clearing and resource lifetime remain separate from view identity; this is no general memory-budget or GPU-time claim ([glyph key][zed-glyph-key], [glyph painting][zed-glyph-paint], [atlas lookup][zed-atlas], [Windows clearing][zed-atlas-reset]). |
+
+**Nara inference:** use explicit, owner-local invalidation before attempting automatic fine-grained
+dependency discovery. A color-only update should reach paint without invalidating compatible
+measurement; text/typography/width changes must reach their actual measurement dependencies.
+Custom-layout invalidation must include child intrinsic measurements and constraints, with a
+conservative complete-root fallback when dependencies are not yet represented. Borrow the
+notification/cache separation, not GPUI's App/Window/Entity ownership or a promise that every
+local event has subtree-only cost.
+
+### Zed Lists: Bounded Elements Do Not Mean Bounded Logical State
+
+**Source facts:** `uniform_list` measures a representative item, derives content height from item
+count and uniform height, and calls the renderer for the viewport's floor/ceil index range. It
+does not infer variable heights or semantic row identity; the inspected path has no configurable
+general overscan budget ([uniform construction/measurement][zed-uniform-measure],
+[visible range][zed-uniform-range]). The representative measurement is additional work beyond
+the visible-range callback. Application state and stable element keys must still identify items.
+
+Variable `List` instead receives caller-retained `ListState`: an `Rc<RefCell<_>>` containing a
+`SumTree<ListItem>`, measured sizes/optional uniform hints, focus handles and scroll state. Pixel
+`overdraw` permits measurement beyond the viewport; optional `measure_all` explicitly pays for
+the whole collection. Unknown extents can be provisional; hints converge as real rows are
+measured. `remeasure_items`, `remeasure`, `splice` and `reset` communicate changed extents or
+membership rather than discovering every model change ([state][zed-list-state],
+[measurement/invalidation API][zed-list-measure], [active/overdraw layout][zed-list-layout]).
+
+Its anchor is an **item index plus pixel offset**, with absolute/proportional remeasurement and
+splice adjustment. A splice before the anchor shifts the index; replacing the anchor range moves
+it to the replacement start. This is not a built-in domain-key reconciliation algorithm
+([anchor/splice][zed-list-splice]). `splice_focusable` supplies per-item handles; layout additionally
+renders an offscreen focused item so keyboard interaction can continue ([focus pinning][zed-list-focus]).
+That protects a configured focus route, not arbitrary selection/draft/IME after deletion or key
+reuse. Text input is installed for a focused handle for the upcoming frame, and cached replay
+preserves handlers ([input handler][zed-input], [replay][zed-frame-replay]). No native IME
+recycling qualification was performed here.
+
+**Nara inference:** budget visible, overscan and explicitly pinned editing rows separately from
+logical row metadata, prefix-height/index storage and filtering. Require domain-key plus
+intra-item offset anchoring across reorder/filter/remeasurement, and a deliberate
+pin/preserve/cancel policy for focus, selection, preedit and caret when recycling or deleting.
+Do not transfer an index-associated input route to the next domain item.
+
+### Open-GPUI: The Actual Virtualizer And Its Component Wrapper
+
+**Verified dependency fact:** at this pin, “the virtualizer crate” is a module of workspace
+`open-gpui-ui-core` **0.2.0**, not an identified independent third-party virtualizer dependency.
+`open-gpui-ui-components` **0.2.0** depends on the workspace core; that core's manifest lists
+`open-gpui-motion`. The root manifests and lockfile contain no separate virtualizer package.
+The implementation **is locally present** in `crates/ui_core/src/virtualizer.rs`; no missing crate
+implementation is being inferred ([workspace versions][open-workspace], [core manifest][open-core-manifest],
+[component manifest][open-components-manifest], [locked packages][open-lock]).
+
+**Source facts:** the reusable composition is `VirtualizedList` -> `VirtualizedListRenderPlan`
+-> core `VirtualizerState`/`VirtualizerGeometryCache` -> `RowWindow` -> GPUI row elements.
+The GPUI extension's `render_row` replaces row **content**, while the outer wrapper retains
+virtual placement, focus, hit testing, selection and accessibility. The gallery actually uses
+this hook and embeds a reusable `Button` in row content; it does not ask an ordinary author to
+repeat range arithmetic ([adapter and retained runtime][open-list-runtime],
+[plan/window projection][open-list-plan], [row wrapper][open-list-row],
+[gallery composition][open-gallery], [nested Button][open-gallery-button]).
+
+| Service/mechanism | Actual owner and limit |
+| --- | --- |
+| Ordinary author inputs | List ID, stable descriptor keys, shared item descriptors, size/theme tokens, fixed/measured mode, row-height estimate, overscan, default active/selected keys, activation/selection callbacks and optional custom content renderer. Concrete scroll handles and row renderers use the GPUI-specific extension; neutral geometry alone does not supply a native control ([builder][open-list-builder], [adapter][open-list-runtime]). |
+| Persistent interaction | A list-scoped `use_keyed_state` entity retains focus, active/selected/selection-anchor keys, typeahead, row measurements, geometry and reveal operations. Keyboard navigation/selection actions explicitly notify; changed child-bound measurements invalidate geometry and notify ([runtime][open-list-runtime], [measurement notification][open-list-notify], [keyboard route][open-list-keyboard]). This supplies collection interaction, not a generic editable-row draft/IME owner. |
+| Fixed extents | `resolve_fixed_window` computes geometry without materializing all row measurements; the caller passes keys for the active/overscan range. Overscan is a **total additional item budget**, divided before/after with edge redistribution ([fixed window][open-fixed], [overscan][open-overscan]). |
+| Variable extents | Measured-window resolution uses keyed sizes where known and the estimate otherwise. Cache rebuild visits every current item and retains dense geometry/key metadata; variable geometry uses prefix ends and partition-point searches. A hit avoids the per-item size callback and materializes only the active window ([geometry][open-geometry], [measured cache][open-measured], [dense rebuild][open-measured-build]). Thus bounded output does not imply bounded cold work or O(visible) retained metadata. |
+| Cache invalidation | Caller advances geometry revision when index-to-key/size results change; count, estimate, gap, margin and measurement authority also participate. Scroll/viewport/overscan can reuse geometry. Component runtime compares item-key order/snapshot measurements and invalidates when row measurement changes ([cache contract][open-geometry-cache], [runtime authority][open-list-authority], [notification][open-list-notify]). The inspected authority does not by itself prove complete width/font/content-change invalidation for every offscreen custom row. |
+| Identity and reveal | Unique domain keys become render keys; duplicates receive collision-avoiding index-dependent render keys, and selectable positions exclude duplicates. Scroll snapshots hold pixel offset plus measured-key sizes; key-based bring-into-view first materializes then delegates physical reveal. These mechanisms do not establish general keyed scroll anchoring across arbitrary edits ([duplicate handling][open-list-keys], [snapshot][open-snapshot], [reveal][open-list-reveal]). |
+
+**Cost limit from source:** even with fixed-window output or a geometry-cache hit, the component
+plan reconstructs state metadata, counts duplicate/source keys and builds selectable positions
+over the full collection; sticky-section lookup can scan backward. The active-window renderer
+therefore does not prove total per-frame work independent of logical count ([plan][open-list-plan],
+[metadata/keys][open-list-keys]). State identity tied to consecutive rendering also does not
+automatically preserve a custom text editor when its row is omitted. This study establishes
+component packaging and caller contracts, not native accessibility/IME quality, a universal
+virtualized editor, or a performance advantage over Nara.
+
+### Proposed Nara Implications Within Existing Owners
+
+The [November 4 cost record](../benchmarks/2026-11-04-ui-work-baseline.md) owns measured results.
+Its unchanged Inspector/Hierarchy calls build descriptions before returning the same `Arc<UiFrame>`;
+the read-only 10,000/100,000-row projections retain 40 layout nodes but still scan logical rows.
+Debug/release CPU repetitions establish that distinction, not a cache improvement or acceptance
+of equally large editable source projects. This research ran no native measurements. Full R11a
+remains open for its remaining attribution and fixed budgets. The moving-Game/static-Inspector
+native receipts, final health/refusal controls and numbers belong in the cost/qualification record.
+
+**Source-to-owner mapping and design inferences, not implemented changes:**
+
+| Nara owner now | Concrete implication for R11 |
+| --- | --- |
+| Private [Inspector](../../editor/src/frontend/imgui/owned_inspector.rs) and [Hierarchy presentation](../../editor/src/frontend/imgui/owned_hierarchy/presentation.rs) | R11a must keep pre-reuse description/comparison and full filter/count/index work visible. R11e can gate description construction on explicit unchanged observation/local-state/style/geometry dependencies; model publication and exact action validation retain their owners. Do not substitute pointer equality or a global frame revision for those dependencies. |
+| [UiCompiler/root](../../crates/nara_ui_kernel/src/compiler/root.rs), [root fallback](../../crates/nara_ui_kernel/src/compiler.rs) and [candidate-local text session](../../crates/nara_ui_kernel/src/compiler/text.rs) | Compilation currently builds a fresh Taffy tree; fallback is inert recovery. R11b's custom-layout consumer must exercise child measurement/placement without exporting Taffy storage. R11e should first compare unchanged component/root output reuse with persistent-layout work under measured pressure; the Zed source does not mandate a persistent arena or prove it faster. |
+| [Widgets](../../crates/nara_ui_widgets/src/lib.rs), [text editing](../../crates/nara_text/src/editing.rs) and the selected component/attachment owner | R11b should make two same-label keyed editors, reorder/filter and custom row/canvas composition work through public scoped services. Component keys, compatible state, owned effects and invalidation belong to the existing UI/panel lifetimes; original document commands stay in Session. Borrow the Open-GPUI outer-wrapper/content split, while making editable focus/IME eviction explicit. No universal UI model owner or GPUI dependency is proposed. |
+| [TextEngine window preparation](../../crates/nara_text/src/paint.rs) | Prepared sources avoid reshaping, but each window preparation still scans admitted glyphs and rasterizes distinct placed keys with call-local footprint reuse. R11e should distinguish source layout, placed raster-bounds/masks and clipping/placement dependencies; keep ordered font content, scale and subpixel identity complete, with bounded retained bytes and cache-loss fallback. |
+| [Presentation planner](../../crates/nara_ui_render/src/planner/mod.rs), [atlas](../../crates/nara_ui_render/src/atlas.rs), [WGPU UI](../../crates/nara_render_wgpu/src/ui.rs) and native Host | Keep packet/atlas/upload/pipeline reuse separate from description/layout/text reuse. R11b's neutral planner consumer must preserve existing target/resource custody. R11e must account for replay/lowering, upload/copy/GPU work, retained bytes, device recovery and retirement without treating an old packet/frame as a new presentation/input authorization. |
+
+Actionable adjustments for the owning plan/design, without expanding this research into runtime work:
+
+1. **R11a:** finish and record the already selected matched native/CPU baseline, then freeze numeric
+   budgets before optimization. Separate model refresh/filter/index, description/comparison,
+   layout/measurement, editing/shaping, placed raster preparation, packet/lowering, upload/GPU
+   and presentation costs. Keep the current text-counter exclusions explicit. The native probe
+   passing does not fill missing allocation/retention/input-latency/GPU cells or qualify the
+   independently runnable successor.
+2. **R11b:** qualify scoped keyed state and explicit update/effect/compose/layout/paint boundaries
+   using the independent composite and custom-layout consumers. Document which listener,
+   external model result and local edit invalidates which retained work. Supply ordinary authors
+   with lifecycle, theme/text/input/semantic services while allowing reusable custom row content;
+   test repeated sizing without repeated business effects and focused-row eviction without
+   retargeted IME/selection. Keep separate whole-Editor runnable closures for Dear and self-drawn.
+3. **R11e:** begin with the measured pre-reuse description and logical-scan costs, rather than
+   declaring virtualization complete at 40 nodes. Retain a filtered/keyed order/index only under
+   its real model/query dependencies; refresh/rebuild cost and dense variable-height metadata
+   remain charged. Compare fixed extents, measured estimates and anchored remeasurement where
+   real consumers require them. Attribute cache hits/misses/evictions and invalidation reasons,
+   including color, typography, width, DPI, reorder/removal and target recovery. Reuse existing
+   qualification facilities; do not add a benchmark kernel, dependency or new owner for this study.
+
+These recommendations add no implementation receipt, native qualification or dependency-adoption
+decision. They refine how the existing R11a/b/e contracts can be implemented and measured.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml
@@ -204,3 +392,56 @@ Host-owned data/commands or process isolation are candidates, not safety receipt
 [gpui-platform]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/gpui/src/platform.rs#L3413-L3518
 [linebender-imaging]: https://linebender.org/blog/tmil-25/#xilem-and-masonry
 [winit-ime]: https://docs.rs/winit/0.30.13/winit/event/enum.Ime.html
+[zed-element]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/element.rs#L9-L187
+[zed-entity]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/entity_map.rs#L512-L604
+[zed-entity-access]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/entity_map.rs#L287-L304
+[zed-element-state]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L4586-L4696
+[zed-state-transfer]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L1126-L1206
+[zed-view-identity]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/view.rs#L197-L312
+[zed-update]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app.rs#L3314-L3330
+[zed-listener]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/context.rs#L215-L250
+[zed-keyed-notify]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L7629-L7635
+[zed-editor-observer]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/examples/view_example/example_editor.rs#L39-L75
+[zed-access]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app.rs#L1459-L1495
+[zed-notify]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app.rs#L3165-L3200
+[zed-dirty]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L2478-L2491
+[zed-view-cache]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/view.rs#L487-L660
+[zed-frame-replay]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L4244-L4360
+[zed-draw-finish]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L3711-L3752
+[zed-layout]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/taffy.rs#L30-L82
+[zed-lines]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/text_system/line_layout.rs#L478-L595
+[zed-line-key]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/text_system/line_layout.rs#L671-L807
+[zed-glyph-key]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/text_system.rs#L1099-L1131
+[zed-glyph-paint]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5071-L5138
+[zed-atlas]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/platform.rs#L1825-L1878
+[zed-atlas-reset]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_windows/src/directx_atlas.rs#L46-L88
+[zed-uniform-measure]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/uniform_list.rs#L624-L683
+[zed-uniform-range]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/uniform_list.rs#L359-L509
+[zed-list-state]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/list.rs#L1-L99
+[zed-list-measure]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/list.rs#L307-L462
+[zed-list-layout]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/list.rs#L1035-L1142
+[zed-list-splice]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/list.rs#L490-L539
+[zed-list-focus]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/list.rs#L1194-L1262
+[zed-input]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5634-L5657
+[open-workspace]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/Cargo.toml#L46-L83
+[open-core-manifest]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/Cargo.toml#L1-L21
+[open-components-manifest]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/Cargo.toml#L1-L36
+[open-lock]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/Cargo.lock#L4551-L4575
+[open-list-runtime]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/runtime.rs#L1083-L1206
+[open-list-builder]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/runtime.rs#L851-L1012
+[open-list-plan]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render_plan.rs#L832-L905
+[open-list-row]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render.rs#L242-L333
+[open-gallery]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/examples/ui-foundation-gallery/src/pages/components/samples/virtualized_list.rs#L140-L181
+[open-gallery-button]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/examples/ui-foundation-gallery/src/pages/components/samples/virtualized_list.rs#L733-L803
+[open-list-notify]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/runtime.rs#L706-L718
+[open-list-keyboard]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/runtime.rs#L1509-L1630
+[open-fixed]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L757-L823
+[open-overscan]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L1432-L1453
+[open-geometry]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L179-L347
+[open-measured]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L933-L1067
+[open-measured-build]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L1226-L1305
+[open-geometry-cache]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L351-L465
+[open-list-authority]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/runtime.rs#L53-L123
+[open-list-keys]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render_plan.rs#L1008-L1142
+[open-snapshot]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L506-L551
+[open-list-reveal]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render.rs#L71-L118

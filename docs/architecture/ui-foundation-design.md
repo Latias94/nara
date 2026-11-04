@@ -304,6 +304,40 @@ compatible fallback. Prepared text avoids reshaping its editing source, but wind
 still scans the admitted layout and rasterizes distinct placed keys. These are current mechanisms,
 not evidence of zero idle work, persistent incremental layout or a performance improvement.
 
+### GPUI mechanisms to compare
+
+The [November 4 local source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-4-state-reuse-and-component-mechanisms)
+prioritizes Zed GPUI for retained state, notification and artifact reuse, and Open-GPUI for
+component composition and list geometry. Zed retains typed entities/element state while rebuilding
+ordinary descriptions. Its opt-in cached views require explicit dependency notification and
+compatible bounds, clip, inherited text style and opacity. Replaying their input/paint records
+still costs work. The inspected Zed pin clears its Taffy tree after drawing; it does not establish
+a persistent whole-tree layout arena as the preferred Nara optimization.
+
+Compare reuse at the measured owner first: unchanged description, layout/measurement, shaped
+text, placed raster, packet/atlas and native composition are separate artifacts. A listener,
+external model result or local edit must invalidate the consuming artifact, not merely mutate
+some retained state. Until those dependencies are represented completely, conservatively rebuild
+the affected root. Do not replace the existing owners with GPUI's App/Window/Entity model or
+assume automatic field-level dependency discovery.
+
+Virtualization has separate collection and active-row work. Uniform extents can derive a range
+arithmetically; measured extents need estimates, changed-size invalidation and retained geometry.
+The Open-GPUI pin implements `virtualizer` inside `open-gpui-ui-core` 0.2.0. Its outer list wrapper
+owns placement/interaction while a content renderer composes reusable controls. A measured
+geometry-cache hit avoids size callbacks, but dense metadata rebuild and the component's
+collection-wide preparation remain O(logical rows). This is a reusable packaging example,
+not evidence of O(visible rows) total work or a selected dependency.
+
+Nara's list consumers must distinguish visible, overscan and pinned editing rows from logical
+metadata, filtering and height-index storage. Retained order/measurement depends on actual item
+keys, content, width and typography. Reorder/filter/remeasurement needs an explicit domain-key
+plus intra-item-offset anchor policy; deletion requires a defined fallback. Focus, caret,
+selection, drafts and preedit need an explicit pin/preserve/cancel policy on eviction, and a
+recycled index cannot inherit the previous item's input route. The independent keyed composite
+and custom-layout consumers in R11b determine the public shape; R11e compares its private
+implementations against the baseline rather than freezing a generic virtual-list framework.
+
 ## Interface readiness and component authoring
 
 The existing foundation proves useful ownership and presentation contracts, not a general-purpose

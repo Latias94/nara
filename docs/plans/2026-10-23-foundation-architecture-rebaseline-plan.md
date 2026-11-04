@@ -1356,7 +1356,9 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 
 1. Record current description construction/comparison, layout, shaping, raster, allocation,
    upload and composition costs, including work before an unchanged-frame fast path. Attribute
-   the existing last-good cache separately from active incremental reuse.
+   the existing last-good cache separately from active incremental reuse. Separate model/query
+   refresh, filtering/key-order/index work and editing from bounded visible-row construction;
+   unchanged frame or geometry-cache hits must not hide those costs.
 2. Fix reference hardware, source/toolchain, build mode, font/DPI, cold/warm workloads, sample
    counts and numeric CPU/GPU/input-latency/retained-byte budgets before optimization. Commit
    that table with the measured baseline; do not infer budgets from this unmeasured design update.
@@ -1374,14 +1376,23 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 
 Success is a reproducible baseline and executable work-count assertions, not a performance win.
 No particular persistent layout arena, reactive language, public cache key or new crate is frozen.
+The [pinned Zed/Open-GPUI follow-up](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-4-state-reuse-and-component-mechanisms)
+supplies notification, cached-view replay and fixed/measured list comparisons. Zed's inspected
+layout tree is cleared between draws; its retained state and cached views do not require Nara to
+retain a whole Taffy arena. Open-GPUI's `virtualizer` is a workspace core module, not a selected
+third-party dependency. Borrow the mechanisms under existing owners and measured pressure.
 
 The first [work-observation prerequisite](../benchmarks/2026-11-04-ui-work-baseline.md) adds
 owner-local text/compiler/planner counters, description-before-reuse assertions and dependency
-closure checks. Its debug Inspector and explicitly read-only 10,000/100,000-row projection probes
+closure checks. Its debug/release Inspector and explicitly read-only 10,000/100,000-row projection probes
 show bounded live layouts but repeated description/scanning work. An actual 10,000-entity project
 Open was refused by startup source preparation before a Session existed; this is recorded
-separately rather than hidden by widening admission. These probes do not complete R11a: matched
-optimized/native active-View, allocation/upload/GPU/latency and fixed numeric budgets remain open.
+separately rather than hidden by widening admission. Three release native repetitions now retain
+the exact Inspector beside an advancing Game for 128 matching current primary composites, with
+observed geometry, original-device health and actual terminal-loss refusal. This remains the
+current Dear-hosted composition, with repeated description work. Allocation/full upload/GPU
+timestamps, OS input/display latency, remaining matched workloads and fixed numeric budgets keep
+R11a open; neither an independent frontend nor a cache improvement is claimed.
 
 ### R11b: Public panel hosting and component composition
 
@@ -1434,6 +1445,11 @@ Keep exact trait shapes provisional until the independent composite/custom compo
 - Independently author a composite with two same-label keyed editors. Reorder, insert, filter
   and change one state type/document binding; compatible drafts remain correctly associated,
   collisions/incompatible reuse are explicit and retired tokens cannot act on replacements.
+- Compose custom row content through a wrapper that owns placement, identity, focus and
+  collection interaction. Exercise focused-row eviction, deletion and same-index replacement
+  with drafts, caret/selection and preedit; pin/preserve/cancel is explicit. Document which local
+  edit, listener and external model result invalidates each consuming artifact. Custom layout
+  includes child intrinsic measurements and constraints without exporting Taffy storage.
 - Repeat a sizing/composition pass without repeating a command, task or subscription. Close
   with a local async request pending; its original result retires without reaching a replacement.
 - Override one library's scoped style and change typography/fallback. Preserve unrelated style
@@ -1530,6 +1546,11 @@ distributions rather than creating registry snapshots or multiplying benchmark s
   layout, shaping and unchanged glyph uploads. Count comparison and composition work honestly.
 - Local paint/interaction changes preserve unrelated text/layout; font/constraint/DPI changes
   invalidate exactly their dependent work. Failed/rejected work preserves the original route rules.
+- Compare fixed-height range arithmetic and, where the real consumer needs it, estimated/measured
+  extents with keyed intra-row scroll anchoring and changed-size invalidation. Attribute dense
+  metadata, filter/order/height-index rebuild and visible/overscan/pinned rows separately. A
+  geometry hit or 40 live nodes is not proof of total O(visible) work. Compare unchanged output
+  reuse before deciding whether persistent layout storage pays for its lifetime complexity.
 - Live collection work scales with visible/overscan/pinned-edit rows. Attribute model refresh,
   filtering and index construction separately; clipping alone is not virtualization.
 - Actual retained CPU/GPU bytes plateau through repeated attach/close/rehost and device recovery;

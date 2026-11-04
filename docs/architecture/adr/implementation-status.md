@@ -32,10 +32,14 @@ by this documentation correction.
 
 The first [R11a work-observation prerequisite](../../benchmarks/2026-11-04-ui-work-baseline.md)
 adds detached cumulative text/compiler/planner observations and executable description/dependency
-checks. Debug CPU probes distinguish frame reuse from repeated description work and keep a
+checks. Debug/release CPU probes distinguish frame reuse from repeated description work and keep a
 full-source startup allowance refusal separate from read-only 10,000/100,000-row projection costs.
-This is not a cache optimization or independent frontend qualification. Optimized/native costs,
-allocation/upload/GPU/latency and fixed budgets still keep R11a open; R11b-f remain unimplemented.
+Three release native repetitions now keep the exact static Inspector and advancing Game in the
+same 128 current window frames, with actual geometry, original-device health and terminal-loss
+refusal controls. Description work remains repeated. Allocation/full upload/GPU timestamps,
+OS input/display latency and fixed budgets still keep R11a open. The pinned Zed/Open-GPUI study
+refines state/invalidation and collection consumers without selecting their ownership/dependencies.
+No cache optimization or independent frontend is qualified; R11b-f remain unimplemented.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
