@@ -214,10 +214,7 @@ pub struct ImguiEditorFrontend {
     owned_images:
         std::collections::BTreeMap<crate::workspace::EditorPanelInstanceId, ImguiOwnedImage>,
     owned_fonts: Vec<nara_text::FontFace>,
-    identity: std::sync::Arc<()>,
-    next_candidate: u64,
-    next_submission: u64,
-    pending: Option<std::sync::Arc<submission::PendingCandidate>>,
+    submissions: crate::panels::submission::SubmissionOwner<submission::Recipient>,
     presentation: workspace::ImguiPanelPresentation,
     project: project::ImguiProjectPanels,
     toolbar: authoring::ImguiAuthoringPanels,
@@ -238,7 +235,12 @@ impl ImguiEditorFrontend {
         authoring: Option<&nara::project_host::EditorUiAuthoringFrame>,
     ) -> Option<ImguiEditorSubmission> {
         let revision = output.actions.take()?.frame_revision();
-        if let Some(pending) = self.pending.as_mut().and_then(std::sync::Arc::get_mut) {
+        if let Some(pending) = self
+            .submissions
+            .pending
+            .as_mut()
+            .and_then(std::sync::Arc::get_mut)
+        {
             pending.failure = Some(PanelActionNotDispatched::PresentationFailed);
         }
         // A failed render may only roll back its Canvas gesture, not admit other UI actions.
@@ -301,7 +303,12 @@ impl ImguiEditorFrontend {
         let mut actions = batch.into_actions();
         let first = actions.len();
         actions.append(&mut output.canvas_actions);
-        if let Some(pending) = self.pending.as_mut().and_then(std::sync::Arc::get_mut) {
+        if let Some(pending) = self
+            .submissions
+            .pending
+            .as_mut()
+            .and_then(std::sync::Arc::get_mut)
+        {
             let origin = submission::PanelOrigin {
                 instance,
                 incarnation: std::sync::Arc::clone(&widgets.incarnation),
@@ -406,14 +413,8 @@ impl ImguiEditorFrontend {
         output: &mut ImguiFrontendOutput,
     ) -> Option<ImguiEditorSubmission> {
         let serial = output.candidate_serial.take()?;
-        let pending = self
-            .pending
-            .as_ref()
-            .filter(|pending| pending.serial == serial)?;
         Some(ImguiEditorSubmission {
-            frontend: std::sync::Arc::clone(&self.identity),
-            ledger: std::sync::Arc::clone(pending),
-            batch: output.actions.take()?,
+            shared: self.submissions.seal(serial, output.actions.take()?)?,
         })
     }
 
@@ -430,55 +431,28 @@ impl ImguiEditorFrontend {
         application: &mut crate::EditorApplication,
         submission: ImguiEditorSubmission,
     ) -> Option<crate::app::EditorApplicationDispatch> {
-        if !std::sync::Arc::ptr_eq(&self.identity, &submission.frontend)
-            || !self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| std::sync::Arc::ptr_eq(pending, &submission.ledger))
-        {
+        if !self.submissions.owns(&submission.shared) {
             return None;
         }
         self.reconcile_application(application);
-        if submission.ledger.generation != application.workspace_generation() {
-            self.settle_pending(None, Some(PanelActionNotDispatched::ProjectChanged));
-            return None;
-        }
-        let revision = submission.batch.frame_revision();
-        let pending = self.pending.as_ref()?;
-        let retired = pending
-            .action_origins
-            .iter()
-            .filter_map(|(slot, origin)| {
-                (!self
-                    .presentation
+        let admission = self
+            .submissions
+            .dispatch(application, submission.shared, |origin| {
+                self.presentation
                     .widgets
                     .get(&origin.instance)
                     .is_some_and(|widgets| {
                         std::sync::Arc::ptr_eq(&origin.incarnation, &widgets.incarnation)
-                    }))
-                .then_some(*slot)
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        let mut actions = Vec::new();
-        let slots = submission
-            .batch
-            .into_actions()
-            .into_iter()
-            .enumerate()
-            .map(|(slot, action)| {
-                if retired.contains(&slot) {
-                    None
-                } else {
-                    let compact = actions.len();
-                    actions.push(action);
-                    Some(compact)
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut dispatch =
-            application.dispatch_editor_actions(EditorActionBatch::new(revision, actions));
-        dispatch.remap_original_slots(&slots);
-        Some(dispatch)
+                    })
+            });
+        match admission {
+            crate::panels::submission::SubmissionAdmission::Foreign => None,
+            crate::panels::submission::SubmissionAdmission::ProjectChanged => {
+                self.settle_pending(None, Some(PanelActionNotDispatched::ProjectChanged));
+                None
+            }
+            crate::panels::submission::SubmissionAdmission::Dispatched(dispatch) => Some(dispatch),
+        }
     }
 
     pub(crate) fn finish_dispatch(
@@ -521,7 +495,7 @@ impl ImguiEditorFrontend {
         dispatch: Option<&crate::app::EditorApplicationDispatch>,
         reason: Option<PanelActionNotDispatched>,
     ) {
-        let Some(pending) = self.pending.take() else {
+        let Some(pending) = self.submissions.pending.take() else {
             return;
         };
         let reason = reason.or(pending.failure);
@@ -562,26 +536,8 @@ impl ImguiEditorFrontend {
             else {
                 continue;
             };
-            let result = if let Some(reason) = reason {
-                PanelActionDispatch::NotDispatched(reason)
-            } else if let Some(outcome) =
-                dispatch.and_then(|dispatch| dispatch.original_outcome(submission.slot))
-            {
-                PanelActionDispatch::Dispatched(outcome.clone())
-            } else {
-                let dispatch =
-                    dispatch.expect("dispatch settlement has a dispatch or explicit reason");
-                let reason = if dispatch.original_slots().get(submission.slot) == Some(&None)
-                    && dispatch.closing_filter()
-                {
-                    PanelActionNotDispatched::Closing
-                } else if let Some(Err(rejection)) = dispatch.feedback() {
-                    PanelActionNotDispatched::BatchRejected(rejection)
-                } else {
-                    PanelActionNotDispatched::NoPublishedFrame
-                };
-                PanelActionDispatch::NotDispatched(reason)
-            };
+            let result =
+                crate::panels::submission::resolve_result(submission.slot, dispatch, reason);
             match submission.recipient {
                 submission::Recipient::Contribution => {
                     if let Some(panel) = widgets.panel.as_mut() {
@@ -930,11 +886,15 @@ impl ImguiEditorFrontend {
                 if widgets.kind != instance.kind()
                     || widgets.document != document
                     || widgets.target != *instance.target()
+                    || widgets.instance_lifecycle.as_ref().is_none_or(|lifecycle| {
+                        !std::sync::Arc::ptr_eq(lifecycle, instance.lifecycle())
+                    })
                 {
                     *widgets = workspace::ImguiPanelWidgets {
                         kind: instance.kind().to_owned(),
                         document,
                         target: instance.target().clone(),
+                        instance_lifecycle: Some(std::sync::Arc::clone(instance.lifecycle())),
                         ..Default::default()
                     };
                 }
@@ -968,7 +928,7 @@ impl ImguiEditorFrontend {
                         input: &input,
                         actions: &mut actions,
                         submissions: &mut submissions,
-                        next_submission: &mut self.next_submission,
+                        next_submission: &mut self.submissions.next_submission,
                         output: &mut output,
                     },
                 );
@@ -1037,20 +997,11 @@ impl ImguiEditorFrontend {
         }
         show_dirty_close_dialog(ui, &frame, &mut actions);
         output.actions = Some(EditorActionBatch::new(frame.revision(), actions));
-        let serial = self.next_candidate;
-        self.next_candidate = self
-            .next_candidate
-            .checked_add(1)
-            .expect("frontend candidate identity exhausted");
-        output.candidate_serial = Some(serial);
-        self.pending = Some(std::sync::Arc::new(submission::PendingCandidate {
-            serial,
-            generation,
-            submissions,
-            panels,
-            action_origins,
-            failure: None,
-        }));
+        output.candidate_serial =
+            Some(
+                self.submissions
+                    .stage(generation, submissions, panels, action_origins),
+            );
         Ok(output)
     }
 }

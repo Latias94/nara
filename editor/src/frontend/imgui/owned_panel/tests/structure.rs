@@ -152,12 +152,12 @@ pub(super) fn complete_exactly(
     expected: ComponentValue,
 ) {
     let candidate = harness.draw();
-    let [submission] = candidate.ledger.submissions.as_slice() else {
+    let [submission] = candidate.shared.ledger.submissions.as_slice() else {
         panic!("whole-field Apply must retain one exact submission")
     };
     let slot = submission.slot;
     let id = submission.id;
-    let target = candidate.batch.first_field_target().unwrap();
+    let target = candidate.shared.batch.first_field_target().unwrap();
     let key = FieldKey::from_target(&target);
     assert_eq!(key.field.as_str(), field);
     assert_eq!(

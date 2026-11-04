@@ -52,8 +52,8 @@ fn select(harness: &mut Harness, entity: &str) {
 
 fn repaint(harness: &mut Harness) {
     let candidate = harness.draw();
-    assert!(candidate.ledger.submissions.is_empty());
-    assert!(candidate.batch.first_field_target().is_none());
+    assert!(candidate.shared.ledger.submissions.is_empty());
+    assert!(candidate.shared.batch.first_field_target().is_none());
     harness.submit(candidate);
 }
 
@@ -242,7 +242,7 @@ fn apply_exactly(
     ));
 
     let candidate = harness.draw();
-    let [submission] = candidate.ledger.submissions.as_slice() else {
+    let [submission] = candidate.shared.ledger.submissions.as_slice() else {
         panic!("the edit must receive one exact submission identity")
     };
     let slot = submission.slot;
@@ -254,7 +254,7 @@ fn apply_exactly(
             .pending,
         Some(submission.id),
     );
-    assert_eq!(candidate.batch.first_field_target(), Some(target));
+    assert_eq!(candidate.shared.batch.first_field_target(), Some(target));
     assert_eq!(
         harness
             .application
@@ -285,7 +285,7 @@ fn apply_exactly(
             .drafts
             .contains_key(&key)
     );
-    assert!(harness.frontend.pending.is_none());
+    assert!(harness.frontend.submissions.pending.is_none());
     assert_eq!(selected_value(harness, field), expected);
 }
 

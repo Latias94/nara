@@ -1446,10 +1446,11 @@ not close the native all-panel font transaction: the Host must still coordinate 
 old/new presented geometry and routed input without silently dropping drafts or pending results.
 
 **Files:** `editor/src/platform/composition.rs`, `editor/src/frontend/imgui/workspace.rs`,
+`editor/src/panels/`,
 `editor/src/platform/imgui/owned.rs` and keyboard/IME adapters, their actual successor modules,
 `crates/nara_ui_render/Cargo.toml` and `crates/nara_ui_render/src/integration.rs`,
-`tests/fixtures/module-consumer/editor-panel-consumer/` and planned
-`tests/fixtures/editor-ui-host-consumer/` with a separately compiled `tests/panel_lifecycle.rs`.
+`tests/fixtures/module-consumer/editor-panel-consumer/` and
+`tests/fixtures/editor-ui-host-consumer/` with separately compiled public/native tests.
 
 **Approach:** replace the ImGui-specific public composition shape with contribution/document
 access plus per-instance frontend attachment and finite Host services. Ordinary component authors
@@ -1596,6 +1597,95 @@ outside that file-existence check. These are not warning-free checks:
 existing style/dead-code warnings and neutral-mode unused import-budget helpers remain. No
 timing, memory improvement, general foreign-frontend hosting or complete R11b/foundation claim
 follows from this dependency prerequisite.
+
+#### Toolkit-independent panel custody prerequisite
+
+Move the reference frontend's existing panel incarnation, candidate/submission identities,
+original action-slot filtering and exact result resolution into one toolkit-independent
+implementation. Reuse that implementation from the Dear reference and a public typed panel
+Host; do not add another application dispatch path or document/history owner. Read/query/source
+preparation remains the original Application/Session access. Compatible relocation and GPU
+reconstruction preserve frontend state; hide/close, target/resolved-document change, layout reset
+and project replacement retire the exact incarnation. Foreign/superseded candidates cannot
+settle another Host. Retired actions retain holes in the original slot sequence.
+
+Make the reference toolkit an explicit default-enabled `imgui-reference` feature until complete
+successor acceptance. Independent Editor/application/panel consumers disable defaults and must
+need no Dear package, context, renderer or docking/input service. This is source selection, not
+an empty frontend or a stubbed Editor. Preserve default reference workflows and its compiled
+Host contribution selection. The neutral panel Host owns semantic lifecycle/action custody;
+native input, overlay, text/platform services and render execution keep their existing owners.
+
+Use an independently locked consumer with reusable Nara controls and separately authored panel
+state. Exercise bounded non-active queries, prepared source edits, exact callbacks, Undo/Redo,
+Save/Reopen, relocation, hide/reopen, layout/project replacement, retained/foreign candidates and
+closing filters through the public interfaces. Keep drawing/presentation observations separate
+from semantic CPU probes. Qualify the resulting native attachment through the same original
+WGPU Host; broader capability arbitration and the full independent Editor remain R11b work.
+
+The selected implementation adds `nara_editor::panels::EditorPanelHost<P>`, scoped context and an
+opaque owned submission. The reference and typed Host use one extracted private
+`SubmissionOwner<R>` implementation for candidate identity, original-slot filtering and exact
+result resolution. The public context forwards bounded reads/preparation to Application and
+Session; consuming edit/construction queue refusal returns the original candidate. Typed
+factories and descriptors register atomically. A process-local, nonserialized workspace-instance
+lifetime marker fixes hide/reopen, close/reopen and target-away/return transitions between
+frontend calls. The reference gesture owner also cancels after that exact instance retires.
+Compatible placement/native-window/render-view changes preserve local state.
+
+The separately locked `editor-ui-host-consumer` disables defaults and authors its own retained
+field/buttons/modal. Its CPU workflows preserve non-active navigation, complete source records
+and placements, history and persistence through the public context. The native executable uses
+the original `WgpuRenderHost` and public `UiSurfacePresenter`, with the existing fixture's public
+image sampler. Six actual composites include one retired candidate; five enter the input journal.
+Replacement input requires actual presentation and focus. Exit cancels active preedit through
+the reducer, clears interaction facts, drops both panel instances and physically drains the
+original GPU Host with no cleanup faults or abandoned submissions.
+
+Qualification corrected three fixture assumptions without reducing acceptance. The internal
+Prefab-open helper now waits for the exact public Browser request/result rather than guessing
+completion from a source locator; both originally failing Host tests then pass. The external
+CPU consumer uses public Application states to observe replacement, without exposing the private
+workspace generation. The first native run fails at Apply because a root layout offset was
+treated as screen placement. A fill modal root with a positioned child and clicks derived from
+actual presented clipped semantics correct the fixture. The complete native trajectory then
+passes. Independent review additionally strengthens retired-action evidence from an invisible
+read to an otherwise valid prepared mutation, verifies property/basis/history/disk remain exact,
+correlates every persistence callback with its attempt, and checks reducer/input/panel cleanup.
+Final independent production and strengthened-consumer reviews report no P1/P2 findings; those
+read-only reviews do not substitute for the executed qualification below.
+
+Executed on Windows 11 with Rust 1.95.0, serial Cargo and the shared root `target`:
+
+| Scope | Executed result |
+| --- | --- |
+| Editor without `imgui-reference`, library plus workspace-layout/generic-composition/open-recovery integrations | 188/188, two skipped; includes all 15 semantic Host tests; run `3ede544a-2df1-438d-8d4e-5a381c7adda3` |
+| Default reference Editor library, Application/panel/authoring-loop/first-game/workspace-layout integrations | 450/450, 61 skipped; run `3acafc01-8ccb-4e35-b07c-59caa1a94708` |
+| Independently locked public panel CPU workflows after stronger retirement/persistence assertions | 7/7, no skips; run `2e95472c-c94d-4fdd-a211-a56382aadcad` |
+| Independently built public panel native Windows/DX12 trajectory | 1/1, no skips; six presentations/five journal commits; run `f704f2a9-b954-442a-87cd-b5bfbd10e494` |
+| Selected default-reference native authoring/Inspector/Hierarchy/Canvas/Scene/Game/panel/recovery/close trajectories on Windows/DX12 | 33/33, one slow; 441 outside this ignored-only filter; run `52760c9b-9b5f-4cdd-8a9b-033b2eedbfca` |
+| Existing independently compiled reference-panel/document/tool consumers | 46/46, four skipped; run `642e084a-b100-404c-a5f8-705163164e7c` |
+| Existing external public embedded native Host on Windows/DX12 | 1/1, no skips; run `8c2174a7-8d99-44ab-b439-0cbbf56322b0` |
+| Independently locked panel consumer's normal/build all-target graphs, with and without `native` | 1/1, 14 outside this filter; no Dear package; run `1b7a2dbc-1ddd-4433-871c-ea4c9ec10a49` |
+
+These cohorts overlap with later default-feature regressions; counts are not additive. The
+independent lock resolves offline without Dear, and its `native` build uses explicit WGPU/Winit.
+The 447-package lock adds no dependency version beyond the root lock; only the consumer itself is new.
+Editor still has those broader product dependencies even with the reference disabled. The
+semantic Host owns no native capability arbitration, input route or presentation transaction.
+Injected pointer/IME delivery and accepted composites establish neither OS event/accessibility
+parity nor a pixel readback oracle. No new performance, incremental cache, extension hot reload,
+foreign-toolkit compatibility or complete independent Editor/R11b/foundation claim follows.
+
+Correctness Clippy passes Editor all targets with all features and separately without defaults,
+plus all targets/all features of the independent panel consumer. Both the selected reference
+Editor executable and the independent native example build under locked offline resolution.
+The final review preserves the original source/result/lifetime assertions and removes no
+incumbent workflow. These checks are not warning-free: existing style/dead-code diagnostics,
+reference-only fields/helpers in the neutral build and large owned result/candidate returns
+remain. Root and independent-consumer format checks pass; changed-document local file links
+resolve, excluding remote URLs and fragment validity. Documentation closure adds no native or
+performance claim beyond the executed scopes above.
 
 #### Custom child-measurement and layout prerequisite
 

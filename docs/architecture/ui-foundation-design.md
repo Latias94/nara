@@ -108,10 +108,15 @@ and domain-neutral interaction; document-specific graphs and inspectors consume 
 layer. External frontends may bypass Nara layout/widgets while using the same Host admission.
 Actual backend work follows the existing render-program/Feature and retained-output contracts.
 
-The current package `nara-editor` still includes Dear/Winit/WGPU dependencies and its public panel
-trait is Dear-specific. This target diagram does not claim that the portable Editor composition
-or independent panel-hosting successor already exists. Module/crate extraction follows an actual
-independent dependency closure and consumer, with direct migration of replaced interfaces.
+The package `nara-editor` selects its Dear frontend through the default-enabled `imgui-reference`
+feature. Disabling defaults retains Application, workspace and the typed semantic
+`EditorPanelHost<P>` without Dear. The Host shares the reference frontend's candidate/result
+implementation and preserves the original Session query, preparation, history and persistence
+owners. Its caller owns drawing and native presentation. Winit/WGPU and broader product
+dependencies remain in the Editor package; this is not a minimal headless dependency closure.
+The [panel custody prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
+keeps its finite independent consumer distinct from native capability arbitration and the
+complete self-drawn Editor. Module/crate extraction follows actual consumer pressure.
 The [R11b dependency prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#neutral-presentation-consumption-prerequisite)
 separates the neutral packet/planner/presenter from App/ECS installation inside the current
 owners. Asset, Identity, Diagnostic, Image, Render, Window and UI Render use explicit `runtime`

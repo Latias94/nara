@@ -340,14 +340,17 @@ fn a_failed_canvas_frame_rolls_back_the_drag_without_dispatching_unpresented_act
         .frontend
         .reject_canvas_frame(released, Some(&frame))
         .unwrap();
-    let revision = batch.batch.frame_revision();
-    let actions =
-        std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, [])).into_actions();
+    let revision = batch.shared.batch.frame_revision();
+    let actions = std::mem::replace(
+        &mut batch.shared.batch,
+        EditorActionBatch::new(revision, []),
+    )
+    .into_actions();
     assert!(matches!(
         actions.as_slice(),
         [EditorAction::Gesture(EditorGestureAction::Cancel { .. })]
     ));
-    batch.batch = EditorActionBatch::new(revision, actions);
+    batch.shared.batch = EditorActionBatch::new(revision, actions);
     interaction
         .frontend
         .submit_and_drive(&mut interaction.application, batch, Duration::ZERO);

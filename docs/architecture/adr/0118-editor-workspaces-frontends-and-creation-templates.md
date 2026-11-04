@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-04 (independent reference/self-drawn Editor development and extension ownership)
+**Last Revised**: 2026-11-05 (toolkit-independent panel custody and explicit reference selection)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -274,6 +274,27 @@ The target panel contract separates a contribution's document/query/command acce
 frontend's content, interaction and rendering. `ImguiEditorPanel` is the current selected
 frontend interface, not the permanent shape of all Editor extensions. Refactor its replacement
 through public consumers; exposing private `OwnedPanelSurface` fields is not that replacement.
+
+The semantic prerequisite exposes typed `EditorPanelHost<P>` custody separately from native
+attachment. A panel's state receives its exact action observations; its caller supplies the
+frontend's update/presentation work through the scoped `EditorPanelContext`. Source queries and
+preparation use the original Application/Session owners. The reference and neutral Hosts share
+one implementation of candidate/submission custody, original-slot filtering and result resolution.
+They retain their toolkit-specific state and callbacks rather than a universal widget tree.
+
+Workspace instances carry a process-local lifetime observation that is never serialized into
+preferences. Actual hide/close and target changes retire that observation, including changes
+that return to identical visible fields before the next frontend cycle. Relocation, native-window
+placement and graphics reconstruction preserve it. Layout/project replacement retains its
+existing separate lifetime boundary. A matching saved instance ID, target and title cannot
+revive a retired state or queued action. Accepted document edits remain with their original
+history owner even if the originating panel subsequently retires.
+
+The `imgui-reference` feature selects the current reference frontend and is default-enabled
+until complete successor acceptance. Disabling defaults preserves Application, workspace and
+semantic panel access without requiring Dear. This library selection alone does not provide the
+independent Editor shell or the native capabilities below. The [panel custody prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
+owns its independent consumer and verification scope; remaining R11b attachment work stays open.
 
 Workspace owns contribution and panel-instance identity, document targeting, placement and
 versioned layout preferences. Each frontend owns its internal control tree or immediate context,

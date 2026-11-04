@@ -190,6 +190,9 @@ impl EditorWorkspaceLayout {
         if contribution.multiplicity() == EditorPanelMultiplicity::Single
             && let Some(panel) = self.panels.iter_mut().find(|panel| panel.kind == kind)
         {
+            if panel.target != target {
+                panel.lifecycle = Arc::new(());
+            }
             panel.open = true;
             panel.visible = true;
             panel.target = target;
@@ -202,6 +205,7 @@ impl EditorWorkspaceLayout {
         let id = EditorPanelInstanceId(self.next_instance);
         self.next_instance = next;
         self.panels.push(EditorPanelInstance {
+            lifecycle: Arc::new(()),
             id,
             kind: kind.to_owned(),
             target,
@@ -215,6 +219,9 @@ impl EditorWorkspaceLayout {
     }
     pub fn close(&mut self, id: EditorPanelInstanceId) -> bool {
         self.change(id, |panel| {
+            if panel.open || panel.visible {
+                panel.lifecycle = Arc::new(());
+            }
             panel.open = false;
             panel.visible = false;
         })
@@ -226,10 +233,20 @@ impl EditorWorkspaceLayout {
         })
     }
     pub fn set_visible(&mut self, id: EditorPanelInstanceId, visible: bool) -> bool {
-        self.change(id, |panel| panel.visible = visible)
+        self.change(id, |panel| {
+            if panel.visible && !visible {
+                panel.lifecycle = Arc::new(());
+            }
+            panel.visible = visible;
+        })
     }
     pub fn set_target(&mut self, id: EditorPanelInstanceId, target: EditorPanelTarget) -> bool {
-        self.change(id, |panel| panel.target = target)
+        self.change(id, |panel| {
+            if panel.target != target {
+                panel.lifecycle = Arc::new(());
+            }
+            panel.target = target;
+        })
     }
     pub fn set_render_view(
         &mut self,

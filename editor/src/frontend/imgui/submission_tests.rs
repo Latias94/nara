@@ -832,11 +832,11 @@ fn panel_queue_refusal_preserves_both_owned_candidates_without_a_commit_callback
     let candidate = harness.draw();
     assert!(retained.borrow().is_some());
     assert_eq!(
-        candidate.ledger.submissions.len(),
+        candidate.shared.ledger.submissions.len(),
         super::submission::MAX_PANEL_SUBMISSIONS
     );
     assert_eq!(
-        candidate.batch.into_actions().len(),
+        candidate.shared.batch.into_actions().len(),
         super::submission::MAX_PANEL_SUBMISSIONS
     );
     assert!(std::sync::Arc::ptr_eq(
@@ -1081,7 +1081,10 @@ fn superseding_both_consuming_candidates_refuses_each_original_submission_once()
     let saved = std::fs::read(&source).unwrap();
     let (stale, ids) = queue_both_prepared_candidates(&mut harness);
     let fresh = harness.draw();
-    assert_eq!(stale.batch.frame_revision(), fresh.batch.frame_revision());
+    assert_eq!(
+        stale.shared.batch.frame_revision(),
+        fresh.shared.batch.frame_revision()
+    );
     assert_eq!(
         harness.panels[0].1.borrow().finished,
         ids.map(|id| (
@@ -1107,7 +1110,15 @@ fn superseding_both_consuming_candidates_refuses_each_original_submission_once()
 
 #[test]
 fn both_consuming_candidates_are_filtered_before_hide_retarget_reset_or_restore() {
-    for fence in ["hide", "retarget", "reset", "restore"] {
+    for fence in [
+        "hide",
+        "hide-reopen",
+        "close-reopen",
+        "retarget",
+        "retarget-return",
+        "reset",
+        "restore",
+    ] {
         let mut harness = Harness::new(1);
         let before = harness.application.current_frame().unwrap();
         let source = harness._project.root.join("worlds/entry.scene.json");
@@ -1124,12 +1135,28 @@ fn both_consuming_candidates_are_filtered_before_hide_retarget_reset_or_restore(
                     .layout_mut()
                     .set_visible(id, false);
             }
+            "hide-reopen" => {
+                let layout = harness.application.panel_workspace_mut().layout_mut();
+                layout.set_visible(id, false);
+                layout.reopen(id);
+            }
+            "close-reopen" => {
+                let layout = harness.application.panel_workspace_mut().layout_mut();
+                layout.close(id);
+                layout.reopen(id);
+            }
             "retarget" => {
                 harness
                     .application
                     .panel_workspace_mut()
                     .layout_mut()
                     .set_target(id, EditorPanelTarget::Workspace);
+            }
+            "retarget-return" => {
+                let layout = harness.application.panel_workspace_mut().layout_mut();
+                let target = layout.instance(id).unwrap().target().clone();
+                layout.set_target(id, EditorPanelTarget::Workspace);
+                layout.set_target(id, target);
             }
             "reset" => harness.application.panel_workspace_mut().reset(),
             "restore" => {
@@ -1172,6 +1199,7 @@ fn both_consuming_candidates_are_filtered_before_hide_retarget_reset_or_restore(
                 .target()
                 .document(&harness.application.current_frame().unwrap()),
             target: instance.target().clone(),
+            instance_lifecycle: Some(std::sync::Arc::clone(instance.lifecycle())),
             ..Default::default()
         };
         let replacement_incarnation = std::sync::Arc::clone(&widgets.incarnation);
@@ -1641,7 +1669,7 @@ fn an_unrelated_application_drive_can_stale_a_candidate_without_settling_its_cal
     let mut harness = Harness::new(1);
     harness.panels[0].1.borrow_mut().count = 2;
     let candidate = harness.draw();
-    let received = candidate.batch.frame_revision();
+    let received = candidate.shared.batch.frame_revision();
     harness
         .application
         .submit_and_drive(EditorActionBatch::new(received, []), Duration::ZERO);
@@ -1680,7 +1708,7 @@ fn foreign_and_superseded_candidates_with_the_same_frame_cannot_dispatch() {
     let mut harness = Harness::new(1);
     harness.panels[0].1.borrow_mut().count = 2;
     let foreign = harness.draw();
-    let revision = foreign.batch.frame_revision();
+    let revision = foreign.shared.batch.frame_revision();
     let before = harness.application.current_frame().unwrap();
     let update = ImguiEditorFrontend::new().submit_and_drive(
         &mut harness.application,
@@ -1694,7 +1722,7 @@ fn foreign_and_superseded_candidates_with_the_same_frame_cannot_dispatch() {
     ));
     assert!(harness.panels[0].1.borrow().finished.is_empty());
     let stale = harness.draw();
-    assert_eq!(revision, stale.batch.frame_revision());
+    assert_eq!(revision, stale.shared.batch.frame_revision());
     assert!(
         harness.panels[0]
             .1
@@ -1705,7 +1733,7 @@ fn foreign_and_superseded_candidates_with_the_same_frame_cannot_dispatch() {
                 == PanelActionDispatch::NotDispatched(PanelActionNotDispatched::Superseded))
     );
     let current = harness.draw();
-    assert_eq!(revision, current.batch.frame_revision());
+    assert_eq!(revision, current.shared.batch.frame_revision());
     let finished = harness.panels[0].1.borrow().finished.len();
     harness.submit(stale);
     assert_eq!(harness.panels[0].1.borrow().finished.len(), finished);

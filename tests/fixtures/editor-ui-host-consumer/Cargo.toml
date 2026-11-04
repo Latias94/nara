@@ -1,0 +1,47 @@
+[package]
+name = "nara-editor-ui-host-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[features]
+default = []
+native = [
+    "dep:nara_core",
+    "dep:nara_ecs",
+    "dep:nara_render",
+    "dep:nara_render_wgpu",
+    "dep:nara_ui_render",
+    "dep:nara_window",
+    "dep:wgpu",
+    "dep:winit",
+]
+
+[dependencies]
+nara = { path = "../../..", default-features = false, features = ["project-workflow", "serde", "tooling"] }
+nara-editor = { path = "../../../editor", default-features = false }
+nara_text = { path = "../../../crates/nara_text", default-features = false }
+nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = false }
+nara_ui_widgets = { path = "../../../crates/nara_ui_widgets", default-features = false }
+tempfile = "=3.27.0"
+nara_core = { path = "../../../crates/nara_core", default-features = false, optional = true }
+nara_ecs = { path = "../../../crates/nara_ecs", default-features = false, optional = true }
+nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"], optional = true }
+nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-ui"], optional = true }
+nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false, optional = true }
+nara_window = { path = "../../../crates/nara_window", default-features = false, features = ["runtime"], optional = true }
+wgpu = { version = "=30.0.1", optional = true }
+winit = { version = "=0.30.13", optional = true }
+
+[[example]]
+name = "panel_surface"
+required-features = ["native"]
+
+[[test]]
+name = "native_panel"
+required-features = ["native"]

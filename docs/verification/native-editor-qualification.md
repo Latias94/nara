@@ -19,8 +19,8 @@ docking service. Reciprocal embedding and mixed first-party panels are not prere
 ## UI Architecture Successor Scope
 
 The [R11a-f sequence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
-and [UI design](../architecture/ui-foundation-design.md) add unimplemented public panel-hosting,
-custom-drawing, observation/operation and measured-reuse targets. Existing results below retain
+and [UI design](../architecture/ui-foundation-design.md) define public panel-hosting,
+custom-drawing, observation/operation and measured-reuse targets with bounded prerequisites. Existing results below retain
 their original scope. Select actual successor native trajectories when those capabilities land:
 
 - Independently compile/run the Nara-drawn composition and a separately selected non-Nara Host
@@ -60,6 +60,21 @@ close/reconstruction and original Host retirement assertions. Separate error/pan
 must settle an actual pending submission before reporting cleanup success. These results do not
 qualify a non-Nara frontend, general Editor attachment, native OS event delivery or an independent
 Editor Shell. The ordinary Editor trajectories below retain their distinct composition scope.
+
+The [independent semantic panel consumer](../../tests/fixtures/editor-ui-host-consumer/README.md)
+disables `imgui-reference` and registers its own typed panel through `EditorPanelHost`. Build its
+`panel_surface` example with `native`, then run the ignored `native_panel` target serially with
+the explicit hardware backend. Require the actual six native presentations/five journal commits,
+text input and presented modal blocking, one exact non-active property edit, Undo/Redo,
+attempt-correlated Save/Reopen/acknowledgment and full source preservation. With a native image
+pending, hide/reopen the panel and require an otherwise valid prepared edit to leave the exact
+document basis, property, history and disk unchanged. Its late composite must be discarded and
+old routes/tokens refused after the replacement actually presents and receives focus. Exit with
+active preedit: cancel through the reducer, clear pointer/focus facts, release both panel states
+and physically retire the original GPU Host. CPU tests and a successful final marker alone do
+not replace these internal assertions. This finite composition supplies semantic/presentation
+custody evidence; broader native capability arbitration, OS input, full independent Editor and
+performance remain separate R11b-f acceptance.
 
 The neutral-dependency successor imports the separate UI library's `presentation` feature and
 its procedural four-color Image. Require the original typed handle, nominal store/slot revision,

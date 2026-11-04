@@ -2,6 +2,7 @@
 
 mod app;
 mod frontend;
+pub mod panels;
 mod platform;
 mod supervised_play;
 pub mod workspace;
@@ -15,11 +16,17 @@ pub use app::{
     EditorApplicationSourceToolSubmission, EditorApplicationState, EditorApplicationSubmission,
     EditorApplicationUpdate, EditorLaunchOptions, EditorProjectAction,
 };
+#[cfg(feature = "imgui-reference")]
 pub use frontend::{
     ImguiEditorFrontend, ImguiEditorPanel, ImguiEditorPanelContext, ImguiEditorSubmission,
-    PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId, PanelSubmitError,
 };
+pub use panels::{
+    EditorPanel, EditorPanelContext, EditorPanelHost, EditorPanelSubmission, PanelActionDispatch,
+    PanelActionNotDispatched, PanelSubmissionId, PanelSubmitError,
+};
+pub use platform::EditorRunError;
+#[cfg(feature = "imgui-reference")]
 pub use platform::{
-    EditorCompositionError, EditorNativeComposition, EditorNativeEvent, EditorNativeHost,
-    EditorRunError, run, run_trusted_compiled,
+    EditorCompositionError, EditorNativeComposition, EditorNativeEvent, EditorNativeHost, run,
+    run_trusted_compiled,
 };

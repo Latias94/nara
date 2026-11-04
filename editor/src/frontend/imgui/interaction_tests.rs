@@ -284,9 +284,12 @@ impl Interaction {
     }
 
     fn submit(&mut self, mut batch: super::ImguiEditorSubmission) {
-        let revision = batch.batch.frame_revision();
-        let actions = std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, []))
-            .into_actions();
+        let revision = batch.shared.batch.frame_revision();
+        let actions = std::mem::replace(
+            &mut batch.shared.batch,
+            EditorActionBatch::new(revision, []),
+        )
+        .into_actions();
         self.actions
             .extend(actions.iter().map(|action| match action {
                 EditorAction::Navigate(action) => EditorAction::Navigate(action.clone()),
@@ -300,7 +303,7 @@ impl Interaction {
                 }
                 _ => panic!("unexpected action in the field interaction fixture: {action:?}"),
             }));
-        batch.batch = EditorActionBatch::new(revision, actions);
+        batch.shared.batch = EditorActionBatch::new(revision, actions);
         self.frontend
             .submit_and_drive(&mut self.application, batch, Duration::ZERO);
     }

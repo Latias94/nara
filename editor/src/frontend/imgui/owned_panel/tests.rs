@@ -251,10 +251,10 @@ fn reordered_fonts_preserve_queued_apply_and_drafts_after_admission_refusal() {
     assert_eq!(widgets.authoring.fields.drafts[&value_key].basis, basis);
     assert!(widgets.authoring.fields.drafts[&label_key].dirty);
 
-    harness.frontend.next_submission = u64::MAX;
+    harness.frontend.submissions.next_submission = u64::MAX;
     let refused = harness.draw();
-    assert!(refused.ledger.submissions.is_empty());
-    assert!(refused.batch.first_field_target().is_none());
+    assert!(refused.shared.ledger.submissions.is_empty());
+    assert!(refused.shared.batch.first_field_target().is_none());
     let (frame, replacement, _) = input(&harness.frontend, panel, "label");
     assert_ne!(replacement, label);
     assert!(!Arc::ptr_eq(&frame, &old_frame));
@@ -321,13 +321,13 @@ fn font_replacement_preserves_pending_ids_and_routes_exact_application_results()
             .unwrap();
     }
     let pending = harness.draw();
-    assert_eq!(pending.ledger.submissions.len(), 2);
+    assert_eq!(pending.shared.ledger.submissions.len(), 2);
     let widgets = &harness.frontend.presentation.widgets[&panel];
     let value_id = widgets.authoring.fields.drafts[&value_key].pending.unwrap();
     let other_id = widgets.authoring.fields.drafts[&other_key].pending.unwrap();
     assert_ne!(value_id, other_id);
-    assert_eq!(pending.ledger.submissions[0].id, value_id);
-    assert_eq!(pending.ledger.submissions[1].id, other_id);
+    assert_eq!(pending.shared.ledger.submissions[0].id, value_id);
+    assert_eq!(pending.shared.ledger.submissions[1].id, other_id);
     let incarnation = Arc::clone(&widgets.incarnation);
     let basis = widgets.authoring.fields.drafts[&other_key].basis.clone();
     let mut reordered = harness.frontend.owned_fonts.clone();
@@ -341,8 +341,8 @@ fn font_replacement_preserves_pending_ids_and_routes_exact_application_results()
     assert!(widgets.owned_inspector.is_none());
     assert!(Arc::ptr_eq(&widgets.incarnation, &incarnation));
     assert!(Arc::ptr_eq(
-        harness.frontend.pending.as_ref().unwrap(),
-        &pending.ledger,
+        harness.frontend.submissions.pending.as_ref().unwrap(),
+        &pending.shared.ledger,
     ));
     for (key, id) in [(&value_key, value_id), (&other_key, other_id)] {
         let draft = &widgets.authoring.fields.drafts[key];
@@ -385,5 +385,5 @@ fn font_replacement_preserves_pending_ids_and_routes_exact_application_results()
     assert!(unapplied.dirty && !unapplied.in_flight());
     assert_eq!(unapplied.candidate.copy_text(), "unapplied label");
     assert!(unapplied.error.is_none());
-    assert!(harness.frontend.pending.is_none());
+    assert!(harness.frontend.submissions.pending.is_none());
 }

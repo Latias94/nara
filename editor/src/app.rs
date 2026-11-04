@@ -1015,6 +1015,35 @@ impl EditorApplication {
             .document_query_basis(document)
     }
 
+    /// Enumerates bounded direct source entities without changing navigation or selection.
+    pub fn query_document_entities(
+        &self,
+        query: nara::tooling::EditorEntityQuery,
+    ) -> Result<nara::tooling::EditorEntityPage, nara::tooling::EditorDocumentQueryRejection> {
+        self.authoring_query_session()?
+            .query_document_entities(query)
+    }
+
+    /// Discovers bounded component and property metadata in an explicitly named source.
+    pub fn query_document_authoring(
+        &self,
+        query: nara::tooling::EditorAuthoringQuery,
+    ) -> Result<nara::tooling::EditorAuthoringPage, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .query_document_authoring(query)
+    }
+
+    /// Reads one bounded source property synchronously through its original document owner.
+    pub fn read_document_property(
+        &self,
+        request: nara::tooling::EditorPropertyRead,
+    ) -> Result<nara::tooling::EditorPropertyObservation, nara::tooling::EditorDocumentQueryRejection>
+    {
+        self.authoring_query_session()?
+            .read_document_property(request)
+    }
+
     /// Observes bounded stored Prefab intent even when its preview cannot activate.
     pub fn observe_prefab_instance(
         &self,
@@ -3043,6 +3072,7 @@ mod tests {
     }
 
     #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[cfg(feature = "imgui-reference")]
     #[test]
     fn consecutive_batches_preserve_each_originating_feedback_before_redraw() {
         use nara::tooling::{

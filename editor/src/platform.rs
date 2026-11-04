@@ -1,7 +1,8 @@
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "imgui-reference")]
+use nara::project_host::TrustedCompiledEditorProjectIntent;
 use nara::{
-    project_host::TrustedCompiledEditorProjectIntent,
     render::RenderWindowPacket,
     render_wgpu::WgpuRenderHostError,
     tooling::{EditorPersistenceOperation, EditorPlayState},
@@ -14,12 +15,18 @@ use winit::{
     window::Window,
 };
 
-use crate::{EditorApplicationOpenError, EditorLaunchOptions};
+use crate::EditorApplicationOpenError;
+#[cfg(feature = "imgui-reference")]
+use crate::EditorLaunchOptions;
 
+#[cfg(feature = "imgui-reference")]
 mod composition;
 mod game_input;
+#[cfg(feature = "imgui-reference")]
 mod imgui;
+#[cfg(feature = "imgui-reference")]
 pub use composition::{EditorCompositionError, EditorNativeComposition};
+#[cfg(feature = "imgui-reference")]
 pub use imgui::{EditorUserEvent as EditorNativeEvent, NativeEditorHost as EditorNativeHost};
 
 const EDITOR_TITLE: &str = "Nara Editor";
@@ -46,6 +53,7 @@ pub enum EditorRunError {
         primary: Box<EditorRunError>,
         cleanup: String,
     },
+    #[cfg(feature = "imgui-reference")]
     #[error(transparent)]
     Composition(#[from] EditorCompositionError),
 }
@@ -61,11 +69,9 @@ impl EditorRunError {
         match self {
             Self::TrustedOpen(error) => error.diagnostics(),
             Self::Cleanup { primary, .. } => primary.diagnostics(),
-            Self::Usage(_)
-            | Self::EventLoop(_)
-            | Self::Platform(_)
-            | Self::Gpu(_)
-            | Self::Composition(_) => None,
+            Self::Usage(_) | Self::EventLoop(_) | Self::Platform(_) | Self::Gpu(_) => None,
+            #[cfg(feature = "imgui-reference")]
+            Self::Composition(_) => None,
         }
     }
 
@@ -74,18 +80,21 @@ impl EditorRunError {
     }
 }
 
+#[cfg(feature = "imgui-reference")]
 impl From<crate::workspace::EditorPanelRegistrationError> for EditorRunError {
     fn from(error: crate::workspace::EditorPanelRegistrationError) -> Self {
         Self::Composition(error.into())
     }
 }
 
+#[cfg(feature = "imgui-reference")]
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
     EditorNativeComposition::new().run(options)
 }
 
 /// Runs one private first-party Editor with an explicitly trusted compiled product intent.
 #[doc(hidden)]
+#[cfg(feature = "imgui-reference")]
 pub fn run_trusted_compiled(
     options: EditorLaunchOptions,
     intent: TrustedCompiledEditorProjectIntent,

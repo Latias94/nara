@@ -1,17 +1,274 @@
 # Source-built Editor panels
 
-This guide describes the current Dear-based composition and its qualified hosted Nara panels.
-The [independent frontend development route](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md#independent-reference-and-self-drawn-editor-implementations)
-builds the self-drawn Editor with its own shell beside an explicitly identified ImGui reference,
-then switches/removes the reference after complete acceptance. The interfaces below are current
-capabilities, not a requirement for mixed-toolkit migration or the final self-drawn extension SDK.
-Optional product embedding remains allowed under its separate Host contract.
+Source-built panels can use the public, toolkit-independent `EditorPanelHost<P>`, `EditorPanel`,
+`EditorPanelContext` and `EditorPanelSubmission` APIs. The Host provides semantic custody for
+panel state, queued actions and exact dispatch observations around an existing `EditorApplication`.
+The caller supplies drawing, platform integration and presentation. The Dear ImGui implementation
+is documented separately below as the explicit reference frontend.
 
 An authoring document owns accepted content, history and persistence. An editor panel presents or
 edits that content: the Inspector, Project Browser and Scene View are panel kinds. A panel instance
 is one open occurrence with its own target and presentation state; the workspace layout arranges
 those instances across editor windows. Closing a panel does not close its document. Scene View
 presents authored content, while Game View presents a running game's output.
+
+Panels are trusted Rust code compiled into the consumer executable. Ordinary project Open does
+not compile or load project code. These source APIs do not establish a stable dynamic plugin ABI.
+For a domain-owned non-Scene document, see the [document extension guide](editor-documents.md).
+
+## Toolkit-Independent Semantic Panels
+
+`EditorPanelHost<P>` retains typed per-instance state and one current submission candidate.
+`EditorPanel` supplies the optional `action_finished` callback; it has no drawing method.
+`host.prepare(&application, |panel, context| { ... })` gives the caller mutable access to its
+concrete `P` and a scoped `EditorPanelContext<'_, '_>` for each visible registered instance, in
+workspace order. The caller can update local controls, compose UI descriptions, draw through its
+own toolkit, or perform a semantic operation there. Preparation does not require drawing.
+
+The semantic Host owns no Application, Session, document, Undo history, window, GPU, input route
+or drawing interface. The caller retains the original Application and drives it. Queries and
+source preparation delegate to that Application and its existing Session/source owners; mutations
+use the original action dispatcher. The reference frontend and semantic Host share the
+candidate/submission queue, panel binding, original-slot filtering and exact result-resolution
+implementation in [`editor/src/panels`](../../editor/src/panels). Each retains its own concrete
+panel state and callback adapter.
+
+### Select Features And Register Typed State
+
+`nara-editor` currently enables `imgui-reference` by default. That feature selects the Dear
+reference frontend, native composition/runner and Editor binary until a complete successor is
+accepted. A custom Application/panel consumer disables defaults, as in the
+[independent consumer manifest](../../tests/fixtures/editor-ui-host-consumer/Cargo.toml):
+
+```toml
+[dependencies]
+nara = { path = "../../..", default-features = false, features = ["project-workflow", "serde", "tooling"] }
+nara-editor = { path = "../../../editor", default-features = false }
+```
+
+These paths are relative to that fixture; adjust them for another workspace. This selection
+keeps Application, workspace and semantic panel APIs available without enabling Dear packages or
+requiring a Dear context. It does not supply a custom native shell. The consumer selects its UI
+and rendering dependencies separately; another dependency enabling `imgui-reference` also enables
+the reference frontend in the shared Cargo feature graph.
+
+Register the descriptor and `Fn() -> P + 'static` factory together with
+`host.register_panel(&mut application, descriptor, factory)`. Admission failure leaves the
+workspace and factory registry unchanged. Empty or duplicate kinds, including built-in kinds,
+are refused. Each visible instance gets a separate `P` on its first preparation. One Host stores
+one concrete panel type; its registered kinds use factories returning that type. Neither factories
+nor panel objects require `Send` or `Sync`.
+
+The following example registers one Workspace-target instance and performs one explicitly
+requested property replacement. The caller supplies a bounded `EditorPropertyRead` for an open
+Scene/Prefab, the component's admitted version and the intended replacement. Keep the returned
+Host for later cycles. The example uses `expect` for its stated preconditions; a UI should retain
+read/preparation refusals and recoverable queue errors as local feedback.
+
+```rust
+use std::time::Duration;
+use nara::{
+    reflect::{ComponentSchemaVersion, ComponentValue},
+    scene::AuthoringPropertyEdit,
+    tooling::EditorPropertyRead,
+};
+use nara_editor::{
+    EditorApplication, EditorPanel, EditorPanelHost, PanelActionDispatch, PanelSubmissionId,
+    workspace::{
+        EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelTarget,
+    },
+};
+
+#[derive(Default)]
+struct PropertyPanel {
+    pending: Option<PanelSubmissionId>,
+    result: Option<PanelActionDispatch>,
+}
+
+impl EditorPanel for PropertyPanel {
+    fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
+        if self.pending == Some(id) {
+            self.pending = None;
+            self.result = Some(result);
+        }
+    }
+}
+
+fn install_and_apply(
+    application: &mut EditorApplication,
+    read: EditorPropertyRead,
+    version: ComponentSchemaVersion,
+    replacement: ComponentValue,
+) -> EditorPanelHost<PropertyPanel> {
+    let mut host = EditorPanelHost::new();
+    host.register_panel(
+        application,
+        EditorPanelDescriptor::new(
+            "consumer.property", "Property", EditorPanelMultiplicity::Single,
+            EditorPanelPlacement::Right, false,
+        ),
+        PropertyPanel::default,
+    ).expect("unique panel kind");
+    application.panel_workspace_mut()
+        .open("consumer.property", EditorPanelTarget::Workspace)
+        .expect("registered panel kind");
+
+    let submission = host.prepare(application, |panel, context| {
+        let observed = context.read_document_property(read.clone()).expect("current read basis");
+        let target = observed.target;
+        let edits = [AuthoringPropertyEdit {
+            entity: target.entity,
+            component: target.component,
+            component_version: version,
+            property: target.property,
+            value: replacement.clone(),
+        }];
+        let prepared = context.prepare_authoring_property_edit(&target.basis, &edits)
+            .expect("admitted source edit");
+        panel.pending = Some(context.commit_authoring_edit(prepared)
+            .expect("one action fits the cycle budget"));
+    }).expect("published Application frame");
+    host.submit_and_drive(application, submission, Duration::ZERO);
+    host
+}
+```
+
+The callback's stored `PanelActionDispatch` is the exact dispatch observation. For this edit, inspect
+`Dispatched(EditorActionOutcome::Workspace(report))` and `report.applied`, including its rejection
+details. Queue admission alone establishes no source change. This example performs no native
+presentation and does not create another document or history owner.
+
+### Query, Prepare, Queue And Dispatch
+
+`context.model()` borrows the retained admitted frame and this instance's binding. It exposes
+the instance, frame, resolved document and available selection/extension projections. A retained
+frame does not freeze source state or turn an old observation into current mutation authority.
+The finite context access delegates as follows:
+
+| Context access | Original-owner operation |
+|---|---|
+| `document_query_basis`, `query_document_entities` | Capture an open document's exact basis and enumerate bounded direct source records. |
+| `query_document_authoring`, `read_document_property` | Discover bounded component/root metadata and read a bounded selected property. |
+| `observe_prefab_instance`, `prefab_composition_failure` | Observe stored Prefab intent or a verified composition failure at the exact basis. |
+| `prepare_authoring_edit`, `prepare_authoring_property_edit`, `prepare_prefab_revert` | Prepare an unpublished source-owned edit and inverse. |
+| `begin_authoring_construction`, `prepare_authoring_construction` | Build bounded construction intent and prepare its fixed local-to-source-ID mapping. |
+| `source_tool_review` | Borrow the existing Session-owned review. |
+
+Use the complete basis returned with the observation that informed the proposal. A named open
+non-active document is accessible without changing tabs or selection. Direct reads/preparation
+return synchronously and create no action callback. Retain a prepared edit/construction in `P`
+for review, inspect its patch/inverse, or drop it to cancel before enqueue. Preparation, local
+drafts and repeated UI composition publish no document, history or dirty change.
+
+`context.submit(EditorAction)` queues an ordinary action; `submit_source_tool` queues the existing
+finite source-tool action. `commit_authoring_edit` and `commit_authoring_construction` consume the
+exact prepared candidate into the same ordered queue. Each admitted entry returns its own
+`PanelSubmissionId`, an opaque observation identity scoped to that Host. Retain the returned ID
+and match it in the original panel's callback; an ID alone cannot route work across Hosts or
+successor instances. The shared per-cycle limit is 1,024 entries across panels. Immediate
+`PanelSubmitError::Capacity` refusal creates no slot or completion callback; the consuming commit
+methods return `(error, original_candidate)` so the caller can retain it for explicit retry.
+
+`prepare` returns `None` when no Application frame is published. Otherwise its opaque, move-only
+`EditorPanelSubmission` belongs to that exact Host and candidate. Pass it to the same Host's
+`submit_and_drive(&mut application, submission, real_delta)`. That call reconciles live instances,
+filters retired origins before dispatch, uses the existing Application dispatcher, drives one
+owner pass, reconciles again, and then settles the original surviving callbacks. The returned
+`EditorApplicationUpdate` describes drive/exit observations; action results arrive through
+`EditorPanel::action_finished(id, dispatch)`.
+
+`PanelActionDispatch::Dispatched` carries the complete `EditorActionOutcome`, including owner
+rejections. `NotDispatched` explains why the action did not reach its owner, such as supersession,
+closing filters or failed batch admission. Result slots retain their original identities when
+an earlier action is removed: a surviving later panel cannot receive that earlier action's
+outcome. A surviving original instance receives one result per admitted action when its candidate
+is settled. The callback has no Context or drawing argument and cannot enqueue through that call.
+
+Preparing another cycle supersedes the preceding candidate and settles its still-live original
+entries with `NotDispatched(Superseded)`. Dropping a submission performs no Application work or
+immediate callbacks; a later `prepare` can settle those pending observations as superseded.
+Submitting a foreign or superseded candidate is idle: it neither drives the Application nor
+settles the current candidate or another Host's callbacks. Direct Application submission/advance
+also does not settle panel callbacks. A project generation change prevents the old candidate
+from dispatching.
+
+Ordered actions are not an atomic transaction. Two edits from one basis can accept the first
+and reject the second as stale; use one source-owned atomic patch for a cohesive edit. Dispatch
+acceptance of Save, Reopen, Play or a finite tool request still requires that owner's later
+completion observation. Continue `application.advance(real_delta)` while work is pending, even
+without another presentation; a submission already includes its own drive.
+
+### Instance, Target And Presentation Lifetimes
+
+Workspace owns panel kind/instance identity, targeting and layout preferences. The Host binds
+each `P` to the exact instance lifetime, kind, target and resolved document:
+
+- `ActiveDocument` follows the active document; a changed resolution retires its state.
+- `Source { kind, locator }` resolves the named open source. Losing or changing that resolved
+  document retires its state; a matching locator cannot revive the previous incarnation.
+- `Workspace` has no resolved document. Use explicit query bases for tools working on named
+  documents, including non-active ones, without tying their local state to active-tab changes.
+
+Semantic target resolution is read-only. Submit an explicit navigation action when activation
+is intended; reading or preparing an edit does not activate the target.
+
+Movement, docking/placement, native-window relocation and render-view changes preserve compatible
+panel state. For GPU reconstruction, keep the same semantic Host and its `P` objects while the
+caller reconstructs graphics resources. Creating a new Host recreates its state. This continuity
+does not certify that old input routes, presentation receipts or GPU resources remain valid.
+
+Hide, close, an explicit target change or a changed resolved document retires the original
+instance's local state. Layout reset/restore, including restoration of identical saved fields,
+and project/workspace replacement retire the previous states; loss of a published frame clears
+them as well. Reconciliation occurs at `prepare` and before/after current-candidate dispatch.
+Reopening creates fresh state on its next preparation, even when the instance ID is reused.
+
+Hide/reopen, close/reopen and target-away/target-back round trips between Host calls still retire
+the original lifetime. Workspace records the transition independently of the final visible
+fields. Matching IDs, labels, targets and visibility cannot revive the old `P` or queued action.
+Retired origins are filtered before dispatch and receive no callback; replacement instances never
+inherit their results. Retirement after source publication does not undo the accepted edit,
+close the document or discard its history.
+
+The caller separately owns input, focus/IME/clipboard/platform integration, popups, clipping,
+refresh scheduling, rendering, exact presentation feedback and physical resource retirement.
+Semantic lifetime reconciliation alone performs none of those native operations. A frontend
+adapter must retire its old routes and pending presentation work and establish fresh admitted
+presentation/input for a replacement. `EditorPanelHost` exposes no universal widget tree or
+native attachment/service API.
+
+### Independent Consumer And Verification Scope
+
+The separate workspace at
+[`tests/fixtures/editor-ui-host-consumer`](../../tests/fixtures/editor-ui-host-consumer/README.md)
+disables `nara-editor` defaults and authors its own `DraftPanel` with reusable Nara controls,
+local text history, focus and modal state. Its `tests/public_host.rs` contains semantic CPU
+trajectories for bounded non-active reads, prepared edits, exact callbacks, Undo/Redo, Save/Reopen,
+source preservation, relocation, retirement round trips, layout/project replacement,
+foreign/superseded/dropped submissions, slot filtering and returned-candidate retry.
+
+The optional `native` example `examples/panel_surface.rs` and `tests/native_panel.rs` exercise
+that panel through public Winit/WGPU and UI presentation interfaces. The Windows/DX12 trajectory
+passes modal/input behavior, source editing/persistence and retirement while presentation is
+pending, including six actual presentations and five journal commits. The
+[owning plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
+records results and limits. See the fixture README for the explicit build/run procedure.
+CPU semantics or UI description compilation alone do not qualify native presentation or OS input.
+This guide claims no full independent Editor, general toolkit compatibility, OS IME/accessibility
+parity, extension hot reload or performance result from this prerequisite.
+
+## ImGui Reference Frontend
+
+The following controls, `ImguiEditorPanel` examples and `EditorNativeComposition` embedding apply
+to the explicitly selected `imgui-reference` frontend. Its current shell includes hosted
+Nara-drawn panels. The
+[independent frontend development route](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md#independent-reference-and-self-drawn-editor-implementations)
+builds the self-drawn Editor with its own shell beside this reference, then switches/removes the
+reference after complete acceptance. The reference's current composition does not prescribe a
+permanent mixed-toolkit architecture for the independent frontend. Optional product embedding
+remains governed by its separate Host contract.
+
+### Built-In Reference Panels
 
 The built-in ordinary Scene View uses Nara-drawn Reset View, status and viewport controls.
 Scroll over the visible Scene image to zoom around the pointer, drag with the middle mouse
@@ -68,9 +325,10 @@ Inspector, bound to the displayed document, source revision and anchor. Authored
 is shown above component controls. The Source asset and Prefab Intent tabs, specialized UI
 authoring and source-built custom panels retain their separate frontends.
 
-Native panel extensions are trusted Rust code compiled into an Editor executable. Opening a
-project does not compile or load its code. Register a panel descriptor and its Dear ImGui state
-factory together through `EditorNativeComposition`:
+### Register A Reference Panel
+
+With `imgui-reference` enabled, register a panel descriptor and its Dear ImGui state factory
+together through `EditorNativeComposition`:
 
 ```rust,ignore
 use nara_editor::{
@@ -119,14 +377,15 @@ The UI thread owns factories and panel objects, so they do not require `Send` or
 receives read-only document/selection projections. Keeping a draft in a panel does not dirty a
 document or publish an undo entry.
 
-For a domain-owned non-Scene document, use the [document extension guide](editor-documents.md).
-Its independent dialogue consumer uses the same panel retirement and action paths while the
-Host retains history/dirty projections, Save/Reopen and document close decisions.
+The document extension guide's independent dialogue consumer uses the same panel retirement and
+action paths while the Host retains history/dirty projections, Save/Reopen and document close
+decisions.
 
-## Edit A Persistent Field
+### Edit A Persistent Field
 
-Use the default field editor when the panel should edit a field from the selected entity's
-published Inspector projection:
+Use the reference frontend's field helper when the panel should edit a field from the selected
+entity's published Inspector projection. This `edit_field` drawing helper belongs to
+`ImguiEditorPanelContext`; it is not a method on the semantic `EditorPanelContext`:
 
 ```rust,ignore
 use nara::reflect::{ComponentFieldId, ComponentTypeId};
@@ -151,11 +410,12 @@ its draft. The private finite draft budget rejects new controls before admitting
 evicting dirty drafts. The current helper does not query arbitrary unselected entities or add new
 component constraints.
 
-## Submit A Custom Action
+### Submit A Custom Action
 
-For custom tools, call `context.submit(EditorAction)` and retain the returned `PanelSubmissionId`.
-Queue admission can fail with `PanelSubmitError::Capacity`; an admitted action has not yet been
-accepted by its owner. Implement the optional callback to settle exactly that request:
+For reference-panel tools, call `context.submit(EditorAction)` and retain the returned
+`PanelSubmissionId`. Queue admission can fail with `PanelSubmitError::Capacity`; an admitted
+action has not yet been accepted by its owner. Implement the optional callback to settle exactly
+that request:
 
 ```rust,ignore
 fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
@@ -215,9 +475,11 @@ Painting a newer candidate supersedes unfinished observations from the previous 
 a candidate performs no application work. The ordinary application `EditorActionBatch` entry
 remains available for callers that do not need panel result routing.
 
-For a complete embedded Editor, keep the original native owner instead of drawing a workspace
-whose Nara image candidates have no renderer. The caller creates the Winit loop and may supply
-its primary window before the first `resumed` callback:
+### Embed The Reference Workspace
+
+For a complete embedded reference Editor, keep the original native owner instead of drawing a
+workspace whose Nara image candidates have no renderer. The caller creates the Winit loop and
+may supply its primary window before the first `resumed` callback:
 
 ```rust,ignore
 let event_loop = winit::event_loop::EventLoop::<nara_editor::EditorNativeEvent>::with_user_event()
@@ -283,23 +545,25 @@ not a newly sampled latest result. `Refused` admission publishes nothing; an imm
 `Rejected` has its own attempt. See [persistence observation](editor-documents.md#save-reopen-and-close)
 for the exact acknowledgment and retry rules shared with window-free consumers.
 
+The reference frontend follows the same instance-retirement rules as the semantic Host above.
 Panel state survives docking, movement, relocation and native GPU reconstruction. Closing or
 hiding a panel retires that instance's drafts without closing its document. Reopening starts
 fresh state. Changing the panel target or its resolved document also retires drafts, including a
 source target that becomes unavailable. A fresh project/workspace and explicit layout
-reset/restore retire all panel drafts. Replacing a GPU owner moves the retained frontend and its
-state; it does not rerun composition or recreate surviving panel objects.
+reset/restore retire all panel drafts. Hide/reopen or target round trips between calls also
+retire the original state. Replacing a GPU owner moves the retained frontend and its state;
+it does not rerun composition or recreate surviving panel objects.
 
 The separately compiled consumer at
 `tests/fixtures/module-consumer/editor-panel-consumer` contains an ordinary native runner and a
-selection-summary panel with a local note draft. This is a source extension interface, not a
-stable dynamic plugin ABI or a toolkit-independent widget framework.
+selection-summary panel with a local note draft. This is the ImGui reference-panel consumer;
+the separate semantic Host consumer is described above. Neither establishes a dynamic plugin ABI.
 
 ## A Source-Local Snap Tool
 
-The same consumer's `snap_local_position` module contributes a useful command without changing
-engine APIs. Call `snap_local_position::install(&mut composition)` before building/running the
-composition; its companion `run(options)` already includes this registration. Select one direct
+The reference-panel consumer's `snap_local_position` module contributes a useful command without
+changing engine APIs. Call `snap_local_position::install(&mut composition)` before building/running
+the composition; its companion `run(options)` already includes this registration. Select one direct
 Scene source entity with `nara.transform.Transform2d`, set the grid spacing, and choose **Preview**.
 The panel shows the before/after coordinates and the Source owner's exact forward/inverse candidate.
 **Apply** consumes that candidate; **Cancel** drops it without a source or history change.
@@ -495,9 +759,10 @@ the finite context methods below. No compatibility wrapper or second Undo author
 
 ## Prepare And Retain An Edit In A Panel
 
-Prepare from the complete basis returned with a document query, not a newly sampled revision.
-The context borrows only finite read-only preparation access; it exposes no mutable Application,
-Session, source document or persistence Host:
+Both the semantic `EditorPanelContext` and reference `ImguiEditorPanelContext` expose these
+finite preparation and consuming queue methods. Prepare from the complete basis returned with
+a document query, not a newly sampled revision. The context borrows only finite read-only
+preparation access; it exposes no mutable Application, Session, source document or persistence Host:
 
 ```rust,ignore
 let prepared = context.prepare_authoring_property_edit(&observation.target.basis, &edits)?;
@@ -513,7 +778,7 @@ Preparing, inspecting or retaining a candidate changes no document, selection or
 Drop it to cancel before submission; changing tool inputs should replace the candidate rather
 than edit it as a second document.
 
-When the user accepts, consume that same candidate through the current frontend submission:
+When the user accepts, consume that same candidate into the current Host/frontend submission:
 
 ```rust,ignore
 if let Some(prepared) = self.prepared.take() {
@@ -529,9 +794,9 @@ if let Some(prepared) = self.prepared.take() {
 
 `commit_authoring_construction` similarly returns an unqueued candidate on refusal. A refused
 entry has no completion callback. Successful enqueue transfers ownership to the existing ordered
-action route; it does not apply during paint and is not a promise of cancellability afterward.
-Use `action_finished` and the exact `PanelSubmissionId`. The successful construction outcome is
-`EditorActionOutcome::AuthoringConstruction`, containing the actual owner report and mapping;
+action route; it does not apply during `prepare`/paint and is not a promise of cancellability
+afterward. Use `action_finished` and the exact `PanelSubmissionId`. The successful construction
+outcome is `EditorActionOutcome::AuthoringConstruction`, containing the actual owner report and mapping;
 failed commit retains its ordinary owner rejection. Never infer success from selection or dirty.
 
 Candidate-bearing `EditorAction` and `EditorActionBatch` values are move-only. Historical outcomes
@@ -541,9 +806,10 @@ the same basis can accept then reject stale, and several actions are not one tra
 Existing supersede, origin retirement and project-generation rules still apply. A panel that
 retires after publication cannot roll the source back.
 
-Use a Workspace-target panel to operate on a named non-active document. Existing Source-target
-activation behavior is unchanged. The [bounded panel design](../architecture/editor-prepared-panel-design.md)
-records alternatives and qualification scope; this does not implement inline Inspector tools,
+Use a Workspace-target panel to operate on a named non-active document. The reference frontend's
+existing Source-target activation behavior is unchanged. The
+[bounded panel design](../architecture/editor-prepared-panel-design.md) records alternatives and
+qualification scope; this does not implement inline Inspector tools,
 dynamic installation, asynchronous preparation or a second preview/history service.
 
 ## Create A Source Entity
@@ -724,7 +990,8 @@ logical bytes; callers choose smaller positive limits independently. These are f
 not measured memory/latency guarantees. Borrowed Scene/Prefab views supply
 source interpretation; they are not a second document or a promise of allocation-free path lookup.
 
-Source-built panels can avoid a multi-frame action/result exchange for a small read:
+Source-built panels using `EditorPanelContext` or `ImguiEditorPanelContext` can avoid a multi-frame
+action/result exchange for a small read:
 
 ```rust,ignore
 let observed = context.read_document_property(request)?;

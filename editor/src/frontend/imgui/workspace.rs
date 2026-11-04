@@ -333,6 +333,7 @@ pub(super) struct ImguiPanelWidgets {
     pub owned_pending: Vec<super::owned_panel::OwnedSubmission>,
     pub owned_revision: u64,
     pub incarnation: std::sync::Arc<submission::PanelIncarnation>,
+    pub instance_lifecycle: Option<std::sync::Arc<()>>,
     pub panel: Option<Box<dyn ImguiEditorPanel>>,
     pub kind: String,
     pub document: Option<EditorDocumentId>,
@@ -416,12 +417,27 @@ impl ImguiPanelPresentation {
     ) {
         self.widgets.retain(|id, widgets| {
             workspace.layout().instance(*id).is_some_and(|instance| {
-                instance.is_visible()
-                    && widgets.kind == instance.kind()
-                    && widgets.target == *instance.target()
-                    && widgets.document == instance.target().document(frame)
+                crate::panels::binding::matches_instance(
+                    frame,
+                    instance,
+                    &widgets.kind,
+                    &widgets.target,
+                    widgets.document,
+                ) && widgets
+                    .instance_lifecycle
+                    .as_ref()
+                    .is_some_and(|lifecycle| {
+                        std::sync::Arc::ptr_eq(lifecycle, instance.lifecycle())
+                    })
             })
         });
+        if self
+            .gesture_owner
+            .as_ref()
+            .is_some_and(|(owner, _, _)| !self.widgets.contains_key(owner))
+        {
+            self.gesture_owner_retired = true;
+        }
     }
 
     pub fn observe_panel_actions(
@@ -596,155 +612,166 @@ mod tests {
     #[test]
     fn frontend_borrowed_gesture_result_keeps_its_owner_after_a_filtered_origin_and_cancels_on_retirement()
      {
-        use super::super::{submission_tests::Harness, ui_interaction_tests::UiProject};
-        use nara::{
-            project_host::TrustedCompiledEditorProjectIntent,
-            tooling::{EditorActionBatch, EditorNavigationAction},
-        };
-        use std::time::Duration;
+        for reopen_before_reconcile in [false, true] {
+            use super::super::{submission_tests::Harness, ui_interaction_tests::UiProject};
+            use nara::{
+                project_host::TrustedCompiledEditorProjectIntent,
+                tooling::{EditorActionBatch, EditorNavigationAction},
+            };
+            use std::time::Duration;
 
-        let mut harness = Harness::new(2);
-        let project = UiProject::new();
-        let mut application = crate::EditorApplication::open_trusted_compiled(
-            crate::EditorLaunchOptions::new(&project.0).with_profile("desktop"),
-            TrustedCompiledEditorProjectIntent::new(),
-        )
-        .unwrap();
-        application.native_shell_ready();
-        // Reuse the registered Probes and native context with the trusted UI source required
-        // by the real gesture owner; no synthetic Began outcome seeds presentation ownership.
-        *application.panel_workspace_mut() =
-            std::mem::take(harness.application.panel_workspace_mut());
-        harness.application = application;
-        let frame = harness.application.current_frame().unwrap();
-        let scene = frame.workspace().active_scene.as_ref().unwrap();
-        harness.application.submit_and_drive(
-            EditorActionBatch::new(
-                frame.revision(),
-                [
-                    EditorAction::Navigate(EditorNavigationAction::SelectEntity {
-                        document: scene.document,
-                        entity: Some(nara::scene::SceneEntityId::new("ui-anchor").unwrap()),
-                    }),
-                    EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
-                        document: scene.document,
-                        base_revision: scene.revision,
-                        entity: nara::scene::SceneEntityId::new("ui-anchor").unwrap(),
-                    }),
-                ],
-            ),
-            Duration::ZERO,
-        );
-        let authoring = harness.application.current_ui_authoring_frame().unwrap();
-        let document = authoring.document();
-        let field = authoring
-            .projection()
-            .unwrap()
-            .fields()
-            .iter()
-            .find(|field| {
-                field.key().entity().as_str() == "image-node"
-                    && field.key().component().as_str() == "nara.ui.UiNode"
-                    && field.key().primary_field().as_str() == "style.flex_grow"
-            })
+            let mut harness = Harness::new(2);
+            let project = UiProject::new();
+            let mut application = crate::EditorApplication::open_trusted_compiled(
+                crate::EditorLaunchOptions::new(&project.0).with_profile("desktop"),
+                TrustedCompiledEditorProjectIntent::new(),
+            )
             .unwrap();
-        let baseline = authoring
-            .lower_field_edit(field.key(), field.value().clone())
-            .unwrap();
-        let before = harness.application.current_frame().unwrap();
-        harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
-            context
-                .submit(EditorAction::Navigate(
-                    EditorNavigationAction::SelectEntity {
-                        document,
-                        entity: None,
-                    },
-                ))
+            application.native_shell_ready();
+            // Reuse the registered Probes and native context with the trusted UI source required
+            // by the real gesture owner; no synthetic Began outcome seeds presentation ownership.
+            *application.panel_workspace_mut() =
+                std::mem::take(harness.application.panel_workspace_mut());
+            harness.application = application;
+            let frame = harness.application.current_frame().unwrap();
+            let scene = frame.workspace().active_scene.as_ref().unwrap();
+            harness.application.submit_and_drive(
+                EditorActionBatch::new(
+                    frame.revision(),
+                    [
+                        EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                            document: scene.document,
+                            entity: Some(nara::scene::SceneEntityId::new("ui-anchor").unwrap()),
+                        }),
+                        EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                            document: scene.document,
+                            base_revision: scene.revision,
+                            entity: nara::scene::SceneEntityId::new("ui-anchor").unwrap(),
+                        }),
+                    ],
+                ),
+                Duration::ZERO,
+            );
+            let authoring = harness.application.current_ui_authoring_frame().unwrap();
+            let document = authoring.document();
+            let field = authoring
+                .projection()
+                .unwrap()
+                .fields()
+                .iter()
+                .find(|field| {
+                    field.key().entity().as_str() == "image-node"
+                        && field.key().component().as_str() == "nara.ui.UiNode"
+                        && field.key().primary_field().as_str() == "style.flex_grow"
+                })
                 .unwrap();
-        }));
-        let mut baseline = Some(baseline);
-        harness.panels[1].1.borrow_mut().paint = Some(Box::new(move |context| {
-            context
-                .submit(EditorAction::Gesture(EditorGestureAction::Begin {
-                    baseline: baseline.take().unwrap(),
-                }))
+            let baseline = authoring
+                .lower_field_edit(field.key(), field.value().clone())
                 .unwrap();
-        }));
-        let candidate = harness.draw();
-        let owner = harness.panels[1].0;
-        harness
-            .application
-            .panel_workspace_mut()
-            .layout_mut()
-            .set_visible(harness.panels[0].0, false);
-        let dispatch = harness
-            .frontend
-            .dispatch_submission(&mut harness.application, candidate)
-            .unwrap();
-        assert_eq!(dispatch.original_slots(), &[None, Some(0)]);
-        let Some(EditorActionOutcome::Gesture(EditorGestureOutcome::Began(began))) =
-            dispatch.original_outcome(1)
-        else {
-            panic!("the real source owner must begin the pending gesture at original slot one");
-        };
-        let gesture = began.stamp().id();
-        harness
-            .application
-            .drive_editor_frame(Duration::ZERO, dispatch.actions_observed(), true);
-        harness
-            .frontend
-            .finish_dispatch(&harness.application, &dispatch);
-        assert_eq!(
-            harness.frontend.presentation.gesture_owner,
-            Some((owner, EditorPanelTarget::ActiveDocument, gesture))
-        );
-        assert!(!harness.frontend.presentation.gesture_owner_retired);
-        let authoring = harness.application.current_ui_authoring_frame().unwrap();
-        let active = authoring.gesture().unwrap();
-        assert_eq!(active.stamp().id(), gesture);
-        let mut actions = Vec::new();
-        harness.frontend.presentation.reconcile_gesture(
-            harness.application.panel_workspace(),
-            Some(active),
-            &mut actions,
-        );
-        assert!(
-            actions.is_empty(),
-            "retiring the filtered panel must not cancel the live owner's gesture"
-        );
-        harness
-            .application
-            .panel_workspace_mut()
-            .layout_mut()
-            .set_visible(owner, false);
-        harness.frontend.reconcile_application(&harness.application);
-        harness.frontend.presentation.reconcile_gesture(
-            harness.application.panel_workspace(),
-            Some(active),
-            &mut actions,
-        );
-        assert!(
-            matches!(actions.as_slice(), [EditorAction::Gesture(EditorGestureAction::Cancel {
+            let before = harness.application.current_frame().unwrap();
+            harness.panels[0].1.borrow_mut().paint = Some(Box::new(move |context| {
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document,
+                            entity: None,
+                        },
+                    ))
+                    .unwrap();
+            }));
+            let mut baseline = Some(baseline);
+            harness.panels[1].1.borrow_mut().paint = Some(Box::new(move |context| {
+                context
+                    .submit(EditorAction::Gesture(EditorGestureAction::Begin {
+                        baseline: baseline.take().unwrap(),
+                    }))
+                    .unwrap();
+            }));
+            let candidate = harness.draw();
+            let owner = harness.panels[1].0;
+            harness
+                .application
+                .panel_workspace_mut()
+                .layout_mut()
+                .set_visible(harness.panels[0].0, false);
+            let dispatch = harness
+                .frontend
+                .dispatch_submission(&mut harness.application, candidate)
+                .unwrap();
+            assert_eq!(dispatch.original_slots(), &[None, Some(0)]);
+            let Some(EditorActionOutcome::Gesture(EditorGestureOutcome::Began(began))) =
+                dispatch.original_outcome(1)
+            else {
+                panic!("the real source owner must begin the pending gesture at original slot one");
+            };
+            let gesture = began.stamp().id();
+            harness.application.drive_editor_frame(
+                Duration::ZERO,
+                dispatch.actions_observed(),
+                true,
+            );
+            harness
+                .frontend
+                .finish_dispatch(&harness.application, &dispatch);
+            assert_eq!(
+                harness.frontend.presentation.gesture_owner,
+                Some((owner, EditorPanelTarget::ActiveDocument, gesture))
+            );
+            assert!(!harness.frontend.presentation.gesture_owner_retired);
+            let authoring = harness.application.current_ui_authoring_frame().unwrap();
+            let active = authoring.gesture().unwrap();
+            assert_eq!(active.stamp().id(), gesture);
+            let mut actions = Vec::new();
+            harness.frontend.presentation.reconcile_gesture(
+                harness.application.panel_workspace(),
+                Some(active),
+                &mut actions,
+            );
+            assert!(
+                actions.is_empty(),
+                "retiring the filtered panel must not cancel the live owner's gesture"
+            );
+            harness
+                .application
+                .panel_workspace_mut()
+                .layout_mut()
+                .set_visible(owner, false);
+            if reopen_before_reconcile {
+                harness
+                    .application
+                    .panel_workspace_mut()
+                    .layout_mut()
+                    .reopen(owner);
+            }
+            harness.frontend.reconcile_application(&harness.application);
+            harness.frontend.presentation.reconcile_gesture(
+                harness.application.panel_workspace(),
+                Some(active),
+                &mut actions,
+            );
+            assert!(
+                matches!(actions.as_slice(), [EditorAction::Gesture(EditorGestureAction::Cancel {
             gesture: actual, reason: EditorGestureCancelReason::TargetRetired,
         })] if *actual == gesture)
-        );
-        let frame = harness.application.current_frame().unwrap();
-        harness.application.submit_and_drive(
-            EditorActionBatch::new(frame.revision(), actions),
-            Duration::ZERO,
-        );
-        let authoring = harness.application.current_ui_authoring_frame().unwrap();
-        assert!(authoring.gesture().is_none());
-        assert_eq!(
-            authoring.last_gesture_cancellation(),
-            Some(EditorGestureCancelReason::TargetRetired)
-        );
-        let after = harness.application.current_frame().unwrap();
-        assert_eq!(
-            after.workspace().document(document),
-            before.workspace().document(document)
-        );
-        drop(harness);
+            );
+            let frame = harness.application.current_frame().unwrap();
+            harness.application.submit_and_drive(
+                EditorActionBatch::new(frame.revision(), actions),
+                Duration::ZERO,
+            );
+            let authoring = harness.application.current_ui_authoring_frame().unwrap();
+            assert!(authoring.gesture().is_none());
+            assert_eq!(
+                authoring.last_gesture_cancellation(),
+                Some(EditorGestureCancelReason::TargetRetired)
+            );
+            let after = harness.application.current_frame().unwrap();
+            assert_eq!(
+                after.workspace().document(document),
+                before.workspace().document(document)
+            );
+            drop(harness);
+        }
     }
 
     #[test]

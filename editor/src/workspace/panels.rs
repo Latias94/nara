@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use nara::tooling::{
     EditorDocumentId, EditorDocumentKind, EditorDocumentTabModel, EditorExtensionDocumentView,
@@ -130,6 +130,8 @@ impl EditorPanelTarget {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EditorPanelInstance {
+    #[serde(skip)]
+    pub(crate) lifecycle: Arc<()>,
     pub(crate) id: EditorPanelInstanceId,
     pub(crate) kind: String,
     pub(crate) target: EditorPanelTarget,
@@ -142,6 +144,10 @@ pub struct EditorPanelInstance {
 }
 
 impl EditorPanelInstance {
+    pub(crate) fn lifecycle(&self) -> &Arc<()> {
+        &self.lifecycle
+    }
+
     #[must_use]
     pub const fn id(&self) -> EditorPanelInstanceId {
         self.id

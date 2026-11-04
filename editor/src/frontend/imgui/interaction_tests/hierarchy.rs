@@ -460,7 +460,7 @@ fn ui_structure_result_keeps_its_original_slot_when_an_earlier_panel_is_retired(
     interaction.queue_hierarchy_click("Apply structure change");
     fire.set(true);
     let candidate = interaction.draw().unwrap();
-    let pending = interaction.frontend.pending.as_ref().unwrap();
+    let pending = interaction.frontend.submissions.pending.as_ref().unwrap();
     assert_eq!(
         pending
             .submissions

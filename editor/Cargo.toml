@@ -7,16 +7,52 @@ license.workspace = true
 publish = false
 
 [features]
-default = []
+default = ["imgui-reference"]
+imgui-reference = [
+    "dep:dear-imgui-rs",
+    "dep:dear-imgui-wgpu",
+    "dep:dear-imgui-winit",
+    "nara_render_wgpu/editor-imgui",
+]
 # Enables the private allocator only in the library test executable, for separate cost runs.
 ui-work-allocation-probes = []
 
+[[bin]]
+name = "nara-editor"
+path = "src/main.rs"
+required-features = ["imgui-reference"]
+
+[[test]]
+name = "application_contract"
+path = "tests/application_contract.rs"
+required-features = ["imgui-reference"]
+
+[[test]]
+name = "authoring_loop"
+path = "tests/authoring_loop.rs"
+required-features = ["imgui-reference"]
+
+[[test]]
+name = "first_game_workflow"
+path = "tests/first_game_workflow.rs"
+required-features = ["imgui-reference"]
+
+[[test]]
+name = "panel_contributions"
+path = "tests/panel_contributions.rs"
+required-features = ["imgui-reference"]
+
+[[test]]
+name = "registered_panel_interactions"
+path = "tests/registered_panel_interactions.rs"
+required-features = ["imgui-reference"]
+
 [dependencies]
-dear-imgui-rs = { workspace = true, features = ["system-clipboard"] }
-dear-imgui-wgpu.workspace = true
-dear-imgui-winit.workspace = true
+dear-imgui-rs = { workspace = true, optional = true, features = ["system-clipboard"] }
+dear-imgui-wgpu = { workspace = true, optional = true }
+dear-imgui-winit = { workspace = true, optional = true }
 nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow-cargo-facts", "render-wgpu", "runtime-ui", "tooling"] }
-nara_render_wgpu = { workspace = true, features = ["editor-imgui"] }
+nara_render_wgpu.workspace = true
 nara_text.workspace = true
 nara_ui_kernel.workspace = true
 nara_ui_render = { workspace = true, features = ["runtime"] }

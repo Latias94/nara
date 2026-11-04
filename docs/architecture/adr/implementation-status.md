@@ -15,8 +15,9 @@ new performance, toolkit compatibility or platform evidence and requires no offi
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
-unqualified beyond the bounded keyed-state prerequisite below. Current public panels remain
-Dear-specific; finite Rect/Text/Mesh paint and button events are not the complete successor interface.
+unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
+from the explicitly selected Dear reference; native attachment and the complete successor
+interface remain open. Finite Rect/Text/Mesh paint and button events alone do not close them.
 R11f adds source-built Editor edit/build/reconstruct,
 bounded versioned owner/UI recovery, failure refusal/recovery and correct-result latency. It is
 unimplemented and separate from Play/checkpoint restoration; declarative composition, preserved
@@ -103,6 +104,18 @@ The linked plan records overlapping cohorts, exact feature/build coverage and li
 Image assertion covers packet resources and actual presentation, without a new pixel readback.
 Public panel attachment, a complete independent Editor, native OS input and performance remain
 open; this is dependency and lifetime qualification rather than full R11b acceptance.
+
+The [toolkit-independent panel custody prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
+adds typed `EditorPanelHost<P>` state, scoped original-owner source access and exact action
+observations, sharing the reference frontend's extracted submission implementation. Workspace
+records transient hide/close/target transitions even when final layout fields match. An
+independently locked consumer disables `imgui-reference`, edits a non-active source, preserves
+history and complete source records, and passes its separate CPU and Windows/DX12 workflows.
+The native path checks actual composites, retired mutation refusal, late-output disposal,
+focused-successor token rejection and reducer/panel/GPU cleanup. The linked plan owns exact
+counts, review corrections and qualifications. The default reference remains available; native
+capability arbitration, broader dependency minimization, the complete independent Editor,
+OS input/accessibility, hot reload and performance acceptance remain open.
 
 The [keyed local-state prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#keyed-local-state-composition-prerequisite)
 adds exact parent/child scoping, typed store/incarnation handles, explicit model/schema

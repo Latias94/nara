@@ -595,12 +595,13 @@ fn conversion_commands_use_prefab_recipient_and_settle_separately_from_revert() 
     let candidate = harness.draw();
     assert!(
         candidate
+            .shared
             .ledger
             .submissions
             .iter()
             .any(|submission| matches!(submission.recipient, Recipient::PrefabIntent,))
     );
-    let actions = candidate.batch.into_actions();
+    let actions = candidate.shared.batch.into_actions();
     assert!(matches!(actions.as_slice(), [
         EditorAction::PrefabConversion(EditorPrefabConversionAction::ReviewPage {
             operation: actual, offset: 64,

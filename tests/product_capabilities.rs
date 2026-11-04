@@ -668,6 +668,36 @@ fn independent_native_ui_presenter_has_no_dear_or_runtime_ui_adapter_dependency(
 }
 
 #[test]
+fn independently_locked_editor_panel_host_excludes_the_reference_toolkit() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/editor-ui-host-consumer/Cargo.toml");
+    for native in [false, true] {
+        let mut arguments = vec!["-e", "normal,build", "--target", "all"];
+        if native {
+            arguments.extend(["--features", "native"]);
+        }
+        let tree = cargo_tree_for_manifest(&manifest, "nara-editor-ui-host-consumer", &arguments);
+        for package in [
+            "nara-editor",
+            "nara_text",
+            "nara_ui_kernel",
+            "nara_ui_widgets",
+        ] {
+            assert_present(&tree, package);
+        }
+        assert!(
+            !tree.lines().any(|line| line.starts_with("dear-")),
+            "the independent Editor panel Host must exclude every Dear package (native={native})\n{tree}"
+        );
+        if native {
+            for package in ["nara_ui_render", "nara_render_wgpu", "winit", "wgpu"] {
+                assert_present(&tree, package);
+            }
+        }
+    }
+}
+
+#[test]
 fn game_ui_adapter_dependency_closure_excludes_editor_frontends() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
