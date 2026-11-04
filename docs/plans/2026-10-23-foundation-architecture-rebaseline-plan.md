@@ -1534,6 +1534,81 @@ Correctness Clippy for all five affected crates with all targets/features and fo
 consumer passes. Root/independent formatting, diff checks and 1,052 local link targets across the
 six changed current documents pass. Existing warning categories outside correctness remain.
 
+#### Independent presented-surface prerequisite
+
+The finite `UiSurfacePresenter` in `nara_ui_render` supplies the missing public
+packet-to-presented-journal bridge for an independently authored Nara frontend. It composes the
+existing planner and hosted journal with original outcome-permit custody. It owns neither
+interaction/reducers nor a GPU, platform or document authority. One Host-assigned non-reused
+surface lifetime has a fixed target and at most one active presentation attempt.
+
+Preparation stages a journal candidate before returning the original backend frame. Only a
+matching original one-shot presentation commit adopts the staged journal; input state is never
+restored from preparation. Foreign completions return unchanged. Deferred retries preserve the
+original attempt, packet, epoch and required backend generation. Retirement revokes routes
+immediately, terminates local retries and drains original returned/dropped permits to quiescence.
+Late presentation is discarded rather than reactivating the retired route. Physical GPU/native
+use retirement remains independent under the render Host.
+Attempt faults keep the previous valid presentation. Target/device faults withdraw accepted
+history and close admission while retaining the installed Slot for the Host's explicit later
+retirement generation; the presenter never substitutes an epoch for that generation.
+
+The independent `render-output-consumer` example uses public text/kernel/widgets/render and
+WGPU stock UI interfaces without Dear or the game's UI ECS adapter. Its hidden native window
+executes `submit_for_display`, paints the designated display occurrence, observes its exact
+composite, returns original outcomes and drains before routing field/button/modal-popup input.
+CPU controls exercise foreign ownership, abandonment, original deferred retry and close/late
+results. An executable dependency check includes the example's dev graph, not only its smaller
+offscreen library closure.
+
+This prerequisite does not complete the Editor's toolkit-independent panel attachment, reusable
+component/custom-layout interfaces, neutral presentation dependency split, non-Nara frontend
+conformance or independent default shell. The existing Dear bridge keeps its current evidence;
+any later migration must replace its planner/journal/promote bookkeeping rather than retain two
+publication authorities. OS input/candidate delivery, accessibility and other native platforms
+require their own evidence.
+
+Independent review finds two pre-existing WGPU contract gaps exposed by this consumer. Lowered
+packet facts previously compared value identity/target only, allowing a different replan of the
+same frame with different image bindings to accompany another packet's permit. Facts now retain
+and compare the original packet `Arc`; their shared storage is charged through the existing
+metadata reservation. An already bound Submitted sidecar now also validates its backend
+instance/device epoch before reuse, preserving the original sidecar on refusal. These repairs
+belong to the original backend owners, not another presenter-side identity ledger.
+
+The first native run fails the popup-action assertion because the fixture uses a fixed click
+coordinate. The correction targets the actual presented action's semantic geometry; it keeps
+the modal/presentation and exactly-once action assertions. The error/panic controls already pass
+that run, but do not substitute for the corrected complete normal trajectory. Review also finds
+and corrects target/device-fault route withdrawal, with an Attempt-fault preservation control.
+Missing reservation-failure injection and old completion arriving after replacement is active
+remain distinct evidence limits; CPU ownership and native close tests do not silently claim
+those interleavings.
+
+| Qualification | Result | Nextest run |
+| --- | --- | --- |
+| Kernel and presentation regression, including journal withdrawal and nine presenter cases | 175/175 | `f6ce24a8-3e1d-4262-a293-7c7fd0577517` |
+| Complete ordinary render-WGPU library with all features | 396/396, 52 ignored | `99755911-f635-4ed1-8f35-e6d25c89160b` |
+| Independent native output/surface consumer, including both UI tests and error/panic child modes | 6/6 | `753a4b63-ad48-4fe3-85aa-88111e27839b` |
+| Native dev-graph and existing neutral/game UI dependency constraints | 3/3 | `bbace96a-4d62-4e00-9c98-a5df2db94888` |
+| Existing native Editor Canvas plus normal/fixed-world Game workflows | 3/3 | `9664d2f3-5ca1-4e8b-84fa-8056b8211c30` |
+
+The independent native run uses Windows/DX12, an explicit non-fallback request, the bundled
+font and a hidden actual window. Its complete normal trajectory observes five native window
+presentations and four journal commits, one modal action without underlay activation, local
+text Undo/Redo, stale route/token rejection and original Host reconstruction/retirement. Two
+additional child runs inject error and panic after actual image submission and require original
+cleanup before reporting success. Events are injected pointer/IME and logical keys, not physical
+OS delivery. The first popup-coordinate failure is retained as `e980b774-0a02-45d3-89b6-f6cbbc6344ee`;
+the final six-case result above follows its correction and the later kernel fault fix.
+Independent architecture/correctness and testing review find no remaining P1/P2 in this scope.
+These results use source base `5fc5c11` plus the presenter work and the backend repair committed
+as `6a7a8be`. Final correctness Clippy covers kernel/presentation/WGPU/Editor with all targets
+and features, plus all independent consumer targets. Root/independent formatting, diff checks
+and 1,091 local link targets across eight changed current documents pass. Final example cleanup
+only normalizes two equivalent conditional spellings for Clippy after native qualification;
+it changes no workload, acceptance or lifetime boundary. Warnings outside correctness remain.
+
 ### R11c: Complex document editor, custom drawing and multiple Views
 
 **Dependencies:** R11b, existing `EditorExtensionDocument` lifecycle and selected R8/R9 render

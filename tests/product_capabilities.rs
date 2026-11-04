@@ -574,6 +574,39 @@ fn independently_locked_ui_module_consumer_has_a_neutral_dependency_closure() {
 }
 
 #[test]
+fn independent_native_ui_presenter_has_no_dear_or_runtime_ui_adapter_dependency() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/render-output-consumer/Cargo.toml");
+    // This consumer's executable uses its dev graph. Include those edges rather than checking
+    // only the smaller offscreen library's normal dependency closure.
+    let tree = cargo_tree_for_manifest(
+        &manifest,
+        "nara-render-output-consumer",
+        &["-e", "normal,build,dev", "--target", "all"],
+    );
+    for package in [
+        "nara_text",
+        "nara_ui_kernel",
+        "nara_ui_widgets",
+        "nara_ui_render",
+        "nara_render_wgpu",
+        "winit",
+    ] {
+        assert_present(&tree, package);
+    }
+    for package in [
+        "nara-editor",
+        "nara_ui",
+        "dear-imgui-rs",
+        "dear-imgui-sys",
+        "dear-imgui-wgpu",
+        "dear-imgui-winit",
+    ] {
+        assert_not_present(&tree, package);
+    }
+}
+
+#[test]
 fn game_ui_adapter_dependency_closure_excludes_editor_frontends() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")

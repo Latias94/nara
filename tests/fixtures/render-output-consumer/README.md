@@ -3,10 +3,11 @@
 This standalone workspace consumes the production image-output Host through public APIs only.
 Its direct engine dependencies are `nara_render_wgpu` without default features, `nara_render`,
 `nara_core` and `nara_ecs`, also without default features. WGPU 30.0.1 is used only by the native
-tests for trusted readback and native-adapter timestamp capability checks. No toolkit, submitter, root
-product, scene serialization or platform-runner feature is enabled.
+tests for trusted readback and native-adapter timestamp capability checks. The separate native
+UI example enables the stock UI render feature and consumes text/kernel/widgets/presentation plus
+Winit through test dependencies. It requires no Dear, game UI ECS adapter, Editor or root product.
 
-The consumer creates no gameplay Runtime, ECS World, native window, surface or event loop.
+The offscreen workflows create no gameplay Runtime, ECS World, native window, surface or event loop.
 The render Host creates each move-only `WgpuRenderProducer`; configuration, submission and
 retirement borrow that owned producer. Its copyable `.id()` is used only to compare nominal facts,
 never as execution authority. Independent source identities and logical image handles use their
@@ -27,7 +28,7 @@ $env:CARGO_TARGET_DIR = (Join-Path (Get-Location).Path 'target')
 cargo +1.95.0 generate-lockfile --manifest-path tests/fixtures/render-output-consumer/Cargo.toml
 ```
 
-Compile the independent consumer, then explicitly execute all three native cases. For the selected
+Compile the independent consumer, then explicitly execute its four offscreen native cases. For the selected
 Windows/DX12 qualification:
 
 ```powershell
@@ -36,12 +37,44 @@ cargo +1.95.0 check --locked --manifest-path tests/fixtures/render-output-consum
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --test offscreen --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-All three tests are ignored by default because they require an actual native GPU. A default test
-run or compilation alone is not native acceptance. The explicit selection must execute all three
+All four tests are ignored by default because they require an actual native GPU. A default test
+run or compilation alone is not native acceptance. The explicit selection must execute all four
 cases; adapter/device acquisition, polling, readback or timeout failure fails the test rather than
 returning a passing skip. The Host uses its production backend-selection and fallback settings.
 An execution qualifies only the actual backend/platform recorded by its caller. This fixture is
-not a browser or window-presentation qualification.
+not a browser qualification. The offscreen cases do not qualify window presentation; the separate
+native UI trajectory below has its own actual window/composite and routing assertions.
+
+## Native UI surface presentation
+
+`examples/ui_surface.rs` consumes `UiSurfacePresenter` through public APIs, prepares an immutable
+field/button/popup frame and returns its original backend outcomes after actual window drawing.
+The existing `WgpuRenderHost` owns the device, producer, output and physical native-use retirement.
+The original `WgpuUiImageSubmission::display()` occurrence is the only one used to complete its
+presentation; mirror displays cannot substitute for its composite receipt.
+
+Only after the presenter drains that original one-shot acceptance may the caller route input
+through its read-only frame journal. Compilation, planning and offscreen submission alone grant
+no route. The caller still owns its `UiInteractionSession`, widget reducers and native placement.
+Its modal popup must reach real presentation before the popup action can run. Retirement revokes
+the old route before late completion, and replacement receives a fresh surface/input lifetime.
+
+The ignored `ui_surface` integration test launches the example in a child process so its event
+loop runs on the actual main thread. A second test injects error and panic separately after a
+real image submission but before composite; success requires original permit settlement,
+presenter quiescence and Host retirement, not merely the expected failure string. Run these
+separately, serially, under the same native environment:
+
+```powershell
+cargo +1.95.0 build --locked --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --example ui_surface
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/render-output-consumer/Cargo.toml --test ui_surface --run-ignored only --test-threads=1
+```
+
+Injected native events and normalized routing qualify this consumer's input adapter; they do not
+establish physical OS input-method/candidate delivery, accessibility or an independent Editor.
+The presentation crate's combined App/ECS/render/image dependency closure remains explicit even
+though this adapter installs no game UI plugin or World. This is a finite presentation prerequisite,
+not the whole R11b panel attachment or a completed neutral presentation split.
 
 ## Workflows And Assertions
 

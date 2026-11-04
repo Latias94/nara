@@ -10,6 +10,62 @@ use crate::{
 };
 
 #[test]
+fn presentation_invalidation_requires_original_authority_and_preserves_the_installed_slot() {
+    let surface = UiSurfaceId::new(509).unwrap();
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(UiRoot::new(
+            UiRootKey::runtime("loss", "surface").unwrap(),
+            UiLayer::Base,
+            UiStyle::fill(),
+        ))
+        .build()
+        .unwrap();
+    let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+        .unwrap()
+        .compile(
+            &snapshot,
+            UiEnvironment::new(surface, 64.0, 64.0, 1.0, 1, 1, 1, 1).unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let (mut journal, authority) =
+        crate::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    let (_, foreign) = crate::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal.install_surface(surface, 1).unwrap();
+    let receipt = authority.submit(&mut journal, frame, 1).unwrap();
+    let route = UiRouteStamp::from_receipt(receipt);
+    assert_eq!(
+        foreign.invalidate_surface_presentation(&mut journal, surface, 1),
+        Err(crate::UiJournalError::SubmissionAuthorityMismatch)
+    );
+    assert!(
+        authority
+            .invalidate_surface_presentation(&mut journal, surface, 2)
+            .is_err()
+    );
+    assert!(
+        authority
+            .invalidate_surface_presentation(&mut journal, surface, 0)
+            .is_err()
+    );
+    assert_eq!(journal.resolve(route).unwrap().receipt(), receipt);
+    authority
+        .invalidate_surface_presentation(&mut journal, surface, 1)
+        .unwrap();
+    assert!(journal.resolve(route).is_err());
+    assert!(journal.latest(surface).is_err());
+    let token = journal.retire_surface(surface, 103).unwrap().unwrap();
+    assert_eq!(token.surface_id(), surface);
+    assert_eq!(token.slot_generation().get(), 1);
+    assert_eq!(token.retirement_generation().get(), 103);
+    assert!(
+        authority
+            .invalidate_surface_presentation(&mut journal, surface, 1)
+            .is_err()
+    );
+}
+
+#[test]
 fn dynamic_text_content_preserves_authored_presentation() {
     let authored = UiText::new("Score", 16.0)
         .unwrap()

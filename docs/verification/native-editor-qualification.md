@@ -49,6 +49,18 @@ needs its actual adapter; an official Nara extension package is not required. In
 semantic actions and screenshots do not establish actual OS candidate delivery, pointer hit
 testing or native accessibility respectively. Native detachment keeps separate platform evidence.
 
+The finite [independent surface consumer](../../tests/fixtures/render-output-consumer/README.md#native-ui-surface-presentation)
+qualifies the public Nara packet-to-presented-journal prerequisite separately. Build its
+`ui_surface` example, then run the ignored `ui_surface` test target serially with the explicit
+native backend and `NARA_WGPU_FORCE_FALLBACK=0`. It uses a hidden real window, original image
+submission, designated occurrence and matching composite before draining presentation into its
+read-only journal. Pointer/IME events and logical keys are injected through its adapter. Require
+the complete field/Undo, presented modal popup, one action, old route/token refusal,
+close/reconstruction and original Host retirement assertions. Separate error/panic controls
+must settle an actual pending submission before reporting cleanup success. These results do not
+qualify a non-Nara frontend, general Editor attachment, native OS event delivery or an independent
+Editor Shell. The ordinary Editor trajectories below retain their distinct composition scope.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

@@ -50,6 +50,32 @@ to remain installed after commit. This naming and consumer correction belongs to
 qualified inventory. The Reference observer resolves the retained Runtime/session/frame facts;
 ordinary authoring changes do not manufacture a new backend presentation.
 
+### Public native surface presentation
+
+The R11b independent frontend consumer admits a finite `nara_ui_render::UiSurfacePresenter`
+adapter for one surface/slot and render target. It composes the existing planner, hosted frame
+journal and original backend-outcome custody without installing the game's ECS UI adapter.
+Preparation stages the exact frame/journal candidate and its original one-shot outcome permit;
+it does not publish a route. Only the matching backend-issued presentation commit can adopt that
+candidate. The journal is read-only to its caller, and no public receipt constructor or generic
+"mark presented" callback is added.
+
+Each presenter consumes one Host-assigned non-reused surface lifetime and a fixed render target.
+Rejected outcome delivery returns the original completion unchanged. Deferred work retains its
+exact retry and backend basis. Surface retirement revokes routing before waiting for original
+outcomes and terminates local deferred retry authority; late acceptance cannot revive the
+surface. Quiescence requires outstanding permits and returned outcomes both to settle. GPU output,
+native-use completion and physical resource release remain with the original render Host.
+An attempt-local failure can preserve the previous valid route. A target/device fault withdraws
+accepted presentation history and closes admission before reporting its terminal outcome, while
+keeping the installed Slot for the Host's later retirement generation. Presentation epochs never
+substitute for that retirement authority.
+Interaction, field reducers, platform input mapping and domain edits remain caller-owned.
+The adapter supplies the public backend bridge previously unavailable to independent consumers;
+hidden first-party test-presenter factories remain restricted to their named conformance glue.
+It does not qualify a toolkit-independent panel attachment, neutral presentation dependency
+closure, native platform-input delivery or a complete independent Editor.
+
 ### Original Backend Outcome Ownership
 
 The [render Host transition](../render-host-ownership-design.md) refines the hidden backend

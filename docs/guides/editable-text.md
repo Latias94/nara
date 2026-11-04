@@ -85,6 +85,28 @@ operating on the committed buffer. Local Undo/Redo does not invoke document hist
 
 ## Field and Host responsibilities
 
+An independently authored native frontend can use `nara_ui_render::UiSurfacePresenter` for one
+Host-allocated, non-reused surface lifetime and fixed render target. Keep its interaction session
+and fields outside this presenter. `prepare(frame, images)` returns the original backend frame;
+it leaves the read-only journal unchanged. With WGPU, use `WgpuUiSubmission::capture`,
+`submit_for_display` and that submission's designated `display()`. After the exact composite
+completes `submission.presented(composite)`, return each original outcome and call `drain`.
+Only `UiSurfacePresentationEvent::Presented` supplies the new routing receipt. Merely planning,
+submitting an offscreen image or drawing another mirror occurrence cannot publish that route.
+
+Resolve pointer/key actions against this journal and reduce its focus facts before admitting
+field text events. On a successful new presentation, reconcile the caller's live interaction
+state; never restore a whole interaction snapshot captured during preparation. `retry()` retains
+a deferred attempt's original identity and backend requirement. `retire()` immediately revokes
+the surface's routes; original outstanding/dropped outcomes must still drain until
+`is_quiescent()`. Render Host output/native-use retirement remains a separate physical boundary.
+Attempt faults preserve a previous valid route; target/device faults withdraw its history and
+close admission. The installed Slot remains until the Host explicitly retires it with its own
+retirement generation.
+The [independent native consumer](../../tests/fixtures/render-output-consumer/examples/ui_surface.rs)
+demonstrates this bridge, including a modal popup and retired-route/token refusal. It is not
+the whole Editor Host, platform IME delivery or a neutral presentation dependency split.
+
 `TextEditor::paint_snapshot()` publishes an opaque immutable `TextPaintSnapshot` with the complete
 display source, ordered font identities, logical size and positioned editing layout.
 `TextEngine::prepare_window()` admits that complete source under the receiver's byte, line, glyph,

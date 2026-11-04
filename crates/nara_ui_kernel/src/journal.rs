@@ -428,6 +428,41 @@ impl UiFrameJournal {
 }
 
 impl UiFrameJournalAuthority {
+    /// Withdraws exact presentation history after target/device loss without retiring its Slot.
+    ///
+    /// The original Host still owns the installed lifetime and later supplies its retirement
+    /// generation. A foreign authority or Slot cannot clear that owner's accepted routes.
+    pub fn invalidate_surface_presentation(
+        &self,
+        journal: &mut UiFrameJournal,
+        surface: UiSurfaceId,
+        slot_generation: u64,
+    ) -> Result<(), UiJournalError> {
+        if !Arc::ptr_eq(&journal.submission_identity, &self.identity) {
+            return Err(UiJournalError::SubmissionAuthorityMismatch);
+        }
+        let slot_generation =
+            UiRevision::new(slot_generation).ok_or(UiJournalError::ZeroSlotGeneration)?;
+        let history = journal
+            .active
+            .get_mut(&surface)
+            .ok_or(UiJournalError::SurfaceNotInstalled { surface })?;
+        if history.slot_generation != slot_generation {
+            return Err(UiJournalError::SlotGenerationMismatch {
+                surface,
+                active: history.slot_generation,
+                expected: slot_generation,
+            });
+        }
+        for pair in history.entries.drain(..) {
+            journal
+                .retired
+                .push_front(UiRouteStamp::from_receipt(pair.receipt));
+        }
+        journal.retired.truncate(journal.limits.max_surfaces * 3);
+        Ok(())
+    }
+
     /// Stages an exact frame in a clone of the hosted journal before backend submission.
     ///
     /// The capability is instance-bound and intentionally not cloneable. A receipt staged in a

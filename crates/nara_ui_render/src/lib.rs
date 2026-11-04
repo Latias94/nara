@@ -6,6 +6,9 @@ mod integration;
 mod limits;
 mod packet;
 mod planner;
+mod surface;
+#[cfg(test)]
+mod surface_tests;
 
 pub use integration::{
     UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats,
@@ -25,6 +28,7 @@ pub use planner::{
     UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
     UiPresentationPlannerCreateError, UiPresentationWorkStats,
 };
+pub use surface::{UiSurfacePresentationError, UiSurfacePresentationEvent, UiSurfacePresenter};
 
 #[doc(hidden)]
 pub mod __private {

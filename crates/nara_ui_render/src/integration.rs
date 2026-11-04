@@ -524,6 +524,16 @@ pub struct UiBackendPresentationFrame {
 }
 
 impl UiBackendPresentationFrame {
+    pub(crate) fn from_parts(
+        packets: Vec<Arc<UiPaintPacket>>,
+        submissions: Vec<UiBackendSubmission>,
+    ) -> Self {
+        Self {
+            packets,
+            submissions,
+        }
+    }
+
     /// Returns whether this backend frame contains at least one concrete UI paint packet.
     #[must_use]
     pub fn has_packets(&self) -> bool {
@@ -545,12 +555,20 @@ impl UiBackendPresentationFrame {
 }
 
 impl UiPresentationOutcomes {
+    pub(crate) fn begin_close(&self) {
+        self.receiver.begin_close();
+    }
+
+    pub(crate) fn has_unsettled_backend_results(&self) -> bool {
+        !self.outcomes.is_empty() || self.receiver.has_unsettled_backend_results()
+    }
+
     pub fn commit_backend(&mut self, completed: UiCompletedBackendOutcome) {
         self.try_commit_backend(completed)
             .expect("a backend outcome must return to the runtime that reserved its permit");
     }
 
-    fn try_commit_backend(
+    pub(crate) fn try_commit_backend(
         &mut self,
         completed: UiCompletedBackendOutcome,
     ) -> Result<(), UiCompletedBackendOutcome> {
@@ -751,7 +769,9 @@ impl UiPresentationOutcomes {
         Ok(permits)
     }
 
-    fn drain(&mut self) -> Result<Vec<UiPresentationOutcome>, UiPresentationIntegrationError> {
+    pub(crate) fn drain(
+        &mut self,
+    ) -> Result<Vec<UiPresentationOutcome>, UiPresentationIntegrationError> {
         let pending = self.pending_backend_count();
         if pending != 0 {
             return Err(

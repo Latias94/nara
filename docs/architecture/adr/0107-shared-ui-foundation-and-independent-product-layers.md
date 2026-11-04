@@ -107,6 +107,15 @@ Host attachment. Providing that attachment is a Nara responsibility; shipping an
 egui or other toolkit extension is not required. The default Nara frontend and optional
 user-authored frontends share document and Host authority without sharing their internal trees.
 
+The finite public surface-presenter bridge in ADR0102 permits an independently authored Nara
+frontend to prepare packets, return original backend outcomes and observe its exact presented
+journal without importing a hidden receipt factory or the game's ECS UI adapter. It is a concrete
+presentation adapter, not a new UI/component, document, platform or GPU authority. A complete
+panel attachment and the independent Editor still need the remaining R11b consumers. It owns
+publication of presentation history only; frontend interaction, widget reducers and text-input
+lifetimes remain live caller state. Completing presentation must not restore an interaction
+snapshot captured during preparation.
+
 The development route under ADR0118 keeps the ImGui reference Editor and independently composed
 self-drawn successor as separate complete implementations over shared semantic owners. It does
 not require a mixed first-party shell, reciprocal toolkit embedding or per-panel default swaps.

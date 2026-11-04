@@ -463,6 +463,16 @@ That fixture is not a prerequisite for the independent default's development/rep
 self-drawn composition does not require hosting the ImGui reference or embedding either toolkit
 inside the other.
 
+The finite Nara surface-presenter prerequisite closes the packet-to-presented-journal bridge.
+`UiSurfacePresenter` stages one immutable frame and original backend outcome permit, then adopts
+the staged journal only after the matching one-shot backend presentation commit. The caller
+retains interaction/reducer state and exact native placement; the existing render Host retains
+GPU resources and native-use retirement. The public journal cannot mint receipts. Deferred
+attempts retain their original retry, and closing immediately revokes routes while original
+backend results still return to the retiring presenter. This single-surface adapter is not the
+whole frontend/panel attachment or a neutral presentation dependency split. The existing Dear
+bridge and Runtime integration keep their recorded scope until separately migrated/qualified.
+
 ## Complex editors, custom drawing and render composition
 
 Use a bounded document-backed node/link editor as architectural pressure for future Shader Graph,

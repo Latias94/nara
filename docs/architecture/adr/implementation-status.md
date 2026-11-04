@@ -40,7 +40,7 @@ refusal controls. Separate current-thread requested-allocation probes quantify t
 without changing production allocators. Full process/native retention, upload/GPU timestamps,
 OS input/display latency and fixed budgets still keep R11a open. The pinned Zed/Open-GPUI study
 refines state/invalidation and collection consumers without selecting their ownership/dependencies.
-No cache optimization or independent frontend is qualified; R11b-f remain unimplemented.
+No cache optimization or complete independent Editor is qualified; R11b-f remain incomplete.
 
 The [native frontend capability/primary GPU prerequisite](../../benchmarks/2026-11-04-ui-work-baseline.md#primary-window-gpu-markers)
 adds declaration through the existing Host before acquisition, sharing the original closed
@@ -75,6 +75,17 @@ on one device/queue, including after their text engines are released. These are 
 of evidence: the public field consumer uses local focus admission, and the GPU fixture consumes
 a text snapshot. They do not qualify the native Editor's all-panel font transaction, presented
 input/IME handoff, a general typography service or an incremental performance improvement.
+
+The [independent presented-surface prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#independent-presented-surface-prerequisite)
+adds a finite public presenter composing the original planner, journal and outcome-permit
+custody. Its independently built Nara frontend needs no Dear or game UI adapter and publishes
+input only after an exact designated native composite and original one-shot acceptance. The
+same scope repairs original WGPU packet-allocation and Submitted backend-generation checks;
+target/device faults withdraw accepted history without taking retirement-generation ownership.
+All 175 kernel/presentation tests, 396 WGPU library tests, six independent native cases and three
+dependency checks pass. This is not
+the whole Editor panel attachment, neutral presentation dependency split or independent default
+shell; their implementation and qualification remain open under R11b.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and

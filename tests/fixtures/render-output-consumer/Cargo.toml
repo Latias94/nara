@@ -16,4 +16,11 @@ nara_render = { path = "../../../crates/nara_render", default-features = false }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]
+nara_text = { path = "../../../crates/nara_text", default-features = false }
+nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = false }
+nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false }
+nara_ui_widgets = { path = "../../../crates/nara_ui_widgets", default-features = false }
+nara_window = { path = "../../../crates/nara_window", default-features = false }
+nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-ui"] }
 wgpu = "=30.0.1"
+winit = "=0.30.13"
