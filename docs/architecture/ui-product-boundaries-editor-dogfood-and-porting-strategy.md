@@ -35,13 +35,14 @@ The direction is:
 
 1. keep game UI and editor UI as separate product layers;
 2. share only narrow services or pure algorithms after their semantics are proven equal;
-3. retain the qualified predecessor until matching Nara-owned default workflows pass, then remove
-   that displaced default; optional user-authored panel frontends use public Host interfaces;
+3. retain the reference until the independently runnable Nara-drawn Editor passes complete
+   workflow acceptance, then switch/remove it; optional frontends use public Host interfaces;
 4. qualify complete Editor panels against their own requirements without waiting for whole-game
    UI readiness; reuse shared fundamentals where the actual consumer proves their fit;
 5. use Open GPUI, egui, and Dear ImGui as evidence and selective implementation sources, not as
    authorities over Nara documents, Hosts, or render backends;
-6. leave the final editor topology open until real game and editor tracers decide it.
+6. refine the self-drawn Editor's internal composition through real workflows; keep game/Editor
+   toolkit convergence as a separate consumer-driven decision.
 
 ## Mature-Engine Precedents
 
@@ -157,8 +158,21 @@ These are capability categories, not proposed Rust traits. Exact interfaces wait
 
 ## Editor UI Direction
 
-The selected default is Nara's own custom-drawn Editor. Current Dear Shell/registered panels and
-qualified Nara panels keep their actual evidence scope; early egui-first wording is historical.
+The selected default destination is Nara's own custom-drawn Editor. Keep a complete ImGui
+reference to validate module interfaces and UI models while developing an independently runnable
+self-drawn composition over the same semantic owners. Each implementation supplies its own
+workspace/shell presentation, layout, controls and input/presentation adapter. Shared workspace
+document/placement semantics retain their existing owners. The successor's selected
+dependency/build/run closure must need no Dear toolkit. Switch the default after complete
+workflow/native/cost acceptance, then remove the first-party reference and migration-only bridges.
+Exact executable/feature/crate organization follows the consumers.
+
+Current Dear Shell/registered panels and qualified hosted Nara panels retain their actual
+evidence scope. Some Dear painters are already removed, so record the complete reference revision
+and coverage gaps before comparison. Future development requires no mixed first-party panels,
+reciprocal toolkit embedding or per-panel default swaps. Optional product embedding remains
+allowed through Host admission; it is a separate feature and not the development route.
+Early egui-first wording is historical.
 Frontends consume immutable tooling models and use the existing validation, result and Undo
 owners. Nara supplies sufficient public panel/Host interfaces for user-authored implementations;
 it need not ship an official ImGui extension. The revised [UI design](ui-foundation-design.md)
@@ -186,9 +200,10 @@ validated atomic patch plus inverse; Escape, focus/capture loss, window close, d
 revision conflict cancels/restores or returns an explicit rejection. Third-party tools write only
 through that scoped command path.
 
-The first Nara UI editor dogfood should migrate one complete panel, not individual widgets mixed
-inside one panel. It must preserve the same tooling commands, validation, undo, selection, and
-diagnostics as the egui version.
+The first complete workflows in the self-drawn Editor may be an Inspector and live Scene view
+inside its own shell. Preserve the reference's tooling commands, validation, Undo, selection and
+diagnostics while expanding that independent composition. The existing hosted-panel evidence
+remains useful, but does not require future panel-by-panel replacement inside ImGui.
 
 ## Editor Shell And Native Windows
 
@@ -253,14 +268,16 @@ not legal advice.
 | UI-1: Mature game settings | Localized settings menu with editable text/IME, focus scopes, gamepad navigation, rebinding, and accessibility semantics | Text, input routing, semantic widgets, localization, and platform accessibility readiness |
 | UI-2: Dynamic game collection | Variable-height inventory or quest/chat list with stable keys, drag/drop, virtualization, and animation | Runtime projection, measurement, scroll anchoring, incremental work, and custom composites |
 | UI-3: Render target UI | World-space or render-to-texture terminal with mapped input and custom visuals | OQ-001 admission evidence for target/view identity, input projection, render freedom, and lifecycle; no graph is selected by this gate alone |
-| UI-4: First editor dogfood | One complete Inspector or similarly demanding panel rendered by Nara UI | Adapter replaceability with command/undo/IME/accessibility parity |
-| UI-5: Heterogeneous editor | Inspector plus virtualized hierarchy/asset browser plus viewport/timeline/graph | Whether one Nara UI foundation can become the primary editor toolkit |
+| UI-4: First editor dogfood | One complete Inspector and live View in an independently runnable Nara-drawn shell | Independent frontend composition with original command/Undo/input/close semantics; hosted pixels alone do not qualify it |
+| UI-5: Complex editor workflows | Inspector, virtualized hierarchy/Browser and multiple Views, with a bounded graph consumer | Whether the independently composed successor supports the required dense tools and extension interfaces |
 | UI-6: Editor shell | Stable panel instances, layout restore/reset, panel removal and tear-off fixtures | Product-owned panel lifetimes with replaceable toolkit layout preferences |
 | UI-7: Native multi-window | One real detached window with DPI/focus/IME/input/surface/device-loss/close coverage | OQ-022 admission evidence for platform/window and render-execution ownership; no replacement Host role is selected by this gate alone |
 
 Failure at UI-4 or UI-5 is not a failure of Nara's game UI. It is valid evidence for keeping a
 separate editor toolkit.
-Success permits convergence but does not establish full replacement parity; the planned successor removes the old production frontend only after that parity passes.
+Success does not establish full Editor replacement parity. Qualify the complete independent
+composition against the agreed incumbent matrix, switch the default and then remove the reference.
+Optional embedding and game/Editor toolkit convergence remain separate decisions.
 
 ## Alternatives Considered
 

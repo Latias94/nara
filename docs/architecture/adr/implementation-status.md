@@ -21,6 +21,15 @@ bounded versioned owner/UI recovery, failure refusal/recovery and correct-result
 unimplemented and separate from Play/checkpoint restoration; declarative composition, preserved
 frontend objects during GPU recovery and source-built panel registration do not qualify code reload.
 
+The later November 4 development-route correction in ADRs0107/0118 selects separate reference
+and self-drawn Editor compositions. The ImGui implementation validates shared module/UI-model
+interfaces; the successor runs independently and replaces it after complete acceptance. Optional
+product embedding remains allowed, but mixed first-party panels and reciprocal embedding are
+not migration requirements. Existing hosted Nara panel results below remain bounded evidence.
+Their removal of original Dear painters means an intact pure-ImGui reference must be explicitly
+identified rather than assumed. No code was reverted/rebuilt and no new composition was qualified
+by this documentation correction.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

@@ -273,6 +273,10 @@ flowchart LR
   The October 30 [Editor study](../research/2026-10-30-engine-direction/editor-and-extensibility.md)
   and [text/render study](../research/2026-10-30-engine-direction/rendering-and-custom-ui.md)
   refine the first consumer; they do not change its implementation status.
+  The November 4 route clarification develops that consumer inside an independently runnable
+  self-drawn Editor composition beside an explicitly identified ImGui reference. Hosted Nara
+  panels keep their actual evidence, but mixed-toolkit development and reciprocal embedding
+  are not prerequisites. Optional product embedding remains separately allowed under ADR0118.
 - **Question**: Which Editor-owned widget/draft/focus lifetimes and editable-text/platform contracts
   make a multilingual numeric/text Inspector, filtered rows and a clipped live Scene image usable
   through exact results, Undo and Save/Reopen? Keep model/property, live widget incarnation and

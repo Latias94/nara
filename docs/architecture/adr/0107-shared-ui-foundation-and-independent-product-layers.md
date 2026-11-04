@@ -107,6 +107,12 @@ Host attachment. Providing that attachment is a Nara responsibility; shipping an
 egui or other toolkit extension is not required. The default Nara frontend and optional
 user-authored frontends share document and Host authority without sharing their internal trees.
 
+The development route under ADR0118 keeps the ImGui reference Editor and independently composed
+self-drawn successor as separate complete implementations over shared semantic owners. It does
+not require a mixed first-party shell, reciprocal toolkit embedding or per-panel default swaps.
+Optional product embedding remains allowed; it is separate from developing the default Editor.
+The reference retires after the successor's complete qualification.
+
 ### Component extension and execution
 
 The Nara component interface supports composing controls and authoring new components through
@@ -186,7 +192,9 @@ demonstrates value; no universal Widget model or required common retained tree f
 
 ## Consequences
 
-- Separate presentation stacks may coexist permanently in the Editor process, coordinated by the Host.
+- Optional user-authored presentation stacks may coexist under Host admission. The first-party
+  ImGui reference is a development implementation scheduled for retirement after the independently
+  composed self-drawn Editor passes complete acceptance.
 - A product-local composite may remain local; it does not need a shared widget registry.
 - Editor docking and native multi-window support follow ADR 0118 and matching qualification;
   any future convergence proposal is a separate product decision.

@@ -19,6 +19,38 @@ public Host/panel interfaces without changing engine-private code. Nara need not
 official ImGui extension. Complex graph/timeline tools and future automation constrain those
 interfaces before broad component-library work; complete products and transports can follow later.
 
+### Development route
+
+Maintain a complete ImGui reference Editor to validate semantic/module interfaces and UI models,
+and build an independently runnable Nara-drawn Editor over the same domain/workspace owners.
+Add workflows incrementally inside the successor's own shell, layout, input and presentation
+composition. Complete replacement acceptance, followed by a default switch and reference removal,
+is the migration unit. Neither reciprocal toolkit embedding nor a mixed first-party shell is
+required during development. Optional product embedding remains allowed under public Host ports.
+
+```mermaid
+flowchart TB
+    Domain[Shared document / command / workspace models]
+    Reference[ImGui reference Editor composition]
+    Successor[Independent Nara-drawn Editor composition]
+    Host[Shared Host and render services with one selected composition per launch]
+    Domain --> Reference
+    Domain --> Successor
+    Reference --> Host
+    Successor --> Host
+```
+
+The diagram describes separate implementations, not two toolkits that must run together. The
+successor must have a build/run closure that needs no Dear context, renderer, input or docking
+service. Package/executable/feature structure remains an implementation decision. Keep the
+reference as a workflow oracle until complete acceptance, then remove its first-party code and
+migration-only bridges. Product Host conformance may separately exercise optional mixed content.
+
+The current checkout already contains selected Nara controls hosted by Dear and has removed
+some original Dear painters. Preserve their actual evidence and reusable mechanisms. Establish
+the exact reference revision and any missing reference workflows explicitly; this document
+claims neither an intact pure-ImGui reference nor an independent self-drawn implementation today.
+
 The Reference Game is one acceptance carrier, not the sole authority for shared interfaces.
 Named game, Editor and independent-author consumers establish the required contracts. Preserve
 existing domain, Input and render owners; do not add a universal widget tree or another GPU graph.
@@ -227,11 +259,12 @@ Editor UI is a separate product layer:
 Editor document -> EditorSnapshot -> EditorActionEnvelope -> applied/rejected/conflict
 ```
 
-The Nara-drawn Editor is the selected default. Ordinary Inspector, source Hierarchy, specialized
+The Nara-drawn Editor is the selected default destination. Ordinary Inspector, source Hierarchy, specialized
 UI Hierarchy and Scene controls have scoped qualification; remaining specialized panels and
-workspace replacement retain their separate work. Dear supplies the current surrounding Shell
-and registered source-built panel interface. Historical egui-first, fixed-layout records do not
-describe this destination or establish today's capability scope.
+workspace still need independent successor implementation and qualification. Dear supplies the
+current surrounding Shell and registered source-built panel interface; that existing mixed
+composition is recorded evidence rather than the prescribed migration route. Historical
+egui-first, fixed-layout records do not describe the destination or establish today's capability.
 
 Workspace owns stable panel/document placement and preference restoration. Frontends own their
 content and compatible instance state. Host owns windows and cross-frontend platform arbitration.
@@ -384,6 +417,10 @@ public attachment, including drawing, text input, a popup and retirement. A smal
 frontend proves that finite Host contract, not compatibility with every toolkit. A named toolkit
 support claim additionally requires its actual user-authored adapter and matching native tests.
 No official ImGui package, universal Widget IR, binary ABI or executable unload service is implied.
+When claiming optional mixed-content support, exercise it in a dedicated extension fixture.
+That fixture is not a prerequisite for the independent default's development/replacement. The
+self-drawn composition does not require hosting the ImGui reference or embedding either toolkit
+inside the other.
 
 ## Complex editors, custom drawing and render composition
 

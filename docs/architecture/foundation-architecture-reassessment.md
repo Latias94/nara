@@ -1030,7 +1030,13 @@ The October 27 conversation additions select a **Nara-owned custom-drawn default
 The November 4 clarification additionally requires public interfaces for user-authored UI
 implementations; it does not ask Nara to ship an official ImGui extension. Selected Nara panels
 have since qualified their own workflows, while public panel hosting, complete workspace and
-performance still need implementation and evidence. No official language was selected. The
+performance still need implementation and evidence. The later November 4 route clarification
+keeps ImGui as a complete reference and builds an independently runnable self-drawn Editor over
+shared semantic owners. Incremental work belongs inside that successor's own shell; default
+switch and reference retirement follow complete acceptance. Mixed first-party panels or reciprocal
+embedding are not required, while optional product embedding remains allowed. Current mixed-panel
+evidence does not establish an intact pure-ImGui reference; identify its exact revision/gaps.
+No official language was selected. The
 [custom UI study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
 and [language/extension study](../research/2026-10-27-language-extension-product-boundaries.md)
 trace the proposals to primary sources. Keep three independent choices explicit: widget state

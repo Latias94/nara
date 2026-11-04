@@ -1,24 +1,30 @@
 # Nara-owned editable Inspector
 
+**Role**: Executed selected-panel unit and bounded evidence. The November 4 development-route
+clarification supersedes its mixed-shell migration instructions for future work. Continue through
+the independent self-drawn Editor composition in R11b/e of the foundation rebaseline plan.
+
 ## Target and ownership
 
-Implement the foundation plan's first R11 visual workflow: an editable multilingual/numeric
+This unit implemented the foundation plan's first R11 visual workflow: an editable multilingual/numeric
 Inspector, a clipped live Scene image and the ordinary external semantic command. Nara owns the
 controls, text buffers, interaction and drawing. The existing Editor Host keeps native windows,
 event loop, device/queue, submission and physical retirement. Existing Application/Session owners
 retain exact document admission, operation results, Undo/Redo and Save/Reopen.
 
-Replace a complete selected Inspector panel after matching its predecessor's behavior. Dear may
-temporarily supply the surrounding existing workspace shell, but not the replacement panel's
-editable controls. Do not embed another UI runtime or create a second graphics owner. R11's
-broader virtualization, native IME/accessibility/DPI and idle-cost gates retain their full scope;
-an internal text prerequisite alone does not complete the visual workflow or full R11.
+The executed slice replaced selected panels inside the existing Dear workspace shell. Preserve
+its actual tests, semantic/shared-text mechanisms and result-routing evidence. Future development
+builds the self-drawn Editor with its own shell and native input/presentation composition beside
+the ImGui reference; it requires no reciprocal embedding or further mixed-panel default swaps.
+Retire the reference after whole-Editor acceptance. R11's virtualization, native IME/accessibility/
+DPI and idle-cost gates retain their scope. The remaining sections record the original unit's
+design/execution and do not prescribe the future migration route.
 
 The subsequent November 4 architecture clarification keeps those qualified selected-panel
 results. Remaining work follows [R11a-f](2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline):
 establish work/cost budgets, public panel hosting and component composition, a bounded complex
 editor/custom-draw/multiple-View consumer, public UI observation/operation, then measured reuse
-and remaining replacement. The [UI design](../architecture/ui-foundation-design.md) records
+and independent whole-Editor replacement. The [UI design](../architecture/ui-foundation-design.md) records
 Editor/game dependency separation and state ownership. This selected-panel plan does not qualify
 those successors or require an official ImGui extension; future user-authored frontends use the
 Host contract rather than changing the default Inspector's controls.

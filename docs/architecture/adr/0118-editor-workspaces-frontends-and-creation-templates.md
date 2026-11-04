@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-04 (custom component hosting, scoped effects and Editor iteration ownership)
+**Last Revised**: 2026-11-04 (independent reference/self-drawn Editor development and extension ownership)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -108,8 +108,42 @@ The October 27 clarification selects a Nara-owned custom-drawn Editor frontend a
 destination. The November 4 clarification also requires sufficient public attachment interfaces
 for users to integrate another UI implementation into a panel. This does not require Nara to
 ship an ImGui extension or embed a foreign toolkit as its default. The existing Dear frontend
-remains the qualified predecessor until matching workflows are replaced. Neither direction
+remains a reference and usable predecessor until the independently composed self-drawn Editor
+passes complete workflow acceptance. Neither direction
 introduces a second document/history authority or blocks independent Scene/language work.
+
+### Independent reference and self-drawn Editor implementations
+
+Use dear-imgui-rs to validate Editor module interfaces, document/UI models, commands and Host
+integration through a complete reference Editor. Develop the Nara-drawn successor as another
+complete frontend composition over the same semantic/domain owners and admitted native/render
+services. Choose the frontend at whole-Editor construction/launch; neither implementation needs
+to construct the other toolkit to operate. An independent composition is not a second document
+model, mutation/history system, event loop or GPU owner inside one running Editor.
+
+Incremental development may add one complete workflow at a time to the successor, using its own
+workspace/shell and input/presentation path. Do not require Nara panels inside an ImGui shell,
+ImGui controls inside the Nara frontend or per-panel default replacement as the development route.
+The self-drawn composition must ultimately build and run without a required Dear context,
+renderer, docking/input service or package dependency in its selected dependency closure.
+Exact executable, feature and crate organization follows the concrete consumers.
+
+Retain the reference until the self-drawn composition covers the agreed complete incumbent
+workflow matrix, native lifetime/input behavior and measured work budgets. Then switch the
+default composition and remove the displaced first-party ImGui implementation and migration-only
+bridges. No permanent first-party ImGui adapter or compatibility layer is required. Optional
+product embedding and user-authored frontend attachment remain allowed under their own Host
+capabilities; this development choice does not prohibit them or require building an embedding
+adapter during migration.
+
+Existing selected Nara panels hosted by Dear are bounded implementation/evidence, not the
+destination or a required stepping stone. Their corresponding Dear painters have already been
+removed in some scopes. Identify the actual complete reference revision and any coverage gaps
+before using it as an oracle; current mixed code does not prove that an intact pure-ImGui
+reference or the independent self-drawn Editor exists. Preserve qualified semantic/shared
+mechanisms and actual historical evidence while moving future development to separate compositions.
+If a historical revision supplies reference source, requalify its integration with the current
+semantic owners before using it for comparison; historical native results do not transfer by name.
 
 ### Independent document domains share the workspace lifecycle
 
@@ -906,14 +940,15 @@ At the initial 0.20.0 research baseline, IME commits are implemented but preedit
 system accessibility parity is not established by that research. Newer composition support is
 qualified separately in the implementation ledger.
 
-The replacement becomes the default only after the plan's actual Nara texture, authoring, input, lifecycle and feature-parity gates pass.
-If a mandatory capability fails, retain the current production frontend and resolve the concrete blocker before porting the rest.
-Passing one probe does not claim a complete replacement or native support on untested platforms.
-Once replacement parity passes, remove the superseded default frontend. Optional user-authored
-panel frontends use the public attachment contract; they do not preserve the displaced default
-Shell or require a permanent ImGui-shaped compatibility interface.
+The original Dear adoption retains its actual qualification. The self-drawn successor now
+follows the independent-composition route above: qualify its whole-Editor authoring, input,
+lifecycle, workspace and performance before selecting it as default, then retire the reference.
+A failed capability leaves the usable predecessor available. Optional user-authored panels use
+the public Host contract and do not require a permanent first-party ImGui implementation.
 
-The ordinary Scene/Prefab Inspector is a selected panel replacement within that migration.
+The following selected-panel descriptions record implementation predating this route correction;
+they do not prescribe further per-panel migration inside Dear.
+The ordinary Scene/Prefab Inspector was qualified as a selected panel replacement.
 Nara owns its default Document controls, field drafts' input buffers, component composition,
 authored-placement projection and exact Open Prefab Source navigation. The ordinary Dear
 whole-Inspector/component painters and optional Nara-properties tab are removed after their
@@ -953,9 +988,17 @@ leaving the default Inspector indefinitely preparing an image without a renderer
 ## Alternatives Considered
 
 1. **Replace widget calls directly.** Fast initially, but preserves egui-shaped application state, singleton views and built-in composition restrictions. Rejected as the architecture strategy.
-2. **Build a complete Nara editor UI or universal widget abstraction first.** Offers direct renderer reuse, but creates a large independent toolkit project before the editor workflows establish its requirements. Deferred custom widgets; universal abstraction rejected.
-3. **Keep semantic owners, replace private coupling, then qualify Dear ImGui.** Chosen because it improves the current product even if the candidate backend fails, while exposing native lifecycle and authoring constraints before a full port.
+2. **Complete a universal widget framework before Editor consumers.** Creates a broad toolkit
+   project before real workflows establish its interfaces. Rejected; the independent self-drawn
+   Editor grows through complete workflows rather than waiting for a complete component catalogue.
+3. **Reference Editor plus independent self-drawn successor.** Chosen: use Dear ImGui to validate
+   semantic owners, UI models and Host interfaces; build the successor's own complete composition
+   incrementally, compare complete workflows and switch/remove the reference after acceptance.
 4. **Load project Rust for creation/Inspector defaults.** Rejected because it changes ordinary Open into executable hosting and makes data authoring depend on successful project compilation. Pure creation templates preserve the existing isolation contract.
+5. **Continue replacing Dear panels with hosted Nara controls.** Bounded evidence already exists,
+   but mixed-toolkit migration is not required. Develop an independently runnable self-drawn
+   Editor beside the reference, then switch and remove the displaced implementation after complete
+   acceptance. Product-level optional embedding remains a separate capability.
 
 ## Consequences
 

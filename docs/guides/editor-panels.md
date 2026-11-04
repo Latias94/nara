@@ -1,5 +1,12 @@
 # Source-built Editor panels
 
+This guide describes the current Dear-based composition and its qualified hosted Nara panels.
+The [independent frontend development route](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md#independent-reference-and-self-drawn-editor-implementations)
+builds the self-drawn Editor with its own shell beside an explicitly identified ImGui reference,
+then switches/removes the reference after complete acceptance. The interfaces below are current
+capabilities, not a requirement for mixed-toolkit migration or the final self-drawn extension SDK.
+Optional product embedding remains allowed under its separate Host contract.
+
 An authoring document owns accepted content, history and persistence. An editor panel presents or
 edits that content: the Inspector, Project Browser and Scene View are panel kinds. A panel instance
 is one open occurrence with its own target and presentation state; the workspace layout arranges

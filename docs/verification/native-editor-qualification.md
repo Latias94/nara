@@ -8,6 +8,14 @@ replacement, frame cadence or supervised lifecycle ownership, select the traject
 the affected behavior. A focused result establishes only that tested scope.
 Documentation-only changes do not require another native qualification run.
 
+The independent-development route in ADR0118 builds a complete self-drawn Editor beside the
+ImGui reference, then switches/removes the reference after complete acceptance. Existing tests
+below cover the actual Dear-based composition, including hosted Nara panels; they do not prove
+an independent self-drawn shell or an intact pure-ImGui reference. Record the exact reference
+revision and coverage. Future successor trajectories must launch its own composition, exercise
+the agreed full workflow matrix and prove no required Dear dependency/context/renderer/input/
+docking service. Reciprocal embedding and mixed first-party panels are not prerequisites.
+
 ## UI Architecture Successor Scope
 
 The [R11a-f sequence](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#r11a-execution-model-dependency-closure-and-work-baseline)
@@ -15,8 +23,11 @@ and [UI design](../architecture/ui-foundation-design.md) add unimplemented publi
 custom-drawing, observation/operation and measured-reuse targets. Existing results below retain
 their original scope. Select actual successor native trajectories when those capabilities land:
 
-- Two independently compiled frontend implementations share one Host; transfer focus, IME,
-  capture and an admitted popup, then close/recreate one with pending input/output.
+- Independently compile/run the Nara-drawn composition and a separately selected non-Nara Host
+  conformance consumer. Each uses public drawing, text, popup, lifecycle and exact-result ports.
+- When claiming optional mixed-content hosting, use a separate extension fixture to transfer
+  focus, IME/capture and popup scope, then close/recreate with pending input/output. This does
+  not prescribe a mixed default or require ImGui embedding during successor development.
 - Two logical Views remain independent through panel relocation, fractional scale, clipping,
   resize and output retirement. Multiple Render Views alone do not qualify UI Surface aggregation.
 - Public semantic targeting and real pointer/key/text routes reach the ordinary controllers;

@@ -97,6 +97,11 @@ multiple logical Views constrain ownership and dependencies now; complete graph 
 agent transports, component catalogues and native multi-window support remain staged work.
 The revised [UI design](../architecture/ui-foundation-design.md), ADRs0093/0107/0109/0118 and the R11a-f
 units below separate those decisions from their still-unimplemented contracts and cost evidence.
+The subsequent development-route clarification keeps the complete ImGui Editor as a reference
+and develops the self-drawn Editor as an independently runnable composition over the same
+semantic owners. Add workflows inside the successor's own shell, then switch the default and
+retire the reference after complete acceptance. Mixed first-party panels and reciprocal toolkit
+embedding are not required; optional product embedding remains allowed.
 The component-interface follow-up adds scoped identity/effects, repeatable preparation and an
 explicit custom layout/draw contract. R11f names Editor extension edit/build/reconstruct separately
 from R12's game/Play restoration; declarative syntax alone qualifies no native reload.
@@ -1247,27 +1252,33 @@ author, Session and result ledger. Shared immutable text paint windows retain th
 owner's 4,096-byte input capacity under unchanged source/output limits. Same-document Source/UI
 replacement retires pending predecessor frames and keyboard/text authority; its owning unit
 records the matched CPU/native evidence and review corrections.
-Workspace and remaining specialized-panel replacement, offscreen keyboard traversal,
+The independent self-drawn Editor composition, workspace and specialized workflows, offscreen keyboard traversal,
 full matching/idle/allocation/GPU cost measurements and broader OS/platform qualification remain
 open. **Owners:** UI compile/presented sessions, text and frontend.
+The selected-panel evidence above predates the route clarification below. It is not a requirement
+to continue mixed-toolkit development or proof of a complete pure-ImGui reference.
 
 The default destination is **Nara's own custom-drawn Editor UI**. Users may integrate another UI
 implementation through public panel/Host ports; Nara need not supply an official ImGui extension.
 That optional attachment is distinct from embedding a reference toolkit as the default. The
 [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)
 informs the [owned runtime direction](../architecture/foundation-architecture-reassessment.md#updated-custom-ui-and-language-research).
-Preserve current semantic owners and use Dear's existing workflow behavior as the replacement baseline. Design
-Nara-owned controls, identity, interaction, layout and drawing. Mature text/layout primitives
-may be reused without importing a complete foreign UI runtime. No third-party embedding
-experiment or demonstration that adoption fails is required first.
+Preserve current semantic owners and use a named complete ImGui reference's workflow behavior
+as the comparison baseline. Record its exact revision and missing coverage; some original Dear
+painters are already removed in the current checkout. Develop an independently runnable
+self-drawn Editor with its own shell, controls, identity, interaction, layout and presentation.
+Mature text/layout primitives may be reused without importing a complete foreign UI runtime.
+Development requires no reciprocal embedding or mixed first-party composition. User-authored
+product embedding and Host conformance retain their separate scope.
 
-The first complete visual slice is an editable multilingual/numeric Inspector plus a clipped live
+The qualified historical visual slice was an editable multilingual/numeric Inspector plus a clipped live
 Scene image and the ordinary external semantic command. Preserve exact operation results, draft
 conflicts, Undo and Save/Reopen from the working predecessor. Select editable cluster/caret,
 selection/hit testing, font fallback and Editor font policy through this slice; display glyph
 projection alone is insufficient. Keep model/property identity, live widget incarnation and saved
-panel identity distinct. Extract toolkit-free draft logic only when actual frontend consumers
-share it, and remove the corresponding Dear path after parity rather than waiting for every panel.
+panel identity distinct. Reuse toolkit-free draft logic where actual frontend consumers share
+it. Add future complete workflows to the independent self-drawn composition. Retain the reference
+for whole-Editor comparison until complete acceptance rather than deleting it panel by panel.
 
 Before expanding the editable-control API, settle active-buffer Undo/Redo versus explicit
 document-history commands, including Escape and focus-loss transitions. Preserve the predecessor's
@@ -1301,11 +1312,11 @@ these observations before replacing the selected frontend:
 - Disable/replace the selected tool with queued events and retained callbacks/resources. Restore
   only explicitly compatible state; observe physical retirement separately from route removal.
 
-Keep this work independent of Scene data-family delivery and pure semantic tools. Qualify the
-owned runtime incrementally through these workflows, then remove superseded frontend code
-when matching complete workflows pass. The current Dear adapter is a working predecessor.
-Its retirement removes the displaced default frontend, while a user-authored optional frontend
-uses the new public attachment; neither requires a permanent ImGui-shaped core interface.
+Keep this work independent of Scene data-family delivery and pure semantic tools. Qualify
+workflows incrementally within the independently runnable successor. Default selection and
+reference removal follow complete incumbent workflow/native/performance acceptance in R11e.
+Optional user-authored frontends use the public Host attachment; they do not preserve the
+reference or require a permanent ImGui-shaped core interface.
 
 Repair exact theme revision/content association and Canvas/Runtime conflict admission (earlier
 F7/F8). Move glyph preparation reservations ahead of raster allocation where the model can prove
@@ -1354,6 +1365,8 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 4. Verify that text/kernel/widgets need no Editor/project/ECS facts, the game's `nara_ui` adapter
    needs no Editor, and Editor components do not import that adapter merely for controls. Record
    `nara_ui_render`'s current combined neutral planner and App/ECS/window integration for R11b.
+   Attribute the current mixed composition, named ImGui reference and future independent
+   self-drawn composition separately; missing consumers remain unmeasured.
 5. Attribute existing repeated preparation, local work and theme/typography changes. Extend the
    same baseline with scoped component/custom-draw cases when R11b/c supplies them; their
    unimplemented cells do not block R11a. Idle refresh demand and queue/retention limits remain
@@ -1384,6 +1397,10 @@ Separate the neutral packet/planner dependency closure from its current App/ECS/
 integration, retaining that game/runtime adapter through an explicit installation path. Whether
 this needs feature gating or an extracted crate follows the independent presentation consumer;
 the dependency result, rather than a prescribed package count, is the acceptance contract.
+Build the self-drawn frontend as a whole-Editor composition with its own workspace/shell
+presentation and native input/presentation path over existing workspace/Host services. Its selected build/run closure must
+need no Dear context, package, renderer or docking/input service. Keep the reference separately
+selectable for workflow comparison; exact executable/feature/crate organization is not prescribed.
 
 Qualify component composition separately from whole-frontend hosting. Scoped keyed state hides
 ordinary identity/reducer/text lifetime work; explicit update/effects are separate from repeatable
@@ -1395,11 +1412,13 @@ Keep exact trait shapes provisional until the independent composite/custom compo
 
 **Test scenarios:**
 
-- Independently compile and attach Nara content and a small non-Nara frontend through the public
-  contract. Each draws, edits text, opens an admitted popup and reports its own actions without
-  private engine changes. This qualifies finite Host conformance, not every foreign toolkit.
-- Transfer keyboard/IME/capture between the two implementations. Close one during composition,
-  pointer capture and queued output; late input/results cannot reach a same-kind replacement.
+- Independently compile and launch Nara content through the self-drawn composition and the
+  small non-Nara conformance implementation through a separately selected Host composition.
+  Each draws, edits text, opens a popup and reports actions without private engine changes.
+- When claiming optional mixed-content hosting, qualify it in a separate extension fixture:
+  transfer keyboard/IME/capture, close during composition or queued output, and reject late input/results to a
+  replacement. This tests the product extension contract, not a required mixed default or an
+  ImGui embedding step in successor development.
 - Relocate and reconstruct GPU state while preserving compatible panel state. Target change,
   layout reset and unsupported capabilities follow explicit retirement/refusal outcomes.
 - Keep an independently registered semantic command usable with its panel closed, through R1's
@@ -1414,6 +1433,8 @@ Keep exact trait shapes provisional until the independent composite/custom compo
 
 Before claiming compatibility with a named external toolkit, qualify its actual user-authored
 adapter separately. Shipping an official ImGui/egui package or stable plugin ABI is not required.
+Optional embedding/coexistence qualification does not gate the independent default's replacement
+unless that capability is explicitly part of the selected support claim.
 
 ### R11c: Complex document editor, custom drawing and multiple Views
 
@@ -1485,9 +1506,10 @@ transport is deferred; the public test driver is the initial real consumer.
 
 ### R11e: Measured reuse, remaining replacement and extension qualification
 
-**Dependencies:** R11a baseline/budgets, R11b-d consumers and the existing selected-panel parity.
-Optimize private layout/cache/render implementations against those same public consumers. Keep
-R12's independently authored and native/platform evidence distinct from maintainer execution.
+**Dependencies:** R11a baseline/budgets and R11b-d consumers; reuse selected-panel mechanisms
+within their recorded scope. Optimize private layout/cache/render implementations against those
+same public consumers. Keep R12's independently authored and native/platform evidence distinct
+from maintainer execution.
 
 **Files:** the owning compiler/text/frontend/planner/backend modules identified by R11a;
 `editor/tests/ui_work_costs.rs`, shared owner tests, the independent UI/panel/render fixtures and
@@ -1507,9 +1529,20 @@ distributions rather than creating registry snapshots or multiplying benchmark s
 - Meet R11a's fixed numeric budgets in the selected workloads. Report cold/warm distributions,
   P50/P95/P99 scope, cache hits/misses/evictions, allocation bytes, invalidation reasons, copies,
   submissions, refusal behavior and diagnostic overhead. Missing measurements keep this unit open.
+- Run the complete agreed incumbent workflow matrix in the independently runnable self-drawn
+  Editor: project/document navigation, ordinary and specialized authoring, commands/history/
+  persistence, Browser/import, Scene/Game Views, workspace layout/restore, overlays/focus/text,
+  diagnostics, cadence, recovery and physical close. Compare the same domain outcomes and native
+  behavior against the exact named reference; document reference gaps instead of inventing parity.
+- Prove the successor's selected dependency/build/run closure needs no Dear package or initialized
+  context, renderer, docking/input service or migration-only image-panel bridge. Shared domain,
+  Host and render services retain their owners. This does not prohibit rendering Scene/Game
+  images or optional user-authored frontend embedding.
 
-Continue specialized panels/workspace, component breadth, Docking and native detachment through
-these qualified interfaces. Delete each displaced default path only after matched workflow parity.
+Implement specialized workflows and workspace incrementally inside the independent successor.
+Switch the default composition after complete acceptance, then remove the first-party reference
+and migration-only mixed paths. Optional product embedding keeps its own admission/evidence.
+Component breadth and native detachment retain their named workload/platform scope.
 Future font/effect/component work may change private algorithms without exposing their storage or
 reopening document, Host or render ownership. Full R11/R12 remains open until its complete scope
 has matching evidence; this design update neither reopens qualified units nor claims the successor.
