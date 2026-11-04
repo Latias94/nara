@@ -153,6 +153,51 @@ Explicit Apply, conflict recovery, document Undo/Redo and persistence use the ex
 owner. These primitives alone do not qualify the complete
 [Nara-owned Inspector](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
 
+## Keyed composite fields
+
+`nara_ui_widgets::UiStateStore` keeps local fields and arbitrary component state by exact
+root/parent/explicit-child identity. The store belongs to one frontend instance. Labels and row
+positions are presentation data; use domain item IDs for child keys. A `UiStateBinding` supplies
+an opaque model binding and schema generation, while the store checks the Rust state type.
+Use a stable binding across compatible revisions; changing a document revision alone need not
+replace every draft. Type, binding or schema changes refuse ordinary reuse. Explicit `replace`
+starts a fresh incarnation after its complete initialization succeeds.
+
+Start a membership pass with `begin()`, derive child paths from `pass.root()`, and obtain a typed
+handle through `try_state(key, binding, initializer)`. `pass.read(&handle)` exposes existing or
+staged state immutably for node construction. `finish()` adopts the selected membership and
+evicts omitted state. Duplicate keys, capacity/initialization failures and incompatible reuse
+refuse the pass, even if a caller catches the individual error. Dropping an unfinished pass
+keeps previous membership. Repeating compatible composition does not rerun initializers or
+mutate drafts. Initializers construct local state only; document commands, tasks and subscriptions
+belong to explicit updates under their existing owners.
+
+Outside composition, use `get_mut` for explicit local updates. For directly retained `UiTextField`
+values, `reduce_text_focus` consumes the Host's admitted focus dispatch without a caller-owned
+field map. After current presentation/focus admission, `text_input(&handle)` captures a
+`UiStateTextInput`; queue this exact value with an incoming text event. `edit_text` validates both
+the store/field incarnation and the focus token. Obtain a new token only for a new ingress event,
+never while draining an older one. Its `TextEditOutcome` tells the frontend whether dependent
+text/layout/paint/semantics must rebuild. `point_text` uses the same scoped input and the field's
+local logical viewport for caret placement/selection. No automatic redraw or document Apply is
+performed.
+
+The [independent row composite](../../tests/fixtures/ui-module-consumer/src/keyed_editors.rs)
+uses the same `Value` label for distinct keyed fields and no central widget enum. Its tests
+preserve drafts, selection, preedit and Undo through reorder/insert and repeated composition.
+It deliberately evicts filtered rows: their drafts and preedit are discarded, and restoring a
+row initializes fresh state. A form that preserves drafts while controls are hidden must declare
+a longer-lived owner instead. This prerequisite is not a virtualized-list pinning policy.
+
+State adoption is separate from compiler and presenter acceptance. Before accepting further
+events, the Host releases/reconciles native focus, capture and IME according to its existing
+contracts. An evicted field's earlier pixels grant no input to a replacement. Destroying an
+arbitrary state value cannot cancel a task or release a native input method on the Host's behalf.
+The store bounds live slots and exact key-path bytes; its old-plus-staged slot peak is at most
+twice the configured slot limit. Arbitrary payload memory is not bounded by that count. Direct
+text-focus reduction scans retained slots; no constant-time dispatch or performance gain is
+claimed. The interface retains native-process type identity, not a hot-reload state codec.
+
 ## Native Editor integration
 
 The ordinary Scene/Prefab Inspector's default `Document` tab uses Nara controls. Its string and numeric

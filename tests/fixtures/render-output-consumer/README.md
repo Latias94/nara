@@ -59,6 +59,18 @@ no route. The caller still owns its `UiInteractionSession`, widget reducers and 
 Its modal popup must reach real presentation before the popup action can run. Retirement revokes
 the old route before late completion, and replacement receives a fresh surface/input lifetime.
 
+The same normal trajectory then imports `KeyedEditors` from the independently compiled
+`ui-module-consumer` library. Two same-label fields draw through the original presenter. Actual
+presented focus admits captured scoped input; reorder/insert preserve the same draft, combining
+preedit, selection/caret and local Undo/Redo. Filtering the active row discards its state, then a
+different item occupies its exact earlier presented rectangle. Old scoped input cannot mutate
+any replacement. Explicit document/schema replacement clears the old local draft/history;
+compatible composition retains the new handles and focus token. The complete trajectory now
+observes 11 native presentations and ten journal commits, retaining the original single popup
+action, reconstruction and original-Host retirement assertions. Logical glyph positions and
+glyph/face identities are checked without requiring target-scale raster keys to equal the source
+editor's keys. This is not independent pixel readback or a typography accuracy benchmark.
+
 The ignored `ui_surface` integration test launches the example in a child process so its event
 loop runs on the actual main thread. A second test injects error and panic separately after a
 real image submission but before composite; success requires original permit settlement,

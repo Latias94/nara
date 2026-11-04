@@ -14,9 +14,10 @@ pass their independent/native and measured acceptance. This documentation update
 new performance, toolkit compatibility or platform evidence and requires no official ImGui package.
 
 The component/reload follow-up explicitly leaves custom measurement/drawing, routed canvas
-interaction, scoped keyed component state/effects and independent component-library ergonomics
-unqualified. Current public panels remain Dear-specific; finite Rect/Text paint and button events
-are not the complete successor interface. R11f adds source-built Editor edit/build/reconstruct,
+interaction, complete component state/effects lifecycle and component-library ergonomics
+unqualified beyond the bounded keyed-state prerequisite below. Current public panels remain
+Dear-specific; finite Rect/Text paint and button events are not the complete successor interface.
+R11f adds source-built Editor edit/build/reconstruct,
 bounded versioned owner/UI recovery, failure refusal/recovery and correct-result latency. It is
 unimplemented and separate from Play/checkpoint restoration; declarative composition, preserved
 frontend objects during GPU recovery and source-built panel registration do not qualify code reload.
@@ -86,6 +87,21 @@ All 175 kernel/presentation tests, 396 WGPU library tests, six independent nativ
 dependency checks pass. This is not
 the whole Editor panel attachment, neutral presentation dependency split or independent default
 shell; their implementation and qualification remain open under R11b.
+
+The [keyed local-state prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#keyed-local-state-composition-prerequisite)
+adds exact parent/child scoping, typed store/incarnation handles, explicit model/schema
+compatibility and transactional membership. A separately authored row composite consumes this
+without a widget registry, document owner or private state map. Repeated composition preserves
+compatible local text state; omitted rows follow the fixture's explicit discard policy. Error,
+abandonment and caught initializer unwind preserve earlier membership. Native focus/IME, pending
+domain results and external-work cancellation stay with their original owners. This is no
+general component/custom-layout interface, virtualization implementation, automatic invalidation,
+hot-reload codec or performance claim; broader R11b acceptance remains open.
+The linked prerequisite records 271 shared regressions, 11 focused custody cases (nine overlap),
+13 independent neutral consumer cases and two dependency checks. Its two final native tests
+include a complete 11-presentation/ten-commit trajectory and separate original error/panic child
+controls. Input delivery is injected; current Editor controllers and their draft policy remain
+unchanged by this slice.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and

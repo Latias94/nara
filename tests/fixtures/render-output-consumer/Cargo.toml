@@ -16,6 +16,7 @@ nara_render = { path = "../../../crates/nara_render", default-features = false }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false }
 
 [dev-dependencies]
+nara-ui-module-consumer = { path = "../ui-module-consumer" }
 nara_text = { path = "../../../crates/nara_text", default-features = false }
 nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = false }
 nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false }

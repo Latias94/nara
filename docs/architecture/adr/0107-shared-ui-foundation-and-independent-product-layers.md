@@ -135,6 +135,19 @@ document binding starts a new incarnation unless an explicit compatible migratio
 Public layout/cache/reconciliation storage is not part of this contract. Exact Rust types and
 key helpers require independent composition/custom-component consumers before freeze.
 
+The bounded keyed-state prerequisite in `nara_ui_widgets` separates a membership pass from
+explicit local updates. Exact root/parent/leaf paths select state; labels and ordering do not.
+A store-local typed handle also identifies the live incarnation. Type, schema or opaque binding
+changes require explicit replacement, and stale handles cannot address that replacement.
+Composition reads existing state and lazily initializes new state without publishing effects;
+only a successful pass adopts membership. This transaction is neither compiler acceptance nor
+presentation admission. A frontend chooses the declaration scope: omitting a slot evicts its
+local state, so drafts that must survive hidden controls need a longer-lived declared owner.
+The store cannot release native focus/IME, cancel external tasks or discover fields nested inside
+arbitrary user state. Those remain explicit responsibilities of the existing owners. This
+prerequisite does not establish automatic dependency tracking, a general Widget trait, custom
+layout/drawing, virtualization or code-reload compatibility.
+
 Nara-owned composition, measurement and painting can be skipped or repeated. Their invocation
 count cannot publish document edits, spawn tasks or install subscriptions. Admitted interaction
 and exact results drive explicit state/effect updates; compatible private caches may still change
@@ -149,7 +162,8 @@ inputs have explicit invalidation dependencies. Drawing, keyboard/text behavior,
 and platform integration remain separately declared capabilities. The current Rect/Text vocabulary
 and Button/TextField reducers do not establish this complete extension interface.
 These are successor design requirements. Existing qualified controlled widgets/panels retain
-their bounded interfaces; the independent component/custom-layout consumers remain unimplemented.
+their bounded interfaces; independent keyed composition supplies one prerequisite, while the
+complete component/custom-layout consumers remain unimplemented.
 
 ### Evidence and non-prerequisites
 

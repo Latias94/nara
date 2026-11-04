@@ -27,6 +27,15 @@ The separate Cargo workspace and lockfile keep this dependency graph independent
 and the broader module-consumer project. Building alongside their ECS, Scene or renderer
 dependencies would weaken this isolation check.
 
+`keyed_editors` is an independently authored reusable row composite. Two fields share the
+accessible label `Value` but retain state by parent/item/property identity. Reorder, insertion
+and repeat composition preserve the exact draft, selection, preedit, focus token and local
+history. The chosen filter policy evicts omitted fields; a restored row starts fresh and old
+scoped input cannot reach same-position replacements. Binding/schema mismatch preserves the
+previous membership until explicit replacement. The component retains no journal, GPU, document
+owner or native input method. Local tests use public field focus; presented input routing is
+separately exercised by the native output consumer importing this actual library.
+
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
 ```text

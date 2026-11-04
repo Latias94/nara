@@ -1501,6 +1501,78 @@ adapter separately. Shipping an official ImGui/egui package or stable plugin ABI
 Optional embedding/coexistence qualification does not gate the independent default's replacement
 unless that capability is explicitly part of the selected support claim.
 
+#### Keyed local-state composition prerequisite
+
+Implement a bounded panel-instance `UiStateStore` with exact root/parent/explicit-child paths,
+typed store/incarnation handles and explicit state-schema/model binding. Compatible composition
+reads retained state; local edits occur in a separate update phase. Lazy initialization creates
+only new local state. Successful `finish` adopts membership; duplicate keys, capacity, failed
+initialization and incompatible ordinary reuse poison the pass. Failure/abandonment keeps the
+previous owners. Explicit replacement starts a new input incarnation without copying old tokens.
+
+Qualify an independently authored row composite with two same-label editors through the neutral
+text/kernel/widgets consumer, then import that actual library in the existing independent native
+presenter executable. Preserve its original popup, text history, backend reconstruction and
+original-outcome retirement assertions. Add reorder/insert/repeated composition with active
+preedit/selection/history, focused filtering, same-position replacement and explicit model/schema
+replacement. No private receipt creation or duplicate native/interaction owner may be introduced.
+
+This row fixture deliberately evicts omitted state. Existing Editor form drafts that survive
+hidden controls retain their longer-lived owner; do not mechanically migrate their policy.
+Membership commit is neither compiler nor presenter acceptance. Native focus/IME/capture and
+external task/result custody stay with the Host and existing semantic owners. Slot counts and
+exact key bytes are bounded separately from arbitrary user payload memory. Record actual work
+and limits without claiming virtualization, automatic dependency tracking, layout reuse, hot
+reload, performance improvement or complete R11b component/custom-layout acceptance.
+
+At source base `0f558a7` plus this prerequisite, the public widget module implements those state
+contracts and the independently compiled `KeyedEditors` library supplies the real consumer.
+Replacement counts as initialized/replaced/retired; failed passes preserve `last_changes`.
+Captured initializer unwind poisons both ordinary creation and replacement. The neutral consumer
+uses public local field focus and fractional compilation, not a private receipt factory. A
+separate widget integration test uses test journal authority to exercise real routed focus,
+blur/preedit cancellation, refocus and old-dispatch isolation; it is explicitly CPU evidence.
+
+The independent native frontend imports the actual composite library. Its original five
+presentations/four commits remain asserted before six more presentations/commits exercise keyed
+composition. Reorder/insert preserve the original draft, combining preedit, caret/selection,
+focus token and Undo/Redo. Filter eviction, same-visible-position replacement and explicit
+document/schema replacement reject original captured input. Closing cancels the original seat,
+evicts local state and rejects saved tokens before presenter and original Host retirement.
+Error/panic controls retain their original outcome-settlement and exact cleanup requirements.
+
+Initial fixture compilation finds a trailing struct-update comma, then the native build finds
+incompatible boxed-error conversions and a nonexistent layout-source getter. The corrections
+preserve original error objects through explicit trait-object coercion and compare logical glyph
+positions/advances and face/glyph identities with full metrics. They do not require placed
+target-scale raster keys to equal original editing keys. Native runs pass; the final one follows
+explicit close cancellation, the edit-adapter borrow simplification and old binding-token
+refusal after its replacement actually receives focus.
+
+| Qualification | Result | Nextest run |
+| --- | --- | --- |
+| Shared text/kernel/widgets/presentation regression, including the first nine keyed-state cases | 271/271 | `5f0c6790-9895-4620-b0f5-0f41453d2077` |
+| Keyed-state and routed-text custody, adding caught unwind and actual focus-dispatch integration | 11/11, including nine overlapping cases above | `fa550458-99b4-4413-a212-a178353a383f` |
+| Independent neutral module consumer, including three full keyed-composite workflows | 13/13 | `dc7dfcf3-f7a1-4d7c-9cf4-d3135e7a033a` |
+| Independent native UI trajectory plus original error/panic child controls | 2/2 | `0d786d8c-bc8e-4583-8678-539decafc11f` |
+| Neutral component and native executable dev-graph dependency checks | 2/2, 10 unrelated cases filtered | `7f759fbf-d445-4bab-bc7f-83368cbcc80a` |
+
+The final normal Windows/DX12 trajectory observes 11 actual native presentations, ten journal
+commits and exactly one original popup action. Input is injected pointer/IME and logical keys;
+physical OS input/candidate delivery and accessibility remain separate. Logical glyph checks are
+not independent pixel readback. Slot bounds and lazy-initializer counts do not establish timing,
+allocation reduction, automatic dependency invalidation, cached layout or virtualized total work.
+No Editor controller, hidden-form retention policy or frontend default changes in this slice.
+Custom geometry/layout/drawing, scoped services/effects, async retirement, neutral presentation
+dependency separation and the complete independent Editor remain open under R11a/R11b-f.
+Independent correctness and architecture reviews find no P1/P2 in this bounded prerequisite.
+Review-driven coverage adds caught initializer unwind, routed blur/refocus/old-dispatch refusal
+and old binding-token refusal while the replacement is focused. Correctness Clippy passes for
+the widget crate and both independent consumers with all targets; root and both fixture format
+checks pass. All 1,068 local Markdown link targets across the seven changed current documents
+and diff whitespace checks pass. Existing unrelated warning categories remain outside the
+correctness gate. Formatting/document closure after these results does not change product scope.
+
 #### Local font reconfiguration prerequisite qualification
 
 At source base `6395ae0` plus this prerequisite, the shared text/field interface adopts new ordered

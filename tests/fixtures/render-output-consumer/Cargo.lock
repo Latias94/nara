@@ -1471,6 +1471,7 @@ dependencies = [
 name = "nara-render-output-consumer"
 version = "0.0.0"
 dependencies = [
+ "nara-ui-module-consumer",
  "nara_core",
  "nara_ecs",
  "nara_render",
@@ -1482,6 +1483,15 @@ dependencies = [
  "nara_window",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "nara-ui-module-consumer"
+version = "0.0.0"
+dependencies = [
+ "nara_text",
+ "nara_ui_kernel",
+ "nara_ui_widgets",
 ]
 
 [[package]]

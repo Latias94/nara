@@ -8,6 +8,8 @@ use nara_ui_kernel::{
 use nara_ui_widgets::UiButton;
 use std::sync::Arc;
 
+pub mod keyed_editors;
+
 pub type StatusLabelError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
 /// Shapes and rasterizes one status label through the direct text-module boundary.

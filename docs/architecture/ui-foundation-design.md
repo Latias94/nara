@@ -328,6 +328,31 @@ some retained state. Until those dependencies are represented completely, conser
 the affected root. Do not replace the existing owners with GPUI's App/Window/Entity model or
 assume automatic field-level dependency discovery.
 
+The bounded `UiStateStore` prerequisite retains arbitrary typed local state through exact
+root/parent/leaf keys. Its membership pass reads compatible existing state and lazily initializes
+new slots. Only `finish` adopts membership; failure or abandonment keeps the previous owners.
+Type, schema or opaque binding mismatches refuse ordinary reuse and require explicit replacement.
+Handles retain store and incarnation identity, so an aborted, evicted or replaced slot cannot
+inherit old input. This is local state custody, not a persistent layout tree or presentation commit.
+Its direct-field helpers reduce admitted focus and apply edits through captured scoped tokens;
+custom composites may retain their fields separately without a central widget registration.
+
+Each consumer declares its retention scope. The independent row composite deliberately evicts
+omitted fields and discards their draft/preedit. Existing Editor form drafts that must survive
+hidden controls retain their longer-lived owner; they must not be mechanically migrated to that
+row policy. Dropping state makes local handles unusable, but native IME/focus release, capture,
+pending domain results and external-work cancellation remain with their original owners. A
+failed later compile/presentation does not restore dropped owners; previous visuals may remain
+only as inert recovery. Membership acceptance grants no routing receipt.
+
+The selected interface has no implicit notify or dependency discovery. Explicit updates precede
+composition; owners conservatively rebuild affected roots after text/focus changes, and callers
+of arbitrary typed mutation invalidate all consuming artifacts. Initializers are lazy local state
+construction, not task/subscription installation. Stable-slot count and exact path bytes are
+bounded, but arbitrary user payload bytes remain the component author's responsibility. Retained
+lookup and direct-field focus scans have documented work; no timing, allocation reduction or
+O(visible rows) claim follows from keyed retention alone.
+
 Virtualization has separate collection and active-row work. Uniform extents can derive a range
 arithmetically; measured extents need estimates, changed-size invalidation and retained geometry.
 The Open-GPUI pin implements `virtualizer` inside `open-gpui-ui-core` 0.2.0. Its outer list wrapper
