@@ -20,6 +20,7 @@ use nara_input::{
     InputWindowEvent, InputWindowId, KeyCode, MAX_INPUT_TIMELINE_ENTRIES, MouseButton,
     PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
+#[cfg(feature = "serde")]
 use nara_reflect::__macro_support::PersistentFieldCodec;
 use nara_reflect::{
     ComponentDecodeContext, ComponentEncodeContext, ComponentFieldPath, ComponentRegistryBuilder,
@@ -555,6 +556,7 @@ fn brush_records_require_canonical_fields_and_reject_untyped_references() {
 }
 
 #[test]
+#[cfg(feature = "serde")]
 fn image_brush_preserves_complete_products_without_source_database() {
     let snapshot = frozen_ui_registry();
     let component_id = ComponentTypeId::new("nara.ui.UiVisual");
