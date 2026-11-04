@@ -123,21 +123,27 @@ impl WgpuUiSubmissionState {
         &self,
         backend_generation: UiPresentationBackendGeneration,
     ) -> Result<(), WgpuRenderError> {
-        let Self::Prepared(submissions) = self else {
-            return Ok(());
+        let mismatch = match self {
+            Self::Prepared(submissions) => submissions.iter().find_map(|submission| {
+                submission
+                    .submission()
+                    .required_backend_generation()
+                    .filter(|required| *required != backend_generation)
+                    .map(|required| {
+                        (
+                            submission.submission().identity().admission_id().get(),
+                            required,
+                        )
+                    })
+            }),
+            Self::Submitted(submissions) => submissions.iter().find_map(|submission| {
+                let submission = submission.submission();
+                let required = submission.backend_generation();
+                (required != backend_generation)
+                    .then_some((submission.identity().admission_id().get(), required))
+            }),
         };
-        let Some((admission_id, required)) = submissions.iter().find_map(|submission| {
-            submission
-                .submission()
-                .required_backend_generation()
-                .filter(|required| *required != backend_generation)
-                .map(|required| {
-                    (
-                        submission.submission().identity().admission_id().get(),
-                        required,
-                    )
-                })
-        }) else {
+        let Some((admission_id, required)) = mismatch else {
             return Ok(());
         };
         Err(ui_backend_generation_mismatch(
@@ -1356,6 +1362,75 @@ mod tests {
                 nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }
                     if attempt.admission_id().unwrap().get() == u64::try_from(index + 1).unwrap()
             ));
+        }
+        assert!(
+            nara_ui_render::drain_ui_presentation_outcomes(&mut world)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn submitted_ui_generation_refusal_preserves_original_attempts_for_same_generation_retry() {
+        use nara_ui_render::UiPresentationOutcome;
+
+        let packet = ui_packet();
+        let generation = UiPresentationBackendGeneration::new(17, 3).unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let mut state =
+            WgpuUiSubmissionState::Prepared(prepare_ui_submissions(&mut outcomes, &packet, 2));
+        state.bind_backend(generation).unwrap();
+        let original_storage = state.bound_submissions().as_ptr();
+        let original_identities: Vec<_> = state
+            .bound_submissions()
+            .iter()
+            .map(|submission| submission.submission().identity())
+            .collect();
+
+        state.validate_backend_generation(generation).unwrap();
+        state.bind_backend(generation).unwrap();
+        assert_eq!(state.bound_submissions().as_ptr(), original_storage);
+        for foreign in [
+            UiPresentationBackendGeneration::new(17, 4).unwrap(),
+            UiPresentationBackendGeneration::new(18, 3).unwrap(),
+        ] {
+            assert!(matches!(
+                state.validate_backend_generation(foreign),
+                Err(WgpuRenderError::UiSubmissionRejected { .. }),
+            ));
+            assert!(matches!(
+                state.bind_backend(foreign),
+                Err(WgpuRenderError::UiSubmissionRejected { .. }),
+            ));
+            assert!(matches!(&state, WgpuUiSubmissionState::Submitted(_)));
+            assert_eq!(state.bound_submissions().as_ptr(), original_storage);
+            assert_eq!(state.submission_count(), original_identities.len());
+            for (submission, identity) in state.bound_submissions().iter().zip(&original_identities)
+            {
+                assert_eq!(submission.submission().identity(), *identity);
+                assert_eq!(submission.submission().backend_generation(), generation);
+                assert!(Arc::ptr_eq(submission.submission().packet(), &packet));
+            }
+        }
+        state.validate_backend_generation(generation).unwrap();
+        state.bind_backend(generation).unwrap();
+        assert_eq!(state.bound_submissions().as_ptr(), original_storage);
+
+        for completed in complete_ui_submissions(state, WgpuUiCompletion::Presented) {
+            outcomes.commit_backend(completed);
+        }
+        let mut world = World::new();
+        world.insert_resource(outcomes);
+        let published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert_eq!(published.len(), original_identities.len());
+        for (outcome, identity) in published.iter().zip(original_identities) {
+            let UiPresentationOutcome::Presented(commit) = outcome else {
+                panic!("the same-generation retry must retain the original presentation authority");
+            };
+            assert_eq!(commit.submission(), identity);
+            assert_eq!(commit.backend_generation(), generation);
+            assert!(Arc::ptr_eq(commit.packet(), &packet));
         }
         assert!(
             nara_ui_render::drain_ui_presentation_outcomes(&mut world)

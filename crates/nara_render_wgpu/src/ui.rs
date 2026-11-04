@@ -25,9 +25,11 @@ pub(crate) fn validate_submission_packets(
 ) -> Result<(), WgpuRenderError> {
     for submission in submissions {
         let identity = submission.submission().identity();
-        let mut matching = packets
-            .iter()
-            .filter(|facts| facts.packet == identity.packet() && facts.target == identity.target());
+        let mut matching = packets.iter().filter(|facts| {
+            facts.packet == identity.packet()
+                && facts.target == identity.target()
+                && Arc::ptr_eq(&facts.original_packet, submission.submission().packet())
+        });
         if matching.next().is_none() || matching.next().is_some() {
             return Err(WgpuRenderError::UiSubmissionRejected {
                 message: format!(
@@ -251,6 +253,7 @@ pub(crate) struct WgpuUiLowering {
 
 #[derive(Clone, Debug)]
 pub(crate) struct WgpuLoweredUiPacketFacts {
+    original_packet: Arc<UiPaintPacket>,
     pub(crate) packet: UiPaintPacketIdentity,
     pub(crate) target: RenderTarget,
     pub(crate) primitive_count: u64,
@@ -263,8 +266,9 @@ pub(crate) struct WgpuLoweredUiPacketFacts {
 }
 
 impl WgpuLoweredUiPacketFacts {
-    fn new(packet: &UiPaintPacket) -> Self {
+    fn new(packet: &Arc<UiPaintPacket>) -> Self {
         Self {
+            original_packet: Arc::clone(packet),
             packet: packet.identity(),
             target: packet.target(),
             primitive_count: crate::saturating_u64(packet.primitives().len()),
@@ -666,6 +670,113 @@ mod tests {
         assert_eq!(facts.primitive_count, 1);
         assert_eq!(facts.submitted_quad_count, 0);
         assert!(facts.resources.is_empty());
+    }
+
+    #[test]
+    fn submission_packets_reject_replanned_image_bindings_with_equal_identity() {
+        let original = image_packet();
+        let mut images = nara_ui_render::UiPreparedImages::default();
+        images.insert(
+            original.images()[0].id().clone(),
+            captured_image_snapshot([16, 240, 16, 255]),
+        );
+        let replacement = nara_ui_render::UiPresentationPlanner::default()
+            .plan(original.frame(), original.target(), &images)
+            .unwrap();
+        assert_eq!(original.identity(), replacement.identity());
+        assert_eq!(original.target(), replacement.target());
+        assert!(!Arc::ptr_eq(&original, &replacement));
+        assert_eq!(
+            original.images()[0].snapshot().resource().pixels(),
+            [240, 16, 120, 255],
+        );
+        assert_eq!(
+            replacement.images()[0].snapshot().resource().pixels(),
+            [16, 240, 16, 255],
+        );
+
+        let mut builder = capture_builder();
+        let target = builder.texture::<()>(capture_descriptor()).unwrap();
+        let capture = UiCapture::new(
+            std::slice::from_ref(&original),
+            original.target(),
+            Some(WindowId::PRIMARY),
+            target.clone(),
+            readback_viewport(),
+        )
+        .unwrap();
+        let replacement_capture = UiCapture::new(
+            std::slice::from_ref(&replacement),
+            replacement.target(),
+            Some(WindowId::PRIMARY),
+            target.clone(),
+            readback_viewport(),
+        )
+        .unwrap();
+        assert_ne!(
+            capture.packet_facts[0].resources,
+            replacement_capture.packet_facts[0].resources,
+        );
+        for (capture, expected) in [
+            (&capture, [240, 16, 120, 255]),
+            (&replacement_capture, [16, 240, 16, 255]),
+        ] {
+            assert!(capture.batches.iter().any(|batch| {
+                matches!(&batch.texture, WgpuQuadTexture::Image(snapshot)
+                    if snapshot.resource().pixels() == expected)
+            }));
+        }
+
+        let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
+        let prepared = crate::tests::admit_ui_attempt(
+            &mut outcomes,
+            crate::tests::prepared_ui_attempt(Arc::clone(&replacement), 1, 3),
+        );
+        let submissions = nara_ui_render::__private::bind_backend_submission_batch(
+            vec![prepared],
+            nara_ui_render::UiPresentationBackendGeneration::new(17, 3).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_submission_packets(&submissions, &capture.packet_facts),
+            Err(WgpuRenderError::UiSubmissionRejected { .. }),
+        ));
+        let report = UiReport {
+            packet_facts: Arc::clone(&capture.packet_facts),
+            ..Default::default()
+        };
+        assert!(matches!(
+            validate_submission_packets(&submissions, &report.packet_facts),
+            Err(WgpuRenderError::UiSubmissionRejected { .. }),
+        ));
+        assert!(Arc::ptr_eq(
+            submissions[0].submission().packet(),
+            &replacement,
+        ));
+        validate_submission_packets(&submissions, &replacement_capture.packet_facts).unwrap();
+
+        let replay_capture = UiCapture::new(
+            &[original, Arc::clone(&replacement)],
+            replacement.target(),
+            Some(WindowId::PRIMARY),
+            target.clone(),
+            readback_viewport(),
+        )
+        .unwrap();
+        validate_submission_packets(&submissions, &replay_capture.packet_facts).unwrap();
+        validate_submission_packets(&[], &replay_capture.packet_facts).unwrap();
+        let duplicate_capture = UiCapture::new(
+            &[Arc::clone(&replacement), replacement],
+            replay_capture.packet_facts[0].target,
+            Some(WindowId::PRIMARY),
+            target,
+            readback_viewport(),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_submission_packets(&submissions, &duplicate_capture.packet_facts),
+            Err(WgpuRenderError::UiSubmissionRejected { .. }),
+        ));
     }
 
     fn capture_builder() -> WgpuRenderProgramBuilder {
@@ -1510,7 +1621,7 @@ mod tests {
             ));
         let frame = compile_frame("wgpu-image-readback", node);
         let mut prepared = nara_ui_render::UiPreparedImages::default();
-        prepared.insert(image_id, captured_image_snapshot());
+        prepared.insert(image_id, captured_image_snapshot([240, 16, 120, 255]));
         nara_ui_render::UiPresentationPlanner::default()
             .plan(frame, RenderTarget::Window(WindowId::PRIMARY), &prepared)
             .unwrap()
@@ -1562,7 +1673,7 @@ mod tests {
             .compile(&snapshot, environment, UiTheme::default())
             .unwrap();
         let mut prepared = nara_ui_render::UiPreparedImages::default();
-        prepared.insert(image_id, captured_image_snapshot());
+        prepared.insert(image_id, captured_image_snapshot([240, 16, 120, 255]));
         nara_ui_render::UiPresentationPlanner::default()
             .plan(frame, RenderTarget::Window(WindowId::PRIMARY), &prepared)
             .unwrap()
@@ -1597,12 +1708,12 @@ mod tests {
             .unwrap()
     }
 
-    fn captured_image_snapshot() -> PreparedImageSnapshot {
+    fn captured_image_snapshot(pixels: [u8; 4]) -> PreparedImageSnapshot {
         let image = ImageAsset::new(
             ImageExtent::new(1, 1),
             ImageFormat::Rgba8,
             ImageColorSpace::Srgb,
-            vec![240, 16, 120, 255],
+            pixels.to_vec(),
         )
         .unwrap();
         let handle = nara_asset::allocate_anonymous_handle().unwrap();
