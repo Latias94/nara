@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiRevision, UiRootDiagnostic,
-    UiRootKey, UiStyle, UiStyleError, UiText, UiVisual, limits::UiSnapshotProfile,
+    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiPreparedText, UiRevision,
+    UiRootDiagnostic, UiRootKey, UiStyle, UiStyleError, UiText, UiVisual,
+    limits::UiSnapshotProfile,
 };
 
 /// Closed root layers shared by paint, hit, focus, and semantic order.
@@ -167,10 +168,42 @@ pub struct UiNode {
     pub(crate) key: Option<UiLocalKey>,
     pub(crate) style: UiStyle,
     pub(crate) visual: Option<UiVisual>,
-    pub(crate) text: Option<UiText>,
+    pub(crate) text: Option<UiNodeText>,
     pub(crate) interaction: UiInteraction,
     pub(crate) semantics: Option<UiSemantics>,
     pub(crate) children: Vec<Self>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum UiNodeText {
+    Plain(UiText),
+    Prepared(UiPreparedText),
+}
+
+impl UiNodeText {
+    pub(crate) fn validate(&self) -> Result<(), UiStyleError> {
+        match self {
+            Self::Plain(text) => text.validate(),
+            Self::Prepared(text) => text.validate(),
+        }
+    }
+
+    pub(crate) fn brush(&self) -> &crate::UiBrush {
+        match self {
+            Self::Plain(text) => &text.brush,
+            Self::Prepared(text) => &text.brush,
+        }
+    }
+
+    pub(crate) fn semantic_text(&self) -> &str {
+        match self {
+            Self::Plain(text) => text.semantic_text.as_deref().unwrap_or(&text.content),
+            Self::Prepared(text) => text
+                .semantic_text
+                .as_deref()
+                .unwrap_or_else(|| text.snapshot.display_text()),
+        }
+    }
 }
 
 impl UiNode {
@@ -205,7 +238,13 @@ impl UiNode {
 
     #[must_use]
     pub fn with_text(mut self, text: UiText) -> Self {
-        self.text = Some(text);
+        self.text = Some(UiNodeText::Plain(text));
+        self
+    }
+
+    #[must_use]
+    pub fn with_prepared_text(mut self, text: UiPreparedText) -> Self {
+        self.text = Some(UiNodeText::Prepared(text));
         self
     }
 
@@ -260,7 +299,13 @@ impl UiRoot {
 
     #[must_use]
     pub fn with_text(mut self, text: UiText) -> Self {
-        self.node.text = Some(text);
+        self.node.text = Some(UiNodeText::Plain(text));
+        self
+    }
+
+    #[must_use]
+    pub fn with_prepared_text(mut self, text: UiPreparedText) -> Self {
+        self.node.text = Some(UiNodeText::Prepared(text));
         self
     }
 

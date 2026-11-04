@@ -67,6 +67,28 @@ operating on the committed buffer. Local Undo/Redo does not invoke document hist
 
 ## Field and Host responsibilities
 
+`TextEditor::paint_snapshot()` publishes an opaque immutable `TextPaintSnapshot` with the complete
+display source, ordered font identities, logical size and positioned editing layout.
+`TextEngine::prepare_window()` admits that complete source under the receiver's byte, line, glyph,
+diagnostic and scale limits and returns only glyphs whose actual raster placement intersects the
+local clip. `prepare_window_at()` additionally takes the exact logical draw origin and physical
+content origin used by the renderer; target-scale size and subpixel phases are rebuilt from those
+baselines. Both methods preserve full metrics and original visual order/coordinates without
+reshaping substrings. Raster extent policy applies even to excluded glyphs. A returned layout
+owns only its window glyphs and reindexed runs, with no retained complete-layout resource.
+
+`UiNode::with_prepared_text(UiPreparedText::new(snapshot))` measures the snapshot's exact dimensions
+and prepares its paint window from final inherited/content geometry. Typography cannot be
+overridden independently. The compile candidate charges the complete display bytes once per
+published snapshot identity, sharing the ordinary source-admission ceiling, but reuse performs no
+new shaping. Every draw charges its output glyphs, including repeated draws of one snapshot,
+against the same combined glyph ceiling as ordinary text. Each prepared draw scans at most one
+receiver-admitted complete glyph set and rasterizes at most one mask per distinct target key;
+only placement metadata is reused within that call. Candidate node limits bound draw count. This
+is bounded raster/scan work, not a claim of constant-time scrolling or cached raster preparation.
+Snapshot publication retains one bounded copy of the editing layout until its display changes.
+Field selection, pointer mapping and IME continue to use the complete editing layout.
+
 `UiTextField::authored_node` draws its text, selection and caret within one content clip. Pass the
 caller's resolved logical viewport width to drawing, pointer mapping and `ime_area()` consistently.
 The candidate area is local logical geometry; the Host translates it to the actual native window
@@ -93,15 +115,16 @@ owner. These primitives alone do not qualify the complete
 
 ## Native Editor integration
 
-The existing Editor workspace offers a `Nara properties` Inspector tab. Its string and numeric
+The ordinary Scene/Prefab Inspector's default `Document` tab uses Nara controls. Its string and numeric
 fields use Nara drawing and local editing. Boolean values use an explicit `Set true` or `Set false`
 button. Entity and asset references use bounded text editing; `Choose target` also offers the
 current document's source-local entities in pages of at most 32 choices. Labels include each
 entity's exact ID to distinguish duplicate names. The same picker is available for entity-reference
 leaves inside supported structured fields. Choosing a target changes only that leaf in the retained
 draft; explicit whole-field Apply publishes it. Supported Optional, Record and scalar-item List/Map fields use
-`Edit value` to open a structured draft. Unsupported shapes remain read-only. The complete
-predecessor Inspector remains available under `Document` during this incremental integration.
+`Edit value` to open a structured draft. Unsupported shapes remain read-only. The displaced ordinary
+Dear Inspector and competing optional tab are removed; specialized UI properties and the workspace
+shell retain their separate consumers while those complete workflows are migrated.
 
 Select a field with the pointer, drag to select, or use arrows, Home/End and Ctrl+A. Within the
 active Inspector image, Tab/Shift+Tab move through enabled fields and buttons; Enter or Space

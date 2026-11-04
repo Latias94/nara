@@ -1,17 +1,26 @@
 use std::sync::Arc;
 
-use nara_text::{TextEngine, TextLayout, TextLayoutError, TextLayoutRequest};
+use nara_text::{
+    TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextPaintSnapshot, TextWindowError,
+};
 
 #[derive(Debug)]
 pub(super) enum TextCompileError {
     SourceBytesLimitExceeded { actual: usize, maximum: usize },
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
     Layout(TextLayoutError),
+    Window(TextWindowError),
 }
 
-/// Candidate-local owner of expensive shaping work and reusable immutable layouts.
+/// Candidate-local source admission and expensive new shaping work.
+///
+/// Prepared sources pay full bytes once per immutable source identity, separately from ordinary
+/// request-cache entries. They perform no new shaping. Each final prepared draw scans/rasterizes
+/// at most one receiver-admitted full layout; the candidate's node ceiling bounds draw count.
+/// Output glyphs (including repeated draws) are charged by the root/frame output budget.
 pub(super) struct TextCompileSession {
     layouts: Vec<(TextLayoutRequest, Result<Arc<TextLayout>, TextLayoutError>)>,
+    prepared: Vec<(TextPaintSnapshot, Result<(), TextWindowError>)>,
     used_source_bytes: usize,
     max_source_bytes: usize,
     used_shaped_glyphs: usize,
@@ -22,11 +31,40 @@ impl TextCompileSession {
     pub(super) fn new(max_source_bytes: usize, max_shaped_glyphs: usize) -> Self {
         Self {
             layouts: Vec::new(),
+            prepared: Vec::new(),
             used_source_bytes: 0,
             max_source_bytes,
             used_shaped_glyphs: 0,
             max_shaped_glyphs,
         }
+    }
+
+    pub(super) fn admit_prepared(
+        &mut self,
+        engine: &TextEngine,
+        snapshot: &TextPaintSnapshot,
+        scale_factor: f32,
+    ) -> Result<(), TextCompileError> {
+        if let Some((_, result)) = self
+            .prepared
+            .iter()
+            .find(|(cached, _)| cached.same_source(snapshot))
+        {
+            return result.clone().map_err(TextCompileError::Window);
+        }
+        let actual = self
+            .used_source_bytes
+            .saturating_add(snapshot.display_text().len());
+        if actual > self.max_source_bytes {
+            return Err(TextCompileError::SourceBytesLimitExceeded {
+                actual,
+                maximum: self.max_source_bytes,
+            });
+        }
+        self.used_source_bytes = actual;
+        let result = engine.validate_paint_snapshot(snapshot, scale_factor);
+        self.prepared.push((snapshot.clone(), result.clone()));
+        result.map_err(TextCompileError::Window)
     }
 
     pub(super) fn layout(

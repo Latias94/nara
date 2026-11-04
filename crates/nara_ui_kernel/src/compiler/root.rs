@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, sync::Arc};
 
-use nara_text::{TextEngine, TextLayoutError};
+use nara_text::{TextEngine, TextLayoutError, TextRect};
 use taffy::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
     LengthPercentage, LengthPercentageAuto, Overflow, Point as TaffyPoint, Position,
@@ -19,6 +19,7 @@ use super::{
     order::{RootOrder, RootOrdered},
     text::{TextCompileError, TextCompileSession},
 };
+use crate::authoring::UiNodeText;
 
 #[derive(Clone, Debug)]
 pub(super) struct CompiledRoot {
@@ -70,6 +71,15 @@ pub(super) fn compile_root(
     budget: RootBudget,
 ) -> Result<CompiledRoot, RootCompileError> {
     let flat = flatten_root(root, limits).map_err(RootCompileError::Local)?;
+    // Admit complete prepared sources even when fixed sizes avoid measurement or the final
+    // geometry is fully clipped. Immutable source reuse pays once across the whole candidate.
+    for node in &flat {
+        if let Some(UiNodeText::Prepared(text)) = &node.node.text {
+            text_session
+                .admit_prepared(text_engine, &text.snapshot, environment.scale_factor())
+                .map_err(text_compile_error)?;
+        }
+    }
     let mut tree = TaffyTree::<usize>::with_capacity(flat.len());
     tree.disable_rounding();
     let mut node_ids = vec![None; flat.len()];
@@ -113,6 +123,15 @@ pub(super) fn compile_root(
             };
             let Some(text) = flat[index].node.text.as_ref() else {
                 return TaffySize::ZERO;
+            };
+            if let UiNodeText::Prepared(text) = text {
+                return TaffySize {
+                    width: text.snapshot.width(),
+                    height: text.snapshot.height(),
+                };
+            }
+            let UiNodeText::Plain(text) = text else {
+                unreachable!()
             };
             // Taffy's known dimensions are outer sizes during ComputeSize, while available
             // space has already had padding and borders removed. The callback measures only
@@ -214,6 +233,63 @@ pub(super) fn compile_root(
             },
         ));
 
+        let text_geometry = node.node.text.as_ref().map(|text| {
+            let content_rect = UiRect::from_origin_size(
+                parent_origin.x() + layout.content_box_x(),
+                parent_origin.y() + layout.content_box_y(),
+                layout.content_box_width().max(0.0),
+                layout.content_box_height().max(0.0),
+            ).ok_or_else(|| {
+                RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
+                    message: "Taffy produced invalid text content geometry".to_owned(),
+                })
+            })?;
+            let text_clip = if matches!(text, UiNodeText::Prepared(_))
+                || matches!(text, UiNodeText::Plain(text) if text.overflow == UiTextOverflow::Clip)
+            {
+                inherited_clip.intersect(content_rect)
+            } else {
+                inherited_clip
+            };
+            Ok((content_rect, text_clip))
+        }).transpose()?;
+        // A hidden or empty draw still admits every raster under the receiving policy. Use its
+        // resolved origin so subpixel extents agree with an otherwise identical visible draw.
+        let prepared_layout =
+            if let (Some(UiNodeText::Prepared(text)), Some((content_rect, text_clip))) =
+                (&node.node.text, text_geometry)
+            {
+                let surface = UiRect::from_origin_size(
+                    0.0,
+                    0.0,
+                    environment.logical_size().width(),
+                    environment.logical_size().height(),
+                )
+                .expect("an environment has validated logical bounds");
+                let clip = (node_visible && !matches!(text_clip, ClipState::Empty))
+                    .then(|| text_clip.rect().unwrap_or(content_rect).intersect(surface))
+                    .flatten();
+                let clip = clip.map_or(TextRect::default(), |clip| TextRect {
+                    x0: clip.origin().x(),
+                    y0: clip.origin().y(),
+                    x1: clip.max().x(),
+                    y1: clip.max().y(),
+                });
+                let physical_origin = environment.content_transform().physical_content_origin();
+                Some(
+                    text_engine
+                        .prepare_window_at(
+                            &text.snapshot,
+                            clip,
+                            scale_factor,
+                            [content_rect.origin().x(), content_rect.origin().y()],
+                            [physical_origin.x(), physical_origin.y()],
+                        )
+                        .map_err(|error| text_compile_error(TextCompileError::Window(error)))?,
+                )
+            } else {
+                None
+            };
         if !node_visible {
             continue;
         }
@@ -244,33 +320,24 @@ pub(super) fn compile_root(
                 ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
             }
         }
-        if let Some(text) = &node.node.text {
-            let content_rect = UiRect::from_origin_size(
-                parent_origin.x() + layout.content_box_x(),
-                parent_origin.y() + layout.content_box_y(),
-                layout.content_box_width().max(0.0),
-                layout.content_box_height().max(0.0),
-            )
-            .ok_or_else(|| {
-                RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
-                    message: "Taffy produced invalid text content geometry".to_owned(),
-                })
-            })?;
-            let text_clip = if text.overflow == UiTextOverflow::Clip {
-                inherited_clip.intersect(content_rect)
-            } else {
-                inherited_clip
-            };
+        if let (Some(text), Some((content_rect, text_clip))) = (&node.node.text, text_geometry) {
             if !content_rect.size().is_empty() && !matches!(text_clip, ClipState::Empty) {
-                let wrap_width = (text.overflow == UiTextOverflow::Wrap)
-                    .then_some(content_rect.size().width())
-                    .filter(|width| *width > 0.0);
-                let request = text
-                    .request(wrap_width, scale_factor)
-                    .map_err(|error| text_compile_error(TextCompileError::Layout(error)))?;
-                let text_layout = text_session
-                    .layout(text_engine, request)
-                    .map_err(text_compile_error)?;
+                let text_layout = match text {
+                    UiNodeText::Plain(text) => {
+                        let wrap_width = (text.overflow == UiTextOverflow::Wrap)
+                            .then_some(content_rect.size().width())
+                            .filter(|width| *width > 0.0);
+                        let request = text
+                            .request(wrap_width, scale_factor)
+                            .map_err(|error| text_compile_error(TextCompileError::Layout(error)))?;
+                        text_session
+                            .layout(text_engine, request)
+                            .map_err(text_compile_error)?
+                    }
+                    UiNodeText::Prepared(_) => {
+                        prepared_layout.expect("prepared text was admitted before visibility")
+                    }
+                };
                 let candidate_glyphs = budget
                     .used_shaped_glyphs
                     .saturating_add(shaped_glyphs)
@@ -289,7 +356,7 @@ pub(super) fn compile_root(
                         rect: content_rect,
                         physical_rect: environment.snap(content_rect),
                         clip_rect: text_clip.rect(),
-                        color: match text.brush.resolve(theme) {
+                        color: match text.brush().resolve(theme) {
                             crate::UiResolvedBrush::Solid(color) => color,
                             crate::UiResolvedBrush::Image { .. } => {
                                 return Err(RootCompileError::Local(
@@ -356,10 +423,7 @@ pub(super) fn compile_root(
                     key: key.clone(),
                     parent: node.semantic_parent.clone(),
                     role: UiSemanticRole::Text,
-                    name: text
-                        .semantic_text
-                        .clone()
-                        .unwrap_or_else(|| text.content.clone()),
+                    name: text.semantic_text().to_owned(),
                     value: None,
                     enabled: true,
                     selected: None,
@@ -416,6 +480,11 @@ fn text_compile_error(error: TextCompileError) -> RootCompileError {
             RootCompileError::ShapedGlyphLimitExceeded { actual, maximum }
         }
         TextCompileError::Layout(error) => text_error(error),
+        TextCompileError::Window(error) => {
+            RootCompileError::Local(UiRootDiagnostic::TextRejected {
+                message: error.to_string(),
+            })
+        }
     }
 }
 

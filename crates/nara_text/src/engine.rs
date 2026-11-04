@@ -454,7 +454,7 @@ const fn parley_alignment(alignment: TextAlignment) -> Alignment {
     }
 }
 
-fn quarter_pixel(value: f32) -> u8 {
+pub(crate) fn quarter_pixel(value: f32) -> u8 {
     (value.rem_euclid(1.0) * 4.0).floor() as u8
 }
 

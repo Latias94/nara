@@ -34,6 +34,13 @@ project font assets nor a mutable global font service.
 Selected faces use their default variation instance with automatic style synthesis disabled.
 Requested variable axes and synthetic weight/slant require a separate complete raster identity.
 
+An editable buffer may publish an opaque immutable paint snapshot of its complete display source,
+ordered font set and adopted layout. A receiving text engine admits that whole source under its
+own limits before preparing a clipped window of the original positioned glyphs. Measurement and
+editing retain full metrics; target-scale raster identity and actual ink placement determine the
+paint window. Clipping cannot weaken source admission or introduce another shaping/layout owner.
+UI output and renderer resource budgets still apply to each draw, independently of snapshot reuse.
+
 The text owner uses pinned Parley editing primitives for a bounded single-line buffer, visual
 movement, selection, hit testing and logical caret/candidate geometry. ICU segmentation constrains
 navigation and deletion to Unicode grapheme boundaries; Parley's shaped ligature components do

@@ -1,4 +1,4 @@
-use nara_text::{TextAlignment, TextLayoutError, TextLayoutRequest};
+use nara_text::{TextAlignment, TextLayoutError, TextLayoutRequest, TextPaintSnapshot};
 use thiserror::Error;
 
 use crate::{UiImageId, UiResolvedBrush};
@@ -685,7 +685,7 @@ pub enum UiTextOverflow {
     Clip,
 }
 
-/// Bounded display text. Editable text and rich spans are intentionally outside this contract.
+/// Bounded display text shaped by the compiler. Prepared editing layouts use [`UiPreparedText`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiText {
     pub(crate) content: String,
@@ -802,6 +802,56 @@ impl UiText {
                 value: self.logical_size,
             });
         }
+        self.brush.validate()?;
+        if matches!(&self.brush, UiBrush::Image { .. }) {
+            return Err(UiStyleError::ImageTextUnsupported);
+        }
+        if self
+            .semantic_text
+            .as_ref()
+            .is_some_and(|text| text.len() > 16 * 1024)
+        {
+            return Err(UiStyleError::SemanticTextTooLong);
+        }
+        Ok(())
+    }
+}
+
+/// An immutable editing snapshot with a paint brush and optional committed-text semantics.
+///
+/// Measurement uses the snapshot's exact full dimensions. Drawing prepares a glyph window from
+/// the final inherited/content clip; no independent size, wrapping or alignment can disagree
+/// with the editing layout. The complete display source still consumes candidate input budget.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiPreparedText {
+    pub(crate) snapshot: TextPaintSnapshot,
+    pub(crate) brush: UiBrush,
+    pub(crate) semantic_text: Option<String>,
+}
+
+impl UiPreparedText {
+    #[must_use]
+    pub fn new(snapshot: TextPaintSnapshot) -> Self {
+        Self {
+            snapshot,
+            brush: UiBrush::Role(UiColorRole::PrimaryText),
+            semantic_text: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_brush(mut self, brush: UiBrush) -> Self {
+        self.brush = brush;
+        self
+    }
+
+    #[must_use]
+    pub fn with_semantic_text(mut self, text: impl Into<String>) -> Self {
+        self.semantic_text = Some(text.into());
+        self
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), UiStyleError> {
         self.brush.validate()?;
         if matches!(&self.brush, UiBrush::Image { .. }) {
             return Err(UiStyleError::ImageTextUnsupported);

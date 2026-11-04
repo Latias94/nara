@@ -64,8 +64,8 @@ pub use journal::{
 pub use limits::{UiLimits, UiLimitsError};
 pub use style::{
     UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges,
-    UiFlexDirection, UiJustify, UiOverflow, UiPositionMode, UiRevision, UiStyle, UiStyleError,
-    UiText, UiTextAlignment, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
+    UiFlexDirection, UiJustify, UiOverflow, UiPositionMode, UiPreparedText, UiRevision, UiStyle,
+    UiStyleError, UiText, UiTextAlignment, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
 };
 
 #[cfg(test)]

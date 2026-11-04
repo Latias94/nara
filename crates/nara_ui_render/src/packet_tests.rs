@@ -10,12 +10,15 @@ use nara_image::{
     ImageSourceMetadata, PreparedImageSnapshot, PreparedImages,
 };
 use nara_render::RenderTarget;
-use nara_text::{FontFace, TextEngine, bundled_font_face};
+use nara_text::{
+    FontFace, TextEditor, TextEngine, TextLayoutRequest, TextPaintSnapshot, bundled_font_face,
+};
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii, UiEdges,
     UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPaintPrimitive, UiPoint,
-    UiRoot, UiRootKey, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
-    UiSurfaceGenerations, UiSurfaceId, UiText, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
+    UiPreparedText, UiRect, UiRoot, UiRootKey, UiSafeAreaInsets, UiSize, UiStyle,
+    UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiText, UiTextOverflow, UiTheme,
+    UiThemePalette, UiVisual,
 };
 use nara_window::WindowId;
 
@@ -1348,4 +1351,262 @@ fn packet_retains_only_atlas_pages_referenced_by_its_glyphs() {
         )
         .unwrap();
     assert_eq!(focused.glyph_pages().len(), 1);
+}
+
+fn editing_window_node(snapshot: &TextPaintSnapshot, clip: UiRect, prepared: bool) -> UiNode {
+    // The text origin remains zero in both paths. Fractional target scales therefore compare
+    // against independent ordinary shaping with exactly the same physical raster phase.
+    let node = UiNode::new(UiStyle::absolute(
+        -clip.origin().x(),
+        -clip.origin().y(),
+        snapshot.width().max(1.0),
+        snapshot.height().max(24.0),
+    ))
+    .with_key(UiLocalKey::runtime("packet-test", "editing-window").unwrap());
+    let node = if prepared {
+        node.with_prepared_text(UiPreparedText::new(snapshot.clone()))
+    } else {
+        node.with_text(
+            UiText::new(snapshot.display_text(), 24.0)
+                .unwrap()
+                .with_overflow(UiTextOverflow::Clip),
+        )
+    };
+    UiNode::new(
+        UiStyle::absolute(
+            clip.origin().x(),
+            clip.origin().y(),
+            clip.size().width(),
+            clip.size().height(),
+        )
+        .with_overflow(UiOverflow::Clip),
+    )
+    .with_child(node)
+}
+
+fn packet_mask_coverage(packet: &crate::UiPaintPacket) -> Vec<u8> {
+    // CPU mask oracle: read the packet's retained page/UV/rect/clip data without consulting
+    // shaping, window culling, glyph advances or the original text owner.
+    const WIDTH: usize = 480;
+    const HEIGHT: usize = 270;
+    let mut pixels = vec![0_u8; WIDTH * HEIGHT];
+    for primitive in packet.primitives() {
+        let UiPacketPrimitive::Glyph {
+            rect,
+            clip,
+            page_index,
+            uv,
+            ..
+        } = primitive
+        else {
+            panic!("the text-only oracle must contain only glyph primitives")
+        };
+        let page = &packet.glyph_pages()[usize::from(*page_index)];
+        let atlas_x = (uv.top_left()[0] * page.width() as f32).round() as usize;
+        let atlas_y = (uv.top_left()[1] * page.height() as f32).round() as usize;
+        let visible = match clip {
+            Some(clip) => rect.intersect(*clip).unwrap(),
+            None => *rect,
+        };
+        for y in visible.min_y().max(0)..visible.max_y().min(HEIGHT as i32) {
+            for x in visible.min_x().max(0)..visible.max_x().min(WIDTH as i32) {
+                let source = (atlas_y + (y - rect.min_y()) as usize) * page.width() as usize
+                    + atlas_x
+                    + (x - rect.min_x()) as usize;
+                let alpha = u32::from(page.pixels()[source]);
+                let destination = &mut pixels[y as usize * WIDTH + x as usize];
+                *destination =
+                    (alpha + (u32::from(*destination) * (255 - alpha) + 127) / 255) as u8;
+            }
+        }
+    }
+    pixels
+}
+
+#[test]
+fn prepared_windows_match_full_layout_packet_pixels_for_bidi_ligatures_and_mark_overhang() {
+    let mut text = TextEngine::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+    let editor = TextEditor::new(&mut text, "j office אבג q\u{301}\u{327} ffi Wj", 24.0).unwrap();
+    let snapshot = editor.paint_snapshot();
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    for scale in [1.25, 1.5] {
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            320.0,
+            180.0,
+            scale,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let full = text
+            .layout(
+                &TextLayoutRequest::new(snapshot.display_text(), 24.0)
+                    .unwrap()
+                    .with_scale_factor(scale)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut clips = vec![
+            UiRect::from_origin_size(0.0, 0.0, 36.25, snapshot.height()).unwrap(),
+            UiRect::from_origin_size(42.75, 0.0, 38.5, snapshot.height()).unwrap(),
+            UiRect::from_origin_size(snapshot.width() - 38.25, 0.0, 38.25, snapshot.height())
+                .unwrap(),
+        ];
+        let mut mark_ink = None;
+        let mut overhang_ink = None;
+        for glyph in full.glyphs() {
+            let raster = text.rasterize(glyph.key()).unwrap();
+            let baseline_x = (glyph.x() * scale).round() as i32;
+            let baseline_y = (glyph.y() * scale).round() as i32;
+            for (index, alpha) in raster.mask().iter().enumerate() {
+                if *alpha == 0 {
+                    continue;
+                }
+                let x = baseline_x + raster.left() + (index % raster.width() as usize) as i32;
+                let y = baseline_y - raster.top() + (index / raster.width() as usize) as i32;
+                // Keep the probe inside the actual content clip as well as the surface.
+                if x < 0
+                    || y < 0
+                    || x + 1 >= (snapshot.width() * scale).round() as i32
+                    || y + 1 >= (snapshot.height() * scale).round() as i32
+                {
+                    continue;
+                }
+                let pixel = UiRect::from_origin_size(
+                    x as f32 / scale,
+                    y as f32 / scale,
+                    1.0 / scale,
+                    1.0 / scale,
+                )
+                .unwrap();
+                if glyph.advance() == 0.0 {
+                    mark_ink.get_or_insert(pixel);
+                }
+                if glyph.advance() > 0.0
+                    && (x < baseline_x || x as f32 >= baseline_x as f32 + glyph.advance() * scale)
+                {
+                    overhang_ink.get_or_insert(pixel);
+                }
+            }
+        }
+        clips.push(mark_ink.expect("the fixture must expose real zero-advance mark ink"));
+        clips.push(overhang_ink.expect("the fixture must expose real ink outside its advance"));
+        for (index, clip) in clips.into_iter().enumerate() {
+            let ordinary = frame_with_environment(
+                10 + index as u64,
+                vec![editing_window_node(&snapshot, clip, false)],
+                environment,
+            );
+            let prepared = frame_with_environment(
+                20 + index as u64,
+                vec![editing_window_node(&snapshot, clip, true)],
+                environment,
+            );
+            assert!(ordinary.diagnostics().is_empty());
+            assert!(prepared.diagnostics().is_empty());
+            let ordinary_glyphs = ordinary
+                .paint()
+                .iter()
+                .filter_map(|primitive| match primitive {
+                    UiPaintPrimitive::Text { layout, .. } => Some(layout.glyphs().len()),
+                    _ => None,
+                })
+                .sum::<usize>();
+            let window_glyphs = prepared
+                .paint()
+                .iter()
+                .filter_map(|primitive| match primitive {
+                    UiPaintPrimitive::Text { layout, .. } => Some(layout.glyphs().len()),
+                    _ => None,
+                })
+                .sum::<usize>();
+            assert_eq!(ordinary_glyphs, full.glyphs().len());
+            assert!(window_glyphs > 0 && window_glyphs < ordinary_glyphs);
+            let reference = UiPresentationPlanner::default()
+                .plan(ordinary, target, &UiPreparedImages::default())
+                .unwrap();
+            let actual = UiPresentationPlanner::default()
+                .plan(prepared, target, &UiPreparedImages::default())
+                .unwrap();
+            let expected_pixels = packet_mask_coverage(&reference);
+            assert!(expected_pixels.iter().any(|pixel| *pixel != 0));
+            assert_eq!(
+                packet_mask_coverage(&actual),
+                expected_pixels,
+                "scale {scale}, clip {clip:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn excluded_window_glyphs_never_consume_resource_keys_and_retained_packet_pixels_survive() {
+    let mut text = TextEngine::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+    let editor = TextEditor::new(
+        &mut text,
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        24.0,
+    )
+    .unwrap();
+    let snapshot = editor.paint_snapshot();
+    let clip = UiRect::from_origin_size(0.0, 0.0, 36.0, snapshot.height()).unwrap();
+    let environment =
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 320.0, 180.0, 1.5, 1, 1, 1, 1).unwrap();
+    let prepared = frame_with_environment(
+        1,
+        vec![editing_window_node(&snapshot, clip, true)],
+        environment,
+    );
+    let ordinary = frame_with_environment(
+        2,
+        vec![editing_window_node(&snapshot, clip, false)],
+        environment,
+    );
+    let keys = |frame: &nara_ui_kernel::UiFrame| {
+        frame
+            .paint()
+            .iter()
+            .filter_map(|primitive| {
+                if let UiPaintPrimitive::Text { layout, .. } = primitive {
+                    Some(layout.glyphs().iter().map(|glyph| glyph.key()))
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect::<std::collections::HashSet<_>>()
+    };
+    let window_keys = keys(&prepared);
+    let full_keys = keys(&ordinary);
+    assert!(!window_keys.is_empty() && window_keys.len() < full_keys.len());
+    assert!(window_keys.is_subset(&full_keys));
+    let limits = UiPresentationLimits::default()
+        .with_max_referenced_glyphs(window_keys.len())
+        .unwrap()
+        .with_max_glyph_entries(window_keys.len())
+        .unwrap()
+        .with_max_new_glyphs_per_plan(window_keys.len())
+        .unwrap();
+    let mut planner = UiPresentationPlanner::new(limits).unwrap();
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let packet = planner
+        .plan(Arc::clone(&prepared), target, &UiPreparedImages::default())
+        .unwrap();
+    let retained_pixels = packet_mask_coverage(&packet);
+    assert!(retained_pixels.iter().any(|pixel| *pixel != 0));
+    assert!(
+        matches!(planner.plan(ordinary, target, &UiPreparedImages::default()),
+        Err(UiPresentationContentError::ReferencedGlyphLimitExceeded { limit })
+            if limit == window_keys.len())
+    );
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &packet));
+    drop(snapshot);
+    drop(editor);
+    drop(text);
+    drop(prepared);
+    drop(planner);
+    assert_eq!(packet_mask_coverage(&packet), retained_pixels);
 }

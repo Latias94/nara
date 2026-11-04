@@ -5,6 +5,7 @@ mod engine;
 mod face;
 mod layout;
 mod limits;
+mod paint;
 mod raster;
 
 pub use editing::{TextEdit, TextEditError, TextEditOutcome, TextEditor, TextRect, TextSelection};
@@ -19,4 +20,5 @@ pub use layout::{
     TextDirection, TextLayout, TextLayoutError, TextLayoutRequest, TextLine, TextRun,
 };
 pub use limits::TextLimits;
+pub use paint::{TextPaintSnapshot, TextWindowError};
 pub use raster::{GlyphRaster, GlyphRasterError};

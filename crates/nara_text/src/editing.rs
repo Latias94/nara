@@ -1,10 +1,13 @@
-use std::{collections::VecDeque, num::NonZeroUsize, ops::Range};
+use std::{collections::VecDeque, num::NonZeroUsize, ops::Range, sync::OnceLock};
 
 use icu_segmenter::GraphemeClusterSegmenter;
 use parley::{BoundingBox, editing::PlainEditor};
 use thiserror::Error;
 
-use crate::{FontFaceId, TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits};
+use crate::{
+    FontFaceId, TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits,
+    TextPaintSnapshot,
+};
 
 const MAX_HISTORY_ENTRIES: usize = 32;
 
@@ -196,6 +199,7 @@ pub struct TextEditor {
     undo: VecDeque<PlainEditor<()>>,
     redo: Vec<PlainEditor<()>>,
     layout: TextLayout,
+    paint: OnceLock<TextPaintSnapshot>,
     geometry: EditorGeometry,
 }
 
@@ -218,6 +222,7 @@ impl TextEditor {
             undo: VecDeque::with_capacity(MAX_HISTORY_ENTRIES),
             redo: Vec::with_capacity(MAX_HISTORY_ENTRIES),
             layout,
+            paint: OnceLock::new(),
             geometry,
         })
     }
@@ -258,7 +263,8 @@ impl TextEditor {
 
         let outcome = TextEditOutcome {
             text_changed: !composing && self.text() != candidate.raw_text(),
-            display_changed: self.display_text() != candidate.raw_text() || self.layout != layout,
+            display_changed: self.display_text() != candidate.raw_text()
+                || self.layout() != &layout,
             selection_changed: self.editor.raw_selection().anchor()
                 != candidate.raw_selection().anchor()
                 || self.editor.raw_selection().focus() != candidate.raw_selection().focus()
@@ -269,6 +275,9 @@ impl TextEditor {
         };
 
         let previous = std::mem::replace(&mut self.editor, candidate);
+        if outcome.display_changed {
+            self.paint = OnceLock::new();
+        }
         self.layout = layout;
         self.geometry = geometry;
         if composing {
@@ -325,6 +334,22 @@ impl TextEditor {
     #[must_use]
     pub const fn snapshot(&self) -> &TextLayout {
         &self.layout
+    }
+
+    /// Shares the complete display source and the exact adopted editing layout without shaping.
+    /// A retained snapshot is unaffected by later edits, selection, composition or history.
+    #[must_use]
+    pub fn paint_snapshot(&self) -> TextPaintSnapshot {
+        self.paint
+            .get_or_init(|| {
+                TextPaintSnapshot::new(
+                    self.display_text(),
+                    &self.font_ids,
+                    self.logical_size(),
+                    self.layout.clone(),
+                )
+            })
+            .clone()
     }
 
     #[must_use]

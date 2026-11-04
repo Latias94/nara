@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use nara_text::{TextEdit, TextEditError, TextEditOutcome, TextEditor, TextEngine, TextRect};
 use nara_ui_kernel::{
     UiBorder, UiBrush, UiColor, UiColorRole, UiDispatchBatch, UiInteraction, UiKey, UiKeyError,
-    UiLocalKey, UiNode, UiOverflow, UiRect, UiRootKey, UiRoutePhase, UiRoutedEventKind,
-    UiSemanticRole, UiSemantics, UiStyle, UiStyleError, UiText, UiTextOverflow,
+    UiLocalKey, UiNode, UiOverflow, UiPreparedText, UiRect, UiRootKey, UiRoutePhase,
+    UiRoutedEventKind, UiSemanticRole, UiSemantics, UiStyle, UiStyleError,
 };
 use thiserror::Error;
 
@@ -224,11 +224,6 @@ impl UiTextField {
         }
         let focused = self.focus.is_some();
         let offset = self.text_origin(viewport_width)?;
-        let text = if focused {
-            self.editor.display_text()
-        } else {
-            self.editor.text()
-        };
         let mut children = Vec::new();
         if focused {
             for selection in self.editor.selection_rects() {
@@ -250,9 +245,8 @@ impl UiTextField {
                     .max(self.editor.logical_size()),
             ))
             .with_key(self.text_key.clone())
-            .with_text(
-                UiText::new(text, self.editor.logical_size())?
-                    .with_overflow(UiTextOverflow::Clip)
+            .with_prepared_text(
+                UiPreparedText::new(self.editor.paint_snapshot())
                     .with_semantic_text(self.editor.text()),
             ),
         );
