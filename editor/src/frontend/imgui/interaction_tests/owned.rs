@@ -33,6 +33,84 @@ impl Default for CpuOwnedInput {
 }
 
 impl Interaction {
+    pub(super) fn hierarchy_panel(&self) -> EditorPanelInstanceId {
+        self.application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.hierarchy")
+            .unwrap()
+            .id()
+    }
+
+    fn hierarchy_frame(&self) -> Arc<UiFrame> {
+        Arc::clone(
+            self.frontend.presentation.widgets[&self.hierarchy_panel()]
+                .owned_hierarchy
+                .as_ref()
+                .expect("the source hierarchy paints Nara controls")
+                .compiled_frame()
+                .unwrap(),
+        )
+    }
+
+    pub(super) fn queue_hierarchy_click(&mut self, name: &str) {
+        self.actions.clear();
+        let panel = self.hierarchy_panel();
+        let find = |frame: &UiFrame| {
+            frame
+                .semantics()
+                .iter()
+                .find(|node| node.role() == UiSemanticRole::Button && node.name() == name)
+                .map(|node| (node.key().clone(), node.enabled()))
+        };
+        let mut frame = self.hierarchy_frame();
+        if find(&frame).is_none() {
+            self.frontend
+                .scroll_owned_panel(panel, &frame, -f32::MAX)
+                .unwrap();
+            self.render();
+        }
+        let (frame, button, enabled) = loop {
+            frame = self.hierarchy_frame();
+            if let Some((button, enabled)) = find(&frame) {
+                break (frame, button, enabled);
+            }
+            let delta = 48.0;
+            assert!(
+                self.frontend
+                    .scroll_owned_panel(panel, &frame, delta)
+                    .unwrap(),
+                "missing Hierarchy Button {name:?}"
+            );
+            self.render();
+        };
+        let focused = self.route_owned(
+            &frame,
+            UiInputEvent::FocusTarget {
+                seat: UiSeatId::PRIMARY,
+                target: button,
+            },
+        );
+        assert_eq!(focused, enabled, "Hierarchy Button {name:?}");
+        if focused {
+            assert!(self.route_owned(
+                &frame,
+                UiInputEvent::ActivateFocused {
+                    seat: UiSeatId::PRIMARY,
+                    source: UiActivationSource::Keyboard,
+                }
+            ));
+        }
+    }
+
+    pub(super) fn click_hierarchy(&mut self, name: &str) {
+        self.queue_hierarchy_click(name);
+        self.render();
+        self.render();
+    }
+
     fn owned_panel(&self) -> EditorPanelInstanceId {
         self.application
             .panel_workspace()
@@ -116,11 +194,43 @@ impl Interaction {
 
     fn route_owned(&mut self, frame: &Arc<UiFrame>, input: UiInputEvent) -> bool {
         let environment = frame.environment();
+        let panel = self
+            .frontend
+            .presentation
+            .widgets
+            .iter()
+            .find(|(_, widgets)| {
+                widgets
+                    .incarnation
+                    .serial
+                    .checked_add(1)
+                    .and_then(UiSurfaceId::new)
+                    == Some(environment.surface_id())
+            })
+            .map(|(panel, _)| *panel)
+            .expect("the frame belongs to a current panel incarnation");
         if self
             .owned_input
             .surface
             .is_some_and(|surface| surface != environment.surface_id())
         {
+            let previous = self
+                .frontend
+                .presentation
+                .widgets
+                .iter()
+                .find(|(_, widgets)| {
+                    widgets
+                        .incarnation
+                        .serial
+                        .checked_add(1)
+                        .and_then(UiSurfaceId::new)
+                        == self.owned_input.surface
+                })
+                .map(|(panel, _)| *panel);
+            if let Some(previous) = previous {
+                self.frontend.cancel_owned_panel_input(previous).unwrap();
+            }
             self.owned_input = CpuOwnedInput::default();
         }
         let adapter = &mut self.owned_input;
@@ -142,7 +252,6 @@ impl Interaction {
             .submit(&mut adapter.journal, Arc::clone(frame), adapter.epoch)
             .unwrap();
         let route = UiRouteStamp::from_receipt(receipt);
-        let panel = self.owned_panel();
         let model = self.frame();
         for attempt in 0..2 {
             let outcome = self

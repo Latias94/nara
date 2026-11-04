@@ -34,11 +34,20 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         delta: f32,
     ) -> Result<bool, String> {
-        self.presentation
+        let widgets = self
+            .presentation
             .widgets
             .get_mut(&panel)
-            .and_then(|widgets| widgets.owned_inspector.as_mut())
-            .ok_or("Inspector panel is retired")?
+            .ok_or("Owned panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            return hierarchy
+                .scroll(frame, delta)
+                .map_err(|error| error.to_string());
+        }
+        widgets
+            .owned_inspector
+            .as_mut()
+            .ok_or("Inspector controls are absent")?
             .scroll(frame, delta)
             .map_err(|error| error.to_string())
     }
@@ -55,6 +64,8 @@ impl ImguiEditorFrontend {
             .eq(fonts.iter().map(FontFace::id))
         {
             for widgets in self.presentation.widgets.values_mut() {
+                widgets.owned_hierarchy = None;
+                widgets.hierarchy_pending.clear();
                 widgets.owned_inspector = None;
                 widgets.scene_view = None;
                 widgets.scene_pick = None;
@@ -84,6 +95,23 @@ impl ImguiEditorFrontend {
                 .map_err(|error| error.to_string())?
             {
                 widgets.scene_pick = Some((Arc::clone(frame), pick));
+            }
+            return Ok(());
+        }
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            let intents = hierarchy
+                .dispatch(frame, dispatch)
+                .map_err(|error| error.to_string())?;
+            for intent in intents.intents() {
+                if widgets.hierarchy_pending.len() == 64 {
+                    break;
+                }
+                if let Some(submission) = hierarchy
+                    .activate(frame, intent.target(), model, widgets.hierarchy_read_only)
+                    .map_err(|error| error.to_string())?
+                {
+                    widgets.hierarchy_pending.push(submission);
+                }
             }
             return Ok(());
         }
@@ -166,6 +194,20 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         dispatch: &UiDispatchBatch,
     ) -> Result<(), String> {
+        if let Some(hierarchy) = self
+            .presentation
+            .widgets
+            .get_mut(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_mut())
+        {
+            let intents = hierarchy
+                .dispatch(frame, dispatch)
+                .map_err(|error| error.to_string())?;
+            if !intents.intents().is_empty() {
+                return Err("Hierarchy cleanup cannot activate an operation".into());
+            }
+            return Ok(());
+        }
         if let Some(scene) = self
             .presentation
             .widgets
@@ -202,6 +244,22 @@ impl ImguiEditorFrontend {
         previous: &Arc<UiFrame>,
         candidate: &Arc<UiFrame>,
     ) -> Vec<UiKey> {
+        if let Some(hierarchy) = self
+            .presentation
+            .widgets
+            .get(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_ref())
+        {
+            return hierarchy
+                .invalidated_controls(previous, candidate)
+                .unwrap_or_else(|_| {
+                    previous
+                        .hit_regions()
+                        .iter()
+                        .map(|region| region.key().clone())
+                        .collect()
+                });
+        }
         if let Some(scene) = self
             .presentation
             .widgets
@@ -238,6 +296,11 @@ impl ImguiEditorFrontend {
     ) -> Result<(), String> {
         if let Some(widgets) = self.presentation.widgets.get_mut(&panel) {
             widgets.scene_pick = None;
+            if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+                hierarchy
+                    .cancel_input()
+                    .map_err(|error| error.to_string())?;
+            }
             if let Some(scene) = widgets.scene_view.as_mut() {
                 scene.cancel_input().map_err(|error| error.to_string())?;
             }
@@ -261,9 +324,11 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         field: &UiKey,
     ) -> Option<UiTextInputToken> {
-        self.presentation
-            .widgets
-            .get(&panel)?
+        let widgets = self.presentation.widgets.get(&panel)?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_ref() {
+            return hierarchy.input_token(frame, field).ok().flatten();
+        }
+        widgets
             .owned_inspector
             .as_ref()?
             .input_token(frame, field)
@@ -277,10 +342,17 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         field: &UiKey,
     ) -> Result<(), String> {
-        self.presentation
+        let widgets = self
+            .presentation
             .widgets
             .get_mut(&panel)
-            .ok_or("Inspector panel is retired")?
+            .ok_or("Owned panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            return hierarchy
+                .blur(frame, field)
+                .map_err(|error| error.to_string());
+        }
+        widgets
             .owned_inspector
             .as_mut()
             .ok_or("Inspector controls are absent")?
@@ -302,6 +374,12 @@ impl ImguiEditorFrontend {
             .widgets
             .get_mut(&panel)
             .ok_or("Inspector panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            hierarchy
+                .point(frame, field, token, point, extend)
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
         widgets
             .owned_inspector
             .as_mut()
@@ -331,6 +409,12 @@ impl ImguiEditorFrontend {
             .widgets
             .get_mut(&panel)
             .ok_or("Inspector panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            hierarchy
+                .edit(frame, field, token, edit)
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
         widgets
             .owned_inspector
             .as_mut()
@@ -352,6 +436,11 @@ impl ImguiEditorFrontend {
             .widgets
             .get(&panel)
             .ok_or("Inspector panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_ref() {
+            return hierarchy
+                .selected_text(frame, field, token)
+                .map_err(|error| error.to_string());
+        }
         widgets
             .owned_inspector
             .as_ref()
@@ -368,6 +457,15 @@ impl ImguiEditorFrontend {
         token: UiTextInputToken,
         error: String,
     ) {
+        if let Some(hierarchy) = self
+            .presentation
+            .widgets
+            .get_mut(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_mut())
+        {
+            hierarchy.input_error(frame, field, token, error);
+            return;
+        }
         if let Some(widgets) = self.presentation.widgets.get_mut(&panel)
             && let Some(inspector) = widgets.owned_inspector.as_mut()
         {
@@ -382,6 +480,14 @@ impl ImguiEditorFrontend {
         field: &UiKey,
         token: UiTextInputToken,
     ) -> bool {
+        if let Some(hierarchy) = self
+            .presentation
+            .widgets
+            .get(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_ref())
+        {
+            return hierarchy.is_composing(frame, field, token).unwrap_or(false);
+        }
         self.presentation
             .widgets
             .get(&panel)
@@ -396,9 +502,11 @@ impl ImguiEditorFrontend {
         field: &UiKey,
         token: UiTextInputToken,
     ) -> Option<nara_ui_kernel::UiRect> {
-        self.presentation
-            .widgets
-            .get(&panel)?
+        let widgets = self.presentation.widgets.get(&panel)?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_ref() {
+            return hierarchy.ime_area(frame, field, token).ok();
+        }
+        widgets
             .owned_inspector
             .as_ref()?
             .ime_area(frame, field, token)
@@ -408,6 +516,9 @@ impl ImguiEditorFrontend {
     pub(crate) fn cancel_owned_input(&mut self) {
         for widgets in self.presentation.widgets.values_mut() {
             widgets.scene_pick = None;
+            if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+                let _ = hierarchy.cancel_input();
+            }
             if let Some(scene) = widgets.scene_view.as_mut() {
                 let _ = scene.cancel_input();
             }
@@ -430,6 +541,14 @@ impl ImguiEditorFrontend {
             .widgets
             .get_mut(&panel)
             .ok_or("Inspector panel is retired")?;
+        if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+            return match operation {
+                InspectorOperation::Apply | InspectorOperation::Discard => hierarchy
+                    .finish_input(frame, field, operation == InspectorOperation::Discard)
+                    .map_err(|error| error.to_string()),
+                _ => Err("A local filter has no document edit operation".into()),
+            };
+        }
         if widgets.owned_pending.len() == 64 {
             return Err("Inspector submission capacity reached".into());
         }
@@ -483,6 +602,14 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         field: &UiKey,
     ) -> bool {
+        if let Some(hierarchy) = self
+            .presentation
+            .widgets
+            .get(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_ref())
+        {
+            return hierarchy.input_token(frame, field).is_ok();
+        }
         self.presentation
             .widgets
             .get(&panel)

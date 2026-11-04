@@ -18,6 +18,23 @@ in the workspace shell's drawing order. Scene pixels are not read back or upload
 UI image. The shell still owns docking and native-window placement; Nara owns the Scene panel's
 layout and interactions. This does not qualify a complete Nara replacement for every Editor panel.
 
+The ordinary Scene/Prefab Hierarchy uses Nara controls to list source declarations and their
+authored placement intent. It does not infer an effective parent or sibling order. Use + Root
+and + Child to create declarations, Parent and Order to choose explicit placement, and Remove
+Entity followed by confirmation to remove a source-local branch. Unavailable deletion explains
+its source/readiness restriction. These actions use the document's existing history and Save/Reopen.
+
+Filter entities matches committed entity IDs and names. Composition remains local to the filter;
+typing, clearing and scrolling do not select another entity or publish a document edit. Clear
+filter restores the source list; Show selection reveals the Session's current entity. The panel
+accepts up to 1,024 UTF-8 bytes of filter text; an oversized edit preserves the previous buffer.
+Long source identifiers use shortened display labels while commands retain their complete IDs.
+The panel builds controls for its visible source/choice rows and retains their source identities separately
+from placement. Inspector drafts remain owned by their original fields when filtering hides the
+selected row. Parent/order/removal choices retain their displayed source basis and cannot
+retarget after another entity or document is selected. Specialized UI trees retain their
+existing frontend.
+
 The Inspector's default `Document` tab uses Nara-drawn controls for ordinary Scene and Prefab
 documents. Use Add Component to inspect the admitted creation choices, then Add with the
 component's stable ID. Existing or unavailable
@@ -27,7 +44,7 @@ uses the same document transaction and Undo history as ordinary field edits. Dir
 a removed component remain available through retained-input recovery. Read-only or mismatched
 component versions cannot be removed. Component actions retain the displayed document, Schema,
 entity and revision; an intervening source change requires a new observation. Entity navigation
-uses the surrounding shell. A selected Prefab anchor exposes Open Prefab Source in the Nara
+uses the Nara Hierarchy. A selected Prefab anchor exposes Open Prefab Source in the Nara
 Inspector, bound to the displayed document, source revision and anchor. Authored placement intent
 is shown above component controls. The Source asset and Prefab Intent tabs, specialized UI
 authoring and source-built custom panels retain their separate frontends.
@@ -171,7 +188,7 @@ advances and cannot affect another Editor session. Keep driving pending work eve
 does not request another presentation.
 
 Contribution-only shells use `frontend.show_contributions(...)`, which draws the shell and
-source-built panels without the hosted Inspector or Scene panels. Game controls retain their
+source-built panels without the hosted Hierarchy, Inspector or Scene panels. Game controls retain their
 state and notices without an attached Runtime image. Pass its opaque move-only
 candidate to that
 same frontend's `submit_and_drive(...)`. It cannot be cloned or converted to a plain action batch.

@@ -74,7 +74,6 @@ impl StructureInteraction {
         for _ in 0..4 {
             interaction.render();
         }
-        interaction.click("entity:ui-anchor");
         setup_ui_prefab_source(&mut interaction.application);
         for _ in 0..3 {
             interaction.render();

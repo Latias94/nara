@@ -2,9 +2,8 @@ use dear_imgui_rs::Ui;
 use nara::{
     reflect::{ComponentValue, ComponentValueKind},
     scene::{
-        AuthoringDocumentReadiness, PrefabEntityOrigin, PrefabEntityTarget, SceneEntityId,
-        ScenePlacement, ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey,
-        SourceDocumentOrigin,
+        AuthoringDocumentReadiness, PrefabEntityOrigin, PrefabEntityTarget, ScenePlacement,
+        ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey, SourceDocumentOrigin,
     },
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
@@ -13,7 +12,7 @@ use nara::{
         EditorPersistenceResult, EditorPersistenceView, EditorPlayState, EditorReopenTarget,
         EditorRuntimeAvailability, EditorSceneModel, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, PrefabCompositionCommand, PrefabCompositionEntityDraft,
-        SceneCompositionCommand, SceneCompositionEntityKind, SceneInspectorFieldView,
+        SceneCompositionCommand, SceneInspectorFieldView,
     },
 };
 
@@ -27,7 +26,6 @@ pub(super) struct ImguiAuthoringPanels {
     scope: Option<EditorDocumentId>,
     pub(super) fields: FieldEditors,
     pub(super) source_tool: super::source_tool::SourceToolWidgets,
-    pending_removal: Option<SceneEntityId>,
     read_only: bool,
 }
 
@@ -36,15 +34,10 @@ impl ImguiAuthoringPanels {
         self.read_only = read_only;
     }
 
-    pub(super) fn hide_document_controls(&mut self) {
-        self.pending_removal = None;
-    }
-
     pub(super) fn retire(&mut self) {
         self.scope = None;
         self.fields.clear();
         self.source_tool = Default::default();
-        self.pending_removal = None;
     }
 
     fn synchronize(&mut self, scene: Option<&EditorSceneModel>) {
@@ -208,235 +201,6 @@ impl ImguiAuthoringPanels {
             }
         }
     }
-
-    pub(super) fn show_hierarchy(
-        &mut self,
-        ui: &Ui,
-        frame: &EditorFrameModel,
-        actions: &mut Vec<EditorAction>,
-    ) {
-        self.synchronize(frame.workspace().active_scene.as_ref());
-        let Some(scene) = frame.workspace().active_scene.as_ref() else {
-            ui.text_disabled("No active document");
-            return;
-        };
-        let editing = !self.read_only && editing_enabled(frame);
-        let removal_reason = entity_removal_unavailable_reason(frame, scene);
-        self.show_composition_controls(ui, scene, editing, removal_reason, actions);
-        ui.text_disabled("Source declarations; resolved hierarchy is unavailable in this view");
-        for entity in &scene.editor.inspector.entities {
-            let _id = ui.push_id(entity.id.as_str());
-            if ui
-                .selectable_config(format!(
-                    "{} ({} components{})",
-                    entity.id.as_str(),
-                    entity.inspectable_component_count,
-                    if entity.has_prefab { ", prefab" } else { "" }
-                ))
-                .selected(entity.selected)
-                .disabled(self.read_only || frame.workspace_intent().intent().is_some())
-                .build()
-            {
-                actions.push(EditorAction::Navigate(
-                    EditorNavigationAction::SelectEntity {
-                        document: scene.document,
-                        entity: Some(entity.id.clone()),
-                    },
-                ));
-            }
-            #[cfg(test)]
-            super::interaction_tests::record_control(ui, format!("entity:{}", entity.id.as_str()));
-            ui.text_wrapped(placement_intent_label(entity.placement.as_ref()));
-        }
-        if scene.editor.inspector.entities.is_empty() {
-            ui.text_disabled("No entities");
-        }
-        self.show_remove_confirmation(ui, scene, editing && removal_reason.is_none(), actions);
-    }
-
-    fn show_composition_controls(
-        &mut self,
-        ui: &Ui,
-        scene: &EditorSceneModel,
-        editing: bool,
-        removal_reason: Option<&'static str>,
-        actions: &mut Vec<EditorAction>,
-    ) {
-        let inspector = &scene.editor.inspector;
-        let selected = inspector
-            .selected_entity
-            .as_ref()
-            .and_then(|id| inspector.entities.iter().find(|row| &row.id == id));
-        let kind = if inspector.composition.generic_authoring {
-            SceneCompositionEntityKind::Empty
-        } else {
-            SceneCompositionEntityKind::ColoredSprite
-        };
-        if enabled_button(ui, editing, "+ Root") {
-            actions.push(compose_action(
-                scene,
-                SceneCompositionCommand::CreateEntity {
-                    kind,
-                    placement: ScenePlacement::last(ScenePlacementParent::Root),
-                },
-            ));
-        }
-        ui.same_line();
-        if enabled_button(ui, editing && selected.is_some(), "+ Child") {
-            if let Some(selected) = selected {
-                actions.push(compose_action(
-                    scene,
-                    SceneCompositionCommand::CreateEntity {
-                        kind,
-                        placement: ScenePlacement::last(ScenePlacementParent::Entity(
-                            PrefabEntityTarget::source(selected.id.clone()),
-                        )),
-                    },
-                ));
-            }
-        }
-        let Some(selected) = selected else {
-            return;
-        };
-        if enabled_button(ui, editing && removal_reason.is_none(), "Remove Entity") {
-            self.pending_removal = Some(selected.id.clone());
-        }
-        if let Some(reason) = removal_reason {
-            ui.text_disabled(reason);
-        }
-        let parent = selected
-            .placement
-            .as_ref()
-            .map(|placement| &placement.parent);
-        let parent_label = parent.map_or_else(
-            || "No placement declaration".to_owned(),
-            placement_parent_label,
-        );
-        ui.text_disabled("Desired placement; compilation checks the resulting layout");
-        let parent_combo = ui.begin_combo("Parent", &parent_label);
-        #[cfg(test)]
-        super::interaction_tests::record_control(ui, "Parent");
-        if let Some(_combo) = parent_combo {
-            if enabled_button(
-                ui,
-                editing && parent != Some(&ScenePlacementParent::Root),
-                "Root",
-            ) {
-                actions.push(compose_action(
-                    scene,
-                    SceneCompositionCommand::MoveEntity {
-                        target: PrefabEntityTarget::source(selected.id.clone()),
-                        to: ScenePlacement::last(ScenePlacementParent::Root),
-                    },
-                ));
-                ui.close_current_popup();
-            }
-            #[cfg(test)]
-            super::interaction_tests::record_control(ui, "parent:root");
-            for candidate in &inspector.entities {
-                let desired_parent =
-                    ScenePlacementParent::Entity(PrefabEntityTarget::source(candidate.id.clone()));
-                let eligible =
-                    editing && candidate.id != selected.id && parent != Some(&desired_parent);
-                if enabled_button(ui, eligible, candidate.id.as_str()) {
-                    actions.push(compose_action(
-                        scene,
-                        SceneCompositionCommand::MoveEntity {
-                            target: PrefabEntityTarget::source(selected.id.clone()),
-                            to: ScenePlacement::last(desired_parent),
-                        },
-                    ));
-                    ui.close_current_popup();
-                }
-                #[cfg(test)]
-                super::interaction_tests::record_control(
-                    ui,
-                    format!("parent:{}", candidate.id.as_str()),
-                );
-            }
-        }
-        let Some(placement) = &selected.placement else {
-            ui.text_disabled("Choose a desired parent before setting order");
-            return;
-        };
-        let order_combo = ui.begin_combo("Order", placement_slot_label(&placement.slot));
-        #[cfg(test)]
-        super::interaction_tests::record_control(ui, "Order");
-        if let Some(_combo) = order_combo {
-            let choices = [ScenePlacementSlot::First, ScenePlacementSlot::Last]
-                .into_iter()
-                .chain(
-                    inspector
-                        .entities
-                        .iter()
-                        .filter(|row| row.id != selected.id)
-                        .flat_map(|row| {
-                            let target = PrefabEntityTarget::source(row.id.clone());
-                            [
-                                ScenePlacementSlot::Before(target.clone()),
-                                ScenePlacementSlot::After(target),
-                            ]
-                        }),
-                );
-            for slot in choices {
-                let label = placement_slot_label(&slot);
-                if enabled_button(ui, editing && slot != placement.slot, &label) {
-                    actions.push(compose_action(
-                        scene,
-                        SceneCompositionCommand::MoveEntity {
-                            target: PrefabEntityTarget::source(selected.id.clone()),
-                            to: ScenePlacement {
-                                parent: placement.parent.clone(),
-                                slot,
-                            },
-                        },
-                    ));
-                    ui.close_current_popup();
-                }
-                #[cfg(test)]
-                super::interaction_tests::record_control(ui, format!("order:{label}"));
-            }
-        }
-    }
-
-    fn show_remove_confirmation(
-        &mut self,
-        ui: &Ui,
-        scene: &EditorSceneModel,
-        editing: bool,
-        actions: &mut Vec<EditorAction>,
-    ) {
-        let Some(entity) = self.pending_removal.clone() else {
-            return;
-        };
-        if !scene
-            .editor
-            .inspector
-            .entities
-            .iter()
-            .any(|row| row.id == entity)
-        {
-            self.pending_removal = None;
-            return;
-        }
-        ui.separator();
-        ui.text_wrapped(format!(
-            "Remove the source-local branch rooted at {}?",
-            entity.as_str(),
-        ));
-        ui.text_wrapped("Removal is refused if the source-local hierarchy cannot be resolved");
-        if enabled_button(ui, editing, "Confirm removal") {
-            actions.push(compose_action(
-                scene,
-                SceneCompositionCommand::RemoveEntity { entity },
-            ));
-            self.pending_removal = None;
-        }
-        ui.same_line();
-        if enabled_button(ui, true, "Cancel removal") {
-            self.pending_removal = None;
-        }
-    }
 }
 
 fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
@@ -444,28 +208,14 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
     #[cfg(test)]
     if matches!(
         label,
-        "+ Root"
-            | "Back to Scene"
-            | "Undo"
-            | "Redo"
-            | "Save"
-            | "Reopen"
-            | "Dismiss persistence result"
-            | "Open Prefab Source"
-            | "Remove Component"
-            | "+ Child"
-            | "Remove Entity"
-            | "Confirm removal"
-            | "Cancel removal"
-            | "Apply"
-    ) || label == super::interaction_tests::CUSTOM_COMPONENT
-    {
+        "Back to Scene" | "Undo" | "Redo" | "Save" | "Reopen" | "Dismiss persistence result"
+    ) {
         super::interaction_tests::record_control(ui, label);
     }
     clicked
 }
 
-fn entity_removal_unavailable_reason(
+pub(super) fn entity_removal_unavailable_reason(
     frame: &EditorFrameModel,
     scene: &EditorSceneModel,
 ) -> Option<&'static str> {
@@ -662,14 +412,14 @@ pub(super) fn placement_intent_label(placement: Option<&ScenePlacement>) -> Stri
     }
 }
 
-fn placement_parent_label(parent: &ScenePlacementParent) -> String {
+pub(super) fn placement_parent_label(parent: &ScenePlacementParent) -> String {
     match parent {
         ScenePlacementParent::Root => "Root".to_owned(),
         ScenePlacementParent::Entity(target) => placement_target_label(target),
     }
 }
 
-fn placement_slot_label(slot: &ScenePlacementSlot) -> String {
+pub(super) fn placement_slot_label(slot: &ScenePlacementSlot) -> String {
     match slot {
         ScenePlacementSlot::First => "First".to_owned(),
         ScenePlacementSlot::Last => "Last".to_owned(),
@@ -717,7 +467,7 @@ mod tests {
     use super::*;
     use nara::{
         reflect::{ComponentRegistryBuilder, ComponentRegistrySnapshot, ComponentTypeId},
-        scene::{SceneAuthoringSession, SceneDocument, SceneEntityRecord},
+        scene::{SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord},
         tooling::{EditorExternalReloadState, SceneEditorState},
     };
 
@@ -879,94 +629,6 @@ mod tests {
             placement_intent_label(None),
             "No source placement declaration"
         );
-    }
-
-    #[test]
-    fn order_widget_declares_an_explicit_slot_without_inventing_effective_siblings() {
-        for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
-            let mut scene = scene(kind);
-            let selected = scene.editor.inspector.entities[0].id.clone();
-            let parent = ScenePlacementParent::Entity(PrefabEntityTarget {
-                through: vec![nara::scene::PrefabInstanceHop {
-                    anchor: PrefabEntityOrigin::SourceEntity(
-                        SceneEntityId::new("instance").unwrap(),
-                    ),
-                    expected_base: SourceDocumentKey::named(
-                        "f9ab807a-c61e-4c92-bfee-b6fa153b8efc".parse().unwrap(),
-                        "selected-source",
-                        nara::scene::SourceDocumentKind::Prefab,
-                    )
-                    .unwrap(),
-                }],
-                entity: PrefabEntityOrigin::SourceEntity(SceneEntityId::new("root").unwrap()),
-            });
-            scene.editor.inspector.entities[0].placement =
-                Some(ScenePlacement::last(parent.clone()));
-            scene.editor.inspector.selected_entity = Some(selected.clone());
-            let mut context = document_context();
-            let mut panels = ImguiAuthoringPanels::default();
-            let draw = |context: &mut dear_imgui_rs::Context, panels: &mut ImguiAuthoringPanels| {
-                super::super::ui_interaction_tests::clear_controls();
-                let ui = context.frame();
-                let mut actions = Vec::new();
-                ui.window("Source placement")
-                    .position([0.0, 0.0], dear_imgui_rs::Condition::Always)
-                    .size([900.0, 500.0], dear_imgui_rs::Condition::Always)
-                    .build(|| {
-                        panels.show_composition_controls(ui, &scene, true, None, &mut actions)
-                    });
-                let _ = context.render_legacy();
-                actions
-            };
-            for _ in 0..3 {
-                assert!(draw(&mut context, &mut panels).is_empty());
-            }
-            assert!(super::super::ui_interaction_tests::control_rect("Up").is_none());
-            assert!(super::super::ui_interaction_tests::control_rect("Down").is_none());
-            let mut click = |label| {
-                let rect = super::super::ui_interaction_tests::control_rect(label).unwrap();
-                context.io_mut().add_mouse_pos_event([
-                    (rect.min[0] + rect.max[0]) * 0.5,
-                    (rect.min[1] + rect.max[1]) * 0.5,
-                ]);
-                let mut actions = draw(&mut context, &mut panels);
-                for down in [true, false] {
-                    context
-                        .io_mut()
-                        .add_mouse_button_event(dear_imgui_rs::MouseButton::Left, down);
-                    actions.extend(draw(&mut context, &mut panels));
-                }
-                for _ in 0..2 {
-                    actions.extend(draw(&mut context, &mut panels));
-                }
-                actions
-            };
-            assert!(click("Order").is_empty());
-            let actions = click("order:First");
-            let target = PrefabEntityTarget::source(selected);
-            let expected = ScenePlacement::first(parent);
-            match actions.as_slice() {
-                [
-                    EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
-                        command: SceneCompositionCommand::MoveEntity { target: actual, to },
-                        ..
-                    }),
-                ] => {
-                    assert_eq!(kind, EditorDocumentKind::Scene);
-                    assert_eq!((actual, to), (&target, &expected));
-                }
-                [
-                    EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
-                        command: PrefabCompositionCommand::MoveEntity { target: actual, to },
-                        ..
-                    }),
-                ] => {
-                    assert_eq!(kind, EditorDocumentKind::Prefab);
-                    assert_eq!((actual, to), (&target, &expected));
-                }
-                other => panic!("order intent changed source authority: {other:?}"),
-            }
-        }
     }
 
     #[test]

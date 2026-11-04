@@ -140,7 +140,7 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..5 {
             self.paint(|_| {})?;
         }
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.owned_component_click("Open Prefab Source")?;
         loop {
             self.paint(|_| {})?;
@@ -160,7 +160,7 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
-        self.click("entity:branch")?;
+        self.hierarchy_select("branch")?;
         let original = fs::read(project.join(PREFAB)).map_err(|error| error.to_string())?;
         let initial = self.frame()?;
         let source_document = initial

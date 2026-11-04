@@ -10,8 +10,11 @@ use nara::{
     tooling::{EditorAction, EditorActionBatch, EditorCloseDecision},
 };
 use nara_editor::{
-    EditorApplication, EditorLaunchOptions, ImguiEditorFrontend,
-    workspace::{EditorPanelPlacement, EditorPanelTarget},
+    EditorApplication, EditorLaunchOptions, EditorNativeComposition, ImguiEditorPanel,
+    ImguiEditorPanelContext,
+    workspace::{
+        EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelTarget,
+    },
 };
 
 #[path = "support/imgui.rs"]
@@ -19,6 +22,16 @@ mod imgui;
 
 #[path = "support/stateful_panel_interactions.rs"]
 mod stateful_panel_interactions;
+
+struct ScrollProbe;
+
+impl ImguiEditorPanel for ScrollProbe {
+    fn show(&mut self, ui: &dear_imgui_rs::Ui, _context: &mut ImguiEditorPanelContext<'_, '_>) {
+        for index in 0..100 {
+            ui.text(format!("Scroll probe row {index:03}"));
+        }
+    }
+}
 
 #[test]
 fn contribution_shell_scrolls_and_preserves_hosted_inspector_instances() {
@@ -65,30 +78,49 @@ fn contribution_shell_scrolls_and_preserves_hosted_inspector_instances() {
     }
     let original = application.current_frame().unwrap();
     let original_scene = original.workspace().active_scene.as_ref().unwrap();
-    let mut frontend = ImguiEditorFrontend::new();
+    let mut composition = EditorNativeComposition::new();
+    composition
+        .register_panel(
+            EditorPanelDescriptor::new(
+                "sample.scroll-probe",
+                "Scroll Probe",
+                EditorPanelMultiplicity::Single,
+                EditorPanelPlacement::Floating,
+                true,
+            ),
+            || ScrollProbe,
+        )
+        .unwrap();
+    let mut frontend = composition.install_panels(&mut application).unwrap();
     let mut context = imgui::context();
     for _ in 0..4 {
         let _ = imgui::draw(&mut context, &mut frontend, &mut application);
     }
-    let before = panel_windows(&context, "Hierarchy###nara-panel-").remove(0);
+    assert!(
+        panel_windows(&context, "Hierarchy###nara-panel-")
+            .iter()
+            .all(|panel| !panel.drawn),
+        "contribution-only painting must not pretend to present the hosted Hierarchy"
+    );
+    let before = panel_windows(&context, "Scroll Probe###nara-panel-").remove(0);
     assert!(
         before.drawn,
-        "the registered hierarchy must contribute real draw commands"
+        "the registered scroll probe must contribute real draw commands"
     );
     assert_eq!(
         before.scroll_y, 0.0,
-        "the first hierarchy row must initially be visible"
+        "the first scroll probe row must initially be visible"
     );
     for _ in 0..10 {
         context.io_mut().add_mouse_pos_event(before.center);
         context.io_mut().add_mouse_wheel_event([0.0, -6.0]);
         let _ = imgui::draw(&mut context, &mut frontend, &mut application);
     }
-    let after = panel_windows(&context, "Hierarchy###nara-panel-").remove(0);
+    let after = panel_windows(&context, "Scroll Probe###nara-panel-").remove(0);
     assert!(after.drawn);
     assert!(
         after.scroll_y > before.scroll_y + 50.0,
-        "wheel input must move the registered hierarchy contents"
+        "wheel input must move the registered scroll probe contents"
     );
 
     let first = application

@@ -872,7 +872,13 @@ impl GameInputWorkflow<'_> {
         self.stage = "Pause and refocus existing Game image";
         self.click("embedded:Pause")?;
         let paused = self.observe()?;
-        self.click("entity:image-source")?;
+        self.presents += super::authoring_workflow_tests::hierarchy_click(
+            self.native,
+            self.application,
+            self.event_loop,
+            &mut self.pointer,
+            "Select image-source",
+        )?;
         self.click("embedded:Game image")?;
         let paused_recaptured = self.native.input.is_captured()
             && self

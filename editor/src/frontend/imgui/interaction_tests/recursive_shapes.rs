@@ -126,7 +126,7 @@ fn replace(interaction: &mut Interaction, field: &str, path: &str, value: &str) 
 fn recursive_container_remove_buttons_target_only_the_second_item_or_entry() {
     let project = InteractionProject::new_recursive();
     let mut interaction = Interaction::new(&project);
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     interaction.click_owned(None, "Add Component");
     interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     let baseline = history(&interaction);
@@ -195,14 +195,14 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
     let mut interaction = Interaction::new(&project);
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
-            interaction.click("entity:prefab-anchor");
+            interaction.click_hierarchy("Select prefab-anchor");
             interaction.click_owned(None, "Open Prefab Source");
         }
         let manifest = interaction
             .application
             .active_authoring_unavailable_record_manifest()
             .unwrap();
-        interaction.click("+ Root");
+        interaction.click_hierarchy("+ Root");
         let entity = interaction
             .frame()
             .workspace()
@@ -359,7 +359,7 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
         interaction.click("Dismiss persistence result");
         interaction.click("Reopen");
         interaction.settle_persistence();
-        interaction.click(&format!("entity:{}", entity.as_str()));
+        interaction.click_hierarchy(&format!("Select {}", entity.as_str()));
         assert_eq!(selected(&interaction, "optional"), ComponentValue::Null);
         assert_eq!(selected(&interaction, "vector"), vector);
         assert_eq!(
@@ -386,7 +386,7 @@ fn unfinished_recursive_child_survives_collapse_and_unrelated_revision_conflict(
 
     let project = InteractionProject::new_recursive();
     let mut interaction = Interaction::new(&project);
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     interaction.click_owned(None, "Add Component");
     interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     click(&mut interaction, "list", "root", "Edit value");

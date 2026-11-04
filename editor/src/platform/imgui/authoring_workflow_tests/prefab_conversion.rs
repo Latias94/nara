@@ -435,7 +435,7 @@ impl AuthoringWorkflow<'_> {
             ));
         }
         let document = active.document;
-        self.conversion_control(&format!("entity:{ANCHOR}"))?;
+        self.hierarchy_select(ANCHOR)?;
         let before_intents = self.conversion_placement_intents()?;
         let before_pixels = self.conversion_render_inputs()?;
         self.conversion_control("Inspector tab: Prefab Intent")?;
@@ -701,7 +701,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.conversion_document(project, EditorDocumentKind::Scene)?;
         self.conversion_control("Inspector tab: Document")?;
-        self.conversion_control(&format!("entity:{OTHER}"))?;
+        self.hierarchy_select(OTHER)?;
         self.owned_component_click("Open Prefab Source")?;
         self.conversion_document(project, EditorDocumentKind::Prefab)?;
         Ok((

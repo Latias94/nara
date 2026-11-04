@@ -81,7 +81,7 @@ pub(super) fn configure(project: &InteractionProject) {
 
 fn setup(project: &InteractionProject) -> Interaction {
     let mut interaction = Interaction::new(project);
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     interaction.click_owned(None, "Add Component");
     interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     interaction
@@ -271,9 +271,9 @@ fn collapsed_and_temporarily_unselected_drafts_require_explicit_conflict_reapply
         Some(("25".into(), true, false, false))
     );
     interaction.click_owned(None, &format!("Expand {CUSTOM_COMPONENT}"));
-    interaction.click("entity:preserved");
+    interaction.click_hierarchy("Select preserved");
     assert_eq!(draft(&interaction, "value").unwrap().0, "25");
-    interaction.click(&format!("entity:{}", entity.as_str()));
+    interaction.click_hierarchy(&format!("Select {}", entity.as_str()));
     assert!(
         interaction
             .field_operation("value", InspectorOperation::Apply)

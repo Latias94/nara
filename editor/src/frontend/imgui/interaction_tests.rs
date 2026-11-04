@@ -33,6 +33,7 @@ use crate::{EditorApplication, EditorLaunchOptions};
 mod entity_references;
 mod field_drafts;
 mod field_overrides;
+mod hierarchy;
 mod nested_references;
 mod owned;
 mod recursive_shapes;
@@ -424,7 +425,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
     let mut interaction = Interaction::new(&project);
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
-            interaction.click("entity:prefab-anchor");
+            interaction.click_hierarchy("Select prefab-anchor");
             interaction.click_owned(None, "Open Prefab Source");
         }
         let before = interaction.frame();
@@ -436,7 +437,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
             .application
             .active_authoring_unavailable_record_manifest()
             .unwrap();
-        interaction.click("+ Root");
+        interaction.click_hierarchy("+ Root");
         let created = interaction.frame();
         let scene = created.workspace().active_scene.as_ref().unwrap();
         let entity = scene
@@ -540,7 +541,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
             interaction.frame().persistence().result(),
             Some(EditorPersistenceResult::Opened { .. })
         ));
-        interaction.click(&format!("entity:{}", entity.as_str()));
+        interaction.click_hierarchy(&format!("Select {}", entity.as_str()));
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(42)));
         assert_eq!(
             interaction
@@ -594,10 +595,10 @@ fn dirty_close_displays_the_prompted_document_after_advance_and_stale_replay() {
 
     let project = InteractionProject::new();
     let mut interaction = Interaction::new(&project);
-    interaction.click("+ Root");
-    interaction.click("entity:prefab-anchor");
+    interaction.click_hierarchy("+ Root");
+    interaction.click_hierarchy("Select prefab-anchor");
     interaction.click_owned(None, "Open Prefab Source");
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     assert_eq!(
         interaction
             .frame()
@@ -677,7 +678,7 @@ fn dirty_close_does_not_offer_a_decision_after_save_has_started() {
 
     let project = InteractionProject::new();
     let mut interaction = Interaction::new(&project);
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     let frame = interaction.frame();
     let document = frame.workspace().active_scene.as_ref().unwrap().document;
     interaction.application.submit_and_drive(
@@ -803,7 +804,7 @@ fn manager_recovery_retry_and_dirty_project_close_use_real_widgets() {
         interaction.application.current_frame().is_some(),
         "Retry must reopen the repaired source"
     );
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     let dirty = interaction.frame().workspace().clone();
     assert!(dirty.documents.iter().any(|document| document.dirty));
 

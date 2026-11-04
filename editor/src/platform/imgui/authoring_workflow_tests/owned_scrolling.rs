@@ -267,7 +267,7 @@ impl AuthoringWorkflow<'_> {
         if manifest.total_count() == 0 {
             return Err("the scrolling fixture must contain actual unknown source records".into());
         }
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         self.owned_component_click("Add Component")?;
         self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
@@ -477,9 +477,9 @@ impl AuthoringWorkflow<'_> {
         self.owned_scroll_document(SCROLL_LABEL, 10, 3, "document Undo")?;
         self.click("Redo")?;
         self.owned_scroll_document(SCROLL_LABEL, 42, 4, "document Redo")?;
-        self.click("entity:preserved")?;
+        self.hierarchy_select("preserved")?;
         self.owned_test_paint()?;
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.owned_test_paint()?;
         expect_scrolling_y(
             &self.owned_test_control("label", None)?,
@@ -538,7 +538,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("Reopen did not load the saved scrolling edits".into());
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.owned_scroll_document(SCROLL_LABEL, 42, 0, "saved Scene Reopen")?;
         if self.dirty()?
             || self

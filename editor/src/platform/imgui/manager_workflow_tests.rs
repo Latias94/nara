@@ -452,7 +452,13 @@ impl ManagerWorkflow<'_> {
                 )
             })?;
         self.wait_for_workspace()?;
-        self.click("+ Root")?;
+        self.presents += super::authoring_workflow_tests::hierarchy_click(
+            self.native,
+            self.application,
+            self.event_loop,
+            &mut self.pointer,
+            "+ Root",
+        )?;
         let dirty = self.frame()?.workspace().clone();
         if !dirty.documents.iter().any(|document| document.dirty) {
             return Err("the actual Create widget did not produce a dirty source".to_owned());
@@ -502,7 +508,13 @@ impl ManagerWorkflow<'_> {
         self.replace_text("Profile", "desktop")?;
         self.click("shell:Open Project")?;
         self.wait_for_workspace()?;
-        self.click("+ Root")?;
+        self.presents += super::authoring_workflow_tests::hierarchy_click(
+            self.native,
+            self.application,
+            self.event_loop,
+            &mut self.pointer,
+            "+ Root",
+        )?;
         let saved_entity = self
             .frame()?
             .workspace()

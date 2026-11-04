@@ -74,7 +74,9 @@ impl ApplicationHandler for StructureApplication {
 }
 
 impl AuthoringWorkflow<'_> {
-    fn structural_intents(&self) -> Result<Vec<(String, Option<ScenePlacement>)>, String> {
+    pub(super) fn structural_intents(
+        &self,
+    ) -> Result<Vec<(String, Option<ScenePlacement>)>, String> {
         let frame = self.frame()?;
         Ok(frame
             .workspace()
@@ -89,7 +91,7 @@ impl AuthoringWorkflow<'_> {
             .collect())
     }
 
-    fn selected_id(&self) -> Result<String, String> {
+    pub(super) fn selected_id(&self) -> Result<String, String> {
         self.frame()?
             .workspace()
             .active_scene
@@ -109,35 +111,35 @@ impl AuthoringWorkflow<'_> {
                 "the deletion fixture must be Complete and contain no Prefab anchors".into(),
             );
         }
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let parent = self.selected_id()?;
-        self.click("+ Child")?;
+        self.hierarchy_click("+ Child")?;
         let child = self.selected_id()?;
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let last = self.selected_id()?;
         let before_order = self.structural_intents()?;
-        self.click("Order")?;
-        self.click("order:First")?;
+        self.hierarchy_click("Order")?;
+        self.hierarchy_click("Order: First")?;
         if self.structural_intents()? == before_order {
             return Err("First did not update the desired root order".into());
         }
-        self.click("Order")?;
-        self.click("order:Last")?;
+        self.hierarchy_click("Order")?;
+        self.hierarchy_click("Order: Last")?;
         if self.structural_intents()? != before_order {
             return Err("Last did not restore the exact root placement declaration".into());
         }
 
-        self.click(&format!("entity:{child}"))?;
-        self.click("Parent")?;
-        self.click("parent:root")?;
+        self.hierarchy_select(&child)?;
+        self.hierarchy_click("Parent")?;
+        self.hierarchy_click("Parent: Root")?;
         if !self.structural_intents()?.contains(&(
             child.clone(),
             Some(ScenePlacement::last(ScenePlacementParent::Root)),
         )) {
             return Err("Parent Root did not detach the child".into());
         }
-        self.click("Parent")?;
-        self.click(&format!("parent:{parent}"))?;
+        self.hierarchy_click("Parent")?;
+        self.hierarchy_click(&format!("Parent entity: {parent}"))?;
         let arranged = self.structural_intents()?;
         if !arranged.contains(&(
             child.clone(),
@@ -149,8 +151,8 @@ impl AuthoringWorkflow<'_> {
         )) {
             return Err("Parent did not reattach the child".into());
         }
-        self.click("Remove Entity")?;
-        self.click("Confirm removal")?;
+        self.hierarchy_click("Remove Entity")?;
+        self.hierarchy_click("Confirm removal")?;
         if self
             .structural_intents()?
             .iter()

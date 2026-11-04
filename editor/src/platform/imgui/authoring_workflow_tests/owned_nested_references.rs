@@ -1,9 +1,5 @@
 use super::*;
-use nara::{
-    identity::EntityReference,
-    scene::SceneEntityId,
-    tooling::{EditorAction, EditorActionBatch, EditorNavigationAction},
-};
+use nara::{identity::EntityReference, scene::SceneEntityId};
 
 const OTHER_TEXT: &str = "retained nested draft";
 
@@ -83,24 +79,7 @@ fn changed_references() -> ComponentValue {
 
 impl AuthoringWorkflow<'_> {
     fn owned_nested_select_source(&mut self) -> Result<(), String> {
-        let frame = self.frame()?;
-        let document = frame
-            .workspace()
-            .active_document
-            .ok_or("the nested reference fixture has no active document")?;
-        self.application.submit_and_drive(
-            EditorActionBatch::new(
-                frame.revision(),
-                [EditorAction::Navigate(
-                    EditorNavigationAction::SelectEntity {
-                        document,
-                        entity: Some(SceneEntityId::new("source").unwrap()),
-                    },
-                )],
-            ),
-            Duration::ZERO,
-        );
-        self.owned_test_paint()
+        self.hierarchy_select("source")
     }
 
     fn expect_owned_nested_value(
@@ -359,30 +338,8 @@ impl AuthoringWorkflow<'_> {
         self.frame()?;
         self.owned_test_paint()?;
         self.owned_nested_document(project, EditorDocumentKind::Scene)?;
-        let frame = self.frame()?;
-        let scene = frame
-            .workspace()
-            .active_scene
-            .as_ref()
-            .ok_or("the saved nested fixture lost its Scene")?;
-        let anchor = SceneEntityId::new("prefab-anchor").unwrap();
-        self.application.submit_and_drive(
-            EditorActionBatch::new(
-                frame.revision(),
-                [
-                    EditorAction::Navigate(EditorNavigationAction::SelectEntity {
-                        document: scene.document,
-                        entity: Some(anchor.clone()),
-                    }),
-                    EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
-                        document: scene.document,
-                        base_revision: scene.revision,
-                        entity: anchor,
-                    }),
-                ],
-            ),
-            Duration::ZERO,
-        );
+        self.hierarchy_select("prefab-anchor")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.owned_test_paint()?;
         self.owned_nested_document(project, EditorDocumentKind::Prefab)?;
         if fs::read(project.join("src/lib.rs")).map_err(|error| error.to_string())? != project_code

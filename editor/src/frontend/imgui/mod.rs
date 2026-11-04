@@ -15,6 +15,8 @@ mod interaction_tests;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
+mod owned_hierarchy;
+mod owned_hierarchy_panel;
 mod owned_inspector;
 mod owned_panel;
 mod owned_scene;
@@ -587,6 +589,11 @@ impl ImguiEditorFrontend {
                 submission::Recipient::Authoring => {
                     widgets.authoring.action_finished(submission.id, &result)
                 }
+                submission::Recipient::Hierarchy => {
+                    if let Some(hierarchy) = widgets.owned_hierarchy.as_mut() {
+                        hierarchy.action_finished(submission.id, &result);
+                    }
+                }
                 submission::Recipient::PrefabIntent => {
                     widgets.prefab_intent.action_finished(submission.id, result)
                 }
@@ -805,7 +812,11 @@ impl ImguiEditorFrontend {
         let mut placements = std::collections::BTreeMap::new();
         let mut placement_docks = std::collections::BTreeMap::new();
         for instance in &instances {
-            if !hosted_panels && matches!(instance.kind(), "nara.inspector" | "nara.authoring-view")
+            if !hosted_panels
+                && matches!(
+                    instance.kind(),
+                    "nara.inspector" | "nara.authoring-view" | "nara.hierarchy"
+                )
             {
                 continue;
             }
@@ -1132,6 +1143,10 @@ fn paint_hierarchy(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .ui_authoring
         .synchronize(context.input.ui_authoring);
     if let Some(authoring) = context.input.ui_authoring {
+        if let Some(mut hierarchy) = context.widgets.owned_hierarchy.take() {
+            let _ = hierarchy.cancel_input();
+        }
+        context.widgets.hierarchy_pending.clear();
         context.widgets.ui_authoring.show_tree(
             ui,
             authoring,
@@ -1140,10 +1155,7 @@ fn paint_hierarchy(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             &mut context.output.text_owner,
         );
     } else {
-        context
-            .widgets
-            .authoring
-            .show_hierarchy(ui, context.input.frame, context.actions);
+        owned_hierarchy_panel::paint(ui, context);
     }
 }
 
@@ -1243,7 +1255,6 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .ui_authoring
         .synchronize(context.input.ui_authoring);
     if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
-        context.widgets.authoring.hide_document_controls();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(
                 authoring,
@@ -1253,7 +1264,6 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         }
         prefab_intent::show(ui, context);
     } else if context.widgets.inspector_tab == InspectorTab::SourceAsset {
-        context.widgets.authoring.hide_document_controls();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(
                 authoring,

@@ -248,7 +248,7 @@ impl AuthoringWorkflow<'_> {
         self.owned_test_paint()?;
         let source = project.join("worlds/entry.scene.json");
         let original = read_source(&source)?;
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         self.owned_component_click("Add Component")?;
         self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
@@ -646,7 +646,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("Reopen did not load the saved keyboard edits".into());
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.owned_test_document(SAVED_LABEL, 10, 0, "saved Scene Reopen")?;
         self.owned_keyboard_flag(true, 0, "saved boolean Scene Reopen")?;
         if self.dirty()?

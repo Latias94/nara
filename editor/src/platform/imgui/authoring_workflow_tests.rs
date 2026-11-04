@@ -37,6 +37,7 @@ mod field_overrides;
 mod ordinary_structure;
 mod owned_components;
 mod owned_fields;
+mod owned_hierarchy;
 mod owned_keyboard;
 mod owned_nested_references;
 mod owned_recovery;
@@ -218,6 +219,54 @@ struct AuthoringWorkflow<'a> {
     event_loop: &'a ActiveEventLoop,
     pointer: [f32; 2],
     presents: u64,
+}
+
+pub(super) fn hierarchy_click(
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
+    pointer: &mut [f32; 2],
+    name: &str,
+) -> Result<u64, String> {
+    let mut workflow = AuthoringWorkflow {
+        native,
+        application,
+        event_loop,
+        pointer: *pointer,
+        presents: 0,
+    };
+    workflow.hierarchy_click(name)?;
+    *pointer = workflow.pointer;
+    Ok(workflow.presents)
+}
+
+pub(super) fn hierarchy_pointer(
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
+    name: &str,
+) -> Result<[f32; 2], String> {
+    let mut workflow = AuthoringWorkflow {
+        native,
+        application,
+        event_loop,
+        pointer: [-1000.0; 2],
+        presents: 0,
+    };
+    workflow.owned_test_panel_reveal(
+        "nara.hierarchy",
+        None,
+        nara_ui_kernel::UiSemanticRole::Button,
+        name,
+    )?;
+    workflow.owned_test_panel_pointer(
+        "nara.hierarchy",
+        None,
+        nara_ui_kernel::UiSemanticRole::Button,
+        name,
+        0.5,
+    )?;
+    Ok(workflow.pointer)
 }
 
 pub(super) fn game_inspector_text_handoff(
@@ -435,7 +484,7 @@ impl AuthoringWorkflow<'_> {
             .active_authoring_unavailable_record_manifest()
             .ok_or("the ordinary source has no unavailable-record manifest")?;
         let clean = self.dirty()?;
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let frame = self.frame()?;
         let entity = frame
             .workspace()
@@ -532,7 +581,7 @@ impl AuthoringWorkflow<'_> {
                 "the real Reopen widget did not reopen the {kind:?} source"
             ));
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         let reopened = self.selected_value()?;
         let reopen_history = self.history()?;
         let reopened_dirty = self.dirty()?;
@@ -590,7 +639,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
         let scene = self.document(project, EditorDocumentKind::Scene)?;
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.owned_component_click("Open Prefab Source")?;
         let prefab = self.document(project, EditorDocumentKind::Prefab)?;
         Ok(AuthoringObservation {

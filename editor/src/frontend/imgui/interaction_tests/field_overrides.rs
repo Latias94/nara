@@ -114,10 +114,10 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
     let mut interaction = Interaction::new(&project);
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
-            interaction.click("entity:prefab-anchor");
+            interaction.click_hierarchy("Select prefab-anchor");
             interaction.click_owned(None, "Open Prefab Source");
         }
-        interaction.click("+ Root");
+        interaction.click_hierarchy("+ Root");
         let frame = interaction.frame();
         let scene = frame.workspace().active_scene.as_ref().unwrap();
         let entity = scene.selection.top_entity().unwrap().clone();
@@ -275,7 +275,7 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
         interaction.click("Dismiss persistence result");
         interaction.click("Reopen");
         interaction.settle_persistence();
-        interaction.click(&format!("entity:{}", entity.as_str()));
+        interaction.click_hierarchy(&format!("Select {}", entity.as_str()));
         for (name, value) in [
             ("required_default", 10),
             ("optional_default", 20),
@@ -324,7 +324,7 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
 fn required_field_without_a_default_has_no_remove_intent() {
     let project = InteractionProject::new();
     let mut interaction = Interaction::new(&project);
-    interaction.click("+ Root");
+    interaction.click_hierarchy("+ Root");
     interaction.click_owned(None, "Add Component");
     interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     let before = interaction.frame();
@@ -373,7 +373,7 @@ fn root_and_list_index_fields_have_no_remove_intent() {
             .with_authoring_initial_value(initial),
         );
         let mut interaction = Interaction::new(&project);
-        interaction.click("+ Root");
+        interaction.click_hierarchy("+ Root");
         interaction.click_owned(None, "Add Component");
         interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
         expect_field(

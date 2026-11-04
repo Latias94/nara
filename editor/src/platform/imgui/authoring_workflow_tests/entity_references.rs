@@ -88,7 +88,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.frame()?;
         self.owned_test_paint()?;
-        self.click("entity:source")?;
+        self.hierarchy_select("source")?;
         self.expect_entity_reference("target")?;
         let original = self.frame()?;
         let scene = original
@@ -147,7 +147,7 @@ impl AuthoringWorkflow<'_> {
         self.click("Dismiss persistence result")?;
         self.click("Reopen")?;
         self.settle_persistence()?;
-        self.click("entity:source")?;
+        self.hierarchy_select("source")?;
         self.expect_entity_reference("other")?;
         if self.history()? != 0 || self.dirty()? {
             return Err("Reopen did not restore a clean source with fresh history".into());
@@ -197,7 +197,7 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
-        self.click("entity:source")?;
+        self.hierarchy_select("source")?;
         self.expect_entity_reference("target")?;
         let baseline = self.history()?;
         self.click_owned_reference("Choose target")?;
@@ -228,7 +228,7 @@ impl AuthoringWorkflow<'_> {
         self.click("Dismiss persistence result")?;
         self.click("Reopen")?;
         self.settle_persistence()?;
-        self.click("entity:source")?;
+        self.hierarchy_select("source")?;
         self.expect_entity_reference("other")?;
         Ok(self.presents)
     }

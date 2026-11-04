@@ -299,14 +299,23 @@ fn run_native_cadence(
         {
             return Err("the real Runtime did not reach Paused".into());
         }
-        let entity = control_rect("entity:image-source")
-            .ok_or("the real Hierarchy entity control was not painted")?;
-        let pointer = [
-            (entity.min[0] + entity.max[0]) * 0.5,
-            (entity.min[1] + entity.max[1]) * 0.5,
-        ];
+        let pointer = super::authoring_workflow_tests::hierarchy_pointer(
+            host.native.as_mut().unwrap(),
+            &mut host.application,
+            event_loop,
+            "Select image-source",
+        )?;
+        let window = host.native.as_ref().unwrap().window.id();
+        host.window_event(
+            event_loop,
+            window,
+            WindowEvent::MouseInput {
+                device_id: winit::event::DeviceId::dummy(),
+                state: winit::event::ElementState::Pressed,
+                button: winit::event::MouseButton::Left,
+            },
+        );
         redraw(&mut host, event_loop, pointer, None)?;
-        redraw(&mut host, event_loop, pointer, Some(true))?;
         let geometry_before = host
             .application
             .active_game_start_request()
@@ -337,7 +346,16 @@ fn run_native_cadence(
             });
         // Release the real entity widget in the same production RedrawRequested that observes
         // the new Game extent. Neither the action batch nor the application is driven here.
-        redraw(&mut host, event_loop, pointer, Some(false))?;
+        host.window_event(
+            event_loop,
+            window,
+            WindowEvent::MouseInput {
+                device_id: winit::event::DeviceId::dummy(),
+                state: winit::event::ElementState::Released,
+                button: winit::event::MouseButton::Left,
+            },
+        );
+        redraw(&mut host, event_loop, pointer, None)?;
         let resize_changed_geometry = host
             .application
             .active_game_start_request()

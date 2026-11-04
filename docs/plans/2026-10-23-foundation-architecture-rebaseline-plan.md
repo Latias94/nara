@@ -1222,8 +1222,13 @@ ordinary Scene/Prefab Document Inspector now uses Nara controls by default, incl
 placement and revision-bound Prefab-source navigation; the competing optional tab and Dear
 whole-panel painters are removed. Complete embedding uses the original native owner through
 `EditorNativeHost`; `show_contributions` explicitly serves unattached source-built panels.
-Tree/workspace and specialized-panel replacement, virtualization, measured costs and broader
-OS/platform qualification remain open. **Owners:** UI compile/presented sessions, text and frontend.
+The ordinary source-declaration Hierarchy successor adds Nara-owned creation, selection, authored
+Parent/Order and confirmed removal, local committed-text filtering and visible-row construction
+for source and placement-choice lists. Its original Session/history/persistence and hosted
+submission owners remain authoritative; source declarations are distinct from an effective tree.
+Specialized UI trees, workspace and specialized-panel replacement, offscreen keyboard traversal,
+full matching/idle/allocation/GPU cost measurements and broader OS/platform qualification remain
+open. **Owners:** UI compile/presented sessions, text and frontend.
 
 The user clarified the destination: **Nara's own custom-drawn Editor UI**, not embedding a
 reference toolkit. The [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)

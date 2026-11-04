@@ -77,7 +77,7 @@ pub(super) struct OwnedFieldProbe {
 impl OwnedFieldProbe {
     fn position(&self, horizontal: f32) -> Result<([f32; 2], PhysicalPosition<f64>), String> {
         if self.rect.size().width() <= 2.0 || self.rect.size().height() <= 2.0 {
-            return Err("the presented Inspector control is too small for pointer input".into());
+            return Err("the presented Nara control is too small for pointer input".into());
         }
         let point = UiPoint::new(
             self.rect.origin().x() + 1.0 + (self.rect.size().width() - 2.0) * horizontal,
@@ -88,7 +88,7 @@ impl OwnedFieldProbe {
             .hit_test(point)
             .is_none_or(|hit| hit.key() != &self.key)
         {
-            return Err("the presented Inspector control does not own its pointer target".into());
+            return Err("the presented Nara control does not own its pointer target".into());
         }
         let logical = self.frame.environment().logical_size();
         let local = [
@@ -129,17 +129,27 @@ impl AuthoringWorkflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> Result<OwnedFieldProbe, String> {
-        let inspector = self
+        self.owned_test_panel_probe("nara.inspector", field, role, name)
+    }
+
+    pub(super) fn owned_test_panel_probe(
+        &self,
+        kind: &str,
+        field: Option<&str>,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<OwnedFieldProbe, String> {
+        let instance = self
             .application
             .panel_workspace()
             .layout()
             .instances()
             .iter()
-            .find(|instance| instance.kind() == "nara.inspector")
-            .ok_or("the native fixture has no Inspector panel")?
+            .find(|instance| instance.kind() == kind)
+            .ok_or_else(|| format!("the native fixture has no {kind} panel"))?
             .id();
         for (panel, frame, image) in self.native.owned_frames_for_test() {
-            if panel != inspector {
+            if panel != instance {
                 continue;
             }
             let parent =
@@ -169,15 +179,15 @@ impl AuthoringWorkflow<'_> {
                 .layouts()
                 .iter()
                 .find(|layout| layout.key() == Some(node.key()))
-                .ok_or("the Inspector semantic control has no compiled layout")?;
+                .ok_or("the Nara semantic control has no compiled layout")?;
             if image.occurrence.is_none() {
                 return Err(format!(
-                    "the Inspector control {field:?}/{name:?} has no confirmed image occurrence"
+                    "the {kind} control {field:?}/{name:?} has no confirmed image occurrence"
                 ));
             }
             if !frame.diagnostics().is_empty() {
                 return Err(format!(
-                    "the presented Inspector has diagnostics: {:?}",
+                    "the presented {kind} has diagnostics: {:?}",
                     frame.diagnostics()
                 ));
             }
@@ -190,7 +200,9 @@ impl AuthoringWorkflow<'_> {
                 .target
                 .viewport_id;
             if image.viewport != main_viewport {
-                return Err("the hidden-window Inspector escaped the primary viewport".into());
+                return Err(format!(
+                    "the hidden-window {kind} escaped the primary viewport"
+                ));
             }
             let rect = layout.rect();
             return Ok(OwnedFieldProbe {
@@ -202,7 +214,7 @@ impl AuthoringWorkflow<'_> {
             });
         }
         Err(format!(
-            "no confirmed Nara Inspector image contains field Group {field:?}"
+            "no confirmed {kind} image contains field Group {field:?}"
         ))
     }
 
@@ -225,29 +237,39 @@ impl AuthoringWorkflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> Result<OwnedFieldProbe, String> {
-        let mut probe = self.owned_test_named_probe(field, role, name)?;
+        self.owned_test_panel_control("nara.inspector", field, role, name)
+    }
+
+    pub(super) fn owned_test_panel_control(
+        &self,
+        kind: &str,
+        field: Option<&str>,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<OwnedFieldProbe, String> {
+        let mut probe = self.owned_test_panel_probe(kind, field, role, name)?;
         let node = probe
             .frame
             .semantics()
             .iter()
             .find(|node| node.key() == &probe.key)
-            .ok_or("the Inspector control lost its semantic node")?;
+            .ok_or("the Nara control lost its semantic node")?;
         let layout = probe
             .frame
             .layouts()
             .iter()
             .find(|layout| layout.key() == Some(&probe.key))
-            .ok_or("the Inspector control lost its compiled layout")?;
+            .ok_or("the Nara control lost its compiled layout")?;
         if !node.enabled() || !layout.visible() {
             return Err(format!(
-                "the Inspector control {field:?}/{name:?} is not enabled and presented"
+                "the {kind} control {field:?}/{name:?} is not enabled and presented"
             ));
         }
         probe.rect = match layout.clip_rect() {
             Some(clip) => layout
                 .rect()
                 .intersect(clip)
-                .ok_or("the Inspector control is fully clipped")?,
+                .ok_or("the Nara control is fully clipped")?,
             None => layout.rect(),
         };
         Ok(probe)
@@ -275,21 +297,31 @@ impl AuthoringWorkflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> Result<(), String> {
+        self.owned_test_panel_reveal("nara.inspector", field, role, name)
+    }
+
+    pub(super) fn owned_test_panel_reveal(
+        &mut self,
+        kind: &str,
+        field: Option<&str>,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<(), String> {
         for vertical in [1.0, -1.0] {
             for _ in 0..48 {
-                if let Ok(visible) = self.owned_test_visible_control(field, role, name)
+                if let Ok(visible) = self.owned_test_panel_control(kind, field, role, name)
                     && visible.rect.size().width() > 2.0
                     && visible.rect.size().height() > 2.0
                 {
                     return Ok(());
                 }
-                let (_, image) = self.owned_test_inspector_image()?;
+                let (_, image) = self.owned_test_panel_image(kind)?;
                 self.pointer = [
                     image.viewport_origin[0] + (image.rect.min[0] + image.rect.max[0]) * 0.5,
                     image.viewport_origin[1] + (image.rect.min[1] + image.rect.max[1]) * 0.5,
                 ];
                 self.paint(|_| {})?;
-                let (before, image) = self.owned_test_inspector_image()?;
+                let (before, image) = self.owned_test_panel_image(kind)?;
                 let local = [
                     (image.rect.min[0] + image.rect.max[0]) * 0.5,
                     (image.rect.min[1] + image.rect.max[1]) * 0.5,
@@ -299,7 +331,9 @@ impl AuthoringWorkflow<'_> {
                     image.viewport_origin[1] + local[1],
                 ];
                 if !image.owns_native_pointer(&self.native.context, self.pointer) {
-                    return Err("the actual Inspector image is occluded at the wheel target".into());
+                    return Err(format!(
+                        "the actual {kind} image is occluded at the wheel target"
+                    ));
                 }
                 self.owned_test_event(WindowEvent::CursorMoved {
                     device_id: DeviceId::dummy(),
@@ -313,40 +347,45 @@ impl AuthoringWorkflow<'_> {
                     delta: MouseScrollDelta::LineDelta(0.0, vertical),
                     phase: TouchPhase::Moved,
                 })? {
-                    return Err(
-                        "the confirmed Inspector image did not consume its locating wheel".into(),
-                    );
+                    return Err(format!(
+                        "the confirmed {kind} image did not consume its locating wheel"
+                    ));
                 }
                 self.owned_test_paint()?;
-                let (after, _) = self.owned_test_inspector_image()?;
+                let (after, _) = self.owned_test_panel_image(kind)?;
                 if Arc::ptr_eq(&before, &after) {
                     break;
                 }
             }
         }
-        self.owned_test_visible_control(field, role, name)
+        self.owned_test_panel_control(kind, field, role, name)
             .map(|_| ())
-            .map_err(|error| format!("after a bounded Inspector wheel search: {error}"))
+            .map_err(|error| format!("after a bounded {kind} wheel search: {error}"))
     }
 
-    fn owned_test_inspector_image(&self) -> Result<(Arc<UiFrame>, ImguiImageInteraction), String> {
-        let inspector = self
+    pub(super) fn owned_test_panel_image(
+        &self,
+        kind: &str,
+    ) -> Result<(Arc<UiFrame>, ImguiImageInteraction), String> {
+        let instance = self
             .application
             .panel_workspace()
             .layout()
             .instances()
             .iter()
-            .find(|instance| instance.kind() == "nara.inspector")
-            .ok_or("the native fixture has no Inspector panel")?
+            .find(|instance| instance.kind() == kind)
+            .ok_or_else(|| format!("the native fixture has no {kind} panel"))?
             .id();
         let (_, frame, image) = self
             .native
             .owned_frames_for_test()
             .into_iter()
-            .find(|(panel, _, _)| *panel == inspector)
-            .ok_or("the Inspector has no confirmed native image")?;
+            .find(|(panel, _, _)| *panel == instance)
+            .ok_or_else(|| format!("the {kind} has no confirmed native image"))?;
         if image.occurrence.is_none() || !frame.diagnostics().is_empty() {
-            return Err("the Inspector image is unconfirmed or contains diagnostics".into());
+            return Err(format!(
+                "the {kind} image is unconfirmed or contains diagnostics"
+            ));
         }
         Ok((frame, image))
     }
@@ -493,19 +532,32 @@ impl AuthoringWorkflow<'_> {
         name: &str,
         horizontal: f32,
     ) -> Result<(), String> {
+        self.owned_test_panel_pointer("nara.inspector", field, role, name, horizontal)
+    }
+
+    pub(super) fn owned_test_panel_pointer(
+        &mut self,
+        kind: &str,
+        field: Option<&str>,
+        role: UiSemanticRole,
+        name: &str,
+        horizontal: f32,
+    ) -> Result<(), String> {
         self.pointer = self
-            .owned_test_visible_control(field, role, name)?
+            .owned_test_panel_control(kind, field, role, name)?
             .position(horizontal)?
             .0;
         self.paint(|_| {})?;
-        let probe = self.owned_test_visible_control(field, role, name)?;
+        let probe = self.owned_test_panel_control(kind, field, role, name)?;
         let (global, position) = probe.position(horizontal)?;
         self.pointer = global;
         if !probe
             .image
             .owns_native_pointer(&self.native.context, global)
         {
-            return Err("the actual Inspector image is occluded at the synthetic pointer".into());
+            return Err(format!(
+                "the actual {kind} image is occluded at the synthetic pointer"
+            ));
         }
         self.owned_test_event(WindowEvent::CursorMoved {
             device_id: DeviceId::dummy(),
@@ -664,7 +716,7 @@ impl AuthoringWorkflow<'_> {
         if initial_manifest.total_count() == 0 {
             return Err("the owned field fixture must retain actual unknown source data".into());
         }
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         self.owned_component_click("Add Component")?;
         self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
@@ -810,7 +862,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("the real Reopen widget did not reopen the owned Inspector edits".into());
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.owned_test_document(OWNED_LABEL, 42, 0, "saved Scene Reopen")?;
         if self.dirty()? {
             return Err("the reopened owned Inspector source is still dirty".into());

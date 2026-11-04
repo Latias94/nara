@@ -62,8 +62,8 @@ cargo +1.95.0 nextest run -p nara-editor -p nara_ui -p nara_winit --features nar
 ```
 
 Use an actual installed compatible font; an unavailable path or missing glyph diagnostics fail
-this trajectory. Retain the environment and DX12 prerequisites above. The hidden window selects
-`Nara properties`, maps pointer input through confirmed image geometry, edits Chinese/string and
+this trajectory. Retain the environment and DX12 prerequisites above. The hidden window uses the
+ordinary Document tab, maps pointer input through confirmed image geometry, edits Chinese/string and
 numeric buffers through Winit IME events, holds Apply across a new presentation, and exercises
 document Undo/Redo and disk Save/Reopen. It also verifies composition isolation/cancellation,
 fresh focus after an outside click, rejection of a commit before the new IME handshake, retained
@@ -96,8 +96,8 @@ The component trajectory creates an ordinary Scene entity and repeats the comple
 Prefab. Native owned-image clicks open the creation choices, add/remove the component and
 fold/unfold its dirty field without changing source/history. Explicit Apply and document
 Undo/Redo precede disk Save/Reopen. Actual typed saved values and the original unknown records
-must survive. Entity creation, navigation and persistence still use the surrounding shell;
-this does not qualify a complete Nara-owned Inspector or tree replacement. CPU controls also
+must survive. Entity creation uses the Nara source-declaration Hierarchy; document navigation
+and persistence retain the surrounding shell. CPU controls also
 refuse stale revisions, repeated menu activation, disabled duplicate creation and read-only or
 unknown-record removal, and retain local text Undo while cancelling hidden composition.
 
@@ -121,9 +121,42 @@ requesting a continuous follow-up. That observation is not an idle CPU benchmark
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
 placement, physical OS key/clipboard delivery, keyboard-only entry from the surrounding shell,
 detached-window/DPI transfer or accessibility.
-The ordinary panel's default replacement and remaining specialized-panel, tree and workspace
+The ordinary panel's default replacement and remaining specialized-panel and workspace
 scope are recorded under the
 [owning unit](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
+
+## Nara Source-declaration Hierarchy Integration
+
+For ordinary Scene/Prefab Hierarchy input, source mutations or hosted-panel routing, execute:
+
+```powershell
+$env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_owned_hierarchy_) | test(native_resume_redraw_rebases_paused_idle_before_the_owner_drive)' --test-threads=1
+```
+
+The structure trajectory repeats source-local Root/Child creation, selection, Parent and Order
+choices, removal cancellation/confirmation, Undo/Redo and disk Save/Reopen in Scene and Prefab.
+It preserves source IDs, routed placement predicates and original declarations. The displayed
+list represents authored source declarations rather than the effective expanded Prefab tree.
+
+The large-list trajectory uses at least 1,024 declarations per source, actual unknown records
+and an unrelated dirty Inspector field. Committed filtering, cancelled preedit, long-filter
+refocus at its displayed prefix, line/pixel wheel input and multiple deltas before repaint must
+preserve exact Session selection, history, source bytes and the Inspector draft. Show selection
+reveals the existing logical selection. Explicit field Apply and disk Save/Reopen retain all
+declarations; document replacement retires the old filter's native text lifetime and refuses late
+input. These tests map real Winit events through the confirmed hosted image. The cadence control
+collects a real owned Hierarchy selection with Game resize in the same output before testing
+paused-idle Resume time rebasing.
+
+CPU controls separately qualify stale revision/selection/Schema/read-only refusal at activation
+and final queue admission, exact result routing, small-viewport confirmation, long legal IDs,
+shared display budgets in tall viewports, oversized-filter refusal, specialized projection retirement
+and visible-row construction for source and choice lists.
+Visible widget/layout counts do not establish bounded matching scans, allocation, idle CPU or
+GPU cost. Specialized UI trees, keyboard traversal to uninstantiated rows, the workspace shell,
+actual OS IME/candidate placement, assistive technology and broader platform/DPI evidence remain
+separate requirements.
 
 ## Nara Scene Integration
 

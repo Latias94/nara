@@ -714,7 +714,13 @@ impl CanvasWorkflow<'_> {
         for _ in 0..6 {
             self.paint(|_| {})?;
         }
-        self.click("entity:ui-anchor")?;
+        self.presents += super::authoring_workflow_tests::hierarchy_click(
+            self.native,
+            self.application,
+            self.event_loop,
+            &mut self.pointer,
+            "Select ui-anchor",
+        )?;
         self.click_owned_root_button("Open Prefab Source")?;
         self.settle_canvas()?;
         let baseline = self.layout()?;

@@ -624,7 +624,7 @@ impl AuthoringWorkflow<'_> {
                 "ordinary Open executed or activated a source tool: {view:?}"
             ));
         }
-        self.click("entity:enemy")
+        self.hierarchy_select("enemy")
     }
 
     fn settle_actual_source_tool(&mut self) -> Result<EditorSourceToolView, String> {
@@ -1140,7 +1140,7 @@ impl AuthoringWorkflow<'_> {
         }
 
         // A useful panel action uses the same explicit request/review/acceptance pipeline.
-        self.click("entity:recruit")?;
+        self.hierarchy_select("recruit")?;
         self.application
             .panel_workspace_mut()
             .layout_mut()
@@ -1188,7 +1188,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
 
-        self.click("entity:enemy")?;
+        self.hierarchy_select("enemy")?;
         self.replace_source_tool_parameter(owned_inspector, "999")?;
         let replaced_input = if owned_inspector {
             Some(self.owned_source_tool_input()?)
@@ -1467,7 +1467,7 @@ impl AuthoringWorkflow<'_> {
                     .into(),
             );
         }
-        self.click("entity:recruit")?;
+        self.hierarchy_select("recruit")?;
         if owned_inspector {
             self.owned_test_named_text("wire_health", "wire_health", "100")?;
             self.owned_test_named_text("wire_armor", "wire_armor", "10")?;

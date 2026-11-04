@@ -257,6 +257,13 @@ impl ImguiEditorPanelContext<'_, '_> {
         self.submit_to(action, Recipient::Authoring)
     }
 
+    pub(super) fn submit_hierarchy(
+        &mut self,
+        action: EditorAction,
+    ) -> Result<PanelSubmissionId, PanelSubmitError> {
+        self.submit_to(action, Recipient::Hierarchy)
+    }
+
     pub(super) fn submit_prefab_conversion(
         &mut self,
         action: nara::tooling::EditorPrefabConversionAction,
@@ -319,6 +326,9 @@ impl ImguiEditorPanelContext<'_, '_> {
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
+    pub owned_hierarchy: Option<super::owned_hierarchy::OwnedHierarchy>,
+    pub hierarchy_pending: Vec<super::owned_hierarchy::HierarchySubmission>,
+    pub hierarchy_read_only: bool,
     pub owned_inspector: Option<super::owned_inspector::OwnedInspector>,
     pub owned_pending: Vec<super::owned_panel::OwnedSubmission>,
     pub owned_revision: u64,

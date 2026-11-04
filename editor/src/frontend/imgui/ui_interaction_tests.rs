@@ -212,13 +212,17 @@ pub(super) fn setup_ui_prefab_source(application: &mut EditorApplication) {
     application.submit_and_drive(
         EditorActionBatch::new(
             frame.revision(),
-            [EditorAction::Navigate(
-                EditorNavigationAction::OpenPrefabSource {
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: scene.document,
+                    entity: Some(SceneEntityId::new("ui-anchor").unwrap()),
+                }),
+                EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
                     document: scene.document,
                     base_revision: scene.revision,
                     entity: SceneEntityId::new("ui-anchor").unwrap(),
-                },
-            )],
+                }),
+            ],
         ),
         Duration::ZERO,
     );
@@ -277,7 +281,6 @@ impl UiInteraction {
         for _ in 0..4 {
             interaction.render();
         }
-        interaction.click("entity:ui-anchor");
         setup_ui_prefab_source(&mut interaction.application);
         for _ in 0..3 {
             interaction.render();

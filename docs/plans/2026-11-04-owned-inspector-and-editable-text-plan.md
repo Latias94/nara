@@ -753,3 +753,104 @@ This closes the ordinary Scene/Prefab Inspector's default-panel replacement. Spe
 tree/workspace replacement, keyboard-only shell entry, virtualization, measured idle/allocation
 and retirement cost, actual OS IME/candidate placement, assistive technology and untested
 platform/DPI combinations remain open. The complete R11/R12 and foundation Goal remain active.
+
+## Source-declaration Hierarchy successor
+
+Replace the ordinary Scene/Prefab Hierarchy's complete source-local editing workflow with
+Nara-drawn controls: entity selection, Root/Child creation, explicit desired parent and sibling
+slot, removal confirmation/cancellation, original history and disk Save/Reopen. The current
+model projects source declarations, not an effective hierarchy. Preserve routed source predicates
+and origin kinds; do not infer effective siblings or flatten Prefab identity for convenience.
+Specialized UI trees and the document/workspace shell remain separate consumers.
+
+Use the existing native Host, hosted image journal, shared buttons/text field and ordered panel
+submission ledger. Each source action captures its document, kind, revision, Schema, selection
+and permissions. Menu/confirmation observations cannot retarget after a selection change.
+Activation and final queue admission both revalidate; duplicate activation consumes its exact
+observation, and dispatched/refused results return only to the original live panel incarnation.
+
+Keep the filter's committed text, focus/IME and local Undo in the panel. Composition is excluded
+from matching. Filtering, clearing, scrolling and revealing selection do not change document
+selection/history or unrelated Inspector drafts. Compile only a visible range of fixed-height
+source rows and choice rows, with keys derived from source/action identity and no retained input
+authority for recycled rows. A finite matching index may scan source rows on input/source change;
+visible widget/layout counts and total matching work are distinct measurements.
+
+The pinned Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`
+[Scene Tree editor](../../repo-ref/godot/editor/scene/scene_tree_editor.cpp) separates logical
+selection, filtering and reveal behavior. Its Node tree is not Nara's source-declaration
+authority, and its retained TreeItems are not evidence of bounded Nara layout work. Consume the
+responsibility distinction rather than importing another toolkit or a resolved-tree model.
+
+Qualify original Scene/Prefab mutations and persistence, stale/readonly/changed-Schema refusal,
+filter focus/IME retirement, exact result routing and >=1,000-row virtualization with the
+existing CPU/public/native harnesses. Migrate predecessor tests without synthetic Dear items or
+direct-mutation substitutes. Remove the displaced Dear source-list/composition/confirmation
+painters after the matched workflows pass. Record actual Windows/DX12 scope and bounded costs;
+this unit does not close the full workspace/toolkit/platform or foundation requirements.
+
+## Source-declaration Hierarchy qualification
+
+Qualified on November 4 with Rust 1.95.0, Windows/DX12, serial Cargo,
+`CARGO_BUILD_JOBS=1` and the root `target`. Source-tool controls reuse the actual .NET 10 Host
+and EnemyStats v1 artifacts; the configured CJK fallback is `simhei.ttf`.
+
+| Check | Result |
+| --- | --- |
+| Ordinary Editor library and selected public integrations | 382/382, 54 skipped; `b56e66c4-cf9f-4338-af85-10a9dce8415f` |
+| Final selected native cohort | 39/39; `988f635f-cfbb-4a77-88b0-1245a1b0594b` |
+| Independent panel/document/tool consumers | 46/46, four skipped; `5c11949e-5613-48ea-a75a-a0452701cc0e` |
+| Independent caller-owned native Host process | 1/1; `272212fd-ef29-4882-86e5-697ffd56be73` |
+| Independent review | Original compact-mode and projection-retirement findings plus filter-point, wheel accumulation and complete display-budget corrections; no remaining scoped P1/P2 |
+| Build and lint | Editor build and all-target/all-feature `-D clippy::correctness` pass; warnings remain |
+| Formatting and documents | Root/independent formatting and diff checks pass; 1,052 relative file links resolve |
+
+The ordinary run includes 373 library tests and nine public integration cases. Owner controls
+cover exact source/selection/Schema/read-only admission, repeat activation, queue refusal and
+original result IDs; compact confirmation and choices at 260/160/80/32 logical heights; source
+filter, local Undo and text lifetime; and retirement when the same document changes to and from
+the specialized UI projection. Final queue admission repeats the captured-basis checks. The
+ordinary and Prefab workflows retain the original routed parent predicate and expected-base
+identity rather than deriving an effective tree.
+
+At 1,200 declarations and 800 logical pixels high, the measured source frame contains 40 layouts,
+37 semantic nodes, 16 hit regions, 15 live button states and one retained frame
+(`a8736d96-4566-42ea-a5dd-0357a50f3151`). The owner retains
+at most three compiled frames. Parent and Order lists also construct only their visible range.
+This measures constructed UI state, not full source matching or snapshot allocation: matching
+still scans source rows, and unchanged-frame reuse does not establish an idle-cost distribution.
+
+The native source workflows create, arrange and remove declarations in both Scene and Prefab,
+then Undo/Redo and Save/Reopen. The large-list workflow uses at least 1,024 declarations in each
+source, real unknown-record diagnostics and a dirty unrelated Inspector draft. Winit input proves
+preedit isolation, exact committed filtering, long-filter blur/refocus at the presented prefix,
+summed line/pixel wheel events before repaint, Show selection and retired text-token refusal after
+document switch. The original cadence test retains a real Hierarchy selection collected with
+Game resize in the same native output before its paused-idle Resume proof.
+
+Review and qualification corrected two ownership defects: a clipped removal confirmation now
+uses its own compact mode, and entering specialized UI drops the ordinary controller and its
+unqueued actions instead of retaining a permanently queued owner. Point mapping uses the
+presented text origin. Relative wheel deltas share only their unchanged viewport observation,
+while old row activations lose authority. Source/filter/mode/geometry changes revoke that
+observation.
+
+Legal 16 KiB IDs keep their complete typed identity in actions. Private display labels use
+UTF-8-safe prefix/digest/suffix elision. A per-segment cap alone still exceeded the shared frame's
+glyph limit; visible source and choice texts now share a 2,048-byte display allowance. The local
+filter has a separate 1,024-byte/glyph limit and refuses oversized Insert/Preedit without changing
+its buffer, selection or token. Actual admitted long-ID sources compile in source/Parent/Order
+modes at 1,080/2,160/4,320 logical heights. Shared UI/text ceilings are unchanged.
+
+The first native run passed 37/39: the large-source fixture had not painted the asynchronous
+persistence acknowledgement, and cadence still located a removed Dear entity widget. Both
+replacements preserve the original assertions; their focused rerun passes 2/2 at
+`24c8f2e6-46b0-4ec4-a6fa-0b29f403f439`. The first ordinary/public run passed 379/380 because
+the contribution-only scroll test still expected Dear Hierarchy output. It now registers a real
+100-row external Scroll Probe, retains actual wheel scrolling and Inspector/source/lifetime
+checks, and verifies hosted Hierarchy omission. These earlier runs are not the final cohort above.
+
+The ordinary Dear source-list/composition/removal painters are removed. Specialized UI trees and
+panels, the document/workspace shell, keyboard traversal to uninstantiated rows, full scanning/
+allocation/idle/GPU costs, actual OS IME/candidate placement, assistive technology and broader
+native platform/DPI support remain open. Full R11/R12 and the foundation Goal remain active.

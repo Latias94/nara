@@ -93,7 +93,7 @@ impl AuthoringWorkflow<'_> {
         project: &Path,
         kind: EditorDocumentKind,
     ) -> Result<(), String> {
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let frame = self.frame()?;
         let scene = frame
             .workspace()
@@ -215,7 +215,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("Reopen did not publish the saved source".to_owned());
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         for (name, value) in [
             ("required_default", 10),
             ("optional_default", 20),
@@ -264,7 +264,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
         self.field_overrides_document(project, EditorDocumentKind::Scene)?;
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.owned_component_click("Open Prefab Source")?;
         self.field_overrides_document(project, EditorDocumentKind::Prefab)?;
         Ok(self.presents)

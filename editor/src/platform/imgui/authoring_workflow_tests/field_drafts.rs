@@ -57,7 +57,7 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         self.owned_component_click("Add Component")?;
         self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let before_range_edit = self.history()?;

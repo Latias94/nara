@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-04 (default Nara-owned ordinary Inspector and selected-panel replacement scope)
+**Last Revised**: 2026-11-04 (Nara-owned ordinary Inspector/Hierarchy and selected-panel replacement scope)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -829,17 +829,28 @@ authored-placement projection and exact Open Prefab Source navigation. The ordin
 whole-Inspector/component painters and optional Nara-properties tab are removed after their
 matched consumer qualification. Source-built `edit_field` contributions and specialized UI,
 source-asset and Prefab Intent panels remain separate consumers of their existing owners.
-The shell still supplies docking, document/tree/persistence controls and native image placement.
+The shell still supplies docking, document navigation/history/persistence and native image placement.
 This panel replacement does not claim complete workspace/toolkit parity, virtualization, cost
 or unqualified native OS IME/accessibility/DPI support.
+
+The ordinary Scene/Prefab Hierarchy likewise consumes the current source-declaration projection,
+not an inferred effective tree. Nara owns its visible controls, filtering, selection presentation,
+desired parent/order choices and source-local branch removal confirmation. Session retains
+selection, document commands, history and persistence. Local filtering/IME and recycled row
+lifetimes do not change document meaning. Displayed source/Schema/selection/permission facts
+are revalidated at activation and queue admission, with exact outcomes delivered through the
+original panel incarnation's submission ledger. The displaced Dear source-list/composition/
+confirmation painters are removed after matched qualification; specialized UI trees and the
+workspace/document shell remain separate consumers. Bounded visible-row qualification does
+not imply bounded source projection/filter cost or complete toolkit/platform parity.
 
 Complete caller-owned event loops consume the existing `EditorNativeHost`, constructed from
 the paired Application/frontend and an optional caller-created primary window. Its original
 Winit handler owns scheduling, native input/presentation, recovery and close; `finish` consumes
 the loop result before returning cleanup errors. It is not a second GPU owner or a promise of
 independent scheduling inside another toolkit. The unattached contribution-only entry is
-`show_contributions`; it omits hosted Inspector/Scene image panels while retaining the exact
-panel submission/result owner. The ambiguous unattached `show` entry is removed rather than
+`show_contributions`; it omits hosted Hierarchy/Inspector/Scene image panels while retaining the
+exact panel submission/result owner. The ambiguous unattached `show` entry is removed rather than
 leaving the default Inspector indefinitely preparing an image without a renderer.
 
 ## Alternatives Considered

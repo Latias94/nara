@@ -121,7 +121,7 @@ impl AuthoringWorkflow<'_> {
         if initial_manifest.total_count() == 0 {
             return Err("component authoring must preserve actual unknown source records".into());
         }
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let entity = self
             .frame()?
             .workspace()
@@ -250,7 +250,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err("the real Reopen widget did not reopen native component authoring".into());
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.expect_owned_component(Some(42), 0, "saved component Reopen")?;
         self.owned_test_named_text("value", "value", "42")?;
         self.owned_test_draft("value", None)?;
@@ -348,7 +348,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.owned_components_document(project, EditorDocumentKind::Scene)
             .map_err(|error| format!("Scene component workflow: {error}"))?;
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.click("Inspector tab: Document")?;
         self.owned_component_click("Open Prefab Source")?;
         self.owned_components_document(project, EditorDocumentKind::Prefab)

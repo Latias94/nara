@@ -102,7 +102,7 @@ impl AuthoringWorkflow<'_> {
             .application
             .active_authoring_unavailable_record_manifest()
             .ok_or("the source has no unavailable-record manifest")?;
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let frame = self.frame()?;
         let entity = frame
             .workspace()
@@ -210,7 +210,7 @@ impl AuthoringWorkflow<'_> {
         self.click("Dismiss persistence result")?;
         self.click("Reopen")?;
         self.settle_persistence()?;
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.expect_recursive_value("optional", &ComponentValue::Null)?;
         self.expect_recursive_value("vector", &vector)?;
         self.expect_recursive_value("list", &list)?;
@@ -240,7 +240,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
         self.recursive_document(&project.join("worlds/entry.scene.json"))?;
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.owned_component_click("Open Prefab Source")?;
         self.recursive_document(&project.join("blueprints/ordinary.prefab.json"))?;
         Ok(self.presents)
@@ -300,7 +300,7 @@ impl AuthoringWorkflow<'_> {
             );
         }
         self.click("Inspector tab: Document")?;
-        self.click("+ Root")?;
+        self.hierarchy_click("+ Root")?;
         let entity = self
             .frame()?
             .workspace()
@@ -492,7 +492,7 @@ impl AuthoringWorkflow<'_> {
         ) {
             return Err(format!("Reopen did not load the saved structured {kind:?}"));
         }
-        self.click(&format!("entity:{}", entity.as_str()))?;
+        self.hierarchy_select(entity.as_str())?;
         self.expect_owned_recursive_values(&expected, 0, "structured source Reopen")?;
         if self.dirty()?
             || self
@@ -528,7 +528,7 @@ impl AuthoringWorkflow<'_> {
         self.frame()?;
         self.owned_test_paint()?;
         self.owned_recursive_document(project, EditorDocumentKind::Scene)?;
-        self.click("entity:prefab-anchor")?;
+        self.hierarchy_select("prefab-anchor")?;
         self.click("Inspector tab: Document")?;
         self.owned_component_click("Open Prefab Source")?;
         self.owned_recursive_document(project, EditorDocumentKind::Prefab)?;

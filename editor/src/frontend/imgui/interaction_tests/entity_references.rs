@@ -94,7 +94,7 @@ fn selected_target(interaction: &Interaction) -> Option<ComponentValue> {
 fn source_local_entity_reference_uses_document_choices_and_history() {
     let project = InteractionProject::new_entity_references();
     let mut interaction = Interaction::new(&project);
-    interaction.click("entity:source");
+    interaction.click_hierarchy("Select source");
     interaction.click_owned(Some("target"), "Choose target");
     interaction.click_owned(Some("target"), "other [other]");
     assert_eq!(

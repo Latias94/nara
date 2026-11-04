@@ -123,6 +123,18 @@ Complete caller-owned loops reuse the original public `EditorNativeHost`; the fo
 submission/result routing without pretending to render hosted image panels. This does not
 complete tree/workspace replacement, virtualization, costs or broader R11/R12.
 
+The [source-declaration Hierarchy successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#source-declaration-hierarchy-successor)
+replaces ordinary Scene/Prefab source-list, composition and removal-confirmation painters with
+Nara controls. It preserves authored routed placement and Prefab identity, exact Session selection,
+one document history and the original ordered panel result ledger. Captured source/Schema/selection,
+permissions and local observations fence activation and final queue admission. Committed filtering,
+preedit, scrolling and Show selection remain panel-local; only visible source/choice rows instantiate
+controls and layout. Recycled rows cannot retain input authority. Long legal source IDs use bounded
+private display text while typed commands retain full IDs. Matched owner/public/native qualification
+and visible-count observations belong to the owning unit. This closes neither specialized UI trees
+and workspace replacement nor offscreen keyboard traversal, measured full scanning/idle/allocation/
+GPU costs, actual OS IME/accessibility or broader R11/R12/foundation qualification.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its
