@@ -4,8 +4,8 @@ use nara_text::TextLayout;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiColor, UiCornerRadii, UiImageId, UiKey, UiLayer, UiPhysicalRect, UiPoint, UiRect,
-    UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy, UiSurfaceContentTransform,
+    UiActionId, UiColor, UiCornerRadii, UiImageId, UiKey, UiLayer, UiMesh, UiPhysicalRect, UiPoint,
+    UiRect, UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy, UiSurfaceContentTransform,
     UiSurfaceId,
 };
 
@@ -340,7 +340,7 @@ impl UiLayoutFact {
     }
 }
 
-/// One item in the forward paint stream. Text retains its exact immutable shaped layout.
+/// One item in the forward paint stream, retaining only resolved facts and immutable payloads.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiPaintPrimitive {
     Rect {
@@ -351,6 +351,16 @@ pub enum UiPaintPrimitive {
         brush: Option<UiResolvedBrush>,
         border: Option<UiResolvedBorder>,
         radii: UiCornerRadii,
+    },
+    Mesh {
+        key: Option<UiKey>,
+        /// Resolved content box. Vertex positions remain local to this rectangle's origin;
+        /// projection must use the environment's exact transform, not the snapped rectangle.
+        rect: UiRect,
+        physical_rect: UiPhysicalRect,
+        /// Always the nonempty content box intersected with any inherited clip.
+        clip_rect: Option<UiRect>,
+        mesh: UiMesh,
     },
     Text {
         key: Option<UiKey>,
@@ -368,21 +378,25 @@ impl UiPaintPrimitive {
     #[must_use]
     pub const fn key(&self) -> Option<&UiKey> {
         match self {
-            Self::Rect { key, .. } | Self::Text { key, .. } => key.as_ref(),
+            Self::Rect { key, .. } | Self::Mesh { key, .. } | Self::Text { key, .. } => {
+                key.as_ref()
+            }
         }
     }
 
     #[must_use]
     pub const fn rect(&self) -> UiRect {
         match self {
-            Self::Rect { rect, .. } | Self::Text { rect, .. } => *rect,
+            Self::Rect { rect, .. } | Self::Mesh { rect, .. } | Self::Text { rect, .. } => *rect,
         }
     }
 
     #[must_use]
     pub const fn clip_rect(&self) -> Option<UiRect> {
         match self {
-            Self::Rect { clip_rect, .. } | Self::Text { clip_rect, .. } => *clip_rect,
+            Self::Rect { clip_rect, .. }
+            | Self::Mesh { clip_rect, .. }
+            | Self::Text { clip_rect, .. } => *clip_rect,
         }
     }
 }

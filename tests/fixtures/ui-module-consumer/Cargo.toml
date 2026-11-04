@@ -10,6 +10,8 @@ publish = false
 resolver = "3"
 
 [dependencies]
+lyon_path = "=1.0.16"
+lyon_tessellation = "=1.0.16"
 nara_text = { path = "../../../crates/nara_text" }
 nara_ui_kernel = { path = "../../../crates/nara_ui_kernel" }
 nara_ui_widgets = { path = "../../../crates/nara_ui_widgets" }

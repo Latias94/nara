@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05 (scoped child layout, intrinsic measurement and candidate work)
+**Last Revised**: 2026-11-05 (scoped child layout, intrinsic measurement and captured geometry)
 **Amended**: 2026-08-09 by the UIF-U2 unpresented-candidate retirement clarification and UIF-U2C/
 UIF-U3C corrections
 **Owner**: UI authoring builder, UI compiler, text budget, presentation planner, WGPU UI adapter
@@ -163,6 +163,23 @@ cooperative requests, not elapsed time or payload allocation. Existing text sour
 paint/resource limits remain separate original-owner budgets. Private compile-local Taffy
 storage/dispatch may change without changing the public component contract; no persistent tree
 or performance improvement follows from this interface alone.
+
+### Geometry source and output admission
+
+Immutable custom meshes have both source and output budgets. Snapshot root envelopes retain
+complete source vertex/index occurrence counts even if later root-local validation rejects the
+body. Hidden geometry and shared meshes are admitted before layout/visibility shortcuts. The
+compiler separately charges the candidate's emitted and retained fallback geometry, so a
+combination of fresh roots and last-good output cannot multiply the hard aggregate ceilings.
+Owner-local profiles may reduce 65,536 vertices and 196,608 indices per candidate; each receiver
+retains its own admission responsibility. Invalid mesh construction is a typed caller error;
+shared-budget overflow rejects the entire candidate without advancing publication or caches.
+
+The presentation planner preflights geometry counts before staging atlas/image resources and
+charges the transformed vertex/index payload in its retained packet bytes. Native buffers and
+pipeline wrappers remain subject to the original render preparation reservations and physical
+completion custody. These budgets bound admitted facts, not arbitrary user tessellation time,
+allocator overhead, driver memory or total process retention.
 
 ### Root Failure Algebra
 

@@ -379,10 +379,10 @@ component library interface. November 4 source inspection identifies these concr
 | --- | --- | --- |
 | Source-built panel registration | `ImguiEditorPanel::show` in [workspace.rs](../../editor/src/frontend/imgui/workspace.rs) and `register_panel` in [composition.rs](../../editor/src/platform/composition.rs) | Toolkit-independent attachment, lifecycle and capability admission |
 | Authored layout | [UiNode](../../crates/nara_ui_kernel/src/authoring.rs) and scoped [custom layout](../../crates/nara_ui_kernel/src/layout.rs) | Broader custom drawing/input and complete complex-editor consumer; layout alone does not establish them |
-| Drawing | `UiPaintPrimitive::Rect`/`Text` in [frame.rs](../../crates/nara_ui_kernel/src/frame.rs) | Bounded paths/geometry and admitted custom-render participation |
+| Drawing | `UiPaintPrimitive::Rect`/`Text`/`Mesh` in [frame.rs](../../crates/nara_ui_kernel/src/frame.rs), captured geometry and the independent curve consumer | Final-size drawing, broader effects/resources and complete custom-canvas interaction |
 | Interaction | `UiRoutedEventKind` in [types.rs](../../crates/nara_ui_kernel/src/interaction/types.rs) | Routed motion coordinates, scroll/gesture and keyboard services sufficient for a custom canvas; current button batches alone do not provide them |
 | Controlled widgets | [widgets](../../crates/nara_ui_widgets/src/lib.rs) expose Button, TextField and scoped local state | Complete scoped effects/services and component-library ergonomics beyond the keyed composition prerequisite |
-| Semantics | Finite roles/actions in [authoring.rs](../../crates/nara_ui_kernel/src/authoring.rs) | An independently authored composite/graph with keyboard and meaningful semantic interaction |
+| Semantics | Finite roles/actions in [authoring.rs](../../crates/nara_ui_kernel/src/authoring.rs), including the external curve's ordinary node/port buttons | Complete graph/document interaction and native accessibility; node/port controls alone do not supply them |
 
 These are interface gaps and unqualified capabilities, not claims that the existing bounded
 consumers are incorrect. Extending the appropriate owner may change the current vocabulary;
@@ -486,6 +486,49 @@ bound a native callback's arbitrary computation or allocation. Source snapshots 
 code/inputs until released; final frames, retained visuals and paint packets contain resolved
 facts only. This supplies child layout, not custom geometry/drawing, gestures, code reload or the
 complete component/foreign-frontend contract.
+
+### Captured custom geometry
+
+The next drawing prerequisite selects immutable, renderer-neutral triangle meshes inside the
+original UI paint stream. A user component may tessellate a path with its chosen library and
+attach `UiMesh` to a node; Nara does not acquire that library's path model or callbacks. The
+independent curve consumer uses Lyon, following the pinned GPUI mechanism of tessellating before
+painting. Lyon remains a fixture dependency, not a Foundation requirement.
+
+Vertices carry local content-space positions and straight-alpha colors. The compiler resolves
+the content origin, padding and inherited clip; a mesh is always clipped to its own content
+box. Geometry supplies no intrinsic size. The owning component captures size, pan, zoom and
+other geometry inputs explicitly when composing its description. There is no encode-time
+lookup of mutable component state. Background, mesh and text use that order within a node;
+the ordinary layer, z and structural ordering still orders different nodes. A foreground
+ordinary control can therefore cover a curved connection in the same stream.
+
+The snapshot and compiler bound aggregate vertex/index occurrences, including shared meshes,
+hidden source geometry and retained fallback output. The presentation planner independently
+admits geometry counts and retained payload bytes before staging resources. The hard aggregate
+ceilings are 65,536 vertices and 196,608 triangle indices per candidate; owner-local profiles may
+reduce them. Coordinates and colors are validated at mesh construction. Physical projection
+uses the original content transform at fractional scale, rather than scaling a rounded layout
+rectangle. Packets retain only immutable geometry and their original frame/resource closure.
+
+The original WGPU `UiFeature` must preserve quad/mesh/quad barriers in one ordered attachment
+transaction. Quad resources are prepared once per operation, while mesh buffers and pipelines
+use the same device epoch, preparation reservation and physical submission custody. Draw and
+upload observations must count this work without calling triangles quads or sprites. Preparation
+and encoding still confer no input authority: only the presenter's matching original native
+composite/outcome adopts a journal candidate.
+
+Native preflight also bounds the aggregate across matching packets in one UI operation before
+copying their geometry. Its metadata model charges the capture allocation, each aligned Arc
+slice, quad instance capacity, retained material-key values, mesh pipeline wrapper and buffer
+reservation/custody records. Original packet/frame and image/glyph source storage remain with
+their source owners. Native buffer payloads use the original render byte reservations; driver
+allocations, allocator rounding and BTree node overhead are not measured by this model.
+
+This finite seam permits a component to supply its own shape algorithm without adding a
+graph-specific widget kind. It does not supply final-size drawing callbacks, curve hit testing,
+drag/wheel routing, a vector-effect language, an incremental geometry cache or a performance
+result. Those capabilities need their actual consumers and matching qualification.
 
 ## Panel hosting and optional frontend implementations
 

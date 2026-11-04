@@ -65,15 +65,25 @@ presented focus admits captured scoped input; reorder/insert preserve the same d
 preedit, selection/caret and local Undo/Redo. Filtering the active row discards its state, then a
 different item occupies its exact earlier presented rectangle. Old scoped input cannot mutate
 any replacement. Explicit document/schema replacement clears the old local draft/history;
-compatible composition retains the new handles and focus token. The complete trajectory now
+compatible composition retains the new handles and focus token. This portion of the trajectory
 observes 11 native presentations and ten journal commits, retaining the original single popup
 action, reconstruction and original-Host retirement assertions. Logical glyph positions and
 glyph/face identities are checked without requiring target-scale raster keys to equal the source
 editor's keys. This is not independent pixel readback or a typography accuracy benchmark.
 
+The trajectory then presents `CurveCanvas` from that same external library. Its fixture-local
+Lyon tessellator supplies actual cubic geometry between ordinary background and foreground
+controls. Presented pointer selection and Tab/Enter port activation use the original journal
+and button reducers; Shift-Tab/Enter changes selection again. Explicit fractional pan moves
+curve vertices and matching node semantics together on the next accepted frame. The previous
+route and the final retired surface cannot activate controls. The full trajectory observes
+14 actual presentations and 13 journal commits. It preserves every earlier field/popup/keyed
+state and original-Host assertion. It does not add canvas motion/wheel or a graph document owner.
+
 The ignored `ui_surface` integration test launches the example in a child process so its event
-loop runs on the actual main thread. A second test injects error and panic separately after a
-real image submission but before composite; success requires original permit settlement,
+loop runs on the actual main thread. A second test injects error and panic after a real image
+submission but before composite, both for the initial controls and after custom mesh submission;
+success requires original permit settlement,
 presenter quiescence and Host retirement, not merely the expected failure string. Run these
 separately, serially, under the same native environment:
 

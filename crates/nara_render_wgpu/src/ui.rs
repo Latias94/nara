@@ -7,6 +7,14 @@ use nara_ui_render::{
 };
 use thiserror::Error;
 
+mod cost;
+mod mesh;
+#[cfg(test)]
+pub(crate) mod mesh_tests;
+
+pub use mesh::UiState;
+use mesh::{MeshPrepared, MeshVertex, UiDraw};
+
 use crate::{
     WgpuFeatureEncodeContext, WgpuFeaturePreflightContext, WgpuFeaturePrepareContext,
     WgpuProgramTexture, WgpuRenderError, WgpuRenderFeature, WgpuRenderProgramError,
@@ -64,12 +72,17 @@ pub struct UiCapture<S: 'static> {
     pub(crate) target: WgpuProgramTexture<S>,
     pub(crate) viewport: ViewportRect,
     pub(crate) batches: Arc<[WgpuQuadBatch]>,
+    pub(crate) draws: Arc<[UiDraw]>,
+    pub(crate) mesh_vertices: Arc<[MeshVertex]>,
+    pub(crate) mesh_indices: Arc<[u32]>,
     pub(crate) packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
 }
 
 impl<S: 'static> UiCapture<S> {
     /// Lowers packets matching the original logical target into this candidate's texture.
     /// Primary-window aliases resolve through the supplied original window identity.
+    /// One operation admits at most 65,536 mesh vertices and 196,608 triangle indices across
+    /// all matching packets, including repeated packets and geometry clipped by this viewport.
     pub fn new(
         packets: &[Arc<UiPaintPacket>],
         logical_target: RenderTarget,
@@ -85,6 +98,9 @@ impl<S: 'static> UiCapture<S> {
             target,
             viewport,
             batches: lowered.batches.into(),
+            draws: lowered.draws.into(),
+            mesh_vertices: lowered.mesh_vertices.into(),
+            mesh_indices: lowered.mesh_indices.into(),
             packet_facts: lowered.packet_facts.into(),
         })
     }
@@ -105,6 +121,11 @@ pub struct UiPrepared<S: 'static> {
     target: WgpuProgramTexture<S>,
     viewport: ViewportRect,
     draw: StockQuadPrepared,
+    mesh: Option<MeshPrepared>,
+    draws: Arc<[UiDraw]>,
+    mesh_count: u32,
+    mesh_vertices: u64,
+    mesh_triangles: u64,
     packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
 }
 
@@ -115,6 +136,9 @@ pub struct UiReport {
     pub(crate) draw_calls: u32,
     pub(crate) sprites: u32,
     pub(crate) image_sprites: u32,
+    pub(crate) meshes: u32,
+    pub(crate) mesh_vertices: u64,
+    pub(crate) mesh_triangles: u64,
     pub(crate) packet_facts: Arc<[WgpuLoweredUiPacketFacts]>,
 }
 
@@ -137,6 +161,24 @@ impl UiReport {
         self.image_sprites
     }
 
+    /// Number of encoded indexed triangle draws, excluding completely clipped meshes.
+    #[must_use]
+    pub const fn meshes(&self) -> u32 {
+        self.meshes
+    }
+
+    /// Number of captured vertices submitted by mesh draws, counting repeated occurrences.
+    #[must_use]
+    pub const fn mesh_vertices(&self) -> u64 {
+        self.mesh_vertices
+    }
+
+    /// Number of submitted indexed triangles; clipping may remove their raster coverage.
+    #[must_use]
+    pub const fn mesh_triangles(&self) -> u64 {
+        self.mesh_triangles
+    }
+
     /// Observes the capture's original packet identities and logical targets, including
     /// replayed packets and packets whose drawing was completely clipped.
     pub fn packets(
@@ -150,7 +192,7 @@ impl UiReport {
 
 impl<S: 'static> WgpuRenderFeature for UiFeature<S> {
     type Capture = UiCapture<S>;
-    type State = ();
+    type State = UiState;
     type Prepared = UiPrepared<S>;
     type Report = UiReport;
 
@@ -159,28 +201,41 @@ impl<S: 'static> WgpuRenderFeature for UiFeature<S> {
         capture: &Self::Capture,
         context: &mut WgpuFeaturePreflightContext<'_>,
     ) -> Result<(), WgpuRenderProgramError> {
-        context.collect_stock_images(&capture.batches)
+        context.collect_stock_images(&capture.batches)?;
+        cost::preflight(capture, context)
     }
 
     fn create_state(
         &self,
         _context: &mut WgpuFeaturePrepareContext<'_>,
     ) -> Result<Self::State, WgpuRenderProgramError> {
-        Ok(())
+        Ok(UiState::default())
     }
 
     fn prepare(
         &self,
-        _state: &mut Self::State,
+        state: &mut Self::State,
         capture: &Self::Capture,
         context: &mut WgpuFeaturePrepareContext<'_>,
     ) -> Result<Self::Prepared, WgpuRenderProgramError> {
         let draw = context
             .prepare_stock_draw(&capture.batches, capture.target.descriptor().native.format)?;
+        let mesh = MeshPrepared::create(
+            state,
+            &capture.mesh_vertices,
+            &capture.mesh_indices,
+            capture.target.descriptor().native.format,
+            context,
+        )?;
         Ok(UiPrepared {
             target: capture.target.clone(),
             viewport: capture.viewport,
             draw,
+            mesh,
+            draws: Arc::clone(&capture.draws),
+            mesh_count: capture.mesh_count(),
+            mesh_vertices: crate::saturating_u64(capture.mesh_vertices.len()),
+            mesh_triangles: crate::saturating_u64(capture.mesh_indices.len() / 3),
             packet_facts: Arc::clone(&capture.packet_facts),
         })
     }
@@ -191,13 +246,55 @@ impl<S: 'static> WgpuRenderFeature for UiFeature<S> {
         context: &mut WgpuFeatureEncodeContext<'_>,
     ) -> Result<Self::Report, WgpuRenderProgramError> {
         let target = context.resources().texture(&prepared.target)?;
-        prepared
-            .draw
-            .encode(context.encoder(), target, prepared.viewport);
+        let mut pass = context
+            .encoder()
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("nara_ui_feature"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+        let viewport = prepared.viewport;
+        pass.set_viewport(
+            viewport.physical_x as f32,
+            viewport.physical_y as f32,
+            viewport.physical_width as f32,
+            viewport.physical_height as f32,
+            0.0,
+            1.0,
+        );
+        for draw in prepared.draws.iter() {
+            match draw {
+                UiDraw::Quads(range) => crate::quad::draw_quad_batch_buffers(
+                    &mut pass,
+                    &prepared.draw.pipelines,
+                    &prepared.draw.buffers[range.clone()],
+                    viewport,
+                ),
+                UiDraw::Mesh { indices, scissor } => {
+                    let mesh = prepared
+                        .mesh
+                        .as_ref()
+                        .ok_or(WgpuRenderProgramError::FeatureState)?;
+                    mesh.encode(&mut pass, indices.clone(), *scissor);
+                }
+            }
+        }
+        drop(pass);
         Ok(UiReport {
-            draw_calls: prepared.draw.draw_calls,
+            draw_calls: prepared.draw.draw_calls.saturating_add(prepared.mesh_count),
             sprites: prepared.draw.sprites,
             image_sprites: prepared.draw.image_sprites,
+            meshes: prepared.mesh_count,
+            mesh_vertices: prepared.mesh_vertices,
+            mesh_triangles: prepared.mesh_triangles,
             packet_facts: Arc::clone(&prepared.packet_facts),
         })
     }
@@ -218,7 +315,9 @@ pub(crate) fn collect_ui_quad_batches(
     primary_window_id: Option<nara_window::WindowId>,
     viewport: ViewportRect,
 ) -> Result<Vec<WgpuQuadBatch>, WgpuUiPacketError> {
-    Ok(lower_ui_packets(packets, target, primary_window_id, viewport)?.batches)
+    let lowered = lower_ui_packets(packets, target, primary_window_id, viewport)?;
+    lowered.require_quad_only()?;
+    Ok(lowered.batches)
 }
 
 pub(crate) fn lower_ui_packets(
@@ -227,7 +326,12 @@ pub(crate) fn lower_ui_packets(
     primary_window_id: Option<nara_window::WindowId>,
     viewport: ViewportRect,
 ) -> Result<WgpuUiLowering, WgpuUiPacketError> {
-    let mut batches = Vec::<WgpuQuadBatch>::new();
+    mesh::preflight_packets(
+        packets
+            .iter()
+            .filter(|packet| ui_packet_targets_view(packet, target, primary_window_id)),
+    )?;
+    let mut lowered = WgpuUiLowering::default();
     let mut packet_facts = Vec::new();
     for packet in packets
         .iter()
@@ -235,20 +339,49 @@ pub(crate) fn lower_ui_packets(
     {
         let mut facts = WgpuLoweredUiPacketFacts::new(packet);
         for primitive in packet.primitives() {
-            append_primitive(&mut batches, &mut facts, packet, primitive, viewport)?;
+            append_primitive(&mut lowered, &mut facts, packet, primitive, viewport)?;
         }
         packet_facts.push(facts);
     }
-    Ok(WgpuUiLowering {
-        batches,
-        packet_facts,
-    })
+    lowered.packet_facts = packet_facts;
+    Ok(lowered)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct WgpuUiLowering {
     pub(crate) batches: Vec<WgpuQuadBatch>,
+    pub(crate) draws: Vec<UiDraw>,
+    mesh_vertices: Vec<MeshVertex>,
+    mesh_indices: Vec<u32>,
+    merge_quad: bool,
     pub(crate) packet_facts: Vec<WgpuLoweredUiPacketFacts>,
+}
+
+impl WgpuUiLowering {
+    /// Legacy numerical quad oracles must refuse geometry instead of silently dropping it.
+    #[cfg(test)]
+    pub(crate) fn require_quad_only(&self) -> Result<(), WgpuUiPacketError> {
+        if self
+            .packet_facts
+            .iter()
+            .any(|facts| facts.mesh_primitive_count != 0)
+        {
+            return Err(WgpuUiPacketError::LegacyMeshUnsupported);
+        }
+        Ok(())
+    }
+}
+
+impl<S: 'static> UiCapture<S> {
+    pub(crate) fn mesh_count(&self) -> u32 {
+        u32::try_from(
+            self.draws
+                .iter()
+                .filter(|draw| matches!(draw, UiDraw::Mesh { .. }))
+                .count(),
+        )
+        .unwrap_or(u32::MAX)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -262,6 +395,10 @@ pub(crate) struct WgpuLoweredUiPacketFacts {
     pub(crate) glyph_page_count: u64,
     pub(crate) submitted_quad_count: u64,
     pub(crate) submitted_glyph_quad_count: u64,
+    pub(crate) mesh_primitive_count: u64,
+    pub(crate) submitted_mesh_count: u64,
+    pub(crate) submitted_mesh_vertex_count: u64,
+    pub(crate) submitted_mesh_triangle_count: u64,
     pub(crate) resources: BTreeSet<WgpuQuadMaterialKey>,
 }
 
@@ -283,6 +420,16 @@ impl WgpuLoweredUiPacketFacts {
             glyph_page_count: crate::saturating_u64(packet.glyph_pages().len()),
             submitted_quad_count: 0,
             submitted_glyph_quad_count: 0,
+            mesh_primitive_count: crate::saturating_u64(
+                packet
+                    .primitives()
+                    .iter()
+                    .filter(|primitive| matches!(primitive, UiPacketPrimitive::Mesh { .. }))
+                    .count(),
+            ),
+            submitted_mesh_count: 0,
+            submitted_mesh_vertex_count: 0,
+            submitted_mesh_triangle_count: 0,
             resources: BTreeSet::new(),
         }
     }
@@ -297,12 +444,33 @@ impl WgpuLoweredUiPacketFacts {
 }
 
 fn append_primitive(
-    batches: &mut Vec<WgpuQuadBatch>,
+    lowered: &mut WgpuUiLowering,
     facts: &mut WgpuLoweredUiPacketFacts,
     packet: &UiPaintPacket,
     primitive: &UiPacketPrimitive,
     viewport: ViewportRect,
 ) -> Result<(), WgpuUiPacketError> {
+    if let UiPacketPrimitive::Mesh { rect, clip, mesh } = primitive {
+        lowered.merge_quad = false;
+        if mesh::append_mesh(
+            &mut lowered.mesh_vertices,
+            &mut lowered.mesh_indices,
+            &mut lowered.draws,
+            mesh,
+            *rect,
+            *clip,
+            viewport,
+        )? {
+            facts.submitted_mesh_count = facts.submitted_mesh_count.saturating_add(1);
+            facts.submitted_mesh_vertex_count = facts
+                .submitted_mesh_vertex_count
+                .saturating_add(crate::saturating_u64(mesh.vertices().len()));
+            facts.submitted_mesh_triangle_count = facts
+                .submitted_mesh_triangle_count
+                .saturating_add(crate::saturating_u64(mesh.indices().len() / 3));
+        }
+        return Ok(());
+    }
     let Some(scissor) = primitive_scissor(primitive.clip(), viewport) else {
         return Ok(());
     };
@@ -346,7 +514,7 @@ fn append_primitive(
                     WgpuUiShape::fill(*corner_radius),
                     viewport,
                 ) {
-                    append_quad(batches, facts, texture, scissor, instance);
+                    append_quad(lowered, facts, texture, scissor, instance);
                 }
             }
             if let Some(border) = border.filter(|border| border.width() > 0.0)
@@ -359,7 +527,7 @@ fn append_primitive(
                     viewport,
                 )
             {
-                append_quad(batches, facts, WgpuQuadTexture::Fallback, scissor, instance);
+                append_quad(lowered, facts, WgpuQuadTexture::Fallback, scissor, instance);
             }
         }
         UiPacketPrimitive::Glyph {
@@ -382,7 +550,7 @@ fn append_primitive(
                 viewport,
             ) {
                 append_quad(
-                    batches,
+                    lowered,
                     facts,
                     WgpuQuadTexture::Glyph(page.clone()),
                     scissor,
@@ -390,12 +558,13 @@ fn append_primitive(
                 );
             }
         }
+        UiPacketPrimitive::Mesh { .. } => unreachable!("meshes are lowered before quad clipping"),
     }
     Ok(())
 }
 
 fn append_quad(
-    batches: &mut Vec<WgpuQuadBatch>,
+    lowered: &mut WgpuUiLowering,
     facts: &mut WgpuLoweredUiPacketFacts,
     texture: WgpuQuadTexture,
     scissor: Option<WgpuScissorRect>,
@@ -407,7 +576,8 @@ fn append_quad(
         alpha_mode: AlphaMode2d::Blend,
     };
     facts.record_quad(material, &texture);
-    if let Some(batch) = batches.last_mut()
+    if lowered.merge_quad
+        && let Some(batch) = lowered.batches.last_mut()
         && batch.material == material
         && batch.texture == texture
         && batch.scissor == scissor
@@ -415,7 +585,7 @@ fn append_quad(
         batch.instances.push(instance);
         return;
     }
-    batches.push(WgpuQuadBatch {
+    lowered.batches.push(WgpuQuadBatch {
         material,
         texture,
         scissor,
@@ -423,6 +593,13 @@ fn append_quad(
         counts_as_sprites: false,
         material_extension: None,
     });
+    let end = lowered.batches.len();
+    if let Some(UiDraw::Quads(range)) = lowered.draws.last_mut() {
+        range.end = end;
+    } else {
+        lowered.draws.push(UiDraw::Quads(end - 1..end));
+    }
+    lowered.merge_quad = true;
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -540,6 +717,13 @@ pub(crate) enum WgpuUiPacketError {
     MissingImageResource { index: u32 },
     #[error("UI paint packet references missing glyph-atlas page {index}")]
     MissingGlyphPage { index: u16 },
+    #[error("UI paint packet contains invalid mesh geometry: {reason}")]
+    InvalidMesh { reason: &'static str },
+    #[error("UI mesh geometry exceeds native indexed buffer capacity")]
+    MeshCapacity,
+    #[cfg(test)]
+    #[error("the legacy quad-only oracle cannot execute a UI mesh; use the typed UI Feature")]
+    LegacyMeshUnsupported,
 }
 
 #[cfg(test)]
@@ -843,7 +1027,7 @@ mod tests {
             .iter()
             .find_map(|primitive| match primitive {
                 UiPacketPrimitive::Glyph { uv, .. } => Some(*uv),
-                UiPacketPrimitive::Rect { .. } => None,
+                UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => None,
             })
             .expect("text packet should contain glyph UVs");
         let top_left = uv.top_left();
@@ -1010,7 +1194,7 @@ mod tests {
             .iter()
             .find_map(|primitive| match primitive {
                 UiPaintPrimitive::Text { layout, .. } => Some(layout),
-                UiPaintPrimitive::Rect { .. } => None,
+                UiPaintPrimitive::Rect { .. } | UiPaintPrimitive::Mesh { .. } => None,
             })
             .expect("the mixed-font frame must retain its shaped text");
         assert!(layout.diagnostics().is_empty());
@@ -1056,7 +1240,7 @@ mod tests {
             .iter()
             .find_map(|primitive| match primitive {
                 UiPaintPrimitive::Text { layout, .. } => Some(layout),
-                UiPaintPrimitive::Rect { .. } => None,
+                UiPaintPrimitive::Rect { .. } | UiPaintPrimitive::Mesh { .. } => None,
             })
             .expect("the primary-only control must retain its missing-glyph layout");
         assert_eq!(missing_layout.glyphs().len(), 2);
@@ -1083,7 +1267,7 @@ mod tests {
                 UiPacketPrimitive::Glyph { rect, clip, .. } => {
                     Some((*rect, clip.expect("text clipping must reach the packet")))
                 }
-                UiPacketPrimitive::Rect { .. } => None,
+                UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(glyphs.len(), 2);
@@ -1351,7 +1535,7 @@ mod tests {
                 .iter()
                 .find_map(|primitive| match primitive {
                     UiPaintPrimitive::Text { layout, .. } => Some(layout),
-                    UiPaintPrimitive::Rect { .. } => None,
+                    UiPaintPrimitive::Rect { .. } | UiPaintPrimitive::Mesh { .. } => None,
                 })
                 .expect("the editor snapshot must reach text paint");
             let keys = layout
@@ -1402,7 +1586,9 @@ mod tests {
                         *rect,
                         clip.expect("prepared text must retain its content clip"),
                     ),
-                    UiPacketPrimitive::Rect { .. } => panic!("the fixture draws only editor text"),
+                    UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => {
+                        panic!("the fixture draws only editor text")
+                    }
                 })
                 .collect::<Vec<_>>();
             assert_eq!(glyphs.len(), 2);

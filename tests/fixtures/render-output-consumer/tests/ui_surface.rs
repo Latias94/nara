@@ -19,7 +19,7 @@ fn independent_surface_presents_routes_input_and_rejects_retired_work() {
 #[test]
 #[ignore = "requires a native hardware GPU, desktop and the prebuilt ui_surface example"]
 fn independent_surface_settles_pending_work_after_error_and_panic() {
-    for mode in ["error", "panic"] {
+    for mode in ["error", "panic", "mesh-error", "mesh-panic"] {
         run_native_surface(Some(mode));
     }
 }
@@ -99,7 +99,7 @@ fn run_native_surface(failure_mode: Option<&str>) {
             "UI_SURFACE_FAILURE_OK mode={mode} original_permits_settled=true presenter_quiescent=true original_host_retired=true"
         )
     } else {
-        "UI_SURFACE_OK native_presentations=11 journal_commits=10 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true input_delivery=injected_pointer_ime_and_logical_keys".into()
+        "UI_SURFACE_OK native_presentations=14 journal_commits=13 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_retired=true input_delivery=injected_pointer_ime_and_logical_keys".into()
     };
     assert!(
         output.lines().any(|line| line == expected),

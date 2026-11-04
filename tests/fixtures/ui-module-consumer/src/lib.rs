@@ -8,6 +8,7 @@ use nara_ui_kernel::{
 use nara_ui_widgets::UiButton;
 use std::sync::Arc;
 
+pub mod curve_canvas;
 pub mod keyed_editors;
 pub mod measured_column;
 

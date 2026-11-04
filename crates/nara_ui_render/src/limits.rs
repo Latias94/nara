@@ -1,6 +1,8 @@
 use thiserror::Error;
 
 const DEFAULT_MAX_EXPANDED_PRIMITIVES: usize = 16_384;
+const DEFAULT_MAX_MESH_VERTICES: usize = 65_536;
+const DEFAULT_MAX_MESH_INDICES: usize = 196_608;
 const DEFAULT_MAX_REFERENCED_IMAGES: usize = 256;
 const DEFAULT_MAX_REFERENCED_GLYPHS: usize = 4_096;
 const DEFAULT_MAX_GLYPH_ENTRIES: usize = 4_096;
@@ -19,12 +21,17 @@ const DEFAULT_MAX_UNIFORM_CORNER_RADIUS: f32 = 4_096.0;
 /// values. A concrete backend owns any further expansion into device instances and admits that
 /// work against its separate instance-buffer budget.
 ///
-/// The retained-packet budget covers planner-owned primitives and immutable image/glyph payloads.
+/// Mesh vertex/index budgets count every occurrence in the source frame's paint stream before
+/// clipping or allocation, including repeated references to the same immutable source mesh.
+///
+/// The retained-packet budget covers planner-owned primitives and immutable image/glyph/mesh payloads.
 /// It deliberately does not count the shared [`nara_ui_kernel::UiFrame`] allocation a second time;
 /// candidate nodes, shaped glyphs, and logical paint are admitted by the kernel's own budgets.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiPresentationLimits {
     max_expanded_primitives: usize,
+    max_mesh_vertices: usize,
+    max_mesh_indices: usize,
     max_referenced_images: usize,
     max_referenced_glyphs: usize,
     max_glyph_entries: usize,
@@ -42,6 +49,8 @@ impl Default for UiPresentationLimits {
     fn default() -> Self {
         Self {
             max_expanded_primitives: DEFAULT_MAX_EXPANDED_PRIMITIVES,
+            max_mesh_vertices: DEFAULT_MAX_MESH_VERTICES,
+            max_mesh_indices: DEFAULT_MAX_MESH_INDICES,
             max_referenced_images: DEFAULT_MAX_REFERENCED_IMAGES,
             max_referenced_glyphs: DEFAULT_MAX_REFERENCED_GLYPHS,
             max_glyph_entries: DEFAULT_MAX_GLYPH_ENTRIES,
@@ -58,6 +67,24 @@ impl Default for UiPresentationLimits {
 }
 
 impl UiPresentationLimits {
+    /// Tightens the total source-paint mesh vertices admitted by one plan, including clipped draws.
+    pub fn with_max_mesh_vertices(
+        mut self,
+        value: usize,
+    ) -> Result<Self, UiPresentationLimitsError> {
+        self.max_mesh_vertices = reduce_usize("max_mesh_vertices", self.max_mesh_vertices, value)?;
+        Ok(self)
+    }
+
+    /// Tightens the total source-paint mesh indices admitted by one plan, including clipped draws.
+    pub fn with_max_mesh_indices(
+        mut self,
+        value: usize,
+    ) -> Result<Self, UiPresentationLimitsError> {
+        self.max_mesh_indices = reduce_usize("max_mesh_indices", self.max_mesh_indices, value)?;
+        Ok(self)
+    }
+
     pub fn with_max_expanded_primitives(
         mut self,
         value: usize,
@@ -190,6 +217,14 @@ impl UiPresentationLimits {
 
     pub(crate) const fn max_expanded_primitives(self) -> usize {
         self.max_expanded_primitives
+    }
+
+    pub(crate) const fn max_mesh_vertices(self) -> usize {
+        self.max_mesh_vertices
+    }
+
+    pub(crate) const fn max_mesh_indices(self) -> usize {
+        self.max_mesh_indices
     }
 
     pub(crate) const fn max_referenced_images(self) -> usize {

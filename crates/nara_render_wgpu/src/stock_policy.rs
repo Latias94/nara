@@ -462,6 +462,11 @@ impl WgpuStockProgramBuilder<'_> {
                 ViewportRect::from_extent(extent).expect("admitted target extent"),
             )?);
             add_draw_facts(&mut self.facts, &ui_capture.batches)?;
+            self.facts.frame.draw_calls = self
+                .facts
+                .frame
+                .draw_calls
+                .saturating_add(ui_capture.mesh_count());
             let initialized = final_color.preserve(scene, AccessRole::Attachment);
             let binding = crate::WgpuUiProgramBinding::new(
                 ui_operation,

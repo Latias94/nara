@@ -671,6 +671,11 @@ impl LegacyWgpuFramePayload {
         .map_err(|error| WgpuRenderError::UiPacketInvariant {
             message: error.to_string(),
         })?;
+        #[cfg(feature = "stock-ui")]
+        ui.require_quad_only()
+            .map_err(|error| WgpuRenderError::UiPacketInvariant {
+                message: error.to_string(),
+            })?;
         #[cfg(not(feature = "stock-ui"))]
         let ui_batches = {
             let _ = (target, viewport, view_index);

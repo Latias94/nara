@@ -18,11 +18,12 @@ pub use integration::{
 pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
 pub use packet::{
     OneShotPresentationCommit, UiBackendSubmissionIdentity, UiGlyphAtlasPageKey,
-    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketPrimitive,
-    UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity, UiPresentationAttemptId,
-    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
-    UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
-    UiPresentationOutcome, UiPresentationRetryIdentity, UiPresentationRuntimeGeneration,
+    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketMesh,
+    UiPacketMeshVertex, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket,
+    UiPaintPacketIdentity, UiPresentationAttemptId, UiPresentationAttemptIdentity,
+    UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
+    UiPresentationCapabilityGeneration, UiPresentationEpoch, UiPresentationOutcome,
+    UiPresentationRetryIdentity, UiPresentationRuntimeGeneration,
 };
 pub use planner::{
     UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
@@ -149,15 +150,15 @@ pub mod advanced {
     pub use crate::packet::{UiPreparedBackendSubmission, UiSubmittedBackendPresentation};
     pub use crate::{
         OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
-        UiPacketFill, UiPacketImage, UiPacketPrimitive, UiPacketRect, UiPacketUv,
-        UiPaintCompileStats, UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages,
-        UiPresentationAttemptId, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
-        UiPresentationBackendGeneration, UiPresentationCapabilityGeneration,
-        UiPresentationContentError, UiPresentationEpoch, UiPresentationIntegrationError,
-        UiPresentationLimits, UiPresentationLimitsError, UiPresentationOutcome,
-        UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRetryIdentity,
-        UiPresentationRuntimeGeneration, UiPresentationWorkStats, compile_ui_paint_packets,
-        drain_ui_presentation_outcomes,
+        UiPacketFill, UiPacketImage, UiPacketMesh, UiPacketMeshVertex, UiPacketPrimitive,
+        UiPacketRect, UiPacketUv, UiPaintCompileStats, UiPaintPacket, UiPaintPacketIdentity,
+        UiPreparedImages, UiPresentationAttemptId, UiPresentationAttemptIdentity,
+        UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
+        UiPresentationCapabilityGeneration, UiPresentationContentError, UiPresentationEpoch,
+        UiPresentationIntegrationError, UiPresentationLimits, UiPresentationLimitsError,
+        UiPresentationOutcome, UiPresentationPlanner, UiPresentationPlannerCreateError,
+        UiPresentationRetryIdentity, UiPresentationRuntimeGeneration, UiPresentationWorkStats,
+        compile_ui_paint_packets, drain_ui_presentation_outcomes,
     };
 }
 

@@ -106,6 +106,10 @@ pub struct WgpuSubmittedUiFacts {
     glyph_page_count: u64,
     submitted_quad_count: u64,
     submitted_glyph_quad_count: u64,
+    mesh_primitive_count: u64,
+    submitted_mesh_count: u64,
+    submitted_mesh_vertex_count: u64,
+    submitted_mesh_triangle_count: u64,
     referenced_texture_binding_count: u64,
     frame_submitted_sprite_count: u64,
     frame_submitted_image_sprite_count: u64,
@@ -199,6 +203,30 @@ impl WgpuSubmittedUiFacts {
     #[must_use]
     pub const fn submitted_glyph_quad_count(self) -> u64 {
         self.submitted_glyph_quad_count
+    }
+
+    /// Mesh primitives in the original packet, including completely clipped geometry.
+    #[must_use]
+    pub const fn mesh_primitive_count(self) -> u64 {
+        self.mesh_primitive_count
+    }
+
+    /// Encoded mesh draws; these are not counted as quads or sprites.
+    #[must_use]
+    pub const fn submitted_mesh_count(self) -> u64 {
+        self.submitted_mesh_count
+    }
+
+    /// Submitted mesh vertex occurrences, including repeated immutable geometry.
+    #[must_use]
+    pub const fn submitted_mesh_vertex_count(self) -> u64 {
+        self.submitted_mesh_vertex_count
+    }
+
+    /// Submitted indexed triangles before raster clipping.
+    #[must_use]
+    pub const fn submitted_mesh_triangle_count(self) -> u64 {
+        self.submitted_mesh_triangle_count
     }
 
     #[must_use]
@@ -1187,6 +1215,10 @@ impl WgpuRenderBackend {
                 glyph_page_count: lowered.glyph_page_count,
                 submitted_quad_count: lowered.submitted_quad_count,
                 submitted_glyph_quad_count: lowered.submitted_glyph_quad_count,
+                mesh_primitive_count: lowered.mesh_primitive_count,
+                submitted_mesh_count: lowered.submitted_mesh_count,
+                submitted_mesh_vertex_count: lowered.submitted_mesh_vertex_count,
+                submitted_mesh_triangle_count: lowered.submitted_mesh_triangle_count,
                 referenced_texture_binding_count: crate::saturating_u64(lowered.resources.len()),
                 frame_submitted_sprite_count: u64::from(frame.submitted_sprite_count),
                 frame_submitted_image_sprite_count: u64::from(frame.submitted_image_sprite_count),

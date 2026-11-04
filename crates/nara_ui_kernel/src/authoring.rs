@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiPreparedText, UiRevision,
+    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiMesh, UiPreparedText, UiRevision,
     UiRootDiagnostic, UiRootKey, UiStyle, UiStyleError, UiText, UiVisual,
-    limits::UiSnapshotProfile,
+    limits::UiSnapshotProfile, mesh::MeshCounts,
 };
 
 /// Closed root layers shared by paint, hit, focus, and semantic order.
@@ -168,6 +168,7 @@ pub struct UiNode {
     pub(crate) key: Option<UiLocalKey>,
     pub(crate) style: UiStyle,
     pub(crate) visual: Option<UiVisual>,
+    pub(crate) mesh: Option<UiMesh>,
     pub(crate) text: Option<UiNodeText>,
     pub(crate) custom_layout: Option<crate::UiCustomLayout>,
     pub(crate) interaction: UiInteraction,
@@ -214,6 +215,7 @@ impl UiNode {
             key: None,
             style,
             visual: None,
+            mesh: None,
             text: None,
             custom_layout: None,
             interaction: UiInteraction {
@@ -235,6 +237,16 @@ impl UiNode {
     #[must_use]
     pub fn with_visual(mut self, visual: UiVisual) -> Self {
         self.visual = Some(visual);
+        self
+    }
+
+    /// Captures local content-space geometry between this node's background and text.
+    ///
+    /// Meshes provide no intrinsic size and are always clipped to the node's content box,
+    /// intersected with inherited clipping. They do not establish hit or semantic regions.
+    #[must_use]
+    pub fn with_mesh(mut self, mesh: UiMesh) -> Self {
+        self.mesh = Some(mesh);
         self
     }
 
@@ -311,6 +323,13 @@ impl UiRoot {
     #[must_use]
     pub fn with_visual(mut self, visual: UiVisual) -> Self {
         self.node.visual = Some(visual);
+        self
+    }
+
+    /// Captures geometry under the same contract as [`UiNode::with_mesh`].
+    #[must_use]
+    pub fn with_mesh(mut self, mesh: UiMesh) -> Self {
+        self.node.mesh = Some(mesh);
         self
     }
 
@@ -412,6 +431,7 @@ pub(crate) struct UiRootEnvelope {
     layer: UiLayer,
     ordinal: usize,
     node_count: usize,
+    mesh_counts: Option<MeshCounts>,
     body: UiRootEnvelopeBody,
 }
 
@@ -432,6 +452,10 @@ impl UiRootEnvelope {
         self.node_count
     }
 
+    pub(crate) const fn mesh_counts(&self) -> Option<MeshCounts> {
+        self.mesh_counts
+    }
+
     pub(crate) const fn body(&self) -> &UiRootEnvelopeBody {
         &self.body
     }
@@ -449,6 +473,7 @@ struct PendingRootEnvelope {
     layer: UiLayer,
     ordinal: usize,
     node_count: usize,
+    mesh_counts: Option<MeshCounts>,
     body: PendingRootEnvelopeBody,
 }
 
@@ -486,13 +511,14 @@ impl UiAuthoringSnapshotBuilder {
 
     #[must_use]
     pub fn with_root(mut self, root: UiRoot) -> Self {
-        let node_count = count_nodes(&root.node);
+        let (node_count, mesh_counts) = source_counts(&root.node);
         let ordinal = self.envelopes.len();
         self.envelopes.push(PendingRootEnvelope {
             key: root.key.clone(),
             layer: root.layer,
             ordinal,
             node_count,
+            mesh_counts,
             body: PendingRootEnvelopeBody::Ready,
         });
         self.ready_roots.push(root);
@@ -512,6 +538,7 @@ impl UiAuthoringSnapshotBuilder {
 
         let mut root_keys = BTreeSet::new();
         let mut node_count = 0usize;
+        let mut mesh_counts = MeshCounts::default();
         for root in &self.envelopes {
             if root.key.encoded_len() > self.limits.max_key_bytes {
                 return Err(UiAuthoringError::KeyLimitExceeded {
@@ -530,6 +557,24 @@ impl UiAuthoringSnapshotBuilder {
                 return Err(UiAuthoringError::NodeLimitExceeded {
                     actual: node_count,
                     maximum: self.limits.max_nodes,
+                });
+            }
+            mesh_counts = mesh_counts
+                .checked_add(
+                    root.mesh_counts
+                        .ok_or(UiAuthoringError::MeshCountOverflow)?,
+                )
+                .ok_or(UiAuthoringError::MeshCountOverflow)?;
+            if mesh_counts.vertices > self.limits.max_mesh_vertices {
+                return Err(UiAuthoringError::MeshVertexLimitExceeded {
+                    actual: mesh_counts.vertices,
+                    maximum: self.limits.max_mesh_vertices,
+                });
+            }
+            if mesh_counts.indices > self.limits.max_mesh_indices {
+                return Err(UiAuthoringError::MeshIndexLimitExceeded {
+                    actual: mesh_counts.indices,
+                    maximum: self.limits.max_mesh_indices,
                 });
             }
         }
@@ -564,6 +609,7 @@ impl UiAuthoringSnapshotBuilder {
                     layer: envelope.layer,
                     ordinal: envelope.ordinal,
                     node_count: envelope.node_count,
+                    mesh_counts: envelope.mesh_counts,
                     body,
                 }
             })
@@ -593,19 +639,24 @@ pub fn with_rejected_root(
         layer,
         ordinal,
         node_count,
+        mesh_counts: Some(MeshCounts::default()),
         body: PendingRootEnvelopeBody::Rejected(diagnostic),
     });
     builder
 }
 
-fn count_nodes(root: &UiNode) -> usize {
+fn source_counts(root: &UiNode) -> (usize, Option<MeshCounts>) {
     let mut count = 0usize;
+    let mut mesh_counts = Some(MeshCounts::default());
     let mut pending = vec![root];
     while let Some(node) = pending.pop() {
         count = count.saturating_add(1);
+        if let Some(mesh) = &node.mesh {
+            mesh_counts = mesh_counts.and_then(|counts| counts.checked_add(MeshCounts::of(mesh)));
+        }
         pending.extend(node.children.iter());
     }
-    count
+    (count, mesh_counts)
 }
 
 fn validate_root(root: &UiRoot, limits: UiLimits) -> Result<(), UiRootDiagnostic> {
@@ -715,6 +766,12 @@ pub enum UiAuthoringError {
     DuplicateRootKey { key: UiRootKey },
     #[error("UI snapshot has at least {actual} nodes; maximum is {maximum}")]
     NodeLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot has {actual} mesh vertices; maximum is {maximum}")]
+    MeshVertexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot has {actual} mesh indices; maximum is {maximum}")]
+    MeshIndexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot mesh occurrence counts overflow")]
+    MeshCountOverflow,
     #[error("UI key has {actual} encoded bytes; configured maximum is {maximum}")]
     KeyLimitExceeded { actual: usize, maximum: usize },
     #[error("UI semantic {field} is empty")]
@@ -732,6 +789,136 @@ pub enum UiAuthoringError {
 #[cfg(test)]
 mod root_budget_tests {
     use super::*;
+
+    fn mesh() -> crate::UiMesh {
+        let color = crate::UiColor::rgba(1.0, 0.5, 0.25, 0.5);
+        crate::UiMesh::new(
+            vec![
+                crate::UiMeshVertex::new(crate::UiPoint::new(0.0, 0.0), color),
+                crate::UiMeshVertex::new(crate::UiPoint::new(20.0, 0.0), color),
+                crate::UiMeshVertex::new(crate::UiPoint::new(0.0, 20.0), color),
+            ],
+            vec![0, 1, 2],
+        )
+        .unwrap()
+    }
+
+    fn mesh_environment() -> crate::UiEnvironment {
+        crate::UiEnvironment::new(
+            crate::UiSurfaceId::new(1).unwrap(),
+            200.0,
+            100.0,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn compiler_rechecks_complete_mesh_source_counts_after_a_body_was_dropped() {
+        let invalid = UiRoot::new(
+            crate::UiRootKey::runtime("mesh-budget", "rejected").unwrap(),
+            crate::UiLayer::Base,
+            crate::UiStyle::fill().with_gap(f32::NAN),
+        )
+        .with_mesh(mesh())
+        .with_child(UiNode::new(crate::UiStyle::fill()).with_mesh(mesh()));
+        let source = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(invalid)
+            .build()
+            .unwrap();
+        assert!(source.roots().is_empty());
+        assert_eq!(
+            source.envelopes[0].mesh_counts(),
+            Some(MeshCounts {
+                vertices: 6,
+                indices: 6
+            })
+        );
+
+        for (limits, vertex_refusal) in [
+            (UiLimits::default().with_max_mesh_vertices(5).unwrap(), true),
+            (UiLimits::default().with_max_mesh_indices(5).unwrap(), false),
+        ] {
+            let mut source = source.clone();
+            source.profile = limits.snapshot_profile();
+            let mut compiler =
+                crate::UiCompiler::new(nara_text::bundled_font_face().unwrap(), limits).unwrap();
+            let result = compiler.compile(&source, mesh_environment(), crate::UiTheme::default());
+            assert!(matches!(
+                (result, vertex_refusal),
+                (
+                    Err(crate::UiCompileError::SnapshotMeshVertexLimitExceeded {
+                        actual: 6,
+                        maximum: 5
+                    }),
+                    true
+                ) | (
+                    Err(crate::UiCompileError::SnapshotMeshIndexLimitExceeded {
+                        actual: 6,
+                        maximum: 5
+                    }),
+                    false
+                )
+            ));
+            assert_eq!(compiler.work_stats().root_compile_attempts, 0);
+            assert_eq!(compiler.work_stats().published_frames, 0);
+            let recovery = UiAuthoringSnapshotBuilder::new(2)
+                .with_limits(limits)
+                .with_root(
+                    UiRoot::new(
+                        crate::UiRootKey::runtime("mesh-budget", "rejected").unwrap(),
+                        crate::UiLayer::Base,
+                        crate::UiStyle::fill(),
+                    )
+                    .with_mesh(mesh()),
+                )
+                .build()
+                .unwrap();
+            let frame = compiler
+                .compile(&recovery, mesh_environment(), crate::UiTheme::default())
+                .unwrap();
+            assert_eq!(frame.revision().get(), 1);
+            assert!(matches!(
+                frame.paint()[0],
+                crate::UiPaintPrimitive::Mesh { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn unknown_mesh_source_counts_fail_globally_before_any_root_work() {
+        let root = UiRoot::new(
+            crate::UiRootKey::runtime("mesh-budget", "overflow").unwrap(),
+            crate::UiLayer::Base,
+            crate::UiStyle::fill(),
+        )
+        .with_mesh(mesh());
+        let mut builder = UiAuthoringSnapshotBuilder::new(1).with_root(root.clone());
+        builder.envelopes[0].mesh_counts = None;
+        assert!(matches!(
+            builder.build(),
+            Err(UiAuthoringError::MeshCountOverflow)
+        ));
+
+        let mut source = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(root)
+            .build()
+            .unwrap();
+        source.envelopes[0].mesh_counts = None;
+        let mut compiler =
+            crate::UiCompiler::new(nara_text::bundled_font_face().unwrap(), UiLimits::default())
+                .unwrap();
+        assert!(matches!(
+            compiler.compile(&source, mesh_environment(), crate::UiTheme::default()),
+            Err(crate::UiCompileError::SnapshotMeshCountOverflow),
+        ));
+        assert_eq!(compiler.work_stats().root_compile_attempts, 0);
+        assert_eq!(compiler.work_stats().published_frames, 0);
+    }
 
     #[test]
     fn compiler_rechecks_complete_root_cost_even_for_an_absent_body() {

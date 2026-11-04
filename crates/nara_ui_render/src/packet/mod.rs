@@ -4,6 +4,10 @@ use nara_image::PreparedImageSnapshot;
 use nara_render::RenderTarget;
 use nara_ui_kernel::{UiColor, UiFrame, UiFrameRevision, UiImageId, UiRevision, UiSurfaceId};
 
+mod mesh;
+
+pub use mesh::{UiPacketMesh, UiPacketMeshVertex};
+
 /// Exact identity of one immutable UI presentation attempt.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiPaintPacketIdentity {
@@ -346,20 +350,25 @@ pub enum UiPacketPrimitive {
         color: UiColor,
         uv: UiPacketUv,
     },
+    Mesh {
+        rect: UiPacketRect,
+        clip: Option<UiPacketRect>,
+        mesh: UiPacketMesh,
+    },
 }
 
 impl UiPacketPrimitive {
     #[must_use]
     pub const fn rect(&self) -> UiPacketRect {
         match self {
-            Self::Rect { rect, .. } | Self::Glyph { rect, .. } => *rect,
+            Self::Rect { rect, .. } | Self::Glyph { rect, .. } | Self::Mesh { rect, .. } => *rect,
         }
     }
 
     #[must_use]
     pub const fn clip(&self) -> Option<UiPacketRect> {
         match self {
-            Self::Rect { clip, .. } | Self::Glyph { clip, .. } => *clip,
+            Self::Rect { clip, .. } | Self::Glyph { clip, .. } | Self::Mesh { clip, .. } => *clip,
         }
     }
 }

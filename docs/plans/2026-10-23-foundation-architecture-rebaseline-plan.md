@@ -1777,6 +1777,108 @@ and 1,091 local link targets across eight changed current documents pass. Final 
 only normalizes two equivalent conditional spellings for Clippy after native qualification;
 it changes no workload, acceptance or lifetime boundary. Warnings outside correctness remain.
 
+#### Same-stream custom geometry prerequisite
+
+This unit adds bounded immutable triangle facts to the original kernel paint stream,
+neutral packet and WGPU `UiFeature`. An independently authored curve component supplies its
+own tessellation and ordinary controls without changing a central widget catalogue. Follow the
+pinned GPUI path-builder/scene mechanism, while preserving Nara's existing layout, resource,
+presentation and input owners. The [selected geometry contract](../architecture/ui-foundation-design.md#captured-custom-geometry)
+specifies local coordinates, content clipping, color/alpha, ordering and aggregate limits.
+
+Required evidence includes exact fractional mapping and quad/mesh/quad barriers; complete
+source/output/retention accounting, including repeated and hidden geometry; typed refusal and
+recovery before publication; original buffer/pipeline custody and work observations; and an
+independent native presentation with pointer/keyboard-operable node semantics. Extend the
+existing full field/popup/reconstruction/retirement trajectory rather than replacing it with
+a standalone pixel demo. A real GPU pixel oracle separately verifies color, clipping and order.
+No new Device, Queue, submitter, document owner, executor or live paint callback is introduced.
+
+This is a prerequisite for R11b/c. Canvas drag/wheel routing, final-size drawing, complete graph
+editing/history/persistence, foreign panel attachment, automatic invalidation, virtualization
+and the full independent Editor remain open. Record the actual results before qualification.
+
+The implementation captures immutable `UiMesh` data in kernel frames and transformed
+`UiPacketMesh` payloads in neutral packets. Source envelopes count geometry before rejecting
+root bodies; fresh/retained output has a separate aggregate count. Hidden/shared occurrences
+cannot bypass admission. Meshes use content-relative coordinates and mandatory content clipping,
+with background/mesh/text fragments in ordinary painter order. The external `CurveCanvas`
+library uses fixture-only `lyon_path`/`lyon_tessellation` 1.0.16 to tessellate a cubic path and
+composes existing node/port buttons. The core has no Lyon, path-model or graph-domain dependency.
+
+The original WGPU UI operation prepares all quad buffers once and a single indexed geometry
+buffer pair, then encodes ordered quad runs/meshes in one pass. Mesh barriers prevent merging
+same-material/same-clip quads across custom geometry. Capture, Prepared, Report and presentation
+binding retain the exact original packet/facts allocation. Mesh calls/vertices/triangles have
+their own facts and do not become sprites/quads. Native preparation reserves payload bytes and
+retains actual buffers/guards under the original submission. Known capture/slice/pipeline/
+reservation metadata is charged for direct programs as well as stock policy.
+
+Early source review corrects nearest-rounded mesh culling bounds to conservative floor/ceil
+edges, and a precision counterexample computes physical extrema from actual vertices rather
+than reconstructing them from `origin + extent`. Public local bounds conservatively enclose
+those source vertices. Independent review finds and closes per-Arc alignment padding and the
+missing native capture-allocation charge. Independent `repr(C)` layout assertions cover three
+and six indices without using the production cost helper as their expected value. Packet budget
+tests require exact admission and one-byte-short refusal without replacing last-good state.
+
+The first all-feature backend regression has one new fixture failure: a purported foreign
+`WindowId::PRIMARY` is a legitimate PrimaryWindow alias. Replacing it with an actually distinct
+window keeps the same source-count refusal and foreign-target assertions; production target
+matching is unchanged. An earlier default-feature selector runs no mesh tests because stock UI
+is not enabled and contributes no evidence. Later runs explicitly select all features.
+
+The full independent native trajectory extends the original field/IME/local history/modal/
+reconstruction/keyed-state proof. It presents the same external curve component, uses actual
+presented node/port bounds for pointer and keyboard operations, changes selection, explicitly
+invalidates old geometry before pan, and verifies new geometry/semantics together. A third Host
+sentinel makes forward/reverse Tab distinguishable. Surface cancellation clears all local button
+state before final route retirement. Four child failure modes cover error/panic after initial
+and mesh image submission, requiring original permit settlement, presenter quiescence and Host
+retirement. The normal run observes 14 actual native presentations and 13 journal commits.
+Input delivery remains injected pointer/IME/logical keys. Pixel readback separately qualifies
+the typed Feature's geometry/clip/color behavior; the window trajectory does not claim readback.
+
+Four actual Windows/DX12 typed-Feature cases cover linear pixels, same-instance sRGB format
+replacement before any explicit old-prefix wait/readback, direct-program metadata refusal and
+recovery, and index-allocation failure after successful vertex initialization. The failed
+preparation keeps its original submission token, reports reached work without refunding it,
+releases reservations after physical settlement, discards touched state and retries the same
+program/capture successfully. Both old/new format outputs retain their exact pixels until
+retirement. These tests do not require a minimum GPU-pending interval or use a second queue.
+
+| Qualification | Result | Nextest run |
+| --- | --- | --- |
+| Shared text/kernel/widgets/presentation and default game UI, after source-bounds/alignment fixes | 450/450 | `5d3b0784-adfb-41b3-938e-ff3387d276dc` |
+| Full ordinary all-feature render-WGPU library, after native cost fixes | 403/403, 56 ignored | `0e633bd8-660c-4438-87d7-ccc2ae31bd7b` |
+| Actual typed UI Feature linear/sRGB pixels, direct budget and partial allocation failure | 4/4, 455 filtered | `cfe438bb-1d76-4cc0-812b-06d8390f7746` |
+| Editor library and selected public integration targets | 406/406, 60 ignored | `0818dbc5-64f1-43d6-9d8d-c1e98cbb5f54` |
+| Existing Windows/DX12 Editor trajectories | 33/33, 421 filtered | `4d4cbe78-d918-4e54-9787-d555c04f91c8` |
+| Independent component library, including the actual Lyon-backed curve component | 19/19 | `50236aa1-5210-45c7-8738-da6b09e79690` |
+| Independent full native surface and four error/panic child controls | 2/2 | `85290550-326d-4284-bdb4-ba13505a9cf3` |
+| Neutral component, native dev graph and game-UI dependency boundaries | 3/3 | `6ecf6228-a78c-4553-919b-529046e35b0e` |
+
+These are overlapping owner/consumer suites, not summed unique cases. They use Rust 1.95.0,
+serial root-target builds and the source base `9af8cc4` plus this unit. The GPU/native results
+use Windows 11/DX12 and an explicit non-fallback request. The existing retained-draft recovery
+trajectory takes 90.145s in this uncontrolled run and is correctness evidence only. It neither
+demonstrates a regression nor improves the earlier unmatched timing claim. Kernel/planner and
+native-fixture reviews have no remaining P1/P2 after the corrections above. Final naming,
+formatting and explanatory-document edits preserve the qualified workload and assertions.
+Correctness Clippy passes for text/kernel/widgets/presentation/game-UI/WGPU/Editor with all
+targets/features and for both independent consumers. Existing warnings outside correctness
+remain. The Editor binary builds; root and both independent-workspace formatting, diff checks
+and 1,117 local Markdown targets across ten changed documents pass.
+The pixel oracle skips samples within a `0.00001` barycentric edge tolerance rather
+than claiming a portable triangle-edge tie-breaking or antialiasing result; more than 5,000
+other samples cover actual geometry, excluded coverage and ordinary foreground blending.
+
+The shared byte/operation limits and work counters are correctness/admission evidence. They do
+not measure arbitrary tessellation time, whole-process memory, allocator/BTree overhead, driver
+allocation, cache effectiveness or matched CPU/GPU latency. Geometry construction and projection
+need their current matched probes before any R11a/e performance claim. The complete graph,
+gesture, foreign-panel and independent-Editor requirements above remain open.
+
 ### R11c: Complex document editor, custom drawing and multiple Views
 
 **Dependencies:** R11b, existing `EditorExtensionDocument` lifecycle and selected R8/R9 render

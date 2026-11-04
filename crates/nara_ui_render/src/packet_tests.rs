@@ -27,6 +27,8 @@ use crate::{
     UiPresentationLimits, UiPresentationPlanner, UiPresentationWorkStats,
 };
 
+mod mesh;
+
 fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui_kernel::UiFrame> {
     let environment = UiEnvironment::new(
         UiSurfaceId::new(surface).unwrap(),
@@ -430,7 +432,7 @@ fn padded_text_packet_matches_an_equivalent_unpadded_content_box() {
                 .iter()
                 .filter_map(|primitive| match primitive {
                     UiPacketPrimitive::Glyph { rect, clip, .. } => Some((*rect, *clip)),
-                    UiPacketPrimitive::Rect { .. } => None,
+                    UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => None,
                 })
                 .collect::<Vec<_>>()
         };
@@ -534,7 +536,7 @@ fn packet_lowering_uses_the_exact_letterboxed_surface_transform() {
                 && rect.max_x() <= 250
                 && clip.is_some_and(|clip| clip.min_x() >= 50 && clip.max_x() <= 250)
         }
-        UiPacketPrimitive::Rect { .. } => false,
+        UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => false,
     }));
 }
 
@@ -677,7 +679,7 @@ fn packet_uv_contract_uses_top_left_origin_and_positive_extent() {
         .iter()
         .find_map(|primitive| match primitive {
             UiPacketPrimitive::Glyph { uv, .. } => Some(*uv),
-            UiPacketPrimitive::Rect { .. } => None,
+            UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => None,
         })
         .unwrap();
     assert!(

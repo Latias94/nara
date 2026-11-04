@@ -3,6 +3,7 @@ use std::{collections::BTreeSet, sync::Arc};
 use nara_text::{FontFace, TextEngine, TextEngineCreateError, TextLimits};
 use thiserror::Error;
 
+use crate::mesh::MeshCounts;
 use crate::{
     UiAuthoringSnapshot, UiDiagnostic, UiEnvironment, UiFocusFact, UiFrame, UiFrameRevision,
     UiHitRegion, UiLayer, UiLimits, UiLimitsError, UiPaintPrimitive, UiRootDiagnostic, UiRootKey,
@@ -172,6 +173,7 @@ impl UiCompiler {
         let mut node_count = 0usize;
         let mut shaped_glyphs = 0usize;
         let mut paint_count = 0usize;
+        let mut mesh_counts = MeshCounts::default();
         let mut text_session =
             TextCompileSession::new(self.max_text_work_bytes, self.max_shaped_glyphs);
         let mut layout_work = LayoutWorkBudget {
@@ -210,6 +212,7 @@ impl UiCompiler {
                         &mut node_count,
                         &mut shaped_glyphs,
                         &mut paint_count,
+                        &mut mesh_counts,
                         &compiled.visual,
                         self.limits,
                         self.max_shaped_glyphs,
@@ -232,6 +235,9 @@ impl UiCompiler {
                 Err(RootCompileError::LayoutWorkLimitExceeded { actual, maximum }) => {
                     return Err(UiCompileError::LayoutWorkLimitExceeded { actual, maximum });
                 }
+                Err(RootCompileError::MeshCountOverflow) => {
+                    return Err(UiCompileError::MeshCountOverflow);
+                }
                 Err(RootCompileError::Local(diagnostic)) => {
                     let fallback = self.cache.compatible(envelope.key(), environment);
                     if let Some(visual) = fallback {
@@ -241,6 +247,7 @@ impl UiCompiler {
                             &mut node_count,
                             &mut shaped_glyphs,
                             &mut paint_count,
+                            &mut mesh_counts,
                             &visual,
                             self.limits,
                             self.max_shaped_glyphs,
@@ -375,6 +382,7 @@ impl UiCompiler {
         let mut authored_keys = BTreeSet::new();
         let mut ready_indices = BTreeSet::new();
         let mut node_count = 0usize;
+        let mut mesh_counts = MeshCounts::default();
         for (expected_ordinal, envelope) in snapshot.envelopes.iter().enumerate() {
             if envelope.ordinal() != expected_ordinal {
                 return Err(UiCompileError::SnapshotOrderInvalid {
@@ -415,6 +423,25 @@ impl UiCompiler {
                     maximum: self.limits.max_nodes,
                 });
             }
+            mesh_counts = mesh_counts
+                .checked_add(
+                    envelope
+                        .mesh_counts()
+                        .ok_or(UiCompileError::SnapshotMeshCountOverflow)?,
+                )
+                .ok_or(UiCompileError::SnapshotMeshCountOverflow)?;
+            if mesh_counts.vertices > self.limits.max_mesh_vertices {
+                return Err(UiCompileError::SnapshotMeshVertexLimitExceeded {
+                    actual: mesh_counts.vertices,
+                    maximum: self.limits.max_mesh_vertices,
+                });
+            }
+            if mesh_counts.indices > self.limits.max_mesh_indices {
+                return Err(UiCompileError::SnapshotMeshIndexLimitExceeded {
+                    actual: mesh_counts.indices,
+                    maximum: self.limits.max_mesh_indices,
+                });
+            }
         }
         if ready_indices.len() != snapshot.roots.len() {
             return Err(UiCompileError::SnapshotEnvelopeMismatch {
@@ -429,6 +456,7 @@ fn account_visual(
     node_count: &mut usize,
     shaped_glyphs: &mut usize,
     paint_count: &mut usize,
+    mesh_counts: &mut MeshCounts,
     visual: &RootVisual,
     limits: UiLimits,
     max_shaped_glyphs: usize,
@@ -452,6 +480,21 @@ fn account_visual(
         return Err(UiCompileError::LogicalPaintLimitExceeded {
             actual: *paint_count,
             maximum: limits.max_paint_primitives,
+        });
+    }
+    *mesh_counts = mesh_counts
+        .checked_add(visual.mesh_counts)
+        .ok_or(UiCompileError::MeshCountOverflow)?;
+    if mesh_counts.vertices > limits.max_mesh_vertices {
+        return Err(UiCompileError::MeshVertexLimitExceeded {
+            actual: mesh_counts.vertices,
+            maximum: limits.max_mesh_vertices,
+        });
+    }
+    if mesh_counts.indices > limits.max_mesh_indices {
+        return Err(UiCompileError::MeshIndexLimitExceeded {
+            actual: mesh_counts.indices,
+            maximum: limits.max_mesh_indices,
         });
     }
     Ok(())
@@ -553,6 +596,12 @@ pub enum UiCompileError {
     SnapshotRootLimitExceeded { actual: usize, maximum: usize },
     #[error("UI snapshot has {actual} nodes; compiler maximum is {maximum}")]
     SnapshotNodeLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot has {actual} mesh vertices; compiler maximum is {maximum}")]
+    SnapshotMeshVertexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot has {actual} mesh indices; compiler maximum is {maximum}")]
+    SnapshotMeshIndexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot mesh occurrence counts overflow")]
+    SnapshotMeshCountOverflow,
     #[error("UI snapshot root key has {actual} encoded bytes; compiler maximum is {maximum}")]
     SnapshotKeyLimitExceeded { actual: usize, maximum: usize },
     #[error("UI snapshot contains duplicate root key {key:?}")]
@@ -563,6 +612,12 @@ pub enum UiCompileError {
     SnapshotEnvelopeMismatch { ordinal: usize },
     #[error("UI candidate has {actual} nodes; compiler maximum is {maximum}")]
     CandidateNodeLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate has {actual} output mesh vertices; maximum is {maximum}")]
+    MeshVertexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate has {actual} output mesh indices; maximum is {maximum}")]
+    MeshIndexLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate output mesh occurrence counts overflow")]
+    MeshCountOverflow,
     #[error("UI candidate has {actual} shaped glyphs; maximum is {maximum}")]
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
     #[error("UI candidate text shaping reads {actual} source bytes; maximum is {maximum}")]

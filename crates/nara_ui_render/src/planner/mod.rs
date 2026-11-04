@@ -465,6 +465,12 @@ pub enum UiPresentationContentError {
     ReferencedGlyphLimitExceeded { limit: usize },
     #[error("the UI target plan exceeds its {limit} expanded-primitive limit")]
     PrimitiveLimitExceeded { limit: usize },
+    #[error("the UI target plan exceeds its {limit} mesh-vertex limit")]
+    MeshVertexLimitExceeded { limit: usize },
+    #[error("the UI target plan exceeds its {limit} mesh-index limit")]
+    MeshIndexLimitExceeded { limit: usize },
+    #[error("UI mesh bounds map outside the finite signed physical-coordinate range")]
+    InvalidMeshPhysicalBounds,
     #[error("the glyph cache exceeds its {limit} entry limit")]
     GlyphEntryLimitExceeded { limit: usize },
     #[error("the UI target plan exceeds its {limit} new-glyph limit")]

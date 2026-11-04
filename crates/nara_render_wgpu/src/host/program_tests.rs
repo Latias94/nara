@@ -6,6 +6,9 @@ use crate::{
     WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
+#[cfg(feature = "stock-ui")]
+mod ui_mesh;
+
 struct PreflightProbe {
     events: Arc<std::sync::Mutex<Vec<&'static str>>>,
     created: Arc<std::sync::atomic::AtomicUsize>,

@@ -66,8 +66,13 @@ layout, using current title/child intrinsic sizes and scoped exact placement rat
 row-index absolute coordinates. Preserve the full 11-presentation/ten-commit trajectory,
 including preedit/selection/history during reorder, focused-row filtering, same-visible-position
 replacement, explicit model/schema reset and rejection of old input after the replacement
-receives focus. This is child-layout and presented-input acceptance; custom drawing, native
-canvas gestures and the complete R11b/R11c consumers remain separate.
+receives focus. The trajectory then imports the external Lyon-backed `CurveCanvas`, presenting
+custom geometry in the same stream as ordinary node/port controls. Require presented pointer
+selection, Tab/Enter port activation, Shift-Tab/Enter selection, fractional authored pan with
+matching geometry/semantics, old-route refusal and final retirement. The extended total is
+14 presentations and 13 journal commits. Error/panic child modes must also exercise a pending
+mesh submission. This is finite child-layout, custom geometry and presented-input acceptance;
+curve hit testing, canvas motion/wheel and the complete R11b/R11c consumers remain separate.
 
 ## UI Work Probes
 

@@ -16,7 +16,7 @@ new performance, toolkit compatibility or platform evidence and requires no offi
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, routed canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded keyed-state prerequisite below. Current public panels remain
-Dear-specific; finite Rect/Text paint and button events are not the complete successor interface.
+Dear-specific; finite Rect/Text/Mesh paint and button events are not the complete successor interface.
 R11f adds source-built Editor edit/build/reconstruct,
 bounded versioned owner/UI recovery, failure refusal/recovery and correct-result latency. It is
 unimplemented and separate from Play/checkpoint restoration; declarative composition, preserved
@@ -119,6 +119,20 @@ Its final shared/default-game suite passes 419/419; the enabled-serialization ga
 Editor trajectories 33/33. The independent component library passes 15/15, followed by both
 native surface tests through the imported measured layout. The linked plan preserves overlapping
 suite counts, ignored scope, review fixes and failed fixture assumptions separately.
+
+The [same-stream geometry prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#same-stream-custom-geometry-prerequisite)
+adds captured local triangle/color facts, content-box clipping and independent source/output
+limits. Neutral packets retain exact projected vertices and charge their aligned allocations;
+the original UI Feature preserves quad/mesh/quad order and original native custody. A separately
+authored Lyon component combines a cubic connection with ordinary node/port controls. Its
+tessellator remains outside the kernel. The linked plan owns executed shared, independent and
+native evidence; this is no full graph editor, canvas gesture model, geometry-cache performance
+result, foreign frontend attachment or complete R11b/c acceptance.
+The corrected shared suite passes 450/450, all-feature WGPU 403/403, Editor/public 406/406 and
+selected Windows/DX12 Editor 33/33. The independent component library passes 19/19; its full
+native trajectory and failure controls pass 2/2, while four typed-Feature GPU cases separately
+cover linear/sRGB pixels, exact metadata admission and partial-allocation recovery. These
+overlapping suites and the original failed fixture assumption retain their limits in the plan.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and

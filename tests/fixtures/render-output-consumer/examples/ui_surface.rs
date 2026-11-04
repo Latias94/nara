@@ -25,6 +25,7 @@ use nara_ui_kernel::{
     UiSeatId, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
     UiTheme, UiVisual,
 };
+use nara_ui_module_consumer::curve_canvas::CurveCanvas;
 use nara_ui_module_consumer::keyed_editors::{EditorRow, KeyedEditors};
 use nara_ui_render::{UiPreparedImages, UiSurfacePresentationEvent, UiSurfacePresenter};
 use nara_ui_widgets::{
@@ -199,6 +200,14 @@ struct Probe {
     keyed_reset_input: Option<UiStateTextInput>,
     keyed_geometry: Option<(TextSelection, Option<TextRect>)>,
     keyed_slot: Option<UiRect>,
+    curve: Option<CurveCanvas>,
+    curve_sentinel: Option<UiButton>,
+    curve_buttons: [UiButtonState; 3],
+    curve_pan: UiPoint,
+    curve_selected: bool,
+    curve_actions: usize,
+    port_actions: usize,
+    curve_previous: Option<(nara_ui_kernel::UiMesh, UiRect, UiRouteStamp)>,
     stage: u8,
     retired: bool,
     presents: usize,
@@ -248,6 +257,14 @@ impl Probe {
             keyed_reset_input: None,
             keyed_geometry: None,
             keyed_slot: None,
+            curve: None,
+            curve_sentinel: None,
+            curve_buttons: std::array::from_fn(|_| UiButtonState::default()),
+            curve_pan: UiPoint::new(0.0, 0.0),
+            curve_selected: false,
+            curve_actions: 0,
+            port_actions: 0,
+            curve_previous: None,
             stage: 0,
             retired: false,
             presents: 0,
@@ -260,7 +277,18 @@ impl Probe {
 
     fn compile(&mut self) -> Result<Arc<UiFrame>> {
         let previous_work = self.compiler.work_stats();
-        let base = if let Some(keyed) = &mut self.keyed {
+        let base = if let Some(curve) = &self.curve {
+            curve
+                .authored_root(self.curve_pan, self.curve_selected)
+                .map_err(|error| -> Box<dyn std::error::Error> { error })?
+                .with_child(self.curve_sentinel.as_ref().unwrap().authored_node(
+                    curve.button().key().root_key(),
+                    UiStyle::absolute(12.0, 126.0, 128.0, 28.0),
+                    UiVisual::role(UiColorRole::Panel),
+                    UiBrush::Role(UiColorRole::PrimaryText),
+                    14.0,
+                )?)
+        } else if let Some(keyed) = &mut self.keyed {
             let ids: &[&str] = match self.stage {
                 5 => &["alpha", "beta"],
                 6 => &["beta", "inserted", "alpha"],
@@ -343,7 +371,7 @@ impl Probe {
         let frame = self
             .compiler
             .compile(&builder.build()?, environment, UiTheme::default())?;
-        if self.keyed.is_some() {
+        if self.keyed.is_some() && self.curve.is_none() {
             let work = self.compiler.work_stats();
             assert!(work.custom_layout_callbacks > previous_work.custom_layout_callbacks);
             assert!(work.custom_child_measurements > previous_work.custom_child_measurements);
@@ -416,16 +444,15 @@ impl Probe {
                 previous,
                 "preparation and image submission cannot publish input authority"
             );
-            if self.stage == 0 {
-                match std::env::var("NARA_UI_SURFACE_FAILURE_AFTER_SUBMIT").as_deref() {
-                    Ok("error") => {
-                        return Err(
-                            io::Error::other("injected native UI failure after submit").into()
-                        );
-                    }
-                    Ok("panic") => panic!("injected native UI failure after submit"),
-                    _ => {}
+            let failure = std::env::var("NARA_UI_SURFACE_FAILURE_AFTER_SUBMIT");
+            match (self.stage, failure.as_deref()) {
+                (0, Ok("error")) | (11, Ok("mesh-error")) => {
+                    return Err(io::Error::other("injected native UI failure after submit").into());
                 }
+                (0, Ok("panic")) | (11, Ok("mesh-panic")) => {
+                    panic!("injected native UI failure after submit");
+                }
+                _ => {}
             }
         }
         if retire_before_composite && !self.retired {
@@ -527,6 +554,30 @@ impl Probe {
     }
 
     fn reduce(&mut self, batch: &UiDispatchBatch) -> Result<()> {
+        if let Some(curve) = &self.curve {
+            let mut intents = UiIntentBatch::default();
+            for (button, state) in [
+                curve.button(),
+                curve.port_button(),
+                self.curve_sentinel.as_ref().unwrap(),
+            ]
+            .into_iter()
+            .zip(&mut self.curve_buttons)
+            {
+                state.reduce_batch(button, batch, &mut intents)?;
+            }
+            for UiIntent::Activate { action, .. } in intents.intents() {
+                if action == curve.button().action() {
+                    self.curve_actions += 1;
+                    self.curve_selected = !self.curve_selected;
+                } else if action == curve.port_button().action() {
+                    self.port_actions += 1;
+                } else {
+                    return Err(io::Error::other("unexpected curve action").into());
+                }
+            }
+            return Ok(());
+        }
         if let Some(keyed) = &mut self.keyed {
             assert!(self.controls.field.input_token().is_none());
             keyed.state.reduce_text_focus(batch, &mut self.text)?;
@@ -602,6 +653,25 @@ impl Probe {
     // Winit's KeyEvent has private platform fields. Inject logical keys through this same
     // adapter used by real KeyboardInput; never manufacture a platform KeyEvent or move the OS pointer.
     fn key(&mut self, key: &Key) -> Result<()> {
+        match key {
+            Key::Named(NamedKey::Tab) => {
+                return self.route_input(UiInputEvent::Navigate {
+                    seat: UiSeatId::PRIMARY,
+                    direction: if self.modifiers.shift_key() {
+                        nara_ui_kernel::UiNavigation::Previous
+                    } else {
+                        nara_ui_kernel::UiNavigation::Next
+                    },
+                });
+            }
+            Key::Named(NamedKey::Enter) => {
+                return self.route_input(UiInputEvent::ActivateFocused {
+                    seat: UiSeatId::PRIMARY,
+                    source: nara_ui_kernel::UiActivationSource::Keyboard,
+                });
+            }
+            _ => {}
+        }
         let edit = match key {
             Key::Character(value) if self.modifiers.control_key() => match value.as_str() {
                 "a" => TextEdit::SelectAll,
@@ -918,12 +988,198 @@ impl Probe {
             }
             5..=10 => {
                 if self.step_keyed()? {
+                    self.route_input(UiInputEvent::SeatCancelled {
+                        seat: UiSeatId::PRIMARY,
+                    })?;
+                    assert!(
+                        self.keyed
+                            .as_ref()
+                            .unwrap()
+                            .state
+                            .text_input(&self.keyed_fields[2])?
+                            .is_none()
+                    );
+                    let root = UiRootKey::runtime("native-curve", "panel")?;
+                    self.curve_sentinel = Some(UiButton::new(
+                        UiKey::scoped(
+                            root.clone(),
+                            UiLocalKey::runtime("host", "navigation-sentinel")?,
+                        )?,
+                        "Navigation sentinel",
+                        UiActionId::new("host.navigation-sentinel")?,
+                    )?);
+                    self.curve = Some(
+                        CurveCanvas::new(root)
+                            .map_err(|error| -> Box<dyn std::error::Error> { error })?,
+                    );
+                }
+            }
+            11..=13 => {
+                if self.step_curve()? {
                     return Ok(true);
                 }
             }
             _ => unreachable!(),
         }
         self.stage += 1;
+        Ok(false)
+    }
+
+    fn step_curve(&mut self) -> Result<bool> {
+        let curve = self.curve.as_ref().unwrap();
+        let button_key = curve.button().key().clone();
+        let port_key = curve.port_button().key().clone();
+        let latest = self.presenter.journal().latest(self.surface)?;
+        let frame = latest.frame();
+        let button = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &button_key)
+            .expect("the actual presented curve node has semantics");
+        assert_eq!(button.selected(), Some(self.curve_selected));
+        let rect = button.rect();
+        let (mesh_index, mesh) = frame
+            .paint()
+            .iter()
+            .enumerate()
+            .find_map(|(index, paint)| match paint {
+                nara_ui_kernel::UiPaintPrimitive::Mesh { mesh, .. } => Some((index, mesh.clone())),
+                _ => None,
+            })
+            .expect("the native component must present actual external tessellation");
+        let foreground_index = frame
+            .paint()
+            .iter()
+            .position(|paint| {
+                matches!(paint, nara_ui_kernel::UiPaintPrimitive::Rect { key: Some(key), .. }
+                if key == &button_key)
+            })
+            .unwrap();
+        assert!(mesh_index > 0 && foreground_index > mesh_index);
+        assert!(
+            frame
+                .focus_order()
+                .iter()
+                .any(|fact| fact.key() == &port_key)
+        );
+        assert_eq!(
+            frame
+                .focus_order()
+                .iter()
+                .map(|fact| fact.key())
+                .collect::<Vec<_>>(),
+            [
+                &button_key,
+                &port_key,
+                self.curve_sentinel.as_ref().unwrap().key()
+            ]
+        );
+        match self.stage {
+            11 => {
+                self.click_rect(rect)?;
+                assert_eq!((self.curve_actions, self.curve_selected), (1, true));
+                self.key(&Key::Named(NamedKey::Tab))?;
+                let semantics = self.interaction.semantic_snapshot(
+                    self.presenter.journal(),
+                    self.route.unwrap(),
+                    UiSeatId::PRIMARY,
+                )?;
+                assert!(
+                    semantics
+                        .nodes()
+                        .iter()
+                        .any(|node| node.key() == &port_key && node.state().focused())
+                );
+                self.key(&Key::Named(NamedKey::Enter))?;
+                assert_eq!(self.port_actions, 1);
+            }
+            12 => {
+                self.modifiers = ModifiersState::SHIFT;
+                self.key(&Key::Named(NamedKey::Tab))?;
+                self.modifiers = ModifiersState::empty();
+                let semantics = self.interaction.semantic_snapshot(
+                    self.presenter.journal(),
+                    self.route.unwrap(),
+                    UiSeatId::PRIMARY,
+                )?;
+                assert!(
+                    semantics
+                        .nodes()
+                        .iter()
+                        .any(|node| node.key() == &button_key && node.state().focused())
+                );
+                self.key(&Key::Named(NamedKey::Enter))?;
+                assert_eq!((self.curve_actions, self.curve_selected), (2, false));
+                self.curve_previous = Some((mesh, rect, self.route.unwrap()));
+                self.route_input(UiInputEvent::GeometryInvalidated)?;
+                self.curve_pan = UiPoint::new(13.25, -4.5);
+            }
+            13 => {
+                let (previous_mesh, previous_rect, previous_route) =
+                    self.curve_previous.as_ref().unwrap();
+                assert_eq!(mesh.indices(), previous_mesh.indices());
+                assert_eq!(mesh.vertices().len(), previous_mesh.vertices().len());
+                for (current, previous) in mesh.vertices().iter().zip(previous_mesh.vertices()) {
+                    assert!(
+                        (current.position().x() - previous.position().x() - self.curve_pan.x())
+                            .abs()
+                            < 0.001
+                    );
+                    assert!(
+                        (current.position().y() - previous.position().y() - self.curve_pan.y())
+                            .abs()
+                            < 0.001
+                    );
+                }
+                assert!(
+                    (rect.origin().x() - previous_rect.origin().x() - self.curve_pan.x()).abs()
+                        < 0.001
+                );
+                assert!(
+                    (rect.origin().y() - previous_rect.origin().y() - self.curve_pan.y()).abs()
+                        < 0.001
+                );
+                let old_input = self.interaction.dispatch(
+                    self.presenter.journal(),
+                    *previous_route,
+                    UiInputEvent::ActivateFocused {
+                        seat: UiSeatId::PRIMARY,
+                        source: nara_ui_kernel::UiActivationSource::Keyboard,
+                    },
+                )?;
+                assert_eq!(
+                    old_input.rejection(),
+                    Some(&nara_ui_kernel::UiNonActivation::StaleGeometry)
+                );
+                let route = self.route.unwrap();
+                self.route_input(UiInputEvent::SurfaceCancelled)?;
+                assert!(
+                    self.curve_buttons
+                        .iter()
+                        .all(|state| !state.focused() && !state.pressed() && !state.hovered())
+                );
+                self.route = None;
+                assert!(self.presenter.retire(100)?.is_some());
+                assert!(self.presenter.journal().latest(self.surface).is_err());
+                assert!(
+                    self.interaction
+                        .dispatch(
+                            self.presenter.journal(),
+                            route,
+                            UiInputEvent::ActivateFocused {
+                                seat: UiSeatId::PRIMARY,
+                                source: nara_ui_kernel::UiActivationSource::Keyboard,
+                            },
+                        )
+                        .is_err()
+                );
+                assert!(self.presenter.is_quiescent());
+                assert_eq!((self.curve_actions, self.port_actions), (2, 1));
+                assert_eq!((self.presents, self.commits), (14, 13));
+                return Ok(true);
+            }
+            _ => unreachable!(),
+        }
         Ok(false)
     }
 
@@ -1187,6 +1443,11 @@ impl Probe {
             }
         }
         self.controls.field.blur(&mut self.text)?;
+        assert!(
+            self.curve_buttons
+                .iter()
+                .all(|state| !state.focused() && !state.pressed() && !state.hovered())
+        );
         if let Some(keyed) = &mut self.keyed {
             keyed.state.begin().finish()?;
             assert!(keyed.state.is_empty());
@@ -1329,7 +1590,10 @@ fn main() -> Result<()> {
         .result
         .ok_or_else(|| io::Error::other("native event loop has no terminal result"))?;
     if let Ok(mode) = std::env::var("NARA_UI_SURFACE_FAILURE_AFTER_SUBMIT") {
-        if !matches!(mode.as_str(), "error" | "panic") {
+        if !matches!(
+            mode.as_str(),
+            "error" | "panic" | "mesh-error" | "mesh-panic"
+        ) {
             return Err(io::Error::other("unknown native UI failure control").into());
         }
         // NativeApp::finish appends any cleanup failure. Exact equality therefore requires the
@@ -1346,7 +1610,7 @@ fn main() -> Result<()> {
     }
     terminal.map_err(io::Error::other)?;
     println!(
-        "UI_SURFACE_OK native_presentations=11 journal_commits=10 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true input_delivery=injected_pointer_ime_and_logical_keys"
+        "UI_SURFACE_OK native_presentations=14 journal_commits=13 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_retired=true input_delivery=injected_pointer_ime_and_logical_keys"
     );
     Ok(())
 }

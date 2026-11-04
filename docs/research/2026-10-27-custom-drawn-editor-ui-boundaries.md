@@ -376,14 +376,15 @@ native acceptance, runtime-cache qualification or dependency adoption.
 
 ### Next drawing pressure after child layout
 
-Current `UiPaintPrimitive` and packet lowering admit Rect/Text and Rect/Glyph respectively.
+Before the geometry prerequisite, `UiPaintPrimitive` and packet lowering admit Rect/Text and
+Rect/Glyph respectively.
 `UiSurfacePresenter` still joins that original packet to native composite and input authority;
 custom child layout adds no drawing capability. The Zed pin's `path_builder.rs:242`,
 `scene.rs:786` and `window.rs:5002` illustrate tessellation before painting and path facts
 carrying vertices, bounds, content mask, order and color together. That is mechanism evidence,
 not a reason to import GPUI Scene or its public path vocabulary.
 
-Two concrete Nara shapes remain for the next drawing consumer:
+Two concrete Nara shapes were compared for the next drawing consumer:
 
 | Shape | Demonstrated existing seam | Qualification and limitation |
 | --- | --- | --- |
@@ -399,7 +400,15 @@ The independent `render-output-consumer` is the complete presentation/input carr
 same-stream drawing proof; `render-composition-consumer` supplies existing CPU/GPU Feature oracles.
 Rectangular node/port semantics do not establish curve hit testing or canvas drag/wheel routing.
 Those input-owner additions remain explicit requirements rather than hidden mesh-side effects.
-No drawing interface, tessellation dependency or performance result is selected by this comparison.
+The successor design selects the first shape for the independent curve consumer: bounded,
+immutable triangles with per-vertex straight-alpha color in the original UI stream. Meshes use
+the compiler's resolved content origin/clip and the planner's exact content transform. A single
+original `UiFeature` prepares all quads once and encodes quad runs and meshes in painter order.
+It preserves original packet allocation identity, preparation reservations and completion
+custody. The consumer's Lyon dependency demonstrates user-selected tessellation without adding
+a kernel dependency. This selection is a design, not qualification or a performance result;
+the current plan records executed evidence separately. Final-size drawing callbacks and canvas
+gestures remain further pressure.
 
 ## Primary Source Links
 

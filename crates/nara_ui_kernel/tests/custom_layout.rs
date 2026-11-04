@@ -772,6 +772,7 @@ fn fractional_content_transform_maps_one_clipped_geometry_into_every_projection(
     for paint in frame.paint() {
         let physical_rect = match paint {
             UiPaintPrimitive::Rect { physical_rect, .. }
+            | UiPaintPrimitive::Mesh { physical_rect, .. }
             | UiPaintPrimitive::Text { physical_rect, .. } => physical_rect,
         };
         assert_eq!(paint.clip_rect(), Some(clip));

@@ -138,13 +138,10 @@ impl WgpuUiProgramBinding {
         facts
     }
 
-    /// Binding wrapper and the original packet-facts slice, including its Arc counters.
-    /// Capture, prepared state and report share that slice, so it is counted once. Retained
-    /// packet/resource contents remain capture-owned and are not estimated here.
+    /// Binding wrapper only. The original facts allocation is counted by UI native preflight,
+    /// including direct typed programs that have no policy binding.
     pub(crate) fn metadata_bytes(&self) -> usize {
         size_of::<Self>()
-            .saturating_add(std::mem::size_of_val(self.facts()))
-            .saturating_add(2 * size_of::<usize>())
     }
 }
 
@@ -209,12 +206,7 @@ mod tests {
             capture.packets().collect::<Vec<_>>(),
             [(binding.facts()[0].packet, RenderTarget::PrimaryWindow)],
         );
-        assert_eq!(
-            binding.metadata_bytes(),
-            size_of::<WgpuUiProgramBinding>()
-                + size_of::<WgpuLoweredUiPacketFacts>()
-                + 2 * size_of::<usize>(),
-        );
+        assert_eq!(binding.metadata_bytes(), size_of::<WgpuUiProgramBinding>(),);
     }
 
     #[test]
@@ -274,6 +266,9 @@ mod tests {
             target: capture.target.clone(),
             viewport: capture.viewport,
             batches: Arc::clone(&capture.batches),
+            draws: Arc::clone(&capture.draws),
+            mesh_vertices: Arc::clone(&capture.mesh_vertices),
+            mesh_indices: Arc::clone(&capture.mesh_indices),
             packet_facts: Arc::clone(&capture.packet_facts),
         });
         let binding = WgpuUiProgramBinding::new(UI_OPERATION, &instance, replacement);

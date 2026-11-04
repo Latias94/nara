@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-11-04
+**Last Revised**: 2026-11-05
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction; 2026-10-25 by the complete source/occurrence/placement key adoption
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -75,6 +75,29 @@ The adapter supplies the public backend bridge previously unavailable to indepen
 hidden first-party test-presenter factories remain restricted to their named conformance glue.
 It does not qualify a toolkit-independent panel attachment, neutral presentation dependency
 closure, native platform-input delivery or a complete independent Editor.
+
+### Captured custom geometry in the original paint stream
+
+An independently authored component may supply immutable bounded triangle meshes without
+adding a toolkit-specific widget or a public native render callback. Vertices carry local
+content-space positions and straight-alpha colors; indices describe triangle lists. Geometry
+does not determine intrinsic size. The compiler resolves padding/origin and clips mesh paint to
+the owning content box and its inherited clip. Background, mesh and text participate in the
+ordinary node/root painter ordering. Hit, focus and semantic facts retain the existing resolved
+layout; geometric curve hit testing needs a separate input contract.
+
+The neutral packet projects the original content transform, retains immutable geometry and
+charges actual occurrence/payload costs. The original WGPU UI Feature preserves quad/mesh/quad
+barriers in the same attachment transaction and original submission. Mesh preparation uses
+the existing device-epoch, reservation, work-observation and completion owners. Repeated shared
+payloads remain repeated draw work; clipping or fallback cannot evade candidate-wide geometry
+limits. No presentable input route follows from creating a mesh or submitting its buffers.
+
+Path vocabulary and tessellation stay with the component author. This seam requires no Lyon,
+GPUI, graph domain or native Device/Queue dependency in the kernel. It does not select a vector
+effect language, final-size drawing callback, geometry cache, canvas gesture model or dynamic
+code reload. The [current geometry prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#same-stream-custom-geometry-prerequisite)
+owns independent/public/native qualification and its limits.
 
 ### Original Backend Outcome Ownership
 

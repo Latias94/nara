@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05 (scoped component state and child-layout prerequisites)
+**Last Revised**: 2026-11-05 (scoped component state, child layout and captured geometry)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -154,7 +154,12 @@ accept exact content-relative allocations, while the private compiler retains la
 text work and final projections. A user-authored layout can wrap existing controls or arbitrary
 authored nodes without inheriting a component base class. Its immutable description is distinct
 from keyed mutable state; construction/measurement repetition cannot publish business effects.
-This does not close custom drawing, routed canvas gestures or the complete component interface.
+The captured-geometry prerequisite in ADR0102 additionally permits component-owned tessellation
+to enter the original paint stream as immutable bounded triangles. A user library can combine
+that geometry with ordinary controls, keeping its path vocabulary and dependencies outside the
+kernel. The compiler, neutral planner and original native Feature retain mapping, clipping,
+ordering, budgets and completion responsibility. Neither prerequisite closes routed canvas
+gestures, final-size drawing callbacks or the complete component interface.
 
 Nara-owned composition, measurement and painting can be skipped or repeated. Their invocation
 count cannot publish document edits, spawn tasks or install subscriptions. Admitted interaction
@@ -167,8 +172,8 @@ scope in background work. Existing task and document owners remain authoritative
 Custom layout/drawing supplies finite constraints/placements, mapped hit/semantic facts and
 resource-complete render contributions through the current owners. Scoped theme and typography
 inputs have explicit invalidation dependencies. Drawing, keyboard/text behavior, semantic support
-and platform integration remain separately declared capabilities. The current Rect/Text vocabulary
-and Button/TextField reducers do not establish this complete extension interface.
+and platform integration remain separately declared capabilities. The finite Rect/Text/Mesh
+vocabulary and Button/TextField reducers do not establish this complete extension interface.
 These are successor design requirements. Existing qualified controlled widgets/panels retain
 their bounded interfaces; independent keyed composition supplies one prerequisite, while the
 complete component/custom-layout consumers remain unimplemented.

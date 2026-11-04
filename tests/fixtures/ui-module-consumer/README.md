@@ -46,6 +46,16 @@ output consumer imports this same library, preserving the original full input/re
 This layout interface alone does not qualify custom paths, canvas motion/scroll, foreign panel
 hosting, automatic invalidation or a layout performance improvement.
 
+`CurveCanvas` is a separately authored drawing consumer. It uses fixture-local Lyon dependencies
+to tessellate a cubic connection into neutral `UiMesh` facts, then composes ordinary node/port
+buttons over that geometry in the same paint stream. Explicit pan changes move both geometry
+and control bounds within a fixed clipped viewport; the caller owns selected state and button
+reducers. Local tests inspect actual triangles, paint order, fractional mapping and matching
+hit/focus/semantic facts. The native output consumer imports this same library. No path engine,
+graph widget, renderer dependency or engine-private construction is required by the component.
+This fixture retessellates on composition; it does not qualify a geometry cache, final-size
+drawing callback, curve hit testing, canvas drag/wheel, a complete graph editor or performance.
+
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
 ```text

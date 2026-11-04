@@ -21,6 +21,7 @@ use super::{
     text::{TextCompileError, TextCompileSession},
 };
 use crate::authoring::UiNodeText;
+use crate::mesh::MeshCounts;
 
 #[derive(Clone, Debug)]
 pub(super) struct CompiledRoot {
@@ -37,6 +38,7 @@ pub(super) enum RootCompileError {
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
     LogicalPaintLimitExceeded { actual: usize, maximum: usize },
     LayoutWorkLimitExceeded { actual: usize, maximum: usize },
+    MeshCountOverflow,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +103,7 @@ pub(super) fn compile_root(
     let mut focus_entries = Vec::new();
     let mut semantic_entries = Vec::new();
     let mut shaped_glyphs = 0usize;
+    let mut mesh_counts = MeshCounts::default();
     let mut origins = vec![UiPoint::new(0.0, 0.0); flat.len()];
     let mut clips = vec![ClipState::Unclipped; flat.len()];
     let mut visible = vec![false; flat.len()];
@@ -160,26 +163,33 @@ pub(super) fn compile_root(
             },
         ));
 
-        let text_geometry = node.node.text.as_ref().map(|text| {
-            let content_rect = UiRect::from_origin_size(
-                parent_origin.x() + layout.content_box_x(),
-                parent_origin.y() + layout.content_box_y(),
-                layout.content_box_width().max(0.0),
-                layout.content_box_height().max(0.0),
-            ).ok_or_else(|| {
-                RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
-                    message: "Taffy produced invalid text content geometry".to_owned(),
+        let content_rect = (node.node.text.is_some() || node.node.mesh.is_some())
+            .then(|| {
+                UiRect::from_origin_size(
+                    parent_origin.x() + layout.content_box_x(),
+                    parent_origin.y() + layout.content_box_y(),
+                    layout.content_box_width().max(0.0),
+                    layout.content_box_height().max(0.0),
+                )
+                .ok_or_else(|| {
+                    RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
+                        message: "Taffy produced invalid content geometry".to_owned(),
+                    })
                 })
-            })?;
-            let text_clip = if matches!(text, UiNodeText::Prepared(_))
-                || matches!(text, UiNodeText::Plain(text) if text.overflow == UiTextOverflow::Clip)
-            {
-                inherited_clip.intersect(content_rect)
-            } else {
-                inherited_clip
-            };
-            Ok((content_rect, text_clip))
-        }).transpose()?;
+            })
+            .transpose()?;
+        let text_geometry = node.node.text.as_ref().zip(content_rect).map(
+            |(text, content_rect)| {
+                let text_clip = if matches!(text, UiNodeText::Prepared(_))
+                    || matches!(text, UiNodeText::Plain(text) if text.overflow == UiTextOverflow::Clip)
+                {
+                    inherited_clip.intersect(content_rect)
+                } else {
+                    inherited_clip
+                };
+                (content_rect, text_clip)
+            },
+        );
         // A hidden or empty draw still admits every raster under the receiving policy. Use its
         // resolved origin so subpixel extents agree with an otherwise identical visible draw.
         let prepared_layout =
@@ -247,6 +257,25 @@ pub(super) fn compile_root(
                 ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
             }
         }
+        if let (Some(mesh), Some(content_rect)) = (&node.node.mesh, content_rect) {
+            let mesh_clip = inherited_clip.intersect(content_rect);
+            if !content_rect.size().is_empty() && !matches!(mesh_clip, ClipState::Empty) {
+                mesh_counts = mesh_counts
+                    .checked_add(MeshCounts::of(mesh))
+                    .ok_or(RootCompileError::MeshCountOverflow)?;
+                paint_entries.push(RootOrdered::new(
+                    root_order(node, 1),
+                    UiPaintPrimitive::Mesh {
+                        key: node.key.clone(),
+                        rect: content_rect,
+                        physical_rect: environment.snap(content_rect),
+                        clip_rect: mesh_clip.rect(),
+                        mesh: mesh.clone(),
+                    },
+                ));
+                ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
+            }
+        }
         if let (Some(text), Some((content_rect, text_clip))) = (&node.node.text, text_geometry) {
             if !content_rect.size().is_empty() && !matches!(text_clip, ClipState::Empty) {
                 let text_layout = match text {
@@ -277,7 +306,7 @@ pub(super) fn compile_root(
                 }
                 shaped_glyphs = shaped_glyphs.saturating_add(text_layout.glyphs().len());
                 paint_entries.push(RootOrdered::new(
-                    root_order(node, 1),
+                    root_order(node, 2),
                     UiPaintPrimitive::Text {
                         key: node.key.clone(),
                         rect: content_rect,
@@ -368,6 +397,7 @@ pub(super) fn compile_root(
             layouts: layout_entries,
             paint: paint_entries,
             shaped_glyphs,
+            mesh_counts,
         }),
         hits: hit_entries,
         focus: focus_entries,

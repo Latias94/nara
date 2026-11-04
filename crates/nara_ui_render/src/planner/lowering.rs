@@ -1,15 +1,16 @@
-use std::{collections::HashSet, mem::size_of, sync::Arc};
+use std::{alloc::Layout, collections::HashSet, mem::size_of, sync::Arc};
 
 use nara_render::{RenderResourceSnapshot, RenderTarget};
 use nara_text::GlyphRasterKey;
 use nara_ui_kernel::{
-    UiEnvironment, UiFrame, UiImageId, UiPaintPrimitive, UiPhysicalRect, UiPoint, UiRect,
+    UiEnvironment, UiFrame, UiImageId, UiMesh, UiPaintPrimitive, UiPhysicalRect, UiPoint, UiRect,
     UiResolvedBrush,
 };
 
 use crate::{
-    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketPrimitive,
-    UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity, UiPresentationLimits,
+    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketMesh,
+    UiPacketMeshVertex, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket,
+    UiPaintPacketIdentity, UiPresentationLimits,
     atlas::{GlyphAtlas, GlyphSlot},
 };
 
@@ -33,6 +34,7 @@ pub(super) fn preflight_content(
     images: &UiPreparedImages,
     limits: UiPresentationLimits,
 ) -> Result<ContentPreflight, UiPresentationContentError> {
+    preflight_meshes(frame, limits)?;
     let requested_glyphs = collect_referenced_glyphs(frame, limits)?;
     let mut referenced_image_ids = HashSet::new();
     let mut referenced_images = Vec::<RenderResourceSnapshot>::new();
@@ -82,6 +84,63 @@ pub(super) fn preflight_content(
         referenced_images.push(snapshot.identity().clone());
     }
     Ok(ContentPreflight { requested_glyphs })
+}
+
+fn preflight_meshes(
+    frame: &UiFrame,
+    limits: UiPresentationLimits,
+) -> Result<(), UiPresentationContentError> {
+    let environment = frame.environment();
+    let mut vertices = 0;
+    let mut indices = 0;
+    let mut retained_bytes = 0;
+    for primitive in frame.paint() {
+        let UiPaintPrimitive::Mesh {
+            rect,
+            clip_rect,
+            mesh,
+            ..
+        } = primitive
+        else {
+            continue;
+        };
+        vertices = checked_add(vertices, mesh.vertices().len())?;
+        if vertices > limits.max_mesh_vertices() {
+            return Err(UiPresentationContentError::MeshVertexLimitExceeded {
+                limit: limits.max_mesh_vertices(),
+            });
+        }
+        indices = checked_add(indices, mesh.indices().len())?;
+        if indices > limits.max_mesh_indices() {
+            return Err(UiPresentationContentError::MeshIndexLimitExceeded {
+                limit: limits.max_mesh_indices(),
+            });
+        }
+        let bounds = mesh_physical_bounds(*rect, mesh, environment);
+        if mesh_enclosing_edges(bounds).into_iter().any(|value| {
+            !value.is_finite()
+                || f64::from(value) < f64::from(i32::MIN)
+                || f64::from(value) > f64::from(i32::MAX)
+        }) {
+            return Err(UiPresentationContentError::InvalidMeshPhysicalBounds);
+        }
+        if mesh_packet_rect(bounds)
+            .and_then(|bounds| packet_clip(*clip_rect, environment, bounds))
+            .is_some()
+        {
+            retained_bytes = checked_add(retained_bytes, size_of::<UiPacketPrimitive>())?;
+            retained_bytes = checked_add(
+                retained_bytes,
+                mesh_retained_bytes(mesh.vertices().len(), mesh.indices().len())?,
+            )?;
+            if retained_bytes > limits.max_packet_retained_bytes() {
+                return Err(UiPresentationContentError::PacketRetentionLimitExceeded {
+                    limit: limits.max_packet_retained_bytes(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn collect_referenced_glyphs(
@@ -256,6 +315,27 @@ pub(super) fn lower_packet(
                     },
                 )?;
             }
+            UiPaintPrimitive::Mesh {
+                rect: content_rect,
+                clip_rect,
+                mesh,
+                ..
+            } => {
+                let Some(rect) =
+                    mesh_packet_rect(mesh_physical_bounds(*content_rect, mesh, environment))
+                else {
+                    continue;
+                };
+                let Some(clip) = packet_clip(*clip_rect, environment, rect) else {
+                    continue;
+                };
+                let mesh = lower_mesh(*content_rect, mesh, environment)?;
+                push_primitive(
+                    &mut primitives,
+                    UiPacketPrimitive::Mesh { rect, clip, mesh },
+                    limits,
+                )?;
+            }
         }
     }
 
@@ -269,6 +349,77 @@ pub(super) fn lower_packet(
         packet_images,
         glyph_pages,
     )))
+}
+
+fn mesh_physical_position(
+    content_rect: UiRect,
+    local: UiPoint,
+    environment: UiEnvironment,
+) -> [f32; 2] {
+    let transform = environment.content_transform();
+    let physical_origin = transform.physical_content_origin();
+    let scale = transform.content_scale_factor();
+    [
+        physical_origin.x() + (content_rect.origin().x() + local.x()) * scale,
+        physical_origin.y() + (content_rect.origin().y() + local.y()) * scale,
+    ]
+}
+
+fn mesh_physical_bounds(
+    content_rect: UiRect,
+    mesh: &UiMesh,
+    environment: UiEnvironment,
+) -> [f32; 4] {
+    let mut bounds = [
+        f32::INFINITY,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::NEG_INFINITY,
+    ];
+    for vertex in mesh.vertices() {
+        let [physical_x, physical_y] =
+            mesh_physical_position(content_rect, vertex.position(), environment);
+        bounds[0] = bounds[0].min(physical_x);
+        bounds[1] = bounds[1].min(physical_y);
+        bounds[2] = bounds[2].max(physical_x);
+        bounds[3] = bounds[3].max(physical_y);
+    }
+    bounds
+}
+
+fn mesh_enclosing_edges([min_x, min_y, max_x, max_y]: [f32; 4]) -> [f32; 4] {
+    [min_x.floor(), min_y.floor(), max_x.ceil(), max_y.ceil()]
+}
+
+fn mesh_packet_rect(bounds: [f32; 4]) -> Option<UiPacketRect> {
+    if bounds[2] <= bounds[0] || bounds[3] <= bounds[1] {
+        return None;
+    }
+    let [min_x, min_y, max_x, max_y] = mesh_enclosing_edges(bounds);
+    UiPacketRect::new(min_x as i32, min_y as i32, max_x as i32, max_y as i32)
+}
+
+fn lower_mesh(
+    content_rect: UiRect,
+    mesh: &UiMesh,
+    environment: UiEnvironment,
+) -> Result<UiPacketMesh, UiPresentationContentError> {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    vertices
+        .try_reserve_exact(mesh.vertices().len())
+        .map_err(|_| UiPresentationContentError::AllocationFailed)?;
+    indices
+        .try_reserve_exact(mesh.indices().len())
+        .map_err(|_| UiPresentationContentError::AllocationFailed)?;
+    vertices.extend(mesh.vertices().iter().map(|vertex| {
+        UiPacketMeshVertex::new(
+            mesh_physical_position(content_rect, vertex.position(), environment),
+            vertex.color(),
+        )
+    }));
+    indices.extend_from_slice(mesh.indices());
+    Ok(UiPacketMesh::new(vertices, indices))
 }
 
 fn map_image_error(error: UiPreparedImageError) -> UiPresentationContentError {
@@ -437,6 +588,14 @@ fn validate_retained_bytes(
     limits: UiPresentationLimits,
 ) -> Result<(), UiPresentationContentError> {
     let mut total = checked_slice_bytes::<UiPacketPrimitive>(primitives.len())?;
+    for primitive in primitives {
+        if let UiPacketPrimitive::Mesh { mesh, .. } = primitive {
+            total = checked_add(
+                total,
+                mesh_retained_bytes(mesh.vertices().len(), mesh.indices().len())?,
+            )?;
+        }
+    }
     total = checked_add(total, checked_slice_bytes::<UiPacketImage>(images.len())?)?;
     total = checked_add(
         total,
@@ -454,6 +613,25 @@ fn validate_retained_bytes(
         });
     }
     Ok(())
+}
+
+fn mesh_retained_bytes(
+    vertices: usize,
+    indices: usize,
+) -> Result<usize, UiPresentationContentError> {
+    checked_add(
+        retained_arc_slice_bytes::<UiPacketMeshVertex>(vertices)?,
+        retained_arc_slice_bytes::<u32>(indices)?,
+    )
+}
+
+fn retained_arc_slice_bytes<T>(len: usize) -> Result<usize, UiPresentationContentError> {
+    let payload =
+        Layout::array::<T>(len).map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
+    let (allocation, _) = Layout::new::<[usize; 2]>()
+        .extend(payload)
+        .map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
+    Ok(allocation.pad_to_align().size())
 }
 
 fn checked_slice_bytes<T>(len: usize) -> Result<usize, UiPresentationContentError> {

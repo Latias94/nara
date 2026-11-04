@@ -1,6 +1,8 @@
 //! Shared stock quad realization owned by the Host's backend and device epoch.
 
-use std::{mem::size_of, ops::Range, sync::Arc};
+#[cfg(feature = "stock-sprite")]
+use std::ops::Range;
+use std::{mem::size_of, sync::Arc};
 
 use crate::{
     GraphError, LimitKind, WgpuRenderError, WgpuRenderProgramError,
@@ -34,25 +36,9 @@ pub(crate) struct StockQuadPrepared {
 }
 
 impl StockQuadPrepared {
-    pub(crate) fn encode(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-        viewport: nara_render::ViewportRect,
-    ) {
-        self.encode_views(
-            encoder,
-            target,
-            std::iter::once((
-                viewport,
-                nara_render::ViewLoadOp::Load,
-                0..self.buffers.len(),
-            )),
-        );
-    }
-
     /// One stock Feature owns the ordered attachment transaction. These ranges select the
     /// already prepared buffers; they do not create another writer or copy the attachment.
+    #[cfg(feature = "stock-sprite")]
     pub(crate) fn encode_views(
         &self,
         encoder: &mut wgpu::CommandEncoder,

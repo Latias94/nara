@@ -277,6 +277,20 @@ impl<'a> WgpuFeaturePrepareContext<'a> {
     ) -> Result<WgpuFeatureAllocation, WgpuRenderProgramError> {
         self.preparation.reserve_bytes(bytes).map_err(Into::into)
     }
+
+    /// First-party private buffers use the original aligned reservation, checked mapping,
+    /// initialized-buffer observations and pre-submission custody.
+    #[cfg(feature = "stock-ui")]
+    pub(crate) fn create_buffer_with_data(
+        &mut self,
+        label: &'static str,
+        contents: &[u8],
+        usage: wgpu::BufferUsages,
+    ) -> Result<(wgpu::Buffer, WgpuFeatureAllocation), WgpuRenderProgramError> {
+        self.preparation
+            .create_buffer_with_data(label, contents, usage)
+            .map_err(Into::into)
+    }
 }
 
 /// Encodes one Feature against already initialized shared resources.

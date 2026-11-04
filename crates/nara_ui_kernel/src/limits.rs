@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::mesh::{HARD_MAX_MESH_INDICES, HARD_MAX_MESH_VERTICES};
+
 const HARD_MAX_ROOTS: usize = 64;
 const HARD_MAX_NODES: usize = 4_096;
 const HARD_MAX_DEPTH: usize = 64;
@@ -24,6 +26,8 @@ pub struct UiLimits {
     pub(crate) max_surfaces: usize,
     pub(crate) max_surface_lifetimes: usize,
     pub(crate) max_layout_work: usize,
+    pub(crate) max_mesh_vertices: usize,
+    pub(crate) max_mesh_indices: usize,
 }
 
 /// Exact authoring constraints that must travel with one immutable source snapshot.
@@ -36,6 +40,8 @@ pub(crate) struct UiSnapshotProfile {
     max_nodes: usize,
     max_depth: usize,
     max_key_bytes: usize,
+    max_mesh_vertices: usize,
+    max_mesh_indices: usize,
 }
 
 impl Default for UiLimits {
@@ -51,11 +57,40 @@ impl Default for UiLimits {
             max_surfaces: HARD_MAX_SURFACES,
             max_surface_lifetimes: HARD_MAX_SURFACE_LIFETIMES,
             max_layout_work: HARD_MAX_LAYOUT_WORK,
+            max_mesh_vertices: HARD_MAX_MESH_VERTICES,
+            max_mesh_indices: HARD_MAX_MESH_INDICES,
         }
     }
 }
 
 impl UiLimits {
+    /// Bounds complete mesh vertex occurrences independently in authored sources and output.
+    ///
+    /// Shared allocations and hidden sources are charged per occurrence; retained fallback
+    /// output participates in the same candidate-wide output ceiling.
+    pub fn with_max_mesh_vertices(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_mesh_vertices", value, HARD_MAX_MESH_VERTICES)?;
+        self.max_mesh_vertices = value;
+        Ok(self)
+    }
+
+    /// Bounds complete triangle-index occurrences independently in sources and resolved output.
+    pub fn with_max_mesh_indices(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_mesh_indices", value, HARD_MAX_MESH_INDICES)?;
+        self.max_mesh_indices = value;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn max_mesh_vertices(self) -> usize {
+        self.max_mesh_vertices
+    }
+
+    #[must_use]
+    pub const fn max_mesh_indices(self) -> usize {
+        self.max_mesh_indices
+    }
+
     /// Candidate-wide layout dispatch, custom callback and child-request ceiling.
     ///
     /// Cache-hit dispatches and failed requests still consume work. This is a finite operation
@@ -78,6 +113,8 @@ impl UiLimits {
             max_nodes: self.max_nodes,
             max_depth: self.max_depth,
             max_key_bytes: self.max_key_bytes,
+            max_mesh_vertices: self.max_mesh_vertices,
+            max_mesh_indices: self.max_mesh_indices,
         }
     }
 
@@ -136,6 +173,16 @@ impl UiLimits {
     }
 
     pub(crate) fn validate(self) -> Result<(), UiLimitsError> {
+        validate(
+            "max_mesh_vertices",
+            self.max_mesh_vertices,
+            HARD_MAX_MESH_VERTICES,
+        )?;
+        validate(
+            "max_mesh_indices",
+            self.max_mesh_indices,
+            HARD_MAX_MESH_INDICES,
+        )?;
         validate(
             "max_layout_work",
             self.max_layout_work,

@@ -13,6 +13,7 @@ mod interaction;
 mod journal;
 mod layout;
 mod limits;
+mod mesh;
 mod style;
 
 /// First-party cross-crate implementation seams that are not product API.
@@ -67,6 +68,7 @@ pub use layout::{
     UiLayoutError, UiLayoutMeasurement, UiLayoutOutput,
 };
 pub use limits::{UiLimits, UiLimitsError};
+pub use mesh::{UiMesh, UiMeshError, UiMeshVertex};
 pub use style::{
     UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges,
     UiFlexDirection, UiJustify, UiOverflow, UiPositionMode, UiPreparedText, UiRevision, UiStyle,

@@ -6,6 +6,7 @@ use crate::{
 };
 
 use super::order::RootOrdered;
+use crate::mesh::MeshCounts;
 
 #[derive(Clone, Debug)]
 pub(super) struct RootLayoutFact {
@@ -42,6 +43,7 @@ pub(super) struct RootVisual {
     pub(super) layouts: Vec<RootOrdered<RootLayoutFact>>,
     pub(super) paint: Vec<RootOrdered<UiPaintPrimitive>>,
     pub(super) shaped_glyphs: usize,
+    pub(super) mesh_counts: MeshCounts,
 }
 
 impl RootVisual {
