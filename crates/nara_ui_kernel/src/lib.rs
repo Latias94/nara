@@ -36,7 +36,7 @@ pub use authoring::{
     UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiInteraction, UiLayer,
     UiNode, UiRoot, UiSemanticRole, UiSemantics,
 };
-pub use compiler::{UiCompileError, UiCompiler};
+pub use compiler::{UiCompileError, UiCompileWorkStats, UiCompiler};
 pub use frame::{
     UiDiagnostic, UiEnvironment, UiEnvironmentError, UiFocusFact, UiFrame, UiFrameRevision,
     UiHitRegion, UiLayoutFact, UiPaintPrimitive, UiPresentationReceipt, UiResolvedBorder,

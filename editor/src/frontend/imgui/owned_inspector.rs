@@ -313,6 +313,7 @@ struct CompiledInspector {
 
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
 pub(super) struct OwnedInspector {
+    work: super::owned_work::OwnedPanelWork,
     root: UiRootKey,
     content_key: UiKey,
     scroll_pixels: f32,
@@ -340,6 +341,7 @@ impl OwnedInspector {
             UiLocalKey::runtime("nara.inspector.recovery", "discard")?,
         )?;
         Ok(Self {
+            work: Default::default(),
             root,
             content_key,
             scroll_pixels: 0.0,
@@ -414,6 +416,7 @@ impl OwnedInspector {
         read_only: bool,
         tool_presentation: Option<&super::source_tool::OwnedSourceToolPresentation>,
     ) -> Result<Arc<UiFrame>, OwnedInspectorError> {
+        self.work.compile_calls = self.work.compile_calls.saturating_add(1);
         self.read_only = read_only;
         let width = environment.logical_size().width() - 2.0 * PANEL_INSET;
         if width <= 16.0 {
@@ -552,6 +555,7 @@ impl OwnedInspector {
         self.finish_components(composition.as_ref());
         let projected_composition = composition.as_ref().map(DisplayedComposition::observation);
         let mut snapshot = self.viewport_snapshot(nodes)?;
+        self.work.record_snapshot(&snapshot);
         if let Some(previous) = self.frames.last()
             && previous.snapshot.roots() == snapshot.roots()
             && previous.frame.environment() == environment
@@ -560,6 +564,7 @@ impl OwnedInspector {
             && previous.projected_recovery == projected_recovery
             && previous.projected_composition == projected_composition
         {
+            self.work.reused_frames = self.work.reused_frames.saturating_add(1);
             return Ok(Arc::clone(&previous.frame));
         }
         let next_snapshot = self
@@ -572,6 +577,7 @@ impl OwnedInspector {
             && self.clamp_scroll(&frame)
         {
             snapshot = self.viewport_snapshot(nodes)?;
+            self.work.record_snapshot(&snapshot);
             let next_snapshot = self
                 .next_snapshot
                 .checked_add(1)

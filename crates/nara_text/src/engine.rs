@@ -15,6 +15,38 @@ use crate::{
     face::{MAX_FONT_FACES, MAX_TOTAL_FONT_BYTES},
 };
 
+/// Cumulative work observed by one [`TextEngine`], with every counter saturating at [`u64::MAX`].
+///
+/// These counters describe entered operations and produced work, including rejected results.
+/// They do not affect admission, resource budgets, or publication of layout, raster, or editor state.
+/// They are not timings, retained memory measurements, or permission to perform further work.
+///
+/// Layout counters cover only [`TextEngine::layout`] and [`TextEngine::layout_with_glyph_limit`].
+/// [`crate::TextEditor`] construction, edits, and projection use Parley directly and are excluded,
+/// as are font setup and validation-only calls. Window preparation includes its nested raster work.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextWorkStats {
+    /// Direct layout calls, including request validation failures. Delegation counts only once.
+    pub layout_attempts: u64,
+    /// UTF-8 source bytes supplied to direct layout calls, including refused requests.
+    /// This is submitted input size, not a count of bytes scanned or retained.
+    pub layout_source_bytes: u64,
+    /// Glyphs exposed by complete line-broken Parley layouts before Nara result admission.
+    /// Includes layouts refused during projection; request validation failures contribute none.
+    pub shaped_glyphs: u64,
+    /// Raster calls, including rejected keys and calls made while preparing paint windows.
+    pub raster_attempts: u64,
+    /// Image bytes produced by the rasterizer before content, extent, and mask admission.
+    /// Includes discarded or refused images; absent images contribute no bytes.
+    pub raster_output_bytes: u64,
+    /// Window preparation calls, including source, placement, and raster failures.
+    /// Delegation from `prepare_window` to `prepare_window_at` counts only once.
+    pub paint_window_attempts: u64,
+    /// Source glyphs entered by the window scan, including hidden glyphs, footprint reuse,
+    /// and the glyph causing a failure. A failure stops counting at that glyph.
+    pub paint_window_glyphs_scanned: u64,
+}
+
 pub struct TextEngine {
     primary_face_id: FontFaceId,
     fonts: Vec<AdmittedFont>,
@@ -23,6 +55,7 @@ pub struct TextEngine {
     pub(crate) font_context: FontContext,
     pub(crate) layout_context: LayoutContext<()>,
     scale_context: ScaleContext,
+    pub(crate) work_stats: TextWorkStats,
 }
 
 struct AdmittedFont {
@@ -122,7 +155,16 @@ impl TextEngine {
             font_context,
             layout_context: LayoutContext::new(),
             scale_context: ScaleContext::new(),
+            work_stats: TextWorkStats::default(),
         })
+    }
+
+    /// Returns an independent cumulative work snapshot without changing engine state.
+    ///
+    /// See [`TextWorkStats`] for counting phases and the excluded Parley editor paths.
+    #[must_use]
+    pub const fn work_stats(&self) -> TextWorkStats {
+        self.work_stats
     }
 
     #[must_use]
@@ -153,6 +195,11 @@ impl TextEngine {
         request: &TextLayoutRequest,
         max_glyphs: usize,
     ) -> Result<TextLayout, TextLayoutError> {
+        self.work_stats.layout_attempts = self.work_stats.layout_attempts.saturating_add(1);
+        self.work_stats.layout_source_bytes = self
+            .work_stats
+            .layout_source_bytes
+            .saturating_add(request.text().len() as u64);
         self.validate_request(request)?;
         let mut builder =
             self.layout_context
@@ -167,6 +214,16 @@ impl TextEngine {
             parley_alignment(request.alignment()),
             AlignmentOptions::default(),
         );
+        for line in parley_layout.lines() {
+            for run in line.runs() {
+                for cluster in run.clusters() {
+                    self.work_stats.shaped_glyphs = self
+                        .work_stats
+                        .shaped_glyphs
+                        .saturating_add(cluster.glyphs().count() as u64);
+                }
+            }
+        }
 
         self.project_layout_with_glyph_limit(&parley_layout, request, max_glyphs)
     }

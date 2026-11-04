@@ -37,6 +37,7 @@ use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOpti
 mod boundaries;
 mod filter;
 mod long_content;
+mod work_costs;
 mod workflows;
 
 fn entity(index: usize) -> SceneEntityId {
@@ -94,7 +95,14 @@ fn open(project: &InteractionProject) -> TestApplication {
     }
     assert!(
         application.current_frame().is_some(),
-        "the ordinary InteractionProject opens"
+        "the ordinary InteractionProject opens; state={:?}, recovery={:?}",
+        application.state(),
+        match application.project_shell_model() {
+            Some(crate::app::EditorProjectShellModel::Recovery { diagnostics, .. }) => {
+                Some(diagnostics)
+            }
+            _ => None,
+        },
     );
     TestApplication(application)
 }

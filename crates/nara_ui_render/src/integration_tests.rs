@@ -766,12 +766,21 @@ fn undrained_outcomes_block_the_next_compile_before_planner_mutation() {
     let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
     let missing_image = UiImageId::new("project://ui/missing.png").unwrap();
     let rejected = frame(1, 1, UiVisual::image(missing_image, white));
+    let rejected_attempt = UiPresentationAttemptIdentity::routed(
+        UiPaintPacketIdentity::from_frame(&rejected),
+        RenderTarget::Window(WindowId::PRIMARY),
+    );
     assert_eq!(
         compile_ui_paint_packets(&mut world, &[rejected])
             .unwrap()
             .rejected_packets,
         1
     );
+    let rejected_stats = world.resource::<UiPresentationState>().0.work_stats();
+    assert_eq!(rejected_stats.plan_attempts, 1);
+    assert_eq!(rejected_stats.planned_packets, 0);
+    assert_eq!(rejected_stats.lowered_primitives, 0);
+    assert_eq!(rejected_stats.text, nara_text::TextWorkStats::default());
 
     let error =
         compile_ui_paint_packets(&mut world, &[frame(1, 2, UiVisual::solid(white))]).unwrap_err();
@@ -780,6 +789,10 @@ fn undrained_outcomes_block_the_next_compile_before_planner_mutation() {
         error,
         UiPresentationIntegrationError::PendingPresentationOutcomes { count: 1 }
     );
+    assert_eq!(
+        world.resource::<UiPresentationState>().0.work_stats(),
+        rejected_stats
+    );
     assert!(
         world
             .resource::<UiPresentationState>()
@@ -787,6 +800,18 @@ fn undrained_outcomes_block_the_next_compile_before_planner_mutation() {
             .planned(RenderTarget::Window(WindowId::PRIMARY))
             .is_none()
     );
+    let outcomes = drain_ui_presentation_outcomes(&mut world).unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(
+        &outcomes[0],
+        UiPresentationOutcome::ContentRejected { .. }
+    ));
+    assert_eq!(outcomes[0].attempt(), Some(rejected_attempt));
+    let expected_message = UiPresentationContentError::MissingImage {
+        id: "project://ui/missing.png".to_owned(),
+    }
+    .to_string();
+    assert_eq!(outcomes[0].message(), Some(expected_message.as_str()));
 }
 
 #[test]

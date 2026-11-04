@@ -171,6 +171,8 @@ impl TextEngine {
         origin: [f32; 2],
         physical_origin: [f32; 2],
     ) -> Result<Arc<TextLayout>, TextWindowError> {
+        self.work_stats.paint_window_attempts =
+            self.work_stats.paint_window_attempts.saturating_add(1);
         self.validate_paint_snapshot(snapshot, target_scale)?;
         if ![
             clip.x0,
@@ -214,6 +216,10 @@ impl TextEngine {
         for run in source.runs() {
             let glyph_start = output.glyphs.len();
             for glyph in &source.glyphs()[run.glyph_range()] {
+                self.work_stats.paint_window_glyphs_scanned = self
+                    .work_stats
+                    .paint_window_glyphs_scanned
+                    .saturating_add(1);
                 let baseline = [
                     physical_origin[0] + (origin[0] + glyph.x()) * target_scale,
                     physical_origin[1] + (origin[1] + glyph.y()) * target_scale,

@@ -9,7 +9,7 @@ mod paint;
 mod raster;
 
 pub use editing::{TextEdit, TextEditError, TextEditOutcome, TextEditor, TextRect, TextSelection};
-pub use engine::{TextEngine, TextEngineCreateError};
+pub use engine::{TextEngine, TextEngineCreateError, TextWorkStats};
 pub use face::{
     BUNDLED_FONT_BYTE_LEN, BUNDLED_FONT_LICENSE_SHA256, BUNDLED_FONT_SHA256, FontFace,
     FontFaceError, FontFaceId, MAX_FONT_CONTAINER_BYTES, MAX_FONT_FACES, MAX_TOTAL_FONT_BYTES,

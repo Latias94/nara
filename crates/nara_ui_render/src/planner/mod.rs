@@ -30,11 +30,34 @@ struct TargetPresentationState {
     active_submission: Option<UiBackendSubmissionIdentity>,
 }
 
+/// Cumulative, saturating work observations for one [`UiPresentationPlanner`].
+///
+/// Observations may advance on rejected work. They do not authorize presentation or reset when
+/// a target is retired.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UiPresentationWorkStats {
+    /// Calls to [`UiPresentationPlanner::plan`], including rejected calls.
+    pub plan_attempts: u64,
+    /// Successful calls to [`UiPresentationPlanner::plan`] that retained a packet.
+    pub planned_packets: u64,
+    /// Output primitives in successfully planned packets, including repeated content.
+    ///
+    /// Excludes partial lowering for rejected plans and any further backend expansion or GPU work.
+    pub lowered_primitives: u64,
+    /// Work observed by the planner's own text engine, including work before a plan fails.
+    ///
+    /// Excludes shaping and other text work performed by the caller's compiler or text engine.
+    pub text: nara_text::TextWorkStats,
+}
+
 /// Target-private, failure-atomic planner for resource-complete UI packets.
 pub struct UiPresentationPlanner {
     limits: UiPresentationLimits,
     text: TextEngine,
     targets: HashMap<RenderTarget, TargetPresentationState>,
+    plan_attempts: u64,
+    planned_packets: u64,
+    lowered_primitives: u64,
 }
 
 impl UiPresentationPlanner {
@@ -62,7 +85,21 @@ impl UiPresentationPlanner {
             limits,
             text,
             targets: HashMap::new(),
+            plan_attempts: 0,
+            planned_packets: 0,
+            lowered_primitives: 0,
         })
+    }
+
+    /// Copies cumulative work observations without changing packet or presentation state.
+    #[must_use]
+    pub fn work_stats(&self) -> UiPresentationWorkStats {
+        UiPresentationWorkStats {
+            plan_attempts: self.plan_attempts,
+            planned_packets: self.planned_packets,
+            lowered_primitives: self.lowered_primitives,
+            text: self.text.work_stats(),
+        }
     }
 
     #[must_use]
@@ -76,6 +113,7 @@ impl UiPresentationPlanner {
         target: RenderTarget,
         images: &UiPreparedImages,
     ) -> Result<Arc<UiPaintPacket>, UiPresentationContentError> {
+        self.plan_attempts = self.plan_attempts.saturating_add(1);
         let identity = UiPaintPacketIdentity::from_frame(&frame);
         let surface_id = identity.surface_id();
         if let Some(existing_surface) = self
@@ -151,6 +189,10 @@ impl UiPresentationPlanner {
                 active_submission: None,
             },
         );
+        self.planned_packets = self.planned_packets.saturating_add(1);
+        self.lowered_primitives = self
+            .lowered_primitives
+            .saturating_add(u64::try_from(packet.primitives().len()).unwrap_or(u64::MAX));
         Ok(packet)
     }
 

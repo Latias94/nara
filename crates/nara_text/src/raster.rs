@@ -52,6 +52,7 @@ impl GlyphRaster {
 
 impl TextEngine {
     pub fn rasterize(&mut self, key: GlyphRasterKey) -> Result<GlyphRaster, GlyphRasterError> {
+        self.work_stats.raster_attempts = self.work_stats.raster_attempts.saturating_add(1);
         if !self.contains_font(key.face_id()) {
             return Err(GlyphRasterError::FaceMismatch);
         }
@@ -89,6 +90,10 @@ impl TextEngine {
                 mask: Arc::from([]),
             });
         };
+        self.work_stats.raster_output_bytes = self
+            .work_stats
+            .raster_output_bytes
+            .saturating_add(image.data.len() as u64);
         if image.content != Content::Mask {
             return Err(GlyphRasterError::UnexpectedContent);
         }

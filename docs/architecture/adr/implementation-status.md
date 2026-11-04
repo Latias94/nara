@@ -30,6 +30,13 @@ Their removal of original Dear painters means an intact pure-ImGui reference mus
 identified rather than assumed. No code was reverted/rebuilt and no new composition was qualified
 by this documentation correction.
 
+The first [R11a work-observation prerequisite](../../benchmarks/2026-11-04-ui-work-baseline.md)
+adds detached cumulative text/compiler/planner observations and executable description/dependency
+checks. Debug CPU probes distinguish frame reuse from repeated description work and keep a
+full-source startup allowance refusal separate from read-only 10,000/100,000-row projection costs.
+This is not a cache optimization or independent frontend qualification. Optimized/native costs,
+allocation/upload/GPU/latency and fixed budgets still keep R11a open; R11b-f remain unimplemented.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

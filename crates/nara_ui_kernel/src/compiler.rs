@@ -21,9 +21,37 @@ mod order;
 mod root;
 mod text;
 
+/// Cumulative work observed within one [`UiCompiler`] and its text engine.
+///
+/// Counts saturate at `u64::MAX` and include work reached by rejected attempts. They do not
+/// confer publication, cache validity, or presentation authority, and do not measure time,
+/// allocation, rendering, or work performed by other owners.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UiCompileWorkStats {
+    /// Calls to [`UiCompiler::compile`], including rejection before any root work.
+    pub compile_attempts: u64,
+    /// Successfully committed immutable frames, including frames with fallback or absent roots.
+    pub published_frames: u64,
+    /// Root envelopes processed after global admission, including rejected root bodies.
+    pub root_compile_attempts: u64,
+    /// Taffy nodes successfully created, including nodes in subsequently rejected candidates.
+    pub layout_nodes_created: u64,
+    /// Taffy layout computations started, including computations that fail.
+    pub layout_passes: u64,
+    /// Taffy measurement callback invocations, including calls without text or after errors.
+    pub measurement_callbacks: u64,
+    /// Compatible last-good visuals selected after local rejection, even in failed candidates.
+    ///
+    /// This counts failure fallback, not active incremental reuse of valid roots.
+    pub retained_roots: u64,
+    /// Current cumulative text-engine work, refreshed when [`UiCompiler::work_stats`] is called.
+    pub text: nara_text::TextWorkStats,
+}
+
 /// Stateful owner of text measurement, bounded last-good roots, and frame revisions.
 pub struct UiCompiler {
     text_engine: TextEngine,
+    work_stats: UiCompileWorkStats,
     limits: UiLimits,
     max_text_work_bytes: usize,
     max_shaped_glyphs: usize,
@@ -59,6 +87,7 @@ impl UiCompiler {
         let max_shaped_glyphs = text_limits.max_glyphs;
         Ok(Self {
             text_engine: TextEngine::with_fonts(font_faces, text_limits)?,
+            work_stats: UiCompileWorkStats::default(),
             limits,
             max_text_work_bytes,
             max_shaped_glyphs,
@@ -68,6 +97,17 @@ impl UiCompiler {
         })
     }
 
+    /// Returns a detached cumulative snapshot, including current compiler-owned text work.
+    ///
+    /// Observation does not reset counters or change revisions, caches, or presentation.
+    #[must_use]
+    pub fn work_stats(&self) -> UiCompileWorkStats {
+        UiCompileWorkStats {
+            text: self.text_engine.work_stats(),
+            ..self.work_stats
+        }
+    }
+
     /// Compiles all roots independently and publishes one immutable cross-projection frame.
     pub fn compile(
         &mut self,
@@ -75,6 +115,7 @@ impl UiCompiler {
         environment: UiEnvironment,
         theme: UiTheme,
     ) -> Result<Arc<UiFrame>, UiCompileError> {
+        self.work_stats.compile_attempts = self.work_stats.compile_attempts.saturating_add(1);
         if environment.theme_revision() != theme.revision() {
             return Err(UiCompileError::ThemeRevisionMismatch {
                 environment: environment.theme_revision().get(),
@@ -106,9 +147,12 @@ impl UiCompiler {
             TextCompileSession::new(self.max_text_work_bytes, self.max_shaped_glyphs);
 
         for envelope in &snapshot.envelopes {
+            self.work_stats.root_compile_attempts =
+                self.work_stats.root_compile_attempts.saturating_add(1);
             let compiled = match envelope.body() {
                 crate::authoring::UiRootEnvelopeBody::Ready(index) => root::compile_root(
                     &mut self.text_engine,
+                    &mut self.work_stats,
                     &snapshot.roots[*index],
                     environment,
                     theme,
@@ -154,6 +198,8 @@ impl UiCompiler {
                 Err(RootCompileError::Local(diagnostic)) => {
                     let fallback = self.cache.compatible(envelope.key(), environment);
                     if let Some(visual) = fallback {
+                        self.work_stats.retained_roots =
+                            self.work_stats.retained_roots.saturating_add(1);
                         account_visual(
                             &mut node_count,
                             &mut shaped_glyphs,
@@ -275,6 +321,7 @@ impl UiCompiler {
         );
         self.next_frame_revision = next_frame_revision;
         self.cache_clock = next_cache_clock;
+        self.work_stats.published_frames = self.work_stats.published_frames.saturating_add(1);
         Ok(frame)
     }
 

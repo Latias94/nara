@@ -15,6 +15,7 @@ use crate::{
 };
 
 use super::{
+    UiCompileWorkStats,
     cache::{RootLayoutFact, RootVisual},
     order::{RootOrder, RootOrdered},
     text::{TextCompileError, TextCompileSession},
@@ -61,8 +62,10 @@ impl RootBudget {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_root(
     text_engine: &mut TextEngine,
+    work_stats: &mut UiCompileWorkStats,
     root: &UiRoot,
     environment: UiEnvironment,
     theme: UiTheme,
@@ -102,12 +105,14 @@ pub(super) fn compile_root(
                 message: error.to_string(),
             })
         })?;
+        work_stats.layout_nodes_created = work_stats.layout_nodes_created.saturating_add(1);
         node_ids[index] = Some(id);
     }
 
     let root_id = node_ids[0].expect("a flattened root always has one Taffy node");
     let mut measurement_error = None;
     let scale_factor = environment.scale_factor();
+    work_stats.layout_passes = work_stats.layout_passes.saturating_add(1);
     tree.compute_layout_with_measure(
         root_id,
         TaffySize {
@@ -115,6 +120,7 @@ pub(super) fn compile_root(
             height: AvailableSpace::Definite(environment.logical_size().height()),
         },
         |_known, available, _node_id, context, _style| {
+            work_stats.measurement_callbacks = work_stats.measurement_callbacks.saturating_add(1);
             if measurement_error.is_some() {
                 return TaffySize::ZERO;
             }

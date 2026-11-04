@@ -359,6 +359,15 @@ impl UiAuthoringSnapshot {
         self.source_revision
     }
 
+    /// Returns admitted source nodes, including the original counts of rejected root bodies.
+    ///
+    /// Sums stored root-envelope counts without traversing node trees. This describes the
+    /// constructed snapshot, independently of compilation, retained visuals, or presentation.
+    #[must_use]
+    pub fn source_node_count(&self) -> usize {
+        self.envelopes.iter().map(UiRootEnvelope::node_count).sum()
+    }
+
     pub(crate) const fn profile(&self) -> UiSnapshotProfile {
         self.profile
     }

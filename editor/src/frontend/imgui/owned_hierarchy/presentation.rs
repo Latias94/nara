@@ -25,6 +25,7 @@ impl OwnedHierarchy {
         theme: UiTheme,
         read_only: bool,
     ) -> Result<Arc<UiFrame>, OwnedHierarchyError> {
+        self.work.compile_calls = self.work.compile_calls.saturating_add(1);
         let width = environment.logical_size().width() - 2.0 * INSET;
         let height = environment.logical_size().height();
         if width <= 16.0 || height <= 2.0 * INSET {
@@ -530,6 +531,7 @@ impl OwnedHierarchy {
         let snapshot = UiAuthoringSnapshotBuilder::new(self.next_snapshot)
             .with_root(root)
             .build()?;
+        self.work.record_snapshot(&snapshot);
         if self.frames.last().is_some_and(|previous| {
             previous.frame.environment() != environment
                 || previous.theme != theme
@@ -547,6 +549,7 @@ impl OwnedHierarchy {
             && previous.source_limit == source_limit
             && previous.choice_limit == choice_limit
         {
+            self.work.reused_frames = self.work.reused_frames.saturating_add(1);
             return Ok(Arc::clone(&previous.frame));
         }
         let next_snapshot = self

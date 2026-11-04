@@ -169,6 +169,7 @@ struct CompiledHierarchy {
 
 /// Private source-declaration panel. Session owns selection, commands, history and persistence.
 pub(super) struct OwnedHierarchy {
+    work: super::owned_work::OwnedPanelWork,
     root: UiRootKey,
     engine: TextEngine,
     compiler: UiCompiler,
@@ -227,6 +228,7 @@ impl OwnedHierarchy {
         let compiler = UiCompiler::with_fonts(fonts, Default::default())?;
         let filter = UiTextField::new(root.clone(), "Filter entities", "", TEXT_SIZE, &mut engine)?;
         Ok(Self {
+            work: Default::default(),
             root,
             engine,
             compiler,

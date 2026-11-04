@@ -1375,6 +1375,14 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 Success is a reproducible baseline and executable work-count assertions, not a performance win.
 No particular persistent layout arena, reactive language, public cache key or new crate is frozen.
 
+The first [work-observation prerequisite](../benchmarks/2026-11-04-ui-work-baseline.md) adds
+owner-local text/compiler/planner counters, description-before-reuse assertions and dependency
+closure checks. Its debug Inspector and explicitly read-only 10,000/100,000-row projection probes
+show bounded live layouts but repeated description/scanning work. An actual 10,000-entity project
+Open was refused by startup source preparation before a Session existed; this is recorded
+separately rather than hidden by widening admission. These probes do not complete R11a: matched
+optimized/native active-View, allocation/upload/GPU/latency and fixed numeric budgets remain open.
+
 ### R11b: Public panel hosting and component composition
 
 **Dependencies:** R11a and the current qualified Application/Session query/result contracts.

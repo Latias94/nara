@@ -536,6 +536,68 @@ fn independently_locked_presentation_ui_consumer_has_an_exact_boundary() {
 }
 
 #[test]
+fn independently_locked_ui_module_consumer_has_a_neutral_dependency_closure() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("ui-module-consumer")
+        .join("Cargo.toml");
+    let tree = cargo_tree_for_manifest(
+        &manifest,
+        "nara-ui-module-consumer",
+        &["-e", "normal,build", "--target", "all"],
+    );
+
+    for package in ["nara_text", "nara_ui_kernel", "nara_ui_widgets"] {
+        assert_present(&tree, package);
+    }
+    for package in [
+        "nara",
+        "nara_app",
+        "nara_ecs",
+        "bevy_ecs",
+        "nara_scene",
+        "nara_project",
+        "nara_ui",
+        "nara-editor",
+        "dear-imgui-rs",
+        "dear-imgui-sys",
+        "dear-imgui-wgpu",
+        "dear-imgui-winit",
+        "nara_render_wgpu",
+        "nara_winit",
+        "wgpu",
+        "winit",
+    ] {
+        assert_not_present(&tree, package);
+    }
+}
+
+#[test]
+fn game_ui_adapter_dependency_closure_excludes_editor_frontends() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates")
+        .join("nara_ui")
+        .join("Cargo.toml");
+    let tree = cargo_tree_for_manifest(
+        &manifest,
+        "nara_ui",
+        &["-e", "normal,build", "--target", "all"],
+    );
+
+    assert_present(&tree, "nara_ui");
+    for package in [
+        "nara-editor",
+        "dear-imgui-rs",
+        "dear-imgui-sys",
+        "dear-imgui-wgpu",
+        "dear-imgui-winit",
+    ] {
+        assert_not_present(&tree, package);
+    }
+}
+
+#[test]
 fn public_prelude_is_gameplay_first() {
     check_public_prelude_fixture("gameplay-pass", true, None);
     check_public_prelude_fixture("recipe-pass", true, None);

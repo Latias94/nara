@@ -23,7 +23,7 @@ pub use packet::{
 };
 pub use planner::{
     UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
-    UiPresentationPlannerCreateError,
+    UiPresentationPlannerCreateError, UiPresentationWorkStats,
 };
 
 #[doc(hidden)]
@@ -152,7 +152,8 @@ pub mod advanced {
         UiPresentationContentError, UiPresentationEpoch, UiPresentationIntegrationError,
         UiPresentationLimits, UiPresentationLimitsError, UiPresentationOutcome,
         UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRetryIdentity,
-        UiPresentationRuntimeGeneration, compile_ui_paint_packets, drain_ui_presentation_outcomes,
+        UiPresentationRuntimeGeneration, UiPresentationWorkStats, compile_ui_paint_packets,
+        drain_ui_presentation_outcomes,
     };
 }
 

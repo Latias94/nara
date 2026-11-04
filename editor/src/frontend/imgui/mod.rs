@@ -21,6 +21,7 @@ mod owned_inspector;
 mod owned_panel;
 mod owned_scene;
 mod owned_ui_hierarchy;
+mod owned_work;
 pub(crate) use owned_inspector::InspectorOperation;
 pub(crate) use owned_panel::ImguiOwnedImage;
 pub(crate) use view::SceneViewPlacement;

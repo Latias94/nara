@@ -24,7 +24,7 @@ use nara_window::WindowId;
 
 use crate::{
     UiPacketFill, UiPacketPrimitive, UiPacketUv, UiPreparedImages, UiPresentationContentError,
-    UiPresentationLimits, UiPresentationPlanner,
+    UiPresentationLimits, UiPresentationPlanner, UiPresentationWorkStats,
 };
 
 fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui_kernel::UiFrame> {
@@ -1124,6 +1124,108 @@ fn captured_pathless_products_keep_primary_auxiliary_and_source_separate() {
 }
 
 #[test]
+fn work_stats_distinguish_cold_rasterization_from_warm_atlas_reuse() {
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let candidate = frame(
+        1,
+        1,
+        vec![text_node(
+            "label",
+            "Nara",
+            Some(UiVisual::solid(UiColor::rgba(0.1, 0.2, 0.3, 1.0))),
+        )],
+    );
+    let images = UiPreparedImages::default();
+    let mut planner = UiPresentationPlanner::default();
+    assert_eq!(planner.work_stats(), UiPresentationWorkStats::default());
+
+    let cold = planner
+        .plan(Arc::clone(&candidate), target, &images)
+        .unwrap();
+    let cold_stats = planner.work_stats();
+    assert_eq!(cold_stats.plan_attempts, 1);
+    assert_eq!(cold_stats.planned_packets, 1);
+    assert_eq!(
+        cold_stats.lowered_primitives,
+        u64::try_from(cold.primitives().len()).unwrap()
+    );
+    assert!(cold_stats.text.raster_attempts > 0);
+    assert!(cold_stats.text.raster_output_bytes > 0);
+    assert_eq!(cold_stats.text.layout_attempts, 0);
+    assert!(!cold.glyph_pages().is_empty());
+
+    let warm = planner.plan(candidate, target, &images).unwrap();
+    let warm_stats = planner.work_stats();
+    assert_eq!(warm_stats.plan_attempts, 2);
+    assert_eq!(warm_stats.planned_packets, 2);
+    assert_eq!(
+        warm_stats.lowered_primitives,
+        cold_stats.lowered_primitives + u64::try_from(warm.primitives().len()).unwrap()
+    );
+    assert_eq!(warm_stats.text, cold_stats.text);
+    assert_eq!(warm.primitives(), cold.primitives());
+    assert_eq!(warm.glyph_pages().len(), cold.glyph_pages().len());
+    for (cold_page, warm_page) in cold.glyph_pages().iter().zip(warm.glyph_pages()) {
+        assert_eq!(cold_page.key(), warm_page.key());
+        assert!(cold_page.shares_storage_with(warm_page));
+    }
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &warm));
+    assert!(planner.last_presented(target).is_none());
+    assert!(Arc::ptr_eq(&planner.retire_target(target).unwrap(), &warm));
+    assert_eq!(planner.work_stats(), warm_stats);
+}
+
+#[test]
+fn rejected_atlas_work_counts_attempts_without_replacing_last_good_packet() {
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let limits = UiPresentationLimits::default()
+        .with_max_new_glyphs_per_plan(1)
+        .unwrap();
+    let images = UiPreparedImages::default();
+    let mut planner = UiPresentationPlanner::new(limits).unwrap();
+    let candidate = frame(1, 1, vec![text_node("label", "A", None)]);
+    let first = planner
+        .plan(Arc::clone(&candidate), target, &images)
+        .unwrap();
+    let first_stats = planner.work_stats();
+
+    let error = planner
+        .plan(
+            frame(1, 2, vec![text_node("label", "BC", None)]),
+            target,
+            &images,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        UiPresentationContentError::NewGlyphLimitExceeded { limit: 1 }
+    );
+    let rejected_stats = planner.work_stats();
+    assert_eq!(rejected_stats.plan_attempts, first_stats.plan_attempts + 1);
+    assert_eq!(rejected_stats.planned_packets, first_stats.planned_packets);
+    assert_eq!(
+        rejected_stats.lowered_primitives,
+        first_stats.lowered_primitives
+    );
+    assert!(rejected_stats.text.raster_attempts > first_stats.text.raster_attempts);
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
+    assert!(planner.last_presented(target).is_none());
+
+    let replay = planner.plan(candidate, target, &images).unwrap();
+    let replay_stats = planner.work_stats();
+    assert_eq!(replay_stats.plan_attempts, 3);
+    assert_eq!(replay_stats.planned_packets, 2);
+    assert_eq!(
+        replay_stats.lowered_primitives,
+        first_stats.lowered_primitives + u64::try_from(replay.primitives().len()).unwrap()
+    );
+    assert_eq!(replay_stats.text, rejected_stats.text);
+    assert_eq!(replay.primitives(), first.primitives());
+    assert_eq!(first.glyph_pages()[0].key(), replay.glyph_pages()[0].key());
+    assert!(first.glyph_pages()[0].shares_storage_with(&replay.glyph_pages()[0]));
+}
+
+#[test]
 fn missing_image_preflight_does_not_stage_glyphs_or_replace_last_good() {
     let target = RenderTarget::Window(WindowId::PRIMARY);
     let mut planner = UiPresentationPlanner::default();
@@ -1134,6 +1236,7 @@ fn missing_image_preflight_does_not_stage_glyphs_or_replace_last_good() {
             &UiPreparedImages::default(),
         )
         .unwrap();
+    let first_stats = planner.work_stats();
     let missing = UiImageId::new("project://ui/missing.png").unwrap();
     let error = planner
         .plan(
@@ -1150,10 +1253,19 @@ fn missing_image_preflight_does_not_stage_glyphs_or_replace_last_good() {
             &UiPreparedImages::default(),
         )
         .unwrap_err();
-    assert!(matches!(
+    assert_eq!(
         error,
-        UiPresentationContentError::MissingImage { .. }
-    ));
+        UiPresentationContentError::MissingImage {
+            id: "project://ui/missing.png".to_owned(),
+        }
+    );
+    assert_eq!(
+        planner.work_stats(),
+        UiPresentationWorkStats {
+            plan_attempts: first_stats.plan_attempts + 1,
+            ..first_stats
+        }
+    );
     assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
 
     let replay = planner
@@ -1163,6 +1275,7 @@ fn missing_image_preflight_does_not_stage_glyphs_or_replace_last_good() {
             &UiPreparedImages::default(),
         )
         .unwrap();
+    assert_eq!(planner.work_stats().text, first_stats.text);
     assert_eq!(first.glyph_pages()[0].key(), replay.glyph_pages()[0].key());
     assert!(first.glyph_pages()[0].shares_storage_with(&replay.glyph_pages()[0]));
 }

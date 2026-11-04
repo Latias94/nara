@@ -26,6 +26,7 @@ use super::*;
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
 mod components;
+mod work_costs;
 
 fn application() -> (InteractionProject, EditorApplication) {
     let project = InteractionProject::new();
@@ -343,7 +344,22 @@ fn scrolling_clips_long_fields_preserves_drafts_and_clamps_after_resize() {
         "retained across scroll"
     );
     assert!(fields.drafts[&key].dirty && !fields.drafts[&key].in_flight());
+    let before_resize = controller.work;
+    let before_compile = controller.compiler.work_stats();
     let expanded = paint(&mut controller, &mut fields, &model);
+    assert_eq!(
+        controller.work.compile_calls - before_resize.compile_calls,
+        1
+    );
+    assert_eq!(
+        controller.work.built_snapshots - before_resize.built_snapshots,
+        2
+    );
+    assert_eq!(
+        controller.compiler.work_stats().compile_attempts - before_compile.compile_attempts,
+        2,
+    );
+    assert_eq!(controller.work.reused_frames, before_resize.reused_frames);
     assert_eq!(controller.scroll_pixels, 0.0);
     let content = expanded
         .layouts()
