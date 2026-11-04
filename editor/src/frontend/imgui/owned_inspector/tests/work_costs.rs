@@ -541,6 +541,11 @@ fn compiler_work_delta(
         layout_nodes_created: after.layout_nodes_created - before.layout_nodes_created,
         layout_passes: after.layout_passes - before.layout_passes,
         measurement_callbacks: after.measurement_callbacks - before.measurement_callbacks,
+        layout_work_units: after.layout_work_units - before.layout_work_units,
+        custom_layout_callbacks: after.custom_layout_callbacks - before.custom_layout_callbacks,
+        custom_child_measurements: after.custom_child_measurements
+            - before.custom_child_measurements,
+        custom_child_placements: after.custom_child_placements - before.custom_child_placements,
         retained_roots: after.retained_roots - before.retained_roots,
         text: text_work_delta(before.text, after.text),
     }

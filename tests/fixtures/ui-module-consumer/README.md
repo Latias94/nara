@@ -36,6 +36,16 @@ previous membership until explicit replacement. The component retains no journal
 owner or native input method. Local tests use public field focus; presented input routing is
 separately exercised by the native output consumer importing this actual library.
 
+The composite now uses the independently authored `MeasuredColumn` container. It measures the
+actual title and each field subtree, then places children through scoped public layout access.
+No Taffy identities/storage or engine-private node construction are used. Typography changes
+alter the title's measured height and subsequent row position; compatible repeat composition
+shares its immutable layout description and retained keyed state. Available space and exact
+outer allocation are distinct, and omitted children must be explicitly hidden. The native
+output consumer imports this same library, preserving the original full input/retirement proof.
+This layout interface alone does not qualify custom paths, canvas motion/scroll, foreign panel
+hosting, automatic invalidation or a layout performance improvement.
+
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
 ```text

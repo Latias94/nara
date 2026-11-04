@@ -17,6 +17,7 @@ use self::{
 };
 
 mod cache;
+mod layout;
 mod order;
 mod root;
 mod text;
@@ -40,12 +41,40 @@ pub struct UiCompileWorkStats {
     pub layout_passes: u64,
     /// Taffy measurement callback invocations, including calls without text or after errors.
     pub measurement_callbacks: u64,
+    /// Reached node dispatches, custom callbacks and child requests, including cache hits/failure.
+    pub layout_work_units: u64,
+    /// Actual invocations of user-authored custom layout descriptions.
+    pub custom_layout_callbacks: u64,
+    /// Child measurement requests reached inside custom layouts.
+    pub custom_child_measurements: u64,
+    /// Child placement/hide requests reached inside custom layouts.
+    pub custom_child_placements: u64,
     /// Compatible last-good visuals selected after local rejection, even in failed candidates.
     ///
     /// This counts failure fallback, not active incremental reuse of valid roots.
     pub retained_roots: u64,
     /// Current cumulative text-engine work, refreshed when [`UiCompiler::work_stats`] is called.
     pub text: nara_text::TextWorkStats,
+}
+
+/// One candidate's reached layout operations, shared across successful and failed roots.
+struct LayoutWorkBudget {
+    used: usize,
+    maximum: usize,
+}
+
+impl LayoutWorkBudget {
+    fn charge(&mut self, stats: &mut UiCompileWorkStats) -> Result<(), RootCompileError> {
+        self.used = self.used.saturating_add(1);
+        stats.layout_work_units = stats.layout_work_units.saturating_add(1);
+        if self.used > self.maximum {
+            return Err(RootCompileError::LayoutWorkLimitExceeded {
+                actual: self.used,
+                maximum: self.maximum,
+            });
+        }
+        Ok(())
+    }
 }
 
 /// Stateful owner of text measurement, bounded last-good roots, and frame revisions.
@@ -145,6 +174,10 @@ impl UiCompiler {
         let mut paint_count = 0usize;
         let mut text_session =
             TextCompileSession::new(self.max_text_work_bytes, self.max_shaped_glyphs);
+        let mut layout_work = LayoutWorkBudget {
+            used: 0,
+            maximum: self.limits.max_layout_work,
+        };
 
         for envelope in &snapshot.envelopes {
             self.work_stats.root_compile_attempts =
@@ -158,6 +191,7 @@ impl UiCompiler {
                     theme,
                     self.limits,
                     &mut text_session,
+                    &mut layout_work,
                     RootBudget::new(
                         shaped_glyphs,
                         self.max_shaped_glyphs,
@@ -194,6 +228,9 @@ impl UiCompiler {
                 }
                 Err(RootCompileError::LogicalPaintLimitExceeded { actual, maximum }) => {
                     return Err(UiCompileError::LogicalPaintLimitExceeded { actual, maximum });
+                }
+                Err(RootCompileError::LayoutWorkLimitExceeded { actual, maximum }) => {
+                    return Err(UiCompileError::LayoutWorkLimitExceeded { actual, maximum });
                 }
                 Err(RootCompileError::Local(diagnostic)) => {
                     let fallback = self.cache.compatible(envelope.key(), environment);
@@ -532,6 +569,8 @@ pub enum UiCompileError {
     TextWorkLimitExceeded { actual: usize, maximum: usize },
     #[error("UI candidate has {actual} logical paint primitives; maximum is {maximum}")]
     LogicalPaintLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate layout reached {actual} work units; maximum is {maximum}")]
+    LayoutWorkLimitExceeded { actual: usize, maximum: usize },
     #[error("modal root {key:?} has no compatible retained visual or barrier")]
     ModalFallbackUnavailable { key: UiRootKey },
     #[error("UI frame revision is exhausted")]

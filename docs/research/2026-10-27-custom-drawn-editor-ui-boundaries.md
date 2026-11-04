@@ -348,6 +348,59 @@ Actionable adjustments for the owning plan/design, without expanding this resear
 These recommendations add no implementation receipt, native qualification or dependency-adoption
 decision. They refine how the existing R11a/b/e contracts can be implemented and measured.
 
+### Zed child measurement and manual placement follow-up
+
+At the same `dd3437011469d5c2ec8c821a84cc999979625697` pin, ordinary `Div::request_layout`
+requests child IDs and delegates placement to `Window::request_layout` (`elements/div.rs:1999`,
+`window.rs:5459`). The alternative `AnyElement::layout_as_root`/`prepaint_at`/`paint` sequence
+permits manual allocation and placement without exposing the layout arena (`element.rs:693`).
+The workspace's `PaneAxisElement` consumes this sequence for actual child regions
+(`crates/workspace/src/pane_group.rs:1420`).
+
+`request_measured_layout` registers a leaf context (`window.rs:5488`, `taffy.rs:85`), not an
+arbitrary child-layout callback. During that callback the Window's layout engine has been taken
+out for computation (`window.rs:5508`), so calling the same Window's child layout registration
+or `layout_as_root` cannot safely reenter it. `UniformList` premeasures its sample first
+(`elements/uniform_list.rs:283`, `:661`). `ContainerQuery` instead obtains final parent bounds,
+then builds/measures/places a child; its contract expressly prevents that child from determining
+the parent's intrinsic size (`elements/container_query.rs:13`, `:82`).
+
+Nara therefore borrows scoped measurement/placement and repeatable phases, not the particular
+GPUI callback storage. The pinned public GPUI path returns Size/Bounds without child-subtree
+baseline propagation. A Nara child-layout interface must specify its own baseline and unknown
+parent-constraint behavior. The pinned Taffy0.10 low-level `LayoutPartialTree` and
+`LayoutFlexboxContainer` algorithms permit a private compile-local adapter to preserve current
+Flex behavior while dispatching a custom container; its public `TaffyTree` leaf measure closure
+does not itself provide recursive custom child placement. This source observation adds no
+native acceptance, runtime-cache qualification or dependency adoption.
+
+### Next drawing pressure after child layout
+
+Current `UiPaintPrimitive` and packet lowering admit Rect/Text and Rect/Glyph respectively.
+`UiSurfacePresenter` still joins that original packet to native composite and input authority;
+custom child layout adds no drawing capability. The Zed pin's `path_builder.rs:242`,
+`scene.rs:786` and `window.rs:5002` illustrate tessellation before painting and path facts
+carrying vertices, bounds, content mask, order and color together. That is mechanism evidence,
+not a reason to import GPUI Scene or its public path vocabulary.
+
+Two concrete Nara shapes remain for the next drawing consumer:
+
+| Shape | Demonstrated existing seam | Qualification and limitation |
+| --- | --- | --- |
+| Bounded neutral path/mesh facts inside the original UI paint stream | Kernel frame order, presentation packet lowering and WGPU `UiFeature` | Can preserve arbitrary Rect/Text/geometry painter order; needs exact geometry/retention/upload limits and draw barriers, not a graph-specific primitive |
+| Independently authored native render Feature in the original program | `render-composition-consumer` typed Feature, original Host outputs and native use | Qualifies geometry/resource/output custody, but operation-level ordering alone cannot put a path between arbitrary UI primitives |
+
+The UI path consumer must carry finite geometry, indices, bounds, clip, complete captured
+transforms, color/alpha and resource identity. A mesh cannot acquire a new Device/Queue/submitter,
+read live component state during encoding or bypass the exact original presentation outcome.
+`UiPreparedImages` accepts CPU image snapshots; it cannot accept a `WgpuImageOutput` lease by
+cast or readback workaround. Existing native outputs retain their separate Host contract.
+The independent `render-output-consumer` is the complete presentation/input carrier for a future
+same-stream drawing proof; `render-composition-consumer` supplies existing CPU/GPU Feature oracles.
+Rectangular node/port semantics do not establish curve hit testing or canvas drag/wheel routing.
+Those input-owner additions remain explicit requirements rather than hidden mesh-side effects.
+No drawing interface, tessellation dependency or performance result is selected by this comparison.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml

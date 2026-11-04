@@ -11,6 +11,7 @@ mod geometry;
 mod identity;
 mod interaction;
 mod journal;
+mod layout;
 mod limits;
 mod style;
 
@@ -60,6 +61,10 @@ pub use interaction::{
 pub use journal::{
     UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId,
     UiSurfaceRetirementToken,
+};
+pub use layout::{
+    UiAvailableSpace, UiCustomLayout, UiLayout, UiLayoutChildren, UiLayoutConstraints,
+    UiLayoutError, UiLayoutMeasurement, UiLayoutOutput,
 };
 pub use limits::{UiLimits, UiLimitsError};
 pub use style::{

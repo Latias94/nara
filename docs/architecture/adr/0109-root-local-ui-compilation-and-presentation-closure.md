@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-04 (invalidation ownership and measured Editor reuse target)
+**Last Revised**: 2026-11-05 (scoped child layout, intrinsic measurement and candidate work)
 **Amended**: 2026-08-09 by the UIF-U2 unpresented-candidate retirement clarification and UIF-U2C/
 UIF-U3C corrections
 **Owner**: UI authoring builder, UI compiler, text budget, presentation planner, WGPU UI adapter
@@ -122,6 +122,47 @@ descriptions does not establish zero idle work. R11 fixes numeric workload/hardw
 optimization, measures cold/warm and static/dynamic cases, and keeps collection, comparison,
 layout, shaping, raster, upload, composition and presentation attribution separate. These are
 target contracts; the current compiler's root cache does not qualify the full successor.
+
+### Custom child layout
+
+An authored node may retain an immutable native-process `UiCustomLayout` description. It replaces
+that node's inner Flex arrangement while the compiler keeps outer sizing/padding, the admitted
+child topology and all frame projections. The callback receives available content constraints
+and scoped access to the current direct children: measure a child subtree, place its exact outer
+rectangle relative to the container's content origin, or explicitly hide it. No layout arena,
+Taffy identity or mutable product state escapes. A custom container puts intrinsic text in a
+child rather than combining two competing intrinsic owners on the same node.
+
+Child measurement may repeat under different constraints before final placement. Definite space
+is a wrapping/percentage basis, not an exact requested child size. Final placement resolves that
+subtree at its exact allocated outer size; its own padding and descendant rules remain active.
+Every direct child must be placed or hidden once per callback; invalid index/geometry, repeated
+placement, measurement after placement or a swallowed child-request failure refuses the root.
+Optional first horizontal baselines are measurements, not fabricated from bounding-box height.
+The same resolved geometry supplies painting, clip, hits, focus and semantic facts.
+Wrapping plain text distinguishes min-content from natural width through the text owner's
+shaper metrics. Prepared text keeps its immutable layout and reports its actual first line.
+Ordinary containers propagate the first visible in-flow child's genuine baseline in authored
+order; an empty box wrapper returns none. Taffy's synthesized box baseline stays private.
+An ordinary Flex container's own painted text does not turn its child-based layout into a text
+leaf or supply a synthetic public baseline.
+
+Callbacks are repeatable preparation. Changed captured inputs require a new immutable description;
+clones share nominal identity, which is not semantic content equality or a reload codec. No
+document edit, task, subscription or native input effect may depend on callback invocation count.
+Snapshots retain callback code until released; compiled frames, retained root visuals and packets
+retain resolved facts only. Dynamic executable unload still requires its separate code-custody
+contract. Callback errors and captured unwind are bounded root-local layout failures; arbitrary
+infinite native code is outside the operation-budget guarantee.
+
+One compiler-candidate work counter charges each reached layout dispatch, custom invocation and
+child measure/place/hide request, including cache hits and work in later rejected roots. The
+owner-local limit can reduce the hard ceiling. Overflow rejects the entire candidate without
+publishing revisions/cache changes, while cumulative work remains observable. This count bounds
+cooperative requests, not elapsed time or payload allocation. Existing text source/glyph and
+paint/resource limits remain separate original-owner budgets. Private compile-local Taffy
+storage/dispatch may change without changing the public component contract; no persistent tree
+or performance improvement follows from this interface alone.
 
 ### Root Failure Algebra
 

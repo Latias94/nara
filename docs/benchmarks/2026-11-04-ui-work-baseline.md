@@ -35,6 +35,22 @@ Parley 0.11.0 has no public constant-time full glyph count: `Layout::len()` coun
 C + G) time and O(1) auxiliary space. Its overhead is included below. Folding it into the
 short-circuiting projection loop would change the documented count for rejected layouts.
 
+## Later Custom-Layout Observation Boundary
+
+The November 5 [child-layout prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#custom-child-measurement-and-layout-prerequisite)
+replaces the compiler's private Taffy-tree dispatch and adds `layout_work_units`,
+`custom_layout_callbacks`, `custom_child_measurements` and `custom_child_placements`.
+Dispatches include cache hits; child requests include explicit hiding and failed requests.
+The candidate-wide layout-work limit has separate admission from the text/glyph and paint limits.
+Wrapping text now distinguishes actual min-content shaping from natural intrinsic measurement.
+
+The distributions and original work counts below retain their stated source revisions. They are
+not automatically requalified for the new dispatch/intrinsic implementation. Correctness/native
+passes and a finite operation ceiling do not establish latency, allocation or memory improvement.
+Before selecting reuse optimizations, repeat matched probes on the current source and attribute
+changed node dispatch, text requests and callback work separately. Native test duration under
+ordinary background load is not a before/after UI benchmark.
+
 ## CPU Probe Protocol
 
 Windows 11, build `10.0.26300.0`; Intel Core i9-13900KF, 24 cores / 32 logical processors;

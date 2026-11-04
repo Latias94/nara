@@ -259,6 +259,7 @@ impl Probe {
     }
 
     fn compile(&mut self) -> Result<Arc<UiFrame>> {
+        let previous_work = self.compiler.work_stats();
         let base = if let Some(keyed) = &mut self.keyed {
             let ids: &[&str] = match self.stage {
                 5 => &["alpha", "beta"],
@@ -342,6 +343,12 @@ impl Probe {
         let frame = self
             .compiler
             .compile(&builder.build()?, environment, UiTheme::default())?;
+        if self.keyed.is_some() {
+            let work = self.compiler.work_stats();
+            assert!(work.custom_layout_callbacks > previous_work.custom_layout_callbacks);
+            assert!(work.custom_child_measurements > previous_work.custom_child_measurements);
+            assert!(work.custom_child_placements > previous_work.custom_child_placements);
+        }
         assert!(frame.diagnostics().is_empty());
         assert!(
             frame

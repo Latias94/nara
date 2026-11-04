@@ -169,6 +169,7 @@ pub struct UiNode {
     pub(crate) style: UiStyle,
     pub(crate) visual: Option<UiVisual>,
     pub(crate) text: Option<UiNodeText>,
+    pub(crate) custom_layout: Option<crate::UiCustomLayout>,
     pub(crate) interaction: UiInteraction,
     pub(crate) semantics: Option<UiSemantics>,
     pub(crate) children: Vec<Self>,
@@ -214,6 +215,7 @@ impl UiNode {
             style,
             visual: None,
             text: None,
+            custom_layout: None,
             interaction: UiInteraction {
                 hit_testable: false,
                 focusable: false,
@@ -248,6 +250,17 @@ impl UiNode {
         self
     }
 
+    /// Replaces default child arrangement with a repeatable content-space layout description.
+    ///
+    /// The compiler retains outer sizing/padding and all projection ownership. Put text in a
+    /// child node; a custom container cannot also own intrinsic text. Inner Flex gap/alignment
+    /// rules are replaced by this description; the node's outer Flex participation remains.
+    #[must_use]
+    pub fn with_custom_layout(mut self, layout: crate::UiCustomLayout) -> Self {
+        self.custom_layout = Some(layout);
+        self
+    }
+
     #[must_use]
     pub const fn with_interaction(mut self, interaction: UiInteraction) -> Self {
         self.interaction = interaction;
@@ -274,6 +287,10 @@ impl UiNode {
 }
 
 /// One stable root candidate and its ordered authored tree.
+///
+/// The root establishes a layout scope at the surface's authored origin. Width, height and
+/// padding apply here; use a positioned child to offset content within that scope. Root inset
+/// values do not relocate the surface or its layout origin.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiRoot {
     pub(crate) key: UiRootKey,
@@ -306,6 +323,13 @@ impl UiRoot {
     #[must_use]
     pub fn with_prepared_text(mut self, text: UiPreparedText) -> Self {
         self.node.text = Some(UiNodeText::Prepared(text));
+        self
+    }
+
+    /// Uses the same custom content arrangement as [`UiNode::with_custom_layout`].
+    #[must_use]
+    pub fn with_custom_layout(mut self, layout: crate::UiCustomLayout) -> Self {
+        self.node.custom_layout = Some(layout);
         self
     }
 
@@ -609,6 +633,11 @@ fn validate_root(root: &UiRoot, limits: UiLimits) -> Result<(), UiRootDiagnostic
                 .map_err(|error| UiRootDiagnostic::InvalidStyle {
                     message: error.to_string(),
                 })?;
+        }
+        if node.custom_layout.is_some() && node.text.is_some() {
+            return Err(UiRootDiagnostic::LayoutRejected {
+                message: "a custom layout container must put intrinsic text in a child node".into(),
+            });
         }
         if let Some(text) = &node.text {
             text.validate()

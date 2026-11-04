@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-04 (independent UI products, component execution and user-authored frontends)
+**Last Revised**: 2026-11-05 (scoped component state and child-layout prerequisites)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -147,6 +147,14 @@ The store cannot release native focus/IME, cancel external tasks or discover fie
 arbitrary user state. Those remain explicit responsibilities of the existing owners. This
 prerequisite does not establish automatic dependency tracking, a general Widget trait, custom
 layout/drawing, virtualization or code-reload compatibility.
+
+The separate child-layout prerequisite under ADR0109 supplies custom intrinsic measurement and
+placement over the admitted child topology. Its scoped operations return sizes/baselines and
+accept exact content-relative allocations, while the private compiler retains layout storage,
+text work and final projections. A user-authored layout can wrap existing controls or arbitrary
+authored nodes without inheriting a component base class. Its immutable description is distinct
+from keyed mutable state; construction/measurement repetition cannot publish business effects.
+This does not close custom drawing, routed canvas gestures or the complete component interface.
 
 Nara-owned composition, measurement and painting can be skipped or repeated. Their invocation
 count cannot publish document edits, spawn tasks or install subscriptions. Admitted interaction

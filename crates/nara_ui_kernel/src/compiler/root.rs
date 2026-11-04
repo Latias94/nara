@@ -2,9 +2,9 @@ use std::{collections::BTreeSet, sync::Arc};
 
 use nara_text::{TextEngine, TextLayoutError, TextRect};
 use taffy::{
-    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
-    LengthPercentage, LengthPercentageAuto, Overflow, Point as TaffyPoint, Position,
-    Rect as TaffyRect, Size as TaffySize, Style as TaffyStyle, TaffyTree,
+    AlignItems, Dimension, Display, FlexDirection, JustifyContent, LengthPercentage,
+    LengthPercentageAuto, Overflow, Point as TaffyPoint, Position, Rect as TaffyRect,
+    Size as TaffySize, Style as TaffyStyle,
 };
 
 use crate::{
@@ -36,6 +36,7 @@ pub(super) enum RootCompileError {
     TextWorkLimitExceeded { actual: usize, maximum: usize },
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
     LogicalPaintLimitExceeded { actual: usize, maximum: usize },
+    LayoutWorkLimitExceeded { actual: usize, maximum: usize },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -71,6 +72,7 @@ pub(super) fn compile_root(
     theme: UiTheme,
     limits: UiLimits,
     text_session: &mut TextCompileSession,
+    layout_work: &mut super::LayoutWorkBudget,
     budget: RootBudget,
 ) -> Result<CompiledRoot, RootCompileError> {
     let flat = flatten_root(root, limits).map_err(RootCompileError::Local)?;
@@ -83,90 +85,15 @@ pub(super) fn compile_root(
                 .map_err(text_compile_error)?;
         }
     }
-    let mut tree = TaffyTree::<usize>::with_capacity(flat.len());
-    tree.disable_rounding();
-    let mut node_ids = vec![None; flat.len()];
-    for index in (0..flat.len()).rev() {
-        let children = flat[index]
-            .children
-            .iter()
-            .map(|child| node_ids[*child].expect("child node is created before its parent"))
-            .collect::<Vec<_>>();
-        let style = taffy_style(flat[index].node.style, index == 0, environment);
-        let id = if children.is_empty() && flat[index].node.text.is_some() {
-            tree.new_leaf_with_context(style, index)
-        } else if children.is_empty() {
-            tree.new_leaf(style)
-        } else {
-            tree.new_with_children(style, &children)
-        }
-        .map_err(|error| {
-            RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
-                message: error.to_string(),
-            })
-        })?;
-        work_stats.layout_nodes_created = work_stats.layout_nodes_created.saturating_add(1);
-        node_ids[index] = Some(id);
-    }
-
-    let root_id = node_ids[0].expect("a flattened root always has one Taffy node");
-    let mut measurement_error = None;
+    let layouts = super::layout::compute_layout(
+        &flat,
+        text_engine,
+        work_stats,
+        environment,
+        text_session,
+        layout_work,
+    )?;
     let scale_factor = environment.scale_factor();
-    work_stats.layout_passes = work_stats.layout_passes.saturating_add(1);
-    tree.compute_layout_with_measure(
-        root_id,
-        TaffySize {
-            width: AvailableSpace::Definite(environment.logical_size().width()),
-            height: AvailableSpace::Definite(environment.logical_size().height()),
-        },
-        |_known, available, _node_id, context, _style| {
-            work_stats.measurement_callbacks = work_stats.measurement_callbacks.saturating_add(1);
-            if measurement_error.is_some() {
-                return TaffySize::ZERO;
-            }
-            let Some(index) = context.map(|index| *index) else {
-                return TaffySize::ZERO;
-            };
-            let Some(text) = flat[index].node.text.as_ref() else {
-                return TaffySize::ZERO;
-            };
-            if let UiNodeText::Prepared(text) = text {
-                return TaffySize {
-                    width: text.snapshot.width(),
-                    height: text.snapshot.height(),
-                };
-            }
-            let UiNodeText::Plain(text) = text else {
-                unreachable!()
-            };
-            // Taffy's known dimensions are outer sizes during ComputeSize, while available
-            // space has already had padding and borders removed. The callback measures only
-            // content; Taffy applies known outer dimensions and adds the insets itself.
-            let wrap_width = definite(available.width);
-            match text
-                .request(wrap_width, scale_factor)
-                .map_err(TextCompileError::Layout)
-                .and_then(|request| text_session.layout(text_engine, request))
-            {
-                Ok(layout) => TaffySize {
-                    width: layout.width(),
-                    height: layout.height(),
-                },
-                Err(error) => {
-                    measurement_error.get_or_insert(text_compile_error(error));
-                    TaffySize::ZERO
-                }
-            }
-        },
-    )
-    .map_err(|error| {
-        RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
-            message: error.to_string(),
-        })
-    })?;
-    if let Some(error) = measurement_error {
-        return Err(error);
-    }
 
     let mut layout_entries = Vec::with_capacity(flat.len());
     let mut paint_entries = Vec::new();
@@ -179,13 +106,7 @@ pub(super) fn compile_root(
     let mut visible = vec![false; flat.len()];
 
     for (index, node) in flat.iter().enumerate() {
-        let layout = tree
-            .layout(node_ids[index].expect("Taffy node exists for each flat node"))
-            .map_err(|error| {
-                RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
-                    message: error.to_string(),
-                })
-            })?;
+        let layout = &layouts[index];
         let parent_origin = node
             .parent
             .map_or(UiPoint::new(0.0, 0.0), |parent| origins[parent]);
@@ -477,7 +398,7 @@ fn text_error(error: TextLayoutError) -> RootCompileError {
     }
 }
 
-fn text_compile_error(error: TextCompileError) -> RootCompileError {
+pub(super) fn text_compile_error(error: TextCompileError) -> RootCompileError {
     match error {
         TextCompileError::SourceBytesLimitExceeded { actual, maximum } => {
             RootCompileError::TextWorkLimitExceeded { actual, maximum }
@@ -550,6 +471,11 @@ fn visit_node<'a>(
             .map_err(|error| UiRootDiagnostic::InvalidStyle {
                 message: error.to_string(),
             })?;
+    }
+    if node.custom_layout.is_some() && node.text.is_some() {
+        return Err(UiRootDiagnostic::LayoutRejected {
+            message: "a custom layout container must put intrinsic text in a child node".into(),
+        });
     }
     if let Some(text) = &node.text {
         text.validate()
@@ -638,7 +564,7 @@ fn root_order(node: &FlatNode<'_>, fragment_index: u8) -> RootOrder {
     RootOrder::new(stacking_path, fragment_index)
 }
 
-fn taffy_style(style: UiStyle, is_root: bool, environment: UiEnvironment) -> TaffyStyle {
+pub(super) fn taffy_style(style: UiStyle, is_root: bool, environment: UiEnvironment) -> TaffyStyle {
     let width = if is_root && style.width == UiDimension::Auto {
         Dimension::length(environment.logical_size().width())
     } else {
@@ -722,13 +648,6 @@ fn inset(value: UiDimension) -> LengthPercentageAuto {
     }
 }
 
-fn definite(value: AvailableSpace) -> Option<f32> {
-    match value {
-        AvailableSpace::Definite(value) if value.is_finite() && value > 0.0 => Some(value),
-        _ => None,
-    }
-}
-
 fn semantic_enabled(node: &UiNode) -> bool {
     if node.interaction.hit_testable || node.interaction.focusable {
         node.interaction.enabled
@@ -738,10 +657,10 @@ fn semantic_enabled(node: &UiNode) -> bool {
 }
 
 #[derive(Clone, Debug)]
-struct FlatNode<'a> {
-    node: &'a UiNode,
+pub(super) struct FlatNode<'a> {
+    pub(super) node: &'a UiNode,
     parent: Option<usize>,
-    children: Vec<usize>,
+    pub(super) children: Vec<usize>,
     key: Option<UiKey>,
     structural_index: usize,
     stacking_ancestors: Vec<(i32, usize)>,

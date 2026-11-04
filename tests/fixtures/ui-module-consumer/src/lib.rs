@@ -9,6 +9,7 @@ use nara_ui_widgets::UiButton;
 use std::sync::Arc;
 
 pub mod keyed_editors;
+pub mod measured_column;
 
 pub type StatusLabelError = Box<dyn std::error::Error + Send + Sync + 'static>;
 

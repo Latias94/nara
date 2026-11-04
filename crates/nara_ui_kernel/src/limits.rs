@@ -9,6 +9,7 @@ const HARD_MAX_DIAGNOSTICS: usize = 64;
 const HARD_MAX_CACHE_ROOTS: usize = 64;
 const HARD_MAX_SURFACES: usize = 16;
 const HARD_MAX_SURFACE_LIFETIMES: usize = 4_096;
+const HARD_MAX_LAYOUT_WORK: usize = 1_048_576;
 
 /// Owner-local resource limits. Callers may reduce but never widen the hard ceilings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,6 +23,7 @@ pub struct UiLimits {
     pub(crate) max_cache_roots: usize,
     pub(crate) max_surfaces: usize,
     pub(crate) max_surface_lifetimes: usize,
+    pub(crate) max_layout_work: usize,
 }
 
 /// Exact authoring constraints that must travel with one immutable source snapshot.
@@ -48,11 +50,22 @@ impl Default for UiLimits {
             max_cache_roots: HARD_MAX_CACHE_ROOTS,
             max_surfaces: HARD_MAX_SURFACES,
             max_surface_lifetimes: HARD_MAX_SURFACE_LIFETIMES,
+            max_layout_work: HARD_MAX_LAYOUT_WORK,
         }
     }
 }
 
 impl UiLimits {
+    /// Candidate-wide layout dispatch, custom callback and child-request ceiling.
+    ///
+    /// Cache-hit dispatches and failed requests still consume work. This is a finite operation
+    /// count, not a CPU-time limit or a watchdog for arbitrary component code.
+    pub fn with_max_layout_work(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_layout_work", value, HARD_MAX_LAYOUT_WORK)?;
+        self.max_layout_work = value;
+        Ok(self)
+    }
+
     /// Root capacity that adapters admit before constructing excess root identities or bodies.
     #[must_use]
     pub const fn max_roots(self) -> usize {
@@ -123,6 +136,11 @@ impl UiLimits {
     }
 
     pub(crate) fn validate(self) -> Result<(), UiLimitsError> {
+        validate(
+            "max_layout_work",
+            self.max_layout_work,
+            HARD_MAX_LAYOUT_WORK,
+        )?;
         validate("max_roots", self.max_roots, HARD_MAX_ROOTS)?;
         validate("max_nodes", self.max_nodes, HARD_MAX_NODES)?;
         validate("max_depth", self.max_depth, HARD_MAX_DEPTH)?;

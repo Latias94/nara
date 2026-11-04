@@ -13,7 +13,7 @@ UI targets remain partial until [R11a-f](../../plans/2026-10-23-foundation-archi
 pass their independent/native and measured acceptance. This documentation update supplies no
 new performance, toolkit compatibility or platform evidence and requires no official ImGui package.
 
-The component/reload follow-up explicitly leaves custom measurement/drawing, routed canvas
+The component/reload follow-up explicitly leaves complete custom measurement/drawing, routed canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded keyed-state prerequisite below. Current public panels remain
 Dear-specific; finite Rect/Text paint and button events are not the complete successor interface.
@@ -102,6 +102,23 @@ The linked prerequisite records 271 shared regressions, 11 focused custody cases
 include a complete 11-presentation/ten-commit trajectory and separate original error/panic child
 controls. Input delivery is injected; current Editor controllers and their draft policy remain
 unchanged by this slice.
+
+The [custom child-layout prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#custom-child-measurement-and-layout-prerequisite)
+adds immutable user-authored layout descriptions with scoped child measurement, exact placement
+and explicit hiding. The compiler privately replaces its Taffy-tree dispatch while preserving
+one text session, final frame projections and inert root fallback. Candidate-wide work limits
+charge dispatches, callbacks and child requests. Min-content and prepared first baselines belong
+to the text owner; public subtree baselines exclude synthetic box fallbacks. The actual
+independent keyed-field library consumes the interface and continues through native presentation
+and input. Snapshot/description owners retain callback code, while frames and last-good visuals
+retain resolved facts only. Custom paths/drawing, canvas gestures, scoped effects/services,
+virtualization, foreign panel attachment, code reload and the complete independent Editor remain
+open. This prerequisite is no incremental-cache or performance qualification.
+Its final shared/default-game suite passes 419/419; the enabled-serialization game library passes
+125/125, the WGPU library 396/396, Editor/public integrations 406/406 and selected Windows/DX12
+Editor trajectories 33/33. The independent component library passes 15/15, followed by both
+native surface tests through the imported measured layout. The linked plan preserves overlapping
+suite counts, ignored scope, review fixes and failed fixture assumptions separately.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and

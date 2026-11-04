@@ -61,6 +61,14 @@ must settle an actual pending submission before reporting cleanup success. These
 qualify a non-Nara frontend, general Editor attachment, native OS event delivery or an independent
 Editor Shell. The ordinary Editor trajectories below retain their distinct composition scope.
 
+The independently authored keyed composite additionally runs under its public `MeasuredColumn`
+layout, using current title/child intrinsic sizes and scoped exact placement rather than
+row-index absolute coordinates. Preserve the full 11-presentation/ten-commit trajectory,
+including preedit/selection/history during reorder, focused-row filtering, same-visible-position
+replacement, explicit model/schema reset and rejection of old input after the replacement
+receives focus. This is child-layout and presented-input acceptance; custom drawing, native
+canvas gestures and the complete R11b/R11c consumers remain separate.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

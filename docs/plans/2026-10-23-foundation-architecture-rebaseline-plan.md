@@ -1501,6 +1501,102 @@ adapter separately. Shipping an official ImGui/egui package or stable plugin ABI
 Optional embedding/coexistence qualification does not gate the independent default's replacement
 unless that capability is explicitly part of the selected support claim.
 
+#### Custom child-measurement and layout prerequisite
+
+Provide one public immutable layout description on an admitted node/root. Scope child operations
+to the current direct children, without exposing Taffy storage: repeat measurement under explicit
+content-space constraints, then place an exact outer rectangle or explicitly hide each child.
+Keep compiler text/glyph/paint limits and final paint/hit/focus/semantic geometry authoritative.
+Use optional real baselines and explicit padding/percentage bases. Default Flex/Absolute behavior
+must survive the private layout-storage replacement, including nested and hidden subtrees.
+
+Invalid geometry/index/order, missing/duplicate placement, callback refusal, caught unwind and
+swallowed child-operation errors follow root-local inert-fallback rules. Candidate-wide layout
+work charges dispatches/cache hits, callbacks and child requests before work. Overflow remains
+global; local failure cannot reset its cost. Failed candidates cannot advance public revision or
+cache state. The count is neither a wall-time watchdog nor an arbitrary user-payload byte bound.
+
+Qualify a reusable measured-column layout in the independently compiled component library. Its
+actual keyed editors use measured title and child sizes rather than row-index absolute placement.
+Run the same full native presenter/input/popup/reconstruction/retirement trajectory under that
+layout, preserving prior assertions. Add direct child constraints/remeasurement, nested layout,
+baseline/padding/clip behavior, finite failure recovery, exact work boundaries and an independent
+Taffy default-layout oracle. Existing Editor/game consumers must still compile and pass relevant
+CPU/native qualification because the private default layout adapter changes as well.
+
+This prerequisite does not close custom drawing/path geometry, routed canvas motion/scroll/key
+input, scoped effects/services, virtualization, foreign panel attachment or the whole independent
+Editor. Source callback equality is nominal immutable-instance identity; updated captures require
+a new description. Snapshots retain callback code, while final frame/fallback/packet facts do
+not. Code reload/unload and automatic dependency tracking remain separate work.
+
+Review corrects three owning contracts before final qualification. Text requests now distinguish
+natural, finite-wrap and actual Parley min-content modes; the same shaped layout supplies the
+minimum rather than an approximate word-width scan or a second shaping pass. Prepared snapshots
+expose their actual first-line baseline. Public child measurement separately propagates genuine
+text/custom baselines through visible in-flow children in authored order, leaving Taffy's
+synthetic box baseline private. Exact placement also prechecks each child padding sum: Taffy's
+Flex main axis may otherwise keep a known outer size below its insets while reporting that same
+size. Row/Column below-boundary and exact-equality controls cover this distinction.
+
+The custom-layout subtree marks its ancestors so final full layout cannot replay a cache over
+exploratory descendant placements. Measure-after-place/hide refuses instead of introducing a
+restoration ledger. Source descriptions use nominal equality, but changing children under one
+description still compiles current content. A captured-owner weak/drop control keeps original
+frames and last-good compiler facts live after all source descriptions are released; none may
+retain the callback. A separate swallowed-local-error control continues requests past the shared
+layout limit and requires global overflow, never a cheaper root-local fallback.
+
+Initial production checking catches the removed layout block's still-needed paint scale local;
+restoring that original environment value fixes compilation. The first combined game-UI test build
+then exposes an existing cooked-image test compiled without its required `serde` feature.
+`bced793` gates only that test and its codec import; default and enabled-feature runs both remain
+required. `c3010d2` separately commits actual min-content requests and immutable snapshot baselines.
+
+The first executable shared run passes 415/419 and fails four new fixtures. Three assumed root
+insets relocate the authored origin, whereas the original and replacement Taffy root paths anchor
+at logical `(0, 0)`; positioned child nodes now express the original expected nonzero geometry.
+The fallback case similarly places the live sibling as a child, retaining both inert-background
+and live-hit checks. The intrinsic test also mistook available width for a hard cap even when an
+unbreakable word overflows; its width now matches the independent text oracle plus padding.
+Expected fractional bounds, clip, physical mapping, nested placement, text metrics and hit
+assertions remain. Focused 12/12 and the subsequent full 419/419 pass after those corrections.
+No root-positioning or word-breaking product semantics change to satisfy the fixtures.
+
+| Final qualification | Result | Nextest run |
+| --- | --- | --- |
+| Shared text/kernel/widgets/presentation and default game-UI regression, including 12 custom-layout and five min-content cases | 419/419 | `ebca498d-4ec4-44a1-a2aa-d61d2ab2e0f9` |
+| Game-UI library with `serde`, including the cooked-image case | 125/125, overlapping the default suite | `3628047b-2bb8-4fb4-bf20-f6927f0918cf` |
+| Render-WGPU ordinary library with all features, including existing glyph/pixel readback | 396/396, 52 ignored | `dfd27c91-8e11-45ae-a077-589289129663` |
+| Editor library and selected public integrations after the final production corrections | 406/406, 60 ignored | `ed9c16c7-7ba7-499b-900a-089efc8508f2` |
+| Selected Windows/DX12 ordinary editing, Hierarchy, Canvas, Game, panel/GPU lifecycle, Scene and stock composition | 33/33, 421 unrelated/ordinary cases filtered | `6bb9add1-3dcd-4a58-9145-ef6c33c17684` |
+| Independent public text/kernel/widgets component library | 15/15 | `f26ae8f7-9071-4c1b-84fe-dce20e089ff1` |
+| Independent native measured-composite trajectory and original error/panic child controls | 2/2 | `2a832531-1b80-43e5-ad37-e70955255459` |
+| Final focused child-layout regression after equivalent conditional normalization | 12/12, overlapping the shared suite | `718b1cc3-d7cb-40db-98de-67b88aa15e55` |
+| Neutral component, native executable dev graph and game-UI dependency boundaries | 3/3 | `f1d0431c-8504-4906-bc06-c740f97b338c` |
+
+The complete independent native normal path still has 11 actual presentations and ten journal
+commits, with new per-compile callback/child-request deltas proving that the imported measured
+layout actually runs. It retains original modal, local text history, reorder/preedit, filtering,
+same-position replacement, focused binding-token refusal, Host reconstruction and physical
+retirement assertions. These injected events do not qualify physical OS IME/candidate delivery.
+Default Flex equivalence uses a separately constructed pinned `TaffyTree` oracle; it is not a
+second independent layout algorithm. No retained callback code survives in compiled frame/cache
+facts. Independent architecture/correctness reviews find no remaining P1/P2 after the three
+owner corrections and their regression cases.
+
+The native retained-draft capacity case completes in 143.732 s in this run; it is correctness
+evidence, not a matched before/after latency experiment. The existing work-baseline document now
+keeps its older source counts/distributions explicitly separate from this changed private
+dispatch and intrinsic measurement. Full R11a numeric budgets, incremental reuse and the
+remaining R11b-f capabilities stay open.
+Correctness Clippy passes for text/kernel/widgets/presentation/game-UI/Editor with all targets
+and features, and for both independent consumers. A new nested conditional is normalized to an
+equivalent let-chain; its focused layout/error/budget suite passes afterward. Existing unrelated
+warning categories remain outside this correctness gate. Root and fixture formatting, diff
+whitespace and local-document link checks complete the review without another product cycle
+for prose/format-only closure.
+
 #### Keyed local-state composition prerequisite
 
 Implement a bounded panel-instance `UiStateStore` with exact root/parent/explicit-child paths,

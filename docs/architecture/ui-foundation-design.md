@@ -2,7 +2,7 @@
 
 **Status**: Design blueprint; qualified mechanisms and unimplemented targets are distinguished below
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-04
+**Last Revised**: 2026-11-05
 **Owners**: UI Foundation, Runtime UI, Editor frontend, Editor Host
 **Authority**: This document is non-normative. Durable contracts live in ADR 0102, ADR 0107-0109 and ADR 0118. Current execution order belongs to R11/R12 in the [foundation rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md); the UI Foundation Correction plan is completed lineage.
 
@@ -378,10 +378,10 @@ component library interface. November 4 source inspection identifies these concr
 | Current surface | Evidence | Missing pressure before a broad extension claim |
 | --- | --- | --- |
 | Source-built panel registration | `ImguiEditorPanel::show` in [workspace.rs](../../editor/src/frontend/imgui/workspace.rs) and `register_panel` in [composition.rs](../../editor/src/platform/composition.rs) | Toolkit-independent attachment, lifecycle and capability admission |
-| Authored layout | [UiNode](../../crates/nara_ui_kernel/src/authoring.rs) and private text measurement in [root compilation](../../crates/nara_ui_kernel/src/compiler/root.rs) | Custom intrinsic measurement/layout without exposing Taffy storage |
+| Authored layout | [UiNode](../../crates/nara_ui_kernel/src/authoring.rs) and scoped [custom layout](../../crates/nara_ui_kernel/src/layout.rs) | Broader custom drawing/input and complete complex-editor consumer; layout alone does not establish them |
 | Drawing | `UiPaintPrimitive::Rect`/`Text` in [frame.rs](../../crates/nara_ui_kernel/src/frame.rs) | Bounded paths/geometry and admitted custom-render participation |
 | Interaction | `UiRoutedEventKind` in [types.rs](../../crates/nara_ui_kernel/src/interaction/types.rs) | Routed motion coordinates, scroll/gesture and keyboard services sufficient for a custom canvas; current button batches alone do not provide them |
-| Controlled widgets | [widgets](../../crates/nara_ui_widgets/src/lib.rs) expose Button and TextField | Reusable composition, scoped state and lifecycle plumbing for ordinary extension authors |
+| Controlled widgets | [widgets](../../crates/nara_ui_widgets/src/lib.rs) expose Button, TextField and scoped local state | Complete scoped effects/services and component-library ergonomics beyond the keyed composition prerequisite |
 | Semantics | Finite roles/actions in [authoring.rs](../../crates/nara_ui_kernel/src/authoring.rs) | An independently authored composite/graph with keyboard and meaningful semantic interaction |
 
 These are interface gaps and unqualified capabilities, not claims that the existing bounded
@@ -447,6 +447,45 @@ engine, complete theme language or catalogue of every platform gesture is select
 | Scoped persistent state, declarative composition and explicit custom-layout/draw access | Ordinary controls hide lifecycle plumbing; specialized components retain control; internals can change | Requires the independent composite and canvas consumers in R11b/c before exact Rust types freeze; selected target |
 
 This selection does not restrict an optional frontend's own immediate/retained implementation.
+
+### Scoped custom child layout
+
+`UiCustomLayout::new(impl UiLayout)` retains one immutable layout description. Attach it with
+`UiNode::with_custom_layout` or the root equivalent. Keep that description across compatible
+compositions; clones compare by exact instance. Updated captured parameters need a new
+description. The scoped `UiLayoutChildren` exposes direct child count and `measure`, `place`,
+`hide`; local child order addresses the current immutable topology, while keyed state retains
+its separate domain identity. No layout-node handle survives the callback.
+
+The callback receives available content space on each axis (`Definite`, `MinContent`,
+`MaxContent`). Measure child subtrees under explicit constraints, optionally use their first
+horizontal baseline, then place each at an exact outer rectangle relative to the parent content
+origin. Available space supplies wrapping and percentage bases; authored size may differ. Final
+placement fixes the child's outer allocation and recomputes its descendants. Parent/child
+padding remains accounted once. Measure before placement; each child must be placed or hidden
+once. A custom container owns no intrinsic text on the same node: compose a text child instead.
+Wrapping text's `MinContent` query uses actual shaper content widths rather than treating it as
+`MaxContent`. Prepared text retains its own full layout and real first line. Ordinary containers
+propagate the first genuine visible in-flow baseline in authored order; text-free boxes return
+none even when the private Flex algorithm synthesizes a box baseline internally.
+
+The [independent measured column](../../tests/fixtures/ui-module-consumer/src/measured_column.rs)
+demonstrates this interface with a real keyed-field composite. Its title determines current
+intrinsic height and subsequent field positions; it does not guess row coordinates from font
+size. A private compile-local Taffy adapter supplies default and custom algorithms under one text
+session and projection owner. Full-layout cache replay is disabled for subtrees containing custom
+layout so exploratory measurements cannot leave stale descendant placement. This conservative
+choice is not an incremental-cache optimization.
+
+`UiLimits::with_max_layout_work` reduces the default hard ceiling of 1,048,576 reached layout
+dispatches, custom callbacks and child requests per candidate. Requests, including cache hits and
+failed roots, remain observable through `UiCompileWorkStats`; overflowing that shared budget
+rejects the whole candidate. Callback error/unwind and invalid or swallowed child-operation
+errors use root-local bounded diagnostics and inert last-good recovery. The count does not
+bound a native callback's arbitrary computation or allocation. Source snapshots own callback
+code/inputs until released; final frames, retained visuals and paint packets contain resolved
+facts only. This supplies child layout, not custom geometry/drawing, gestures, code reload or the
+complete component/foreign-frontend contract.
 
 ## Panel hosting and optional frontend implementations
 
