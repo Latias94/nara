@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiMesh, UiPreparedText, UiRevision,
-    UiRootDiagnostic, UiRootKey, UiStyle, UiStyleError, UiText, UiVisual,
-    limits::UiSnapshotProfile, mesh::MeshCounts,
+    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiMesh, UiPointerButton,
+    UiPreparedText, UiRevision, UiRootDiagnostic, UiRootKey, UiStyle, UiStyleError, UiText,
+    UiVisual, limits::UiSnapshotProfile, mesh::MeshCounts,
 };
 
 /// Closed root layers shared by paint, hit, focus, and semantic order.
@@ -16,12 +16,79 @@ pub enum UiLayer {
     Modal,
 }
 
-/// Generic geometry participation needed by the kernel before widget reducers are applied.
+/// Accepted capture buttons for one hit target. Additional native buttons remain unsupported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UiPointerButtons {
+    primary: bool,
+    secondary: bool,
+    middle: bool,
+}
+
+impl UiPointerButtons {
+    pub const PRIMARY: Self = Self::new(true, false, false);
+
+    #[must_use]
+    pub const fn new(primary: bool, secondary: bool, middle: bool) -> Self {
+        Self {
+            primary,
+            secondary,
+            middle,
+        }
+    }
+
+    #[must_use]
+    pub const fn primary(self) -> bool {
+        self.primary
+    }
+
+    #[must_use]
+    pub const fn secondary(self) -> bool {
+        self.secondary
+    }
+
+    #[must_use]
+    pub const fn middle(self) -> bool {
+        self.middle
+    }
+
+    #[must_use]
+    pub const fn contains(self, button: UiPointerButton) -> bool {
+        match button {
+            UiPointerButton::Primary => self.primary,
+            UiPointerButton::Secondary => self.secondary,
+            UiPointerButton::Middle => self.middle,
+            UiPointerButton::Other(_) => false,
+        }
+    }
+}
+
+impl Default for UiPointerButtons {
+    fn default() -> Self {
+        Self::PRIMARY
+    }
+}
+
+/// Geometry that must remain equivalent when a presentation renews pointer capture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UiCaptureContinuity {
+    /// Any change to the surface's pointer routing cancels the gesture.
+    #[default]
+    SurfaceGeometry,
+    /// The owner and its keyed ancestors must remain exact; descendants and siblings may change.
+    /// Environment, modal scope and explicit behavior invalidation still cancel capture.
+    TargetGeometry,
+}
+
+/// Immutable input participation needed by the kernel before widget reducers are applied.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UiInteraction {
     pub(crate) hit_testable: bool,
     pub(crate) focusable: bool,
     pub(crate) enabled: bool,
+    pointer_motion: bool,
+    scroll: bool,
+    pointer_buttons: UiPointerButtons,
+    capture_continuity: UiCaptureContinuity,
 }
 
 impl UiInteraction {
@@ -31,6 +98,10 @@ impl UiInteraction {
             hit_testable: true,
             focusable: false,
             enabled: true,
+            pointer_motion: false,
+            scroll: false,
+            pointer_buttons: UiPointerButtons::PRIMARY,
+            capture_continuity: UiCaptureContinuity::SurfaceGeometry,
         }
     }
 
@@ -40,12 +111,43 @@ impl UiInteraction {
             hit_testable: true,
             focusable: true,
             enabled: true,
+            pointer_motion: false,
+            scroll: false,
+            pointer_buttons: UiPointerButtons::PRIMARY,
+            capture_continuity: UiCaptureContinuity::SurfaceGeometry,
         }
     }
 
     #[must_use]
     pub const fn with_enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Requests target motion when hit, or while this node owns pointer capture.
+    /// Ancestor capture/bubble observations do not constitute another motion listener.
+    #[must_use]
+    pub const fn with_pointer_motion(mut self, enabled: bool) -> Self {
+        self.pointer_motion = enabled;
+        self
+    }
+
+    /// Requests scroll as the nearest interested stable-key ancestor of the exact hit target.
+    #[must_use]
+    pub const fn with_scroll(mut self, enabled: bool) -> Self {
+        self.scroll = enabled;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_pointer_buttons(mut self, buttons: UiPointerButtons) -> Self {
+        self.pointer_buttons = buttons;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_capture_continuity(mut self, continuity: UiCaptureContinuity) -> Self {
+        self.capture_continuity = continuity;
         self
     }
 
@@ -62,6 +164,30 @@ impl UiInteraction {
     #[must_use]
     pub const fn enabled(self) -> bool {
         self.enabled
+    }
+
+    #[must_use]
+    pub const fn pointer_motion(self) -> bool {
+        self.pointer_motion
+    }
+
+    #[must_use]
+    pub const fn scroll(self) -> bool {
+        self.scroll
+    }
+
+    #[must_use]
+    pub const fn pointer_buttons(self) -> UiPointerButtons {
+        self.pointer_buttons
+    }
+
+    #[must_use]
+    pub const fn capture_continuity(self) -> UiCaptureContinuity {
+        self.capture_continuity
+    }
+
+    pub(crate) const fn requires_key(self) -> bool {
+        self.hit_testable || self.focusable || self.pointer_motion || self.scroll
     }
 }
 
@@ -222,6 +348,10 @@ impl UiNode {
                 hit_testable: false,
                 focusable: false,
                 enabled: false,
+                pointer_motion: false,
+                scroll: false,
+                pointer_buttons: UiPointerButtons::PRIMARY,
+                capture_continuity: UiCaptureContinuity::SurfaceGeometry,
             },
             semantics: None,
             children: Vec::new(),
@@ -721,10 +851,8 @@ fn validate_root(root: &UiRoot, limits: UiLimits) -> Result<(), UiRootDiagnostic
                 return Err(UiRootDiagnostic::DuplicateNodeKey { key: key.clone() });
             }
         }
-        let requires_key = node.interaction.hit_testable
-            || node.interaction.focusable
-            || node.semantics.is_some()
-            || node.text.is_some();
+        let requires_key =
+            node.interaction.requires_key() || node.semantics.is_some() || node.text.is_some();
         if requires_key && key.is_none() {
             return Err(UiRootDiagnostic::MissingRequiredKey { structural_index });
         }

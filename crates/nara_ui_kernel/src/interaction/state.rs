@@ -1,13 +1,18 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
 use super::{
-    UiInputEvent, UiPointerId, UiRoutedEventKind, UiSeatId,
+    UiInputEvent, UiPointerButton, UiPointerId, UiPointerInputKind, UiRoutedEventKind, UiSeatId,
+    continuity::{
+        capture_declarations_are_equivalent, pointer_routing_is_equivalent,
+        target_geometry_is_equivalent,
+    },
     focus::{can_retain_focus, first_focus, is_focusable_key, set_focus},
-    routing::{active_modal_root, is_interactive_key, route_event},
+    routing::{active_modal_root, is_interactive_key, route_event, route_path},
     session::UiDispatchError,
 };
 use crate::{
-    UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRevision, UiRootKey, UiRouteStamp, UiSurfaceId,
+    UiCaptureContinuity, UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRevision, UiRootKey,
+    UiRouteStamp, UiSurfaceId,
 };
 
 const MAX_SEATS_PER_SURFACE: usize = 1;
@@ -68,6 +73,7 @@ pub(super) struct PointerPosition {
 pub(super) struct PointerCapture {
     pub(super) target: UiKey,
     pub(super) presentation_epoch: u64,
+    pub(super) button: UiPointerButton,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -154,16 +160,18 @@ pub(super) fn preflight_input_identity(
     input: &UiInputEvent,
 ) -> Result<(), UiDispatchError> {
     match input {
-        UiInputEvent::PointerMoved { seat, pointer, .. }
-        | UiInputEvent::PointerButton { seat, pointer, .. } => {
-            preflight_pointer(state, *seat, *pointer)
+        UiInputEvent::Pointer(input) => {
+            if matches!(input.kind(), UiPointerInputKind::Cancelled) {
+                Ok(())
+            } else {
+                preflight_pointer(state, input.seat(), input.pointer())
+            }
         }
         UiInputEvent::Navigate { seat, .. }
         | UiInputEvent::ActivateFocused { seat, .. }
         | UiInputEvent::FocusTarget { seat, .. }
         | UiInputEvent::SemanticAction { seat, .. } => preflight_seat(state, *seat),
-        UiInputEvent::PointerCancelled { .. }
-        | UiInputEvent::SeatCancelled { .. }
+        UiInputEvent::SeatCancelled { .. }
         | UiInputEvent::GeometryInvalidated
         | UiInputEvent::SurfaceCancelled => Ok(()),
     }
@@ -186,14 +194,32 @@ pub(super) fn cancel_invalidated_pointer_interactions(
             .get(&pointer_key)
             .map(|pointer| (pointer.captured.clone(), pointer.hovered.clone()))
             .unwrap_or_default();
-        let captured_is_retired = captured
-            .as_ref()
-            .is_some_and(|capture| invalidated.contains(&capture.target));
+        let captured_is_retired = captured.as_ref().is_some_and(|capture| {
+            route_path(frame, &capture.target)
+                .iter()
+                .any(|key| invalidated.contains(key))
+        });
         let hovered_is_retired = hovered
             .as_ref()
             .is_some_and(|target| invalidated.contains(target));
-        if captured_is_retired || hovered_is_retired {
+        let target_geometry_capture = captured.as_ref().is_some_and(|capture| {
+            frame
+                .layouts()
+                .iter()
+                .find(|layout| layout.key() == Some(&capture.target))
+                .is_some_and(|layout| {
+                    layout.interaction().capture_continuity() == UiCaptureContinuity::TargetGeometry
+                })
+        });
+        if captured_is_retired || hovered_is_retired && !target_geometry_capture {
             cancel_pointer(state, pointer_key.0, pointer_key.1, frame, batch, false);
+        } else if hovered_is_retired {
+            super::pointer::set_hover(state, pointer_key.0, pointer_key.1, None, frame, batch);
+            if let Some(pointer) = state.pointers.get_mut(&pointer_key)
+                && pointer.captured.is_none()
+            {
+                pointer.position = None;
+            }
         }
     }
 }
@@ -210,10 +236,7 @@ pub(super) fn reconcile_presented_pointer_state(
         cancel_all_pointers(state, latest, batch);
         return;
     };
-    if !pointer_routing_is_equivalent(previous, latest) {
-        cancel_all_pointers(state, latest, batch);
-        return;
-    }
+    let equivalent = pointer_routing_is_equivalent(previous, latest);
 
     let pointer_keys = state.pointers.keys().copied().collect::<Vec<_>>();
     for (seat, pointer) in pointer_keys {
@@ -229,6 +252,40 @@ pub(super) fn reconcile_presented_pointer_state(
         });
         if generation_mismatch {
             cancel_pointer(state, seat, pointer, latest, batch, false);
+            continue;
+        }
+        let captured = state
+            .pointers
+            .get(&(seat, pointer))
+            .and_then(|pointer| pointer.captured.as_ref());
+        let preserve_capture = captured.is_some_and(|capture| {
+            let opted_in = previous
+                .layouts()
+                .iter()
+                .find(|layout| layout.key() == Some(&capture.target))
+                .is_some_and(|layout| {
+                    layout.interaction().capture_continuity() == UiCaptureContinuity::TargetGeometry
+                });
+            let geometry_matches = if opted_in {
+                target_geometry_is_equivalent(previous, latest, &capture.target)
+            } else {
+                equivalent && capture_declarations_are_equivalent(previous, latest, &capture.target)
+            };
+            geometry_matches
+                && is_interactive_key(
+                    previous,
+                    latest,
+                    active_modal_root(latest).as_ref(),
+                    &capture.target,
+                )
+                && !route_path(previous, &capture.target)
+                    .iter()
+                    .any(|key| invalidated.contains(key))
+        });
+        if captured.is_some() && !preserve_capture || !equivalent && !preserve_capture {
+            cancel_pointer(state, seat, pointer, latest, batch, false);
+        } else if !equivalent {
+            super::pointer::set_hover(state, seat, pointer, None, latest, batch);
         }
     }
 
@@ -245,34 +302,32 @@ pub(super) fn reconcile_presented_pointer_state(
     }
 }
 
-fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
-    previous.environment().slot_generation() == latest.environment().slot_generation()
-        && previous.environment().route_revision() == latest.environment().route_revision()
-        && previous.environment().geometry_generation()
-            == latest.environment().geometry_generation()
-        && previous.environment().content_transform() == latest.environment().content_transform()
-        && previous
-            .layouts()
-            .iter()
-            .filter_map(|layout| {
-                layout
-                    .key()
-                    .map(|key| (key, layout.route_parent(), layout.visible()))
-            })
-            .eq(latest.layouts().iter().filter_map(|layout| {
-                layout
-                    .key()
-                    .map(|key| (key, layout.route_parent(), layout.visible()))
-            }))
-        && previous
-            .hit_regions()
-            .iter()
-            .map(|region| (&region.key, region.rect, region.clip_rect))
-            .eq(latest
-                .hit_regions()
-                .iter()
-                .map(|region| (&region.key, region.rect, region.clip_rect)))
-        && active_modal_root(previous) == active_modal_root(latest)
+pub(super) fn pointer_input_is_older(
+    state: &SurfaceState,
+    input: &UiInputEvent,
+    route: UiRouteStamp,
+) -> bool {
+    let UiInputEvent::Pointer(input) = input else {
+        return false;
+    };
+    if !state
+        .presented_route
+        .is_some_and(|presented| UiRouteLineage::from_route(presented).matches(route))
+    {
+        return false;
+    }
+    state
+        .pointers
+        .get(&(input.seat(), input.pointer()))
+        .is_some_and(|pointer| {
+            pointer
+                .captured
+                .as_ref()
+                .is_some_and(|capture| capture.presentation_epoch > route.presentation_epoch())
+                || pointer.position.is_some_and(|position| {
+                    position.presentation_epoch > route.presentation_epoch()
+                })
+        })
 }
 
 pub(super) fn reconcile_pointer_input_generation(
@@ -283,8 +338,7 @@ pub(super) fn reconcile_pointer_input_generation(
     batch: &mut UiDispatchBatch,
 ) {
     let pointer_key = match input {
-        UiInputEvent::PointerMoved { seat, pointer, .. }
-        | UiInputEvent::PointerButton { seat, pointer, .. } => (*seat, *pointer),
+        UiInputEvent::Pointer(input) => (input.seat(), input.pointer()),
         _ => return,
     };
     let generation_changed = state.pointers.get(&pointer_key).is_some_and(|pointer| {

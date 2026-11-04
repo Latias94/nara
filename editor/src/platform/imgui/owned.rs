@@ -18,7 +18,7 @@ use nara_text::FontFace;
 use nara_ui_kernel::__private::UiFrameJournalAuthority;
 use nara_ui_kernel::{
     UiDispatchBatch, UiDispatchOutcome, UiFrame, UiFrameJournal, UiInputEvent,
-    UiInteractionSession, UiRouteStamp,
+    UiInteractionSession, UiPointerInput, UiRouteStamp,
 };
 use nara_ui_render::UiPresentationPlanner;
 use winit::{
@@ -495,11 +495,11 @@ impl NativeImgui {
                     .owned
                     .get_mut(&panel)
                     .expect("Inspector exists")
-                    .dispatch(UiInputEvent::PointerMoved {
-                        seat: nara_ui_kernel::UiSeatId::PRIMARY,
-                        pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-                        position: point,
-                    })?
+                    .dispatch(UiInputEvent::Pointer(UiPointerInput::moved(
+                        nara_ui_kernel::UiSeatId::PRIMARY,
+                        nara_ui_kernel::UiPointerId::PRIMARY,
+                        point,
+                    )))?
                     && let Some(batch) = outcome.consumed()
                     && let Some(model) = application.current_frame()
                 {
@@ -568,17 +568,17 @@ impl NativeImgui {
                 if *state == ElementState::Pressed {
                     self.owned_input.pointer_panel = Some(panel);
                 }
-                let event = UiInputEvent::PointerButton {
-                    seat: nara_ui_kernel::UiSeatId::PRIMARY,
-                    pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-                    button: nara_ui_kernel::UiPointerButton::Primary,
-                    phase: if *state == ElementState::Pressed {
+                let event = UiInputEvent::Pointer(UiPointerInput::button(
+                    nara_ui_kernel::UiSeatId::PRIMARY,
+                    nara_ui_kernel::UiPointerId::PRIMARY,
+                    nara_ui_kernel::UiPointerButton::Primary,
+                    if *state == ElementState::Pressed {
                         nara_ui_kernel::UiButtonPhase::Pressed
                     } else {
                         nara_ui_kernel::UiButtonPhase::Released
                     },
-                    position: Some(point),
-                };
+                    Some(point),
+                ));
                 if let Some((frame, outcome)) = self
                     .owned
                     .get_mut(&panel)
@@ -730,10 +730,12 @@ impl NativeImgui {
         self.owned_input.pointer_panel = None;
         self.owned_input.dragging = false;
         if let Some(surface) = self.owned.get_mut(&panel) {
-            if let Some((frame, outcome)) = surface.dispatch(UiInputEvent::PointerCancelled {
-                seat: nara_ui_kernel::UiSeatId::PRIMARY,
-                pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-            })? && let Some(batch) = outcome.consumed()
+            if let Some((frame, outcome)) =
+                surface.dispatch(UiInputEvent::Pointer(UiPointerInput::cancelled(
+                    nara_ui_kernel::UiSeatId::PRIMARY,
+                    nara_ui_kernel::UiPointerId::PRIMARY,
+                )))?
+                && let Some(batch) = outcome.consumed()
             {
                 self.frontend
                     .reconcile_owned_input(panel, &frame, batch)
@@ -1018,10 +1020,10 @@ impl NativeImgui {
                     .map_err(imgui_error)?;
             } else if mapping_changed
                 && let Some((frame, outcome)) =
-                    surface.dispatch(UiInputEvent::PointerCancelled {
-                        seat: nara_ui_kernel::UiSeatId::PRIMARY,
-                        pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-                    })?
+                    surface.dispatch(UiInputEvent::Pointer(UiPointerInput::cancelled(
+                        nara_ui_kernel::UiSeatId::PRIMARY,
+                        nara_ui_kernel::UiPointerId::PRIMARY,
+                    )))?
                 && let Some(batch) = outcome.consumed()
             {
                 self.frontend

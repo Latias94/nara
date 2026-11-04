@@ -35,8 +35,8 @@ pub mod __private {
 }
 
 pub use authoring::{
-    UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiInteraction, UiLayer,
-    UiNode, UiRoot, UiSemanticRole, UiSemantics,
+    UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiCaptureContinuity,
+    UiInteraction, UiLayer, UiNode, UiPointerButtons, UiRoot, UiSemanticRole, UiSemantics,
 };
 pub use compiler::{UiCompileError, UiCompileWorkStats, UiCompiler};
 pub use frame::{
@@ -56,8 +56,9 @@ pub use identity::{
 pub use interaction::{
     UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiButtonPhase,
     UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent, UiInteractionSession,
-    UiNavigation, UiNonActivation, UiPointerButton, UiPointerId, UiRoutePhase, UiRoutedEvent,
-    UiRoutedEventKind, UiSeatId, UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
+    UiModifiers, UiNavigation, UiNonActivation, UiPointerButton, UiPointerId, UiPointerInput,
+    UiPointerInputKind, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiScrollDelta, UiSeatId,
+    UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
 };
 pub use journal::{
     UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId,

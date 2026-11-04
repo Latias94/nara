@@ -358,11 +358,11 @@ fn prepared_toggle_states(
             .dispatch(
                 &journal,
                 UiRouteStamp::from_receipt(receipt),
-                UiInputEvent::PointerMoved {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: UiPointerId::PRIMARY,
+                UiInputEvent::Pointer(nara_ui_kernel::UiPointerInput::moved(
+                    UiSeatId::PRIMARY,
+                    UiPointerId::PRIMARY,
                     position,
-                },
+                )),
             )
             .unwrap();
         let intents = owner.dispatch(frame, dispatch.consumed().unwrap()).unwrap();

@@ -70,9 +70,14 @@ receives focus. The trajectory then imports the external Lyon-backed `CurveCanva
 custom geometry in the same stream as ordinary node/port controls. Require presented pointer
 selection, Tab/Enter port activation, Shift-Tab/Enter selection, fractional authored pan with
 matching geometry/semantics, old-route refusal and final retirement. The extended total is
-14 presentations and 13 journal commits. Error/panic child modes must also exercise a pending
-mesh submission. This is finite child-layout, custom geometry and presented-input acceptance;
-curve hit testing, canvas motion/wheel and the complete R11b/R11c consumers remain separate.
+14 presentations and 13 journal commits at that checkpoint. The continuous-input extension
+keeps the fixed viewport's capture through descendant pan/disappearance, moves outside its
+bounds, returns and tests wrong/matching release. Require cursor-anchored Lines/Pixels wheel
+over a child control, bounded-pan wheel/release without a jump, held focus-loss cancellation
+and final Surface retirement. The full total is 19 presentations and 18 journal commits.
+Error/panic child modes must also exercise a pending mesh submission. This is finite child-layout,
+custom geometry and pointer/keyboard-control acceptance; curve hit testing, general logical-key
+delivery, cross-window capture and the complete R11b/R11c consumers remain separate.
 
 ## UI Work Probes
 

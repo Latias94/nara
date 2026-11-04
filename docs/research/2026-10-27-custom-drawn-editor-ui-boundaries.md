@@ -410,6 +410,32 @@ a kernel dependency. This selection is a design, not qualification or a performa
 the current plan records executed evidence separately. Final-size drawing callbacks and canvas
 gestures remain further pressure.
 
+### Presented pointer follow-up
+
+At the same Zed GPUI `dd3437011469d5c2ec8c821a84cc999979625697` pin,
+`elements/div.rs:299` limits ordinary motion to hovered Bubble listeners, while
+`window.rs:3602`/`:778` makes a captured hitbox count as hovered outside its bounds. Capture-phase
+mouse observation in `window.rs:6212` follows listener registration order; it does not itself
+grant pointer ownership. `interactive.rs:520` preserves Lines/Pixels, event position, modifiers,
+phase and source; its `pixel_delta(line_height)` leaves conversion to the caller. Windows
+ordinary wheel events and Direct Manipulation supply different source units
+(`gpui_windows/src/events.rs:577`, `direct_manipulation.rs:320`).
+
+GPUI key-down/up retains repeat and logical keystroke facts separately from its text input
+handler (`interactive.rs:23`, `platform/keystroke.rs:16`, `input.rs:26`). Its keyboard path
+(`window.rs:6433`, `:6550`) may consume a shortcut before raw propagation. These mechanisms
+support preserving source meaning, not deriving desktop logical keys/repeat from Nara's
+gameplay physical `KeyCode`/held-state projection. `nara_input` also brings nonoptional App/ECS
+dependencies, so it is not selected as a neutral kernel type dependency.
+
+Nara's existing pointer-route equivalence cancels all gestures when any hit geometry changes.
+That protects ordinary widgets but interrupts a viewport whose own pan moves descendants. The
+selected successor makes event samples explicit and admits opt-in owner/ancestor geometry
+continuity under unchanged Surface facts; other geometry changes retain their own cancellation.
+It selects one nearest motion/scroll listener, not GPUI's live callback registry, automatic
+global drag state or arbitrary propagation. Dynamic stop handling and general key/text services
+remain further pressure. This pinned source study is not native or performance evidence.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml

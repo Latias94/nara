@@ -160,6 +160,7 @@ pub(super) fn compile_root(
                 physical_rect: environment.snap(rect),
                 clip_rect: inherited_clip.rect(),
                 visible: node_visible,
+                interaction: node.node.interaction,
             },
         ));
 
@@ -532,10 +533,8 @@ fn visit_node<'a>(
             message: format!("key exceeds {} encoded bytes", limits.max_key_bytes),
         });
     }
-    let requires_key = node.interaction.hit_testable
-        || node.interaction.focusable
-        || node.semantics.is_some()
-        || node.text.is_some();
+    let requires_key =
+        node.interaction.requires_key() || node.semantics.is_some() || node.text.is_some();
     if requires_key && key.is_none() {
         return Err(UiRootDiagnostic::MissingRequiredKey {
             structural_index: nodes.len(),
@@ -679,7 +678,7 @@ fn inset(value: UiDimension) -> LengthPercentageAuto {
 }
 
 fn semantic_enabled(node: &UiNode) -> bool {
-    if node.interaction.hit_testable || node.interaction.focusable {
+    if node.interaction.requires_key() {
         node.interaction.enabled
     } else {
         true

@@ -380,7 +380,7 @@ component library interface. November 4 source inspection identifies these concr
 | Source-built panel registration | `ImguiEditorPanel::show` in [workspace.rs](../../editor/src/frontend/imgui/workspace.rs) and `register_panel` in [composition.rs](../../editor/src/platform/composition.rs) | Toolkit-independent attachment, lifecycle and capability admission |
 | Authored layout | [UiNode](../../crates/nara_ui_kernel/src/authoring.rs) and scoped [custom layout](../../crates/nara_ui_kernel/src/layout.rs) | Broader custom drawing/input and complete complex-editor consumer; layout alone does not establish them |
 | Drawing | `UiPaintPrimitive::Rect`/`Text`/`Mesh` in [frame.rs](../../crates/nara_ui_kernel/src/frame.rs), captured geometry and the independent curve consumer | Final-size drawing, broader effects/resources and complete custom-canvas interaction |
-| Interaction | `UiRoutedEventKind` in [types.rs](../../crates/nara_ui_kernel/src/interaction/types.rs) | Routed motion coordinates, scroll/gesture and keyboard services sufficient for a custom canvas; current button batches alone do not provide them |
+| Interaction | Event-time pointer samples, declared motion/scroll and opt-in viewport capture in [interaction](../../crates/nara_ui_kernel/src/interaction/mod.rs) | General logical-key delivery, dynamic propagation and broader gesture/services beyond the finite canvas consumer |
 | Controlled widgets | [widgets](../../crates/nara_ui_widgets/src/lib.rs) expose Button, TextField and scoped local state | Complete scoped effects/services and component-library ergonomics beyond the keyed composition prerequisite |
 | Semantics | Finite roles/actions in [authoring.rs](../../crates/nara_ui_kernel/src/authoring.rs), including the external curve's ordinary node/port buttons | Complete graph/document interaction and native accessibility; node/port controls alone do not supply them |
 
@@ -529,6 +529,46 @@ This finite seam permits a component to supply its own shape algorithm without a
 graph-specific widget kind. It does not supply final-size drawing callbacks, curve hit testing,
 drag/wheel routing, a vector-effect language, an incremental geometry cache or a performance
 result. Those capabilities need their actual consumers and matching qualification.
+
+### Pointer samples and local canvas views
+
+The canvas-input prerequisite extends the existing presented interaction owner with immutable
+event-time pointer samples. Position, seat/pointer, button edge, modifiers and scroll units
+travel together. Routed press/release, motion and scroll retain the exact resolved sample;
+reconciliation cleanup does not manufacture a device sample. Non-finite input is refused before
+state changes. Text/IME remains with the text owner, and the gameplay physical-key vocabulary
+does not become a desktop logical-key interface.
+
+A component declares supported buttons and interest in motion or scroll through its immutable
+interaction description. A press captures the actual selected target; only the matching button
+release ends that capture. Captured motion reaches that owner outside its hit rectangle without
+clamping. Uncaptured motion and scroll choose the nearest interested keyed ancestor of the
+event's exact hit. That one target participates in ordinary Capture/Target/Bubble observation;
+ancestor observations do not install a second listener. This finite rule supports a scrollable
+canvas containing ordinary buttons without a mutable-tree event callback or a second router.
+It is not arbitrary dynamic stop-propagation or gesture arbitration.
+
+Default capture continuity keeps the existing strict surface-routing equivalence. A custom
+viewport can explicitly select `UiCaptureContinuity::TargetGeometry`: actual presentation may
+advance its capture across changed descendants/siblings only while its owner and keyed
+ancestors keep the same geometry, clips, declarations, path and published modal scope under
+the same Surface mapping and generations. Explicit behavior invalidation, replacement,
+reparenting, owner movement, fallback, disabling or native/Surface loss still cancels the
+gesture. Old event epochs cannot cancel or move a renewed newer capture. A component incarnation
+change must invalidate its old behavior even when its logical key and rectangle remain equal.
+
+`UiScrollDelta::Lines` retains device line units. `Pixels` carries authored logical point
+displacement after the adapter's inverse content-scale conversion; the name preserves its
+pixel-event origin and does not mean physical target pixels. Sensitivity and line conversion
+belong to the component. The external curve library retains desired pan/zoom and its drag
+anchor; cursor-anchored zoom updates both scale and pan. It consumes already admitted batches,
+owns no journal or receipt, and asks its caller to compose/present the changed view. Continuous
+desired-state updates do not authorize unpresented hit geometry.
+
+This prerequisite supplies pointer behavior, not a general logical-key stream, native OS
+capture across windows, Runtime wheel projection from an untyped source, a gesture arena or
+the full graph editor. The reference Runtime wheel event currently lacks unit/modifier facts;
+its adapter must continue to report unsupported input instead of inventing them.
 
 ## Panel hosting and optional frontend implementations
 

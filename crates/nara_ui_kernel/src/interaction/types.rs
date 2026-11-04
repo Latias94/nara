@@ -1,4 +1,5 @@
-use crate::{UiActionId, UiFrameRevision, UiKey, UiPoint, UiPresentationReceipt, UiRouteStamp};
+use super::UiPointerInput;
+use crate::{UiActionId, UiFrameRevision, UiKey, UiPresentationReceipt, UiRouteStamp};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiSeatId(u32);
@@ -167,22 +168,7 @@ pub enum UiRoutePhase {
 /// One renderer- and platform-neutral interaction event mapped by an owning adapter.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UiInputEvent {
-    PointerMoved {
-        seat: UiSeatId,
-        pointer: UiPointerId,
-        position: UiPoint,
-    },
-    PointerButton {
-        seat: UiSeatId,
-        pointer: UiPointerId,
-        button: UiPointerButton,
-        phase: UiButtonPhase,
-        position: Option<UiPoint>,
-    },
-    PointerCancelled {
-        seat: UiSeatId,
-        pointer: UiPointerId,
-    },
+    Pointer(UiPointerInput),
     Navigate {
         seat: UiSeatId,
         direction: UiNavigation,
@@ -209,6 +195,8 @@ pub enum UiInputEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiRoutedEventKind {
+    PointerMoved,
+    Scrolled,
     HoverChanged {
         hovered: bool,
     },
@@ -226,12 +214,13 @@ pub enum UiRoutedEventKind {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiRoutedEvent {
     target: UiKey,
     current_target: UiKey,
     phase: UiRoutePhase,
     kind: UiRoutedEventKind,
+    pointer_input: Option<UiPointerInput>,
 }
 
 impl UiRoutedEvent {
@@ -246,7 +235,13 @@ impl UiRoutedEvent {
             current_target,
             phase,
             kind,
+            pointer_input: None,
         }
+    }
+
+    pub(crate) const fn with_pointer_input(mut self, input: Option<UiPointerInput>) -> Self {
+        self.pointer_input = input;
+        self
     }
 
     #[must_use]
@@ -268,27 +263,54 @@ impl UiRoutedEvent {
     pub const fn kind(&self) -> &UiRoutedEventKind {
         &self.kind
     }
+
+    /// Returns the original reached press, release, motion or scroll sample with its actual
+    /// resolved position and event-time modifiers. Cleanup and synthetic transitions have none.
+    #[must_use]
+    pub const fn pointer_input(&self) -> Option<&UiPointerInput> {
+        self.pointer_input.as_ref()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiNonActivation {
     NoPointerTarget,
     NoPointerCapture,
+    NoScrollTarget,
     NoFocusTarget,
     MissingPointerPosition,
     UnsupportedPointerButton,
-    PointerAlreadyCaptured { target: UiKey },
+    PointerButtonMismatch {
+        captured: UiPointerButton,
+        received: UiPointerButton,
+    },
+    PointerAlreadyCaptured {
+        target: UiKey,
+    },
     StaleGeometry,
-    TargetRetired { target: UiKey },
-    TargetHidden { target: UiKey },
-    TargetOutsideModal { target: UiKey },
-    TargetDisabled { target: UiKey },
-    NoSupportedAction { target: UiKey },
-    ActionUnavailable { target: UiKey, action: UiActionId },
+    TargetRetired {
+        target: UiKey,
+    },
+    TargetHidden {
+        target: UiKey,
+    },
+    TargetOutsideModal {
+        target: UiKey,
+    },
+    TargetDisabled {
+        target: UiKey,
+    },
+    NoSupportedAction {
+        target: UiKey,
+    },
+    ActionUnavailable {
+        target: UiKey,
+        action: UiActionId,
+    },
 }
 
 /// Events committed by one consumed normalized input transaction.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiDispatchBatch {
     frame_revision: UiFrameRevision,
     presentation_epoch: u64,
@@ -348,7 +370,7 @@ impl UiDispatchBatch {
 ///
 /// A rejected result cannot carry routed events or a candidate session, so callers cannot
 /// accidentally commit interaction state while reporting `RejectedClosed`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiDispatchOutcome {
     Consumed(UiDispatchBatch),
     Rejected(UiNonActivation),

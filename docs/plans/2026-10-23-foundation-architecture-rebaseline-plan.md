@@ -1879,6 +1879,90 @@ allocation, cache effectiveness or matched CPU/GPU latency. Geometry constructio
 need their current matched probes before any R11a/e performance claim. The complete graph,
 gesture, foreign-panel and independent-Editor requirements above remain open.
 
+#### Presented pointer samples and viewport capture prerequisite
+
+The next consumer pressure joins captured geometry to actual drag and wheel input through the
+original journal/session. Add a neutral event-time pointer sample, declared motion/scroll/button
+interest, matching-button capture and finite nearest-listener selection. Preserve line/pixel
+origin, modifiers and exact logical positions without importing gameplay Input/ECS or native
+toolkit types into the kernel. Text/IME and general logical-key delivery remain separate.
+
+Explicit `TargetGeometry` capture continuity permits a fixed viewport to pan/zoom descendants
+through successive actual presentations. Preserve default strict routing. The same owner and
+keyed ancestor path, geometry, clips, input declarations and modal scope remain mandatory under
+the same Surface transform/generations. Test movement outside the viewport, child disappearance,
+return/release, wrong-button refusal, old epochs, reparent, policy/owner replacement, fallback,
+native focus loss and Surface retirement. No candidate may renew capture before presentation.
+
+The independent `CurveCanvasState` owns only desired local pan/zoom and drag anchors. It reduces
+already admitted target batches and composes mesh/node/port geometry through the existing
+library. The full native field/popup/reconstruction/keyed/curve trajectory must remain intact,
+then continue a drag across changing presented descendants, preserve an anchored world point
+for both line and pixel scroll, and cancel a held gesture on native focus loss/retirement.
+Nested scroll listeners target one nearest owner; child button presses must not pan a parent.
+
+This is no general propagation callback, logical-key framework, Runtime wheel-source upgrade,
+cross-window capture, full graph document or R11b/c closure. Existing Runtime wheel events have
+insufficient unit/modifier information and remain explicitly unhandled rather than reinterpreted.
+The [pointer contract](../architecture/ui-foundation-design.md#pointer-samples-and-local-canvas-views)
+and ADR0108 own the decision. Record actual verification and limits before qualification.
+
+The implementation replaces three separate pointer input variants with one opaque immutable
+`UiPointerInput`. Routed operation samples retain resolved event position, button, modifiers
+and scroll units; generated cleanup carries no sample. The layout facts retain the exact
+interaction declaration. One capture remembers its accepted button, and a wrong-button
+release refuses without clearing it. A fixed viewport opts into target/ancestor continuity;
+default widgets retain strict equivalence. Same-slot historical samples cannot clear a renewed
+newer capture, while a successor slot can restart epochs and clean predecessor state normally.
+Non-finite source data is rejected before any pending reconciliation or session mutation.
+
+Existing Runtime and reference Editor callsites migrate directly. The Runtime's original
+untyped Wheel source remains unhandled. The independent native adapter preserves Winit line
+units and converts pixel displacement through its direct Surface scale. Its actual component
+uses desired local state without creating a second journal or receipt. Ordinary child buttons
+still own their presses; their scroll selects the nearest interested viewport. Native capture
+continues while descendant buttons move/disappear and the pointer leaves the viewport, then
+terminates on the accepted button release. Native window/Surface loss retains original cleanup.
+
+Independent review identifies a bounded-view interaction bug: after a drag reaches the pan
+limit, wheel adjustment leaves a hidden excess displacement in the old drag baseline. A
+stationary release then moves the canvas. Wheel now rebases the drag anchor to the actual
+sample and constrained resulting pan. The native trajectory asserts the exact boundary
+sequence `14990 → 15000 → 14984 → 14984` through admitted events, preserving the later focus-loss
+and retirement assertions. Kernel, component and migrated-adapter reviews have no remaining
+P1/P2 after correction.
+
+The first kernel interaction run is 54/55 because a new environment-change fixture uses theme
+revision 2 with a revision 1 theme. Matching the actual theme to the environment corrects that
+fixture without weakening capture cancellation; the later shared suite executes all 55.
+The independent native trajectory preserves its earlier complete workflow and extends to 19
+actual window presentations/18 journal commits. It still uses injected pointer/IME/logical
+keys, not physical OS event delivery. State admission/geometry CPU cases and real native
+reducer behavior remain distinct evidence. No measured-cache, input-latency or performance
+improvement follows from these changes.
+
+November 5 qualification uses Rust 1.95.0, serial Cargo with one build job and the shared
+`target`. Native cases run on Windows/DX12. The following suites overlap and must not be added
+into a unique test total:
+
+| Scope | Actual result | Nextest run |
+| --- | --- | --- |
+| Shared text, kernel, widgets, presentation and game UI | 469/469; includes all 55 interaction tests | `312bb407-f907-410a-9bdc-9a84d330bc89` |
+| Editor library and selected public integrations | 406/406; 60 ignored/native tests excluded | `aabda47e-44c9-404d-adeb-40a77732117e` |
+| Selected native Editor workflows | 33/33; includes original Canvas, field, hierarchy, View and retirement trajectories | `484e1d44-75dc-4374-b507-354a88fe3d57` |
+| Independent UI component library | 24/24; view admission, geometry and bounds without hosted-input claims | `d4438bf7-b7d2-445c-960a-caff1ef3813a` |
+| Final independent native surface | 2/2; complete 19-presentation/18-commit trajectory plus four error/panic child modes | `af5f42af-f182-4964-b41f-c7c696876a42` |
+| Neutral component/native presenter/game adapter dependency closure | 3/3 | `f8db03ba-7c2a-437f-9570-f3fe8de17437` |
+
+The actual Editor binary and final independent native example build. Correctness Clippy passes
+for text/kernel/widgets/presentation/game UI/WGPU/Editor with all targets/features and for both
+independent consumer workspaces. Existing warnings remain; this is not a warning-free claim.
+Root and independent workspace formatting, whitespace and changed-document local links pass.
+The renderer implementation is unchanged in this unit; the preceding mesh GPU qualification
+keeps its original scope rather than being reported as a new pointer run. The complete R11a
+numeric baseline, public panel Host, logical-key/services, graph/history and independent Editor
+workflows remain open.
+
 ### R11c: Complex document editor, custom drawing and multiple Views
 
 **Dependencies:** R11b, existing `EditorExtensionDocument` lifecycle and selected R8/R9 render

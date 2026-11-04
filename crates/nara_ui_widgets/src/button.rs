@@ -196,7 +196,9 @@ impl UiButtonState {
                     source: *source,
                 });
             }
-            UiRoutedEventKind::ActivateRequested { .. } => {}
+            UiRoutedEventKind::ActivateRequested { .. }
+            | UiRoutedEventKind::PointerMoved
+            | UiRoutedEventKind::Scrolled => {}
         }
         None
     }

@@ -21,11 +21,11 @@ use nara_text::{TextEdit, TextEngine, TextRect, TextSelection, bundled_font_face
 use nara_ui_kernel::{
     UiActionId, UiAuthoringSnapshotBuilder, UiBrush, UiButtonPhase, UiColorRole, UiCompiler,
     UiDispatchBatch, UiEnvironment, UiFrame, UiInputEvent, UiInteractionSession, UiKey, UiLayer,
-    UiLocalKey, UiPoint, UiPointerButton, UiPointerId, UiRect, UiRoot, UiRootKey, UiRouteStamp,
-    UiSeatId, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId,
-    UiTheme, UiVisual,
+    UiLocalKey, UiModifiers, UiPoint, UiPointerButton, UiPointerId, UiPointerInput, UiRect, UiRoot,
+    UiRootKey, UiRouteStamp, UiSeatId, UiSize, UiStyle, UiSurfaceContentTransform,
+    UiSurfaceGenerations, UiSurfaceId, UiTheme, UiVisual,
 };
-use nara_ui_module_consumer::curve_canvas::CurveCanvas;
+use nara_ui_module_consumer::curve_canvas::{CurveCanvas, CurveCanvasState};
 use nara_ui_module_consumer::keyed_editors::{EditorRow, KeyedEditors};
 use nara_ui_render::{UiPreparedImages, UiSurfacePresentationEvent, UiSurfacePresenter};
 use nara_ui_widgets::{
@@ -44,7 +44,7 @@ use window_gpu::{ImagePainter, Result};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition},
-    event::{DeviceId, ElementState, Ime, MouseButton, WindowEvent},
+    event::{DeviceId, ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{Window, WindowId as NativeWindowId},
@@ -203,7 +203,8 @@ struct Probe {
     curve: Option<CurveCanvas>,
     curve_sentinel: Option<UiButton>,
     curve_buttons: [UiButtonState; 3],
-    curve_pan: UiPoint,
+    curve_state: Option<CurveCanvasState>,
+    curve_anchor: Option<(UiPoint, UiPoint)>,
     curve_selected: bool,
     curve_actions: usize,
     port_actions: usize,
@@ -260,7 +261,8 @@ impl Probe {
             curve: None,
             curve_sentinel: None,
             curve_buttons: std::array::from_fn(|_| UiButtonState::default()),
-            curve_pan: UiPoint::new(0.0, 0.0),
+            curve_state: None,
+            curve_anchor: None,
             curve_selected: false,
             curve_actions: 0,
             port_actions: 0,
@@ -279,7 +281,11 @@ impl Probe {
         let previous_work = self.compiler.work_stats();
         let base = if let Some(curve) = &self.curve {
             curve
-                .authored_root(self.curve_pan, self.curve_selected)
+                .authored_view(
+                    self.curve_state.as_ref().unwrap().pan(),
+                    self.curve_state.as_ref().unwrap().zoom(),
+                    self.curve_selected,
+                )
                 .map_err(|error| -> Box<dyn std::error::Error> { error })?
                 .with_child(self.curve_sentinel.as_ref().unwrap().authored_node(
                     curve.button().key().root_key(),
@@ -364,7 +370,7 @@ impl Probe {
                 UiSize::new(size.width, size.height).unwrap(),
                 self.window.scale_factor() as f32,
             )?,
-            UiSurfaceGenerations::new(1, generation, generation, generation)?,
+            UiSurfaceGenerations::new(1, generation.min(12), generation.min(12), generation)?,
             1,
             1,
         )?;
@@ -555,6 +561,11 @@ impl Probe {
 
     fn reduce(&mut self, batch: &UiDispatchBatch) -> Result<()> {
         if let Some(curve) = &self.curve {
+            self.curve_state
+                .as_mut()
+                .unwrap()
+                .reduce(batch)
+                .map_err(|error| -> Box<dyn std::error::Error> { error })?;
             let mut intents = UiIntentBatch::default();
             for (button, state) in [
                 curve.button(),
@@ -691,28 +702,54 @@ impl Probe {
             WindowEvent::CursorMoved { position, .. } => {
                 let point = position.to_logical::<f32>(self.window.scale_factor());
                 self.cursor = UiPoint::new(point.x, point.y);
-                self.route_input(UiInputEvent::PointerMoved {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: UiPointerId::PRIMARY,
-                    position: self.cursor,
-                })?;
+                self.route_input(UiInputEvent::Pointer(
+                    UiPointerInput::moved(UiSeatId::PRIMARY, UiPointerId::PRIMARY, self.cursor)
+                        .with_modifiers(self.pointer_modifiers()),
+                ))?;
             }
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } => {
-                self.route_input(UiInputEvent::PointerButton {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: UiPointerId::PRIMARY,
-                    button: UiPointerButton::Primary,
-                    phase: if state == ElementState::Pressed {
-                        UiButtonPhase::Pressed
-                    } else {
-                        UiButtonPhase::Released
-                    },
-                    position: Some(self.cursor),
-                })?;
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    MouseButton::Left => UiPointerButton::Primary,
+                    MouseButton::Right => UiPointerButton::Secondary,
+                    MouseButton::Middle => UiPointerButton::Middle,
+                    MouseButton::Back => UiPointerButton::Other(4),
+                    MouseButton::Forward => UiPointerButton::Other(5),
+                    MouseButton::Other(button) => UiPointerButton::Other(button),
+                };
+                self.route_input(UiInputEvent::Pointer(
+                    UiPointerInput::button(
+                        UiSeatId::PRIMARY,
+                        UiPointerId::PRIMARY,
+                        button,
+                        if state == ElementState::Pressed {
+                            UiButtonPhase::Pressed
+                        } else {
+                            UiButtonPhase::Released
+                        },
+                        Some(self.cursor),
+                    )
+                    .with_modifiers(self.pointer_modifiers()),
+                ))?;
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let delta = match delta {
+                    MouseScrollDelta::LineDelta(horizontal, vertical) => {
+                        nara_ui_kernel::UiScrollDelta::Lines(UiPoint::new(horizontal, vertical))
+                    }
+                    MouseScrollDelta::PixelDelta(delta) => {
+                        let logical = delta.to_logical::<f32>(self.window.scale_factor());
+                        nara_ui_kernel::UiScrollDelta::Pixels(UiPoint::new(logical.x, logical.y))
+                    }
+                };
+                self.route_input(UiInputEvent::Pointer(
+                    UiPointerInput::scroll(
+                        UiSeatId::PRIMARY,
+                        UiPointerId::PRIMARY,
+                        self.cursor,
+                        delta,
+                    )
+                    .with_modifiers(self.pointer_modifiers()),
+                ))?;
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::Focused(false) => {
@@ -736,6 +773,15 @@ impl Probe {
             _ => {}
         }
         Ok(())
+    }
+
+    fn pointer_modifiers(&self) -> UiModifiers {
+        UiModifiers::new(
+            self.modifiers.shift_key(),
+            self.modifiers.control_key(),
+            self.modifiers.alt_key(),
+            self.modifiers.super_key(),
+        )
     }
 
     fn click(&mut self, x: f64, y: f64) -> Result<()> {
@@ -951,13 +997,13 @@ impl Probe {
                         .dispatch(
                             self.presenter.journal(),
                             self.old_route.unwrap(),
-                            UiInputEvent::PointerButton {
-                                seat: UiSeatId::PRIMARY,
-                                pointer: UiPointerId::PRIMARY,
-                                button: UiPointerButton::Primary,
-                                phase: UiButtonPhase::Released,
-                                position: Some(UiPoint::new(30.0, 30.0))
-                            }
+                            UiInputEvent::Pointer(UiPointerInput::button(
+                                UiSeatId::PRIMARY,
+                                UiPointerId::PRIMARY,
+                                UiPointerButton::Primary,
+                                UiButtonPhase::Released,
+                                Some(UiPoint::new(30.0, 30.0)),
+                            ))
                         )
                         .is_err()
                 );
@@ -1012,9 +1058,10 @@ impl Probe {
                         CurveCanvas::new(root)
                             .map_err(|error| -> Box<dyn std::error::Error> { error })?,
                     );
+                    self.curve_state = Some(CurveCanvasState::new(self.curve.as_ref().unwrap()));
                 }
             }
-            11..=13 => {
+            11..=18 => {
                 if self.step_curve()? {
                     return Ok(true);
                 }
@@ -1026,6 +1073,9 @@ impl Probe {
     }
 
     fn step_curve(&mut self) -> Result<bool> {
+        if self.stage >= 14 {
+            return self.step_curve_gesture();
+        }
         let curve = self.curve.as_ref().unwrap();
         let button_key = curve.button().key().clone();
         let port_key = curve.port_button().key().clone();
@@ -1069,6 +1119,7 @@ impl Probe {
                 .map(|fact| fact.key())
                 .collect::<Vec<_>>(),
             [
+                curve.viewport_key(),
                 &button_key,
                 &port_key,
                 self.curve_sentinel.as_ref().unwrap().key()
@@ -1112,32 +1163,33 @@ impl Probe {
                 assert_eq!((self.curve_actions, self.curve_selected), (2, false));
                 self.curve_previous = Some((mesh, rect, self.route.unwrap()));
                 self.route_input(UiInputEvent::GeometryInvalidated)?;
-                self.curve_pan = UiPoint::new(13.25, -4.5);
+                self.curve_state
+                    .as_mut()
+                    .unwrap()
+                    .set_view(UiPoint::new(13.25, -4.5), 1.0)
+                    .map_err(|error| -> Box<dyn std::error::Error> { error })?;
             }
             13 => {
                 let (previous_mesh, previous_rect, previous_route) =
                     self.curve_previous.as_ref().unwrap();
+                let curve_pan = self.curve_state.as_ref().unwrap().pan();
                 assert_eq!(mesh.indices(), previous_mesh.indices());
                 assert_eq!(mesh.vertices().len(), previous_mesh.vertices().len());
                 for (current, previous) in mesh.vertices().iter().zip(previous_mesh.vertices()) {
                     assert!(
-                        (current.position().x() - previous.position().x() - self.curve_pan.x())
-                            .abs()
+                        (current.position().x() - previous.position().x() - curve_pan.x()).abs()
                             < 0.001
                     );
                     assert!(
-                        (current.position().y() - previous.position().y() - self.curve_pan.y())
-                            .abs()
+                        (current.position().y() - previous.position().y() - curve_pan.y()).abs()
                             < 0.001
                     );
                 }
                 assert!(
-                    (rect.origin().x() - previous_rect.origin().x() - self.curve_pan.x()).abs()
-                        < 0.001
+                    (rect.origin().x() - previous_rect.origin().x() - curve_pan.x()).abs() < 0.001
                 );
                 assert!(
-                    (rect.origin().y() - previous_rect.origin().y() - self.curve_pan.y()).abs()
-                        < 0.001
+                    (rect.origin().y() - previous_rect.origin().y() - curve_pan.y()).abs() < 0.001
                 );
                 let old_input = self.interaction.dispatch(
                     self.presenter.journal(),
@@ -1151,6 +1203,163 @@ impl Probe {
                     old_input.rejection(),
                     Some(&nara_ui_kernel::UiNonActivation::StaleGeometry)
                 );
+                assert_eq!((self.presents, self.commits), (14, 13));
+                self.move_curve_pointer(30.0, 86.0)?;
+                self.curve_mouse(MouseButton::Middle, ElementState::Pressed)?;
+                self.move_curve_pointer(50.0, 88.0)?;
+                assert!(self.curve_state.as_ref().unwrap().is_dragging());
+                assert_eq!(
+                    self.curve_state.as_ref().unwrap().pan(),
+                    UiPoint::new(33.25, -2.5)
+                );
+            }
+            _ => unreachable!(),
+        }
+        Ok(false)
+    }
+
+    fn move_curve_pointer(&mut self, position_x: f64, position_y: f64) -> Result<()> {
+        self.window_event(WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: PhysicalPosition::new(
+                position_x * self.window.scale_factor(),
+                position_y * self.window.scale_factor(),
+            ),
+        })
+    }
+
+    fn curve_mouse(&mut self, button: MouseButton, state: ElementState) -> Result<()> {
+        self.window_event(WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state,
+            button,
+        })
+    }
+
+    fn curve_wheel(&mut self, delta: MouseScrollDelta) -> Result<()> {
+        self.window_event(WindowEvent::MouseWheel {
+            device_id: DeviceId::dummy(),
+            delta,
+            phase: TouchPhase::Moved,
+        })
+    }
+
+    fn curve_world_anchor(&self, position: UiPoint) -> UiPoint {
+        let state = self.curve_state.as_ref().unwrap();
+        UiPoint::new(
+            (position.x() - state.pan().x()) / state.zoom(),
+            (position.y() - state.pan().y()) / state.zoom(),
+        )
+    }
+
+    fn step_curve_gesture(&mut self) -> Result<bool> {
+        let state = self.curve_state.as_ref().unwrap();
+        let latest = self.presenter.journal().latest(self.surface)?;
+        let frame = latest.frame();
+        let curve = self.curve.as_ref().unwrap();
+        let viewport = frame
+            .layouts()
+            .iter()
+            .find(|layout| layout.key() == Some(curve.viewport_key()))
+            .unwrap();
+        assert_eq!(
+            viewport.rect(),
+            UiRect::from_origin_size(0.0, 0.0, 320.0, 100.0).unwrap()
+        );
+        if let Some(node) = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == curve.button().key())
+        {
+            assert!(
+                (node.rect().origin().x() - (112.0 * state.zoom() + state.pan().x())).abs() < 0.001
+            );
+            assert!(
+                (node.rect().origin().y() - (30.0 * state.zoom() + state.pan().y())).abs() < 0.001
+            );
+        }
+        match self.stage {
+            14 => {
+                assert!(
+                    state.is_dragging(),
+                    "descendant motion must preserve the original viewport capture"
+                );
+                assert_eq!(state.pan(), UiPoint::new(33.25, -2.5));
+                self.move_curve_pointer(340.0, 110.0)?;
+                assert_eq!(
+                    self.curve_state.as_ref().unwrap().pan(),
+                    UiPoint::new(323.25, 19.5)
+                );
+                assert!(self.curve_state.as_ref().unwrap().is_dragging());
+            }
+            15 => {
+                assert!(state.is_dragging());
+                assert!(
+                    frame
+                        .semantics()
+                        .iter()
+                        .all(|node| node.key() != curve.button().key())
+                );
+                self.move_curve_pointer(60.0, 90.0)?;
+                assert_eq!(
+                    self.curve_state.as_ref().unwrap().pan(),
+                    UiPoint::new(43.25, -0.5)
+                );
+                self.curve_mouse(MouseButton::Right, ElementState::Released)?;
+                assert!(self.curve_state.as_ref().unwrap().is_dragging());
+                self.curve_mouse(MouseButton::Middle, ElementState::Released)?;
+                assert!(!self.curve_state.as_ref().unwrap().is_dragging());
+            }
+            16 => {
+                assert_eq!(state.zoom(), 1.0);
+                let anchor = UiPoint::new(180.0, 48.0);
+                assert_eq!(frame.hit_test(anchor).unwrap().key(), curve.button().key());
+                let world_anchor = self.curve_world_anchor(anchor);
+                self.move_curve_pointer(f64::from(anchor.x()), f64::from(anchor.y()))?;
+                self.curve_wheel(MouseScrollDelta::LineDelta(0.0, 1.0))?;
+                assert!((self.curve_state.as_ref().unwrap().zoom() - 0.1f32.exp()).abs() < 0.00001);
+                self.curve_anchor = Some((anchor, world_anchor));
+            }
+            17 => {
+                let (anchor, world_anchor) = self.curve_anchor.unwrap();
+                let actual = self.curve_world_anchor(anchor);
+                assert!((actual.x() - world_anchor.x()).abs() < 0.001);
+                assert!((actual.y() - world_anchor.y()).abs() < 0.001);
+                let before = state.zoom();
+                self.curve_wheel(MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+                    0.0,
+                    25.0 * self.window.scale_factor(),
+                )))?;
+                assert!(
+                    (self.curve_state.as_ref().unwrap().zoom() - before * 0.05f32.exp()).abs()
+                        < 0.00001
+                );
+            }
+            18 => {
+                let (anchor, world_anchor) = self.curve_anchor.unwrap();
+                let actual = self.curve_world_anchor(anchor);
+                assert!((actual.x() - world_anchor.x()).abs() < 0.001);
+                assert!((actual.y() - world_anchor.y()).abs() < 0.001);
+                self.curve_state
+                    .as_mut()
+                    .unwrap()
+                    .set_view(UiPoint::new(14_990.0, 0.0), 1.0)
+                    .map_err(|error| -> Box<dyn std::error::Error> { error })?;
+                self.move_curve_pointer(30.0, 86.0)?;
+                self.curve_mouse(MouseButton::Middle, ElementState::Pressed)?;
+                self.move_curve_pointer(50.0, 86.0)?;
+                assert_eq!(self.curve_state.as_ref().unwrap().pan().x(), 15_000.0);
+                self.modifiers = ModifiersState::SHIFT;
+                self.curve_wheel(MouseScrollDelta::LineDelta(0.0, -1.0))?;
+                self.modifiers = ModifiersState::empty();
+                assert_eq!(self.curve_state.as_ref().unwrap().pan().x(), 14_984.0);
+                self.curve_mouse(MouseButton::Middle, ElementState::Released)?;
+                assert_eq!(self.curve_state.as_ref().unwrap().pan().x(), 14_984.0);
+                self.move_curve_pointer(12.0, 86.0)?;
+                self.curve_mouse(MouseButton::Left, ElementState::Pressed)?;
+                assert!(self.curve_state.as_ref().unwrap().is_dragging());
+                self.window_event(WindowEvent::Focused(false))?;
+                assert!(!self.curve_state.as_ref().unwrap().is_dragging());
                 let route = self.route.unwrap();
                 self.route_input(UiInputEvent::SurfaceCancelled)?;
                 assert!(
@@ -1166,20 +1375,22 @@ impl Probe {
                         .dispatch(
                             self.presenter.journal(),
                             route,
-                            UiInputEvent::ActivateFocused {
-                                seat: UiSeatId::PRIMARY,
-                                source: nara_ui_kernel::UiActivationSource::Keyboard,
-                            },
+                            UiInputEvent::Pointer(UiPointerInput::moved(
+                                UiSeatId::PRIMARY,
+                                UiPointerId::PRIMARY,
+                                UiPoint::new(32.0, 90.0)
+                            ))
                         )
                         .is_err()
                 );
                 assert!(self.presenter.is_quiescent());
                 assert_eq!((self.curve_actions, self.port_actions), (2, 1));
-                assert_eq!((self.presents, self.commits), (14, 13));
+                assert_eq!((self.presents, self.commits), (19, 18));
                 return Ok(true);
             }
             _ => unreachable!(),
         }
+        assert_eq!((self.curve_actions, self.port_actions), (2, 1));
         Ok(false)
     }
 
@@ -1444,6 +1655,11 @@ impl Probe {
         }
         self.controls.field.blur(&mut self.text)?;
         assert!(
+            self.curve_state
+                .as_ref()
+                .is_none_or(|state| !state.is_dragging())
+        );
+        assert!(
             self.curve_buttons
                 .iter()
                 .all(|state| !state.focused() && !state.pressed() && !state.hovered())
@@ -1610,7 +1826,7 @@ fn main() -> Result<()> {
     }
     terminal.map_err(io::Error::other)?;
     println!(
-        "UI_SURFACE_OK native_presentations=14 journal_commits=13 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_retired=true input_delivery=injected_pointer_ime_and_logical_keys"
+        "UI_SURFACE_OK native_presentations=19 journal_commits=18 popup_actions=1 underlay_blocked=true stale_input_rejected=true late_acceptance_discarded=true reconstructed=true original_hosts_retired=true keyed_component_presented=true keyed_reorder_preserved=true filtered_preedit_discarded=true keyed_binding_reset=true compatible_compose=true external_curve_presented=true curve_pointer_keyboard=true curve_pan_preserved=true curve_drag_across_presentations=true curve_wheel_units_anchored=true curve_retired=true input_delivery=injected_pointer_ime_and_logical_keys"
     );
     Ok(())
 }

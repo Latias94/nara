@@ -132,14 +132,18 @@ fn existing_buttons_supply_matching_hit_focus_and_semantic_actions_for_custom_co
         &snapshot(&canvas, UiPoint::default(), true),
         environment(),
     );
-    assert_eq!(frame.hit_regions().len(), 2);
+    assert_eq!(frame.hit_regions().len(), 3);
     assert_eq!(
         frame
             .focus_order()
             .iter()
             .map(|fact| fact.key())
             .collect::<Vec<_>>(),
-        [canvas.button().key(), canvas.port_button().key()]
+        [
+            canvas.viewport_key(),
+            canvas.button().key(),
+            canvas.port_button().key()
+        ]
     );
     for (button, point, selected) in [
         (canvas.button(), UiPoint::new(158.0, 48.0), Some(true)),

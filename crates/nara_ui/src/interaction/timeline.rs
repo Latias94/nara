@@ -2,8 +2,8 @@ use nara_core::Vec2;
 use nara_input::{ButtonTransitionPhase, InputEventKind, InputTimelineEntry, KeyCode, MouseButton};
 use nara_ui_kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiNavigation, UiPoint, UiPointerButton,
-    UiPointerId, UiRouteStamp, UiSeatId, UiSurfaceContentTransform, UiSurfaceGenerations,
-    UiSurfaceId,
+    UiPointerId, UiPointerInput, UiRouteStamp, UiSeatId, UiSurfaceContentTransform,
+    UiSurfaceGenerations, UiSurfaceId,
 };
 
 use crate::runtime::UiRuntimeState;
@@ -113,7 +113,7 @@ pub(crate) fn project_timeline_entry(
         };
         return UiTimelineProjection::Routed {
             route,
-            input: UiInputEvent::PointerCancelled { seat, pointer },
+            input: UiInputEvent::Pointer(UiPointerInput::cancelled(seat, pointer)),
         };
     }
     let (position, outside_content) =
@@ -135,7 +135,7 @@ pub(crate) fn project_timeline_entry(
         if runtime.interaction().has_pointer_facts(surface) {
             return UiTimelineProjection::Routed {
                 route,
-                input: UiInputEvent::PointerCancelled { seat, pointer },
+                input: UiInputEvent::Pointer(UiPointerInput::cancelled(seat, pointer)),
             };
         }
         return unhandled_projection(blocks_unhandled_input);
@@ -149,29 +149,25 @@ pub(crate) fn project_timeline_entry(
             let Some(position) = position else {
                 return rejected_projection(UiInputProjectionIssue::MissingPosition);
             };
-            UiInputEvent::PointerMoved {
-                seat,
-                pointer,
-                position,
-            }
+            UiInputEvent::Pointer(UiPointerInput::moved(seat, pointer, position))
         }
         InputEventKind::PointerButton { button, phase } => {
             let Some(pointer) = pointer else {
                 return rejected_projection(UiInputProjectionIssue::MissingPointer);
             };
-            UiInputEvent::PointerButton {
+            UiInputEvent::Pointer(UiPointerInput::button(
                 seat,
                 pointer,
-                button: pointer_button(button),
-                phase: button_phase(phase),
+                pointer_button(button),
+                button_phase(phase),
                 position,
-            }
+            ))
         }
         InputEventKind::PointerLeft => {
             let Some(pointer) = pointer else {
                 return rejected_projection(UiInputProjectionIssue::MissingPointer);
             };
-            UiInputEvent::PointerCancelled { seat, pointer }
+            UiInputEvent::Pointer(UiPointerInput::cancelled(seat, pointer))
         }
         InputEventKind::Key { key, phase } => {
             let Some(input) = project_key(seat, key, phase) else {

@@ -4,19 +4,21 @@ use thiserror::Error;
 
 use super::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome,
-    UiInputEvent, UiNonActivation, UiPointerButton, UiSeatId, UiSemanticFact, UiSemanticSnapshot,
-    UiSemanticState,
+    UiInputEvent, UiNonActivation, UiPointerInputKind, UiSeatId, UiSemanticFact,
+    UiSemanticSnapshot, UiSemanticState,
     focus::{activate_target, committed_focus, is_focusable_key, navigate_focus, set_focus},
-    pointer::{pointer_press, pointer_release, set_hover},
-    routing::{KeyAvailability, active_modal_root, hit_target, key_availability, target_rejection},
+    pointer::{
+        pointer_button_is_unsupported, pointer_move, pointer_press, pointer_release, pointer_scroll,
+    },
+    routing::{KeyAvailability, active_modal_root, key_availability, target_rejection},
     state::{
         PointerPosition, SurfaceState, cancel_all_pointers, cancel_pointer, cancel_seat,
-        cancel_surface, preflight_input_identity, preflight_seat,
+        cancel_surface, pointer_input_is_older, preflight_input_identity, preflight_seat,
         reconcile_pointer_input_generation, reconcile_presented_pointer_state, reconcile_surface,
     },
 };
 use crate::{
-    UiFrame, UiFrameJournal, UiJournalError, UiKey, UiLimits, UiLimitsError, UiPoint, UiRouteStamp,
+    UiFrame, UiFrameJournal, UiJournalError, UiKey, UiLimits, UiLimitsError, UiRouteStamp,
     UiRouteTarget, UiSurfaceId,
 };
 
@@ -65,6 +67,7 @@ impl UiInteractionSession {
         route: UiRouteStamp,
         input: UiInputEvent,
     ) -> Result<UiDispatchOutcome, UiDispatchError> {
+        validate_input(&input)?;
         let target = journal.resolve(route)?;
         let latest = journal.latest(route.surface_id())?;
         self.dispatch_resolved(&target, &latest, route, input)
@@ -88,6 +91,7 @@ impl UiInteractionSession {
         route: UiRouteStamp,
         input: UiInputEvent,
     ) -> Result<UiDispatchOutcome, UiDispatchError> {
+        validate_input(&input)?;
         let latest_route = UiRouteStamp::from_receipt(latest.receipt());
         if UiRouteStamp::from_receipt(target.receipt()) != route
             || latest_route.surface_id() != route.surface_id()
@@ -105,6 +109,9 @@ impl UiInteractionSession {
             .get(&route.surface_id())
             .cloned()
             .unwrap_or_default();
+        if pointer_input_is_older(&initial, &input, route) {
+            return Ok(UiDispatchOutcome::Rejected(UiNonActivation::StaleGeometry));
+        }
         let mut reconciled = initial.clone();
         let mut reconciliation = UiDispatchBatch::reconciliation(
             latest.revision(),
@@ -136,9 +143,11 @@ impl UiInteractionSession {
             }
         }
 
-        if matches!(
-            input,
-            UiInputEvent::PointerButton { button, .. } if button != UiPointerButton::Primary
+        if pointer_button_is_unsupported(
+            &reconciled,
+            &input,
+            target.frame(),
+            route.presentation_epoch(),
         ) {
             return Ok(self.finish_reconciliation_or_rejection(
                 route.surface_id(),
@@ -214,7 +223,10 @@ impl UiInteractionSession {
     /// Callers that own presentation publication can apply this to a cloned session, reduce the
     /// returned cleanup batch, and publish both candidates atomically. `invalidated_keys` names
     /// stable controls whose owning behavior changed; their in-flight pointer gestures are
-    /// cancelled before structural reconciliation, while focus remains frame-owned.
+    /// cancelled before structural reconciliation, while focus remains frame-owned. The default
+    /// capture policy requires equivalent surface routing. Opted-in target geometry continuity
+    /// permits descendant/sibling changes only when the owner, keyed ancestor geometry and input
+    /// declarations, modal scope and environment remain exact. Hover is reconciled independently.
     pub fn reconcile_latest_presentation(
         &mut self,
         journal: &UiFrameJournal,
@@ -490,75 +502,67 @@ fn apply_input(
     batch: &mut UiDispatchBatch,
 ) -> Result<UiInputApplication, UiDispatchError> {
     match input {
-        UiInputEvent::PointerMoved {
-            seat,
-            pointer,
-            position,
-        } => {
-            validate_position(position)?;
-            state
-                .pointers
-                .get_mut(&(seat, pointer))
-                .expect("input identity preflight creates pointer state")
-                .position = Some(PointerPosition {
-                point: position,
-                presentation_epoch: route.presentation_epoch(),
-            });
-            let hovered = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
-                Ok(target) => target,
-                Err(reason) => return Ok(UiInputApplication::Rejected(reason)),
-            };
-            set_hover(state, seat, pointer, hovered, frame, batch);
-        }
-        UiInputEvent::PointerButton {
-            seat,
-            pointer,
-            button: _,
-            phase,
-            position,
-        } => {
-            if let Some(position) = position {
-                validate_position(position)?;
-                state
+        UiInputEvent::Pointer(input) => {
+            if matches!(input.kind(), UiPointerInputKind::Cancelled) {
+                cancel_pointer(state, input.seat(), input.pointer(), frame, batch, true);
+            } else {
+                let pointer = state
                     .pointers
-                    .get_mut(&(seat, pointer))
-                    .expect("input identity preflight creates pointer state")
-                    .position = Some(PointerPosition {
+                    .get_mut(&(input.seat(), input.pointer()))
+                    .expect("input identity preflight creates pointer state");
+                let position = input.position().or_else(|| {
+                    pointer
+                        .position
+                        .filter(|position| {
+                            position.presentation_epoch == route.presentation_epoch()
+                        })
+                        .map(|position| position.point)
+                });
+                let Some(position) = position else {
+                    return Ok(UiInputApplication::Rejected(
+                        UiNonActivation::MissingPointerPosition,
+                    ));
+                };
+                pointer.position = Some(PointerPosition {
                     point: position,
                     presentation_epoch: route.presentation_epoch(),
                 });
-            }
-            match phase {
-                UiButtonPhase::Pressed => {
-                    if let Err(reason) = pointer_press(
+                let input = input.with_resolved_position(position);
+                let result = match input.kind() {
+                    UiPointerInputKind::Moved => pointer_move(state, input, frame, latest, batch),
+                    UiPointerInputKind::Scroll { .. } => {
+                        pointer_scroll(state, input, frame, latest, batch)
+                    }
+                    UiPointerInputKind::Button {
+                        phase: UiButtonPhase::Pressed,
+                        ..
+                    } => pointer_press(
                         state,
-                        seat,
-                        pointer,
+                        input,
                         frame,
                         latest,
                         route.presentation_epoch(),
                         batch,
-                    ) {
-                        return Ok(UiInputApplication::Rejected(reason));
-                    }
-                }
-                UiButtonPhase::Released => {
-                    if let Err(reason) = pointer_release(
+                    ),
+                    UiPointerInputKind::Button {
+                        phase: UiButtonPhase::Released,
+                        ..
+                    } => pointer_release(
                         state,
-                        seat,
-                        pointer,
+                        input,
                         frame,
                         latest,
                         route.presentation_epoch(),
                         batch,
-                    ) {
-                        return Ok(UiInputApplication::Rejected(reason));
+                    ),
+                    UiPointerInputKind::Cancelled => {
+                        unreachable!("cancellation was handled before pointer resolution")
                     }
+                };
+                if let Err(reason) = result {
+                    return Ok(UiInputApplication::Rejected(reason));
                 }
             }
-        }
-        UiInputEvent::PointerCancelled { seat, pointer } => {
-            cancel_pointer(state, seat, pointer, frame, batch, true);
         }
         UiInputEvent::Navigate { seat, direction } => {
             if let Err(reason) = navigate_focus(state, seat, direction, frame, latest, batch) {
@@ -644,9 +648,10 @@ enum UiInputApplication {
 fn is_stale_geometry(state: &SurfaceState, route: UiRouteStamp, input: &UiInputEvent) -> bool {
     let targets_geometry = matches!(
         input,
-        UiInputEvent::PointerMoved { .. }
-            | UiInputEvent::PointerButton { .. }
-            | UiInputEvent::Navigate { .. }
+        UiInputEvent::Pointer(input) if !matches!(input.kind(), UiPointerInputKind::Cancelled)
+    ) || matches!(
+        input,
+        UiInputEvent::Navigate { .. }
             | UiInputEvent::ActivateFocused { .. }
             | UiInputEvent::FocusTarget { .. }
             | UiInputEvent::SemanticAction { .. }
@@ -654,9 +659,19 @@ fn is_stale_geometry(state: &SurfaceState, route: UiRouteStamp, input: &UiInputE
     targets_geometry && state.geometry_is_invalidated_for(route)
 }
 
-fn validate_position(position: UiPoint) -> Result<(), UiDispatchError> {
-    if !position.is_finite() {
-        return Err(UiDispatchError::NonFinitePointerPosition);
+fn validate_input(input: &UiInputEvent) -> Result<(), UiDispatchError> {
+    if let UiInputEvent::Pointer(input) = input {
+        if input
+            .position()
+            .is_some_and(|position| !position.is_finite())
+        {
+            return Err(UiDispatchError::NonFinitePointerPosition);
+        }
+        if let UiPointerInputKind::Scroll { delta } = input.kind()
+            && !delta.is_finite()
+        {
+            return Err(UiDispatchError::NonFiniteScrollDelta);
+        }
     }
     Ok(())
 }
@@ -675,6 +690,8 @@ pub enum UiDispatchError {
     PointerLimitExceeded { maximum: usize },
     #[error("UI pointer position must be finite")]
     NonFinitePointerPosition,
+    #[error("UI scroll delta must be finite")]
+    NonFiniteScrollDelta,
     #[error("resolved UI targets do not match the requested route")]
     ResolvedRouteMismatch,
     #[error("UI dispatch exceeds {maximum} routed events")]

@@ -54,7 +54,17 @@ reducers. Local tests inspect actual triangles, paint order, fractional mapping 
 hit/focus/semantic facts. The native output consumer imports this same library. No path engine,
 graph widget, renderer dependency or engine-private construction is required by the component.
 This fixture retessellates on composition; it does not qualify a geometry cache, final-size
-drawing callback, curve hit testing, canvas drag/wheel, a complete graph editor or performance.
+drawing callback, curve hit testing, a complete graph editor or performance.
+
+`CurveCanvasState` retains bounded desired pan/zoom and one drag anchor for that viewport.
+`authored_view` transforms both mesh and controls, keeping label fonts fixed. The viewport
+declares motion, scroll, three capture buttons and `TargetGeometry` continuity; child buttons
+retain their ordinary behavior. The reducer accepts only already admitted Target batches for
+its exact viewport. It supports unclamped pointer positions during capture, matching release,
+focus/capture cancellation, cursor-anchored zoom with distinct line/pixel sensitivity and Shift
+horizontal pan. It owns no journal, receipt or domain history. CPU tests cover view admission,
+geometry, identity and bounds; the native output consumer supplies actual routed drag/wheel
+and cancellation evidence, including dragging across changed presentations.
 
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 

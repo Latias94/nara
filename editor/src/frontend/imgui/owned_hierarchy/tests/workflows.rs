@@ -359,12 +359,14 @@ fn real_pointer_dispatch_updates_button_state_before_any_document_action() {
         rect.origin().y() + rect.size().height() / 2.0,
     );
     let mut routing = RoutedInput::new(&frame);
-    let event = |phase| UiInputEvent::PointerButton {
-        seat: UiSeatId::PRIMARY,
-        pointer: UiPointerId::PRIMARY,
-        button: UiPointerButton::Primary,
-        phase,
-        position: Some(point),
+    let event = |phase| {
+        UiInputEvent::Pointer(nara_ui_kernel::UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            phase,
+            Some(point),
+        ))
     };
     assert!(
         routing

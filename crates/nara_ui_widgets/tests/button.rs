@@ -4,8 +4,9 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiActionId, UiActivationSource, UiAuthoringSnapshotBuilder, UiBrush, UiButtonPhase,
     UiColorRole, UiCompiler, UiEnvironment, UiFrameJournal, UiInputEvent, UiInteractionSession,
-    UiKey, UiLayer, UiLocalKey, UiNavigation, UiPoint, UiPointerButton, UiPointerId, UiRoot,
-    UiRootKey, UiRouteStamp, UiSeatId, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+    UiKey, UiLayer, UiLocalKey, UiNavigation, UiPoint, UiPointerButton, UiPointerId,
+    UiPointerInput, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiStyle, UiSurfaceId, UiTheme,
+    UiVisual,
 };
 use nara_ui_widgets::{
     UiButton, UiButtonState, UiButtonVisualState, UiIntent, UiIntentBatch, UiIntentBatchError,
@@ -57,13 +58,13 @@ fn fixture() -> (UiButton, UiFrameJournal, UiRouteStamp, UiInteractionSession) {
 }
 
 fn pointer_button(phase: UiButtonPhase, point: UiPoint) -> UiInputEvent {
-    UiInputEvent::PointerButton {
-        seat: UiSeatId::PRIMARY,
-        pointer: UiPointerId::PRIMARY,
-        button: UiPointerButton::Primary,
+    UiInputEvent::Pointer(UiPointerInput::button(
+        UiSeatId::PRIMARY,
+        UiPointerId::PRIMARY,
+        UiPointerButton::Primary,
         phase,
-        position: Some(point),
-    }
+        Some(point),
+    ))
 }
 
 #[test]
@@ -73,11 +74,11 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
     let mut intents = UiIntentBatch::default();
 
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: UiPoint::new(30.0, 30.0),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPoint::new(30.0, 30.0),
+        )),
         pointer_button(UiButtonPhase::Pressed, UiPoint::new(30.0, 30.0)),
     ] {
         let dispatch = session.dispatch(&journal, route, input).unwrap();
@@ -95,11 +96,11 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
         .dispatch(
             &journal,
             route,
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: UiPoint::new(180.0, 100.0),
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPoint::new(180.0, 100.0),
+            )),
         )
         .unwrap();
     state

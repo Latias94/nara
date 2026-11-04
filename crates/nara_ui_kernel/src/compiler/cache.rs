@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use crate::{
-    UiEnvironment, UiKey, UiLayer, UiLayoutFact, UiPaintPrimitive, UiPhysicalRect, UiRect,
-    UiRootKey,
+    UiEnvironment, UiInteraction, UiKey, UiLayer, UiLayoutFact, UiPaintPrimitive, UiPhysicalRect,
+    UiRect, UiRootKey,
 };
 
 use super::order::RootOrdered;
@@ -19,6 +19,7 @@ pub(super) struct RootLayoutFact {
     pub(super) physical_rect: UiPhysicalRect,
     pub(super) clip_rect: Option<UiRect>,
     pub(super) visible: bool,
+    pub(super) interaction: UiInteraction,
 }
 
 impl RootLayoutFact {
@@ -34,6 +35,7 @@ impl RootLayoutFact {
             physical_rect: self.physical_rect,
             clip_rect: self.clip_rect,
             visible: self.visible,
+            interaction: self.interaction,
         }
     }
 }

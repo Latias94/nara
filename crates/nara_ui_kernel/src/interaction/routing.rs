@@ -1,5 +1,7 @@
-use super::{UiNonActivation, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind};
-use crate::{UiDispatchBatch, UiFrame, UiHitRegion, UiKey, UiPoint, UiRootKey, UiRootStatus};
+use super::{UiNonActivation, UiPointerInput, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind};
+use crate::{
+    UiDispatchBatch, UiFrame, UiHitRegion, UiInteraction, UiKey, UiPoint, UiRootKey, UiRootStatus,
+};
 
 pub(super) fn hit_target(
     frame: &UiFrame,
@@ -17,7 +19,7 @@ pub(super) fn hit_target(
     if let Some(reason) = target_rejection(frame, latest, modal_root, region.key()) {
         return Err(reason);
     }
-    if !region.enabled() {
+    if !region.enabled() || !key_is_enabled(latest, region.key()) {
         return Err(UiNonActivation::TargetDisabled {
             target: region.key().clone(),
         });
@@ -79,6 +81,49 @@ pub(super) fn is_interactive_key(
             .hit_regions()
             .iter()
             .any(|region| region.key() == target && region.enabled())
+        && key_is_enabled(latest, target)
+}
+
+fn key_is_enabled(frame: &UiFrame, target: &UiKey) -> bool {
+    frame
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(target))
+        .is_some_and(|layout| layout.interaction().enabled())
+}
+
+pub(super) fn nearest_pointer_listener(
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    hit: &UiKey,
+    interested: fn(UiInteraction) -> bool,
+) -> Result<Option<UiKey>, UiNonActivation> {
+    for target in route_path(frame, hit).into_iter().rev() {
+        let Some(layout) = frame
+            .layouts()
+            .iter()
+            .find(|layout| layout.key() == Some(&target))
+        else {
+            continue;
+        };
+        if !interested(layout.interaction()) {
+            continue;
+        }
+        if let Some(reason) = target_rejection(frame, latest, modal_root, &target) {
+            return Err(reason);
+        }
+        if !layout.interaction().enabled() || !key_is_enabled(latest, &target) {
+            return Err(UiNonActivation::TargetDisabled { target });
+        }
+        return Ok(latest
+            .layouts()
+            .iter()
+            .find(|layout| layout.key() == Some(&target))
+            .filter(|layout| interested(layout.interaction()))
+            .map(|_| target));
+    }
+    Ok(None)
 }
 
 pub(super) fn active_modal_root(frame: &UiFrame) -> Option<UiRootKey> {
@@ -120,33 +165,62 @@ pub(super) fn route_event(
     kind: UiRoutedEventKind,
     batch: &mut UiDispatchBatch,
 ) {
+    route_event_with_pointer(frame, target, kind, None, batch);
+}
+
+pub(super) fn route_pointer_event(
+    frame: &UiFrame,
+    target: &UiKey,
+    kind: UiRoutedEventKind,
+    input: UiPointerInput,
+    batch: &mut UiDispatchBatch,
+) {
+    route_event_with_pointer(frame, target, kind, Some(input), batch);
+}
+
+fn route_event_with_pointer(
+    frame: &UiFrame,
+    target: &UiKey,
+    kind: UiRoutedEventKind,
+    input: Option<UiPointerInput>,
+    batch: &mut UiDispatchBatch,
+) {
     let path = route_path(frame, target);
     let ancestors = &path[..path.len().saturating_sub(1)];
     for current in ancestors {
-        batch.push(UiRoutedEvent::new(
-            target.clone(),
-            current.clone(),
-            UiRoutePhase::Capture,
-            kind.clone(),
-        ));
+        batch.push(
+            UiRoutedEvent::new(
+                target.clone(),
+                current.clone(),
+                UiRoutePhase::Capture,
+                kind.clone(),
+            )
+            .with_pointer_input(input),
+        );
     }
-    batch.push(UiRoutedEvent::new(
-        target.clone(),
-        target.clone(),
-        UiRoutePhase::Target,
-        kind.clone(),
-    ));
-    for current in ancestors.iter().rev() {
-        batch.push(UiRoutedEvent::new(
+    batch.push(
+        UiRoutedEvent::new(
             target.clone(),
-            current.clone(),
-            UiRoutePhase::Bubble,
+            target.clone(),
+            UiRoutePhase::Target,
             kind.clone(),
-        ));
+        )
+        .with_pointer_input(input),
+    );
+    for current in ancestors.iter().rev() {
+        batch.push(
+            UiRoutedEvent::new(
+                target.clone(),
+                current.clone(),
+                UiRoutePhase::Bubble,
+                kind.clone(),
+            )
+            .with_pointer_input(input),
+        );
     }
 }
 
-fn route_path(frame: &UiFrame, target: &UiKey) -> Vec<UiKey> {
+pub(super) fn route_path(frame: &UiFrame, target: &UiKey) -> Vec<UiKey> {
     let mut reversed = vec![target.clone()];
     let mut current = target;
     while let Some(parent) = frame

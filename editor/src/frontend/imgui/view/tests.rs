@@ -1,6 +1,6 @@
 use nara_ui_kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiInteractionSession, UiPointerButton,
-    UiPointerId, UiRouteStamp, UiSeatId, UiSurfaceId,
+    UiPointerId, UiPointerInput, UiRouteStamp, UiSeatId, UiSurfaceId,
 };
 
 use super::*;
@@ -47,13 +47,13 @@ fn center(rect: DisplayRect) -> UiPoint {
 }
 
 fn pointer(point: UiPoint, phase: UiButtonPhase) -> UiInputEvent {
-    UiInputEvent::PointerButton {
-        seat: UiSeatId::PRIMARY,
-        pointer: UiPointerId::PRIMARY,
-        button: UiPointerButton::Primary,
+    UiInputEvent::Pointer(UiPointerInput::button(
+        UiSeatId::PRIMARY,
+        UiPointerId::PRIMARY,
+        UiPointerButton::Primary,
         phase,
-        position: Some(point),
-    }
+        Some(point),
+    ))
 }
 
 fn routed(

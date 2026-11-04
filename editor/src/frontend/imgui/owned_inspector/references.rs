@@ -129,18 +129,18 @@ mod tests {
                 .rect();
             let position = UiPoint::new(rect.origin().x() + 2.0, rect.origin().y() + 2.0);
             for event in [
-                UiInputEvent::PointerMoved {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: nara_ui_kernel::UiPointerId::PRIMARY,
+                UiInputEvent::Pointer(nara_ui_kernel::UiPointerInput::moved(
+                    UiSeatId::PRIMARY,
+                    nara_ui_kernel::UiPointerId::PRIMARY,
                     position,
-                },
-                UiInputEvent::PointerButton {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: nara_ui_kernel::UiPointerId::PRIMARY,
-                    button: nara_ui_kernel::UiPointerButton::Primary,
-                    phase: nara_ui_kernel::UiButtonPhase::Pressed,
-                    position: Some(position),
-                },
+                )),
+                UiInputEvent::Pointer(nara_ui_kernel::UiPointerInput::button(
+                    UiSeatId::PRIMARY,
+                    nara_ui_kernel::UiPointerId::PRIMARY,
+                    nara_ui_kernel::UiPointerButton::Primary,
+                    nara_ui_kernel::UiButtonPhase::Pressed,
+                    Some(position),
+                )),
             ] {
                 let dispatch = session
                     .dispatch(&journal, UiRouteStamp::from_receipt(receipt), event)

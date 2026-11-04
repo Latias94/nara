@@ -9,10 +9,13 @@ use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiButtonPhase, UiCompiler, UiDispatchError, UiEnvironment, UiFrame,
     UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiJournalError, UiLayer,
     UiLimits, UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiPoint, UiPointerButton,
-    UiPointerId, UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind, UiSeatId,
-    UiSemanticRole, UiSemantics, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations,
-    UiSurfaceId, UiTheme,
+    UiPointerId, UiPointerInput, UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind,
+    UiSeatId, UiSemanticRole, UiSemantics, UiSize, UiStyle, UiSurfaceContentTransform,
+    UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
+
+#[path = "interaction/pointer_input.rs"]
+mod pointer_input;
 
 struct HostedJournal {
     journal: UiFrameJournal,
@@ -338,21 +341,17 @@ fn submit(journal: &mut HostedJournal, frame: Arc<UiFrame>, epoch: u64) -> UiRou
 }
 
 fn move_pointer(position: UiPoint) -> UiInputEvent {
-    UiInputEvent::PointerMoved {
-        seat: SEAT,
-        pointer: POINTER,
-        position,
-    }
+    UiInputEvent::Pointer(UiPointerInput::moved(SEAT, POINTER, position))
 }
 
 fn pointer_button(phase: UiButtonPhase, position: UiPoint) -> UiInputEvent {
-    UiInputEvent::PointerButton {
-        seat: SEAT,
-        pointer: POINTER,
-        button: UiPointerButton::Primary,
+    UiInputEvent::Pointer(UiPointerInput::button(
+        SEAT,
+        POINTER,
+        UiPointerButton::Primary,
         phase,
-        position: Some(position),
-    }
+        Some(position),
+    ))
 }
 
 #[test]
@@ -569,10 +568,7 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
         .dispatch(
             &journal,
             route,
-            UiInputEvent::PointerCancelled {
-                seat: SEAT,
-                pointer: POINTER,
-            },
+            UiInputEvent::Pointer(UiPointerInput::cancelled(SEAT, POINTER)),
         )
         .unwrap();
     assert!(cancelled.consumed().unwrap().events().iter().any(|event| {
@@ -1494,28 +1490,29 @@ fn empty_reconciliation_is_separate_when_the_presentation_generation_changed() {
 }
 
 #[test]
-fn presentation_reconciliation_precedes_input_validation_errors() {
+fn nonfinite_input_validation_precedes_pending_presentation_reconciliation() {
     let mut compiler = compiler();
     let mut journal = hosted_journal();
     let route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 1), 10);
     let mut session = UiInteractionSession::default();
-    let invalid_move = UiInputEvent::PointerMoved {
-        seat: SEAT,
-        pointer: POINTER,
-        position: UiPoint::new(f32::NAN, 20.0),
-    };
+    let invalid_move = move_pointer(UiPoint::new(f32::NAN, 20.0));
 
-    let reconciled = session
-        .dispatch(&journal, route, invalid_move.clone())
-        .unwrap();
-    let reconciliation = reconciled.consumed().unwrap();
-    assert!(reconciliation.is_reconciliation());
-    assert!(reconciliation.events().is_empty());
-
+    assert_eq!(
+        session
+            .dispatch(&journal, route, invalid_move.clone())
+            .unwrap_err(),
+        UiDispatchError::NonFinitePointerPosition
+    );
     assert_eq!(
         session.dispatch(&journal, route, invalid_move).unwrap_err(),
         UiDispatchError::NonFinitePointerPosition
     );
+    let pending = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .expect("non-finite input did not perform pending modal reconciliation");
+    assert!(pending.is_reconciliation());
+    assert!(!session.has_pointer_facts(SURFACE));
 }
 
 #[test]
@@ -1821,13 +1818,13 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
             .dispatch(
                 &journal,
                 route,
-                UiInputEvent::PointerButton {
-                    seat: SEAT,
-                    pointer: UiPointerId::new(pointer),
-                    button: UiPointerButton::Secondary,
-                    phase: UiButtonPhase::Pressed,
-                    position: Some(UiPoint::new(20.0, 20.0)),
-                },
+                UiInputEvent::Pointer(UiPointerInput::button(
+                    SEAT,
+                    UiPointerId::new(pointer),
+                    UiPointerButton::Secondary,
+                    UiButtonPhase::Pressed,
+                    Some(UiPoint::new(20.0, 20.0)),
+                )),
             )
             .unwrap();
         assert_eq!(
@@ -1840,13 +1837,13 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
         .dispatch(
             &journal,
             route,
-            UiInputEvent::PointerButton {
-                seat: SEAT,
-                pointer: UiPointerId::new(1_000),
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: Some(UiPoint::new(20.0, 20.0)),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                SEAT,
+                UiPointerId::new(1_000),
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(UiPoint::new(20.0, 20.0)),
+            )),
         )
         .unwrap();
     assert!(accepted.rejection().is_none());
@@ -1868,11 +1865,11 @@ fn one_surface_has_one_seat_and_one_pointer_owner() {
             .dispatch(
                 &journal,
                 route,
-                UiInputEvent::PointerMoved {
-                    seat: SEAT,
-                    pointer: UiPointerId::new(1),
-                    position: UiPoint::new(20.0, 20.0),
-                },
+                UiInputEvent::Pointer(UiPointerInput::moved(
+                    SEAT,
+                    UiPointerId::new(1),
+                    UiPoint::new(20.0, 20.0),
+                )),
             )
             .unwrap_err(),
         UiDispatchError::PointerLimitExceeded { maximum: 1 }
@@ -1919,13 +1916,13 @@ fn pending_reconciliation_is_consumed_before_unsupported_pointer_rejection() {
         compile(&mut compiler, &disabled_snapshot, 2),
         11,
     );
-    let unsupported = UiInputEvent::PointerButton {
-        seat: SEAT,
-        pointer: POINTER,
-        button: UiPointerButton::Secondary,
-        phase: UiButtonPhase::Pressed,
-        position: Some(UiPoint::new(20.0, 20.0)),
-    };
+    let unsupported = UiInputEvent::Pointer(UiPointerInput::button(
+        SEAT,
+        POINTER,
+        UiPointerButton::Secondary,
+        UiButtonPhase::Pressed,
+        Some(UiPoint::new(20.0, 20.0)),
+    ));
 
     let reconciled = session
         .dispatch(&journal, disabled_route, unsupported.clone())
@@ -1958,13 +1955,13 @@ fn rejected_missing_positions_do_not_consume_pointer_capacity() {
             .dispatch(
                 &journal,
                 route,
-                UiInputEvent::PointerButton {
-                    seat: SEAT,
-                    pointer: UiPointerId::new(pointer),
-                    button: UiPointerButton::Primary,
-                    phase: UiButtonPhase::Pressed,
-                    position: None,
-                },
+                UiInputEvent::Pointer(UiPointerInput::button(
+                    SEAT,
+                    UiPointerId::new(pointer),
+                    UiPointerButton::Primary,
+                    UiButtonPhase::Pressed,
+                    None,
+                )),
             )
             .unwrap();
         assert_eq!(
@@ -1977,13 +1974,13 @@ fn rejected_missing_positions_do_not_consume_pointer_capacity() {
         .dispatch(
             &journal,
             route,
-            UiInputEvent::PointerButton {
-                seat: SEAT,
-                pointer: UiPointerId::new(1_000),
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: Some(UiPoint::new(20.0, 20.0)),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                SEAT,
+                UiPointerId::new(1_000),
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(UiPoint::new(20.0, 20.0)),
+            )),
         )
         .unwrap();
     assert!(accepted.consumed().is_some());
@@ -2017,13 +2014,13 @@ fn geometry_invalidation_requires_a_fresh_pointer_position() {
         .dispatch(
             &journal,
             newer,
-            UiInputEvent::PointerButton {
-                seat: SEAT,
-                pointer: POINTER,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: None,
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                SEAT,
+                POINTER,
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                None,
+            )),
         )
         .unwrap();
     assert_eq!(

@@ -5,7 +5,8 @@
 **Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation, UIF-U3C prepared-submission and
 UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction;
 2026-10-30 by total prepared completion, interaction-basis and endpoint-incarnation restoration;
-2026-11-04 by pointer-route equivalence across text paint changes
+2026-11-04 by pointer-route equivalence across text paint changes; 2026-11-05 by event-time pointer
+samples and opt-in target-geometry capture continuity
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -129,6 +130,41 @@ reconcile the successfully presented successor and reduce its cleanup batch befo
 events. It must separately cancel gestures when the owning action changes, an image's actual native
 mapping changes, or presentation authority is lost; equal logical hit rectangles do not prove those
 Host facts.
+
+### Event-time pointer input and viewport capture
+
+`UiPointerInput` keeps the original seat/pointer, optional position, button edge, modifiers and
+scroll unit together. Dispatch validates finite positions/deltas before reconciliation or
+candidate mutation. Original reached press/release/move/scroll events retain their resolved
+pointer sample. Cleanup events carry no fabricated input. A missing button position may resolve
+only from the same pointer and exact presentation epoch. Matching-button release terminates
+capture; an unrelated release cannot consume it or produce a click.
+
+Immutable interaction declarations identify supported buttons and interest in motion/scroll.
+Captured motion targets its original owner even outside that owner's bounds. Otherwise motion
+and scroll target the nearest eligible keyed ancestor of the exact event-time hit. The ordinary
+keyed route provides observation phases, while only one target is selected for the operation.
+This is a finite listener-selection contract, not arbitrary mutable event callbacks or a new
+propagation owner. A component cannot infer capture from hover or an ancestor observation.
+
+`UiCaptureContinuity::SurfaceGeometry` retains strict default route equivalence.
+`TargetGeometry` explicitly permits a fixed viewport's capture to advance across descendant or
+sibling changes. Its owner and keyed ancestors must retain exact path, geometry, clip, visible
+published state and interaction declarations under the same content transform, environment
+generations and modal scope. Owner movement, reparenting, disabling, fallback, declaration or
+Surface changes cancel it. An owning behavior/incarnation replacement explicitly invalidates
+the old key even if the geometry is equal. Reconciliation adopts this continuity only after
+actual matching presentation, never from a candidate. A historical event cannot clear or move
+newer pointer facts. Leaving the Surface content/native window retains the existing Host
+cancellation policy; this adds no cross-window capture.
+
+Scroll retains Lines versus pixel-event origin. Pixel displacement is converted by the adapter
+to authored logical points under the event's Surface transform, independently of any Canvas
+world zoom. The component owns line sensitivity, pan/zoom policy and desired local state;
+the original journal/session owns admission, capture and exact result. Logical keys, key repeat,
+text and IME need their own correct source facts and cannot be reconstructed from gameplay
+physical button state. The [current pointer prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#presented-pointer-samples-and-viewport-capture-prerequisite)
+owns independent/native evidence and remaining gaps.
 
 The conformance baseline admits one active seat owner and one active pointer owner per Surface Slot.
 Keyboard, gamepad and accessibility devices for the same player share that seat identity. A second

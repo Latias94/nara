@@ -76,9 +76,20 @@ Lyon tessellator supplies actual cubic geometry between ordinary background and 
 controls. Presented pointer selection and Tab/Enter port activation use the original journal
 and button reducers; Shift-Tab/Enter changes selection again. Explicit fractional pan moves
 curve vertices and matching node semantics together on the next accepted frame. The previous
-route and the final retired surface cannot activate controls. The full trajectory observes
-14 actual presentations and 13 journal commits. It preserves every earlier field/popup/keyed
-state and original-Host assertion. It does not add canvas motion/wheel or a graph document owner.
+route and the final retired surface cannot activate controls. This checkpoint observes
+14 actual presentations and 13 journal commits before the continuous-input portion below.
+It preserves every earlier field/popup/keyed state and original-Host assertion.
+
+The same original surface then admits a middle-button drag on the fixed viewport. Changed
+descendant geometry and disappearance do not cancel this explicitly opted-in viewport capture;
+motion outside the viewport still uses the original authored anchor. An unrelated button
+release preserves capture, and its matching release ends it. Wheel events over an ordinary
+child button select the viewport's scroll interest once. Both Lines and converted pixel-event
+units preserve the same world anchor through actual presentations. A drag at the pan limit,
+Shift-wheel adjustment and stationary release exercise the bounded-view rebase; native focus
+loss cancels a final held gesture. The complete trajectory is 19 presentations and 18 journal
+commits, retaining the earlier keyboard, field/IME and original retirement proof. This is
+injected native-adapter input, not OS delivery, cross-window capture or a graph document owner.
 
 The ignored `ui_surface` integration test launches the example in a child process so its event
 loop runs on the actual main thread. A second test injects error and panic after a real image

@@ -35,7 +35,7 @@ use nara_scene::{
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer,
     UiLocalKey, UiNonActivation, UiPaintPrimitive, UiPoint, UiPointerButton, UiPointerId,
-    UiPresentationReceipt, UiResolvedBrush, UiRootKey, UiRootStatus, UiRouteStamp,
+    UiPointerInput, UiPresentationReceipt, UiResolvedBrush, UiRootKey, UiRootStatus, UiRouteStamp,
     UiSafeAreaInsets, UiSeatId, UiSemanticRole, UiSize, UiSurfaceContentTransform,
     UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
@@ -1232,11 +1232,11 @@ fn transform_update_unbinds_ui_route_but_preserves_the_physical_release() {
     assert!(matches!(
         app.dispatch_input(
             UiRouteStamp::from_receipt(receipt),
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: UiPoint::new(10.0, 10.0),
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPoint::new(10.0, 10.0),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::SurfaceGenerationMismatch)
     ));
@@ -2941,25 +2941,21 @@ fn dispatch_pointer_click(app: &mut UiTestApp, route: UiRouteStamp) -> Vec<UiRou
     let pointer = UiPointerId::PRIMARY;
     let point = UiPoint::new(10.0, 10.0);
     [
-        UiInputEvent::PointerMoved {
+        UiInputEvent::Pointer(UiPointerInput::moved(seat, pointer, point)),
+        UiInputEvent::Pointer(UiPointerInput::button(
             seat,
             pointer,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
             seat,
             pointer,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
-        UiInputEvent::PointerButton {
-            seat,
-            pointer,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Released,
-            position: Some(point),
-        },
+            UiPointerButton::Primary,
+            UiButtonPhase::Released,
+            Some(point),
+        )),
     ]
     .into_iter()
     .map(|input| app.dispatch_input(route, input))
@@ -2983,11 +2979,7 @@ fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
     assert!(matches!(
         app.dispatch_input(
             route,
-            UiInputEvent::PointerMoved {
-                seat,
-                pointer,
-                position: point,
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(seat, pointer, point)),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::PresentedHistory(_))
     ));
@@ -2999,25 +2991,21 @@ fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
     assert_eq!(receipt.frame_revision(), frame.revision());
 
     for input in [
-        UiInputEvent::PointerMoved {
+        UiInputEvent::Pointer(UiPointerInput::moved(seat, pointer, point)),
+        UiInputEvent::Pointer(UiPointerInput::button(
             seat,
             pointer,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
             seat,
             pointer,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
-        UiInputEvent::PointerButton {
-            seat,
-            pointer,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Released,
-            position: Some(point),
-        },
+            UiPointerButton::Primary,
+            UiButtonPhase::Released,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route, input,),
@@ -3244,18 +3232,18 @@ fn equivalent_presentation_preserves_one_inflight_click() {
     app.present_frame(initial, 10).unwrap();
     let point = UiPoint::new(10.0, 10.0);
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            point,
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(10), input,),
@@ -3288,13 +3276,13 @@ fn equivalent_presentation_preserves_one_inflight_click() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(11),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
@@ -3309,13 +3297,13 @@ fn equivalent_presentation_preserves_one_inflight_click() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(11),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
             UiNonActivation::NoPointerCapture
@@ -3342,18 +3330,18 @@ fn label_only_successor_with_stable_geometry_preserves_the_inflight_click() {
     app.present_frame(initial, 1).unwrap();
     let point = UiPoint::new(10.0, 10.0);
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            point,
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(1), input,),
@@ -3383,13 +3371,13 @@ fn label_only_successor_with_stable_geometry_preserves_the_inflight_click() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(2),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
@@ -3414,18 +3402,18 @@ fn changed_behavior_requires_a_fresh_press_before_the_new_action_can_activate() 
     app.present_frame(first, 1).unwrap();
     let point = UiPoint::new(10.0, 10.0);
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            point,
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(1), input,),
@@ -3487,13 +3475,13 @@ fn changed_behavior_requires_a_fresh_press_before_the_new_action_can_activate() 
     assert!(matches!(
         app.dispatch_input(
             route_stamp(2),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
             UiNonActivation::NoPointerCapture
@@ -3509,26 +3497,26 @@ fn changed_behavior_requires_a_fresh_press_before_the_new_action_can_activate() 
     assert!(matches!(
         app.dispatch_input(
             route_stamp(1),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
     assert!(matches!(
         app.dispatch_input(
             route_stamp(2),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
@@ -3569,18 +3557,18 @@ fn presentation_retirement_reconciles_before_historical_route_rejection() {
     app.present_frame(Arc::clone(&first), 1).unwrap();
     let point = UiPoint::new(10.0, 10.0);
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            point,
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(1), input,),
@@ -3596,11 +3584,11 @@ fn presentation_retirement_reconciles_before_historical_route_rejection() {
         .expect("retired-button frame should exist");
     app.present_frame(second, 2).unwrap();
 
-    let retired_move = UiInputEvent::PointerMoved {
-        seat: UiSeatId::PRIMARY,
-        pointer: UiPointerId::PRIMARY,
-        position: point,
-    };
+    let retired_move = UiInputEvent::Pointer(UiPointerInput::moved(
+        UiSeatId::PRIMARY,
+        UiPointerId::PRIMARY,
+        point,
+    ));
     assert!(matches!(
         app.dispatch_input(route_stamp(1), retired_move.clone(),),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
@@ -3657,18 +3645,18 @@ fn presentation_removal_cannot_resurrect_interaction_for_the_same_stable_key() {
 
     let point = UiPoint::new(10.0, 10.0);
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: point,
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(point),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            point,
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(point),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(1), input,),
@@ -3720,13 +3708,13 @@ fn presentation_removal_cannot_resurrect_interaction_for_the_same_stable_key() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(3),
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
             UiNonActivation::NoPointerCapture
@@ -3823,18 +3811,18 @@ fn interaction_and_reducer_visual_state_are_isolated_per_surface() {
     app.present_frame(second_before.clone(), 1).unwrap();
 
     for input in [
-        UiInputEvent::PointerMoved {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            position: UiPoint::new(10.0, 10.0),
-        },
-        UiInputEvent::PointerButton {
-            seat: UiSeatId::PRIMARY,
-            pointer: UiPointerId::PRIMARY,
-            button: UiPointerButton::Primary,
-            phase: UiButtonPhase::Pressed,
-            position: Some(UiPoint::new(10.0, 10.0)),
-        },
+        UiInputEvent::Pointer(UiPointerInput::moved(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPoint::new(10.0, 10.0),
+        )),
+        UiInputEvent::Pointer(UiPointerInput::button(
+            UiSeatId::PRIMARY,
+            UiPointerId::PRIMARY,
+            UiPointerButton::Primary,
+            UiButtonPhase::Pressed,
+            Some(UiPoint::new(10.0, 10.0)),
+        )),
     ] {
         assert!(matches!(
             app.dispatch_input(route_stamp(1), input,),
@@ -4526,26 +4514,26 @@ fn intent_backpressure_drops_activation_but_commits_the_physical_release() {
     assert!(matches!(
         app.dispatch_input(
             route,
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
     assert!(matches!(
         app.dispatch_input(
             route,
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Released,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Released,
+                Some(point),
+            )),
         ),
         UiRouteDisposition::Consumed(_)
     ));
@@ -4632,11 +4620,11 @@ fn surface_slot_replacement_invalidates_the_retained_route_generation() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(1),
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: UiPoint::new(10.0, 10.0),
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPoint::new(10.0, 10.0),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::SurfaceGenerationMismatch)
     ));
@@ -4903,11 +4891,11 @@ fn stale_frames_and_retired_surface_identities_fail_closed() {
     assert!(matches!(
         app.dispatch_input(
             route_stamp(1),
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: UiPoint::new(10.0, 10.0),
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPoint::new(10.0, 10.0),
+            )),
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::RetiredSurface { surface: 7 })
     ));
@@ -5234,18 +5222,18 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
     let route = UiRouteStamp::from_receipt(receipt);
     for (index, point) in points.into_iter().enumerate() {
         for event in [
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: point,
-            },
-            UiInputEvent::PointerButton {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                button: UiPointerButton::Primary,
-                phase: UiButtonPhase::Pressed,
-                position: Some(point),
-            },
+            UiInputEvent::Pointer(UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                point,
+            )),
+            UiInputEvent::Pointer(UiPointerInput::button(
+                UiSeatId::PRIMARY,
+                UiPointerId::PRIMARY,
+                UiPointerButton::Primary,
+                UiButtonPhase::Pressed,
+                Some(point),
+            )),
         ] {
             assert!(matches!(
                 app.dispatch_input(route, event),
@@ -5301,13 +5289,13 @@ fn persistent_sources_and_occurrences_isolate_presented_focus_press_and_actions(
         assert!(matches!(
             app.dispatch_input(
                 route,
-                UiInputEvent::PointerButton {
-                    seat: UiSeatId::PRIMARY,
-                    pointer: UiPointerId::PRIMARY,
-                    button: UiPointerButton::Primary,
-                    phase: UiButtonPhase::Released,
-                    position: Some(point),
-                }
+                UiInputEvent::Pointer(UiPointerInput::button(
+                    UiSeatId::PRIMARY,
+                    UiPointerId::PRIMARY,
+                    UiPointerButton::Primary,
+                    UiButtonPhase::Released,
+                    Some(point),
+                ))
             ),
             UiRouteDisposition::Consumed(_)
         ));

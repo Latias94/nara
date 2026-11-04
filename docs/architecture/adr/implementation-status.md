@@ -13,7 +13,7 @@ UI targets remain partial until [R11a-f](../../plans/2026-10-23-foundation-archi
 pass their independent/native and measured acceptance. This documentation update supplies no
 new performance, toolkit compatibility or platform evidence and requires no official ImGui package.
 
-The component/reload follow-up explicitly leaves complete custom measurement/drawing, routed canvas
+The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded keyed-state prerequisite below. Current public panels remain
 Dear-specific; finite Rect/Text/Mesh paint and button events are not the complete successor interface.
@@ -133,6 +133,20 @@ selected Windows/DX12 Editor 33/33. The independent component library passes 19/
 native trajectory and failure controls pass 2/2, while four typed-Feature GPU cases separately
 cover linear/sRGB pixels, exact metadata admission and partial-allocation recovery. These
 overlapping suites and the original failed fixture assumption retain their limits in the plan.
+
+The [presented-pointer prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#presented-pointer-samples-and-viewport-capture-prerequisite)
+adds finite event-time samples, declared motion/scroll/buttons and explicit viewport capture
+continuity. Exact matching presentation may renew an opted-in viewport while descendants move;
+owner/ancestor, Surface, modal and explicit invalidation rules still cancel its capture. The
+external curve library consumes admitted batches to update bounded local pan/zoom, with no
+second journal, document history or input owner. Existing adapters migrate directly, preserving
+their supported input meanings. General logical keys, dynamic propagation, Runtime wheel-source
+facts, cross-window capture and complete complex-editor/Host workflows remain open. The linked
+plan records actual tests, review fixes and native input-delivery limits. Shared 469/469,
+Editor/public 406/406 and selected native Editor 33/33 pass. Independent component 24/24 and
+native 2/2 pass; the complete native trajectory observes 19 presentations/18 journal commits,
+and its separate failure test exercises four error/panic child modes. These overlapping suites
+qualify this pointer prerequisite, not measured reuse or complete R11b/c.
 
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and

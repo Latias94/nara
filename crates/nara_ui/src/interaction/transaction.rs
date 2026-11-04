@@ -4,8 +4,8 @@ use nara_ecs::{Mut, Resource, World};
 use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
 use nara_ui_kernel::{
     UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent,
-    UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiPointerButton, UiRouteStamp,
-    UiSurfaceId,
+    UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiPointerButton,
+    UiPointerInputKind, UiRouteStamp, UiSurfaceId,
 };
 use nara_ui_widgets::{UiButtonState, UiIntent};
 use thiserror::Error;
@@ -131,7 +131,7 @@ pub enum UiInputProjectionIssue {
 }
 
 /// Typed result of routing one event at the runtime UI boundary.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiRouteDisposition {
     PassThrough,
     Consumed(UiDispatchBatch),
@@ -201,13 +201,16 @@ impl UiInteractionTransaction {
         input_sequence: Option<u64>,
     ) -> Result<Option<Self>, UiRouteRejection> {
         let surface_id = route.surface_id();
-        let release_must_commit = matches!(
-            &input,
-            UiInputEvent::PointerButton {
-                phase: UiButtonPhase::Released,
-                ..
-            }
-        );
+        let release_must_commit = match &input {
+            UiInputEvent::Pointer(pointer) => matches!(
+                pointer.kind(),
+                UiPointerInputKind::Button {
+                    phase: UiButtonPhase::Released,
+                    ..
+                }
+            ),
+            _ => false,
+        };
         if state.is_retired(surface_id) {
             return Err(UiRouteRejection::RetiredSurface {
                 surface: surface_id.get(),
@@ -234,15 +237,18 @@ impl UiInteractionTransaction {
             None
         } else {
             match &input {
-                UiInputEvent::PointerButton { button, .. }
-                    if *button != UiPointerButton::Primary =>
-                {
-                    Some(UiNonActivation::UnsupportedPointerButton)
-                }
-                UiInputEvent::PointerButton {
-                    phase: UiButtonPhase::Pressed,
-                    ..
-                } => Some(UiNonActivation::NoPointerTarget),
+                UiInputEvent::Pointer(pointer) => match pointer.kind() {
+                    UiPointerInputKind::Button { button, .. }
+                        if button != UiPointerButton::Primary =>
+                    {
+                        Some(UiNonActivation::UnsupportedPointerButton)
+                    }
+                    UiPointerInputKind::Button {
+                        phase: UiButtonPhase::Pressed,
+                        ..
+                    } => Some(UiNonActivation::NoPointerTarget),
+                    _ => None,
+                },
                 UiInputEvent::Navigate { .. } | UiInputEvent::ActivateFocused { .. } => {
                     Some(UiNonActivation::NoFocusTarget)
                 }

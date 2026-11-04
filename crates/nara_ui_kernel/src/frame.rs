@@ -4,9 +4,9 @@ use nara_text::TextLayout;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiColor, UiCornerRadii, UiImageId, UiKey, UiLayer, UiMesh, UiPhysicalRect, UiPoint,
-    UiRect, UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy, UiSurfaceContentTransform,
-    UiSurfaceId,
+    UiActionId, UiColor, UiCornerRadii, UiImageId, UiInteraction, UiKey, UiLayer, UiMesh,
+    UiPhysicalRect, UiPoint, UiRect, UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy,
+    UiSurfaceContentTransform, UiSurfaceId,
 };
 
 const MAX_LOGICAL_EXTENT: f32 = 16_384.0;
@@ -285,6 +285,7 @@ pub struct UiLayoutFact {
     pub(crate) physical_rect: UiPhysicalRect,
     pub(crate) clip_rect: Option<UiRect>,
     pub(crate) visible: bool,
+    pub(crate) interaction: UiInteraction,
 }
 
 impl UiLayoutFact {
@@ -337,6 +338,12 @@ impl UiLayoutFact {
     #[must_use]
     pub const fn visible(&self) -> bool {
         self.visible
+    }
+
+    /// Returns the exact immutable input declaration that produced this layout fact.
+    #[must_use]
+    pub const fn interaction(&self) -> UiInteraction {
+        self.interaction
     }
 }
 
