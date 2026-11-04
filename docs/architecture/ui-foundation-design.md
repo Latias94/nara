@@ -339,6 +339,12 @@ some retained state. Until those dependencies are represented completely, conser
 the affected root. Do not replace the existing owners with GPUI's App/Window/Entity model or
 assume automatic field-level dependency discovery.
 
+The [November 5 follow-up](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-phase-validity-and-measurement-retention)
+also distinguishes early cache selection from final artifact validity. A property determined
+in a later phase can invalidate an earlier hit. Revalidate and regenerate or refuse the affected
+output before publication; replay followed by a next-frame correction does not establish exact
+paint/input agreement for the accepted frame.
+
 The bounded `UiStateStore` prerequisite retains arbitrary typed local state through exact
 root/parent/leaf keys. Its membership pass reads compatible existing state and lazily initializes
 new slots. Only `finish` adopts membership; failure or abandonment keeps the previous owners.
@@ -380,6 +386,15 @@ selection, drafts and preedit need an explicit pin/preserve/cancel policy on evi
 recycled index cannot inherit the previous item's input route. The independent keyed composite
 and custom-layout consumers in R11b determine the public shape; R11e compares its private
 implementations against the baseline rather than freezing a generic virtual-list framework.
+
+Measured-height records and the derived height index have separate validity. Records depend on
+item incarnation, content, measurement width and typography; stale offscreen measurements must
+be invalidated or replaced by estimates before rebuilding the index. Qualify same-key offscreen
+changes followed by reorder and scrolling back, checking actual height, keyed anchoring and input
+association. Keep a bounded collection mounted while repeatedly replacing keys: measurement
+storage needs a declared bound/eviction policy and must plateau independently of attach/close.
+Pinned edit state retains its separate owner and policy. Label a cold geometry index with warm
+measurements separately from empty measurement/snapshot state when reporting cold/warm work.
 
 ## Interface readiness and component authoring
 

@@ -2145,18 +2145,29 @@ distributions rather than creating registry snapshots or multiplying benchmark s
   layout, shaping and unchanged glyph uploads. Count comparison and composition work honestly.
 - Local paint/interaction changes preserve unrelated text/layout; font/constraint/DPI changes
   invalidate exactly their dependent work. Failed/rejected work preserves the original route rules.
+  Revalidate early cache hits when later phase facts change; regenerate or refuse affected
+  output before publication instead of accepting stale facts for correction on the next frame.
 - Compare fixed-height range arithmetic and, where the real consumer needs it, estimated/measured
   extents with keyed intra-row scroll anchoring and changed-size invalidation. Attribute dense
   metadata, filter/order/height-index rebuild and visible/overscan/pinned rows separately. A
   geometry hit or 40 live nodes is not proof of total O(visible) work. Compare unchanged output
   reuse before deciding whether persistent layout storage pays for its lifetime complexity.
+  Invalidate stale measurement records themselves before rebuilding the height index. Change
+  an offscreen same-key row's content/width/typography, reorder, then scroll back and verify
+  actual height, the keyed intra-row anchor and original input association together.
 - Live collection work scales with visible/overscan/pinned-edit rows. Attribute model refresh,
   filtering and index construction separately; clipping alone is not virtualization.
 - Actual retained CPU/GPU bytes plateau through repeated attach/close/rehost and device recovery;
   output resources and original completion obligations retire through their existing owners.
+  Also keep a bounded collection mounted while repeatedly replacing its keys; historical
+  measurement storage must obey its declared bound/eviction policy and plateau without unmounting.
+  Charge pinned editing state separately rather than discarding its original owner to meet a bound.
 - Meet R11a's fixed numeric budgets in the selected workloads. Report cold/warm distributions,
   P50/P95/P99 scope, cache hits/misses/evictions, allocation bytes, invalidation reasons, copies,
   submissions, refusal behavior and diagnostic overhead. Missing measurements keep this unit open.
+  Distinguish a cold geometry index with retained measurements from fully cold measurement/
+  snapshot state. The [pinned GPUI follow-up](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-phase-validity-and-measurement-retention)
+  supplies these additional cases as source-derived requirements, not new runtime qualification.
 - Run the complete agreed incumbent workflow matrix in the independently runnable self-drawn
   Editor: project/document navigation, ordinary and specialized authoring, commands/history/
   persistence, Browser/import, Scene/Game Views, workspace layout/restore, overlays/focus/text,

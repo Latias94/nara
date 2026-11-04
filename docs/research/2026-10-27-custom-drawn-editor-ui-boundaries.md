@@ -303,6 +303,42 @@ automatically preserve a custom text editor when its row is omitted. This study 
 component packaging and caller contracts, not native accessibility/IME quality, a universal
 virtualized editor, or a performance advantage over Nara.
 
+### November 5: Phase Validity And Measurement Retention
+
+This bounded local-source follow-up uses the same Zed and Open-GPUI pins above. It adds three
+acceptance cases to the existing comparison; it runs no native or performance experiment.
+
+**Source fact:** Zed's cached view compares bounds, clip, inherited text style and opacity in
+prepaint. Final opacity from ancestor hover/drag-over styling can become known during paint.
+After a hit, the inspected path can replay its recorded paint despite changed opacity and
+request another frame to correct it ([prepaint and paint][zed-view-cache]). **Nara inference:**
+an early cache hit does not establish final artifact validity. Dependencies discovered in a
+later phase require revalidation and regeneration or refusal of the affected candidate before
+publication. A next-frame visual correction is not evidence for Nara's exact frame/input
+publication contract. This extends the existing conservative invalidation rule without adding
+a reactive owner or requiring a persistent layout arena.
+
+**Source facts:** Open-GPUI keeps item-order geometry authority separately from
+`row_measurements`; rebuilding geometry reads retained measurements before snapshot estimates
+([authority][open-list-authority], [measurement selection][open-list-keys]). **Nara inference:**
+advancing the geometry revision alone can rebuild an index from stale offscreen heights. A
+measurement record must depend on the item incarnation, content, measurement width and
+typography. Invalidate that record or return to an estimate before rebuilding the index.
+The combined acceptance case changes an offscreen row under the same key, changes width/font,
+reorders the collection and scrolls back; check actual height, keyed anchor and input association.
+Existing focused-row pin/preserve/cancel and same-index replacement requirements still apply.
+
+**Source fact:** the inspected list runtime inserts/overwrites measured rows and invalidates
+geometry, but no eviction of historical measurement keys accompanies collection replacement
+([measurement storage update][open-list-notify], [retained runtime][open-list-runtime]).
+**Source-derived risk, unmeasured:** a continuously mounted measured list can accumulate
+historical entries as successive distinct keys are measured. Nara's retention acceptance must
+therefore include repeated key replacement without unmounting, with separately charged pinned
+edit state and a declared bound/eviction policy for measurement storage. Attach/close tests alone
+cannot establish that plateau. Cold/warm comparisons must also distinguish a cold geometry index
+with retained measurements from empty measurement/snapshot state; the core's tests separately
+exercise initial measurement callbacks and later geometry reuse ([measured cache tests][open-measured-tests]).
+
 ### Proposed Nara Implications Within Existing Owners
 
 The [November 4 cost record](../benchmarks/2026-11-04-ui-work-baseline.md) owns measured results.
@@ -533,3 +569,4 @@ remain further pressure. This pinned source study is not native or performance e
 [open-list-keys]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render_plan.rs#L1008-L1142
 [open-snapshot]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L506-L551
 [open-list-reveal]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render.rs#L71-L118
+[open-measured-tests]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L1788-L1880
