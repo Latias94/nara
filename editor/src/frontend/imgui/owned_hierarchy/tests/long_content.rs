@@ -188,8 +188,13 @@ fn oversized_unicode_names_placement_and_errors_are_bounded_on_every_text_surfac
     let model = republish(&original, workspace);
     let mut owner = controller();
     paint(&mut owner, &model);
-    owner.error = Some(format!("Action refused: {unicode}"));
-    owner.input_error = Some(format!("Input refused: {unicode}"));
+    owner.submission_failed(format!("Action refused: {unicode}"));
+    let frame = Arc::clone(owner.compiled_frame().unwrap());
+    let field = input(&frame);
+    let mut routing = RoutedInput::new(&frame);
+    routing.focus(&mut owner, &frame, &field);
+    let token = owner.input_token(&frame, &field).unwrap().unwrap();
+    owner.input_error(&frame, &field, token, format!("Input refused: {unicode}"));
     let frame = paint(&mut owner, &model);
     let texts = frame
         .semantics()

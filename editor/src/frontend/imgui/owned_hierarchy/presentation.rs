@@ -26,12 +26,45 @@ impl OwnedHierarchy {
         read_only: bool,
     ) -> Result<Arc<UiFrame>, OwnedHierarchyError> {
         self.work.compile_calls = self.work.compile_calls.saturating_add(1);
+        let painted_clean = !self.paint_dirty;
+        self.paint_dirty = true;
         let width = environment.logical_size().width() - 2.0 * INSET;
         let height = environment.logical_size().height();
         if width <= 16.0 || height <= 2.0 * INSET {
             return Err(OwnedHierarchyError::InvalidViewport);
         }
-        let basis = HierarchyBasis::capture(model, read_only);
+        if painted_clean
+            && let Some(previous) = self.frames.last()
+            && previous.model_revision == model.revision()
+            && previous.read_only == read_only
+            && previous.frame.environment() == environment
+            && previous.theme == theme
+            && Arc::ptr_eq(&previous.observation, &self.observation)
+            && previous.observation.load(Ordering::Relaxed)
+        {
+            self.work.reused_frames = self.work.reused_frames.saturating_add(1);
+            self.projection_work.early_reused_frames =
+                self.projection_work.early_reused_frames.saturating_add(1);
+            self.paint_dirty = false;
+            return Ok(Arc::clone(&previous.frame));
+        }
+        if self
+            .projection
+            .as_ref()
+            .is_none_or(|projection| !projection.matches(model, read_only))
+        {
+            self.projection = Some(SourceProjection::capture(
+                model,
+                read_only,
+                &mut self.projection_work,
+            ));
+        }
+        let projection = self
+            .projection
+            .as_ref()
+            .expect("current projection captured");
+        let basis = projection.basis.clone();
+        let selected_exists = projection.selected_index.is_some();
         let scope = basis.as_ref().map(HierarchyBasis::scope);
         if self.scope != scope {
             self.filter.blur(&mut self.engine)?;
@@ -66,18 +99,6 @@ impl OwnedHierarchy {
         let busy = self.queued || self.pending.is_some();
         let editing = basis.as_ref().is_some_and(|basis| basis.editing) && !busy;
         let selected = basis.as_ref().and_then(|basis| basis.selected.as_ref());
-        let selected_exists = model
-            .workspace()
-            .active_scene
-            .as_ref()
-            .is_some_and(|scene| {
-                scene
-                    .editor
-                    .inspector
-                    .entities
-                    .iter()
-                    .any(|row| Some(&row.id) == selected)
-            });
         let mut source_limit = 0.0;
         let mut choice_limit = 0.0;
         let show_filter = self.removal.is_none() && self.choices.is_none() && height >= 180.0;
@@ -149,13 +170,7 @@ impl OwnedHierarchy {
                 .active_scene
                 .as_ref()
                 .ok_or(OwnedHierarchyError::ChangedProjection)?;
-            let others = scene
-                .editor
-                .inspector
-                .entities
-                .iter()
-                .filter(|row| Some(&row.id) != menu_basis.selected.as_ref());
-            let count = others.clone().count();
+            let count = scene.editor.inspector.entities.len() - usize::from(selected_exists);
             let count = match menu_kind {
                 MenuKind::Parent => count + 1,
                 MenuKind::Order => count * 2 + 2,
@@ -200,27 +215,17 @@ impl OwnedHierarchy {
             self.choice_scroll = self.choice_scroll.clamp(0.0, choice_limit);
             let range = visible_range(count, self.choice_scroll, viewport_height, CHOICE_HEIGHT);
             let text_limit = row_text_limit(range.len(), 1);
-            // The iterator describes source targets. Only this viewport slice creates widgets.
-            let options: Box<dyn Iterator<Item = Control> + '_> = match menu_kind {
-                MenuKind::Parent => Box::new(
-                    std::iter::once(Control::ParentRoot)
-                        .chain(others.map(|row| Control::ParentEntity(row.id.clone()))),
-                ),
-                MenuKind::Order => Box::new([Control::First, Control::Last].into_iter().chain(
-                    others.flat_map(|row| {
-                        [
-                            Control::Before(row.id.clone()),
-                            Control::After(row.id.clone()),
-                        ]
-                    }),
-                )),
-            };
-            let options = options
-                .skip(range.start)
-                .take(range.len())
-                .collect::<Vec<_>>();
             let mut children = Vec::new();
-            for (offset, control) in options.into_iter().enumerate() {
+            for index in range {
+                let control = projected_choice(
+                    menu_kind,
+                    index,
+                    self.projection
+                        .as_ref()
+                        .expect("current projection captured"),
+                    &scene.editor.inspector.entities,
+                )
+                .ok_or(OwnedHierarchyError::ChangedProjection)?;
                 let (name, enabled) = choice(&control, &menu_basis);
                 let name = presentation_text_with_limit(&name, text_limit);
                 children.push(self.button(
@@ -229,7 +234,7 @@ impl OwnedHierarchy {
                     editing && enabled,
                     [
                         0.0,
-                        (range.start + offset) as f32 * CHOICE_HEIGHT - self.choice_scroll,
+                        index as f32 * CHOICE_HEIGHT - self.choice_scroll,
                         width,
                         CHOICE_HEIGHT,
                     ],
@@ -395,14 +400,16 @@ impl OwnedHierarchy {
                 .as_ref()
                 .filter(|_| basis.is_some())
             {
-                let query = self.filter.editor().text().to_lowercase();
-                let matching = scene
-                    .editor
-                    .inspector
-                    .entities
-                    .iter()
-                    .filter(|row| matches_filter(row, &query));
-                let matches = matching.clone().count();
+                let projection = self
+                    .projection
+                    .as_mut()
+                    .expect("current projection captured");
+                projection.refilter(
+                    &scene.editor.inspector.entities,
+                    self.filter.editor().text(),
+                    &mut self.projection_work,
+                );
+                let matches = projection.matching_count();
                 let diagnostics = &scene.editor.inspector.diagnostics;
                 let total = matches + diagnostics.iter().len();
                 if !compact {
@@ -429,8 +436,10 @@ impl OwnedHierarchy {
                     SOURCE_ROW_HEIGHT,
                 );
                 let text_limit = row_text_limit(range.len(), 3);
+                let visible_sources = projection.visible_sources(range.clone());
                 let mut children = Vec::new();
-                for (offset, row) in matching.skip(range.start).take(range.len()).enumerate() {
+                for (offset, index) in visible_sources.into_iter().enumerate() {
+                    let row = &scene.editor.inspector.entities[index];
                     let top =
                         (range.start + offset) as f32 * SOURCE_ROW_HEIGHT - self.source_scroll;
                     let name = format!("Select {}", row.id.as_str());
@@ -496,7 +505,7 @@ impl OwnedHierarchy {
                 if total == 0 {
                     children.push(label(
                         "empty-source",
-                        if query.is_empty() {
+                        if self.filter.editor().text().is_empty() {
                             "No entities"
                         } else {
                             "No matching source entities"
@@ -540,7 +549,7 @@ impl OwnedHierarchy {
         }) {
             self.invalidate_actions();
         }
-        if let Some(previous) = self.frames.last()
+        if let Some(previous) = self.frames.last_mut()
             && previous.snapshot.roots() == snapshot.roots()
             && previous.frame.environment() == environment
             && previous.theme == theme
@@ -550,6 +559,9 @@ impl OwnedHierarchy {
             && previous.choice_limit == choice_limit
         {
             self.work.reused_frames = self.work.reused_frames.saturating_add(1);
+            previous.model_revision = model.revision();
+            previous.read_only = read_only;
+            self.paint_dirty = false;
             return Ok(Arc::clone(&previous.frame));
         }
         let next_snapshot = self
@@ -590,6 +602,8 @@ impl OwnedHierarchy {
             self.filter.blur(&mut self.engine)?;
         }
         self.frames.push(CompiledHierarchy {
+            model_revision: model.revision(),
+            read_only,
             frame: Arc::clone(&frame),
             snapshot,
             theme,
@@ -604,6 +618,7 @@ impl OwnedHierarchy {
         if self.frames.len() > RETAINED_FRAMES {
             self.frames.remove(0);
         }
+        self.paint_dirty = false;
         Ok(frame)
     }
 
@@ -716,13 +731,25 @@ fn presentation_text_with_limit(text: &str, maximum: usize) -> Cow<'_, str> {
     ))
 }
 
-fn matches_filter(row: &SceneInspectorEntityRow, query: &str) -> bool {
-    query.is_empty()
-        || row.id.as_str().to_lowercase().contains(query)
-        || row
-            .name
-            .as_ref()
-            .is_some_and(|name| name.to_lowercase().contains(query))
+fn projected_choice(
+    kind: MenuKind,
+    index: usize,
+    projection: &SourceProjection,
+    rows: &[SceneInspectorEntityRow],
+) -> Option<Control> {
+    let ordinal = match (kind, index) {
+        (MenuKind::Parent, 0) => return Some(Control::ParentRoot),
+        (MenuKind::Order, 0) => return Some(Control::First),
+        (MenuKind::Order, 1) => return Some(Control::Last),
+        (MenuKind::Parent, index) => index - 1,
+        (MenuKind::Order, index) => (index - 2) / 2,
+    };
+    let row = rows.get(projection.other_source(ordinal)?)?;
+    Some(match kind {
+        MenuKind::Parent => Control::ParentEntity(row.id.clone()),
+        MenuKind::Order if index.is_multiple_of(2) => Control::Before(row.id.clone()),
+        MenuKind::Order => Control::After(row.id.clone()),
+    })
 }
 
 fn visible_range(

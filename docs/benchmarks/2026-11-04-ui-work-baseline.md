@@ -18,11 +18,18 @@ not change admission limits, revision allocation, last-good fallback or exact ba
 | `UiCompiler` / `UiCompileWorkStats` | Compile/root attempts, committed frames, created Taffy nodes, layout passes/callbacks, last-good fallback selections and its own text-engine work | Description construction, allocation, active incremental layout reuse, other engines and rendering |
 | `UiPresentationPlanner` / `UiPresentationWorkStats` | Plan attempts, successfully retained packets/output primitives and its own text-engine work | Partial lowering of refused plans, compiler shaping, backend expansion, uploads and GPU work |
 | Private Inspector/Hierarchy `OwnedPanelWork` | Controller calls, successfully built descriptions, stored source-node counts and same-frame returns | Description attempts refused before snapshot construction, byte allocations, Session work and native presentation |
+| Private Hierarchy `HierarchyProjectionWork` | Model projection refreshes and examined rows, committed-filter refreshes and tested rows, returns before description construction, current requested filter-index capacity | Session/model production, action-time basis revalidation, temporary lowercase strings, allocator overhead, compiled frame payloads and native work |
 
 Rejected operations count only the work reached at the phase documented by the corresponding
 field. Submitted source bytes are not scanned or retained bytes. Produced raster bytes can be
 discarded later. Successfully lowered primitives are not an accounting of all lowering work.
 Do not add overlapping nested text snapshots as independent work.
+
+Hierarchy projection/filter counters accumulate reached work. `retained_index_bytes` is a live
+capacity gauge replaced on refresh, not cumulative allocation or peak process retention. An empty
+committed filter uses direct source indices; a nonempty filter retains dense `usize` indices.
+Replacing a filter can transiently hold both vectors, outside this live gauge. The optional
+allocation observer separately counts current-thread requests during its exact observation window.
 
 `UiAuthoringSnapshot::source_node_count()` sums the stored envelope counts, including original
 counts for rejected root bodies, without walking the trees again. A retained root is an inert
@@ -124,6 +131,94 @@ cause nor establish an SLA. No performance optimization separates the debug and 
 their timing difference is not a claimed implementation improvement. Selecting only the fastest
 process would discard observed cost. Native active-View and allocation/GPU attribution remain
 separate below.
+
+## November 5 Matched Source Hierarchy Reuse
+
+The [selected owner unit](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#source-hierarchy-matched-reuse-unit)
+first repeats the existing read-only projection probe at `0ed3507`, after custom layout, meshes
+and pointer-input changes. It keeps the earlier hardware/toolchain, bundled font, 700 by 800
+logical viewport at scale 1.5, 16 warmups and 512 timed calls. Three ordinary serial release
+processes pass. Initial recompilation takes 9 min 01 s outside workload timing; this is neither
+UI latency nor an extension edit-to-result measurement.
+
+Cells are **P50 / P95 / P99 microseconds**. Retain each process rather than selecting its minimum.
+
+| Before reuse, `0ed3507` | Process 1 | Process 2 | Process 3 |
+| --- | --- | --- | --- |
+| Unchanged 10,000-row read-only projection | 35.4 / 41.1 / 54.0 | 35.4 / 40.3 / 64.1 | 36.0 / 40.4 / 65.9 |
+| Unchanged 100,000-row read-only projection | 285.7 / 320.5 / 455.3 | 277.6 / 330.1 / 402.0 | 283.6 / 314.8 / 412.5 |
+
+Runs: `e163bb47-1575-402e-be90-a1d5acb7cdc2`, `be23937f-5615-48c0-bb91-14308a9c1bd9`,
+`97e04268-072b-45f7-8269-39da34dad0f1`. All retain 40 live layout facts. Each measured group
+still builds 512 snapshots / 20,480 source nodes while returning the original frame. Compiler
+work stays at one initial pass, 36 measurement callbacks and 79 layout-work units. This repeats
+the description/scanning pressure on current code rather than borrowing the older timings.
+
+The predeclared change uses one exact immutable `EditorFrameRevision` for private source/index
+reuse and explicit local paint invalidation. The frame clock is nominal and not cloneable;
+workspace/project contents have no mutable model access. All current `with_*` enrichment methods
+change auxiliary observations unused by this Hierarchy. External `read_only`, local input,
+menus, pending/results/errors and environment/theme remain separate dependencies. A cache hit
+adds no receipt, action authorization or new journal/Session owner.
+
+The selected warm budget is zero description construction, source/filter row visits, compiler
+work and current-thread requested Rust allocation, with per-process P99 at most 25 microseconds
+over the same 512-call release protocol. Real admitted 128/1,024-entity Application consumers
+must preserve their source/history beside the synthetic scale controls. Pure scroll reuses the
+same filter index and builds only the active viewport; committed filter changes may scan all
+rows once. Empty filters use a direct range. Nonempty filtering retains a dense index, whose
+requested capacity is charged separately from live controls and prior compiled frames.
+
+The first after-change repetition reports a flat 100 ns P50/P95/P99 in all four workloads,
+close to this clock's observed granularity. The final probe therefore makes the owner, model,
+environment, theme, read-only argument and returned frame opaque through `std::hint::black_box`.
+This reduces compiler knowledge of repeated inputs; it does not change the runtime controller
+or the 25-microsecond target. Final latency qualification uses that protected probe. The original
+before table uses its original harness, so it is not a denominator for an exact speedup ratio.
+Work-count and allocation changes retain their separate direct evidence.
+
+| Final protected release probe | Process 1 P50/P95/P99 µs | Process 2 P50/P95/P99 µs | Process 3 P50/P95/P99 µs |
+| --- | --- | --- | --- |
+| Real admitted 128-entity Application | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 |
+| Real admitted 1,024-entity Application | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 |
+| Read-only 10,000-row projection | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 |
+| Read-only 100,000-row projection | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 | 0.1 / 0.1 / 0.1 |
+
+Runs: `069c8020-85f4-4256-bedc-6b379a95bb24`, `89916e98-3630-4282-8fd1-d0ae4744bd88`,
+`38f23aab-29c4-4665-b628-1596f5627856`; both complete probes pass in every process. These
+quantized observations meet the selected 25-microsecond P99 target but do not resolve an exact
+sub-microsecond cost. All four workloads keep 40 live layout facts, one initial description,
+one initial source-projection pass and unchanged compiler work. The 512 sampled calls add no
+description, authored node, source/filter row visit or filter refresh. Empty filters retain no
+index allocation. Construction/setup and source projection remain outside the timed warm path.
+
+The separate unoptimized `ui-work-allocation-probes` process passes both final protected probes,
+run `72f934ca-bbf8-46ec-b0f5-1e79eef39b91`. All four empty-filter workloads report zero alloc,
+alloc-zeroed, realloc and dealloc requests over 512 individually observed warm calls. Each then
+executes an additional 512-call observation window and asserts the complete `AllocationWork`
+snapshot is zero. Description, source/filter scan and compiler counters remain unchanged in
+both loops. The real 128/1,024-entity consumers retain exact source bytes, workspace and history;
+the synthetic projections remain read-only. These are requested current-thread System allocation
+observations, excluding native/background allocation and model/controller construction. Their
+instrumented timing is not used to judge the ordinary release latency budget.
+
+Any new model conservatively refreshes, including same-document-revision selection, Schema or
+display-row changes. The actual Running Game path continually publishes fresh models, so this
+unit cannot establish general static-panel/live-View dependency reuse. Session model production,
+new-model preparation, full process/GPU memory, OS input/display latency and the independent
+Editor remain in R11a/e. No cross-frame or general virtual-list framework claim follows.
+
+The complete Editor/public integration cohort passes 410/410
+(`3849ecf9-10d1-4014-b2f7-c85a06457a92`), including the four new reuse regressions. Selected
+actual Windows/DX12 ordinary Scene/Prefab, source Hierarchy/1,000-row filter-wheel and specialized
+Canvas workflows pass 5/5 (`5c9d5a88-d858-4c46-8571-f5ad184b1ff7`). They preserve the original
+action, history, source, Save/Reopen and projection-retirement assertions rather than timing a
+partial drawing loop. A later equivalent `is_multiple_of(2)` spelling removes the new Clippy
+warning; the affected 37-test source/adapter cohort then passes again
+(`98f61f41-941d-4315-97f9-d86e6184537a`). Final binary build, correctness Clippy with all
+targets/features and formatting pass. Other existing warning categories remain outside that
+gate. Native and public cohorts retain that explicit source/test scope rather than a new entire
+R11 qualification.
 
 ## CPU Change Pressure
 

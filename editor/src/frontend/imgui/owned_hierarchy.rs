@@ -13,7 +13,7 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionOutcome, EditorDocumentId, EditorDocumentKind,
-        EditorDocumentQueryBasis, EditorFrameModel, EditorNavigationAction,
+        EditorDocumentQueryBasis, EditorFrameModel, EditorFrameRevision, EditorNavigationAction,
         SceneCompositionCapabilities, SceneCompositionCommand, SceneCompositionEntityKind,
     },
 };
@@ -32,8 +32,11 @@ use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError, authoring}
 
 mod input;
 mod presentation;
+mod projection;
 #[cfg(test)]
 mod tests;
+
+use projection::{HierarchyProjectionWork, SourceProjection};
 
 const RETAINED_FRAMES: usize = 3;
 const TEXT_SIZE: f32 = 16.0;
@@ -60,38 +63,7 @@ struct HierarchyBasis {
 
 impl HierarchyBasis {
     fn capture(model: &EditorFrameModel, read_only: bool) -> Option<Self> {
-        let scene = model.workspace().active_scene.as_ref()?;
-        if model.workspace().active_document != Some(scene.document)
-            || !matches!(
-                scene.kind,
-                EditorDocumentKind::Scene | EditorDocumentKind::Prefab
-            )
-        {
-            return None;
-        }
-        let inspector = &scene.editor.inspector;
-        let selected = inspector
-            .selected_entity
-            .as_ref()
-            .and_then(|id| inspector.entities.iter().find(|row| &row.id == id));
-        Some(Self {
-            target: EditorDocumentQueryBasis {
-                document: scene.document,
-                revision: scene.revision,
-                schema: model
-                    .workspace()
-                    .document(scene.document)
-                    .and_then(|tab| tab.authoring_schema_basis.clone()),
-            },
-            kind: scene.kind,
-            selected: inspector.selected_entity.clone(),
-            placement: selected.and_then(|row| row.placement.clone()),
-            capabilities: inspector.composition.clone(),
-            editing: !read_only && authoring::editing_enabled(model),
-            navigation: !read_only && model.workspace_intent().intent().is_none(),
-            read_only,
-            removal_reason: authoring::entity_removal_unavailable_reason(model, scene),
-        })
+        SourceProjection::capture(model, read_only, &mut HierarchyProjectionWork::default()).basis
     }
 
     fn scope(&self) -> DocumentScope {
@@ -155,6 +127,8 @@ struct DisplayedInput {
 }
 
 struct CompiledHierarchy {
+    model_revision: EditorFrameRevision,
+    read_only: bool,
     frame: Arc<UiFrame>,
     snapshot: UiAuthoringSnapshot,
     theme: UiTheme,
@@ -170,6 +144,9 @@ struct CompiledHierarchy {
 /// Private source-declaration panel. Session owns selection, commands, history and persistence.
 pub(super) struct OwnedHierarchy {
     work: super::owned_work::OwnedPanelWork,
+    projection_work: HierarchyProjectionWork,
+    projection: Option<SourceProjection>,
+    paint_dirty: bool,
     root: UiRootKey,
     engine: TextEngine,
     compiler: UiCompiler,
@@ -229,6 +206,9 @@ impl OwnedHierarchy {
         let filter = UiTextField::new(root.clone(), "Filter entities", "", TEXT_SIZE, &mut engine)?;
         Ok(Self {
             work: Default::default(),
+            projection_work: Default::default(),
+            projection: None,
+            paint_dirty: true,
             root,
             engine,
             compiler,
@@ -276,6 +256,7 @@ impl OwnedHierarchy {
     }
 
     fn invalidate_buttons(&mut self) {
+        self.paint_dirty = true;
         self.observation.store(false, Ordering::Relaxed);
         self.observation = Arc::new(AtomicBool::new(true));
         for control in self.controls.values_mut() {
@@ -367,6 +348,7 @@ impl OwnedHierarchy {
                 button
             })
             .collect::<Vec<_>>();
+        self.paint_dirty = true;
         if live_input {
             self.filter.reduce_focus(batch, &mut self.engine)?;
         }
@@ -392,6 +374,7 @@ impl OwnedHierarchy {
     ) -> Result<Option<HierarchySubmission>, OwnedHierarchyError> {
         let result = self.activate_inner(frame, button, model, read_only);
         if let Err(error) = &result {
+            self.paint_dirty = true;
             self.error.get_or_insert_with(|| error.to_string());
         }
         result

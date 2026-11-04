@@ -47,6 +47,7 @@ impl OwnedHierarchy {
         field: &UiKey,
     ) -> Result<(), OwnedHierarchyError> {
         self.live_input(frame, field)?;
+        self.paint_dirty = true;
         Ok(self.filter.blur(&mut self.engine)?)
     }
 
@@ -68,6 +69,7 @@ impl OwnedHierarchy {
     ) -> Result<TextEditOutcome, OwnedHierarchyError> {
         self.live_input(frame, field)?;
         let result = self.filter.edit(token, edit, &mut self.engine)?;
+        self.paint_dirty |= result.changed();
         if result.text_changed {
             self.source_scroll = 0.0;
             self.input_error = None;
@@ -117,7 +119,7 @@ impl OwnedHierarchy {
             })
             .ok_or(OwnedHierarchyError::ChangedProjection)?;
         // Focus can restore tail scrolling before a repaint. Point into the presented text.
-        Ok(self.filter.edit(
+        let outcome = self.filter.edit(
             token,
             &TextEdit::Point {
                 x: field_rect.origin().x() + point.x() - origin.x(),
@@ -125,7 +127,9 @@ impl OwnedHierarchy {
                 extend,
             },
             &mut self.engine,
-        )?)
+        )?;
+        self.paint_dirty |= outcome.changed();
+        Ok(outcome)
     }
 
     pub(in crate::frontend::imgui) fn selected_text(
@@ -173,6 +177,7 @@ impl OwnedHierarchy {
         error: String,
     ) {
         if self.input_token(frame, field).ok().flatten() == Some(token) {
+            self.paint_dirty = true;
             self.input_error = Some(error);
         }
     }
@@ -184,6 +189,7 @@ impl OwnedHierarchy {
         discard: bool,
     ) -> Result<(), OwnedHierarchyError> {
         self.live_input(frame, field)?;
+        self.paint_dirty = true;
         if discard {
             self.clear_filter()?;
         }
@@ -192,6 +198,7 @@ impl OwnedHierarchy {
     }
 
     pub(super) fn clear_filter(&mut self) -> Result<(), OwnedHierarchyError> {
+        self.paint_dirty = true;
         let focused = self.filter.input_token().is_some();
         let token = self.filter.focus()?;
         self.filter

@@ -1376,6 +1376,10 @@ qualification and R12 observation facilities rather than inventing a benchmark o
 
 Success is a reproducible baseline and executable work-count assertions, not a performance win.
 No particular persistent layout arena, reactive language, public cache key or new crate is frozen.
+A bounded owner-local reuse change may use a matched current-source baseline and predeclared
+work, allocation and latency budgets for its complete selected consumer while the broader native
+matrix remains open. It must include changed-input/refusal controls and retain the unmeasured
+cells explicitly; this does not satisfy R11a's complete budget table or R11e's whole-Editor exit.
 The [pinned Zed/Open-GPUI follow-up](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-4-state-reuse-and-component-mechanisms)
 supplies notification, cached-view replay and fixed/measured list comparisons. Zed's inspected
 layout tree is cleared between draws; its retained state and cached views do not require Nara to
@@ -1500,6 +1504,29 @@ Before claiming compatibility with a named external toolkit, qualify its actual 
 adapter separately. Shipping an official ImGui/egui package or stable plugin ABI is not required.
 Optional embedding/coexistence qualification does not gate the independent default's replacement
 unless that capability is explicitly part of the selected support claim.
+
+#### Neutral presentation consumption prerequisite
+
+The concrete dependency investigation confirms that `surface.rs` shares outcome permits,
+submission binding, abandoned-drop handling and completion custody with `integration.rs`.
+Move that existing mechanism into shared neutral implementation before gating runtime integration;
+do not duplicate the protocol. `RenderTarget`/`RenderResourceSnapshot`, typed Asset handles/slot
+revisions and `PreparedImageSnapshot` also reach App/ECS/Window through their current owner
+manifests. A UI-only feature switch cannot remove those transitive edges. Compare values versus
+integration features inside the existing owners with a bounded extraction of Render/Window
+values; select the simpler complete consumer closure rather than optimizing package count.
+
+Use the existing independently locked UI consumer for public code-first Image store/capture,
+`UiPreparedImages`, compile, presenter preparation, original backend completion, journal/input
+and retirement. Check normal/build dependencies without workspace feature unification: text,
+kernel, widgets and neutral presentation must not require App/ECS, game UI, project/Editor,
+WGPU/Winit/Dear or filesystem/task installation. Value-only Window identity may remain in its
+existing owner if its runtime integration is absent. Preserve typed resource identity, nominal
+slot revisions, retained pixels/import leases, deferred retry and late-outcome disposal. Then
+reuse the complete native `ui_surface` consumer with real captured Image content, and verify the
+default game installation still selects its original plugins. This is the next dependency unit;
+its code, exact shape and qualification remain unimplemented. Public panel attachment and the
+independent Editor are later complete consumers, not consequences of a manifest change.
 
 #### Custom child-measurement and layout prerequisite
 
@@ -2078,6 +2105,61 @@ Component breadth and native detachment retain their named workload/platform sco
 Future font/effect/component work may change private algorithms without exposing their storage or
 reopening document, Host or render ownership. Full R11/R12 remains open until its complete scope
 has matching evidence; this design update neither reopens qualified units nor claims the successor.
+
+#### Source Hierarchy matched reuse unit
+
+The next selected consumer is the existing complete ordinary source-declaration Hierarchy,
+including filter/selection, Parent/Order choices, removal, exact action results and history/source
+preservation. Repeat the current 10,000/100,000-row read-only projection probes at the current
+source before changes, and add real admitted 128/1,024-entity Application consumers. Keep their
+editing/native evidence separate from synthetic projection scale. Reuse stays private to the
+existing controller; no public cache key, universal virtualizer or model/history owner is added.
+
+Use exact immutable Editor-frame identity for source projection reuse, with explicit local paint
+invalidation and matching environment/theme/read-only facts. A newly published model conservatively
+refreshes the projection even when the document revision is unchanged. Selection, Schema, source,
+permissions, changed row metadata/order and closed/retired action controls retain their original
+revalidation. Auxiliary frame-enrichment methods must be inspected before treating its nominal
+revision as proof of any consumed property. Cache hits confer no presentation/input authority.
+
+Predeclared acceptance at the existing hardware/toolchain/font/viewport is: after warm-up, 512
+unchanged calls construct zero descriptions, visit zero source/filter rows, perform zero compiler
+work and allocate zero current-thread Rust bytes. Their per-process P99 target is 25 microseconds
+for three ordinary release processes; report every process and background-load limits. Scroll
+under the same immutable projection must avoid full-source/filter scans and retain fewer than
+128 live layout facts at the 700-by-800 viewport. Changed committed filters may scan all logical
+rows once; unchanged filter/scroll may not repeat that work. Retained filtering indexes are
+explicit dense logical-row metadata with at most `row_count * size_of::<usize>()` requested
+capacity plus the bounded filter text, separate from visible controls and retained frame payloads.
+New models and failed candidates retain their separately charged conservative paths. General
+cross-frame dependency reuse, variable-height lists, whole-process/GPU memory and OS input latency
+remain in the full R11a/e matrix.
+
+The implemented private `SourceProjection` captures the exact frame/read-only basis once and
+retains one committed filter's matching source indices. Empty queries and Parent/Order choices
+derive direct indices. Local input/selection/focus/preedit, scrolling, modes, error/result and
+observation changes dirty the painted artifact independently. Same-frame unchanged calls return
+before basis cloning, description construction or compiler entry; new model publication always
+refreshes conservatively. The original action and queue boundaries still recapture their exact
+basis rather than accepting cache identity as authority.
+
+The [matched report](../benchmarks/2026-11-04-ui-work-baseline.md#november-5-matched-source-hierarchy-reuse)
+records three current-source before processes, the protected final three-process release probe,
+independent allocation observations and limits. All final 128/1,024 admitted and 10,000/100,000
+read-only warm distributions meet the 25-microsecond P99 target, reporting a quantized 0.1
+microsecond P50/P95/P99. Input/output optimization barriers preserve that observation; timer
+granularity prevents an exact sub-microsecond or before/after speedup claim. Work counters add
+zero descriptions, authored nodes, source/filter visits or compiler work across each 512-call
+group. Separate current-thread allocation windows add zero allocation/reallocation/free requests;
+construction, model publication and native/background allocation are outside those windows.
+
+Four new hosted regressions cover source and choice scrolling, committed-filter/preedit reuse,
+same-document-revision changed rows/old controls, and local field/error redraw. Existing tests
+retain real commands, queue refusal, history, source and Save/Reopen. Editor/public 410/410 and
+selected actual Windows/DX12 workflows 5/5 pass; the equivalent final choice-parity spelling is
+covered by a later 37/37 owner/adapter run. Build, correctness Clippy, formatting and changed-doc
+checks pass. This qualifies the selected same-frame Hierarchy unit. Running Game publishes new
+models, so cross-frame dependency reuse, full R11a budgets and R11b-f remain open.
 
 ### R11f: Editor extension edit/build/reconstruct
 

@@ -37,6 +37,7 @@ use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOpti
 mod boundaries;
 mod filter;
 mod long_content;
+mod reuse;
 mod work_costs;
 mod workflows;
 

@@ -148,6 +148,14 @@ native 2/2 pass; the complete native trajectory observes 19 presentations/18 jou
 and its separate failure test exercises four error/panic child modes. These overlapping suites
 qualify this pointer prerequisite, not measured reuse or complete R11b/c.
 
+The [source Hierarchy reuse unit](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#source-hierarchy-matched-reuse-unit)
+adds private exact-frame projection/filter reuse and explicit local paint invalidation, preserving
+original action/queue revalidation. Matched 128/1,024 admitted and 10,000/100,000 read-only warm
+probes meet their selected work/allocation and 25-microsecond P99 targets; quantized timing and
+current-thread allocation limits remain in the report. Editor/public 410/410 and selected native
+5/5 pass. New model publication still refreshes conservatively, including an advancing Game;
+cross-frame retained dependency reuse and the complete R11a/e budgets remain open.
+
 The [complete foundation reassessment](../foundation-architecture-reassessment.md) records all
 103 baseline ADR dispositions and a staged refactor plan. Strategy/research-scope corrections and
 ADR 0119 metadata authority are documentation decisions, not new runtime qualification. Proposed

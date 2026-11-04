@@ -84,7 +84,19 @@ delivery, cross-window capture and the complete R11b/R11c consumers remain separ
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work
 and separate debug/release CPU distributions. Its opt-in native probe reuses the trusted compiled
 Game input fixture and the existing hidden-window Host; it performs no external Cargo build or
-project-code reload. Run it separately from the correctness trajectories when measuring work:
+project-code reload. Run it separately from the correctness trajectories when measuring work.
+
+The source Hierarchy's [matched reuse unit](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#source-hierarchy-matched-reuse-unit)
+has a separate CPU protocol: 16 warmups and 512 unchanged calls for real admitted 128/1,024-entity
+Applications and read-only 10,000/100,000-row projections. Require zero repeated descriptions,
+projection/filter row visits and compiler work before reporting early reuse. Keep the committed
+filter/index and source/Parent/Order scrolling regressions, same-document-revision new-model
+controls and original action/history/persistence native trajectories. Run the two `measure_owned_hierarchy_*`
+probes in separate ordinary release processes; the opt-in `ui-work-allocation-probes` process
+checks requested current-thread allocation independently and must not supply ordinary timing.
+Exact-frame reuse does not establish cross-frame static-panel reuse beside the advancing Game.
+
+Run the native Inspector/Game lane with:
 
 ```powershell
 $env:CARGO_BUILD_JOBS='1'

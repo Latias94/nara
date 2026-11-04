@@ -298,11 +298,17 @@ reuse, placed raster keys, atlas residency and native pipeline reuse separate. C
 cost work but cannot change document results or revive retired input. A retained last-good visual
 is inert recovery, not an active incremental-layout result.
 
-Current panel code can reconstruct descriptions and compare them before returning an unchanged
-frame. Current kernel compilation flattens roots and creates a Taffy tree; its root cache provides
-compatible fallback. Prepared text avoids reshaping its editing source, but window preparation
-still scans the admitted layout and rasterizes distinct placed keys. These are current mechanisms,
-not evidence of zero idle work, persistent incremental layout or a performance improvement.
+Current Inspector code can reconstruct descriptions and compare them before returning an unchanged
+frame. The source Hierarchy's private reuse uses exact immutable Editor-frame identity plus local
+paint invalidation, read-only, environment and theme facts before constructing a description. Its
+matching-index cache separates full committed-filter work from visible source/choice construction.
+New models conservatively refresh, so this does not solve cross-frame static-panel reuse beside an
+advancing Game. The [matched unit](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#source-hierarchy-matched-reuse-unit)
+owns its before/after measurements and acceptance. Current kernel compilation flattens roots and
+creates a Taffy tree; its root cache provides compatible fallback. Prepared text avoids reshaping
+its editing source, but window preparation still scans the admitted layout and rasterizes distinct
+placed keys. These mechanisms do not establish general zero idle work or persistent incremental
+layout.
 
 The [editable-text interface](../guides/editable-text.md#local-editing) adds explicit local font
 reconfiguration while retaining a field's edit/focus state. It revalidates current, preedit-origin

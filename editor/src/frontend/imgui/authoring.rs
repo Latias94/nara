@@ -218,6 +218,7 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
 pub(super) fn entity_removal_unavailable_reason(
     frame: &EditorFrameModel,
     scene: &EditorSceneModel,
+    has_prefab: bool,
 ) -> Option<&'static str> {
     if !scene.editor.inspector.composition.generic_authoring {
         return None;
@@ -230,13 +231,7 @@ pub(super) fn entity_removal_unavailable_reason(
     {
         return Some("Entity deletion requires a Complete authoring document");
     }
-    if scene
-        .editor
-        .inspector
-        .entities
-        .iter()
-        .any(|entity| entity.has_prefab)
-    {
+    if has_prefab {
         return Some("Entity deletion requires a source without Prefab anchors");
     }
     None
