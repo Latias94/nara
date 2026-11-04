@@ -1498,7 +1498,7 @@ impl Harness {
     pub(super) fn draw(&mut self) -> ImguiEditorSubmission {
         let candidate = self
             .frontend
-            .show(self.context.frame(), &mut self.application)
+            .show_unpresented(self.context.frame(), &mut self.application)
             .unwrap()
             .unwrap();
         let _ = self.context.render_legacy();

@@ -125,20 +125,37 @@ impl AuthoringWorkflow<'_> {
 
     fn owned_test_named_probe(
         &self,
-        field: &str,
+        field: Option<&str>,
         role: UiSemanticRole,
         name: &str,
     ) -> Result<OwnedFieldProbe, String> {
+        let inspector = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.inspector")
+            .ok_or("the native fixture has no Inspector panel")?
+            .id();
         for (panel, frame, image) in self.native.owned_frames_for_test() {
-            let Some(group) = frame
-                .semantics()
-                .iter()
-                .find(|node| node.role() == UiSemanticRole::Group && node.name() == field)
-            else {
+            if panel != inspector {
                 continue;
-            };
+            }
+            let parent =
+                match field {
+                    Some(field) => {
+                        let Some(group) = frame.semantics().iter().find(|node| {
+                            node.role() == UiSemanticRole::Group && node.name() == field
+                        }) else {
+                            continue;
+                        };
+                        Some(group.key())
+                    }
+                    None => None,
+                };
             let mut nodes = frame.semantics().iter().filter(|node| {
-                node.role() == role && node.name() == name && node.parent() == Some(group.key())
+                node.role() == role && node.name() == name && node.parent() == parent
             });
             let node = nodes
                 .next()
@@ -195,6 +212,19 @@ impl AuthoringWorkflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> Result<OwnedFieldProbe, String> {
+        self.owned_test_visible_control(Some(field), role, name)
+    }
+
+    pub(super) fn owned_test_root_control(&self, name: &str) -> Result<OwnedFieldProbe, String> {
+        self.owned_test_visible_control(None, UiSemanticRole::Button, name)
+    }
+
+    fn owned_test_visible_control(
+        &self,
+        field: Option<&str>,
+        role: UiSemanticRole,
+        name: &str,
+    ) -> Result<OwnedFieldProbe, String> {
         let mut probe = self.owned_test_named_probe(field, role, name)?;
         let node = probe
             .frame
@@ -229,7 +259,7 @@ impl AuthoringWorkflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> Result<bool, String> {
-        let probe = self.owned_test_named_probe(field, role, name)?;
+        let probe = self.owned_test_named_probe(Some(field), role, name)?;
         probe
             .frame
             .semantics()
@@ -241,13 +271,13 @@ impl AuthoringWorkflow<'_> {
 
     fn owned_test_reveal_named(
         &mut self,
-        field: &str,
+        field: Option<&str>,
         role: UiSemanticRole,
         name: &str,
     ) -> Result<(), String> {
         for vertical in [1.0, -1.0] {
             for _ in 0..48 {
-                if let Ok(visible) = self.owned_test_named_control(field, role, name)
+                if let Ok(visible) = self.owned_test_visible_control(field, role, name)
                     && visible.rect.size().width() > 2.0
                     && visible.rect.size().height() > 2.0
                 {
@@ -294,7 +324,7 @@ impl AuthoringWorkflow<'_> {
                 }
             }
         }
-        self.owned_test_named_control(field, role, name)
+        self.owned_test_visible_control(field, role, name)
             .map(|_| ())
             .map_err(|error| format!("after a bounded Inspector wheel search: {error}"))
     }
@@ -360,7 +390,7 @@ impl AuthoringWorkflow<'_> {
         name: &str,
         expected: &str,
     ) -> Result<(), String> {
-        let probe = self.owned_test_named_probe(field, UiSemanticRole::TextInput, name)?;
+        let probe = self.owned_test_named_probe(Some(field), UiSemanticRole::TextInput, name)?;
         let actual = probe
             .frame
             .semantics()
@@ -437,7 +467,7 @@ impl AuthoringWorkflow<'_> {
             Some(action) => (UiSemanticRole::Button, action),
             None => (UiSemanticRole::TextInput, field),
         };
-        self.owned_test_point_at_named(field, role, name, horizontal)
+        self.owned_test_point_at_named(Some(field), role, name, horizontal)
     }
 
     fn owned_test_named_pointer(
@@ -447,23 +477,28 @@ impl AuthoringWorkflow<'_> {
         name: &str,
         horizontal: f32,
     ) -> Result<(), String> {
-        self.owned_test_reveal_named(field, role, name)?;
-        self.owned_test_point_at_named(field, role, name, horizontal)
+        self.owned_test_reveal_named(Some(field), role, name)?;
+        self.owned_test_point_at_named(Some(field), role, name, horizontal)
+    }
+
+    pub(super) fn owned_test_root_pointer(&mut self, name: &str) -> Result<(), String> {
+        self.owned_test_reveal_named(None, UiSemanticRole::Button, name)?;
+        self.owned_test_point_at_named(None, UiSemanticRole::Button, name, 0.5)
     }
 
     fn owned_test_point_at_named(
         &mut self,
-        field: &str,
+        field: Option<&str>,
         role: UiSemanticRole,
         name: &str,
         horizontal: f32,
     ) -> Result<(), String> {
         self.pointer = self
-            .owned_test_named_control(field, role, name)?
+            .owned_test_visible_control(field, role, name)?
             .position(horizontal)?
             .0;
         self.paint(|_| {})?;
-        let probe = self.owned_test_named_control(field, role, name)?;
+        let probe = self.owned_test_visible_control(field, role, name)?;
         let (global, position) = probe.position(horizontal)?;
         self.pointer = global;
         if !probe
@@ -513,11 +548,7 @@ impl AuthoringWorkflow<'_> {
     }
 
     pub(super) fn owned_test_apply(&mut self, field: &str) -> Result<(), String> {
-        self.owned_test_pointer(field, Some("Apply"), 0.5)?;
-        self.owned_test_mouse(ElementState::Pressed)?;
-        self.owned_test_paint()?;
-        self.owned_test_mouse(ElementState::Released)?;
-        self.owned_test_paint()?;
+        self.owned_test_named_click(field, "Apply")?;
         self.owned_test_draft(field, None)
     }
 
@@ -634,8 +665,8 @@ impl AuthoringWorkflow<'_> {
             return Err("the owned field fixture must retain actual unknown source data".into());
         }
         self.click("+ Root")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
         let scene = frame
             .workspace()
@@ -653,7 +684,6 @@ impl AuthoringWorkflow<'_> {
             .active_authoring_unavailable_record_manifest()
             .ok_or("the created entity lost the unavailable-record manifest")?;
         self.owned_test_document("before", 10, 2, "component creation")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
         self.owned_test_idle("label")?;
 
@@ -717,7 +747,7 @@ impl AuthoringWorkflow<'_> {
         self.click("Inspector tab: Source asset")?;
         self.owned_test_draft("label", Some(OWNED_LABEL))?;
         self.owned_test_document("before", 10, 2, "Inspector tab change without Apply")?;
-        self.click("Inspector tab: Nara properties")?;
+        self.click("Inspector tab: Document")?;
         self.owned_test_paint()?;
         self.owned_test_select("value")?;
         self.owned_test_draft("label", Some(OWNED_LABEL))?;

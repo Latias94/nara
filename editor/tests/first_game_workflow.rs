@@ -1106,7 +1106,7 @@ fn select_browser_image(
             sys::igSetNavCursorVisible(true);
         }
     });
-    let batch = frontend.show(ui, &mut application).unwrap();
+    let batch = frontend.show_contributions(ui, &mut application).unwrap();
     let first_item = binding.with_bound_context(|| {
         // SAFETY: only the copied result of this frame's real navigation request leaves scope.
         unsafe { (*sys::igGetCurrentContext()).NavInitResult.ID }

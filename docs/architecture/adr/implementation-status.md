@@ -13,8 +13,8 @@ publication/replacement remains Proposed. 0121 remains Proposed. Its finite type
 prerequisite and stock execution replacements have separate implementation evidence under
 ADR0094. Original Source/Processed capture replay, native streams and clipped numeric composition
 now have scoped evidence. Shared stock-stage Scene effects have their own complete Runtime,
-native Scene View and offscreen qualification below; the editable Nara-drawn Inspector remains
-open. Exact native binding and stock-render ownership are retained.
+native Scene View and offscreen qualification below; the default Nara-drawn ordinary Inspector
+replacement is recorded below. Exact native binding and stock-render ownership are retained.
 
 The [owned Inspector unit](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md)
 adds a qualified shared text prerequisite: finite ordered immutable font faces, exact fallback
@@ -111,6 +111,17 @@ compatible drafts/local Undo while losing text focus and composition; removed-co
 remain in the existing recovery path. Its owner and native Scene/Prefab qualification is recorded
 in the same unit. Full Inspector/navigation and tree parity, virtualization, costs and actual
 OS/platform requirements remain open.
+
+The [default ordinary Inspector replacement](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#default-ordinary-inspector-replacement)
+adds the selected entity's authored placement and exact Prefab-source navigation, uses Nara
+controls in the ordinary Document tab and removes the competing optional tab and Dear whole-panel
+painters. Its matched consumer qualification remains recorded in that unit. Source-built
+`edit_field` contributions and specialized UI/source-asset/Prefab Intent panels retain their
+separate consumers; the shell still owns document/tree/persistence controls and native windows.
+Complete caller-owned loops reuse the original public `EditorNativeHost`; the former unattached
+`show` entry is replaced by explicit contribution-only `show_contributions`, preserving exact
+submission/result routing without pretending to render hosted image panels. This does not
+complete tree/workspace replacement, virtualization, costs or broader R11/R12.
 
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver

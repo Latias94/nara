@@ -1,5 +1,6 @@
 use super::*;
 use nara::{scene::SceneEntityId, tooling::SceneInspectorFieldState};
+use nara_ui_kernel::UiSemanticRole;
 
 #[test]
 #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -36,10 +37,6 @@ impl ApplicationHandler for OverrideTestApplication {
     }
 
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
-}
-
-fn control(field: &str, label: &str) -> String {
-    format!("field-action:{CUSTOM_COMPONENT}:{field}:{label}")
 }
 
 fn raw_value(path: &Path, entity: &SceneEntityId) -> Result<ComponentValue, String> {
@@ -121,8 +118,8 @@ impl AuthoringWorkflow<'_> {
         let manifest = self
             .application
             .active_authoring_unavailable_record_manifest();
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         self.click("Save")?;
         self.settle_persistence()?;
         let authored = ComponentValue::map([
@@ -171,7 +168,7 @@ impl AuthoringWorkflow<'_> {
                 SceneInspectorFieldState::Present,
                 Some(authored.clone()),
             )?;
-            self.click(&control(name, label))?;
+            self.owned_test_named_click(name, "Reset")?;
             depth += 1;
             if self.history()? != depth {
                 return Err(format!(
@@ -186,7 +183,9 @@ impl AuthoringWorkflow<'_> {
             }
             self.click("Redo")?;
             self.expect_override(name, state.clone(), effective.clone())?;
-            self.click(&control(name, label))?;
+            if self.owned_test_named_enabled(name, UiSemanticRole::Button, "Reset")? {
+                return Err(format!("{name}: an omitted override still enables {label}"));
+            }
             self.expect_override(name, state, effective)?;
             if self.history()? != depth {
                 return Err(format!(
@@ -227,10 +226,14 @@ impl AuthoringWorkflow<'_> {
                 SceneInspectorFieldState::Defaulted,
                 Some(ComponentValue::I64(value)),
             )?;
-            self.click(&control(name, "Reset to default"))?;
+            if self.owned_test_named_enabled(name, UiSemanticRole::Button, "Reset")? {
+                return Err(format!("{name}: a reopened default still enables Reset"));
+            }
         }
         self.expect_override("optional", SceneInspectorFieldState::Missing, None)?;
-        self.click(&control("optional", "Remove field"))?;
+        if self.owned_test_named_enabled("optional", UiSemanticRole::Button, "Reset")? {
+            return Err("the reopened omitted field still enables Reset".into());
+        }
         if self.history()? != 0
             || self.dirty()?
             || self
@@ -262,7 +265,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.field_overrides_document(project, EditorDocumentKind::Scene)?;
         self.click("entity:prefab-anchor")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.field_overrides_document(project, EditorDocumentKind::Prefab)?;
         Ok(self.presents)
     }

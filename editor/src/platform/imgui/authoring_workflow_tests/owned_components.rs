@@ -1,10 +1,5 @@
 use super::*;
-use crate::frontend::imgui::ImguiImageInteraction;
-use nara_ui_kernel::{UiPoint, UiSemanticRole};
-use winit::{
-    dpi::PhysicalPosition,
-    event::{DeviceId, ElementState, MouseButton as NativeMouseButton},
-};
+use winit::event::{DeviceId, ElementState, MouseButton as NativeMouseButton};
 
 #[test]
 #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -43,125 +38,9 @@ impl ApplicationHandler for OwnedComponentsTestApplication {
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
 }
 
-struct ComponentButtonPoint {
-    image: ImguiImageInteraction,
-    global: [f32; 2],
-    physical: PhysicalPosition<f64>,
-}
-
 impl AuthoringWorkflow<'_> {
-    fn owned_component_point(&self, label: &str) -> Result<ComponentButtonPoint, String> {
-        let inspector = self
-            .application
-            .panel_workspace()
-            .layout()
-            .instances()
-            .iter()
-            .find(|instance| instance.kind() == "nara.inspector")
-            .ok_or("the component fixture has no Inspector panel")?
-            .id();
-        let (_, frame, image) = self
-            .native
-            .owned_frames_for_test()
-            .into_iter()
-            .find(|(panel, _, _)| *panel == inspector)
-            .ok_or("the Inspector has no confirmed native image")?;
-        if image.occurrence.is_none() || !frame.diagnostics().is_empty() {
-            return Err("the component Inspector is unconfirmed or contains diagnostics".into());
-        }
-        let mut buttons = frame.semantics().iter().filter(|node| {
-            node.role() == UiSemanticRole::Button && node.name() == label && node.parent().is_none()
-        });
-        let button = buttons
-            .next()
-            .ok_or_else(|| format!("the root Inspector has no component Button {label:?}"))?;
-        if buttons.next().is_some() {
-            return Err(format!(
-                "the root Inspector has ambiguous component Button {label:?}"
-            ));
-        }
-        let layout = frame
-            .layouts()
-            .iter()
-            .find(|layout| layout.key() == Some(button.key()))
-            .ok_or("the component Button has no compiled layout")?;
-        if !button.enabled() || !layout.visible() {
-            return Err(format!(
-                "component Button {label:?} is disabled or not presented"
-            ));
-        }
-        let rect = match layout.clip_rect() {
-            Some(clip) => layout
-                .rect()
-                .intersect(clip)
-                .ok_or("the component Button is fully clipped")?,
-            None => layout.rect(),
-        };
-        if rect.size().width() <= 2.0 || rect.size().height() <= 2.0 {
-            return Err(format!(
-                "component Button {label:?} is too small for pointer input"
-            ));
-        }
-        let point = UiPoint::new(
-            rect.origin().x() + rect.size().width() * 0.5,
-            rect.origin().y() + rect.size().height() * 0.5,
-        );
-        if frame
-            .hit_test(point)
-            .is_none_or(|hit| hit.key() != button.key())
-        {
-            return Err(format!(
-                "component Button {label:?} does not own its hit target"
-            ));
-        }
-        let viewport = self
-            .native
-            .platform
-            .window_snapshot(self.native.window.id())
-            .map_err(|error| error.to_string())?
-            .ok_or("the native component window has no platform snapshot")?
-            .target
-            .viewport_id;
-        if image.viewport != viewport {
-            return Err("the component Inspector escaped the primary viewport".into());
-        }
-        let logical = frame.environment().logical_size();
-        let local = [
-            image.rect.min[0]
-                + point.x() / logical.width() * (image.rect.max[0] - image.rect.min[0]),
-            image.rect.min[1]
-                + point.y() / logical.height() * (image.rect.max[1] - image.rect.min[1]),
-        ];
-        Ok(ComponentButtonPoint {
-            image,
-            global: [
-                image.viewport_origin[0] + local[0],
-                image.viewport_origin[1] + local[1],
-            ],
-            physical: PhysicalPosition::new(
-                f64::from(local[0]) * f64::from(image.pixels_per_point),
-                f64::from(local[1]) * f64::from(image.pixels_per_point),
-            ),
-        })
-    }
-
-    fn owned_component_click(&mut self, label: &str) -> Result<(), String> {
-        self.pointer = self.owned_component_point(label)?.global;
-        self.paint(|_| {})?;
-        let point = self.owned_component_point(label)?;
-        self.pointer = point.global;
-        if !point
-            .image
-            .owns_native_pointer(&self.native.context, self.pointer)
-        {
-            return Err(format!(
-                "the component Button {label:?} is occluded in its native window"
-            ));
-        }
-        self.owned_test_event(WindowEvent::CursorMoved {
-            device_id: DeviceId::dummy(),
-            position: point.physical,
-        })?;
+    pub(super) fn owned_component_click(&mut self, label: &str) -> Result<(), String> {
+        self.owned_test_root_pointer(label)?;
         for state in [ElementState::Pressed, ElementState::Released] {
             if !self.owned_test_event(WindowEvent::MouseInput {
                 device_id: DeviceId::dummy(),
@@ -252,7 +131,6 @@ impl AuthoringWorkflow<'_> {
             .cloned()
             .ok_or("the real create widget did not select its entity")?;
         self.expect_owned_component(None, 1, "entity creation")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
         self.owned_component_click("Add Component")?;
         self.expect_owned_component(None, 1, "component menu without admission")?;
@@ -283,7 +161,7 @@ impl AuthoringWorkflow<'_> {
         let before_fold = self.frame()?.workspace().active_scene.clone();
         for (action, replacement) in [("Collapse", "Expand"), ("Expand", "Collapse")] {
             self.owned_component_click(&format!("{action} {CUSTOM_COMPONENT}"))?;
-            self.owned_component_point(&format!("{replacement} {CUSTOM_COMPONENT}"))?;
+            self.owned_test_root_control(&format!("{replacement} {CUSTOM_COMPONENT}"))?;
             self.owned_test_draft("value", Some("42"))?;
             if self.frame()?.workspace().active_scene != before_fold {
                 return Err(format!(
@@ -398,11 +276,81 @@ impl AuthoringWorkflow<'_> {
         }
         self.frame()?;
         self.owned_test_paint()?;
+        let first = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|panel| panel.kind() == "nara.inspector")
+            .ok_or("the default Inspector is missing")?
+            .id();
+        let second = self
+            .application
+            .panel_workspace_mut()
+            .open(
+                "nara.inspector",
+                crate::workspace::EditorPanelTarget::Workspace,
+            )
+            .map_err(|error| error.to_string())?;
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .place(second, crate::workspace::EditorPanelPlacement::Floating);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            self.owned_test_paint()?;
+            let frames = self.native.owned_frames_for_test();
+            if frames.iter().any(|(panel, ..)| *panel == first)
+                && frames.iter().any(|(panel, ..)| *panel == second)
+            {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(
+                    "both independent hosted Inspectors did not reach actual native presentation"
+                        .into(),
+                );
+            }
+        }
+        let frames = self.native.owned_frames_for_test();
+        let (_, first_frame, first_image) = frames
+            .iter()
+            .find(|(panel, ..)| *panel == first)
+            .ok_or("the default Inspector has no actual image")?;
+        let (_, second_frame, second_image) = frames
+            .iter()
+            .find(|(panel, ..)| *panel == second)
+            .ok_or("the second Inspector has no actual image")?;
+        if Arc::ptr_eq(first_frame, second_frame)
+            || first_frame.environment().surface_id() == second_frame.environment().surface_id()
+            || first_image.occurrence.is_none()
+            || second_image.occurrence.is_none()
+            || first_image.occurrence == second_image.occurrence
+        {
+            return Err(
+                "independent Inspectors shared a frame, surface or native presentation occurrence"
+                    .into(),
+            );
+        }
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .close(second);
+        self.owned_test_paint()?;
+        let frames = self.native.owned_frames_for_test();
+        if frames.iter().any(|(panel, ..)| *panel == second)
+            || !frames.iter().any(|(panel, ..)| *panel == first)
+        {
+            return Err(
+                "closing one hosted Inspector retired another or preserved the old route".into(),
+            );
+        }
         self.owned_components_document(project, EditorDocumentKind::Scene)
             .map_err(|error| format!("Scene component workflow: {error}"))?;
         self.click("entity:prefab-anchor")?;
         self.click("Inspector tab: Document")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.owned_components_document(project, EditorDocumentKind::Prefab)
             .map_err(|error| format!("Prefab component workflow: {error}"))?;
         if fs::read(project.join("src/lib.rs")).map_err(|error| error.to_string())? != project_code

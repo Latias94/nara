@@ -34,6 +34,7 @@ mod entity_references;
 mod field_drafts;
 mod field_overrides;
 mod nested_references;
+mod owned;
 mod recursive_shapes;
 
 pub(super) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
@@ -203,6 +204,7 @@ struct Interaction {
     frontend: ImguiEditorFrontend,
     context: Context,
     actions: Vec<EditorAction>,
+    owned_input: owned::CpuOwnedInput,
 }
 
 impl Interaction {
@@ -257,6 +259,7 @@ impl Interaction {
             frontend: ImguiEditorFrontend::new(),
             context,
             actions: Vec::new(),
+            owned_input: owned::CpuOwnedInput::default(),
         };
         for _ in 0..4 {
             interaction.render();
@@ -268,31 +271,42 @@ impl Interaction {
         self.application.current_frame().unwrap()
     }
 
-    fn render(&mut self) {
+    fn draw(&mut self) -> Option<super::ImguiEditorSubmission> {
         CONTROLS.with(|controls| controls.borrow_mut().clear());
         let ui = self.context.frame();
-        let batch = self.frontend.show(ui, &mut self.application).unwrap();
+        let batch = self
+            .frontend
+            .show_unpresented(ui, &mut self.application)
+            .unwrap();
         let _ = self.context.render_legacy();
-        if let Some(mut batch) = batch {
-            let revision = batch.batch.frame_revision();
-            let actions = std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, []))
-                .into_actions();
-            self.actions
-                .extend(actions.iter().map(|action| match action {
-                    EditorAction::Navigate(action) => EditorAction::Navigate(action.clone()),
-                    EditorAction::Mutate(action) => EditorAction::Mutate(action.clone()),
-                    EditorAction::Persistence(action) => EditorAction::Persistence(action.clone()),
-                    EditorAction::WorkspaceIntent(action) => {
-                        EditorAction::WorkspaceIntent(action.clone())
-                    }
-                    EditorAction::ReportFieldValidation(action) => {
-                        EditorAction::ReportFieldValidation(action.clone())
-                    }
-                    _ => panic!("unexpected action in the field interaction fixture: {action:?}"),
-                }));
-            batch.batch = EditorActionBatch::new(revision, actions);
-            self.frontend
-                .submit_and_drive(&mut self.application, batch, Duration::ZERO);
+        batch
+    }
+
+    fn submit(&mut self, mut batch: super::ImguiEditorSubmission) {
+        let revision = batch.batch.frame_revision();
+        let actions = std::mem::replace(&mut batch.batch, EditorActionBatch::new(revision, []))
+            .into_actions();
+        self.actions
+            .extend(actions.iter().map(|action| match action {
+                EditorAction::Navigate(action) => EditorAction::Navigate(action.clone()),
+                EditorAction::Mutate(action) => EditorAction::Mutate(action.clone()),
+                EditorAction::Persistence(action) => EditorAction::Persistence(action.clone()),
+                EditorAction::WorkspaceIntent(action) => {
+                    EditorAction::WorkspaceIntent(action.clone())
+                }
+                EditorAction::ReportFieldValidation(action) => {
+                    EditorAction::ReportFieldValidation(action.clone())
+                }
+                _ => panic!("unexpected action in the field interaction fixture: {action:?}"),
+            }));
+        batch.batch = EditorActionBatch::new(revision, actions);
+        self.frontend
+            .submit_and_drive(&mut self.application, batch, Duration::ZERO);
+    }
+
+    fn render(&mut self) {
+        if let Some(batch) = self.draw() {
+            self.submit(batch);
         }
     }
 
@@ -328,11 +342,9 @@ impl Interaction {
     }
 
     fn replace_integer(&mut self, text: &str) {
-        self.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), text);
-        self.context.io_mut().add_key_event(Key::Enter, true);
-        self.render();
-        self.context.io_mut().add_key_event(Key::Enter, false);
-        self.render();
+        self.replace_field("value", text);
+        self.field_operation("value", owned::InspectorOperation::Apply)
+            .unwrap();
     }
 
     fn replace_text(&mut self, label: &str, text: &str) {
@@ -413,7 +425,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
             interaction.click("entity:prefab-anchor");
-            interaction.click("Open Prefab Source");
+            interaction.click_owned(None, "Open Prefab Source");
         }
         let before = interaction.frame();
         let model = before.workspace().active_scene.as_ref().unwrap();
@@ -433,8 +445,8 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
             .expect("the create widget selects its accepted entity")
             .clone();
         assert_eq!(scene.editor.inspector.history.undo_depth, 1);
-        interaction.click("Add Component");
-        interaction.click(CUSTOM_COMPONENT);
+        interaction.click_owned(None, "Add Component");
+        interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(10)));
         let before_edit = interaction
             .frame()
@@ -452,7 +464,7 @@ fn ordinary_scene_and_prefab_mouse_keyboard_workflow_saves_and_reopens_real_sour
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(10)));
         interaction.click("Redo");
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(42)));
-        interaction.click("Remove Component");
+        interaction.click_owned(None, &format!("Remove {CUSTOM_COMPONENT}"));
         assert_eq!(interaction.selected_value(), None);
         interaction.click("Undo");
         assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(42)));
@@ -584,7 +596,7 @@ fn dirty_close_displays_the_prompted_document_after_advance_and_stale_replay() {
     let mut interaction = Interaction::new(&project);
     interaction.click("+ Root");
     interaction.click("entity:prefab-anchor");
-    interaction.click("Open Prefab Source");
+    interaction.click_owned(None, "Open Prefab Source");
     interaction.click("+ Root");
     assert_eq!(
         interaction

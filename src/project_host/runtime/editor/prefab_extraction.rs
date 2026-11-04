@@ -404,7 +404,7 @@ impl EditorProjectSession {
                 })
                 .map_err(|_| E::Operation)?,
         );
-        self.prefab_extraction = EditorPrefabExtractionHost {
+        *self.prefab_extraction = EditorPrefabExtractionHost {
             view: EditorPrefabExtractionView {
                 operation: Some(operation),
                 phase: EditorPrefabExtractionPhase::Draining,

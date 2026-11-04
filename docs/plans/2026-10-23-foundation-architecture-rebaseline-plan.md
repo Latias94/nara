@@ -1210,7 +1210,20 @@ preceding definition qualification nor the private count model substitutes for t
 
 ## R11: UI Content Association, Text Admission And Platform Qualification
 
-**Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md) has qualified shared text/field prerequisites, native scalar/boolean/reference editing, scrolling and supported structured drafts. Its shared picker successor covers nested reference leaves; retained-input Copy and exact capacity recovery extend field recovery. The finite source-tool property shares the original Session candidate, review and history with the ordinary tool panel. The owned Scene successor directly samples the retained GPU output with Nara controls, exact clip/placement authority and native edit/Undo/retirement evidence. Component creation/removal and fold/recovery now use the original Scene/Prefab actions with exact displayed basis and native history/persistence evidence. Complete panel/navigation and tree parity and the broader virtualization, measured-cost and platform workflows remain open. **Owners:** UI compile/presented sessions, text and frontend.
+**Design:** D13, D17. **State:** in progress; the [owned Inspector unit](2026-11-04-owned-inspector-and-editable-text-plan.md)
+has qualified shared text/field prerequisites, native scalar/boolean/reference editing, scrolling
+and supported structured drafts. Its shared picker covers nested reference leaves; retained-input
+Copy and exact capacity recovery extend field recovery. The finite source-tool property shares
+the original Session candidate, review and history with the ordinary tool panel. The owned Scene
+directly samples the retained GPU output with Nara controls, exact clip/placement authority and
+native edit/Undo/retirement evidence. Component creation/removal and fold/recovery use the original
+Scene/Prefab actions with exact displayed basis and native history/persistence evidence. The
+ordinary Scene/Prefab Document Inspector now uses Nara controls by default, including authored
+placement and revision-bound Prefab-source navigation; the competing optional tab and Dear
+whole-panel painters are removed. Complete embedding uses the original native owner through
+`EditorNativeHost`; `show_contributions` explicitly serves unattached source-built panels.
+Tree/workspace and specialized-panel replacement, virtualization, measured costs and broader
+OS/platform qualification remain open. **Owners:** UI compile/presented sessions, text and frontend.
 
 The user clarified the destination: **Nara's own custom-drawn Editor UI**, not embedding a
 reference toolkit. The [source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md)

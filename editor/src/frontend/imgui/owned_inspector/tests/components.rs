@@ -333,3 +333,66 @@ fn queued_component_refuses_same_revision_schema_replacement_at_submission() {
         model.revision()
     );
 }
+
+#[test]
+fn prefab_navigation_uses_displayed_anchor_and_refuses_selection_replacement() {
+    use nara::tooling::EditorNavigationAction;
+
+    let (_project, mut application) = application();
+    let model = application.current_frame().unwrap();
+    let scene = model.workspace().active_scene.as_ref().unwrap();
+    let anchor = nara::scene::SceneEntityId::new("prefab-anchor").unwrap();
+    send(
+        &mut application,
+        EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+            document: scene.document,
+            entity: Some(anchor.clone()),
+        }),
+    );
+    let model = application.current_frame().unwrap();
+    let scene = model.workspace().active_scene.as_ref().unwrap();
+    let mut inspector = new_controller();
+    let mut fields = FieldEditors::default();
+    let frame = paint(&mut inspector, &mut fields, &model);
+    let open = component_button(&frame, "Open Prefab Source");
+    let submission = inspector
+        .activate_component(&frame, &open, &model)
+        .unwrap()
+        .unwrap();
+    let action = submission.into_action(&model, false).unwrap();
+    assert!(
+        matches!(action, EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+        document, base_revision, entity
+    }) if document == scene.document && base_revision == scene.revision && entity == anchor)
+    );
+    assert!(inspector.activate_component(&frame, &open, &model).is_err());
+    let frame = paint(&mut inspector, &mut fields, &model);
+    let open = component_button(&frame, "Open Prefab Source");
+    let submission = inspector
+        .activate_component(&frame, &open, &model)
+        .unwrap()
+        .unwrap();
+    send(
+        &mut application,
+        EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+            document: scene.document,
+            entity: Some(nara::scene::SceneEntityId::new("preserved").unwrap()),
+        }),
+    );
+    let changed = application.current_frame().unwrap();
+    assert_eq!(
+        changed.workspace().active_scene.as_ref().unwrap().revision,
+        scene.revision
+    );
+    assert!(matches!(
+        submission.into_action(&changed, false),
+        Err(OwnedInspectorError::ChangedProjection)
+    ));
+    let replacement = paint(&mut inspector, &mut fields, &changed);
+    assert!(
+        !replacement
+            .semantics()
+            .iter()
+            .any(|node| node.name() == "Open Prefab Source")
+    );
+}

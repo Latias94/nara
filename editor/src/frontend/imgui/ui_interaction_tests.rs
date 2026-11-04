@@ -19,7 +19,7 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel,
-        EditorPersistenceResult,
+        EditorNavigationAction, EditorPersistenceResult,
     },
     ui::__private::{UiAuthoringFieldValue, UiAuthoringHierarchyKind},
 };
@@ -206,6 +206,28 @@ impl Drop for UiProject {
     }
 }
 
+pub(super) fn setup_ui_prefab_source(application: &mut EditorApplication) {
+    let frame = application.current_frame().unwrap();
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::OpenPrefabSource {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    entity: SceneEntityId::new("ui-anchor").unwrap(),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(
+        application.current_ui_authoring_frame().is_some(),
+        "public navigation must establish the specialized UI fixture"
+    );
+}
+
 struct UiInteraction {
     application: EditorApplication,
     frontend: ImguiEditorFrontend,
@@ -256,7 +278,10 @@ impl UiInteraction {
             interaction.render();
         }
         interaction.click("entity:ui-anchor");
-        interaction.click("Open Prefab Source");
+        setup_ui_prefab_source(&mut interaction.application);
+        for _ in 0..3 {
+            interaction.render();
+        }
         interaction
     }
 
@@ -273,7 +298,10 @@ impl UiInteraction {
     fn render(&mut self) {
         CONTROLS.with(|controls| controls.borrow_mut().clear());
         let ui = self.context.frame();
-        let batch = self.frontend.show(ui, &mut self.application).unwrap();
+        let batch = self
+            .frontend
+            .show_unpresented(ui, &mut self.application)
+            .unwrap();
         let _ = self.context.render_legacy();
         if let Some(batch) = batch {
             self.frontend

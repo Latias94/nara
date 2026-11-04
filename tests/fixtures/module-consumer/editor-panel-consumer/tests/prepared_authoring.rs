@@ -543,7 +543,7 @@ fn exercise_discovered_computed_edit(
         .build();
     for _ in 0..32 {
         let draw = context.begin_frame();
-        let candidate = frontend.show(draw.ui(), app).unwrap();
+        let candidate = frontend.show_contributions(draw.ui(), app).unwrap();
         drop(draw);
         if let Some(candidate) = candidate {
             frontend.submit_and_drive(app, candidate, Duration::ZERO);
@@ -839,7 +839,7 @@ fn exercise_panel_construction(
         .build();
     for _ in 0..16 {
         let draw = context.begin_frame();
-        let candidate = frontend.show(draw.ui(), app).unwrap();
+        let candidate = frontend.show_contributions(draw.ui(), app).unwrap();
         drop(draw);
         if let Some(candidate) = candidate {
             frontend.submit_and_drive(app, candidate, Duration::ZERO);
@@ -1347,7 +1347,7 @@ fn an_independent_tool_edits_two_scenes_and_two_prefabs_without_selection_choreo
             .build();
         for _ in 0..3 {
             let draw = context.begin_frame();
-            let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+            let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
             drop(draw);
             if let Some(candidate) = candidate {
                 frontend.submit_and_drive(&mut app, candidate, Duration::ZERO);

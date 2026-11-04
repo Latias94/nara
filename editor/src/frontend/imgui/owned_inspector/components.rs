@@ -12,6 +12,7 @@ use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ComponentAction {
+    OpenPrefab,
     Menu,
     Add(ComponentTypeId),
     Fold(ComponentTypeId),
@@ -23,6 +24,7 @@ pub(super) struct CompositionBasis {
     target: EditorDocumentQueryBasis,
     kind: EditorDocumentKind,
     entity: SceneEntityId,
+    has_prefab: bool,
     editing: bool,
     capabilities: SceneCompositionCapabilities,
     components: Vec<(
@@ -48,6 +50,7 @@ impl CompositionBasis {
             },
             kind: scene.kind,
             entity: entity.id.clone(),
+            has_prefab: entity.has_prefab,
             editing: !read_only && authoring::editing_enabled(model),
             capabilities: scene.editor.inspector.composition.clone(),
             components: entity
@@ -146,6 +149,38 @@ impl OwnedInspector {
             revision: self.components.revision,
             buttons: HashMap::new(),
         };
+        let scene = model
+            .workspace()
+            .active_scene
+            .as_ref()
+            .ok_or(OwnedInspectorError::ChangedProjection)?;
+        let entity = scene
+            .editor
+            .inspector
+            .selected_entity_view
+            .as_ref()
+            .ok_or(OwnedInspectorError::ChangedProjection)?;
+        nodes.push(
+            UiNode::new(
+                UiStyle::flex()
+                    .with_width(UiDimension::Px(width))
+                    .with_flex_shrink(0.0),
+            )
+            .with_key(UiLocalKey::runtime("nara.inspector.label", "placement")?)
+            .with_text(UiText::new(
+                authoring::placement_intent_label(entity.placement.as_ref()),
+                TEXT_SIZE,
+            )?),
+        );
+        if displayed.basis.has_prefab {
+            nodes.push(self.component_button(
+                ComponentAction::OpenPrefab,
+                "Open Prefab Source",
+                displayed.basis.editing,
+                width,
+                &mut displayed,
+            )?);
+        }
         if let Some(error) = &self.components.error {
             nodes.push(self.label("composition.error", error)?);
         }
@@ -376,7 +411,12 @@ impl OwnedInspector {
         let entity = displayed.basis.entity.clone();
         let basis = displayed.basis.clone();
         let close_menu = matches!(action, ComponentAction::Add(_));
-        let command = match action {
+        let scene = model
+            .workspace()
+            .active_scene
+            .as_ref()
+            .ok_or(OwnedInspectorError::ChangedProjection)?;
+        let action = match action {
             ComponentAction::Menu | ComponentAction::Fold(_) => {
                 let revision = self
                     .components
@@ -399,21 +439,28 @@ impl OwnedInspector {
                 }
                 return Ok(None);
             }
-            ComponentAction::Add(component) => SceneCompositionCommand::AddComponent {
-                entity,
-                component: component.clone(),
-            },
-            ComponentAction::Remove(component) => SceneCompositionCommand::RemoveComponent {
-                entity,
-                component: component.clone(),
-            },
+            ComponentAction::OpenPrefab => {
+                EditorAction::Navigate(nara::tooling::EditorNavigationAction::OpenPrefabSource {
+                    document: basis.target.document,
+                    base_revision: basis.target.revision,
+                    entity,
+                })
+            }
+            ComponentAction::Add(component) => authoring::compose_action(
+                scene,
+                SceneCompositionCommand::AddComponent {
+                    entity,
+                    component: component.clone(),
+                },
+            ),
+            ComponentAction::Remove(component) => authoring::compose_action(
+                scene,
+                SceneCompositionCommand::RemoveComponent {
+                    entity,
+                    component: component.clone(),
+                },
+            ),
         };
-        let scene = model
-            .workspace()
-            .active_scene
-            .as_ref()
-            .ok_or(OwnedInspectorError::ChangedProjection)?;
-        let action = authoring::compose_action(scene, command);
         let revision = self
             .components
             .revision

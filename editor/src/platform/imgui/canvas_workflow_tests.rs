@@ -22,10 +22,11 @@ use nara::{
         UiAuthoringHierarchyKind,
     },
 };
+use nara_ui_kernel::{UiPoint, UiSemanticRole};
 use winit::{
     application::ApplicationHandler,
-    dpi::LogicalSize,
-    event::WindowEvent,
+    dpi::{LogicalSize, PhysicalPosition},
+    event::{DeviceId, ElementState, MouseButton as NativeMouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
     platform::windows::EventLoopBuilderExtWindows,
     window::{Window, WindowId},
@@ -224,6 +225,139 @@ impl CanvasWorkflow<'_> {
     fn click(&mut self, label: &str) -> Result<(), String> {
         let point = self.reveal(label)?;
         self.click_point(point)
+    }
+
+    fn owned_root_button_position(
+        &self,
+        name: &str,
+    ) -> Result<([f32; 2], PhysicalPosition<f64>), String> {
+        let inspector = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.inspector")
+            .ok_or("the Canvas fixture has no Inspector panel")?
+            .id();
+        let (_, frame, image) = self
+            .native
+            .owned_frames_for_test()
+            .into_iter()
+            .find(|(panel, _, _)| *panel == inspector)
+            .ok_or("the Inspector has no confirmed native image")?;
+        if image.occurrence.is_none() || !frame.diagnostics().is_empty() {
+            return Err("the Inspector image is unconfirmed or contains diagnostics".into());
+        }
+        let main_viewport = self
+            .native
+            .platform
+            .window_snapshot(self.native.window.id())
+            .map_err(|error| error.to_string())?
+            .ok_or("the native primary window has no platform snapshot")?
+            .target
+            .viewport_id;
+        if image.viewport != main_viewport {
+            return Err("the hidden-window Inspector escaped the primary viewport".into());
+        }
+        let mut buttons = frame.semantics().iter().filter(|node| {
+            node.role() == UiSemanticRole::Button && node.name() == name && node.parent().is_none()
+        });
+        let button = buttons
+            .next()
+            .ok_or_else(|| format!("the presented Inspector has no root Button {name:?}"))?;
+        if buttons.next().is_some() {
+            return Err(format!("the Inspector has ambiguous root Buttons {name:?}"));
+        }
+        let layout = frame
+            .layouts()
+            .iter()
+            .find(|layout| layout.key() == Some(button.key()))
+            .ok_or("the Inspector Button has no compiled layout")?;
+        if !button.enabled() || !layout.visible() {
+            return Err(format!(
+                "the Inspector Button {name:?} is not enabled and presented"
+            ));
+        }
+        let rect = match layout.clip_rect() {
+            Some(clip) => layout
+                .rect()
+                .intersect(clip)
+                .ok_or("the Inspector Button is fully clipped")?,
+            None => layout.rect(),
+        };
+        let point = UiPoint::new(
+            rect.origin().x() + rect.size().width() * 0.5,
+            rect.origin().y() + rect.size().height() * 0.5,
+        );
+        if frame
+            .hit_test(point)
+            .is_none_or(|hit| hit.key() != button.key())
+        {
+            return Err("the presented Inspector Button does not own its pointer target".into());
+        }
+        let logical = frame.environment().logical_size();
+        let local = [
+            image.rect.min[0]
+                + point.x() / logical.width() * (image.rect.max[0] - image.rect.min[0]),
+            image.rect.min[1]
+                + point.y() / logical.height() * (image.rect.max[1] - image.rect.min[1]),
+        ];
+        let global = [
+            image.viewport_origin[0] + local[0],
+            image.viewport_origin[1] + local[1],
+        ];
+        if !image.owns_native_pointer(&self.native.context, global) {
+            return Err("the actual Inspector image is occluded at the synthetic pointer".into());
+        }
+        Ok((
+            global,
+            PhysicalPosition::new(
+                f64::from(local[0]) * f64::from(image.pixels_per_point),
+                f64::from(local[1]) * f64::from(image.pixels_per_point),
+            ),
+        ))
+    }
+
+    fn click_owned_root_button(&mut self, name: &str) -> Result<(), String> {
+        self.pointer = self.owned_root_button_position(name)?.0;
+        self.paint(|_| {})?;
+        let (global, position) = self.owned_root_button_position(name)?;
+        self.pointer = global;
+        let window = self.native.window.id();
+        self.native
+            .handle_owned_event(
+                window,
+                &WindowEvent::CursorMoved {
+                    device_id: DeviceId::dummy(),
+                    position,
+                },
+                self.application,
+            )
+            .map_err(|error| error.to_string())?;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            if !self
+                .native
+                .handle_owned_event(
+                    window,
+                    &WindowEvent::MouseInput {
+                        device_id: DeviceId::dummy(),
+                        state,
+                        button: NativeMouseButton::Left,
+                    },
+                    self.application,
+                )
+                .map_err(|error| error.to_string())?
+            {
+                return Err(format!(
+                    "the Inspector Button {name:?} did not consume {state:?}"
+                ));
+            }
+            for _ in 0..3 {
+                self.paint(|_| {})?;
+            }
+        }
+        Ok(())
     }
 
     fn reveal(&mut self, label: &str) -> Result<[f32; 2], String> {
@@ -581,7 +715,7 @@ impl CanvasWorkflow<'_> {
             self.paint(|_| {})?;
         }
         self.click("entity:ui-anchor")?;
-        self.click("Open Prefab Source")?;
+        self.click_owned_root_button("Open Prefab Source")?;
         self.settle_canvas()?;
         let baseline = self.layout()?;
         let initial_history = self.history()?;

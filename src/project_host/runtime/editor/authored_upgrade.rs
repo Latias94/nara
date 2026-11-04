@@ -393,7 +393,7 @@ impl EditorProjectSession {
                 })
                 .map_err(|_| E::Operation)?,
         );
-        self.authored_schema_upgrade = EditorAuthoredSchemaUpgradeHost {
+        *self.authored_schema_upgrade = EditorAuthoredSchemaUpgradeHost {
             draining_save: match &self.persistence {
                 persistence::PersistenceState::Pending { attempt, .. } => Some(*attempt),
                 _ => None,

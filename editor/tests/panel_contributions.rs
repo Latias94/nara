@@ -1,11 +1,25 @@
 use nara_editor::{
     EditorApplication, EditorCompositionError, EditorLaunchOptions, EditorNativeComposition,
-    ImguiEditorPanel, ImguiEditorPanelContext,
+    EditorNativeEvent, EditorNativeHost, ImguiEditorFrontend, ImguiEditorPanel,
+    ImguiEditorPanelContext,
     workspace::{
         EditorPanelDescriptor, EditorPanelMultiplicity, EditorPanelPlacement,
         EditorPanelRegistrationError,
     },
 };
+use winit::application::ApplicationHandler;
+
+#[test]
+fn public_native_host_finishes_without_starting_graphics() {
+    fn assert_application_handler<Handler: ApplicationHandler<EditorNativeEvent>>() {}
+
+    assert_application_handler::<EditorNativeHost>();
+    let application = EditorApplication::new(EditorLaunchOptions::project_manager());
+    let host =
+        EditorNativeHost::from_application(application, ImguiEditorFrontend::new(), None, || true);
+    host.finish(Ok(()))
+        .expect("an unstarted native Host must finish without graphics");
+}
 
 #[test]
 fn production_builtins_are_registered_contributions() {

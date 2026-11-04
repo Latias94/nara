@@ -69,13 +69,6 @@ fn setup_references(project: InteractionProject) -> (Harness, EditorPanelInstanc
         .find(|instance| instance.kind() == "nara.inspector")
         .unwrap()
         .id();
-    harness
-        .frontend
-        .presentation
-        .widgets
-        .get_mut(&panel)
-        .unwrap()
-        .inspector_tab = InspectorTab::Owned;
     harness.frontend.set_owned_images(fonts(), BTreeMap::new());
     repaint(&mut harness);
     (harness, panel)

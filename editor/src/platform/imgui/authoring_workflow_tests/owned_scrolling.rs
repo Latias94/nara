@@ -268,8 +268,8 @@ impl AuthoringWorkflow<'_> {
             return Err("the scrolling fixture must contain actual unknown source records".into());
         }
         self.click("+ Root")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
         let scene = frame
             .workspace()
@@ -287,7 +287,6 @@ impl AuthoringWorkflow<'_> {
             .application
             .active_authoring_unavailable_record_manifest()
             .ok_or("the created scrolling fixture has no unavailable-record manifest")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
         if self.owned_test_control("value", None).is_ok() {
             return Err(

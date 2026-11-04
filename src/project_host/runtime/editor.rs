@@ -902,9 +902,9 @@ pub struct EditorProjectSession {
     source_asset_import: source_asset_import::EditorSourceAssetImportHost,
     prefab_conversion: prefab_conversion::EditorPrefabConversionHost,
     source_tools: source_tools::EditorSourceTools,
-    schema_owner_adoption: schema_owner::EditorSchemaOwnerAdoptionHost,
-    authored_schema_upgrade: authored_upgrade::EditorAuthoredSchemaUpgradeHost,
-    prefab_extraction: prefab_extraction::EditorPrefabExtractionHost,
+    schema_owner_adoption: Box<schema_owner::EditorSchemaOwnerAdoptionHost>,
+    authored_schema_upgrade: Box<authored_upgrade::EditorAuthoredSchemaUpgradeHost>,
+    prefab_extraction: Box<prefab_extraction::EditorPrefabExtractionHost>,
     #[cfg(test)]
     next_close_poll_gate: Option<Box<dyn FnOnce(&mut Self) + Send>>,
     authoring_prefab_source_observations:

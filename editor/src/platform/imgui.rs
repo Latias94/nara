@@ -112,49 +112,118 @@ pub(super) fn run_application(
     };
     event_loop.set_control_flow(ControlFlow::Wait);
     let proxy = event_loop.create_proxy();
-    let supervised_play_wake = SupervisedPlayWake::new(move || {
+    let mut host = NativeEditorHost::from_application(application, frontend, None, move || {
         proxy
             .send_event(EditorUserEvent::SupervisedPlayWake)
             .is_ok()
     });
-    application.install_supervised_play_wake(supervised_play_wake.clone());
-    let mut host = NativeEditorHost::new(application, supervised_play_wake, frontend);
-    if let Err(error) = event_loop.run_app(&mut host) {
-        host.error
-            .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
+    let result = event_loop.run_app(&mut host);
+    host.finish(result)
+}
+
+impl NativeEditorHost {
+    /// Uses the original Editor graphics, input and lifecycle owner inside a caller-owned loop.
+    /// Forward every Editor window event, wake event and `about_to_wait` callback to this handler.
+    /// The Host controls scheduling and exits the loop after ordinary semantic/native close.
+    pub fn from_application(
+        mut application: EditorApplication,
+        frontend: ImguiEditorFrontend,
+        primary_window: Option<Arc<Window>>,
+        wake: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> Self {
+        let wake = SupervisedPlayWake::new(wake);
+        application.install_supervised_play_wake(wake.clone());
+        let mut host = Self::new(application, wake, frontend);
+        host.window = primary_window;
+        host
     }
-    // Ordinary exit has already retired graphics while the event loop was alive. A terminal
-    // event-loop failure can still leave an owner; attempt finite local cleanup without claiming
-    // that a lost event pump can satisfy arbitrary external close dependencies.
-    host.retire_native();
-    let shutdown = host
-        .retiring
-        .as_mut()
-        .map_or(Ok(()), NativeImgui::shutdown_graphics);
-    if let Some(native) = &host.retiring {
-        if !native.close.is_complete() {
-            eprintln!(
-                "Nara Editor cannot release unfinished native custody after its event loop ended: {shutdown:?}"
-            );
-            std::process::abort();
+
+    #[must_use]
+    pub fn application(&self) -> &EditorApplication {
+        &self.application
+    }
+
+    pub fn application_mut(&mut self) -> &mut EditorApplication {
+        &mut self.application
+    }
+
+    #[must_use]
+    pub fn primary_window(&self) -> Option<&Window> {
+        self.window.as_deref()
+    }
+
+    /// Joins the original cleanup tail after the caller's loop returns, including a loop error.
+    /// Normal dirty-document decisions and asynchronous retirement run before loop exit.
+    pub fn finish(
+        mut self,
+        loop_result: Result<(), winit::error::EventLoopError>,
+    ) -> Result<(), EditorRunError> {
+        if let Err(error) = loop_result {
+            self.error
+                .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
         }
-        native.publish_render_views(host.application.panel_workspace_mut());
+        self.finish_inner()
     }
-    host.retiring.take();
-    if let Err(error) = shutdown {
-        host.retirement_errors.record(error);
+
+    fn finish_inner(&mut self) -> Result<(), EditorRunError> {
+        self.retire_native();
+        let shutdown = self
+            .retiring
+            .as_mut()
+            .map_or(Ok(()), NativeImgui::shutdown_graphics);
+        if let Some(native) = &self.retiring {
+            if !native.close.is_complete() {
+                eprintln!(
+                    "Nara Editor cannot release unfinished native custody after its event loop ended: {shutdown:?}"
+                );
+                std::process::abort();
+            }
+            native.publish_render_views(self.application.panel_workspace_mut());
+        }
+        self.retiring.take();
+        if let Err(error) = shutdown {
+            self.retirement_errors.record(error);
+        }
+        let mut exit_ready = self.application.request_exit().exit_ready();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !exit_ready && Instant::now() < deadline {
+            if self
+                .application
+                .current_frame()
+                .is_some_and(|frame| frame.workspace_intent().decision_prompt().is_some())
+            {
+                break;
+            }
+            exit_ready = self.application.advance(Duration::ZERO).exit_ready();
+            if !exit_ready {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if !exit_ready {
+            self.error.get_or_insert_with(|| imgui_error("the native event loop ended before the Editor's ordinary close decisions and Session retirement completed"));
+        }
+        let open_tasks = finish_open_host_shutdown(
+            &mut self.application,
+            Instant::now() + Duration::from_secs(5),
+        );
+        editor_run_result(
+            self.error.take(),
+            &self.retirement_errors,
+            self.application.failed_open_close_evidence(),
+            self.application.failed_session_close_receipt(),
+            Some(&open_tasks),
+        )
     }
-    let open_tasks = finish_open_host_shutdown(
-        &mut host.application,
-        Instant::now() + Duration::from_secs(5),
-    );
-    editor_run_result(
-        host.error,
-        &host.retirement_errors,
-        host.application.failed_open_close_evidence(),
-        host.application.failed_session_close_receipt(),
-        Some(&open_tasks),
-    )
+}
+
+impl Drop for NativeEditorHost {
+    fn drop(&mut self) {
+        if (self.native.is_some() || self.retiring.is_some())
+            && let Err(error) = self.finish_inner()
+        {
+            eprintln!("Nara Editor Host cleanup failed: {error}");
+        }
+    }
 }
 
 fn finish_open_host_shutdown(
@@ -463,11 +532,14 @@ mod result_tests {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditorUserEvent {
+/// Wake event forwarded by a caller-owned native Editor event loop.
+pub enum EditorUserEvent {
     SupervisedPlayWake,
 }
 
-struct NativeEditorHost {
+/// Complete native Editor owner; contributions and built-in panels share its original GPU Host.
+#[must_use = "drive the native Editor event loop and pass its result to finish"]
+pub struct NativeEditorHost {
     application: EditorApplication,
     supervised_play_wake: SupervisedPlayWake,
     native: Option<NativeImgui>,

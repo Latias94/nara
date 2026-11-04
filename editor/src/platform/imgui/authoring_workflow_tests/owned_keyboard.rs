@@ -5,7 +5,8 @@
 use super::super::clipboard::EditorClipboard;
 use super::*;
 use winit::{
-    event::{ElementState, Ime},
+    dpi::PhysicalPosition,
+    event::{DeviceId, ElementState, Ime, MouseButton as NativeMouseButton},
     keyboard::{Key as NativeKey, ModifiersState, NamedKey},
 };
 
@@ -146,6 +147,41 @@ impl AuthoringWorkflow<'_> {
         Ok(())
     }
 
+    fn owned_keyboard_custom_field(&mut self) -> Result<(), String> {
+        let label = format!("field:{CUSTOM_COMPONENT}:label");
+        let rect = control_rect(&label).ok_or("the custom field was not painted")?;
+        self.pointer = [
+            (rect.min[0] + rect.max[0]) * 0.5,
+            (rect.min[1] + rect.max[1]) * 0.5,
+        ];
+        self.paint(|_| {})?;
+        let origin = self.native.context.main_viewport().pos();
+        let scale = f64::from(self.native.context.io().display_framebuffer_scale()[0]);
+        self.owned_test_event(WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: PhysicalPosition::new(
+                f64::from(self.pointer[0] - origin[0]) * scale,
+                f64::from(self.pointer[1] - origin[1]) * scale,
+            ),
+        })?;
+        self.owned_keyboard_flush_platform()?;
+        for state in [ElementState::Pressed, ElementState::Released] {
+            if self.owned_test_event(WindowEvent::MouseInput {
+                device_id: DeviceId::dummy(),
+                state,
+                button: NativeMouseButton::Left,
+            })? {
+                return Err("the owned image consumed a custom Dear field click".into());
+            }
+            self.owned_keyboard_flush_platform()?;
+        }
+        if self.native.owned_text_focus_for_test() || self.native.input.text_owner_item().is_none()
+        {
+            return Err("native text focus did not hand off to the custom Dear field".into());
+        }
+        Ok(())
+    }
+
     fn owned_keyboard_flag(
         &self,
         expected: bool,
@@ -204,12 +240,17 @@ impl AuthoringWorkflow<'_> {
             std::thread::sleep(Duration::from_millis(1));
         }
         self.frame()?;
+        let custom = self.install_native_custom_fields(CUSTOM_COMPONENT, &["label"])?;
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(custom, false);
         self.owned_test_paint()?;
         let source = project.join("worlds/entry.scene.json");
         let original = read_source(&source)?;
         self.click("+ Root")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let frame = self.frame()?;
         let scene = frame
             .workspace()
@@ -230,7 +271,6 @@ impl AuthoringWorkflow<'_> {
             return Err("the keyboard fixture must preserve actual unknown source data".into());
         }
         self.owned_test_document("before", 10, 2, "component creation")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
 
         let clipboard = EditorClipboard::memory("clipboard sentinel");
@@ -256,8 +296,12 @@ impl AuthoringWorkflow<'_> {
         if !self.native.context.io().key_ctrl() {
             return Err("owned text acquisition cleared a physically held Ctrl modifier".into());
         }
-        self.click("Inspector tab: Document")?;
-        self.click(&format!("field:{CUSTOM_COMPONENT}:label"))?;
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(custom, true);
+        self.owned_test_paint()?;
+        self.owned_keyboard_custom_field()?;
         self.paint(|context| {
             context.io_mut().add_key_event(Key::A, true);
             context.io_mut().add_input_characters_utf8("a");
@@ -273,14 +317,12 @@ impl AuthoringWorkflow<'_> {
                 .add_input_characters_utf8("after held Ctrl")
         })?;
         self.owned_test_draft("label", Some("after held Ctrl"))?;
-        self.owned_test_document("before", 10, 2, "held Ctrl handoff to predecessor text")?;
-        self.click("Inspector tab: Nara properties")?;
+        self.owned_test_document("before", 10, 2, "held Ctrl handoff to custom Dear text")?;
+        self.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(custom, false);
         self.owned_test_paint()?;
-        self.owned_test_select("label")?;
-        self.owned_test_text("label", "after held Ctrl", false)?;
-        self.owned_keyboard_key(NativeKey::Named(NamedKey::Escape), None)?;
-        self.owned_test_paint()?;
-        self.owned_test_draft("label", None)?;
         self.owned_test_select("label")?;
         self.owned_test_text("label", "before", false)?;
         self.owned_test_draft("label", None)?;

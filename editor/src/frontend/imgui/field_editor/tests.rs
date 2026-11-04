@@ -2,6 +2,7 @@ use super::*;
 use nara::{
     reflect::ComponentFieldPath,
     scene::{SceneAuthoringSession, SceneDocument},
+    tooling::EditorDocumentId,
 };
 
 #[test]

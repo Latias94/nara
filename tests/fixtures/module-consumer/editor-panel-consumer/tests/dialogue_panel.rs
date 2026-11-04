@@ -187,7 +187,7 @@ fn dialogue_panel_retirement_drops_only_its_draft_and_keeps_document_history() {
             .set_visible(instance, visible);
         let frame = context.begin_frame();
         let submission = frontend
-            .show(frame.ui(), &mut application)
+            .show_contributions(frame.ui(), &mut application)
             .unwrap()
             .unwrap();
         drop(frame);
@@ -212,7 +212,7 @@ fn dialogue_panel_retirement_drops_only_its_draft_and_keeps_document_history() {
         .close(instance);
     let frame = context.begin_frame();
     let submission = frontend
-        .show(frame.ui(), &mut application)
+        .show_contributions(frame.ui(), &mut application)
         .unwrap()
         .unwrap();
     drop(frame);

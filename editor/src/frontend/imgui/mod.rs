@@ -325,13 +325,32 @@ impl ImguiEditorFrontend {
         self.presentation.factories.insert(kind, factory);
     }
 
-    /// Draws the ordinary shell and workspace without a native render-view attachment.
-    pub fn show(
+    /// Draws the shell and source-built contributions without hosted image panels.
+    /// A complete Editor workspace uses `EditorNativeHost` or the ordinary native runner.
+    pub fn show_contributions(
         &mut self,
         ui: &Ui,
         application: &mut crate::EditorApplication,
     ) -> Result<Option<ImguiEditorSubmission>, String> {
-        let mut output = self.show_with_views(
+        self.show_unattached(ui, application, false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn show_unpresented(
+        &mut self,
+        ui: &Ui,
+        application: &mut crate::EditorApplication,
+    ) -> Result<Option<ImguiEditorSubmission>, String> {
+        self.show_unattached(ui, application, true)
+    }
+
+    fn show_unattached(
+        &mut self,
+        ui: &Ui,
+        application: &mut crate::EditorApplication,
+        hosted_panels: bool,
+    ) -> Result<Option<ImguiEditorSubmission>, String> {
+        let mut output = self.show_workspace(
             ui,
             application,
             None,
@@ -339,6 +358,7 @@ impl ImguiEditorFrontend {
             false,
             false,
             "Native detachment is owned by the product Host",
+            hosted_panels,
         )?;
         self.finish_canvas_presentation(
             &mut output,
@@ -619,6 +639,30 @@ impl ImguiEditorFrontend {
         canvas_presented: bool,
         detachment: &str,
     ) -> Result<ImguiFrontendOutput, String> {
+        self.show_workspace(
+            ui,
+            application,
+            scene,
+            game,
+            game_captured,
+            canvas_presented,
+            detachment,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_workspace(
+        &mut self,
+        ui: &Ui,
+        application: &mut crate::EditorApplication,
+        scene: Option<ImguiViewImage>,
+        game: Option<ImguiViewImage>,
+        game_captured: bool,
+        canvas_presented: bool,
+        detachment: &str,
+        hosted_panels: bool,
+    ) -> Result<ImguiFrontendOutput, String> {
         self.reconcile_application(application);
         self.settle_pending(None, Some(PanelActionNotDispatched::Superseded));
         let generation = application.workspace_generation();
@@ -761,6 +805,10 @@ impl ImguiEditorFrontend {
         let mut placements = std::collections::BTreeMap::new();
         let mut placement_docks = std::collections::BTreeMap::new();
         for instance in &instances {
+            if !hosted_panels && matches!(instance.kind(), "nara.inspector" | "nara.authoring-view")
+            {
+                continue;
+            }
             let Some(descriptor) = workspace.registry().descriptor(instance.kind()) else {
                 continue;
             };
@@ -965,11 +1013,10 @@ impl ImguiEditorFrontend {
             }
         }
         for (panel, widgets) in &mut self.presentation.widgets {
-            if (widgets.inspector_tab != workspace::InspectorTab::Owned
-                || !output
-                    .owned_candidates
-                    .iter()
-                    .any(|(owner, _)| owner == panel))
+            if !output
+                .owned_candidates
+                .iter()
+                .any(|(owner, _)| owner == panel)
                 && let Some(inspector) = widgets.owned_inspector.as_mut()
             {
                 inspector.retire_tool_controls();
@@ -1160,7 +1207,6 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     }
     for (index, (label, tab)) in [
         ("Document", InspectorTab::Document),
-        ("Nara properties", InspectorTab::Owned),
         ("Source asset", InspectorTab::SourceAsset),
         ("Prefab Intent", InspectorTab::PrefabIntent),
     ]
@@ -1182,7 +1228,8 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         ui_interaction_tests::record_control(ui, format!("Inspector tab: {label}"));
     }
     ui.separator();
-    if context.widgets.inspector_tab != InspectorTab::Owned
+    if (context.widgets.inspector_tab != InspectorTab::Document
+        || context.input.ui_authoring.is_some())
         && let Some(inspector) = context.widgets.owned_inspector.as_mut()
     {
         let _ = inspector.cancel_input();
@@ -1195,9 +1242,7 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         .widgets
         .ui_authoring
         .synchronize(context.input.ui_authoring);
-    if context.widgets.inspector_tab == InspectorTab::Owned {
-        owned_panel::paint(ui, context);
-    } else if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
+    if context.widgets.inspector_tab == InspectorTab::PrefabIntent {
         context.widgets.authoring.hide_document_controls();
         if let Some(authoring) = context.input.ui_authoring {
             context.widgets.ui_authoring.cancel_interaction(
@@ -1235,7 +1280,7 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             &mut context.output.text_owner,
         );
     } else {
-        context.show_scene_inspector(ui);
+        owned_panel::paint(ui, context);
     }
 }
 

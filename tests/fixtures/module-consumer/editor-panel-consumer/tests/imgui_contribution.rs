@@ -177,7 +177,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         .close(instance_id);
     let frame = context.begin_frame();
     let batch = frontend
-        .show(frame.ui(), &mut application)
+        .show_contributions(frame.ui(), &mut application)
         .unwrap()
         .unwrap();
     drop(frame);
@@ -211,7 +211,7 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         && reopened_panel.target() == &target;
     let frame = context.begin_frame();
     let batch = frontend
-        .show(frame.ui(), &mut application)
+        .show_contributions(frame.ui(), &mut application)
         .unwrap()
         .unwrap();
     drop(frame);
@@ -425,7 +425,9 @@ fn an_external_field_tool_observes_acceptance_and_same_basis_conflict_separately
         .build();
     for _ in 0..4 {
         let frame = context.begin_frame();
-        let candidate = frontend.show(frame.ui(), &mut application).unwrap();
+        let candidate = frontend
+            .show_contributions(frame.ui(), &mut application)
+            .unwrap();
         drop(frame);
         if let Some(candidate) = candidate {
             frontend.submit_and_drive(&mut application, candidate, Duration::ZERO);

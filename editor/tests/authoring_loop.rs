@@ -750,7 +750,7 @@ fn assert_frontend_notice(application: &mut EditorApplication, expected: &str) {
     for _ in 0..3 {
         let ui = context.frame();
         ui.log_to_clipboard(0_u32);
-        let batch = frontend.show(ui, application).unwrap();
+        let batch = frontend.show_contributions(ui, application).unwrap();
         ui.log_finish();
         let _ = context.render_legacy();
         if let Some(batch) = batch {

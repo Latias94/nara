@@ -7,7 +7,7 @@ use canvas::{install_canvas_button, observe_canvas_button};
 
 use std::{path::Path, sync::Arc, time::Duration};
 
-use dear_imgui_rs::{ConfigFlags, Context, Key, MouseButton};
+use dear_imgui_rs::{ConfigFlags, Context, MouseButton};
 use nara::{
     ProductRecipe,
     app::{
@@ -50,7 +50,7 @@ use super::{
 use crate::{
     EditorApplication, EditorLaunchOptions,
     app::EditorApplicationDispatch,
-    frontend::imgui::{UiProject, clear_controls, control_clip, control_rect, control_visible},
+    frontend::imgui::{UiProject, clear_controls, control_rect},
 };
 
 /// Read-only source facts retained only by the native test build. An assertion may consume them
@@ -717,44 +717,6 @@ impl GameInputWorkflow<'_> {
         self.click_point(center(rect))
     }
 
-    fn reveal(&mut self, label: &str) -> Result<(), String> {
-        for _ in 0..32 {
-            let rect =
-                control_rect(label).ok_or_else(|| format!("widget {label:?} was not painted"))?;
-            let clip = control_clip(label)
-                .ok_or_else(|| format!("widget {label:?} has no actual draw clip"))?;
-            let point = center(rect);
-            if clip.contains(point) && control_visible(label) {
-                return Ok(());
-            }
-            if point[0] < clip.min[0] || point[0] >= clip.max[0] {
-                return Err(format!("widget {label:?} is horizontally clipped"));
-            }
-            if point[1] >= clip.min[1] && point[1] < clip.max[1] {
-                self.paint(|_| {})?;
-                continue;
-            }
-            let direction = if point[1] < clip.min[1] { 3.0 } else { -3.0 };
-            self.pointer = center(clip);
-            // Match the existing native Canvas driver: hover first so event trickling cannot
-            // defer and then discard the wheel when the next local input queue is installed.
-            self.paint(|_| {})?;
-            self.paint(|context| context.io_mut().add_mouse_wheel_event([0.0, direction]))?;
-            self.paint(|_| {})?;
-            self.paint(|_| {})?;
-            let after = control_rect(label)
-                .ok_or_else(|| format!("scrolling stopped painting widget {label:?}"))?;
-            if after.min[1] == rect.min[1] {
-                return Err(format!(
-                    "scrolling reached an edge without revealing widget {label:?}"
-                ));
-            }
-        }
-        Err(format!(
-            "widget {label:?} stayed clipped after 32 scroll steps"
-        ))
-    }
-
     fn key(&mut self, state: ElementState) -> Result<(), String> {
         self.interaction = format!("D {state:?}");
         self.native.input.handle_key(
@@ -918,31 +880,14 @@ impl GameInputWorkflow<'_> {
                 .current_frame()
                 .is_some_and(|frame| frame.play().state() == EditorPlayState::Paused);
         self.stage = "Inspector text releases Game capture";
-        self.reveal("field:nara.sprite.Sprite:size.x")?;
-        self.click("field:nara.sprite.Sprite:size.x")?;
-        let captured = self.native.input.is_captured();
-        let owner = self.native.input.text_owner_item();
-        let (active, text_state) = self.native.context.binding().with_bound_context(|| {
-            // SAFETY: this live test Context is bound on its UI thread after presentation.
-            // Copy only identities; no Dear ImGui pointer escapes the scope.
-            unsafe {
-                let active = dear_imgui_rs::sys::igGetActiveID();
-                let state = dear_imgui_rs::sys::igGetInputTextState(active);
-                (active, (!state.is_null()).then(|| (*state).ID))
-            }
-        });
-        let text_active = active != 0 && Some(active) == owner && text_state == Some(active);
-        let text_released_capture = !captured && text_active;
-        let text_state_diagnostics = format!(
-            "Inspector text activation: captured={captured}, actual_text_active={text_active}, IO want_text_input={}, active={active}, text_state={text_state:?}, routed_text_owner={owner:?}, rect={:?}, clip={:?}, visible={}",
-            self.native.context.io().want_text_input(),
-            control_rect("field:nara.sprite.Sprite:size.x"),
-            control_clip("field:nara.sprite.Sprite:size.x"),
-            control_visible("field:nara.sprite.Sprite:size.x"),
-        );
-        self.paint(|context| context.io_mut().add_input_characters_utf8("99"))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Escape, true))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Escape, false))?;
+        let (text_released_capture, text_state_diagnostics, presents) =
+            super::authoring_workflow_tests::game_inspector_text_handoff(
+                self.native,
+                self.application,
+                self.event_loop,
+                &mut self.pointer,
+            )?;
+        self.presents += presents;
         self.stage = "resize Game through actual window grip";
         self.interaction = "resize grip press, move +64/+48, release".into();
         let window = control_rect("embedded:Game window")

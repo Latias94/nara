@@ -702,7 +702,7 @@ impl AuthoringWorkflow<'_> {
         self.conversion_document(project, EditorDocumentKind::Scene)?;
         self.conversion_control("Inspector tab: Document")?;
         self.conversion_control(&format!("entity:{OTHER}"))?;
-        self.conversion_control("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.conversion_document(project, EditorDocumentKind::Prefab)?;
         Ok((
             vec![EditorDocumentKind::Scene, EditorDocumentKind::Prefab],

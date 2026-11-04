@@ -3078,7 +3078,7 @@ mod tests {
             .unwrap()
             .build();
         let rendered = frontend
-            .show(context.frame(), &mut application)
+            .show_unpresented(context.frame(), &mut application)
             .expect("the ordinary Dear ImGui frontend must render")
             .is_some();
         let _ = context.render_legacy();

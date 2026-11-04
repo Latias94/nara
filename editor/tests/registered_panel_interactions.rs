@@ -21,7 +21,7 @@ mod imgui;
 mod stateful_panel_interactions;
 
 #[test]
-fn registered_panels_scroll_and_keep_independent_inspector_instances() {
+fn contribution_shell_scrolls_and_preserves_hosted_inspector_instances() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/generic-editor/known-unbound");
     let unique = std::time::SystemTime::now()
@@ -113,12 +113,15 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
         let _ = imgui::draw(&mut context, &mut frontend, &mut application);
     }
     let inspectors = panel_windows(&context, "Inspector###nara-panel-");
-    assert_eq!(inspectors.iter().filter(|panel| panel.drawn).count(), 2);
-    assert_ne!(inspectors[0].id, inspectors[1].id);
+    assert!(
+        inspectors.iter().all(|panel| !panel.drawn),
+        "contribution-only painting must not pretend to present hosted Inspectors"
+    );
+    assert_ne!(first, second);
     application.panel_workspace_mut().layout_mut().close(first);
     let _ = imgui::draw(&mut context, &mut frontend, &mut application);
     let retained = panel_windows(&context, "Inspector###nara-panel-");
-    assert_eq!(retained.iter().filter(|panel| panel.drawn).count(), 1);
+    assert!(retained.iter().all(|panel| !panel.drawn));
     assert!(
         application
             .panel_workspace()
@@ -181,7 +184,6 @@ fn registered_panels_scroll_and_keep_independent_inspector_instances() {
 }
 
 struct PanelWindow {
-    id: u32,
     center: [f32; 2],
     scroll_y: f32,
     drawn: bool,
@@ -204,7 +206,6 @@ fn panel_windows(context: &dear_imgui_rs::Context, prefix: &str) -> Vec<PanelWin
                         return None;
                     }
                     Some(PanelWindow {
-                        id: window.ID,
                         center: [
                             (window.InnerRect.Min.x + window.InnerRect.Max.x) * 0.5,
                             (window.InnerRect.Min.y + window.InnerRect.Max.y) * 0.5,

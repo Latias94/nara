@@ -8,10 +8,7 @@ use nara::{
         PersistentComponentSchemaOwnerId,
     },
     scene::UnavailableRecordManifest,
-    tooling::{
-        EditorAction, EditorActionBatch, EditorDocumentMutation, EditorSceneModel,
-        SceneCompositionCommand,
-    },
+    tooling::EditorSceneModel,
 };
 use nara_ui_kernel::UiSemanticRole;
 use winit::{
@@ -181,9 +178,8 @@ impl AuthoringWorkflow<'_> {
         self.frame()?;
         self.owned_test_paint()?;
         self.click("+ Root")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
-        self.click("Inspector tab: Nara properties")?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         self.owned_test_paint()
     }
 
@@ -402,28 +398,8 @@ impl AuthoringWorkflow<'_> {
         self.owned_recovery_copy("value", &clipboard, &unprojected)?;
 
         self.click(&format!("entity:{}", entity.as_str()))?;
-        let frame = self.frame()?;
-        let scene = frame
-            .workspace()
-            .active_scene
-            .as_ref()
-            .ok_or("no recovery Scene")?;
         let history = self.history()?;
-        self.application.submit_and_drive(
-            EditorActionBatch::new(
-                frame.revision(),
-                [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
-                    document: scene.document,
-                    base_revision: scene.revision,
-                    command: SceneCompositionCommand::RemoveComponent {
-                        entity,
-                        component: ComponentTypeId::new(CUSTOM_COMPONENT),
-                    },
-                })],
-            ),
-            Duration::ZERO,
-        );
-        self.owned_test_paint()?;
+        self.owned_component_click(&format!("Remove {CUSTOM_COMPONENT}"))?;
         if self.history()? != history + 1 {
             return Err("the exact component removal did not create its own history entry".into());
         }

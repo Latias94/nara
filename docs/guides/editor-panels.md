@@ -18,15 +18,19 @@ in the workspace shell's drawing order. Scene pixels are not read back or upload
 UI image. The shell still owns docking and native-window placement; Nara owns the Scene panel's
 layout and interactions. This does not qualify a complete Nara replacement for every Editor panel.
 
-The Inspector's `Nara properties` tab also owns component controls. Use Add Component to inspect
-the admitted creation choices, then Add with the component's stable ID. Existing or unavailable
+The Inspector's default `Document` tab uses Nara-drawn controls for ordinary Scene and Prefab
+documents. Use Add Component to inspect the admitted creation choices, then Add with the
+component's stable ID. Existing or unavailable
 components have disabled choices and an explanation. Expand/Collapse preserves compatible
 unapplied field drafts and local text Undo; hidden fields lose focus and composition. Remove
 uses the same document transaction and Undo history as ordinary field edits. Dirty drafts from
 a removed component remain available through retained-input recovery. Read-only or mismatched
 component versions cannot be removed. Component actions retain the displayed document, Schema,
 entity and revision; an intervening source change requires a new observation. Entity navigation
-and Prefab-source opening still use the surrounding shell and Document tab.
+uses the surrounding shell. A selected Prefab anchor exposes Open Prefab Source in the Nara
+Inspector, bound to the displayed document, source revision and anchor. Authored placement intent
+is shown above component controls. The Source asset and Prefab Intent tabs, specialized UI
+authoring and source-built custom panels retain their separate frontends.
 
 Native panel extensions are trusted Rust code compiled into an Editor executable. Opening a
 project does not compile or load its code. Register a panel descriptor and its Dear ImGui state
@@ -69,7 +73,8 @@ fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
 The factory creates a separate object for each painted panel instance. Empty identities,
 duplicate identities and attempts to replace built-in panel kinds are rejected. Embedded shells
 consume `composition.build(options)` to receive the fully configured `(application, frontend)`;
-the native runner uses this construction. For panel-only attachment to an existing application,
+pass both to `EditorNativeHost::from_application` for the complete hosted workspace. The native
+runner uses that same owner. For panel-only attachment to an existing application,
 use `composition.install_panels(&mut application)`. It rejects selected Host contributions,
 which require complete construction, before changing the workspace. A panel admission failure
 also preserves the complete workspace.
@@ -165,11 +170,42 @@ request authority. Exact cancellation and acknowledgement remain valid after unr
 advances and cannot affect another Editor session. Keep driving pending work even when a panel
 does not request another presentation.
 
-Embedded shells pass the opaque move-only candidate returned by `frontend.show(...)` to that
+Contribution-only shells use `frontend.show_contributions(...)`, which draws the shell and
+source-built panels without the hosted Inspector or Scene panels. Game controls retain their
+state and notices without an attached Runtime image. Pass its opaque move-only
+candidate to that
 same frontend's `submit_and_drive(...)`. It cannot be cloned or converted to a plain action batch.
 Painting a newer candidate supersedes unfinished observations from the previous cycle; dropping
 a candidate performs no application work. The ordinary application `EditorActionBatch` entry
 remains available for callers that do not need panel result routing.
+
+For a complete embedded Editor, keep the original native owner instead of drawing a workspace
+whose Nara image candidates have no renderer. The caller creates the Winit loop and may supply
+its primary window before the first `resumed` callback:
+
+```rust,ignore
+let event_loop = winit::event_loop::EventLoop::<nara_editor::EditorNativeEvent>::with_user_event()
+    .build()?;
+let proxy = event_loop.create_proxy();
+let (application, frontend) = composition.build(options)?;
+let mut host = nara_editor::EditorNativeHost::from_application(
+    application,
+    frontend,
+    None,
+    move || proxy.send_event(nara_editor::EditorNativeEvent::SupervisedPlayWake).is_ok(),
+);
+let result = event_loop.run_app(&mut host);
+host.finish(result)?;
+```
+
+`Some(Arc<Window>)` uses the caller's existing primary window. The same owner supplies native
+image presentation, exact input admission, GPU recovery and physical retirement. A forwarding
+application must deliver all Editor primary/secondary window events, wake events, `resumed` and
+`about_to_wait`; the Editor owns loop scheduling and ordinary close/exit decisions. This is not
+an independently scheduled child viewport inside another GUI runtime. Pass the loop result to
+`finish` before propagating errors so terminal cleanup retains the original failure. Finish
+does not replace dirty-document decisions that must settle while the loop is alive. The former
+unattached `show` entry is removed; it cannot present a complete Nara workspace.
 
 Direct application submissions return an owned `EditorApplicationSubmission`. Inspect `actions()`
 for one dispatch observation per original action, including explicit Closing, WorkspaceUnavailable

@@ -919,6 +919,10 @@ impl AuthoringWorkflow<'_> {
         owned_inspector: bool,
     ) -> Result<SourceToolObservation, String> {
         self.open_source_tool_document()?;
+        if !owned_inspector {
+            self.install_native_custom_fields(STATS, &["health", "armor"])?;
+            self.owned_test_paint()?;
+        }
         self.adopt_installed_source_tool_owner(fixture)?;
         let source = fixture.project.root.join(SCENE);
         let original_bytes = fs::read(&source).map_err(|error| error.to_string())?;
@@ -947,7 +951,6 @@ impl AuthoringWorkflow<'_> {
             return Err("ordinary Open unexpectedly created an installed selection".into());
         }
         if owned_inspector {
-            self.click("Inspector tab: Nara properties")?;
             self.owned_test_paint()?;
             self.owned_test_named_text("wire_health", "wire_health", "100")?;
             self.owned_test_named_text("wire_armor", "wire_armor", "10")?;
@@ -1145,21 +1148,34 @@ impl AuthoringWorkflow<'_> {
         for _ in 0..4 {
             self.paint(|_| {})?;
         }
+        let attach_basis = self
+            .application
+            .document_query_basis(document)
+            .map_err(|error| format!("{error:?}"))?;
         self.source_tool_control(PANEL_ATTACH)?;
         let attach = self.settle_actual_source_tool()?;
         let attach_request = attach
             .request
+            .as_ref()
             .ok_or("the panel Attach submitted no actual child request")?;
         if attach.review.as_ref().is_none_or(|review| {
-            review.request != attach_request
+            &review.request != attach_request
                 || !matches!(&review.intent, EditorSourceToolIntent::Attach { entity }
                 if entity.as_str() == "recruit")
         }) || self.history()? != 1
+            || self
+                .application
+                .document_query_basis(document)
+                .map_err(|error| format!("{error:?}"))?
+                != attach_basis
+            || fs::read(&source).map_err(|error| error.to_string())? != original_bytes
         {
-            return Err(
-                "the panel Attach bypassed shared review or mutated before acceptance".into(),
-            );
+            return Err(format!(
+                "the panel Attach bypassed shared review or mutated before acceptance: tool={attach:?}, history={}",
+                self.history()?,
+            ));
         }
+        let attach_request = attach_request.clone();
         self.source_tool_control(PANEL_ACCEPT)?;
         if self.history()? != 2 || self.selected_stats()? != (100, 10) {
             return Err("the panel did not accept its Attach candidate exactly once".into());
@@ -1423,8 +1439,11 @@ impl AuthoringWorkflow<'_> {
         owned_inspector: bool,
     ) -> Result<u64, String> {
         self.open_source_tool_document()?;
+        if !owned_inspector {
+            self.install_native_custom_fields(STATS, &["health", "armor"])?;
+            self.owned_test_paint()?;
+        }
         if owned_inspector {
-            self.click("Inspector tab: Nara properties")?;
             self.owned_test_paint()?;
             self.owned_test_named_text("wire_health", "wire_health", "125")?;
             self.owned_test_named_text("wire_armor", "wire_armor", "10")?;

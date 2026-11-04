@@ -10,7 +10,7 @@ use nara::{
     },
     scene::SceneEntityId,
     tooling::{
-        EditorAction, EditorDocumentId, EditorDocumentMutation, EditorFrameModel, EditorSceneModel,
+        EditorAction, EditorDocumentMutation, EditorFrameModel, EditorSceneModel,
         SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorFieldState,
         SceneInspectorFieldView,
     },
@@ -294,38 +294,6 @@ impl FieldEditors {
         }
     }
 
-    fn show_recovery(&mut self, ui: &Ui, document: EditorDocumentId) {
-        let mut discard = Vec::new();
-        for (key, draft) in &self.drafts {
-            if key.document != document
-                || !draft.dirty
-                || !draft.incompatible
-                || self.painted.contains(key)
-            {
-                continue;
-            }
-            let _id = ui.push_id(&format!(
-                "retained:{}:{}:{}",
-                key.entity.as_str(),
-                key.component.as_str(),
-                key.field.as_str()
-            ));
-            ui.text_wrapped(format!(
-                "Retained incompatible input: {} / {} / {}",
-                key.entity.as_str(),
-                key.component.as_str(),
-                key.field.as_str()
-            ));
-            show_copy(ui, &draft.candidate);
-            if button(ui, key, "Discard incompatible draft", !draft.in_flight()) {
-                discard.push(key.clone());
-            }
-        }
-        for key in discard {
-            self.drafts.remove(&key);
-        }
-    }
-
     #[cfg(test)]
     pub(super) fn retained_text(
         &self,
@@ -514,38 +482,6 @@ impl ImguiEditorPanelContext<'_, '_> {
             &mut self.output.text_owner,
         ) {
             self.submit_field(prepared);
-        }
-    }
-
-    pub(super) fn show_scene_inspector(&mut self, ui: &Ui) {
-        let mut prepared = Vec::new();
-        let mut tool_actions = Vec::new();
-        let review = self
-            .preparation
-            .as_ref()
-            .ok()
-            .and_then(|session| session.source_tool_review());
-        self.widgets.authoring.show_inspector(
-            ui,
-            self.input.frame,
-            self.actions,
-            &mut self.output.text_owner,
-            &mut prepared,
-            review.as_ref(),
-            &mut tool_actions,
-        );
-        if let Some(document) = self.model.document() {
-            self.widgets
-                .authoring
-                .fields
-                .show_recovery(ui, document.document);
-        }
-        for edit in prepared {
-            self.submit_field(edit);
-        }
-        for action in tool_actions {
-            let result = self.submit_authoring(EditorAction::SourceTool(action));
-            self.widgets.authoring.source_tool.admitted(result);
         }
     }
 

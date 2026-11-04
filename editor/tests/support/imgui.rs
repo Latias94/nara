@@ -25,8 +25,8 @@ pub fn draw(
     application: &mut EditorApplication,
 ) -> Option<ImguiEditorSubmission> {
     let batch = frontend
-        .show(context.frame(), application)
-        .expect("the ordinary Dear ImGui frontend must render");
+        .show_contributions(context.frame(), application)
+        .expect("the Dear ImGui contribution frontend must render");
     let _ = context.render_legacy();
     batch
 }

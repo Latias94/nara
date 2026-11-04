@@ -375,7 +375,7 @@ impl EditorProjectSession {
                 })
                 .map_err(|_| EditorSchemaOwnerAdoptionError::Operation)?,
         );
-        self.schema_owner_adoption = EditorSchemaOwnerAdoptionHost {
+        *self.schema_owner_adoption = EditorSchemaOwnerAdoptionHost {
             view: EditorSchemaOwnerAdoptionView {
                 operation: Some(id),
                 phase: EditorSchemaOwnerAdoptionPhase::Quiescing,
@@ -471,7 +471,7 @@ impl EditorProjectSession {
         {
             return Err(EditorSchemaOwnerAdoptionError::Operation);
         }
-        self.schema_owner_adoption = Default::default();
+        *self.schema_owner_adoption = Default::default();
         Ok(())
     }
 

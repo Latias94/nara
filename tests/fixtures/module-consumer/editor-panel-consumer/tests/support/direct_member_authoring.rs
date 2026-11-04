@@ -456,7 +456,7 @@ fn a_registered_panel_discovers_direct_members_and_round_trips_a_nonactive_scene
         .build();
     for _ in 0..8 {
         let draw = context.begin_frame();
-        let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+        let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
         drop(draw);
         assert_eq!(
             frame(&app).workspace().documents,

@@ -50,9 +50,10 @@ This proves preedit/draft isolation, one commit and rejection of a late commit a
 field changes. It constructs Winit events directly and does not qualify OS candidate-window
 placement, actual input-method event delivery, or manual cross-window typing.
 
-## Nara Properties Integration
+## Nara Inspector Integration
 
-For the incremental Nara-drawn Inspector, select a standalone TrueType CJK fallback
+The ordinary Scene/Prefab Inspector uses Nara controls in its default Document tab. Select a
+standalone TrueType CJK fallback
 accepted by the current workspace shell and Nara text owner, then run the owned trajectories explicitly:
 
 ```powershell
@@ -120,7 +121,8 @@ requesting a continuous follow-up. That observation is not an idle CPU benchmark
 do not read back the native framebuffer, deliver OS input-method events or qualify candidate-window
 placement, physical OS key/clipboard delivery, keyboard-only entry from the surrounding shell,
 detached-window/DPI transfer or accessibility.
-The complete Inspector and broader Nara-owned tool visuals remain open under the
+The ordinary panel's default replacement and remaining specialized-panel, tree and workspace
+scope are recorded under the
 [owning unit](../plans/2026-11-04-owned-inspector-and-editable-text-plan.md).
 
 ## Nara Scene Integration

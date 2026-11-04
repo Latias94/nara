@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-01 (CP1 persistent write fences, physical Play retirement and final installation)
+**Last Revised**: 2026-11-04 (default Nara-owned ordinary Inspector and selected-panel replacement scope)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -822,6 +822,25 @@ The replacement becomes the default only after the plan's actual Nara texture, a
 If a mandatory capability fails, retain the current production frontend and resolve the concrete blocker before porting the rest.
 Passing one probe does not claim a complete replacement or native support on untested platforms.
 Once replacement parity passes, remove the superseded frontend rather than preserving a permanent compatibility product.
+
+The ordinary Scene/Prefab Inspector is a selected panel replacement within that migration.
+Nara owns its default Document controls, field drafts' input buffers, component composition,
+authored-placement projection and exact Open Prefab Source navigation. The ordinary Dear
+whole-Inspector/component painters and optional Nara-properties tab are removed after their
+matched consumer qualification. Source-built `edit_field` contributions and specialized UI,
+source-asset and Prefab Intent panels remain separate consumers of their existing owners.
+The shell still supplies docking, document/tree/persistence controls and native image placement.
+This panel replacement does not claim complete workspace/toolkit parity, virtualization, cost
+or unqualified native OS IME/accessibility/DPI support.
+
+Complete caller-owned event loops consume the existing `EditorNativeHost`, constructed from
+the paired Application/frontend and an optional caller-created primary window. Its original
+Winit handler owns scheduling, native input/presentation, recovery and close; `finish` consumes
+the loop result before returning cleanup errors. It is not a second GPU owner or a promise of
+independent scheduling inside another toolkit. The unattached contribution-only entry is
+`show_contributions`; it omits hosted Inspector/Scene image panels while retaining the exact
+panel submission/result owner. The ambiguous unattached `show` entry is removed rather than
+leaving the default Inspector indefinitely preparing an image without a renderer.
 
 ## Alternatives Considered
 

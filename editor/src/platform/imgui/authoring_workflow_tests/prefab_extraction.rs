@@ -141,7 +141,7 @@ impl AuthoringWorkflow<'_> {
             self.paint(|_| {})?;
         }
         self.click("entity:prefab-anchor")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         loop {
             self.paint(|_| {})?;
             if self

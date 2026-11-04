@@ -176,7 +176,7 @@ mod tests {
         let mut context = context();
         for _ in 0..4 {
             let ui = context.frame();
-            frontend.show(ui, &mut application).unwrap();
+            frontend.show_unpresented(ui, &mut application).unwrap();
             let _ = context.render_legacy();
         }
         let workspace = application.panel_workspace();

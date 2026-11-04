@@ -345,7 +345,6 @@ pub(super) struct ImguiPanelWidgets {
 pub(super) enum InspectorTab {
     #[default]
     Document,
-    Owned,
     SourceAsset,
     PrefabIntent,
 }

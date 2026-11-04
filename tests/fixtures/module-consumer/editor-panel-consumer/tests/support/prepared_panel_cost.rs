@@ -281,7 +281,7 @@ fn run_mode(
         // Install and paint the real registered instance before the eight edit warmups.
         for _ in 0..4 {
             let draw = context.begin_frame();
-            let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+            let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
             drop(draw);
             if let Some(candidate) = candidate {
                 frontend.submit_and_drive(&mut app, candidate, Duration::ZERO);
@@ -329,7 +329,7 @@ fn run_mode(
                 state.intent = Some((captured.clone(), edits));
             }
             let draw = context.begin_frame();
-            let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+            let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
             drop(draw);
             let (prepare_ns, enqueue_ns, submission) =
                 shared.borrow_mut().queued.take().expect(

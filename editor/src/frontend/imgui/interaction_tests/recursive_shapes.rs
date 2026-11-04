@@ -1,3 +1,4 @@
+use super::owned::InspectorOperation;
 use super::*;
 use nara::reflect::{
     ComponentFieldId, ComponentNumericDomain, ComponentShapeMember, ComponentValueShape,
@@ -73,10 +74,6 @@ pub(super) fn configure(project: &InteractionProject) {
     .unwrap();
 }
 
-fn control(field: &str, path: &str, name: &str) -> String {
-    format!("recursive:{CUSTOM_COMPONENT}:{field}:{path}:{name}")
-}
-
 fn selected(interaction: &Interaction, name: &str) -> ComponentValue {
     interaction
         .frame()
@@ -116,11 +113,13 @@ fn history(interaction: &Interaction) -> usize {
 }
 
 fn click(interaction: &mut Interaction, field: &str, path: &str, name: &str) {
-    interaction.click(&control(field, path, name));
+    interaction.click_owned(Some(field), &format!("{path}: {name}"));
 }
 
 fn replace(interaction: &mut Interaction, field: &str, path: &str, value: &str) {
-    interaction.replace_text(&control(field, path, "value"), value);
+    interaction
+        .try_replace_owned_text(field, path, value)
+        .unwrap();
 }
 
 #[test]
@@ -128,15 +127,17 @@ fn recursive_container_remove_buttons_target_only_the_second_item_or_entry() {
     let project = InteractionProject::new_recursive();
     let mut interaction = Interaction::new(&project);
     interaction.click("+ Root");
-    interaction.click("Add Component");
-    interaction.click(CUSTOM_COMPONENT);
+    interaction.click_owned(None, "Add Component");
+    interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     let baseline = history(&interaction);
 
     click(&mut interaction, "list", "root", "Edit value");
     click(&mut interaction, "list", "root", "Add...");
     replace(&mut interaction, "list", "root.new", "8");
     click(&mut interaction, "list", "root", "Add value");
-    click(&mut interaction, "list", "root", "Apply value");
+    interaction
+        .field_operation("list", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected(&interaction, "list"),
         ComponentValue::List(vec![ComponentValue::U64(3), ComponentValue::U64(8),])
@@ -148,7 +149,9 @@ fn recursive_container_remove_buttons_target_only_the_second_item_or_entry() {
         baseline + 1,
         "removal remains local until Apply"
     );
-    click(&mut interaction, "list", "root", "Apply value");
+    interaction
+        .field_operation("list", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected(&interaction, "list"),
         ComponentValue::List(vec![ComponentValue::U64(3)])
@@ -156,10 +159,12 @@ fn recursive_container_remove_buttons_target_only_the_second_item_or_entry() {
 
     click(&mut interaction, "map", "root", "Edit value");
     click(&mut interaction, "map", "root", "Insert...");
-    interaction.replace_text(&control("map", "root", "key"), "second");
+    replace(&mut interaction, "map", "root.key", "second");
     replace(&mut interaction, "map", "root.new", "after");
     click(&mut interaction, "map", "root", "Insert value");
-    click(&mut interaction, "map", "root", "Apply value");
+    interaction
+        .field_operation("map", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected(&interaction, "map"),
         ComponentValue::map([
@@ -174,7 +179,9 @@ fn recursive_container_remove_buttons_target_only_the_second_item_or_entry() {
         baseline + 3,
         "removal remains local until Apply"
     );
-    click(&mut interaction, "map", "root", "Apply value");
+    interaction
+        .field_operation("map", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected(&interaction, "map"),
         ComponentValue::map([("first", ComponentValue::String("before".into())),])
@@ -189,7 +196,7 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
             interaction.click("entity:prefab-anchor");
-            interaction.click("Open Prefab Source");
+            interaction.click_owned(None, "Open Prefab Source");
         }
         let manifest = interaction
             .application
@@ -206,8 +213,8 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
             .top_entity()
             .unwrap()
             .clone();
-        interaction.click("Add Component");
-        interaction.click(CUSTOM_COMPONENT);
+        interaction.click_owned(None, "Add Component");
+        interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
         let initial_history = history(&interaction);
 
         click(&mut interaction, "optional", "root", "Edit value");
@@ -222,7 +229,9 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
         click(&mut interaction, "optional", "root", "Use Some");
         assert_eq!(selected(&interaction, "optional"), ComponentValue::Null);
         click(&mut interaction, "optional", "root", "Cancel Some");
-        click(&mut interaction, "optional", "root", "Cancel value");
+        interaction
+            .field_operation("optional", InspectorOperation::Discard)
+            .unwrap();
         assert_eq!(
             history(&interaction),
             initial_history,
@@ -238,14 +247,18 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
             ComponentValue::Null,
             "child confirmation stays local"
         );
-        click(&mut interaction, "optional", "root", "Apply value");
+        interaction
+            .field_operation("optional", InspectorOperation::Apply)
+            .unwrap();
         assert_eq!(
             selected(&interaction, "optional"),
             ComponentValue::f64(7.0).unwrap()
         );
         click(&mut interaction, "optional", "root", "Edit value");
         click(&mut interaction, "optional", "root", "Set Null");
-        click(&mut interaction, "optional", "root", "Apply value");
+        interaction
+            .field_operation("optional", InspectorOperation::Apply)
+            .unwrap();
         assert_eq!(selected(&interaction, "optional"), ComponentValue::Null);
         interaction.click("Undo");
         assert_eq!(
@@ -257,7 +270,9 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
         click(&mut interaction, "vector", "root", "Edit value");
         replace(&mut interaction, "vector", "root.x", "9");
         assert_eq!(history(&interaction), initial_history + 2);
-        click(&mut interaction, "vector", "root", "Apply value");
+        interaction
+            .field_operation("vector", InspectorOperation::Apply)
+            .unwrap();
         let vector = ComponentValue::map([
             ("x", ComponentValue::f64(9.0).unwrap()),
             ("y", ComponentValue::f64(2.0).unwrap()),
@@ -276,7 +291,9 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
         replace(&mut interaction, "list", "root.new", "8");
         click(&mut interaction, "list", "root", "Add value");
         click(&mut interaction, "list", "root[0]", "Remove item");
-        click(&mut interaction, "list", "root", "Apply value");
+        interaction
+            .field_operation("list", InspectorOperation::Apply)
+            .unwrap();
         assert_eq!(
             selected(&interaction, "list"),
             ComponentValue::List(vec![ComponentValue::U64(8)])
@@ -284,11 +301,13 @@ fn recursive_widgets_draft_optional_record_and_scalar_containers_in_scene_and_pr
 
         click(&mut interaction, "map", "root", "Edit value");
         click(&mut interaction, "map", "root", "Insert...");
-        interaction.replace_text(&control("map", "root", "key"), "second");
+        replace(&mut interaction, "map", "root.key", "second");
         replace(&mut interaction, "map", "root.new", "after");
         click(&mut interaction, "map", "root", "Insert value");
         click(&mut interaction, "map", "root[\"first\"]", "Remove entry");
-        click(&mut interaction, "map", "root", "Apply value");
+        interaction
+            .field_operation("map", InspectorOperation::Apply)
+            .unwrap();
         assert_eq!(
             selected(&interaction, "map"),
             ComponentValue::map([("second", ComponentValue::String("after".into()))])
@@ -368,12 +387,12 @@ fn unfinished_recursive_child_survives_collapse_and_unrelated_revision_conflict(
     let project = InteractionProject::new_recursive();
     let mut interaction = Interaction::new(&project);
     interaction.click("+ Root");
-    interaction.click("Add Component");
-    interaction.click(CUSTOM_COMPONENT);
+    interaction.click_owned(None, "Add Component");
+    interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     click(&mut interaction, "list", "root", "Edit value");
     click(&mut interaction, "list", "root", "Add...");
     replace(&mut interaction, "list", "root.new", "256");
-    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
+    interaction.click_owned(None, &format!("Collapse {CUSTOM_COMPONENT}"));
     let frame = interaction.frame();
     let scene = frame.workspace().active_scene.as_ref().unwrap();
     interaction.application.submit_and_drive(
@@ -402,10 +421,12 @@ fn unfinished_recursive_child_survives_collapse_and_unrelated_revision_conflict(
         .unwrap();
     assert!(retained.0.contains("256"));
     assert!(retained.1);
-    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
-    interaction.click(&format!(
-        "field-action:{CUSTOM_COMPONENT}:list:Reapply draft"
-    ));
+    interaction.click_owned(None, &format!("Expand {CUSTOM_COMPONENT}"));
+    assert!(
+        interaction
+            .field_operation("list", InspectorOperation::Reapply)
+            .is_err()
+    );
     assert_eq!(
         selected(&interaction, "list"),
         ComponentValue::List(vec![ComponentValue::U64(3)])
@@ -420,7 +441,9 @@ fn unfinished_recursive_child_survives_collapse_and_unrelated_revision_conflict(
     );
     replace(&mut interaction, "list", "root.new", "8");
     click(&mut interaction, "list", "root", "Add value");
-    click(&mut interaction, "list", "root", "Apply value");
+    interaction
+        .field_operation("list", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected(&interaction, "list"),
         ComponentValue::List(vec![ComponentValue::U64(3), ComponentValue::U64(8)])

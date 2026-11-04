@@ -502,7 +502,7 @@ mod panel {
             .build();
         for _ in 0..3 {
             let draw = imgui.begin_frame();
-            let queued = frontend.show(draw.ui(), &mut app).unwrap();
+            let queued = frontend.show_contributions(draw.ui(), &mut app).unwrap();
             drop(draw);
             if let Some(queued) = queued {
                 frontend.submit_and_drive(&mut app, queued, Duration::ZERO);
@@ -662,7 +662,7 @@ mod panel {
             .build();
         let mut paint = |imgui: &mut dear_imgui_rs::Context, app: &mut EditorApplication| {
             let draw = imgui.begin_frame();
-            let queued = frontend.show(draw.ui(), app).unwrap();
+            let queued = frontend.show_contributions(draw.ui(), app).unwrap();
             drop(draw);
             if let Some(queued) = queued {
                 frontend.submit_and_drive(app, queued, Duration::ZERO);

@@ -1,3 +1,4 @@
+use super::owned::InspectorOperation;
 use super::*;
 use nara::{
     reflect::{
@@ -81,13 +82,9 @@ pub(super) fn configure(project: &InteractionProject) {
 fn setup(project: &InteractionProject) -> Interaction {
     let mut interaction = Interaction::new(project);
     interaction.click("+ Root");
-    interaction.click("Add Component");
-    interaction.click(CUSTOM_COMPONENT);
+    interaction.click_owned(None, "Add Component");
+    interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     interaction
-}
-
-fn control(field: &str, action: &str) -> String {
-    format!("field-action:{CUSTOM_COMPONENT}:{field}:{action}")
 }
 
 fn draft(interaction: &Interaction, field: &str) -> Option<(String, bool, bool, bool)> {
@@ -122,7 +119,7 @@ fn change_other(interaction: &mut Interaction) {
 }
 
 #[test]
-fn actual_scalar_controls_retain_invalid_u8_and_long_input_until_explicit_correction() {
+fn actual_scalar_controls_retain_invalid_u8_and_refuse_unbounded_text_until_correction() {
     let project = InteractionProject::new_field_drafts();
     let mut interaction = setup(&project);
     let history = interaction
@@ -135,7 +132,7 @@ fn actual_scalar_controls_retain_invalid_u8_and_long_input_until_explicit_correc
         .inspector
         .history
         .undo_depth;
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "256");
+    interaction.replace_field("value", "256");
     assert_eq!(draft(&interaction, "value").unwrap().0, "256");
     assert!(
         interaction
@@ -144,14 +141,28 @@ fn actual_scalar_controls_retain_invalid_u8_and_long_input_until_explicit_correc
             .is_some(),
         "the shared numeric-domain validator explains u8 overflow before submission"
     );
-    interaction.click(&control("value", "Apply"));
+    assert!(
+        interaction
+            .field_operation("value", InspectorOperation::Apply)
+            .is_err()
+    );
     assert_eq!(interaction.selected_value(), Some(ComponentValue::U64(10)));
     assert_eq!(draft(&interaction, "value").unwrap().0, "256");
-    let long = "9".repeat(8256);
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), &long);
+    let long = "9".repeat(1024);
+    interaction.replace_field("value", &long);
     assert_eq!(draft(&interaction, "value").unwrap().0, long);
-    interaction.click(&control("value", "Apply"));
-    assert_eq!(draft(&interaction, "value").unwrap().0.len(), 8256);
+    assert!(
+        interaction
+            .field_operation("value", InspectorOperation::Apply)
+            .is_err()
+    );
+    assert!(
+        interaction
+            .try_replace_owned_text("value", "value", &"9".repeat(8256))
+            .is_err()
+    );
+    assert_eq!(draft(&interaction, "value").unwrap().0, long);
+    assert_eq!(interaction.selected_value(), Some(ComponentValue::U64(10)));
     assert_eq!(
         interaction
             .frame()
@@ -165,8 +176,10 @@ fn actual_scalar_controls_retain_invalid_u8_and_long_input_until_explicit_correc
             .undo_depth,
         history
     );
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "25");
-    interaction.click(&control("value", "Apply"));
+    interaction.replace_field("value", "25");
+    interaction
+        .field_operation("value", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(interaction.selected_value(), Some(ComponentValue::U64(25)));
     assert!(
         draft(&interaction, "value").is_none(),
@@ -185,8 +198,12 @@ fn actual_interval_controls_keep_out_of_range_input_until_corrected() {
         .as_ref()
         .unwrap()
         .revision;
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "31");
-    interaction.click(&control("seconds", "Apply"));
+    interaction.replace_field("seconds", "31");
+    assert!(
+        interaction
+            .field_operation("seconds", InspectorOperation::Apply)
+            .is_err()
+    );
     assert_eq!(draft(&interaction, "seconds").unwrap().0, "31");
     assert!(
         interaction
@@ -204,8 +221,10 @@ fn actual_interval_controls_keep_out_of_range_input_until_corrected() {
             .revision,
         before
     );
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:seconds"), "30");
-    interaction.click(&control("seconds", "Apply"));
+    interaction.replace_field("seconds", "30");
+    interaction
+        .field_operation("seconds", InspectorOperation::Apply)
+        .unwrap();
     assert!(draft(&interaction, "seconds").is_none());
     let frame = interaction.frame();
     let field = frame
@@ -243,22 +262,28 @@ fn collapsed_and_temporarily_unselected_drafts_require_explicit_conflict_reapply
         .top_entity()
         .unwrap()
         .clone();
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "25");
-    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
+    interaction.replace_field("value", "25");
+    interaction.click_owned(None, &format!("Collapse {CUSTOM_COMPONENT}"));
     change_other(&mut interaction);
     interaction.render();
     assert_eq!(
         draft(&interaction, "value"),
         Some(("25".into(), true, false, false))
     );
+    interaction.click_owned(None, &format!("Expand {CUSTOM_COMPONENT}"));
     interaction.click("entity:preserved");
     assert_eq!(draft(&interaction, "value").unwrap().0, "25");
     interaction.click(&format!("entity:{}", entity.as_str()));
-    interaction.click(&format!("component:{CUSTOM_COMPONENT}"));
-    interaction.click(&control("value", "Apply"));
+    assert!(
+        interaction
+            .field_operation("value", InspectorOperation::Apply)
+            .is_err()
+    );
     assert_eq!(interaction.selected_value(), Some(ComponentValue::U64(10)));
     assert_eq!(draft(&interaction, "value").unwrap().0, "25");
-    interaction.click(&control("value", "Reapply draft"));
+    interaction
+        .field_operation("value", InspectorOperation::Reapply)
+        .unwrap();
     assert_eq!(interaction.selected_value(), Some(ComponentValue::U64(25)));
     assert!(draft(&interaction, "value").is_none());
 }
@@ -267,29 +292,19 @@ fn collapsed_and_temporarily_unselected_drafts_require_explicit_conflict_reapply
 fn actual_queued_field_rejection_preserves_the_exact_input_and_releases_pending() {
     let project = InteractionProject::new_field_drafts();
     let mut interaction = setup(&project);
-    interaction.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "25");
-    interaction.context.io_mut().add_key_event(Key::Enter, true);
-    let ui = interaction.context.frame();
-    let submission = interaction
-        .frontend
-        .show(ui, &mut interaction.application)
-        .unwrap()
+    interaction.replace_field("value", "25");
+    interaction
+        .queue_owned_operation("value", InspectorOperation::Apply)
         .unwrap();
-    let _ = interaction.context.render_legacy();
+    let submission = interaction.draw().unwrap();
     assert!(
         draft(&interaction, "value").unwrap().3,
-        "the real Enter control queued its exact candidate"
+        "the owned Apply operation queued its exact candidate"
     );
     change_other(&mut interaction);
-    interaction
-        .frontend
-        .submit_and_drive(&mut interaction.application, submission, Duration::ZERO);
+    interaction.submit(submission);
     assert_eq!(draft(&interaction, "value").unwrap().0, "25");
     assert!(!draft(&interaction, "value").unwrap().3);
-    interaction
-        .context
-        .io_mut()
-        .add_key_event(Key::Enter, false);
     interaction.render();
     assert_eq!(
         draft(&interaction, "value"),
@@ -302,13 +317,12 @@ fn actual_queued_field_rejection_preserves_the_exact_input_and_releases_pending(
 fn removed_component_draft_has_an_explicit_recovery_control() {
     let project = InteractionProject::new_field_drafts();
     let mut interaction = setup(&project);
-    interaction.replace_text(
-        &format!("field:{CUSTOM_COMPONENT}:value"),
-        "invalid retained input",
-    );
-    interaction.click("Remove Component");
+    interaction.replace_field("value", "invalid retained input");
+    interaction.click_owned(None, &format!("Remove {CUSTOM_COMPONENT}"));
     assert!(draft(&interaction, "value").unwrap().2);
-    interaction.click(&control("value", "Discard incompatible draft"));
+    interaction
+        .field_operation("value", InspectorOperation::Discard)
+        .unwrap();
     assert!(draft(&interaction, "value").is_none());
 }
 
@@ -316,29 +330,10 @@ fn removed_component_draft_has_an_explicit_recovery_control() {
 fn superseded_reset_reapplies_override_removal_after_an_unrelated_edit() {
     let project = InteractionProject::new_field_overrides();
     let mut interaction = setup(&project);
-    let reset = control("required_default", "Reset to default");
-    let rect = CONTROLS.with(|controls| controls.borrow()[&reset]);
-    interaction.context.io_mut().add_mouse_pos_event([
-        (rect.min[0] + rect.max[0]) * 0.5,
-        (rect.min[1] + rect.max[1]) * 0.5,
-    ]);
-    interaction.render();
     interaction
-        .context
-        .io_mut()
-        .add_mouse_button_event(MouseButton::Left, true);
-    interaction.render();
-    interaction
-        .context
-        .io_mut()
-        .add_mouse_button_event(MouseButton::Left, false);
-    let ui = interaction.context.frame();
-    let dropped = interaction
-        .frontend
-        .show(ui, &mut interaction.application)
-        .unwrap()
+        .queue_owned_operation("required_default", InspectorOperation::Reset)
         .unwrap();
-    let _ = interaction.context.render_legacy();
+    let dropped = interaction.draw().unwrap();
     assert!(draft(&interaction, "required_default").unwrap().3);
     drop(dropped);
     interaction.render();
@@ -365,7 +360,9 @@ fn superseded_reset_reapplies_override_removal_after_an_unrelated_edit() {
         Duration::ZERO,
     );
     interaction.render();
-    interaction.click(&control("required_default", "Reapply draft"));
+    interaction
+        .field_operation("required_default", InspectorOperation::Reapply)
+        .unwrap();
     let frame = interaction.frame();
     let field = &frame
         .workspace()
@@ -445,58 +442,68 @@ fn the_sixty_fifth_clean_field_can_be_edited_after_scrolling_to_its_real_control
     )
     .unwrap();
     let mut interaction = setup(&project);
-    let first = format!("field:{CUSTOM_COMPONENT}:field00");
-    let last = format!("field:{CUSTOM_COMPONENT}:field64");
-    let rect = super::super::ui_interaction_tests::control_rect(&first).unwrap();
-    interaction.context.io_mut().add_mouse_pos_event([
-        (rect.min[0] + rect.max[0]) * 0.5,
-        (rect.min[1] + rect.max[1]) * 0.5,
-    ]);
-    interaction.render();
-    for _ in 0..20 {
-        if super::super::ui_interaction_tests::control_visible(&last) {
-            break;
-        }
+    assert!(
         interaction
-            .context
-            .io_mut()
-            .add_mouse_wheel_event([0.0, -12.0]);
-        interaction.render();
-    }
-    assert!(super::super::ui_interaction_tests::control_visible(&last));
-    interaction.replace_text(&last, "65");
+            .find_owned_control(
+                Some("field00"),
+                nara_ui_kernel::UiSemanticRole::TextInput,
+                "field00"
+            )
+            .is_some()
+    );
+    assert!(
+        interaction
+            .find_owned_control(
+                Some("field64"),
+                nara_ui_kernel::UiSemanticRole::TextInput,
+                "field64"
+            )
+            .is_none()
+    );
+    assert!(interaction.scroll_owned(f32::MAX));
+    assert!(
+        interaction
+            .find_owned_control(
+                Some("field64"),
+                nara_ui_kernel::UiSemanticRole::TextInput,
+                "field64"
+            )
+            .is_some()
+    );
+    interaction.replace_field("field64", "65");
     assert_eq!(draft(&interaction, "field64").unwrap().0, "65");
-    interaction.click(&control("field64", "Apply"));
+    interaction
+        .field_operation("field64", InspectorOperation::Apply)
+        .unwrap();
     assert!(draft(&interaction, "field64").is_none());
+    let frame = interaction.frame();
+    let field = frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap()
+        .components
+        .iter()
+        .find(|component| component.component.as_str() == CUSTOM_COMPONENT)
+        .unwrap()
+        .fields
+        .iter()
+        .find(|field| field.id.as_str() == "field64")
+        .unwrap();
+    assert_eq!(field.value, Some(ComponentValue::I64(65)));
 }
 
 #[test]
 fn superseded_bool_edit_retries_its_retained_value_without_toggling_it_back() {
     let project = InteractionProject::new_field_drafts();
     let mut interaction = setup(&project);
-    let label = format!("field:{CUSTOM_COMPONENT}:flag");
-    let rect = CONTROLS.with(|controls| controls.borrow()[&label]);
-    interaction.context.io_mut().add_mouse_pos_event([
-        (rect.min[0] + rect.max[0]) * 0.5,
-        (rect.min[1] + rect.max[1]) * 0.5,
-    ]);
-    interaction.render();
-    interaction
-        .context
-        .io_mut()
-        .add_mouse_button_event(MouseButton::Left, true);
-    interaction.render();
-    interaction
-        .context
-        .io_mut()
-        .add_mouse_button_event(MouseButton::Left, false);
-    let ui = interaction.context.frame();
-    let dropped = interaction
-        .frontend
-        .show(ui, &mut interaction.application)
-        .unwrap()
-        .unwrap();
-    let _ = interaction.context.render_legacy();
+    interaction.queue_owned_click(Some("flag"), "Set true");
+    let dropped = interaction.draw().unwrap();
     assert_eq!(
         draft(&interaction, "flag"),
         Some(("true".into(), false, false, true))
@@ -507,7 +514,9 @@ fn superseded_bool_edit_retries_its_retained_value_without_toggling_it_back() {
         draft(&interaction, "flag"),
         Some(("true".into(), false, false, false))
     );
-    interaction.click(&control("flag", "Apply"));
+    interaction
+        .field_operation("flag", InspectorOperation::Apply)
+        .unwrap();
     assert!(draft(&interaction, "flag").is_none());
     let frame = interaction.frame();
     let actual = frame

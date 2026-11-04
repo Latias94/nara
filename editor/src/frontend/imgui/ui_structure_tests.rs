@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 
 use super::{
     ImguiEditorFrontend,
-    ui_interaction_tests::{UiProject, clear_controls, control_rect},
+    ui_interaction_tests::{UiProject, clear_controls, control_rect, setup_ui_prefab_source},
 };
 use crate::{EditorApplication, EditorLaunchOptions};
 
@@ -75,7 +75,10 @@ impl StructureInteraction {
             interaction.render();
         }
         interaction.click("entity:ui-anchor");
-        interaction.click("Open Prefab Source");
+        setup_ui_prefab_source(&mut interaction.application);
+        for _ in 0..3 {
+            interaction.render();
+        }
         interaction
     }
 
@@ -90,7 +93,10 @@ impl StructureInteraction {
     fn render(&mut self) {
         clear_controls();
         let ui = self.context.frame();
-        let batch = self.frontend.show(ui, &mut self.application).unwrap();
+        let batch = self
+            .frontend
+            .show_unpresented(ui, &mut self.application)
+            .unwrap();
         let _ = self.context.render_legacy();
         if let Some(batch) = batch {
             self.frontend

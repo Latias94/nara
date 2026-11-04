@@ -21,11 +21,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use super::{
-    NativeImgui,
-    canvas_tests::retire_application,
-    retirement::{finish_graphics_for_test, initialize_native_for_test},
-};
+use super::{NativeImgui, canvas_tests::retire_application, retirement::finish_graphics_for_test};
 use crate::{
     EditorApplication, EditorLaunchOptions,
     frontend::imgui::{InteractionProject, clear_controls, control_rect},
@@ -33,6 +29,7 @@ use crate::{
 
 const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 
+mod custom_fields;
 mod entity_references;
 mod extension_documents;
 mod field_drafts;
@@ -162,26 +159,41 @@ fn run_native_workflow<T>(
             )
             .map_err(|error| error.to_string())?,
     );
-    let mut native = initialize_native_for_test(event_loop, Arc::clone(&window))?;
+    let application =
+        EditorApplication::new(EditorLaunchOptions::new(project).with_profile("desktop"));
+    let mut host = crate::EditorNativeHost::from_application(
+        application,
+        crate::ImguiEditorFrontend::new(),
+        Some(Arc::clone(&window)),
+        || true,
+    );
+    host.resumed(event_loop);
+    if let Some(error) = &host.error {
+        return Err(error.to_string());
+    }
+    let native = host
+        .native
+        .as_mut()
+        .ok_or("the caller-owned native Host did not initialize")?;
     native.layout_loaded = true;
     let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
     native.context.io_mut().set_config_flags(flags);
-    let mut application =
-        EditorApplication::new(EditorLaunchOptions::new(project).with_profile("desktop"));
-    application.native_shell_ready();
     let result = run(AuthoringWorkflow {
-        native: &mut native,
-        application: &mut application,
+        native,
+        application: &mut host.application,
         event_loop,
         pointer: [-1000.0, -1000.0],
         presents: 0,
     });
-    let graphics = finish_graphics_for_test(&mut native);
-    drop(native);
+    let graphics = host
+        .native
+        .as_mut()
+        .map_or(Ok(()), finish_graphics_for_test);
+    host.native.take();
     drop(window);
-    let session = retire_application(&mut application);
-    drop(application);
+    let session = retire_application(&mut host.application)
+        .and_then(|()| host.finish(Ok(())).map_err(|error| error.to_string()));
     match (result, graphics, session) {
         (Ok(observed), Ok(()), Ok(())) => Ok(observed),
         (result, graphics, session) => {
@@ -206,6 +218,48 @@ struct AuthoringWorkflow<'a> {
     event_loop: &'a ActiveEventLoop,
     pointer: [f32; 2],
     presents: u64,
+}
+
+pub(super) fn game_inspector_text_handoff(
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
+    pointer: &mut [f32; 2],
+) -> Result<(bool, String, u64), String> {
+    let mut workflow = AuthoringWorkflow {
+        native,
+        application,
+        event_loop,
+        pointer: *pointer,
+        presents: 0,
+    };
+    workflow.owned_test_named_replace("size.x", "size.x", "99")?;
+    let focus = workflow.native.owned_text_focus_for_test();
+    let captured = workflow.native.input.is_captured();
+    let diagnostics =
+        format!("Nara Inspector text activation: captured={captured}, exact_text_focus={focus}");
+    for state in [
+        winit::event::ElementState::Pressed,
+        winit::event::ElementState::Released,
+    ] {
+        if !workflow
+            .native
+            .owned_key(
+                workflow.native.window.id(),
+                winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape),
+                None,
+                state,
+                false,
+                workflow.application,
+            )
+            .map_err(|error| error.to_string())?
+        {
+            return Err("the focused Nara Inspector did not consume Escape".into());
+        }
+    }
+    workflow.owned_test_paint()?;
+    *pointer = workflow.pointer;
+    Ok((!captured && focus, diagnostics, workflow.presents))
 }
 
 impl AuthoringWorkflow<'_> {
@@ -267,13 +321,8 @@ impl AuthoringWorkflow<'_> {
     }
 
     fn replace_integer(&mut self) -> Result<(), String> {
-        self.replace_text(&format!("field:{CUSTOM_COMPONENT}:value"), "42")?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, true))?;
-        self.paint(|context| context.io_mut().add_key_event(Key::Enter, false))?;
-        for _ in 0..3 {
-            self.paint(|_| {})?;
-        }
-        Ok(())
+        self.owned_test_named_replace("value", "value", "42")?;
+        self.owned_test_apply("value")
     }
 
     fn replace_text(&mut self, label: &str, value: &str) -> Result<(), String> {
@@ -396,8 +445,8 @@ impl AuthoringWorkflow<'_> {
             .cloned()
             .ok_or("the real create widget did not select its entity")?;
         let created_history = self.history()?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let manifest = self
             .application
             .active_authoring_unavailable_record_manifest()
@@ -427,7 +476,7 @@ impl AuthoringWorkflow<'_> {
         self.click("Redo")?;
         let redo_edit = self.selected_value()?;
         let redo_edit_history = self.history()?;
-        self.click("Remove Component")?;
+        self.owned_component_click(&format!("Remove {CUSTOM_COMPONENT}"))?;
         let removed = self.selected_value()?;
         let removed_history = self.history()?;
         self.click("Undo")?;
@@ -542,7 +591,7 @@ impl AuthoringWorkflow<'_> {
         }
         let scene = self.document(project, EditorDocumentKind::Scene)?;
         self.click("entity:prefab-anchor")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         let prefab = self.document(project, EditorDocumentKind::Prefab)?;
         Ok(AuthoringObservation {
             documents: vec![scene, prefab],

@@ -2008,6 +2008,7 @@ dependencies = [
  "nara_diagnostic",
  "nara_tooling",
  "serde_json",
+ "winit",
 ]
 
 [[package]]

@@ -4,7 +4,6 @@ use super::{
     PathBuf, WindowEvent, WindowId, run_native_workflow,
 };
 use nara::{identity::EntityReference, reflect::ComponentValue, scene::SceneEntityId};
-use winit::event::ElementState;
 
 #[test]
 #[ignore = "requires an interactive Windows desktop and a working WGPU adapter"]
@@ -75,11 +74,7 @@ impl ApplicationHandler for EntityReferenceTestApplication {
 
 impl AuthoringWorkflow<'_> {
     fn click_owned_reference(&mut self, action: &str) -> Result<(), String> {
-        self.owned_test_pointer("target", Some(action), 0.5)?;
-        self.owned_test_mouse(ElementState::Pressed)?;
-        self.owned_test_paint()?;
-        self.owned_test_mouse(ElementState::Released)?;
-        self.owned_test_paint()
+        self.owned_test_named_click("target", action)
     }
 
     fn run_owned_entity_reference(mut self) -> Result<u64, String> {
@@ -103,7 +98,6 @@ impl AuthoringWorkflow<'_> {
             .ok_or("the reference fixture has no active Scene")?;
         let document = scene.document;
         let baseline = self.history()?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
         self.owned_test_control("target", None)?;
         self.owned_test_control("target", Some("Choose target"))?;
@@ -206,25 +200,15 @@ impl AuthoringWorkflow<'_> {
         self.click("entity:source")?;
         self.expect_entity_reference("target")?;
         let baseline = self.history()?;
-        let apply = format!("field-action:{CUSTOM_COMPONENT}:target:Apply");
-        self.click("entity-reference:picker")?;
-        self.paint(|context| {
-            context
-                .io_mut()
-                .add_key_event(dear_imgui_rs::Key::Escape, true)
-        })?;
-        self.paint(|context| {
-            context
-                .io_mut()
-                .add_key_event(dear_imgui_rs::Key::Escape, false)
-        })?;
+        self.click_owned_reference("Choose target")?;
+        self.click_owned_reference("Hide targets")?;
         self.expect_entity_reference("target")?;
         if self.history()? != baseline {
             return Err("cancelling target selection changed authoring history".to_owned());
         }
-        self.click("entity-reference:picker")?;
-        self.click("entity-reference:choice:other")?;
-        self.click(&apply)?;
+        self.click_owned_reference("Choose target")?;
+        self.click_owned_reference("other [other]")?;
+        self.owned_test_apply("target")?;
         self.expect_entity_reference("other")?;
         if self.history()? != baseline + 1 {
             return Err("an accepted reference did not create one history entry".to_owned());

@@ -715,7 +715,7 @@ fn a_panel_reads_a_keyed_scalar_then_commits_it_without_copying_or_activating_it
             .build();
         for _ in 0..8 {
             let draw = context.begin_frame();
-            let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+            let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
             drop(draw);
             assert_eq!(
                 frame(&app).workspace().documents,
@@ -1253,7 +1253,7 @@ fn a_panel_first_writes_a_defaulted_leaf_and_undo_restores_absent_source_storage
                     EditorPropertyValue::Defaulted(ComponentValue::U64(13)),
                 );
                 let draw = context.begin_frame();
-                let candidate = frontend.show(draw.ui(), &mut app).unwrap();
+                let candidate = frontend.show_contributions(draw.ui(), &mut app).unwrap();
                 drop(draw);
                 assert_eq!(
                     frame(&app).workspace().documents,

@@ -1,6 +1,6 @@
-use dear_imgui_rs::{TreeNodeFlags, Ui};
+use dear_imgui_rs::Ui;
 use nara::{
-    reflect::{ComponentCapability, ComponentValue, ComponentValueKind},
+    reflect::{ComponentValue, ComponentValueKind},
     scene::{
         AuthoringDocumentReadiness, PrefabEntityOrigin, PrefabEntityTarget, SceneEntityId,
         ScenePlacement, ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey,
@@ -13,15 +13,11 @@ use nara::{
         EditorPersistenceResult, EditorPersistenceView, EditorPlayState, EditorReopenTarget,
         EditorRuntimeAvailability, EditorSceneModel, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, PrefabCompositionCommand, PrefabCompositionEntityDraft,
-        SceneCompositionCommand, SceneCompositionEntityKind, SceneInspectorComponentView,
-        SceneInspectorFieldView,
+        SceneCompositionCommand, SceneCompositionEntityKind, SceneInspectorFieldView,
     },
 };
 
-use super::{
-    ImguiTextOwner,
-    field_editor::{FieldEditors, PreparedFieldEdit},
-};
+use super::field_editor::FieldEditors;
 
 pub(super) mod recursive_controls;
 pub(super) mod value_draft;
@@ -441,189 +437,6 @@ impl ImguiAuthoringPanels {
             self.pending_removal = None;
         }
     }
-
-    pub(super) fn show_inspector(
-        &mut self,
-        ui: &Ui,
-        frame: &EditorFrameModel,
-        actions: &mut Vec<EditorAction>,
-        text_owner: &mut Option<ImguiTextOwner>,
-        prepared: &mut Vec<PreparedFieldEdit>,
-        review: Option<&nara::tooling::EditorSourceToolReview<'_>>,
-        tool_actions: &mut Vec<nara::tooling::EditorSourceToolAction>,
-    ) {
-        self.synchronize(frame.workspace().active_scene.as_ref());
-        let Some(scene) = frame.workspace().active_scene.as_ref() else {
-            ui.text_disabled("No active document");
-            return;
-        };
-        let Some(entity) = scene.editor.inspector.selected_entity_view.as_ref() else {
-            ui.text_disabled("Select an entity");
-            return;
-        };
-        let scope_id = format!(
-            "document:{}:entity:{}",
-            scene.document.raw(),
-            entity.id.as_str()
-        );
-        let _scope = ui.push_id(scope_id.as_str());
-        let editing = !self.read_only && editing_enabled(frame);
-        ui.text(entity.id.as_str());
-        ui.text_wrapped(placement_intent_label(entity.placement.as_ref()));
-        if entity.has_prefab && enabled_button(ui, editing, "Open Prefab Source") {
-            actions.push(EditorAction::Navigate(
-                EditorNavigationAction::OpenPrefabSource {
-                    document: scene.document,
-                    base_revision: scene.revision,
-                    entity: entity.id.clone(),
-                },
-            ));
-        }
-        let component_combo = ui.begin_combo("Add Component", "Choose a component");
-        #[cfg(test)]
-        super::interaction_tests::record_control(ui, "Add Component");
-        if let Some(_combo) = component_combo {
-            for capability in &scene.editor.inspector.composition.components {
-                let present = entity
-                    .components
-                    .iter()
-                    .any(|component| component.component == capability.component);
-                if enabled_button(
-                    ui,
-                    editing && !present && capability.add_unavailable_reason.is_none(),
-                    capability.component.as_str(),
-                ) {
-                    actions.push(compose_action(
-                        scene,
-                        SceneCompositionCommand::AddComponent {
-                            entity: entity.id.clone(),
-                            component: capability.component.clone(),
-                        },
-                    ));
-                    ui.close_current_popup();
-                }
-                if let Some(reason) = capability.add_unavailable_reason {
-                    ui.text_disabled(reason);
-                } else if present {
-                    ui.text_disabled("Component already exists");
-                }
-            }
-        }
-        for component in &entity.components {
-            self.show_component(
-                ui,
-                frame,
-                scene,
-                &entity.id,
-                component,
-                editing,
-                actions,
-                text_owner,
-                prepared,
-                review,
-                tool_actions,
-            );
-        }
-        if entity.components.is_empty() {
-            ui.text_disabled("No components");
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn show_component(
-        &mut self,
-        ui: &Ui,
-        frame: &EditorFrameModel,
-        scene: &EditorSceneModel,
-        entity: &SceneEntityId,
-        component: &SceneInspectorComponentView,
-        editing: bool,
-        actions: &mut Vec<EditorAction>,
-        text_owner: &mut Option<ImguiTextOwner>,
-        prepared: &mut Vec<PreparedFieldEdit>,
-        review: Option<&nara::tooling::EditorSourceToolReview<'_>>,
-        tool_actions: &mut Vec<nara::tooling::EditorSourceToolAction>,
-    ) {
-        let _id = ui.push_id(component.component.as_str());
-        let open = ui.collapsing_header(component.component.as_str(), TreeNodeFlags::DEFAULT_OPEN);
-        #[cfg(test)]
-        super::interaction_tests::record_control(
-            ui,
-            format!("component:{}", component.component.as_str()),
-        );
-        if !open {
-            return;
-        }
-        if let Some(reason) = component.access.read_only_reason() {
-            ui.text_disabled(format!("Read-only component: {reason:?}"));
-        }
-        let removable = editing
-            && component.access.is_editable()
-            && component.document_version == component.schema_version
-            && scene
-                .editor
-                .inspector
-                .composition
-                .components
-                .iter()
-                .any(|capability| {
-                    capability.component == component.component && capability.removable
-                });
-        if enabled_button(ui, removable, "Remove Component") {
-            actions.push(compose_action(
-                scene,
-                SceneCompositionCommand::RemoveComponent {
-                    entity: entity.clone(),
-                    component: component.component.clone(),
-                },
-            ));
-        }
-        for field in &component.fields {
-            let editable = editing
-                && component.access.is_editable()
-                && field.capabilities.contains(&ComponentCapability::Edit);
-            if let Some(target) =
-                super::field_editor::property_target(frame, scene, entity, component, field)
-                && component.access.is_editable()
-                && field.capabilities.contains(&ComponentCapability::Edit)
-                && frame
-                    .source_tool()
-                    .active
-                    .as_ref()
-                    .is_some_and(|active| active.matches_integer_property(&target))
-            {
-                let (customized, action) = self.source_tool.show_integer_property(
-                    ui,
-                    frame,
-                    &target,
-                    field
-                        .value
-                        .as_ref()
-                        .or(field.default_value.as_ref())
-                        .and_then(ComponentValue::as_i64),
-                    editable,
-                    review,
-                );
-                if let Some(owner) = self.source_tool.text_owner() {
-                    *text_owner = Some(owner);
-                }
-                if customized {
-                    if let Some(action) = action {
-                        tool_actions.push(action);
-                    }
-                    continue;
-                }
-            }
-            if let Some(edit) = self.fields.show(
-                ui, frame, scene, entity, component, field, editable, text_owner,
-            ) {
-                prepared.push(edit);
-            }
-        }
-        if component.fields.is_empty() {
-            ui.text_disabled("No inspectable fields");
-        }
-    }
 }
 
 fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
@@ -838,7 +651,7 @@ pub(super) fn value_label(value: Option<&ComponentValue>) -> String {
     }
 }
 
-fn placement_intent_label(placement: Option<&ScenePlacement>) -> String {
+pub(super) fn placement_intent_label(placement: Option<&ScenePlacement>) -> String {
     match placement {
         Some(placement) => format!(
             "Desired: {} / {}",

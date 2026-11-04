@@ -20,6 +20,7 @@ mod composition;
 mod game_input;
 mod imgui;
 pub use composition::{EditorCompositionError, EditorNativeComposition};
+pub use imgui::{EditorUserEvent as EditorNativeEvent, NativeEditorHost as EditorNativeHost};
 
 const EDITOR_TITLE: &str = "Nara Editor";
 const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";

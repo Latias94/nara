@@ -19,7 +19,6 @@ use super::super::{
     interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
     owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspectorError, ReferenceAction},
     submission_tests::Harness,
-    workspace::InspectorTab,
 };
 use crate::workspace::EditorPanelInstanceId;
 
@@ -86,13 +85,6 @@ fn setup_project(project: InteractionProject) -> (Harness, EditorPanelInstanceId
         .find(|instance| instance.kind() == "nara.inspector")
         .unwrap()
         .id();
-    harness
-        .frontend
-        .presentation
-        .widgets
-        .get_mut(&panel)
-        .unwrap()
-        .inspector_tab = InspectorTab::Owned;
     harness.frontend.set_owned_images(fonts(), BTreeMap::new());
     let candidate = harness.draw();
     harness.submit(candidate);

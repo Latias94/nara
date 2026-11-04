@@ -54,17 +54,18 @@ impl ApplicationHandler for RecursiveAuthoringTestApplication {
     fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
 }
 
-fn control(field: &str, path: &str, label: &str) -> String {
-    format!("recursive:{CUSTOM_COMPONENT}:{field}:{path}:{label}")
-}
-
 impl AuthoringWorkflow<'_> {
     fn recursive_click(&mut self, field: &str, path: &str, label: &str) -> Result<(), String> {
-        self.click(&control(field, path, label))
+        let name = match label {
+            "Apply value" => "Apply".to_owned(),
+            "Cancel value" => "Discard".to_owned(),
+            _ => format!("{path}: {label}"),
+        };
+        self.owned_test_named_click(field, &name)
     }
 
     fn recursive_replace(&mut self, field: &str, path: &str, value: &str) -> Result<(), String> {
-        self.replace_text(&control(field, path, "value"), value)
+        self.owned_test_named_replace(field, path, value)
     }
 
     fn expect_recursive_value(&self, field: &str, expected: &ComponentValue) -> Result<(), String> {
@@ -110,8 +111,8 @@ impl AuthoringWorkflow<'_> {
             .and_then(|scene| scene.selection.top_entity())
             .cloned()
             .ok_or("the create widget did not select its entity")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let manifest = self
             .application
             .active_authoring_unavailable_record_manifest()
@@ -134,7 +135,9 @@ impl AuthoringWorkflow<'_> {
         self.recursive_click("optional", "root", "Edit value")?;
         self.recursive_click("optional", "root", "Some...")?;
         self.recursive_replace("optional", "root.new", "1e100")?;
-        self.recursive_click("optional", "root", "Use Some")?;
+        if self.owned_test_named_enabled("optional", UiSemanticRole::Button, "root: Use Some")? {
+            return Err("an invalid Some exposed an enabled confirmation".into());
+        }
         self.recursive_click("optional", "root", "Cancel Some")?;
         self.recursive_click("optional", "root", "Cancel value")?;
         if self.history()? != baseline {
@@ -172,7 +175,7 @@ impl AuthoringWorkflow<'_> {
         self.expect_recursive_value("list", &list)?;
         self.recursive_click("map", "root", "Edit value")?;
         self.recursive_click("map", "root", "Insert...")?;
-        self.replace_text(&control("map", "root", "key"), "second")?;
+        self.owned_test_named_replace("map", "root.key", "second")?;
         self.recursive_replace("map", "root.new", "after")?;
         self.recursive_click("map", "root", "Insert value")?;
         self.recursive_click("map", "root[\"first\"]", "Remove entry")?;
@@ -238,7 +241,7 @@ impl AuthoringWorkflow<'_> {
         }
         self.recursive_document(&project.join("worlds/entry.scene.json"))?;
         self.click("entity:prefab-anchor")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.recursive_document(&project.join("blueprints/ordinary.prefab.json"))?;
         Ok(self.presents)
     }
@@ -306,8 +309,8 @@ impl AuthoringWorkflow<'_> {
             .and_then(|scene| scene.selection.top_entity())
             .cloned()
             .ok_or("the Root widget did not select the structured fixture entity")?;
-        self.click("Add Component")?;
-        self.click(CUSTOM_COMPONENT)?;
+        self.owned_component_click("Add Component")?;
+        self.owned_component_click(&format!("Add {CUSTOM_COMPONENT}"))?;
         let manifest = self
             .application
             .active_authoring_unavailable_record_manifest()
@@ -343,7 +346,6 @@ impl AuthoringWorkflow<'_> {
             ),
         ];
         self.expect_owned_recursive_values(&expected, baseline, "component creation")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
 
         self.owned_test_named_click("optional", "root: Edit value")?;
@@ -503,7 +505,6 @@ impl AuthoringWorkflow<'_> {
             );
         }
         self.click("Dismiss persistence result")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
         for (field, _) in &expected {
             if !self.owned_test_named_enabled(field, UiSemanticRole::Button, "root: Edit value")? {
@@ -529,7 +530,7 @@ impl AuthoringWorkflow<'_> {
         self.owned_recursive_document(project, EditorDocumentKind::Scene)?;
         self.click("entity:prefab-anchor")?;
         self.click("Inspector tab: Document")?;
-        self.click("Open Prefab Source")?;
+        self.owned_component_click("Open Prefab Source")?;
         self.owned_recursive_document(project, EditorDocumentKind::Prefab)?;
         Ok(self.presents)
     }

@@ -664,3 +664,92 @@ trajectories. Earlier 344-test and native passes preceded the review corrections
 345/13 results above cover their replacements. These are bounded Windows/DX12 results, not actual
 OS IME/candidate placement, assistive technology, detached Scene/DPI or measured cost evidence.
 Full Inspector/navigation and tree replacement and the foundation Goal remain open.
+
+## Default ordinary Inspector replacement
+
+Complete the ordinary Scene/Prefab Inspector's selected-entity workflow with authored placement
+intent and revision-bound Open Prefab Source, then use the Nara controls as the default Document
+tab. Remove the competing `Nara properties` tab and the displaced Dear whole-Inspector/component
+painters. Retain source-built `edit_field` contributions and specialized UI/source-asset/Prefab
+Intent panels under their existing owners; they are distinct consumers, not a fallback ordinary
+Inspector. The existing shell continues to own document navigation/history/persistence and the
+source tree until those complete workflows have replacements.
+
+Migrate predecessor tests to the actual new CPU/native input paths and keep exact values,
+defaults, structured/reference editing, source conflicts, component operations, local/document
+history, tool replacement and unknown-record persistence assertions. Qualify default startup,
+Prefab-source navigation, no-active/empty selection, read-only/replaced basis and native
+retirement with the affected existing suite. Keep tree/workspace parity, virtualization,
+measured costs and OS/platform evidence explicitly open after this replacement.
+
+Independent review found that the public unattached `show` entry discarded Nara image candidates,
+so merely changing its default Inspector would leave embedding permanently preparing. Reuse
+the complete native owner as public `EditorNativeHost` with caller-loop events and an optional
+caller-created primary window. The ordinary runner uses the same construction and cleanup tail.
+Pass loop failures into consuming `finish`; ordinary close decisions remain explicit and an
+unfinished Session cannot report success. Keep `show_contributions` explicit for source-built
+panels without hosted Inspector/Scene outputs, and remove the ambiguous old entry. A separate
+independent caller-loop consumer qualifies startup/paint/close; matched native authoring tests
+use the same public Host construction for actual editing and retirement.
+
+The independent process exposed a real default-main-thread stack overflow during ordinary
+project opening, after native initialization. A local debugger traced it through by-value Open
+progress and Session publication into authoring Runtime construction; the Session occupied
+85,824 bytes in that debug binary. The Session now heap-owns its three largest operation hosts:
+Schema-owner adoption, authored Schema upgrade and Prefab extraction. Starts and resets reuse
+those allocations. The matched binary's inline Session size is 32,784 bytes; the operation states
+remain owned heap allocations, so this is not a total-memory reduction claim. Public Open/Session
+values, exact operation identity, cancellation and close custody retain their existing contracts.
+The independent binary uses the ordinary process stack
+and caller-created hidden window, preserving this regression beyond the larger test-thread stack.
+The correction's independent static review has no P1/P2 finding. The process smoke qualifies
+startup/painting/normal close, not all three operations' start/cancel/reset paths on that main
+thread; their existing owner and native workflows retain their distinct test-stack scope.
+
+## Default ordinary Inspector qualification
+
+Qualified on November 4 on Windows/DX12 with Rust 1.95.0, serial Cargo,
+`CARGO_BUILD_JOBS=1` and the root `target`. Native source-tool controls reuse the actual .NET 10
+Host and EnemyStats v1 artifacts; CJK text uses the configured `simhei.ttf` fallback.
+
+| Check | Result |
+| --- | --- |
+| Final ordinary Editor and selected public integrations | 355/355, 52 skipped; `b4fee414-d4f1-4db5-af35-50c7963dbcaa` |
+| Final selected native Editor cohort | 35/35; `bc50941c-790e-42a8-8e13-e07e624e07b3` |
+| Final independent panel/document/tool consumers | 46/46, four skipped; `8e4ddbfc-0c58-4625-96bc-46b57bca484e` |
+| Independent caller-owned native Host process | 1/1; `57bb3cc5-790e-4a8e-9908-ba71b821b65c` |
+| Session operation owners after heap-state correction | 63/63; `10d934d2-216c-47ea-a8cd-8917d389c255` |
+| Build and lint | Editor build and all-target/all-feature `-D clippy::correctness` pass; existing warnings remain |
+| Formatting and documents | Root/consumer formatting and diff checks pass; 1,050 relative file links resolve |
+
+The ordinary run combines 346 library tests with nine selected public integration cases. CPU
+interaction tests use the actual Nara reducer, local TextEdit state and a bounded hosted journal;
+they do not claim GPU/OS delivery. Specialized UI fixture setup uses explicit public navigation,
+while the native Canvas test opens its Prefab through the actual Nara Button and Winit ingress.
+
+The native cohort includes all 22 ordinary authoring trajectories, Canvas, Game input, native
+cadence, detached/recovered views, composed panel reconstruction, six retirement controls,
+Scene reimport and the independent stock-composition effect. It preserves source values,
+defaults/omitted fields, local/document history, conflict recovery, source-tool review, unknown
+records and Save/Reopen. Two hosted Inspectors have independent compiled frames, surfaces and
+confirmed placement occurrences; retiring one preserves the other. Game capture transfers to
+the real owned text focus and resumes its later resize/exact-Step controls. The separate source-built
+custom field panel protects the continuing `edit_field` consumer and keyboard handoff.
+
+The independent hidden-window binary imports only public APIs and supplies its original Window,
+forwards the caller loop into `EditorNativeHost`, observes three contributed-panel paints, sends
+ordinary CloseRequested, and requires successful `finish` and unchanged fixture source bytes.
+It uses neither a private graphics Host nor a larger configured process stack. This is
+startup/painting/normal-close evidence; native field editing is established by the matched
+authoring cohort using the same public Host construction.
+
+Initial native qualification found three fixture regressions: a second Inspector hidden in the
+same dock tab, a custom field window overlapping Source Tool review, and a removed Dear Sprite
+field locator in the Game focus test. The replacements require both actual images, place the
+explicit contribution away from review, and use real Nara pointer/text input. Earlier 24/27 and
+the separate three-case repair run precede the final 35-case qualification above.
+
+This closes the ordinary Scene/Prefab Inspector's default-panel replacement. Specialized panels,
+tree/workspace replacement, keyboard-only shell entry, virtualization, measured idle/allocation
+and retirement cost, actual OS IME/candidate placement, assistive technology and untested
+platform/DPI combinations remain open. The complete R11/R12 and foundation Goal remain active.

@@ -214,7 +214,6 @@ impl AuthoringWorkflow<'_> {
         let initial = initial_references();
         let changed = changed_references();
         self.expect_owned_nested_value(&initial, 0, false, "initial source")?;
-        self.click("Inspector tab: Nara properties")?;
         self.owned_test_paint()?;
 
         self.owned_test_named_click("references", "root: Edit value")?;

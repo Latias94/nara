@@ -24,3 +24,4 @@ nara-asset-domain-consumer = { path = "../asset-domain-consumer" }
 nara-editor = { path = "../../../../editor" }
 nara_tooling = { path = "../../../../crates/nara_tooling" }
 serde_json = "1"
+winit = "=0.30.13"

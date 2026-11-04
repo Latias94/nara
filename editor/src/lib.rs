@@ -17,5 +17,6 @@ pub use frontend::{
     PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId, PanelSubmitError,
 };
 pub use platform::{
-    EditorCompositionError, EditorNativeComposition, EditorRunError, run, run_trusted_compiled,
+    EditorCompositionError, EditorNativeComposition, EditorNativeEvent, EditorNativeHost,
+    EditorRunError, run, run_trusted_compiled,
 };

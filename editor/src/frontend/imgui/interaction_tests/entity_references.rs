@@ -1,3 +1,4 @@
+use super::owned::InspectorOperation;
 use super::*;
 
 use nara::identity::EntityReference;
@@ -94,10 +95,20 @@ fn source_local_entity_reference_uses_document_choices_and_history() {
     let project = InteractionProject::new_entity_references();
     let mut interaction = Interaction::new(&project);
     interaction.click("entity:source");
-    let apply = format!("field-action:{CUSTOM_COMPONENT}:target:Apply");
-    interaction.click("entity-reference:picker");
-    interaction.click("entity-reference:choice:other");
-    interaction.click(&apply);
+    interaction.click_owned(Some("target"), "Choose target");
+    interaction.click_owned(Some("target"), "other [other]");
+    assert_eq!(
+        selected_target(&interaction),
+        Some(ComponentValue::EntityReference(
+            EntityReference::SceneLocal {
+                entity: SceneEntityId::new("target").unwrap(),
+            }
+        )),
+        "choosing a target remains local until Apply"
+    );
+    interaction
+        .field_operation("target", InspectorOperation::Apply)
+        .unwrap();
     assert_eq!(
         selected_target(&interaction),
         Some(ComponentValue::EntityReference(

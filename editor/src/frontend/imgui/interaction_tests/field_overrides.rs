@@ -1,3 +1,4 @@
+use super::owned::InspectorOperation;
 use super::*;
 use nara::tooling::{EditorDocumentMutation, SceneInspectorCommand, SceneInspectorFieldState};
 
@@ -62,10 +63,6 @@ fn write_schema(project: &InteractionProject, schema: ComponentSchema) {
     .unwrap();
 }
 
-fn control(field: &str, label: &str) -> String {
-    format!("field-action:{CUSTOM_COMPONENT}:{field}:{label}")
-}
-
 fn expect_field(
     interaction: &Interaction,
     name: &str,
@@ -118,15 +115,15 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
     for kind in [EditorDocumentKind::Scene, EditorDocumentKind::Prefab] {
         if kind == EditorDocumentKind::Prefab {
             interaction.click("entity:prefab-anchor");
-            interaction.click("Open Prefab Source");
+            interaction.click_owned(None, "Open Prefab Source");
         }
         interaction.click("+ Root");
         let frame = interaction.frame();
         let scene = frame.workspace().active_scene.as_ref().unwrap();
         let entity = scene.selection.top_entity().unwrap().clone();
         let document = scene.document;
-        interaction.click("Add Component");
-        interaction.click(CUSTOM_COMPONENT);
+        interaction.click_owned(None, "Add Component");
+        interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
         interaction.click("Save");
         interaction.settle_persistence();
         assert_eq!(
@@ -164,11 +161,6 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
                 Some(ComponentValue::I64(40)),
             ),
         ] {
-            let label = if effective.is_some() {
-                "Reset to default"
-            } else {
-                "Remove field"
-            };
             let state = if effective.is_some() {
                 SceneInspectorFieldState::Defaulted
             } else {
@@ -186,7 +178,9 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
                 .document(document)
                 .unwrap()
                 .revision;
-            interaction.click(&control(name, label));
+            interaction
+                .field_operation(name, InspectorOperation::Reset)
+                .unwrap();
             // The command must remove the authored override, never write the current default.
             let [
                 EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
@@ -202,7 +196,7 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
                 }),
             ] = interaction.actions.as_slice()
             else {
-                panic!("the real {label} control did not emit one RemoveField action");
+                panic!("the owned Reset control did not emit one RemoveField action");
             };
             assert_eq!(*actual_document, document);
             assert_eq!(*base_revision, revision);
@@ -244,7 +238,11 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
             );
             interaction.click("Redo");
             expect_field(&interaction, name, state.clone(), effective.clone());
-            interaction.click(&control(name, label));
+            assert!(
+                interaction
+                    .field_operation(name, InspectorOperation::Reset)
+                    .is_err()
+            );
             assert!(
                 interaction.actions.is_empty(),
                 "an omitted override has no removal intent"
@@ -289,7 +287,11 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
                 SceneInspectorFieldState::Defaulted,
                 Some(ComponentValue::I64(value)),
             );
-            interaction.click(&control(name, "Reset to default"));
+            assert!(
+                interaction
+                    .field_operation(name, InspectorOperation::Reset)
+                    .is_err()
+            );
             assert!(interaction.actions.is_empty());
         }
         expect_field(
@@ -298,7 +300,11 @@ fn field_reset_and_remove_controls_preserve_authored_presence_through_history_an
             SceneInspectorFieldState::Missing,
             None,
         );
-        interaction.click(&control("optional", "Remove field"));
+        assert!(
+            interaction
+                .field_operation("optional", InspectorOperation::Reset)
+                .is_err()
+        );
         assert!(interaction.actions.is_empty());
         assert_eq!(
             interaction
@@ -319,10 +325,14 @@ fn required_field_without_a_default_has_no_remove_intent() {
     let project = InteractionProject::new();
     let mut interaction = Interaction::new(&project);
     interaction.click("+ Root");
-    interaction.click("Add Component");
-    interaction.click(CUSTOM_COMPONENT);
+    interaction.click_owned(None, "Add Component");
+    interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
     let before = interaction.frame();
-    interaction.click(&control("value", "Remove field"));
+    assert!(
+        interaction
+            .field_operation("value", InspectorOperation::Reset)
+            .is_err()
+    );
     assert!(interaction.actions.is_empty());
     assert_eq!(interaction.selected_value(), Some(ComponentValue::I64(10)));
     assert_eq!(
@@ -364,8 +374,8 @@ fn root_and_list_index_fields_have_no_remove_intent() {
         );
         let mut interaction = Interaction::new(&project);
         interaction.click("+ Root");
-        interaction.click("Add Component");
-        interaction.click(CUSTOM_COMPONENT);
+        interaction.click_owned(None, "Add Component");
+        interaction.click_owned(None, &format!("Add {CUSTOM_COMPONENT}"));
         expect_field(
             &interaction,
             "value",
@@ -373,7 +383,11 @@ fn root_and_list_index_fields_have_no_remove_intent() {
             Some(ComponentValue::I64(1)),
         );
         let before = interaction.frame();
-        interaction.click(&control("value", "Reset to default"));
+        assert!(
+            interaction
+                .field_operation(&path.to_string(), InspectorOperation::Reset)
+                .is_err()
+        );
         assert!(
             interaction.actions.is_empty(),
             "{path}: removal must be disabled"
