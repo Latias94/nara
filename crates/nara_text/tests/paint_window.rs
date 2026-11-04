@@ -28,6 +28,8 @@ fn paint_snapshots_retain_full_display_provenance_across_selection_and_compositi
     assert_eq!(original.width(), editor.layout().width());
     assert_eq!(original.height(), editor.layout().height());
     assert_eq!(original.glyph_count(), editor.layout().glyphs().len());
+    let original_baseline = editor.layout().lines().first().map(|line| line.baseline());
+    assert_eq!(original.first_baseline(), original_baseline);
     editor
         .edit(&mut engine, &TextEdit::End { extend: false })
         .unwrap();
@@ -53,6 +55,8 @@ fn paint_snapshots_retain_full_display_provenance_across_selection_and_compositi
     assert!(!original.same_source(&preedit));
     assert_eq!(preedit.display_text(), "draft");
     assert_eq!(editor.text(), original.display_text());
+    let preedit_baseline = editor.layout().lines().first().map(|line| line.baseline());
+    assert_eq!(preedit.first_baseline(), preedit_baseline);
     assert!(
         editor
             .edit(&mut engine, &TextEdit::Commit("x".repeat(33)))
@@ -67,6 +71,16 @@ fn paint_snapshots_retain_full_display_provenance_across_selection_and_compositi
     assert_eq!(editor.selection(), selection);
     assert_eq!(original.display_text(), "office אבג q\u{301}");
     assert_eq!(preedit.display_text(), "draft");
+    editor
+        .edit(&mut engine, &TextEdit::Commit("saved".into()))
+        .unwrap();
+    assert_eq!(editor.display_text(), "saved");
+    assert_eq!(original.first_baseline(), original_baseline);
+    assert_eq!(preedit.first_baseline(), preedit_baseline);
+    assert_eq!(
+        editor.paint_snapshot().first_baseline(),
+        editor.layout().lines().first().map(|line| line.baseline())
+    );
 }
 
 #[test]

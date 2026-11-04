@@ -51,10 +51,17 @@ pub enum TextDiagnostic {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum TextWrapping {
+    Natural,
+    Width(f32),
+    MinContent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct TextLayoutRequest {
     text: String,
     logical_size: f32,
-    wrap_width: Option<f32>,
+    wrapping: TextWrapping,
     alignment: TextAlignment,
     scale_factor: f32,
 }
@@ -72,7 +79,7 @@ impl TextLayoutRequest {
         Ok(Self {
             text: text.into(),
             logical_size,
-            wrap_width: None,
+            wrapping: TextWrapping::Natural,
             alignment: TextAlignment::Start,
             scale_factor: 1.0,
         })
@@ -82,8 +89,15 @@ impl TextLayoutRequest {
         if !width.is_finite() || width <= 0.0 || width > MAX_REQUEST_WRAP_WIDTH {
             return Err(TextLayoutError::InvalidWrapWidth { value: width });
         }
-        self.wrap_width = Some(width);
+        self.wrapping = TextWrapping::Width(width);
         Ok(self)
+    }
+
+    /// Wraps at the minimum content width calculated from the complete shaped text.
+    #[must_use]
+    pub fn with_min_content(mut self) -> Self {
+        self.wrapping = TextWrapping::MinContent;
+        self
     }
 
     #[must_use]
@@ -115,9 +129,18 @@ impl TextLayoutRequest {
         self.logical_size
     }
 
+    /// Returns the explicit finite wrap width, or `None` for natural or min-content layout.
     #[must_use]
     pub const fn wrap_width(&self) -> Option<f32> {
-        self.wrap_width
+        match self.wrapping {
+            TextWrapping::Width(width) => Some(width),
+            TextWrapping::Natural | TextWrapping::MinContent => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_min_content(&self) -> bool {
+        matches!(self.wrapping, TextWrapping::MinContent)
     }
 
     #[must_use]

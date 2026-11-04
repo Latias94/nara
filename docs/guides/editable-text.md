@@ -83,6 +83,13 @@ buffer. Its optional cursor endpoints are UTF-8 byte offsets relative to the pro
 once and records one local edit. Other navigation/editing actions cancel composition before
 operating on the committed buffer. Local Undo/Redo does not invoke document history.
 
+For intrinsic measurement, `TextLayoutRequest::with_min_content()` asks the original shaper for
+its minimum content width and breaks that same shaped layout at that width. Natural, explicit
+finite wrapping and min-content remain distinct request/cache identities. Selecting a finite
+wrap width replaces min-content mode. This performs one shaping operation under the existing
+source/glyph/line limits; an intrinsic empty/space result may internally have zero width without
+widening public finite-wrap admission.
+
 ## Field and Host responsibilities
 
 An independently authored native frontend can use `nara_ui_render::UiSurfacePresenter` for one
@@ -109,6 +116,8 @@ the whole Editor Host, platform IME delivery or a neutral presentation dependenc
 
 `TextEditor::paint_snapshot()` publishes an opaque immutable `TextPaintSnapshot` with the complete
 display source, ordered font identities, logical size and positioned editing layout.
+Its `first_baseline()` exposes the actual original first line without exposing layout storage;
+old snapshots retain that observation after the live editor changes.
 `TextEngine::prepare_window()` admits that complete source under the receiver's byte, line, glyph,
 diagnostic and scale limits and returns only glyphs whose actual raster placement intersects the
 local clip. `prepare_window_at()` additionally takes the exact logical draw origin and physical

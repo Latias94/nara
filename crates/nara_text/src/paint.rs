@@ -54,6 +54,16 @@ impl TextPaintSnapshot {
         self.inner.layout.height()
     }
 
+    /// Returns the first retained line's baseline in the original local logical coordinates.
+    #[must_use]
+    pub fn first_baseline(&self) -> Option<f32> {
+        self.inner
+            .layout
+            .lines()
+            .first()
+            .map(|line| line.baseline())
+    }
+
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.inner.layout.glyphs().len()

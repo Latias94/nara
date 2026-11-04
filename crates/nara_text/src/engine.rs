@@ -209,7 +209,16 @@ impl TextEngine {
         builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
 
         let mut parley_layout = builder.build(request.text());
-        parley_layout.break_all_lines(request.wrap_width());
+        let wrap_width = if request.is_min_content() {
+            let min_width = parley_layout.calculate_content_widths().min;
+            if !min_width.is_finite() || min_width < 0.0 {
+                return Err(TextLayoutError::NonFiniteResult);
+            }
+            Some(min_width)
+        } else {
+            request.wrap_width()
+        };
+        parley_layout.break_all_lines(wrap_width);
         parley_layout.align(
             parley_alignment(request.alignment()),
             AlignmentOptions::default(),
