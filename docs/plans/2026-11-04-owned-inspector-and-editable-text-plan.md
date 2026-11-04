@@ -605,3 +605,62 @@ tests observe retirement without another GPU owner. This is not a measured idle,
 or retirement-latency result. Complete Inspector/component/tree parity, virtualization, actual
 OS IME/candidate placement, accessibility, Scene detached-window/DPI qualification and broader
 R11/R12/foundation requirements remain open.
+
+## Component controls successor
+
+Replace the selected Inspector's component composition controls through the existing
+Scene/Prefab actions and ordered Authoring submission ledger. Capture document kind, source
+revision, Schema, entity, availability and local menu observation in the displayed controls;
+refuse stale actions rather than retargeting them to the latest selection. Keep unavailable
+creation reasons and read-only component diagnostics visible.
+
+Retain that basis in the existing pending submission until the paint-time Authoring queue
+boundary and revalidate it there. Creation-metadata adoption can change Schema without changing
+the source revision; a raw composition action alone cannot preserve the old creation template.
+Both Add and Remove consume their displayed operation observation before another event can
+queue the same mutation. Invalidated pointer state is cancelled while stable keyboard focus
+keeps its ordinary lifetime.
+
+Folded fields retain their original drafts and compatible local text history while losing
+focus, composition and displayed input authority. Removed components leave dirty fields in
+the existing retained-input recovery path. No new mutation, history or candidate owner is
+introduced. Qualify both Scene and Prefab Add/Remove, fold/unfold, explicit field Apply,
+Undo/Redo and disk Save/Reopen, plus stale/read-only refusal and unknown-data preservation.
+Complete tree/navigation parity, virtualization and the other R11/R12 gates remain open.
+
+## Component controls qualification
+
+Qualified on November 4 on Windows/DX12 with Rust 1.95.0, root `target`,
+`CARGO_BUILD_JOBS=1` and serial Cargo. The native cohort uses the configured CJK fallback and
+the existing actual .NET Host/EnemyStats artifacts for its source-tool property control.
+
+| Check | Result |
+| --- | --- |
+| Final ordinary Editor library | 345/345, 49 ignored; `fb5acfa5-0251-4d5a-bf3d-0f100876e2a9` |
+| Final selected native cohort | 13/13; `e72aecd1-7737-4222-a81f-42e66d74b312` |
+| Independent review | Two queue/observation P2 findings corrected; scoped re-review has no remaining P1/P2 |
+| Build and lint | Editor build and all-target/all-feature correctness Clippy pass; existing warnings remain |
+| Formatting and documents | `cargo fmt --all -- --check` and diff checks pass; 1,022 relative links resolve |
+
+The four component owner controls cover exact Scene actions, duplicate-creation and unknown/read-only
+refusal, old/retired display rejection, incompatible retained drafts after removal, cancelled
+hidden preedit, new focus lifetime and compatible local Undo after unfolding. A separate queued
+Add control publishes a genuinely admitted different creation Schema with unchanged Scene
+observations and proves that the final queue boundary refuses it. Repeated Remove is refused
+before document drive. This specifically protects a creation-metadata transition that source
+revision checks alone cannot detect.
+
+The new native trajectory performs Add, dirty-field fold/unfold, explicit Apply, Remove,
+Undo/Redo and disk Save/Reopen in both Scene and Prefab. It verifies typed saved values, original
+unknown records, history/dirty state, retired hidden text focus and unchanged project code. Its
+component controls use actual Winit pointer ingress and the confirmed hosted panel image, rather
+than Dear component events or direct mutation substitutes. Entity creation, navigation and
+persistence still use the existing surrounding shell.
+
+The final 13-case cohort also protects ordinary source preservation, scalar/IME-injection and
+keyboard/clipboard controls, root/nested reference pickers, structured fields, wheel clipping,
+retained-input/capacity recovery, the actual C# property tool, and all three direct-sampling Scene
+trajectories. Earlier 344-test and native passes preceded the review corrections; the final
+345/13 results above cover their replacements. These are bounded Windows/DX12 results, not actual
+OS IME/candidate placement, assistive technology, detached Scene/DPI or measured cost evidence.
+Full Inspector/navigation and tree replacement and the foundation Goal remain open.

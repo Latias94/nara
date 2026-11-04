@@ -37,12 +37,15 @@ const TEXT_SIZE: f32 = 16.0;
 const PANEL_INSET: f32 = 12.0;
 const RETAINED_FRAMES: usize = 3;
 
+mod components;
 mod recovery;
 mod references;
 mod structured;
 mod tools;
 mod viewport;
 
+pub(super) use components::ComponentSubmission;
+use components::{ComponentControls, CompositionBasis, DisplayedComposition};
 use recovery::DisplayedRecovery;
 pub(super) use references::ReferenceAction;
 use references::{ReferenceBinding, ReferencePicker};
@@ -85,6 +88,7 @@ impl InspectorOperation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum InspectorBinding {
+    Composition,
     Field(FieldKey),
     Copy {
         field: UiKey,
@@ -303,6 +307,8 @@ struct CompiledInspector {
     buttons: HashMap<UiKey, DisplayedButton>,
     projected_recovery: Option<DisplayedRecovery>,
     recovery: Option<DisplayedRecovery>,
+    projected_composition: Option<(CompositionBasis, u64)>,
+    composition: Option<DisplayedComposition>,
 }
 
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
@@ -318,6 +324,7 @@ pub(super) struct OwnedInspector {
     frames: Vec<CompiledInspector>,
     read_only: bool,
     recovery_button: ButtonControl,
+    components: ComponentControls,
 }
 
 impl OwnedInspector {
@@ -347,6 +354,7 @@ impl OwnedInspector {
                 key: recovery_key,
                 state: UiButtonState::default(),
             },
+            components: ComponentControls::default(),
         })
     }
 
@@ -384,6 +392,10 @@ impl OwnedInspector {
         if previous.recovery != candidate.recovery {
             invalidated.push(self.recovery_button.key.clone());
         }
+        invalidated.extend(Self::invalidated_component_controls(
+            previous.composition.as_ref(),
+            candidate.composition.as_ref(),
+        ));
         Ok(invalidated)
     }
 
@@ -412,18 +424,21 @@ impl OwnedInspector {
         let mut inputs = HashMap::new();
         let mut buttons = HashMap::new();
         let mut visible = Vec::new();
+        let mut component_nodes = Vec::new();
+        let mut composition = self.begin_components(model, width, &mut component_nodes)?;
         if let Some(scene) = model.workspace().active_scene.as_ref() {
             if let Some(entity) = scene.editor.inspector.selected_entity_view.as_ref() {
                 nodes.push(self.label("selection", entity.id.as_str())?);
+                nodes.extend(component_nodes);
                 for component in &entity.components {
-                    nodes.push(
-                        UiNode::new(UiStyle::flex())
-                            .with_key(UiLocalKey::runtime(
-                                "nara.inspector.component",
-                                component.component.as_str(),
-                            )?)
-                            .with_text(UiText::new(component.component.as_str(), TEXT_SIZE)?),
-                    );
+                    let expanded = self.component_header(
+                        component,
+                        width,
+                        &mut nodes,
+                        composition
+                            .as_mut()
+                            .ok_or(OwnedInspectorError::ChangedProjection)?,
+                    )?;
                     for field in &component.fields {
                         let basis = FieldBasis::new(model, scene, &entity.id, component, field);
                         let key = FieldKey::from_target(&basis.target);
@@ -432,6 +447,16 @@ impl OwnedInspector {
                                 &format!("duplicate.{}", visible.len()),
                                 "This field already has an editor in this panel",
                             )?);
+                            continue;
+                        }
+                        if !expanded {
+                            if let Some(control) = self.controls.get_mut(&key) {
+                                for text in control.texts_mut() {
+                                    text.blur(&mut self.engine)?;
+                                    text.set_enabled(false, &mut self.engine)?;
+                                }
+                            }
+                            visible.push(key);
                             continue;
                         }
                         let editable = !read_only
@@ -524,6 +549,8 @@ impl OwnedInspector {
             recovery
         });
         let retry_nodes = (self.scroll_pixels > 0.0).then(|| nodes.clone());
+        self.finish_components(composition.as_ref());
+        let projected_composition = composition.as_ref().map(DisplayedComposition::observation);
         let mut snapshot = self.viewport_snapshot(nodes)?;
         if let Some(previous) = self.frames.last()
             && previous.snapshot.roots() == snapshot.roots()
@@ -531,6 +558,7 @@ impl OwnedInspector {
             && previous.theme == theme
             && previous.projected_fields == displayed
             && previous.projected_recovery == projected_recovery
+            && previous.projected_composition == projected_composition
         {
             return Ok(Arc::clone(&previous.frame));
         }
@@ -563,6 +591,9 @@ impl OwnedInspector {
                 .collect::<HashMap<_, _>>();
             buttons.retain(|key, _| semantics.contains_key(key));
             inputs.retain(|key, _| semantics.contains_key(key));
+            if let Some(composition) = &mut composition {
+                composition.retain(&semantics);
+            }
             if !semantics.contains_key(&self.recovery_button.key) {
                 recovery = None;
             }
@@ -592,6 +623,8 @@ impl OwnedInspector {
             inputs.clear();
             buttons.clear();
             recovery = None;
+            composition = None;
+            self.cancel_component_input();
             self.recovery_button.state = UiButtonState::default();
             for control in self.controls.values_mut() {
                 for text in control.texts_mut() {
@@ -613,6 +646,8 @@ impl OwnedInspector {
             buttons,
             projected_recovery,
             recovery,
+            projected_composition,
+            composition,
         });
         Ok(frame)
     }
@@ -623,6 +658,13 @@ impl OwnedInspector {
         key: &UiKey,
     ) -> Result<InspectorBinding, OwnedInspectorError> {
         let compiled = self.retained(frame)?;
+        if compiled
+            .composition
+            .as_ref()
+            .is_some_and(|composition| composition.contains(key))
+        {
+            return Ok(InspectorBinding::Composition);
+        }
         if key == &self.recovery_button.key && compiled.recovery.is_some() {
             return Ok(InspectorBinding::DiscardRetainedDrafts);
         }
@@ -759,6 +801,7 @@ impl OwnedInspector {
             }
         }
         self.recovery_button.state = UiButtonState::default();
+        self.cancel_component_input();
         match failure {
             Some(error) => Err(error.into()),
             None => Ok(()),
@@ -982,6 +1025,7 @@ impl OwnedInspector {
             }
         }
         let mut intents = UiIntentBatch::default();
+        self.dispatch_components(frame, dispatch, &mut intents)?;
         if let Some(recovery) = recovery {
             let button = self.recovery_control(&recovery)?;
             self.recovery_button
@@ -1928,6 +1972,8 @@ pub(super) enum OwnedInspectorError {
     ChangedProjection,
     #[error("this field is read-only")]
     ReadOnlyField,
+    #[error("the displayed component action is disabled")]
+    CompositionDisabled,
     #[error("copying retained input requires the Host clipboard")]
     HostClipboardRequired,
     #[error("this control requires the source-tool submission owner")]

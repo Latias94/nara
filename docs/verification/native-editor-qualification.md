@@ -91,6 +91,15 @@ until whole-field Apply. The trajectory then checks exact history, ordinary Undo
 values, original unavailable records and a clean Save/Reopen. The predecessor recursive trajectory
 separately protects the shared Optional child identity change.
 
+The component trajectory creates an ordinary Scene entity and repeats the complete path in a
+Prefab. Native owned-image clicks open the creation choices, add/remove the component and
+fold/unfold its dirty field without changing source/history. Explicit Apply and document
+Undo/Redo precede disk Save/Reopen. Actual typed saved values and the original unknown records
+must survive. Entity creation, navigation and persistence still use the surrounding shell;
+this does not qualify a complete Nara-owned Inspector or tree replacement. CPU controls also
+refuse stale revisions, repeated menu activation, disabled duplicate creation and read-only or
+unknown-record removal, and retain local text Undo while cancelling hidden composition.
+
 The nested-reference trajectory uses the same source-local picker for Record, Optional, List and
 Map leaves in actual Scene and Prefab documents. It checks duplicate-name choices, menu cancellation,
 pending-child confirmation and whole-field Apply, then ordinary Undo/Redo, typed saved references

@@ -25,6 +25,8 @@ use super::super::{
 use super::*;
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
+mod components;
+
 fn application() -> (InteractionProject, EditorApplication) {
     let project = InteractionProject::new();
     let mut reset = ComponentFieldSchema::required(

@@ -38,6 +38,7 @@ mod extension_documents;
 mod field_drafts;
 mod field_overrides;
 mod ordinary_structure;
+mod owned_components;
 mod owned_fields;
 mod owned_keyboard;
 mod owned_nested_references;

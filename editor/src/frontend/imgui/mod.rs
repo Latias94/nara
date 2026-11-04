@@ -1138,6 +1138,17 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     use workspace::InspectorTab;
     for edit in std::mem::take(&mut context.widgets.owned_pending) {
         match edit {
+            owned_panel::OwnedSubmission::Composition(submission) => {
+                let result = submission
+                    .into_action(context.input.frame, context.input.read_only)
+                    .map_err(|error| format!("Component action was not submitted: {error}. Review the current source and retry."))
+                    .and_then(|action| context.submit_authoring(action).map_err(|error| format!("Component action was not queued: {error:?}")));
+                if let Err(error) = result
+                    && let Some(inspector) = context.widgets.owned_inspector.as_mut()
+                {
+                    inspector.component_submission_failed(error);
+                }
+            }
             owned_panel::OwnedSubmission::Field(edit) => context.submit_field(edit),
             owned_panel::OwnedSubmission::SourceTool(action) => {
                 if let Some(action) = context.widgets.authoring.source_tool.offer_owned(action) {

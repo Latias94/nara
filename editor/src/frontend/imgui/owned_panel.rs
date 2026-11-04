@@ -15,6 +15,7 @@ use super::owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspecto
 use super::{ImguiEditorFrontend, ImguiEditorPanelContext, ImguiViewImage};
 
 pub(super) enum OwnedSubmission {
+    Composition(super::owned_inspector::ComponentSubmission),
     Field(super::field_drafts::PreparedFieldEdit),
     SourceTool(EditorSourceToolAction),
 }
@@ -98,6 +99,20 @@ impl ImguiEditorFrontend {
                 .binding(frame, intent.target())
                 .map_err(|error| error.to_string())?
             {
+                InspectorBinding::Composition => {
+                    if widgets.owned_pending.len() == 64 {
+                        break;
+                    }
+                    if let Some(action) = inspector
+                        .activate_component(frame, intent.target(), model)
+                        .map_err(|error| error.to_string())?
+                    {
+                        widgets
+                            .owned_pending
+                            .push(OwnedSubmission::Composition(action));
+                    }
+                    continue;
+                }
                 InspectorBinding::Copy { .. } => {
                     let text = inspector
                         .copy_draft(frame, intent.target(), &widgets.authoring.fields)

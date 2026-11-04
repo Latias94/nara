@@ -103,6 +103,15 @@ Scene/Canvas priority, image reimport, independent Scene effects and Game/view l
 does not complete selected Inspector parity, virtualization, measured idle/retirement costs or
 actual OS IME/accessibility and broader platform qualification.
 
+The [component-control successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#component-controls-successor)
+adds Nara-owned creation choices, removal, folding and unavailable diagnostics through the
+original Scene/Prefab commands and ordered Authoring result ledger. Displayed document/Schema,
+entity, revision, capabilities and local menu observation fence activation. Folded fields retain
+compatible drafts/local Undo while losing text focus and composition; removed-component drafts
+remain in the existing recovery path. Its owner and native Scene/Prefab qualification is recorded
+in the same unit. Full Inspector/navigation and tree parity, virtualization, costs and actual
+OS/platform requirements remain open.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

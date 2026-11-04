@@ -18,6 +18,16 @@ in the workspace shell's drawing order. Scene pixels are not read back or upload
 UI image. The shell still owns docking and native-window placement; Nara owns the Scene panel's
 layout and interactions. This does not qualify a complete Nara replacement for every Editor panel.
 
+The Inspector's `Nara properties` tab also owns component controls. Use Add Component to inspect
+the admitted creation choices, then Add with the component's stable ID. Existing or unavailable
+components have disabled choices and an explanation. Expand/Collapse preserves compatible
+unapplied field drafts and local text Undo; hidden fields lose focus and composition. Remove
+uses the same document transaction and Undo history as ordinary field edits. Dirty drafts from
+a removed component remain available through retained-input recovery. Read-only or mismatched
+component versions cannot be removed. Component actions retain the displayed document, Schema,
+entity and revision; an intervening source change requires a new observation. Entity navigation
+and Prefab-source opening still use the surrounding shell and Document tab.
+
 Native panel extensions are trusted Rust code compiled into an Editor executable. Opening a
 project does not compile or load its code. Register a panel descriptor and its Dear ImGui state
 factory together through `EditorNativeComposition`:

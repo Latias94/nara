@@ -724,7 +724,10 @@ pub(super) fn persistence_allows(
     }
 }
 
-fn compose_action(scene: &EditorSceneModel, command: SceneCompositionCommand) -> EditorAction {
+pub(super) fn compose_action(
+    scene: &EditorSceneModel,
+    command: SceneCompositionCommand,
+) -> EditorAction {
     if scene.kind == EditorDocumentKind::Prefab {
         let command = match command {
             SceneCompositionCommand::CreateEntity { placement, .. } => {
