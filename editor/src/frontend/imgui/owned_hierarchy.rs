@@ -255,6 +255,12 @@ impl OwnedHierarchy {
         self.frames.last().map(|compiled| &compiled.frame)
     }
 
+    pub(super) fn retains_frame(&self, frame: &Arc<UiFrame>) -> bool {
+        self.frames
+            .iter()
+            .any(|compiled| Arc::ptr_eq(&compiled.frame, frame))
+    }
+
     fn retained(&self, frame: &Arc<UiFrame>) -> Result<&CompiledHierarchy, OwnedHierarchyError> {
         self.frames
             .iter()

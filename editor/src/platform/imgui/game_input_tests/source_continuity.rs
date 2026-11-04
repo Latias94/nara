@@ -3,7 +3,7 @@ use super::*;
 use nara::{
     scene::SceneEntityId,
     tooling::{
-        EditorActionAcknowledgement, EditorDocumentKind, EditorNavigationAction,
+        EditorActionAcknowledgement, EditorDocumentId, EditorDocumentKind, EditorNavigationAction,
         EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
         EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
@@ -140,6 +140,66 @@ impl GameInputWorkflow<'_> {
         Ok(outcomes)
     }
 
+    fn observe_prefab_canvas(&self, prefab: EditorDocumentId) -> Result<GameObservation, String> {
+        let authoring = self
+            .application
+            .current_ui_authoring_frame()
+            .ok_or("unrelated Prefab B has no UI authoring frame")?;
+        require_continuity(
+            authoring.document() == prefab
+                && self
+                    .native
+                    .canvas
+                    .is_current(&self.native.scene, &authoring),
+            "unrelated Prefab B has no confirmed current UI Canvas",
+        )?;
+        let display = self
+            .native
+            .scene
+            .display
+            .as_ref()
+            .ok_or("the UI Prefab Canvas has no native display")?;
+        let submitted = self
+            .native
+            .submitted_game_observation
+            .ok_or("the Runtime has no submitted sprite/UI observation")?;
+        let (primary, secondary) = self
+            .native
+            .lifecycle_frame
+            .as_ref()
+            .ok_or("the native frame did not present")?;
+        let receipt = primary
+            .composites()
+            .iter()
+            .chain(secondary.iter().flat_map(|outcome| outcome.composites()))
+            .copied()
+            .find(|receipt| {
+                receipt.image() == submitted.image && receipt.occurrence() == submitted.occurrence
+            })
+            .ok_or("the exact Runtime sprite/UI image was not actually composited")?;
+        let scene = primary
+            .composites()
+            .iter()
+            .copied()
+            .find(|receipt| {
+                Some(receipt.image()) == self.native.scene.submitted
+                    && receipt.image() == display.receipt()
+                    && receipt.occurrence() == display.occurrence()
+            })
+            .ok_or("Game omitted the concurrent exact UI Prefab Canvas composite")?
+            .image();
+        let center_x = submitted
+            .content
+            .center_x
+            .ok_or("the submitted image did not contain exactly one tracked sprite")?;
+        Ok(GameObservation {
+            submitted,
+            receipt,
+            scene,
+            center_x,
+        })
+    }
+
     fn source_continuity(mut self) -> Result<(), String> {
         self.settle()?;
         self.click("embedded:Play")?;
@@ -222,7 +282,9 @@ impl GameInputWorkflow<'_> {
             "Prefab B did not open independently of the retained Play source",
         )?;
         self.settle()?;
-        let opened = self.observe()?;
+        // Opening this UI Prefab replaces the ordinary Scene projection with its Canvas.
+        // Require that exact current Canvas and Game image in the same native frame.
+        let opened = self.observe_prefab_canvas(prefab)?;
         require_continuity(
             opened.submitted.identity.start() == start
                 && opened.submitted.image.producer_id() == initial.submitted.image.producer_id()

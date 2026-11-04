@@ -326,6 +326,16 @@ impl NativeImgui {
                 == Some(focus.token)
         })
     }
+
+    #[cfg(test)]
+    pub(in crate::platform::imgui) fn owned_pending_frame_for_test(
+        &self,
+        panel: EditorPanelInstanceId,
+    ) -> Option<Arc<UiFrame>> {
+        self.owned_pending
+            .get(&panel)
+            .map(|candidate| Arc::clone(&candidate.frame))
+    }
     fn cancel_owned_focus(&mut self) -> Result<(), EditorRunError> {
         self.release_owned_focus(None)
     }
@@ -494,6 +504,7 @@ impl NativeImgui {
                         &frame,
                         batch,
                         &model,
+                        application.current_ui_authoring_frame().as_deref(),
                         &mut |text| clipboard.write(text),
                     );
                 }
@@ -578,6 +589,7 @@ impl NativeImgui {
                         &frame,
                         batch,
                         &model,
+                        application.current_ui_authoring_frame().as_deref(),
                         &mut |text| clipboard.write(text),
                     );
                     if *state == ElementState::Pressed

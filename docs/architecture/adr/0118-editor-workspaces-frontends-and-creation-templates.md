@@ -844,6 +844,13 @@ confirmation painters are removed after matched qualification; specialized UI tr
 workspace/document shell remain separate consumers. Bounded visible-row qualification does
 not imply bounded source projection/filter cost or complete toolkit/platform parity.
 
+The specialized UI Hierarchy follows the same hosted panel/input/result boundary, while consuming
+the existing UI author's complete hierarchy, legal placements and finite creation recipes under
+ADR 0113. One panel has one active ordinary or specialized controller. Changing projection retires
+the displaced controller's form and text observations. The specialized tree never substitutes
+ordinary source-list placement inference for the UI owner's structural guards. Its Inspector
+gestures and Canvas remain distinct consumers with their original semantic/geometric authority.
+
 Complete caller-owned event loops consume the existing `EditorNativeHost`, constructed from
 the paired Application/frontend and an optional caller-created primary window. Its original
 Winit handler owns scheduling, native input/presentation, recovery and close; `finish` consumes

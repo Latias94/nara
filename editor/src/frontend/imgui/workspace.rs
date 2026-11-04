@@ -326,8 +326,8 @@ impl ImguiEditorPanelContext<'_, '_> {
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
-    pub owned_hierarchy: Option<super::owned_hierarchy::OwnedHierarchy>,
-    pub hierarchy_pending: Vec<super::owned_hierarchy::HierarchySubmission>,
+    pub owned_hierarchy: Option<super::owned_hierarchy_panel::HierarchyControls>,
+    pub hierarchy_pending: Vec<super::owned_hierarchy_panel::HierarchySubmission>,
     pub hierarchy_read_only: bool,
     pub owned_inspector: Option<super::owned_inspector::OwnedInspector>,
     pub owned_pending: Vec<super::owned_panel::OwnedSubmission>,
@@ -516,7 +516,6 @@ impl ImguiPanelPresentation {
             if !live.contains(id) {
                 continue;
             }
-            widgets.ui_authoring.observe_report(outcomes.clone());
             widgets.project.observe_action_report(outcomes.clone());
         }
     }
@@ -555,7 +554,6 @@ impl ImguiPanelPresentation {
             if !live.contains(id) {
                 continue;
             }
-            widgets.ui_authoring.observe_rejection(rejection);
             widgets.project.observe_action_rejection(rejection);
         }
     }

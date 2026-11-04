@@ -1226,7 +1226,13 @@ The ordinary source-declaration Hierarchy successor adds Nara-owned creation, se
 Parent/Order and confirmed removal, local committed-text filtering and visible-row construction
 for source and placement-choice lists. Its original Session/history/persistence and hosted
 submission owners remain authoritative; source declarations are distinct from an effective tree.
-Specialized UI trees, workspace and specialized-panel replacement, offscreen keyboard traversal,
+The specialized UI Prefab Hierarchy now uses Nara tree/choice controls and complete
+Container/Text/Image/Button creation, move and subtree-delete forms through the original UI
+author, Session and result ledger. Shared immutable text paint windows retain the creation
+owner's 4,096-byte input capacity under unchanged source/output limits. Same-document Source/UI
+replacement retires pending predecessor frames and keyboard/text authority; its owning unit
+records the matched CPU/native evidence and review corrections.
+Workspace and remaining specialized-panel replacement, offscreen keyboard traversal,
 full matching/idle/allocation/GPU cost measurements and broader OS/platform qualification remain
 open. **Owners:** UI compile/presented sessions, text and frontend.
 

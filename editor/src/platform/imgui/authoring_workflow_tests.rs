@@ -269,6 +269,89 @@ pub(super) fn hierarchy_pointer(
     Ok(workflow.pointer)
 }
 
+pub(super) fn hierarchy_replace_text(
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
+    pointer: &mut [f32; 2],
+    name: &str,
+    text: &str,
+) -> Result<u64, String> {
+    use nara_ui_kernel::UiSemanticRole;
+    use winit::event::{ElementState, Ime};
+    let mut workflow = AuthoringWorkflow {
+        native,
+        application,
+        event_loop,
+        pointer: *pointer,
+        presents: 0,
+    };
+    workflow.owned_test_panel_reveal("nara.hierarchy", None, UiSemanticRole::TextInput, name)?;
+    workflow.owned_test_panel_pointer(
+        "nara.hierarchy",
+        None,
+        UiSemanticRole::TextInput,
+        name,
+        1.0,
+    )?;
+    workflow.owned_test_mouse(ElementState::Pressed)?;
+    workflow.owned_test_panel_pointer(
+        "nara.hierarchy",
+        None,
+        UiSemanticRole::TextInput,
+        name,
+        0.0,
+    )?;
+    workflow.owned_test_mouse(ElementState::Released)?;
+    workflow.owned_test_paint()?;
+    workflow.owned_test_ime(Ime::Enabled)?;
+    workflow.owned_test_ime(Ime::Commit(text.into()))?;
+    let probe = workflow.owned_test_panel_control(
+        "nara.hierarchy",
+        None,
+        UiSemanticRole::TextInput,
+        name,
+    )?;
+    if !probe
+        .frame
+        .semantics()
+        .iter()
+        .any(|node| node.key() == &probe.key && node.value() == Some(text))
+    {
+        return Err(format!(
+            "the native UI creation field {name:?} did not retain the exact committed input"
+        ));
+    }
+    *pointer = workflow.pointer;
+    Ok(workflow.presents)
+}
+
+pub(super) fn hierarchy_leave_pending_click(
+    native: &mut NativeImgui,
+    application: &mut EditorApplication,
+    event_loop: &ActiveEventLoop,
+    pointer: &mut [f32; 2],
+    name: &str,
+) -> Result<u64, String> {
+    use nara_ui_kernel::UiSemanticRole;
+    use winit::event::ElementState;
+    let mut workflow = AuthoringWorkflow {
+        native,
+        application,
+        event_loop,
+        pointer: *pointer,
+        presents: 0,
+    };
+    workflow.owned_test_panel_reveal("nara.hierarchy", None, UiSemanticRole::Button, name)?;
+    workflow.owned_test_panel_pointer("nara.hierarchy", None, UiSemanticRole::Button, name, 0.5)?;
+    workflow.owned_test_mouse(ElementState::Pressed)?;
+    workflow.owned_test_mouse(ElementState::Released)?;
+    // Compile the new panel mode, retaining the previous native sample until the next repaint.
+    workflow.paint(|_| {})?;
+    *pointer = workflow.pointer;
+    Ok(workflow.presents)
+}
+
 pub(super) fn game_inspector_text_handoff(
     native: &mut NativeImgui,
     application: &mut EditorApplication,

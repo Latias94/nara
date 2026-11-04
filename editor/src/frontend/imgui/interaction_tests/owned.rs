@@ -263,9 +263,14 @@ impl Interaction {
                 return false;
             };
             self.frontend
-                .reduce_owned_input(panel, frame, dispatch, &model, &mut |_| {
-                    panic!("this fixture does not request clipboard writes")
-                })
+                .reduce_owned_input(
+                    panel,
+                    frame,
+                    dispatch,
+                    &model,
+                    self.application.current_ui_authoring_frame().as_deref(),
+                    &mut |_| panic!("this fixture does not request clipboard writes"),
+                )
                 .unwrap();
             if !dispatch.is_reconciliation() {
                 return true;

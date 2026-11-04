@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-17
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-04
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
 authority, separate receipt-backed Prefab persistence from immutable project-content generation
 publication, admit source-local ordered entity structure through ordinary Prefab history, and close
@@ -101,11 +101,21 @@ deferred.
 
 ### 4. Toolkit and Canvas ownership stay separated
 
-Dear ImGui is the selected Editor frontend under ADR 0118. Nara UI owns the accepted authored UI
-projection and Canvas candidate in a private Editor producer; it does not own the Editor toolkit.
-The seam carries immutable authoring facts and revision-bound actions. An ordered action trace
-is not an atomic batch; each cohesive edit uses its owning document transaction. No universal
-Widget or Automation trait, toolkit-owned document state or future Nara UI Inspector is required.
+ADR 0118's selected-panel migration gives Nara the specialized UI tree and structural forms,
+alongside the ordinary source Hierarchy, Inspector and Scene controls. The existing native Host
+and surrounding Dear workspace retain their present placement/lifecycle responsibilities until
+matched successors replace them. Nara UI owns the accepted authored UI projection and Canvas
+candidate in the original private producer. The seam carries immutable authoring facts and
+revision-bound actions. An ordered action trace is not an atomic batch; each cohesive edit uses
+its owning document transaction. No universal Widget or Automation trait or toolkit-owned
+document state is introduced.
+
+The specialized UI tree presents the exact owner-provided hierarchy and finite structural
+recipes. Its forms retain displayed source/revision/Schema/selection/image-choice facts and
+revalidate at activation and final submission. Local text, focus and choice state cannot retarget
+another source or create a second history owner. The original panel submission ledger supplies
+exact results; replacing a panel or projection retires its input. Specialized property gestures
+and Canvas geometric authority keep their separate qualification and owners.
 
 The Canvas uses the independent render-view lifecycle refined by ADRs 0117/0118, not a permanent
 mutually exclusive Authoring/Game slot. It gains geometric input authority only from the exact

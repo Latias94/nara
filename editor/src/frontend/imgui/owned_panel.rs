@@ -82,6 +82,7 @@ impl ImguiEditorFrontend {
         frame: &Arc<UiFrame>,
         dispatch: &UiDispatchBatch,
         model: &EditorFrameModel,
+        ui_authoring: Option<&nara::project_host::EditorUiAuthoringFrame>,
         clipboard: &mut dyn FnMut(&str) -> Result<(), String>,
     ) -> Result<(), String> {
         let widgets = self
@@ -107,7 +108,13 @@ impl ImguiEditorFrontend {
                     break;
                 }
                 if let Some(submission) = hierarchy
-                    .activate(frame, intent.target(), model, widgets.hierarchy_read_only)
+                    .activate(
+                        frame,
+                        intent.target(),
+                        model,
+                        ui_authoring,
+                        widgets.hierarchy_read_only,
+                    )
                     .map_err(|error| error.to_string())?
                 {
                     widgets.hierarchy_pending.push(submission);
@@ -316,6 +323,18 @@ impl ImguiEditorFrontend {
                 .map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+
+    pub(crate) fn owned_escape(
+        &mut self,
+        panel: EditorPanelInstanceId,
+        frame: &Arc<UiFrame>,
+    ) -> Result<bool, String> {
+        self.presentation
+            .widgets
+            .get_mut(&panel)
+            .and_then(|widgets| widgets.owned_hierarchy.as_mut())
+            .map_or(Ok(false), |hierarchy| hierarchy.escape(frame))
     }
 
     pub(crate) fn owned_field_token(

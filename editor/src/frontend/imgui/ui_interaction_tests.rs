@@ -27,6 +27,8 @@ use nara::{
 use super::ImguiEditorFrontend;
 use crate::{EditorApplication, EditorLaunchOptions};
 
+pub(super) mod owned;
+
 const IMAGE: &str = "textures/player.png";
 
 thread_local! {
@@ -236,6 +238,7 @@ struct UiInteraction {
     application: EditorApplication,
     frontend: ImguiEditorFrontend,
     context: Context,
+    owned_input: owned::CpuOwnedInput,
 }
 
 impl UiInteraction {
@@ -277,6 +280,7 @@ impl UiInteraction {
             application,
             frontend: ImguiEditorFrontend::new(),
             context,
+            owned_input: owned::CpuOwnedInput::default(),
         };
         for _ in 0..4 {
             interaction.render();
@@ -343,6 +347,42 @@ impl UiInteraction {
         for _ in 0..3 {
             self.render();
         }
+    }
+
+    fn click_hierarchy(&mut self, name: &str) {
+        self.render();
+        let panel = owned::hierarchy_panel(&self.application);
+        let frame = owned::hierarchy_frame(&self.frontend, &self.application);
+        if !owned::button_visible(&frame, name) {
+            self.frontend
+                .scroll_owned_panel(panel, &frame, -f32::MAX)
+                .unwrap();
+            self.render();
+        }
+        for _ in 0..128 {
+            let frame = owned::hierarchy_frame(&self.frontend, &self.application);
+            if owned::button_visible(&frame, name) {
+                assert!(self.owned_input.click(
+                    &mut self.frontend,
+                    &self.application,
+                    &frame,
+                    name,
+                ));
+                for _ in 0..3 {
+                    self.render();
+                }
+                return;
+            }
+            let step = frame.environment().logical_size().height() * 0.75;
+            assert!(
+                self.frontend
+                    .scroll_owned_panel(panel, &frame, step)
+                    .unwrap(),
+                "missing UI Hierarchy Button {name:?}"
+            );
+            self.render();
+        }
+        panic!("UI Hierarchy Button {name:?} stayed clipped after 128 scroll steps");
     }
 
     fn press(&mut self, key: Key) {
@@ -472,7 +512,7 @@ fn specialized_ui_prefab_widgets_cancel_edit_select_image_and_save_reopen_source
             .len(),
         1
     );
-    interaction.click("ui-entity:image-node");
+    interaction.click_hierarchy("Select UI image-node");
     interaction.cancel_scalar_drag();
     assert_eq!(
         fs::read(&source).unwrap(),
@@ -496,14 +536,11 @@ fn specialized_ui_prefab_widgets_cancel_edit_select_image_and_save_reopen_source
         UiAuthoringFieldValue::Bool(false)
     );
 
-    interaction.click("Add UI node");
-    interaction.click("Node kind");
-    interaction.press(Key::DownArrow);
-    interaction.press(Key::DownArrow);
-    interaction.press(Key::Enter);
-    interaction.click("Create image");
-    interaction.click(&format!("create-image:{IMAGE}"));
-    interaction.click("Apply structure change");
+    interaction.click_hierarchy("Add UI node");
+    interaction.click_hierarchy("Kind: Image");
+    interaction.click_hierarchy("Choose image");
+    interaction.click_hierarchy(&format!("Image: {IMAGE}"));
+    interaction.click_hierarchy("Apply structure change");
     let authoring = interaction.authoring();
     let created = authoring
         .selection()
@@ -514,8 +551,8 @@ fn specialized_ui_prefab_widgets_cancel_edit_select_image_and_save_reopen_source
     assert!(authoring.projection().unwrap().hierarchy().iter()
         .any(|node| node.entity() == &created && node.kind() == UiAuthoringHierarchyKind::Image));
     assert_eq!(interaction.undo_depth(), 2);
-    interaction.click("Delete subtree");
-    interaction.click("Apply structure change");
+    interaction.click_hierarchy("Delete subtree");
+    interaction.click_hierarchy("Apply structure change");
     assert!(
         !interaction
             .authoring()

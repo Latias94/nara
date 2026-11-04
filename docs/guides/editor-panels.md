@@ -32,8 +32,20 @@ Long source identifiers use shortened display labels while commands retain their
 The panel builds controls for its visible source/choice rows and retains their source identities separately
 from placement. Inspector drafts remain owned by their original fields when filtering hides the
 selected row. Parent/order/removal choices retain their displayed source basis and cannot
-retarget after another entity or document is selected. Specialized UI trees retain their
-existing frontend.
+retarget after another entity or document is selected.
+
+For a UI Prefab, the Hierarchy uses the specialized UI projection's exact source topology.
+Select a UI row, then use Add UI node, Move subtree or Delete subtree. Creation offers Container,
+Text, Image and Button. Choose placement lists the owner's legal parent/sibling positions;
+Image creation requires a current project image and Button creation requires a valid Action.
+Text and label input remain local until Apply structure change publishes one document edit.
+Cancel structure change discards the form; Escape closes an open chooser before cancelling its
+form. Protected roots and subtrees with omitted source records explain their read-only status.
+Source, selection, Schema, image-catalog or permission changes retire the original form. A refused
+or undispatched operation reports its original result and permits explicit retry when its basis
+is still current. Scrolling builds only visible tree and choice controls and does not alter
+selection or document history. The specialized Inspector and Canvas keep their separate controls
+and original continuous-gesture/geometric admission.
 
 The Inspector's default `Document` tab uses Nara-drawn controls for ordinary Scene and Prefab
 documents. Use Add Component to inspect the admitted creation choices, then Add with the

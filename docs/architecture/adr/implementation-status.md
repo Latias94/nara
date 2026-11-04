@@ -135,6 +135,18 @@ and visible-count observations belong to the owning unit. This closes neither sp
 and workspace replacement nor offscreen keyboard traversal, measured full scanning/idle/allocation/
 GPU costs, actual OS IME/accessibility or broader R11/R12/foundation qualification.
 
+The [specialized UI Hierarchy successor](../../plans/2026-11-04-owned-inspector-and-editable-text-plan.md#specialized-ui-hierarchy-successor)
+replaces the UI Prefab tree and complete creation/move/delete forms with Nara controls through
+the original UI projection, structural lowering and Session history. Typed source/placement and
+image-generation facts are revalidated before activation and queue admission; exact results
+retain explicit retries and cannot attach to replacement forms. Its shared text prerequisite
+publishes opaque complete-source editing snapshots and prepares placed raster-accurate glyph
+windows under the existing input/output ceilings, retaining 4,096-byte creation text. Hidden
+draws still enforce receiving raster policy. The owning unit records scoped tests and corrected
+counterexamples, including actual pending-frame Source/UI replacement and chooser keyboard
+ownership. Specialized Inspector/Canvas controls, workspace replacement, measured costs and
+actual OS/platform qualification remain open; full R11/R12 and the foundation Goal stay active.
+
 The [joint motion unit](../../plans/2026-11-03-joint-motion-execution-plan.md) now compares public
 sets, a private finite phase plan and Bevy App with the same independent animation/real-solver
 consumer. Production automatic schedules explicitly use Bevy's serial executor instead of its

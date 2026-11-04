@@ -227,6 +227,17 @@ impl CanvasWorkflow<'_> {
         self.click_point(point)
     }
 
+    fn hierarchy_click(&mut self, name: &str) -> Result<(), String> {
+        self.presents += super::authoring_workflow_tests::hierarchy_click(
+            self.native,
+            self.application,
+            self.event_loop,
+            &mut self.pointer,
+            name,
+        )?;
+        Ok(())
+    }
+
     fn owned_root_button_position(
         &self,
         name: &str,
@@ -482,6 +493,212 @@ impl CanvasWorkflow<'_> {
             }))
     }
 
+    fn cancel_structure_forms(&mut self) -> Result<(), String> {
+        let baseline = self.authoring()?;
+        let history = self.history()?;
+        let panel = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.hierarchy")
+            .ok_or("the Canvas fixture has no Hierarchy panel")?
+            .id();
+        for kind in ["Text", "Button", "Container"] {
+            self.hierarchy_click("Add UI node")?;
+            self.hierarchy_click(&format!("Kind: {kind}"))?;
+            let (_, frame, image) = self
+                .native
+                .owned_frames_for_test()
+                .into_iter()
+                .find(|(instance, _, _)| *instance == panel)
+                .ok_or("the UI Hierarchy form has no confirmed native image")?;
+            if image.occurrence.is_none() || !frame.diagnostics().is_empty() {
+                return Err("the UI Hierarchy form is unconfirmed or contains diagnostics".into());
+            }
+            let fields: &[&str] = match kind {
+                "Text" => &["Text"],
+                "Button" => &["Label", "Action"],
+                _ => &[],
+            };
+            for field in fields {
+                if !frame
+                    .semantics()
+                    .iter()
+                    .any(|node| node.role() == UiSemanticRole::TextInput && node.name() == *field)
+                {
+                    return Err(format!("the native {kind} form has no TextInput {field:?}"));
+                }
+            }
+            self.hierarchy_click("Choose placement")?;
+            self.hierarchy_click("Placement: ui-root / after image-node")?;
+            self.hierarchy_click("Cancel structure change")?;
+            let current = self.authoring()?;
+            if current.projection() != baseline.projection()
+                || current.revision() != baseline.revision()
+                || current.selection() != baseline.selection()
+                || self.history()? != history
+            {
+                return Err(format!(
+                    "cancelling the native {kind} form changed source, selection or history"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn hierarchy_key(&mut self, key: winit::keyboard::NamedKey) -> Result<(), String> {
+        for state in [ElementState::Pressed, ElementState::Released] {
+            if !self
+                .native
+                .owned_key(
+                    self.native.window.id(),
+                    winit::keyboard::Key::Named(key),
+                    None,
+                    state,
+                    false,
+                    self.application,
+                )
+                .map_err(|error| error.to_string())?
+            {
+                return Err(format!(
+                    "the native Hierarchy lost keyboard ownership before {key:?}"
+                ));
+            }
+        }
+        for _ in 0..3 {
+            self.paint(|_| {})?;
+        }
+        Ok(())
+    }
+
+    fn hierarchy_escape_keeps_keyboard_ownership(&mut self) -> Result<(), String> {
+        use winit::keyboard::NamedKey;
+        let baseline = self.authoring()?;
+        let history = self.history()?;
+        self.hierarchy_click("Add UI node")?;
+        self.hierarchy_click("Choose placement")?;
+        self.hierarchy_key(NamedKey::Escape)?;
+        self.hierarchy_key(NamedKey::Tab)?;
+        let (panel, key) = self
+            .native
+            .owned_focused_control_for_test()
+            .ok_or("Tab after chooser Escape did not focus a native Hierarchy control")?;
+        let (_, frame, _) = self
+            .native
+            .owned_frames_for_test()
+            .into_iter()
+            .find(|(owner, _, _)| *owner == panel)
+            .ok_or("keyboard Hierarchy is not presented")?;
+        if !frame
+            .semantics()
+            .iter()
+            .any(|node| node.key() == &key && node.name() == "Cancel structure change")
+        {
+            return Err(
+                "Tab after chooser Escape did not reach the original form's Cancel button".into(),
+            );
+        }
+        self.hierarchy_key(NamedKey::Enter)?;
+        self.hierarchy_click("Add UI node")?;
+        self.hierarchy_click("Choose placement")?;
+        self.hierarchy_key(NamedKey::Escape)?;
+        self.hierarchy_key(NamedKey::Escape)?;
+        let current = self.authoring()?;
+        if current.projection() != baseline.projection()
+            || current.revision() != baseline.revision()
+            || current.selection() != baseline.selection()
+            || self.history()? != history
+        {
+            return Err(
+                "keyboard chooser/form cancellation changed UI source, selection or history".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn create_and_undo_typed_forms(&mut self) -> Result<(), String> {
+        let baseline = self.authoring()?;
+        let history = self.history()?;
+        let full_text = format!("{}文本", "x".repeat(4090));
+        let full_label = format!("{}确认", "y".repeat(4090));
+        assert_eq!(full_text.len(), 4096);
+        assert_eq!(full_label.len(), 4096);
+        for (name, kind, input) in [
+            ("Container", UiAuthoringHierarchyKind::Container, &[][..]),
+            (
+                "Text",
+                UiAuthoringHierarchyKind::Text,
+                &[("Text", "Created 文本")][..],
+            ),
+            (
+                "Text",
+                UiAuthoringHierarchyKind::Text,
+                &[("Text", full_text.as_str())][..],
+            ),
+            (
+                "Button",
+                UiAuthoringHierarchyKind::Button,
+                &[("Label", full_label.as_str()), ("Action", "ui.confirm")][..],
+            ),
+        ] {
+            self.hierarchy_click("Add UI node")?;
+            self.hierarchy_click(&format!("Kind: {name}"))?;
+            for &(field, text) in input {
+                self.presents += super::authoring_workflow_tests::hierarchy_replace_text(
+                    self.native,
+                    self.application,
+                    self.event_loop,
+                    &mut self.pointer,
+                    field,
+                    text,
+                )?;
+            }
+            self.hierarchy_click("Apply structure change")?;
+            let created = self.authoring()?;
+            let entity = created
+                .selection()
+                .top_entity()
+                .ok_or("UI creation did not select its new declaration")?;
+            let projection = created.projection().map_err(|error| error.to_string())?;
+            if !projection
+                .hierarchy()
+                .iter()
+                .any(|row| row.entity() == entity && row.kind() == kind)
+                || projection.hierarchy().len()
+                    != baseline
+                        .projection()
+                        .map_err(|error| error.to_string())?
+                        .hierarchy()
+                        .len()
+                        + 1
+                || self.history()? != history + 1
+            {
+                return Err(format!(
+                    "the native {name} form did not publish one complete recipe and history entry"
+                ));
+            }
+            for &(field, text) in input {
+                if !projection.fields().iter().any(|descriptor| descriptor.key().entity() == entity && descriptor.label() == if field == "Text" { "Content" } else { field }
+                    && matches!(descriptor.value(), UiAuthoringFieldValue::Text(value) | UiAuthoringFieldValue::Action(value) if value == text))
+                { return Err(format!("the native {name} recipe lost its exact {field} value")); }
+            }
+            self.click("Undo")?;
+            let undone = self.authoring()?;
+            if undone.projection() != baseline.projection() || self.history()? != history {
+                return Err(format!(
+                    "Undo did not restore the exact source after native {name} creation"
+                ));
+            }
+            // Document selection is Session-owned; restore the original row through its real control.
+            if let Some(selected) = baseline.selection().top_entity() {
+                self.hierarchy_click(&format!("Select UI {}", selected.as_str()))?;
+            }
+        }
+        Ok(())
+    }
+
     fn edit_specialized_fields_and_structure(&mut self) -> Result<String, String> {
         let history = self.history()?;
         self.click("ui-field:image-node:style.visible")?;
@@ -499,14 +716,14 @@ impl CanvasWorkflow<'_> {
             return Err("Redo did not restore the edited bool field".to_owned());
         }
         self.check_history(history + 1, "redoing the bool field")?;
-        self.click("Add UI node")?;
-        self.click("Node kind")?;
-        self.press(Key::DownArrow)?;
-        self.press(Key::DownArrow)?;
-        self.press(Key::Enter)?;
-        self.click("Create image")?;
-        self.click(&format!("create-image:{IMAGE}"))?;
-        self.click("Apply structure change")?;
+        self.cancel_structure_forms()?;
+        self.hierarchy_escape_keeps_keyboard_ownership()?;
+        self.create_and_undo_typed_forms()?;
+        self.hierarchy_click("Add UI node")?;
+        self.hierarchy_click("Kind: Image")?;
+        self.hierarchy_click("Choose image")?;
+        self.hierarchy_click(&format!("Image: {IMAGE}"))?;
+        self.hierarchy_click("Apply structure change")?;
         let created = self
             .authoring()?
             .selection()
@@ -517,8 +734,8 @@ impl CanvasWorkflow<'_> {
             return Err("the real create widget did not create a distinct Image".to_owned());
         }
         self.check_history(history + 2, "creating the chosen Image")?;
-        self.click("Delete subtree")?;
-        self.click("Apply structure change")?;
+        self.hierarchy_click("Delete subtree")?;
+        self.hierarchy_click("Apply structure change")?;
         if self.has_image(&created)? {
             return Err("the real delete widget left the new Image present".to_owned());
         }
@@ -704,6 +921,155 @@ impl CanvasWorkflow<'_> {
         Err("the widget-requested persistence operation did not finish".to_owned())
     }
 
+    fn reopen_without_native_paint(&mut self) -> Result<(), String> {
+        use nara::tooling::{
+            EditorAction, EditorActionBatch, EditorPersistenceAction, EditorPersistenceView,
+        };
+        let frame = self
+            .application
+            .current_frame()
+            .ok_or("the source has no published frame")?;
+        self.application.submit_and_drive(
+            EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                    target: frame.reopen_target(),
+                })],
+            ),
+            Duration::ZERO,
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            self.application.advance(Duration::ZERO);
+            let frame = self
+                .application
+                .current_frame()
+                .ok_or("Reopen lost the Editor frame")?;
+            if let EditorPersistenceView::Terminal { attempt, result } = frame.persistence() {
+                if !matches!(result, EditorPersistenceResult::Opened { .. }) {
+                    return Err(format!("projection Reopen did not succeed: {result:?}"));
+                }
+                self.application.submit_and_drive(
+                    EditorActionBatch::new(
+                        frame.revision(),
+                        [EditorAction::Persistence(
+                            EditorPersistenceAction::AcknowledgeResult { attempt },
+                        )],
+                    ),
+                    Duration::ZERO,
+                );
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err("projection Reopen did not finish without a native paint".into());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn switch_projection_with_pending_native_frames(
+        &mut self,
+        source: &Path,
+    ) -> Result<(), String> {
+        let saved = fs::read(source).map_err(|error| error.to_string())?;
+        let mut ordinary: serde_json::Value =
+            serde_json::from_slice(&saved).map_err(|error| error.to_string())?;
+        for entity in ordinary["payload"]["entities"]
+            .as_array_mut()
+            .ok_or("the UI source has no entity records")?
+        {
+            entity["components"]
+                .as_object_mut()
+                .ok_or("the UI entity has no component map")?
+                .clear();
+        }
+        let ordinary = serde_json::to_vec(&ordinary).map_err(|error| error.to_string())?;
+        let document = self.authoring()?.document();
+        let panel = self
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|instance| instance.kind() == "nara.hierarchy")
+            .ok_or("the native fixture has no Hierarchy")?
+            .id();
+        for (name, bytes, expect_ui) in [
+            ("Add UI node", ordinary.as_slice(), false),
+            ("Parent", saved.as_slice(), true),
+        ] {
+            if name == "Parent" {
+                self.hierarchy_click("Select ui-root")?;
+            }
+            self.presents += super::authoring_workflow_tests::hierarchy_leave_pending_click(
+                self.native,
+                self.application,
+                self.event_loop,
+                &mut self.pointer,
+                name,
+            )?;
+            let pending = self
+                .native
+                .owned_pending_frame_for_test(panel)
+                .ok_or("the original projection has no pending native candidate")?;
+            let (_, displayed, _) = self
+                .native
+                .owned_frames_for_test()
+                .into_iter()
+                .find(|(owner, _, _)| *owner == panel)
+                .ok_or("the original projection has no current native display")?;
+            if Arc::ptr_eq(&pending, &displayed) {
+                return Err(
+                    "projection switch must retain a genuinely unpresented candidate".into(),
+                );
+            }
+            fs::write(source, bytes).map_err(|error| error.to_string())?;
+            self.reopen_without_native_paint()?;
+            let frame = self
+                .application
+                .current_frame()
+                .ok_or("projection switch lost its source")?;
+            if frame.workspace().active_document != Some(document)
+                || self.application.current_ui_authoring_frame().is_some() != expect_ui
+            {
+                return Err("Reopen did not change projection within the original document".into());
+            }
+            // The native prepare stage receives the old candidate before the new controller paints.
+            self.paint(|_| {})?;
+            if self
+                .native
+                .owned_frames_for_test()
+                .iter()
+                .any(|(owner, _, _)| *owner == panel)
+            {
+                return Err(
+                    "the replacement controller presented a frame from the retired projection"
+                        .into(),
+                );
+            }
+            for _ in 0..4 {
+                self.paint(|_| {})?;
+            }
+            let (_, frame, _) = self
+                .native
+                .owned_frames_for_test()
+                .into_iter()
+                .find(|(owner, _, _)| *owner == panel)
+                .ok_or("the replacement projection did not present its own frame")?;
+            let expected = if expect_ui { "Add UI node" } else { "+ Root" };
+            if !frame.semantics().iter().any(|node| node.name() == expected) {
+                return Err("the replacement native Hierarchy has the wrong controls".into());
+            }
+        }
+        self.settle_canvas()?;
+        if fs::read(source).map_err(|error| error.to_string())? != saved || self.history()? != 0 {
+            return Err(
+                "projection retirement changed the exact restored source or history".into(),
+            );
+        }
+        Ok(())
+    }
+
     fn run(mut self, project: &Path) -> Result<CanvasWorkflowObservation, String> {
         let source = project.join("prefabs/ui.prefab.json");
         let scene = project.join("scenes/startup.scene.json");
@@ -714,13 +1080,7 @@ impl CanvasWorkflow<'_> {
         for _ in 0..6 {
             self.paint(|_| {})?;
         }
-        self.presents += super::authoring_workflow_tests::hierarchy_click(
-            self.native,
-            self.application,
-            self.event_loop,
-            &mut self.pointer,
-            "Select ui-anchor",
-        )?;
+        self.hierarchy_click("Select ui-anchor")?;
         self.click_owned_root_button("Open Prefab Source")?;
         self.settle_canvas()?;
         let baseline = self.layout()?;
@@ -854,6 +1214,8 @@ impl CanvasWorkflow<'_> {
         if reopened_source != stored {
             return Err("Reopen modified the saved UI source".to_owned());
         }
+        self.click("Dismiss persistence result")?;
+        self.switch_projection_with_pending_native_frames(&source)?;
         Ok(CanvasWorkflowObservation {
             picked,
             layouts: [baseline, moved, resized, undone, redone, self.layout()?],

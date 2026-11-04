@@ -854,3 +854,142 @@ The ordinary Dear source-list/composition/removal painters are removed. Speciali
 panels, the document/workspace shell, keyboard traversal to uninstantiated rows, full scanning/
 allocation/idle/GPU costs, actual OS IME/candidate placement, assistive technology and broader
 native platform/DPI support remain open. Full R11/R12 and the foundation Goal remain active.
+
+## Specialized UI Hierarchy successor
+
+Replace the specialized UI Prefab tree and complete Container/Text/Image/Button creation,
+source-local move and subtree deletion forms with Nara controls. Keep the specialized Inspector's
+continuous gestures and the Canvas as separate subsequent consumers. Unlike the ordinary source
+declaration list, the UI tree consumes the existing complete `UiAuthoringProjection` hierarchy.
+Its legal parent/sibling choices, protected roots, omitted-source-descendant and cycle guards
+remain owned by that projection. Only `EditorUiAuthoringFrame::lower_structure_intent` produces
+the submitted mutation; no frontend patch builder or persistent ID allocator is introduced.
+
+A Hierarchy panel owns either the ordinary source projection or this specialized UI projection.
+They share the existing hosted image/input bridge and ordered result ledger. Switching projection
+retires the previous controller, queued observations, focus and composition. Capture source
+incarnation/revision, nominal Schema, selection, image-choice generation and editing permissions
+at presentation and revalidate at activation and final queue admission. A late result belongs only
+to its original submission and live panel incarnation. Refused or undispatched work leaves an
+explicit recoverable form; it cannot retarget the latest selection or silently repair placement.
+
+Use visible rows for tree, placement and image choices, bounded display text with complete typed
+IDs, and the shared local text widgets for creation parameters. A chooser returns to its intact
+form; Cancel/Escape withdraw local input before publication. Composition and invalid/oversized
+text remain outside source/history. Compact form actions remain reachable. Preserve the original
+four recipes and preparation errors, logical selection, exact source records, one Undo/Redo and
+Save/Reopen. A pending or stale image choice cannot borrow a newer project-content generation.
+
+Pinned Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558` separates
+[tree selection](../../repo-ref/godot/editor/scene/scene_tree_editor.cpp) from
+[creation, reparent and undo integration](../../repo-ref/godot/editor/docks/scene_tree_dock.cpp).
+Consume that separation of responsibility; Nara's owner-provided recipes/topology replace neither
+themselves nor their original Session custody with Godot's object model.
+
+Migrate the current CPU UI editing/structure and actual Windows/DX12 Canvas workflow to the
+real compiled controls and native input without synthetic Dear aliases or direct-mutation
+substitutes. Preserve Inspector scalar cancellation, Canvas pick/move/resize, history and content
+refresh assertions. Add complete form, stale-basis/result, compact/text-lifetime and visible-row
+controls, then remove the displaced Dear tree/forms and their raw action-index observation state.
+Document actual qualified scope; this does not complete specialized properties, Canvas chrome,
+workspace replacement, measured costs, OS IME/accessibility/DPI or full R11/R12/foundation.
+
+The replacement preserves the creation owner's 4,096-byte Text and Button-label capacity.
+Reducing local fields to 1,024 bytes would avoid a full-layout-plus-chrome glyph overflow but
+would fail that contract. Instead, the shared text owner publishes an opaque immutable display
+snapshot with its complete ordered font provenance and adopted editing layout. The compiler
+admits the complete source, measures its full dimensions and prepares only original positioned
+glyphs intersecting the final paint window. Target scale, subpixel phase and actual raster ink
+placement must match the renderer, including combining marks and overhang. Selection, IME,
+point placement and local history continue to use the complete editing buffer and layout.
+Repeated draws still pay output glyphs separately; source reuse performs no new shaping, while
+bounded full-layout scanning and raster preparation remain actual work. This is a capacity and
+correctness prerequisite, not a measured performance improvement or a larger shared hard limit.
+
+## Specialized UI Hierarchy qualification
+
+Qualified on November 4 with Rust 1.95.0, Windows/DX12, serial Cargo, `CARGO_BUILD_JOBS=1`,
+the root `target` and the configured `simhei.ttf` fallback. The owning/API and native results
+remain separate from actual OS IME event delivery or platform support.
+
+The shared text/kernel/widgets/render suite passes 225/225 with no skips
+(`76c6fb2e-0999-4bcd-ad45-f553d288be2b`). Two complete 4,096-byte fields compile beside real
+chrome. Snapshot tests preserve complete source, local history, composition and ordered fallback
+provenance; stricter receiving policies and failed windows retain usable predecessors. Candidate
+input is charged across roots and repeated draws retain separate output charges. Actual packet
+mask comparisons cover bidi, ligatures, zero-advance marks and ink overhang at 1.25/1.5 scale.
+Excluded glyphs do not consume renderer key/atlas admission; retained packet pixels survive the
+text owner and planner. This is a CPU packet-mask oracle, not native framebuffer readback.
+
+Independent review exposed one shared-policy defect: a fully clipped prepared node bypassed
+raster extent admission. The new regression fails on the original code
+(`2c7104bc-a382-48e4-aea9-3808956d9263`, Published instead of RetainedVisual). Window preparation
+now precedes visibility/empty-content short-circuits at the exact resolved draw origin. Hidden,
+fully clipped, zero-width, empty padded content and invisible-parent controls pass in the final
+shared suite; the bounded follow-up review reports no remaining scoped P1/P2.
+
+The first focused Editor run passes 57/58 (`d102433c-5636-4ac9-834e-ef96ec1ec8c2`). Its one failure
+waited for Browser indexing in the trusted compiled lane, which does not own that index. The
+corrected fixture uses an ordinary Browser/Import Session for the actual reimport and waits for
+its physical close. The original trusted Session publishes its refreshed catalog through Save
+without changing the captured source revision. Both activation and final submission still refuse
+the old image generation. No synthetic catalog or relaxed timeout replaces that workflow.
+
+The complete native Canvas trajectory and corrected image-generation control pass 2/2
+(`f9018ac3-d199-4031-b2ff-9bc3dd8755dc`). Creation covers Container, short multilingual Text,
+full 4,096-byte Text and full 4,096-byte Button label with exact Action, each with one document
+edit and exact Undo. The chosen Image retains create/delete/Undo/Redo and Save/Reopen. Existing
+Canvas picking/move/resize, continuous Inspector Escape cancellation, content refresh and
+unrelated-source assertions remain in the same trajectory. An earlier native run requested an
+equivalent `last` placement that the owner had deduplicated to `after image-node`; the test now
+activates the actual offered placement without changing the owner's legal choices.
+
+Adapter review also corrected promotion of a predecessor's pending frame after a Source/UI
+controller replacement. The native image filter requires membership in the current controller's
+retained frames; omission invalidates the original route before new presentation. The actual
+same-document Reopen test leaves genuinely unpresented candidates in both directions and proves
+neither is exposed by the replacement. Chooser Escape now retains keyboard ownership; actual
+Tab/Enter and successive Escape controls preserve exact source, selection and history.
+
+The complete ordinary Editor library and selected public integrations pass 400/400, 54 skipped
+(`fe0694e9-dc52-46ff-9e9a-cd6d85b53ed5`). This includes all 58 focused source/UI Hierarchy,
+structural, Canvas-admission and preserved specialized-property controls. The independently
+compiled UI-only workspace passes 7/7, with no ECS, Scene or renderer dependency
+(`801bbeef-1cc6-4b37-b9d2-046dc243456c`). The shared text prerequisite is committed as `26f593c`.
+
+In the first expanded native cohort, the retained-input/capacity-recovery trajectory takes 88.998 seconds.
+Record that elapsed observation for follow-up attribution; this run is not an isolated cost
+comparison and does not establish a CPU, raster, allocation or idle improvement. Prepared draws
+still scan complete admitted layouts and rasterize distinct placed keys. Profile that work in
+the remaining R11 cost unit before making performance claims.
+
+The first expanded native cohort passes 38/40 (`e7904b50-37e7-4dd7-a5eb-8a8b47bacddc`). Its newly
+included Play/source-continuity fixture incorrectly demanded an ordinary Scene display after
+opening a UI Prefab had replaced it with the Canvas. That stage now requires the exact current
+Canvas and Game composites in the same native frame; initial and post-close observations still
+require the ordinary Nara Scene. Play/source/close assertions and waiting bounds are unchanged.
+The same cohort observes one extra redraw in the strict quiet-exit proof. Its unchanged focused
+rerun passes (`61a27905-1b38-4c04-9666-121c425c200a`); retain the first failure rather than treating
+that rerun as a complete-group result. No quiet-exit assertion is removed or relaxed.
+
+The independent panel/document/tool workspace passes 46/46, four skipped
+(`c57b0f44-5f96-4e79-bcf0-0db27f85d579`). The caller-owned native Host executes and closes normally
+through the public embedding entry, 1/1 (`97b0a351-07ec-4136-a8c6-fbe743e4f600`). These consumers
+retain their independent Cargo workspaces and share only the root build directory.
+
+The final expanded Windows/DX12 cohort passes 40/40, one slow and 402 unselected
+(`4abc9031-79bf-42fa-894f-8e2267344551`). It includes the corrected Scene/Canvas/Play continuity
+and unchanged quiet-exit proof, ordinary and specialized Hierarchy, all selected Inspector/tool
+consumers, live Scene output, cadence, Game input/Step, view reconstruction, image reimport and
+native retirement. The native cases execute with one test thread; these counts do not imply
+actual OS candidate-window delivery, accessibility, detached-window DPI or another platform.
+
+The displaced Dear UI tree/forms and raw action-index observation state are removed. Specialized
+Inspector gestures and Canvas chrome, workspace replacement, offscreen keyboard traversal,
+complete scan/allocation/raster/idle cost attribution and broader OS/platform evidence remain
+open. Full R11/R12 and the foundation Goal stay active.
+
+Final Editor build, all-target/all-feature `-D clippy::correctness`, root formatting and both
+independent-workspace formatting checks pass; existing warnings remain. Diff checks pass and
+1,278 relative file links resolve across the ten affected current architecture/guide/plan sources.
+No registry snapshot or separate verification document is added for this unit.

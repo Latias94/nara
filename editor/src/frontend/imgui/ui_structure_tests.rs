@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dear_imgui_rs::{ConfigFlags, Context, Key, MouseButton};
+use dear_imgui_rs::{ConfigFlags, Context, MouseButton};
 use nara::{
     project_host::{EditorUiAuthoringFrame, TrustedCompiledEditorProjectIntent},
     scene::{
@@ -22,7 +22,9 @@ use serde_json::{Value, json};
 
 use super::{
     ImguiEditorFrontend,
-    ui_interaction_tests::{UiProject, clear_controls, control_rect, setup_ui_prefab_source},
+    ui_interaction_tests::{
+        UiProject, clear_controls, control_rect, owned, setup_ui_prefab_source,
+    },
 };
 use crate::{EditorApplication, EditorLaunchOptions};
 
@@ -30,6 +32,7 @@ struct StructureInteraction {
     application: EditorApplication,
     frontend: ImguiEditorFrontend,
     context: Context,
+    owned_input: owned::CpuOwnedInput,
 }
 
 impl StructureInteraction {
@@ -70,6 +73,7 @@ impl StructureInteraction {
             application,
             frontend: ImguiEditorFrontend::new(),
             context,
+            owned_input: owned::CpuOwnedInput::default(),
         };
         for _ in 0..4 {
             interaction.render();
@@ -124,15 +128,44 @@ impl StructureInteraction {
         }
     }
 
-    fn press(&mut self, key: Key) {
-        self.context.io_mut().add_key_event(key, true);
+    fn click_hierarchy(&mut self, name: &str) {
         self.render();
-        self.context.io_mut().add_key_event(key, false);
-        self.render();
+        let panel = owned::hierarchy_panel(&self.application);
+        let frame = owned::hierarchy_frame(&self.frontend, &self.application);
+        if !owned::button_visible(&frame, name) {
+            self.frontend
+                .scroll_owned_panel(panel, &frame, -f32::MAX)
+                .unwrap();
+            self.render();
+        }
+        for _ in 0..128 {
+            let frame = owned::hierarchy_frame(&self.frontend, &self.application);
+            if owned::button_visible(&frame, name) {
+                assert!(self.owned_input.click(
+                    &mut self.frontend,
+                    &self.application,
+                    &frame,
+                    name,
+                ));
+                for _ in 0..3 {
+                    self.render();
+                }
+                return;
+            }
+            let step = frame.environment().logical_size().height() * 0.75;
+            assert!(
+                self.frontend
+                    .scroll_owned_panel(panel, &frame, step)
+                    .unwrap(),
+                "missing UI Hierarchy Button {name:?}"
+            );
+            self.render();
+        }
+        panic!("UI Hierarchy Button {name:?} stayed clipped after 128 scroll steps");
     }
 
     fn move_group_after(&mut self, parent: &str, sibling: &str) {
-        self.click("ui-entity:moving-group");
+        self.click_hierarchy("Select UI moving-group");
         let authoring = self.authoring();
         let candidates = authoring
             .projection()
@@ -157,21 +190,10 @@ impl StructureInteraction {
         assert_ne!(current, destination);
         let revision = authoring.revision().generation();
         let history = self.undo_depth();
-        self.click("Move subtree");
-        self.click("Placement");
-        let key = if destination > current {
-            Key::DownArrow
-        } else {
-            Key::UpArrow
-        };
-        for _ in 0..destination.abs_diff(current) {
-            self.press(key);
-        }
-        self.press(Key::Enter);
-        for _ in 0..3 {
-            self.render();
-        }
-        self.click("Apply structure change");
+        self.click_hierarchy("Move subtree");
+        self.click_hierarchy("Choose placement");
+        self.click_hierarchy(&format!("Placement: {parent} / after {sibling}"));
+        self.click_hierarchy("Apply structure change");
         assert_eq!(self.authoring().revision().generation(), revision + 1);
         assert_eq!(self.undo_depth(), history + 1);
         assert_eq!(

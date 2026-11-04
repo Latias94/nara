@@ -158,6 +158,26 @@ GPU cost. Specialized UI trees, keyboard traversal to uninstantiated rows, the w
 actual OS IME/candidate placement, assistive technology and broader platform/DPI evidence remain
 separate requirements.
 
+For the specialized UI tree and creation forms, also run the existing complete Canvas trajectory:
+
+```powershell
+$env:NARA_EDITOR_CJK_FONT='C:\Windows\Fonts\simhei.ttf'
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_canvas_widgets_pick_move_resize_and_save_reopen_real_source)' --test-threads=1
+```
+
+Its structure controls now use the confirmed Nara Hierarchy image and Winit pointer/text ingress.
+The test opens and cancels typed forms, creates Container/Text/Button recipes with exact parameter
+values and undoes each, then creates the selected Image, deletes/undoes/redoes it and saves/reopens
+the original Prefab with that one new Image. Text and Button label creation include the complete
+4,096-byte capacity through native committed input. Chooser Escape retains keyboard ownership for
+Tab/Enter or another Escape. Reopen switches the same document in both directions between ordinary
+and specialized projections with a genuinely unpresented native candidate; neither replacement
+may present or route input through the retired controller's frame.
+The same trajectory retains actual Canvas picking,
+move/resize, continuous Inspector Escape cancellation, ordinary history, unrelated source bytes
+and project-content refresh assertions. The specialized Inspector and Canvas themselves are
+separate frontend consumers; this tree/form result does not imply their Nara replacement.
+
 ## Nara Scene Integration
 
 For the Nara-drawn ordinary Scene toolbar and viewport, run the direct-sampling trajectories:

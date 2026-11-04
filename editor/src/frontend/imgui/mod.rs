@@ -20,6 +20,7 @@ mod owned_hierarchy_panel;
 mod owned_inspector;
 mod owned_panel;
 mod owned_scene;
+mod owned_ui_hierarchy;
 pub(crate) use owned_inspector::InspectorOperation;
 pub(crate) use owned_panel::ImguiOwnedImage;
 pub(crate) use view::SceneViewPlacement;
@@ -1134,29 +1135,7 @@ fn default_panel_rect(
 }
 
 fn paint_hierarchy(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
-    context
-        .widgets
-        .authoring
-        .set_read_only(context.input.read_only);
-    context
-        .widgets
-        .ui_authoring
-        .synchronize(context.input.ui_authoring);
-    if let Some(authoring) = context.input.ui_authoring {
-        if let Some(mut hierarchy) = context.widgets.owned_hierarchy.take() {
-            let _ = hierarchy.cancel_input();
-        }
-        context.widgets.hierarchy_pending.clear();
-        context.widgets.ui_authoring.show_tree(
-            ui,
-            authoring,
-            !context.input.read_only,
-            context.actions,
-            &mut context.output.text_owner,
-        );
-    } else {
-        owned_hierarchy_panel::paint(ui, context);
-    }
+    owned_hierarchy_panel::paint(ui, context);
 }
 
 fn paint_project_browser(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {

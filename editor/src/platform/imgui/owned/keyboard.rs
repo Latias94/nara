@@ -103,11 +103,14 @@ impl NativeImgui {
             && let Some(model) = application.current_frame()
         {
             let clipboard = self.clipboard.clone();
-            let _ = self
-                .frontend
-                .reduce_owned_input(panel, &frame, batch, &model, &mut |text| {
-                    clipboard.write(text)
-                });
+            let _ = self.frontend.reduce_owned_input(
+                panel,
+                &frame,
+                batch,
+                &model,
+                application.current_ui_authoring_frame().as_deref(),
+                &mut |text| clipboard.write(text),
+            );
         }
         Ok(())
     }
@@ -329,7 +332,16 @@ impl NativeImgui {
                     direction: UiNavigation::Down,
                 }),
                 Key::Named(NamedKey::Escape) => {
-                    self.cancel_owned_focus()?;
+                    let handled = self
+                        .owned
+                        .get(&panel)
+                        .and_then(|surface| surface.presented.as_ref())
+                        .is_some_and(|frame| {
+                            self.frontend.owned_escape(panel, frame).unwrap_or(false)
+                        });
+                    if !handled {
+                        self.cancel_owned_focus()?;
+                    }
                     None
                 }
                 _ => None,
