@@ -187,6 +187,7 @@ fn transient_allocations_defer_without_submission_refund_demand_and_recover() {
 #[test]
 fn invalid_buffer_is_checked_before_mapping_and_allocation_failure_takes_priority() {
     render_to_rgba(|_, _, _, _, _, preparation| {
+        let baseline = preparation.work_stats();
         for allocation_failed in [false, true] {
             let failure =
                 allocation_failed.then(|| AllocationFailureGuard::at("test.invalid-buffer"));
@@ -198,6 +199,7 @@ fn invalid_buffer_is_checked_before_mapping_and_allocation_failure_takes_priorit
                 )
                 .unwrap_err();
             let error = WgpuTextureError::from(error);
+            assert_eq!(preparation.work_stats(), baseline);
             assert_eq!(error.is_deferred(), allocation_failed);
             let rendered_error = WgpuRenderError::from(error.clone());
             if let Some(failure) = failure {
@@ -224,6 +226,25 @@ fn invalid_buffer_is_checked_before_mapping_and_allocation_failure_takes_priorit
         preparation
             .create_buffer_with_data("test.valid-buffer", &[1; 16], wgpu::BufferUsages::UNIFORM)
             .unwrap();
+        let initialized = preparation.work_stats();
+        assert_eq!(
+            initialized.initialized_buffer_calls - baseline.initialized_buffer_calls,
+            1
+        );
+        assert_eq!(
+            initialized.initialized_buffer_payload_bytes
+                - baseline.initialized_buffer_payload_bytes,
+            16
+        );
+        assert_eq!(
+            initialized.initialized_buffer_storage_bytes
+                - baseline.initialized_buffer_storage_bytes,
+            16
+        );
+        preparation
+            .create_buffer_with_data("test.empty-buffer", &[], wgpu::BufferUsages::UNIFORM)
+            .unwrap();
+        assert_eq!(preparation.work_stats(), initialized);
         Ok(())
     })
     .unwrap();

@@ -74,6 +74,7 @@ pub struct WgpuFrameTransactionStats {
     presents: u64,
     candidate_instance_buffer_demand_bytes: u64,
     submitted_instance_buffer_demand_bytes: u64,
+    native_work: crate::WgpuNativeWorkStats,
     #[cfg(feature = "stock-ui")]
     ui_packet_count: u64,
     #[cfg(feature = "stock-ui")]
@@ -233,6 +234,13 @@ impl WgpuSubmittedUiFacts {
 }
 
 impl WgpuFrameTransactionStats {
+    /// Returns issued preparation/program work for all attempts in this transaction.
+    /// Publication, failure, completion and resource retirement do not refund these counts.
+    #[must_use]
+    pub const fn native_work(self) -> crate::WgpuNativeWorkStats {
+        self.native_work
+    }
+
     #[must_use]
     pub const fn app_frame_index(self) -> Option<u64> {
         self.app_frame_index
@@ -518,6 +526,10 @@ impl WgpuRenderBackend {
             stats
         };
         stats
+    }
+
+    pub(crate) fn record_native_work(&mut self, work: crate::WgpuNativeWorkStats) {
+        self.frame_transaction_stats.native_work.accumulate(work);
     }
 
     /// Transfers already admitted CPU facts to the World without exposing native execution.
@@ -1040,12 +1052,14 @@ impl WgpuRenderBackend {
         let resource_budget = Arc::clone(&self.resource_budget);
         let mut reservation =
             crate::submission::WgpuSubmissionReservation::new(&device, &queue, payload.clone());
+        let mut native_work = crate::WgpuNativeWorkStats::default();
         let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut preparation = crate::preparation::NativePreparation::new(
                 &device,
                 &queue,
                 &resource_budget,
                 &mut reservation,
+                &mut native_work,
             );
             let mut draw = match self.prepare_target_draw(
                 view_format,
@@ -1123,6 +1137,7 @@ impl WgpuRenderBackend {
             }
             Ok(())
         }));
+        self.record_native_work(native_work);
         // The stock window route submits internally. Bind its original prefix on success and
         // every failed/panicking preparation, including uploads before a surface became lost.
         self.retain_resource_prefix(reservation.bind_current_prefix());

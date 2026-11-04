@@ -52,6 +52,13 @@ once until its last responsibility releases it, including cached state, output l
 uses. Toolkit-owned storage and native pipeline/driver overhead are excluded; the budget does not
 measure physical driver residency. A WorldCanvas world image is a declared program resource.
 
+The existing transaction observation also exposes `frame_transaction_stats().native_work()`.
+It records work reached through Nara's preparation/program paths, separately from allocation
+demand and retained bytes. Retries after failure accumulate until the next transaction; native
+callback work such as `submit_image_use` readback, arbitrary Feature commands and third-party
+renderers is excluded. See the [program work contract](render-programs.md#admission-outputs-and-close)
+before using those issued-write/initialization/encoded-copy counts as evidence.
+
 `display_image(output)` selects one exact output for a new display occurrence. Clone that display
 for repaint; create a separate display for a mirror. Toolkit bindings retain the exact display.
 Image equality, a receipt or a passive mirror cannot settle another occurrence's Runtime UI

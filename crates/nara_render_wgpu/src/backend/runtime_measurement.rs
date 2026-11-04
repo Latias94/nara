@@ -324,9 +324,15 @@ fn tilemap_and_changing_hud_costs() {
                 let mut reservation =
                     WgpuSubmissionReservation::new(&device, &queue, Arc::clone(&native_budget));
                 let begin = Instant::now();
+                let mut native_work = crate::WgpuNativeWorkStats::default();
                 let preparation_result = {
-                    let mut preparation =
-                        NativePreparation::new(&device, &queue, &native_budget, &mut reservation);
+                    let mut preparation = NativePreparation::new(
+                        &device,
+                        &queue,
+                        &native_budget,
+                        &mut reservation,
+                        &mut native_work,
+                    );
                     backend.prepare_target_draw(
                         format,
                         &packet,

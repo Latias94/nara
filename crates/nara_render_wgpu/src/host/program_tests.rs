@@ -778,14 +778,21 @@ fn native_rejected_feature_flushes_original_uploads_and_can_retry_the_same_captu
         .unwrap();
     host.begin_frame(1).unwrap();
     let mut builder = WgpuRenderProgramBuilder::new(source(), 1, GraphLimits::default()).unwrap();
+    let scratch = builder.texture::<Color>(descriptor()).unwrap();
     let output = builder.texture::<Color>(descriptor()).unwrap();
+    builder
+        .initialize(
+            0,
+            &[scratch.clear(wgpu::Color::BLUE, AccessRole::Attachment)],
+        )
+        .unwrap();
     builder
         .operation(
             1,
             &instance,
             Arc::new(RejectCapture(Arc::new(AtomicBool::new(true)))),
             &[],
-            &[output.clear(wgpu::Color::BLUE, AccessRole::Attachment)],
+            &[output.preserve(&scratch, AccessRole::Attachment)],
         )
         .unwrap();
     let program = builder.finish(&[output.output()]).unwrap();
@@ -796,6 +803,17 @@ fn native_rejected_feature_flushes_original_uploads_and_can_retry_the_same_captu
         ))
     ));
     assert_eq!(host.views[&producer.id()].admission.last_frame_index, None);
+    let refused_work = host.frame_transaction_stats().native_work();
+    assert_eq!(
+        refused_work,
+        crate::WgpuNativeWorkStats {
+            issued_buffer_write_calls: 1,
+            issued_buffer_write_bytes: 16,
+            encoded_texture_copy_commands: 1,
+            encoded_texture_copy_bytes: 4 * 4 * 4,
+            ..Default::default()
+        }
+    );
     drain(
         host.views[&producer.id()]
             .submitted_prefix
@@ -803,7 +821,16 @@ fn native_rejected_feature_flushes_original_uploads_and_can_retry_the_same_captu
             .unwrap(),
     );
     assert_eq!(host.retained_resource_bytes(), 0);
+    assert_eq!(host.frame_transaction_stats().native_work(), refused_work);
     let outputs = host.submit_program(&producer, &program).unwrap();
+    assert_eq!(
+        host.frame_transaction_stats().native_work(),
+        crate::WgpuNativeWorkStats {
+            encoded_texture_copy_commands: 2,
+            encoded_texture_copy_bytes: 2 * 4 * 4 * 4,
+            ..refused_work
+        }
+    );
     assert_eq!(outputs.report::<RejectOnce>(1, &instance).unwrap(), &());
     let output = outputs.texture(&output).unwrap();
     assert!(

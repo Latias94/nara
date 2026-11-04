@@ -55,9 +55,15 @@ pub(crate) struct NativePreparation<'a> {
     queue: &'a wgpu::Queue,
     budget: &'a Arc<OutputBudget>,
     reservation: &'a mut WgpuSubmissionReservation,
+    work: &'a mut crate::WgpuNativeWorkStats,
 }
 
 impl<'a> NativePreparation<'a> {
+    #[cfg(test)]
+    pub(crate) fn work_stats(&self) -> crate::WgpuNativeWorkStats {
+        *self.work
+    }
+
     #[cfg(test)]
     pub(crate) fn reserve_entries(&mut self, count: usize) -> Result<(), NativePreparationError> {
         self.reservation
@@ -72,12 +78,14 @@ impl<'a> NativePreparation<'a> {
         queue: &'a wgpu::Queue,
         budget: &'a Arc<OutputBudget>,
         reservation: &'a mut WgpuSubmissionReservation,
+        work: &'a mut crate::WgpuNativeWorkStats,
     ) -> Self {
         Self {
             device,
             queue,
             budget,
             reservation,
+            work,
         }
     }
 
@@ -122,6 +130,11 @@ impl<'a> NativePreparation<'a> {
     ) -> Result<(), NativePreparationError> {
         self.retain(destination.clone())?;
         self.queue.write_buffer(destination, offset, data);
+        self.work.issued_buffer_write_calls = self.work.issued_buffer_write_calls.saturating_add(1);
+        self.work.issued_buffer_write_bytes = self
+            .work
+            .issued_buffer_write_bytes
+            .saturating_add(data.len() as u64);
         Ok(())
     }
 
@@ -134,6 +147,12 @@ impl<'a> NativePreparation<'a> {
     ) -> Result<(), NativePreparationError> {
         self.retain(destination.texture.clone())?;
         self.queue.write_texture(destination, data, layout, size);
+        self.work.issued_texture_write_calls =
+            self.work.issued_texture_write_calls.saturating_add(1);
+        self.work.issued_texture_write_bytes = self
+            .work
+            .issued_texture_write_bytes
+            .saturating_add(data.len() as u64);
         Ok(())
     }
 
@@ -151,6 +170,18 @@ impl<'a> NativePreparation<'a> {
             .ok_or(NativePreparationError::ResourceCapacity)?;
         let allocation = self.reserve_bytes(size)?;
         let buffer = create_checked_buffer_with_data(self.device, label, contents, usage)?;
+        if !contents.is_empty() {
+            self.work.initialized_buffer_calls =
+                self.work.initialized_buffer_calls.saturating_add(1);
+            self.work.initialized_buffer_payload_bytes = self
+                .work
+                .initialized_buffer_payload_bytes
+                .saturating_add(contents.len() as u64);
+            self.work.initialized_buffer_storage_bytes = self
+                .work
+                .initialized_buffer_storage_bytes
+                .saturating_add(size);
+        }
         debug_assert_eq!(buffer.size(), size);
         self.retain((buffer.clone(), allocation.clone()))?;
         Ok((buffer, allocation))
@@ -182,7 +213,9 @@ mod tests {
         crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
             let budget = Arc::new(OutputBudget::new(4));
             let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
-            let mut preparation = NativePreparation::new(device, queue, &budget, &mut reservation);
+            let mut work = crate::WgpuNativeWorkStats::default();
+            let mut preparation =
+                NativePreparation::new(device, queue, &budget, &mut reservation, &mut work);
             let failure =
                 crate::allocation::AllocationFailureGuard::at("preparation-aligned-buffer");
             assert!(matches!(
@@ -197,6 +230,7 @@ mod tests {
                 !failure.was_consumed(),
                 "budget refusal must precede native allocation"
             );
+            assert_eq!(*preparation.work, crate::WgpuNativeWorkStats::default());
             assert_eq!(budget.retained(), 0);
             drop(failure);
             let (buffer, allocation) = preparation
@@ -207,6 +241,9 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(buffer.size(), 4);
+            assert_eq!(preparation.work.initialized_buffer_calls, 1);
+            assert_eq!(preparation.work.initialized_buffer_payload_bytes, 3);
+            assert_eq!(preparation.work.initialized_buffer_storage_bytes, 4);
             assert_eq!(budget.retained(), buffer.size());
             drop(buffer);
             drop(allocation);
@@ -260,7 +297,9 @@ mod tests {
                 view_formats: &[],
             });
             let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let mut preparation = NativePreparation::new(device, queue, &budget, &mut reservation);
+            let mut work = crate::WgpuNativeWorkStats::default();
+            let mut preparation =
+                NativePreparation::new(device, queue, &budget, &mut reservation, &mut work);
             // Both writes are invalid if they reach WGPU. Custody refusal must happen first.
             assert!(matches!(
                 preparation.upload_buffer(&buffer, 0, &[7]),
@@ -293,6 +332,7 @@ mod tests {
                 "a refused guard must refund its charge"
             );
             assert!(pollster::block_on(validation.pop()).is_none());
+            assert_eq!(work, crate::WgpuNativeWorkStats::default());
             let index = queue.submit([]);
             let prefix = reservation.submitted(index.clone());
             device
@@ -302,6 +342,133 @@ mod tests {
                 })
                 .unwrap();
             assert!(prefix.poll().unwrap());
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    #[test]
+    fn mapped_initialization_is_counted_when_later_retention_refuses() {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::new(4));
+            let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
+            for _ in 1..crate::submission::MAX_SUBMISSION_RESOURCES - 1 {
+                reservation.retain(()).unwrap();
+            }
+            let mut work = crate::WgpuNativeWorkStats::default();
+            let mut preparation =
+                NativePreparation::new(device, queue, &budget, &mut reservation, &mut work);
+            assert!(matches!(
+                preparation.create_buffer_with_data(
+                    "initialized-before-retention-refusal",
+                    &[7; 3],
+                    wgpu::BufferUsages::VERTEX
+                ),
+                Err(NativePreparationError::SubmissionCapacity)
+            ));
+            assert_eq!(
+                work,
+                crate::WgpuNativeWorkStats {
+                    initialized_buffer_calls: 1,
+                    initialized_buffer_payload_bytes: 3,
+                    initialized_buffer_storage_bytes: 4,
+                    ..Default::default()
+                }
+            );
+            assert_eq!(budget.retained(), 4);
+            let index = queue.submit([]);
+            let prefix = reservation.submitted(index.clone());
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(index),
+                    timeout: Some(std::time::Duration::from_secs(10)),
+                })
+                .unwrap();
+            assert!(prefix.poll().unwrap());
+            assert_eq!(budget.retained(), 0);
+            assert_eq!(work.initialized_buffer_payload_bytes, 3);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
+    #[test]
+    fn returned_empty_and_invalid_writes_count_requests_without_claiming_transfer() {
+        crate::readback_tests::render_to_rgba(|device, queue, _, _, _, _| {
+            let budget = Arc::new(OutputBudget::new(4));
+            let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
+            let mut work = crate::WgpuNativeWorkStats::default();
+            let mut preparation =
+                NativePreparation::new(device, queue, &budget, &mut reservation, &mut work);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("issued-write-buffer"),
+                size: 4,
+                usage: wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            preparation.upload_buffer(&buffer, 0, &[]).unwrap();
+            assert!(pollster::block_on(validation.pop()).is_none());
+            assert_eq!(preparation.work.issued_buffer_write_calls, 1);
+            assert_eq!(preparation.work.issued_buffer_write_bytes, 0);
+
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            preparation.upload_buffer(&buffer, 0, &[3]).unwrap();
+            assert!(pollster::block_on(validation.pop()).is_some());
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("issued-write-texture"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            preparation
+                .upload_texture(
+                    texture.as_image_copy(),
+                    &[7; 4],
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(8),
+                        rows_per_image: Some(1),
+                    },
+                    wgpu::Extent3d {
+                        width: 2,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                )
+                .unwrap();
+            assert!(pollster::block_on(validation.pop()).is_some());
+            assert_eq!(
+                work,
+                crate::WgpuNativeWorkStats {
+                    issued_buffer_write_calls: 2,
+                    issued_buffer_write_bytes: 1,
+                    issued_texture_write_calls: 1,
+                    issued_texture_write_bytes: 4,
+                    ..Default::default()
+                }
+            );
+            let index = queue.submit([]);
+            let prefix = reservation.submitted(index.clone());
+            device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: Some(index),
+                    timeout: Some(std::time::Duration::from_secs(10)),
+                })
+                .unwrap();
+            assert!(prefix.poll().unwrap());
+            assert_eq!(work.issued_buffer_write_bytes, 1);
             Ok(())
         })
         .unwrap();

@@ -415,7 +415,9 @@ fn clear_only_canvas_uses_checked_base_backend_without_submitters() {
     let mut cache = WorldCanvasCache::default();
     let budget = Arc::new(OutputBudget::default());
     let mut reservation = WgpuSubmissionReservation::new(&device, &queue, Arc::clone(&budget));
-    let mut preparation = NativePreparation::new(&device, &queue, &budget, &mut reservation);
+    let mut native_work = crate::WgpuNativeWorkStats::default();
+    let mut preparation =
+        NativePreparation::new(&device, &queue, &budget, &mut reservation, &mut native_work);
     let prepared = match backend.prepare_target_draw_with_canvas_cache(
         format,
         &packet,

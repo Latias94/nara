@@ -317,6 +317,7 @@ pub(crate) struct EncodedProgram {
 pub(crate) struct FeaturePreparationAttempt {
     pub(crate) touched_instances: Vec<u64>,
     pub(crate) native_started: bool,
+    pub(crate) work: crate::WgpuNativeWorkStats,
     #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
     instance_reservations: Vec<crate::budget::InstanceReservation>,
 }
@@ -536,7 +537,7 @@ pub(crate) fn prepare_and_encode(
             operation,
             physical: &resources,
         };
-        initialize(scoped, &mut encoder)?;
+        initialize(scoped, &mut encoder, &mut feature_attempt.work)?;
         let original = compiled
             .operations
             .iter()
@@ -557,6 +558,7 @@ pub(crate) fn prepare_and_encode(
                     &namespace.queue,
                     budget,
                     reservation,
+                    &mut feature_attempt.work,
                 ),
                 resources: scoped,
                 #[cfg(any(feature = "stock-sprite", feature = "stock-ui"))]
@@ -593,6 +595,7 @@ pub(crate) fn prepare_and_encode(
             &namespace.queue,
             budget,
             reservation,
+            &mut feature_attempt.work,
         ),
     )?;
     Ok(EncodedProgram {
@@ -739,6 +742,7 @@ fn native_matches_descriptor(storage: &ProgramResourceStorage) -> bool {
 fn initialize(
     resources: WgpuOperationResources<'_>,
     encoder: &mut wgpu::CommandEncoder,
+    work: &mut crate::WgpuNativeWorkStats,
 ) -> Result<(), WgpuRenderProgramError> {
     for write in &resources.operation.writes {
         let destination = resources.storage(&write.version)?;
@@ -772,14 +776,23 @@ fn initialize(
                             texture: output, ..
                         },
                     ) => {
+                        let bytes = resource_bytes(&destination.descriptor)?;
                         encoder.copy_texture_to_texture(
                             input.as_image_copy(),
                             output.as_image_copy(),
                             output.size(),
                         );
+                        work.encoded_texture_copy_commands =
+                            work.encoded_texture_copy_commands.saturating_add(1);
+                        work.encoded_texture_copy_bytes =
+                            work.encoded_texture_copy_bytes.saturating_add(bytes);
                     }
                     (NativeResource::Buffer(input), NativeResource::Buffer(output)) => {
                         encoder.copy_buffer_to_buffer(input, 0, output, 0, output.size());
+                        work.encoded_buffer_copy_commands =
+                            work.encoded_buffer_copy_commands.saturating_add(1);
+                        work.encoded_buffer_copy_bytes =
+                            work.encoded_buffer_copy_bytes.saturating_add(output.size());
                     }
                     _ => return Err(WgpuRenderProgramError::ResourceKind),
                 }

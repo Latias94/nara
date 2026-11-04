@@ -37,7 +37,9 @@ separately: nextest does not execute them. These probes use the actual public ty
 
 - `invalid_capture_preflight_refuses_before_known_native_resource_budget` supplies invalid pixels
   with a zero-byte native payload budget. Pure preflight returns the capture-shape refusal before
-  resource allocation or preparation, then a valid capture with the same index succeeds.
+  resource allocation or preparation. Two attempts issue no observed native work, then a valid
+  capture with the same index succeeds in the same Host transaction. Its issued-work counts
+  survive prefix completion, output Drop and final Host retirement.
 
 - `independent_features_preserve_exact_a1_while_a2_and_b_execute` uploads a real 64-by-64
   linear premultiplied RGBA32Float image, including transparent, half-alpha and alpha-zero
@@ -57,13 +59,20 @@ separately: nextest does not execute them. These probes use the actual public ty
   texture and buffer leases for new readback submissions. Every original image, blur,
   complement, histogram pixel and raw/frequency value is checked after that interleaving.
   B renders another full group after A's prefix settles. Closed A rejects resubmission.
+  The first A execution and subsequent instance reuse each issue the same exact upload and
+  Preserve work. A2 and B1 aggregate in one Host transaction, while retained snapshots remain
+  detached across later submissions and frame resets. Output Drop and producer-local close
+  leave the accumulated counts intact.
 - `private_allocation_refusal_keeps_old_outputs_and_the_same_candidate_can_retry` settles
-  A1, then leaves enough retained-byte capacity for all A2 graph resources but one byte less
-  than its private upload reservation requires. Host submission refuses inside Feature
-  preparation, publishing no group. Increasing the limit admits the exact same immutable
-  A2 program and capture index. Fresh exact-output imports then check both the old A1 and
-  new A2 numerically. Original submission custody and last-lease accounting return charged
-  bytes to zero before final Host retirement.
+  A1, then first refuses A2 with one byte less than its complete graph working set needs.
+  It next allows all A2 graph resources but leaves one byte less than the private upload
+  reservation requires. The first such attempt refuses inside Feature preparation, publishing
+  no group; a repeated attempt also adds no observed work. Both limits preserve A1's existing
+  issued-work counts. Increasing the limit admits the exact same immutable A2 program and
+  capture index without beginning another Host transaction, so A1 and A2's counts aggregate.
+  Fresh exact-output imports then check both the old A1 and new A2 numerically. Original
+  submission custody and last-lease accounting return charged bytes to zero before final
+  Host retirement.
 
 All image channels and normalized frequencies use an absolute tolerance of `1e-6` against
 independent CPU equations in `tests/support/oracle.rs`. Raw counts and integer totals are
@@ -82,6 +91,51 @@ The workload uses seven graph resources, seven operations and six published outp
 candidate allowances cap resources/operations at 12, accesses at 48, outputs at 8, modeled
 resource bytes at 2 MiB and modeled metadata bytes at 256 KiB. Private native allocations
 share the production Host's retained-byte budget.
+
+## Native Work Observation
+
+The offscreen cases compare every public field of the detached
+`host.frame_transaction_stats().native_work()` snapshot. One complete workload executes
+one `Upload::prepare` texture write, one whole-buffer Preserve from the four raw counts to
+frequencies, and one whole-texture Preserve from complement to histogram. The exact totals
+are identical on first execution and reuse of the installed Feature instances:
+
+| Field | One complete program | Two programs in one Host transaction |
+| --- | ---: | ---: |
+| `issued_buffer_write_calls` | 0 | 0 |
+| `issued_buffer_write_bytes` | 0 | 0 |
+| `issued_texture_write_calls` | 1 | 2 |
+| `issued_texture_write_bytes` | 65,536 | 131,072 |
+| `initialized_buffer_calls` | 0 | 0 |
+| `initialized_buffer_payload_bytes` | 0 | 0 |
+| `initialized_buffer_storage_bytes` | 0 | 0 |
+| `encoded_buffer_copy_commands` | 1 | 2 |
+| `encoded_buffer_copy_bytes` | 16 | 32 |
+| `encoded_texture_copy_commands` | 1 | 2 |
+| `encoded_texture_copy_bytes` | 65,536 | 131,072 |
+
+The upload payload and preserved texture each contain `64 * 64 * 4 * 4 = 65,536` bytes.
+The preserved buffer contains `4 * 4 = 16` bytes. This consumer issues no preparation
+buffer write or mapped buffer initialization; graph buffer allocation and zeroing do not
+become initialized-buffer counts. The payload/storage distinction for initialized mapped
+buffers is therefore not exercised by this workload.
+
+Each existing `begin_frame` asserts that every field resets to zero. Repeated invalid
+preflight attempts leave zero counts. Graph-budget and private-upload-budget refusals add
+zero to the preceding A1 work, while the eventual A2 success adds exactly one workload.
+Readback adds zero, including when it runs after two complete programs without a frame
+reset: its four texture-to-buffer and two buffer-to-buffer copies are Feature-encoded
+commands. The upload Feature's private staging-to-scene copy is likewise excluded; only
+the graph-owned texture Preserve appears in `encoded_texture_copy_commands`. Clears,
+shader writes and empty graph-buffer allocation also add zero.
+
+These saturating observations describe completed preparation API calls and graph-owned
+copies when encoded. They confer no allocation, submission, publication or retirement
+authority, and completion or discard does not refund them. They do not claim successful
+GPU transfer, residency, direct external Device/native callback work, Dear ImGui work or
+readback upload work. This window-free consumer does not exercise `begin_window_frame`,
+saturation at `u64::MAX`, or a failure after an upload or Preserve has already been issued;
+the existing refusal paths stop before either counted operation.
 
 ## Run
 

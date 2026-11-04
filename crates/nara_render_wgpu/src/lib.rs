@@ -43,6 +43,7 @@ mod texture;
 mod ui;
 #[cfg(all(test, feature = "stock-sprite"))]
 mod view_probe;
+mod work;
 
 use crate::backend::{WgpuRenderBackend, render_backend_state};
 #[cfg(test)]
@@ -129,6 +130,7 @@ pub use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
     WgpuFrameCompletionStats, WgpuGpuResourceStats, WgpuTelemetryConfigError,
 };
+pub use crate::work::WgpuNativeWorkStats;
 #[cfg(feature = "stock-ui")]
 pub use crate::{
     host::{WgpuUiImageSubmission, WgpuUiSubmission, WgpuUiSubmitFailure},

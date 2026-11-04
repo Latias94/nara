@@ -618,7 +618,7 @@ mod tests {
             let budget = Arc::new(OutputBudget::new(expected));
             let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
             let buffers = create_quad_batch_buffers(
-                &mut NativePreparation::new(device, queue, &budget, &mut reservation),
+                &mut NativePreparation::new(device, queue, &budget, &mut reservation, &mut Default::default()),
                 &[batch],
                 &texture_layout,
                 &material_layout,

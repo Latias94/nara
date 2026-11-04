@@ -1132,6 +1132,7 @@ mod tests {
             queue,
             budget,
             &mut reservation,
+            &mut Default::default(),
         ));
         let index = queue.submit([]);
         let prefix = reservation.submitted(index.clone());
@@ -1279,8 +1280,9 @@ mod tests {
             let mut reservation = WgpuSubmissionReservation::new(device, queue, ());
             let mut cache = WgpuSpriteTextureCache::default();
             let failure = crate::allocation::AllocationFailureGuard::at("nara_wgpu_texture_view");
+            let mut work = crate::WgpuNativeWorkStats::default();
             let result = cache.ensure_image(
-                &mut NativePreparation::new(device, queue, &budget, &mut reservation),
+                &mut NativePreparation::new(device, queue, &budget, &mut reservation, &mut work),
                 &snapshot,
                 1,
             );
@@ -1291,6 +1293,8 @@ mod tests {
             assert!(failure.was_consumed());
             assert!(cache.images.is_empty());
             assert_eq!(cache.logical_texture_bytes(), 0);
+            assert_eq!(work.issued_texture_write_calls, 1);
+            assert_eq!(work.issued_texture_write_bytes, 4);
             assert_eq!(budget.retained(), 4);
             let index = queue.submit([]);
             let prefix = reservation.submitted(index.clone());

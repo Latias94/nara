@@ -11,8 +11,8 @@ use std::{
 
 use nara_render::RenderFrameSourceGeneration;
 use nara_render_wgpu::{
-    WgpuFeatureInstance, WgpuRenderHost, WgpuRenderHostError, WgpuRenderProducer,
-    WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuSubmissionPrefix,
+    WgpuFeatureInstance, WgpuNativeWorkStats, WgpuRenderHost, WgpuRenderHostError,
+    WgpuRenderProducer, WgpuRenderProgramBuilder, WgpuRenderProgramError, WgpuSubmissionPrefix,
 };
 use support::{
     features::{Axis, Blur},
@@ -32,27 +32,34 @@ fn invalid_capture_preflight_refuses_before_known_native_resource_budget() {
     let producer = host.create_producer().unwrap();
     let installed = Installed::new(&mut host, &producer);
     let source = source();
+    assert_workload_native_work(&host, 0);
     begin(&mut host, 1);
     let invalid = workload::build(source, 1, Vec::<[f32; 4]>::new().into(), &installed);
-    let error = host
-        .submit_program(&producer, &invalid.program)
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        WgpuRenderHostError::Program(WgpuRenderProgramError::Feature { .. })
-    ));
-    assert!(error.is_content_rejected());
-    assert!(
-        !error.is_deferred(),
-        "invalid captured shape precedes temporary budget pressure"
-    );
-    assert_eq!(host.retained_resource_bytes(), 0);
+    for _ in 0..2 {
+        let error = host
+            .submit_program(&producer, &invalid.program)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            WgpuRenderHostError::Program(WgpuRenderProgramError::Feature { .. })
+        ));
+        assert!(error.is_content_rejected());
+        assert!(
+            !error.is_deferred(),
+            "invalid captured shape precedes temporary budget pressure"
+        );
+        assert_eq!(host.retained_resource_bytes(), 0);
+        assert_workload_native_work(&host, 0);
+    }
     host = host.with_resource_byte_limit(4 * 1024 * 1024);
     let valid = workload::build(source, 1, oracle::scene(0).into(), &installed);
     let outputs = host.submit_program(&producer, &valid.program).unwrap();
+    assert_workload_native_work(&host, 1);
     settle(outputs.submitted_prefix());
     drop(outputs);
+    assert_workload_native_work(&host, 1);
     finish(&mut host);
+    assert_workload_native_work(&host, 1);
 }
 
 #[test]
@@ -73,12 +80,14 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     let a_features = Installed::new(&mut host, &a);
     let b_features = Installed::new(&mut host, &b);
     let readback = workload::install(&mut host, &b, Readback);
+    assert_workload_native_work(&host, 0);
 
     begin(&mut host, 1);
     let a1_input = workload::build(a_source, 1, oracle::scene(0).into(), &a_features);
     let a1_group = host
         .submit_program(&a, &a1_input.program)
         .expect("publish the whole A1 group");
+    let a1_work = assert_workload_native_work(&host, 1);
     assert_eq!(
         *a1_group
             .report::<Blur>(HORIZONTAL, &a_features.horizontal)
@@ -118,6 +127,7 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     let a2_group = host
         .submit_program(&a, &a2_input.program)
         .expect("publish independent A2 storage");
+    let a2_work = assert_workload_native_work(&host, 1);
     let a2 = a2_input.ports.published(&a2_group);
     assert!(matches!(
         a1_group.texture(&a2_input.ports.scene),
@@ -136,8 +146,14 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     let b1_group = host
         .submit_program(&b, &b1_input.program)
         .expect("B has its own capture clock and native state");
+    assert_workload_native_work(&host, 2);
+    assert_eq!(
+        a1_work, a2_work,
+        "detached A1 facts survive reset; reused A instances issue the same work"
+    );
     let b1 = b1_input.ports.published(&b1_group);
     drop((a1_group, a2_group, b1_group));
+    assert_workload_native_work(&host, 2);
 
     // No map, blocking drain or explicit prefix poll precedes producer-local close.
     let a_prefix = host
@@ -148,6 +164,7 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
         Err(WgpuRenderHostError::ProducerClosed)
     ));
     assert!(host.retire_producer(&a).is_none());
+    assert_workload_native_work(&host, 2);
 
     begin(&mut host, 3);
     assert_sample(&inspect(&mut host, &b, b_source, 2, &a1, &readback), 0);
@@ -163,8 +180,10 @@ fn independent_features_preserve_exact_a1_while_a2_and_b_execute() {
     let b2_group = host
         .submit_program(&b, &b2_input.program)
         .expect("B stays live after A completion");
+    assert_workload_native_work(&host, 1);
     let b2 = b2_input.ports.published(&b2_group);
     drop(b2_group);
+    assert_workload_native_work(&host, 1);
     begin(&mut host, 7);
     assert_sample(&inspect(&mut host, &b, b_source, 6, &b2, &readback), 5);
     assert!(a1.scene.is_current() && a1.raw.is_current());
@@ -192,37 +211,53 @@ fn private_allocation_refusal_keeps_old_outputs_and_the_same_candidate_can_retry
     begin(&mut host, 1);
     let a1_input = workload::build(source, 1, oracle::scene(0).into(), &installed);
     let a1_group = host.submit_program(&producer, &a1_input.program).unwrap();
+    assert_workload_native_work(&host, 1);
     let a1 = a1_input.ports.published(&a1_group);
     settle(a1_group.submitted_prefix());
     drop(a1_group);
+    assert_workload_native_work(&host, 1);
     let retained = 4 * IMAGE_BYTES + 2 * COUNTS_BYTES;
     assert_eq!(host.retained_resource_bytes(), retained);
 
-    // All five local textures and both buffers fit. The private upload allocation is one
-    // byte short, so refusal occurs inside Feature preparation after graph realization.
-    let attempt_bytes = 6 * IMAGE_BYTES + 2 * COUNTS_BYTES;
-    host = host.with_resource_byte_limit(retained + attempt_bytes - 1);
+    // Refuse the complete local graph working set before any Feature upload or Preserve copy.
+    let graph_bytes = 5 * IMAGE_BYTES + 2 * COUNTS_BYTES;
+    host = host.with_resource_byte_limit(retained + graph_bytes - 1);
     let a2_input = workload::build(source, 2, oracle::scene(1).into(), &installed);
-    begin(&mut host, 2);
     assert!(matches!(
         host.submit_program(&producer, &a2_input.program),
         Err(WgpuRenderHostError::Program(
             WgpuRenderProgramError::ResourceCapacity
         ))
     ));
+    assert_eq!(host.retained_resource_bytes(), retained);
+    assert_workload_native_work(&host, 1);
+
+    // All graph resources fit, but the private upload reservation is one byte short.
+    // Retrying without begin_frame must not invent a queue write or encoded Preserve copy.
+    let attempt_bytes = graph_bytes + IMAGE_BYTES;
+    host = host.with_resource_byte_limit(retained + attempt_bytes - 1);
+    for _ in 0..2 {
+        assert!(matches!(
+            host.submit_program(&producer, &a2_input.program),
+            Err(WgpuRenderHostError::Program(
+                WgpuRenderProgramError::ResourceCapacity
+            ))
+        ));
+        assert_workload_native_work(&host, 1);
+    }
 
     host = host.with_resource_byte_limit(4 * 1024 * 1024);
-    begin(&mut host, 3);
     let a2_group = host
         .submit_program(&producer, &a2_input.program)
         .expect("retry the exact same immutable program and capture index after refusal");
+    assert_workload_native_work(&host, 2);
     let a2 = a2_input.ports.published(&a2_group);
     assert_eq!(a2.scene.frame_index(), 2);
     assert_eq!(a1.scene.frame_index(), 1);
     drop(a2_group);
-    begin(&mut host, 4);
+    assert_workload_native_work(&host, 2);
     assert_sample(&inspect(&mut host, &producer, source, 3, &a1, &readback), 0);
-    begin(&mut host, 5);
+    begin(&mut host, 2);
     assert_sample(&inspect(&mut host, &producer, source, 4, &a2, &readback), 1);
     assert_window_free(&host);
     settle(
@@ -260,6 +295,29 @@ fn begin(host: &mut WgpuRenderHost, frame: u64) {
     host.begin_frame(frame)
         .expect("the production Host must acquire its selected native GPU; no passing skip");
     assert_window_free(host);
+    assert_workload_native_work(host, 0);
+}
+
+fn assert_workload_native_work(host: &WgpuRenderHost, programs: u64) -> WgpuNativeWorkStats {
+    let work = host.frame_transaction_stats().native_work();
+    assert_eq!(
+        work,
+        WgpuNativeWorkStats {
+            issued_buffer_write_calls: 0,
+            issued_buffer_write_bytes: 0,
+            issued_texture_write_calls: programs,
+            issued_texture_write_bytes: programs * IMAGE_BYTES,
+            initialized_buffer_calls: 0,
+            initialized_buffer_payload_bytes: 0,
+            initialized_buffer_storage_bytes: 0,
+            encoded_buffer_copy_commands: programs,
+            encoded_buffer_copy_bytes: programs * COUNTS_BYTES,
+            encoded_texture_copy_commands: programs,
+            encoded_texture_copy_bytes: programs * IMAGE_BYTES,
+        },
+        "count only issued uploads and graph-owned Preserve copies for the complete workload"
+    );
+    work
 }
 
 fn inspect(
@@ -284,6 +342,7 @@ fn inspect(
     let program = builder
         .finish(&ports.outputs())
         .expect("a read-only use publishes its exact imported group");
+    let work = host.frame_transaction_stats().native_work();
     let outputs = host
         .submit_program(producer, &program)
         .expect("Host admission precedes any report mapping");
@@ -292,6 +351,12 @@ fn inspect(
         .expect("lookup the original instance's typed report");
     let sample = report.read();
     settle(outputs.submitted_prefix());
+    drop(outputs);
+    assert_eq!(
+        host.frame_transaction_stats().native_work(),
+        work,
+        "Feature-encoded readback copies and native completion add no observed preparation work"
+    );
     sample
 }
 

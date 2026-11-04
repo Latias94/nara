@@ -310,6 +310,20 @@ allocation is admitted by one complete GPU-memory budget.
 
 ## Admission, Outputs And Close
 
+`host.frame_transaction_stats().native_work()` returns detached `WgpuNativeWorkStats` for the
+current Host transaction. It counts completed calls through Nara's preparation Queue helpers,
+initial mapped buffer copies and whole-resource graph Preserve copy commands. Separate payload
+and aligned storage bytes for mapped buffers; these bytes are not new Queue writes. Texture
+copy bytes use the admitted native format. The original transaction reset clears the snapshot;
+retries and independent programs in the same transaction accumulate their reached work.
+
+A later view/allocation, custody, encoding or submission refusal does not refund issued work.
+An encoded copy can belong to a discarded encoder. A helper Queue call that panics before
+returning is excluded. These are issued API requests/encoded commands, not successful hardware
+transfer, GPU completion or physical residency. Native callbacks, Feature-internal encoded
+commands, third-party renderer work, clears and shader writes remain outside this snapshot.
+The counters neither admit resources nor replace the existing payload budget or exact receipts.
+
 `submit_program` validates producer/instance, prepares and encodes under original custody, inspects
 native errors, then revalidates epoch/admission. Failure publishes none of the group and leaves the
 successful capture watermark unchanged. Even failed preparation may leave uploads; the Host retains

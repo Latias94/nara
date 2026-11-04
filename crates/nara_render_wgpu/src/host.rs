@@ -1956,6 +1956,7 @@ impl WgpuRenderHost {
             )
         }))
         .unwrap_or(Err(crate::WgpuRenderProgramError::FeaturePanicked));
+        self.backend.record_native_work(feature_attempt.work);
         if let Some(surface) = &mut surface {
             let texture_bytes =
                 self.backend

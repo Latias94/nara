@@ -643,6 +643,7 @@ impl ReadbackGpu {
             &self.queue,
             &self.budget,
             &mut reservation,
+            &mut Default::default(),
         ));
         match result {
             Ok((facts, index)) => (Ok(facts), reservation.submitted(index)),
