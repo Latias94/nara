@@ -33,12 +33,19 @@ maintenance at published Open-GPUI `15cc4a7d85`, with allocator Miri and real du
 The subsequent [TextSystem ownership unit](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-textsystem-lifetime-and-native-reconstruction)
 removes the pool reference cycle and exercises public headless/native reconstruction, including
 the corrected WinRT settings-factory lifetime, at published Open-GPUI `229723e620` after native
-correction `432d079675`. Three other upstream units and the specific touchpad timing comparison
-remain open. Complete Editor integration, full native input, costs and game-runtime selection
+correction `432d079675`. The specific touchpad timing comparison remains open.
+Complete Editor integration, full native input, costs and game-runtime selection
 remain unqualified by these framework prerequisites.
 The [diff-based refresh record](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-diff-based-upstream-baseline-and-maintenance-skill)
 at Open-GPUI `2d66e3ff88f` fixes the comparison target and maintenance workflow; source inventory
 and the repository skill add no implementation qualification or toolkit-default decision.
+The subsequent [cached-dependency qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-cached-dependencies-and-deferred-opacity)
+at published Open-GPUI `7a1bf6d73d4` adds nested-draw read isolation, paint/deferred subscriptions,
+stable deferred replay and admitted opacity convergence. Core 873, affected consumers 2,964 and
+selected Windows 165 pass, with four existing interactive cases skipped; the native cache matrix
+uses actual Submitted frames and retirement. Text layout and pending-input/blur remain the two
+initial units before the broader refresh. This framework evidence establishes no Nara toolkit
+default, complete engine View or measured runtime budget.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

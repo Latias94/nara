@@ -1698,3 +1698,48 @@ complete prerequisites and fork-contract adaptation. Its schema/references and a
 read-only animated-WebP scenario were checked. The changing baseline and task status stay in the
 framework's existing queue and plan. No synchronization engine, Nara-specific scanner or second
 framework copy was added.
+
+## November 6: Cached Dependencies And Deferred Opacity
+
+The published, remote-verified framework successor is
+[`7a1bf6d73d4`](https://github.com/Latias94/open-gpui/commit/7a1bf6d73d46fbc8b251929cc4d8cfb53a9a5fc1),
+following the separate native-fixture correction
+[`015749945c5`](https://github.com/Latias94/open-gpui/commit/015749945c5df9c6c1a7e27e4404e1c09bac577e).
+The cycle's upstream target remains Zed `635026fabc38440fce5e1767d125026a17b12012`.
+The [framework qualification](https://github.com/Latias94/open-gpui/blob/7a1bf6d73d46fbc8b251929cc4d8cfb53a9a5fc1/docs/verification.md#cached-dependencies-deferred-replay-and-opacity)
+owns the executed commands, initial failures, final results and limits.
+
+This third priority unit adapts upstream `5e982c6bdc`, `decd2399b1` and `8fa085e397` within the
+existing EntityMap, AnyView and frame journals. Callback scopes capture repeated reads; draw
+guards isolate nested windows and restore outer reads on success, refusal and unwind. Retained
+paint/deferred reads keep window subscriptions, released generations are filtered through live
+reference-count membership, and nested deferred menus retain stable replay indices. Subscription
+publication remains after candidate acceptance.
+
+Ordinary deferred content and window portals now inherit logical primitive opacity. Private
+opacity prediction reconciles stationary-pointer hover after the final admitted hit test without
+changing input-latched layout refinements. Follow-up view notifications coalesce through the
+existing Window animation owner. Regressions cover fresh cached parents, refused Inert candidates,
+retry without MouseMove, group hover, unchanged reuse and exact rounded clips. Non-view model
+notification still redraws subscribed windows without automatically dirtying a clean cached view;
+notify the owning view or refresh when rebuilding is required. External group-context changes
+also require owning-view notification. Arbitrary custom paint-only opacity is outside this
+prediction guarantee.
+
+Final Windows/Rust 1.95 execution passed Core 873/873, affected UI/component/docking/Canvas
+2,964/2,964 across 25 binaries, and 165/165 selected Windows cases. Four existing interactive
+Windows cases remain skipped. The native cache matrix checks real HWNDs, newer accepted and
+nonempty renderer-Submitted generations, preserved cached render/paint counts, explicit child
+rebuild and exact native/platform retirement. These receipts measure neither screen pixels nor
+frame-time/retained-byte budgets. Native activation fixtures now establish their exact foreground
+prerequisites and retain raw message parameters for failures; the whole-span keyboard assertion
+and exact terminal/restoration checks remain. The verification record preserves earlier failures
+without assigning an unproven keyboard-message source.
+
+Locked workspace all-target and independently locked consumer all-target/all-feature compilation,
+Core/Windows correctness Clippy, formatting and import/document/release/public-API checks passed.
+Independent review found no remaining P1/P2. The declared Rust 1.92 floor and dependency graph did
+not change; that compiler floor was not executed in this unit. Text layout and pending-input/blur
+are the two remaining initial correctness units, followed by the coherent font/text/layout/API and
+platform/render refresh. Full R11/R12, integrated engine View, Editor/game execution selection,
+complete native input and measured performance remain open.

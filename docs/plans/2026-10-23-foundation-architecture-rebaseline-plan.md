@@ -1499,7 +1499,14 @@ The following [diff-based baseline record](../research/2026-10-27-custom-drawn-e
 is Open-GPUI `2d66e3ff88f`. It fixes this refresh's upstream target, reconstructs initial source
 provenance without inventing an exact checkout SHA, corrects an older equivalence claim and adds
 a repository maintenance skill. It qualifies no additional product behavior.
-The other three upstream correctness units, integrated engine View, complete editing, full native
+The following [cached-dependency and deferred-opacity unit](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-cached-dependencies-and-deferred-opacity)
+is published and remote-verified at Open-GPUI `7a1bf6d73d4`, after native-fixture correction
+`015749945c5`. Existing owners now retain scoped paint/deferred dependencies, stable nested
+journals and inherited opacity through admitted/rejected candidates. Core 873, affected
+UI/component/docking/Canvas 2,964 and selected Windows 165 pass; four existing interactive cases
+remain skipped. Its real HWND cache matrix and independent-consumer compilation retain the
+explicit non-view/external-group notification limits and unmeasured performance scope.
+The other two initial correctness units, integrated engine View, complete editing, full native
 input, numeric cost comparison and game-runtime selection remain open; no frontend/default
 replacement follows.
 
