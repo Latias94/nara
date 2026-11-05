@@ -39,6 +39,7 @@ use super::{
     EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
     explicit_gpu_retry_requested, image_import_poll_deadline, persistence_poll_deadline,
     platform_gpu_error, play_lifecycle_poll_deadline,
+    termination::{editor_run_result, finish_open_host_shutdown},
 };
 
 #[cfg(all(test, target_os = "windows"))]
@@ -104,7 +105,7 @@ pub(super) fn run_application(
             );
             return editor_run_result(
                 Some(EditorRunError::EventLoop(error.to_string())),
-                &NativeCloseErrors::default(),
+                None,
                 application.failed_open_close_evidence(),
                 application.failed_session_close_receipt(),
                 Some(&open_tasks),
@@ -207,9 +208,11 @@ impl NativeEditorHost {
             &mut self.application,
             Instant::now() + Duration::from_secs(5),
         );
+        let native_cleanup =
+            (!self.retirement_errors.is_empty()).then(|| self.retirement_errors.to_string());
         editor_run_result(
             self.error.take(),
-            &self.retirement_errors,
+            native_cleanup.as_deref(),
             self.application.failed_open_close_evidence(),
             self.application.failed_session_close_receipt(),
             Some(&open_tasks),
@@ -224,70 +227,6 @@ impl Drop for NativeEditorHost {
         {
             eprintln!("Nara Editor Host cleanup failed: {error}");
         }
-    }
-}
-
-fn finish_open_host_shutdown(
-    application: &mut EditorApplication,
-    deadline: Instant,
-) -> nara::project_host::EditorProjectOpenTasksCloseReport {
-    loop {
-        let report = application.poll_open_host_shutdown();
-        if report.is_complete() || Instant::now() >= deadline {
-            return report;
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-}
-
-fn editor_run_result(
-    primary: Option<EditorRunError>,
-    native_cleanup: &NativeCloseErrors,
-    project_cleanup: Option<&nara::app::RuntimeCloseEvidence>,
-    session_cleanup: Option<&nara::project_host::EditorProjectCloseReceipt>,
-    open_tasks: Option<&nara::project_host::EditorProjectOpenTasksCloseReport>,
-) -> Result<(), EditorRunError> {
-    let mut cleanup = String::new();
-    if !native_cleanup.is_empty() {
-        cleanup = format!("native graphics retired with errors: {native_cleanup}");
-    }
-    if let Some(evidence) = project_cleanup {
-        if !cleanup.is_empty() {
-            cleanup.push_str("; ");
-        }
-        cleanup.push_str(&format!(
-            "failed project Open retired with cleanup errors: {evidence:?}"
-        ));
-    }
-    if let Some(receipt) = session_cleanup.filter(|receipt| receipt.has_cleanup_failure()) {
-        if !cleanup.is_empty() {
-            cleanup.push_str("; ");
-        }
-        cleanup.push_str(&format!(
-            "project Session retired with cleanup errors: {receipt:?}"
-        ));
-    }
-    if let Some(report) =
-        open_tasks.filter(|report| !report.is_complete() || report.has_cleanup_failure())
-    {
-        if !cleanup.is_empty() {
-            cleanup.push_str("; ");
-        }
-        let status = if report.is_complete() {
-            "retired with cleanup errors"
-        } else {
-            "retirement remains incomplete"
-        };
-        cleanup.push_str(&format!("project Open Host Tasks {status}: {report:?}"));
-    }
-    match (primary, cleanup.is_empty()) {
-        (Some(primary), false) => Err(EditorRunError::Cleanup {
-            primary: Box::new(primary),
-            cleanup,
-        }),
-        (Some(primary), true) => Err(primary),
-        (None, false) => Err(imgui_error(cleanup)),
-        (None, true) => Ok(()),
     }
 }
 
@@ -337,9 +276,10 @@ mod result_tests {
         let evidence = failed_open_cleanup_evidence();
         let mut native = NativeCloseErrors::default();
         native.record("native cleanup probe");
+        let native_cleanup = (!native.is_empty()).then(|| native.to_string());
         let result = editor_run_result(
             Some(EditorRunError::Usage("primary probe".to_owned())),
-            &native,
+            native_cleanup.as_deref(),
             Some(&evidence),
             None,
             None,
@@ -356,21 +296,12 @@ mod result_tests {
         ] {
             assert!(text.contains(fact), "missing {fact}: {text}");
         }
-        assert!(
-            editor_run_result(
-                None,
-                &NativeCloseErrors::default(),
-                Some(&evidence),
-                None,
-                None
-            )
-            .is_err()
-        );
-        assert!(editor_run_result(None, &NativeCloseErrors::default(), None, None, None).is_ok());
+        assert!(editor_run_result(None, None, Some(&evidence), None, None).is_err());
+        assert!(editor_run_result(None, None, None, None, None).is_ok());
         assert!(matches!(
             editor_run_result(
                 Some(EditorRunError::Usage("primary only".to_owned())),
-                &NativeCloseErrors::default(),
+                None,
                 None,
                 None,
                 None,
@@ -383,15 +314,9 @@ mod result_tests {
     #[test]
     fn trusted_session_cleanup_failure_reaches_editor_result_and_preserves_every_cleanup_source() {
         let receipt = crate::app::failed_trusted_session_close_receipt();
-        let session_only = editor_run_result(
-            None,
-            &NativeCloseErrors::default(),
-            None,
-            Some(&receipt),
-            None,
-        )
-        .unwrap_err()
-        .to_string();
+        let session_only = editor_run_result(None, None, None, Some(&receipt), None)
+            .unwrap_err()
+            .to_string();
         for fact in ["project Session", "PluginShutdown"] {
             assert!(
                 session_only.contains(fact),
@@ -402,11 +327,12 @@ mod result_tests {
         let evidence = failed_open_cleanup_evidence();
         let mut native = NativeCloseErrors::default();
         native.record("native cleanup probe");
+        let native_cleanup = (!native.is_empty()).then(|| native.to_string());
         let result = editor_run_result(
             Some(EditorRunError::EventLoop(
                 "primary event loop probe".to_owned(),
             )),
-            &native,
+            native_cleanup.as_deref(),
             Some(&evidence),
             Some(&receipt),
             None,
@@ -446,7 +372,7 @@ mod result_tests {
         assert_eq!(probe.exited(), 0);
         let result = editor_run_result(
             Some(EditorRunError::EventLoop("lost event pump".to_owned())),
-            &NativeCloseErrors::default(),
+            None,
             None,
             None,
             Some(&incomplete),
@@ -457,16 +383,7 @@ mod result_tests {
             text.contains("Open Host Tasks retirement remains incomplete"),
             "{text}"
         );
-        assert!(
-            editor_run_result(
-                None,
-                &NativeCloseErrors::default(),
-                None,
-                None,
-                Some(&incomplete),
-            )
-            .is_err()
-        );
+        assert!(editor_run_result(None, None, None, None, Some(&incomplete)).is_err());
 
         let deadline = Instant::now() + Duration::from_secs(2);
         while !application
@@ -498,9 +415,10 @@ mod result_tests {
         let evidence = failed_open_cleanup_evidence();
         let mut native = NativeCloseErrors::default();
         native.record("native cleanup probe");
+        let native_cleanup = (!native.is_empty()).then(|| native.to_string());
         let result = editor_run_result(
             Some(EditorRunError::EventLoop("lost event pump".to_owned())),
-            &native,
+            native_cleanup.as_deref(),
             Some(&evidence),
             None,
             Some(&complete),
@@ -519,16 +437,7 @@ mod result_tests {
         ] {
             assert!(text.contains(fact), "missing {fact}: {text}");
         }
-        assert!(
-            editor_run_result(
-                None,
-                &NativeCloseErrors::default(),
-                None,
-                None,
-                Some(&complete),
-            )
-            .is_err()
-        );
+        assert!(editor_run_result(None, None, None, None, Some(&complete)).is_err());
     }
 }
 

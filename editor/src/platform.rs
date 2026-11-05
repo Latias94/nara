@@ -24,6 +24,7 @@ mod composition;
 mod game_input;
 #[cfg(feature = "imgui-reference")]
 mod imgui;
+mod termination;
 #[cfg(feature = "imgui-reference")]
 pub use composition::{EditorCompositionError, EditorNativeComposition};
 #[cfg(feature = "imgui-reference")]
