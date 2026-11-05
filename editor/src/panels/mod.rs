@@ -5,6 +5,7 @@ mod context;
 mod host;
 pub(crate) mod submission;
 
+pub use binding::EditorPanelInstanceToken;
 pub use context::EditorPanelContext;
 pub use host::{EditorPanel, EditorPanelHost, EditorPanelSubmission};
 

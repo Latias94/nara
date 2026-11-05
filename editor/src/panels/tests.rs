@@ -258,6 +258,129 @@ fn exact_results_are_ordered_once_and_keep_owned_query_observations() {
 }
 
 #[test]
+fn instance_tokens_bind_the_original_state_through_relocation_and_hidden_round_trips() {
+    let (_fixture, mut application) = application();
+    let mut host = EditorPanelHost::new();
+    let observed = Rc::new(Observations::default());
+    let instance = register(&mut host, &mut application, &observed, "test.endpoint");
+    let mut original = None;
+    let _ = host.prepare(&application, |_, context| {
+        original = Some(context.instance_token())
+    });
+    let original = original.unwrap();
+    assert_eq!(original.instance(), instance);
+    assert!(original.is_current(&application));
+    {
+        let layout = application.panel_workspace_mut().layout_mut();
+        assert!(layout.place(instance, EditorPanelPlacement::Bottom));
+        assert!(layout.set_native_window(instance, EditorNativeWindowId(9)));
+        assert!(layout.set_render_view(instance, Some(EditorRenderViewId(11))));
+    }
+    let _ = host.prepare(&application, |_, context| {
+        assert_eq!(context.instance_token(), original);
+        assert!(context.matches_instance(&original));
+    });
+    assert!(original.is_current(&application));
+    {
+        let layout = application.panel_workspace_mut().layout_mut();
+        assert!(layout.set_visible(instance, false));
+        assert!(layout.reopen(instance));
+    }
+    assert!(!original.is_current(&application));
+    let _ = host.prepare(&application, |panel, context| {
+        assert_eq!(panel.serial, 2);
+        assert!(!context.matches_instance(&original));
+        let replacement = context.instance_token();
+        assert_eq!(replacement.instance(), original.instance());
+        assert_ne!(replacement, original);
+        assert!(replacement.is_current(&application));
+    });
+    close(&mut application);
+    assert!(!original.is_current(&application));
+}
+
+#[test]
+fn native_deliveries_keep_chronological_repeated_visits_in_one_original_candidate() {
+    let (_fixture, mut application) = application();
+    let mut host = EditorPanelHost::new();
+    let observed = Rc::new(Observations::default());
+    let first = register(&mut host, &mut application, &observed, "test.first");
+    let second = register(&mut host, &mut application, &observed, "test.second");
+    let basis = current_basis(&application);
+    application
+        .panel_workspace_mut()
+        .layout_mut()
+        .set_visible(first, false);
+    let mut visits = Vec::new();
+    let mut ids = Vec::new();
+    let candidate = host
+        .prepare_ordered(
+            &application,
+            &[second, first, second],
+            |index, panel, context| {
+                visits.push((index, context.model().instance().id(), panel.serial));
+                ids.push(
+                    context
+                        .submit(EditorAction::QueryDocumentEntities(query(
+                            &basis,
+                            if index == 0 { 1 } else { 2 },
+                        )))
+                        .unwrap(),
+                );
+            },
+        )
+        .unwrap();
+    assert_eq!(visits, [(0, second, 1), (2, second, 1)]);
+    assert!(observed.finished.borrow().is_empty());
+    host.submit_and_drive(&mut application, candidate, Duration::ZERO);
+    let finished = observed.finished.borrow();
+    assert_eq!(finished.len(), 2);
+    assert_eq!(
+        finished.iter().map(|(_, id, _)| *id).collect::<Vec<_>>(),
+        ids
+    );
+    assert!(
+        matches!(&finished[0].2, PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentEntities(Ok(page))) if page.entities.len() == 1)
+    );
+    assert!(
+        matches!(&finished[1].2, PanelActionDispatch::Dispatched(EditorActionOutcome::DocumentEntities(Ok(page))) if page.entities.len() == 2)
+    );
+    drop(finished);
+    close(&mut application);
+}
+
+#[test]
+fn retained_instance_tokens_do_not_keep_a_released_frontend_state_alive() {
+    let (_fixture, mut application) = application();
+    let mut host = EditorPanelHost::new();
+    let observed = Rc::new(Observations::default());
+    let instance = register(&mut host, &mut application, &observed, "test.endpoint");
+    let mut token = None;
+    let retained_candidate = host
+        .prepare(&application, |_, context| {
+            token = Some(context.instance_token())
+        })
+        .unwrap();
+    let token = token.unwrap();
+    let before = application.current_frame().unwrap();
+    assert!(token.is_current(&application));
+    drop(host);
+    assert_eq!(*observed.dropped.borrow(), [1]);
+    assert!(
+        application
+            .panel_workspace()
+            .layout()
+            .instance(instance)
+            .unwrap()
+            .is_visible()
+    );
+    assert!(!token.is_current(&application));
+    assert!(Arc::ptr_eq(&before, &application.current_frame().unwrap()));
+    drop(retained_candidate);
+    close(&mut application);
+}
+
+#[test]
 fn foreign_and_superseded_candidates_cannot_settle_the_current_owner() {
     let (_fixture, mut application) = application();
     let mut first = EditorPanelHost::new();

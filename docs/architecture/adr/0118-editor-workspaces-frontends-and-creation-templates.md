@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-05 (toolkit-independent panel custody and explicit reference selection)
+**Last Revised**: 2026-11-05 (toolkit-independent panel custody and native image attachment)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -312,6 +312,33 @@ Provider-local focus is distinct from Host arbitration between providers. The sa
 coordinate mapping must govern drawing, hit testing and semantic bounds. Toolkits may retain
 their own trees and render through admitted packets or retained images; they need not lower
 every control into `UiNode`. Image composition alone does not qualify input or text integration.
+
+The first concrete native attachment is an image-backed, single-window Host over the original
+semantic panel and WGPU owners. It receives opaque instance tokens, immutable provider snapshots,
+original image display occurrences and their placement/clip. The token observes the actual
+frontend state's lifetime without retaining that state. One native attachment Host binds one
+original semantic submission owner, so cancellation and subsequent input settle together in that
+owner's candidate. Another semantic Host cannot attach or drain its interaction. The complete
+ordered window candidate adopts input geometry only after the original successful native outcome
+covers every declared image. Original backend submissions and physical retirement stay with their
+renderer; a boolean presentation assertion or another Host's frame cannot substitute them.
+
+This Host arbitrates provider-level keyboard, pointer capture, window-modal input, clipboard,
+cursor, text services and explicit redraw demand. Each provider keeps its own controls, local
+focus and editing state. Text input additionally names a provider-local nominal focus scope;
+changing fields within one panel retires old composition readiness. Late delivery cannot select
+the latest field token. The Host maps and clips a nonzero IME exclusion area to accepted visible
+content; invisible areas refuse, and a zero-width caret cannot be relocated from outside the
+clip. Nara providers retain their existing presenter/journal/interaction owners; foreign providers
+need not construct a Nara widget or kernel frame.
+
+Required unsupported services refuse before attachment and native output admission. This first
+path admits complete-image outputs, in-image popups and one window's modal arbitration; direct
+rendering, out-of-panel overlays, native detachment and native accessibility remain explicit
+unsupported capabilities there. They remain successors, separately from the reference frontend's
+existing native scope. This source-level cooperative attachment defines no stable binary ABI,
+process sandbox or hot-unload policy. Its [owning unit](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#image-backed-native-panel-attachment)
+records actual independent/native qualification and limits.
 
 Nara supplies documented Host ports and independently compiled conformance consumers. An official
 ImGui/egui extension, stable binary ABI, native code hot-unload and arbitrary project-code loading

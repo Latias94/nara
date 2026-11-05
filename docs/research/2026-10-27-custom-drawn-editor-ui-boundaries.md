@@ -472,6 +472,24 @@ It selects one nearest motion/scroll listener, not GPUI's live callback registry
 global drag state or arbitrary propagation. Dynamic stop handling and general key/text services
 remain further pressure. This pinned source study is not native or performance evidence.
 
+### Cached composition and state membership follow-up
+
+At the same Zed pin, `window.rs:4256` carries accessed element-state records into the next frame
+while `view.rs:560` restores accessed entity IDs on a cached prepaint hit
+([replay][zed-frame-replay], [view cache][zed-view-cache]). This keeps retained state and later
+dependency notifications alive even when composition is skipped. Nara's membership transaction
+must distinguish such reuse from actual child removal before adopting the parent pass. This
+is a future reuse acceptance requirement, not a demonstrated bug in the current conservative
+recomposition consumers.
+
+At Open-GPUI `689db5b49b33a5b2e64ba332bff72c98e70092bb`, geometry reuse does not skip the
+wrapper's complete key preparation. `render_plan.rs:856` rebuilds duplicate/source key data;
+`:1008` inserts keys into a `BTreeMap` ([plan][open-list-plan], [keys][open-list-keys]). Distinguish
+O(n) logical-entry visits/storage from up to O(n log n) ordered-key comparisons and key-byte
+copying. Neither geometry reuse nor a bounded number of rendered rows proves O(visible) total
+work. The current design/plan now name these separate costs without selecting this module as
+a dependency.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml

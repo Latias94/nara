@@ -16,6 +16,7 @@ use nara::{
 
 use crate::{EditorApplication, workspace::EditorPanelModel};
 
+use super::binding::{EditorPanelInstanceToken, PanelBinding};
 use super::submission::{
     self, PanelOrigin, PanelSubmissionId, PanelSubmitError, PendingPanelSubmission,
 };
@@ -29,6 +30,8 @@ pub struct EditorPanelContext<'scope, 'frame> {
     pub(super) application: &'scope EditorApplication,
     pub(super) model: EditorPanelModel<'frame>,
     pub(super) origin: PanelOrigin,
+    pub(super) state_lifetime: std::sync::Weak<()>,
+    pub(super) host: std::sync::Arc<()>,
     pub(super) actions: &'scope mut Vec<EditorAction>,
     pub(super) submissions: &'scope mut Vec<PendingPanelSubmission<()>>,
     pub(super) next_submission: &'scope mut u64,
@@ -39,6 +42,29 @@ impl EditorPanelContext<'_, '_> {
     #[must_use]
     pub fn model(&self) -> EditorPanelModel<'_> {
         self.model
+    }
+
+    /// Captures this exact panel incarnation for native attachment and later liveness checks.
+    #[must_use]
+    pub fn instance_token(&self) -> EditorPanelInstanceToken {
+        EditorPanelInstanceToken {
+            instance: self.origin.instance,
+            binding: PanelBinding::with_incarnation(
+                self.model.frame(),
+                self.model.instance(),
+                std::sync::Arc::clone(&self.origin.incarnation),
+            ),
+            project: self.application.workspace_generation(),
+            layout: std::sync::Arc::clone(self.application.panel_workspace().layout().lifecycle()),
+            state_lifetime: self.state_lifetime.clone(),
+            host: std::sync::Arc::clone(&self.host),
+        }
+    }
+
+    /// Whether a retained native attachment belongs to this exact callback's panel state.
+    #[must_use]
+    pub fn matches_instance(&self, token: &EditorPanelInstanceToken) -> bool {
+        token.matches_origin(&self.origin) && token.is_current(self.application)
     }
 
     /// Captures an open source document's exact query basis without changing navigation.

@@ -73,8 +73,25 @@ old routes/tokens refused after the replacement actually presents and receives f
 active preedit: cancel through the reducer, clear pointer/focus facts, release both panel states
 and physically retire the original GPU Host. CPU tests and a successful final marker alone do
 not replace these internal assertions. This finite composition supplies semantic/presentation
-custody evidence; broader native capability arbitration, OS input, full independent Editor and
-performance remain separate R11b-f acceptance.
+custody evidence, with native services qualified by the attachment successor below. OS input,
+the full independent Editor and performance remain separate R11b-f acceptance.
+
+The public native image attachment successor keeps that complete trajectory, with keyboard,
+clipboard error handling, original field/scope mapping, cursor and refresh supplied through
+`EditorPanelImageHost`. Build both `native` examples and run `native_panel` plus
+`conformance_native` serially. The latter frontend owns its controls/software painter without
+importing a Nara widget tree or UI renderer. Require all 18 actual window presentations, seven
+exact callbacks, source/history/persistence/retirement checks and 144,000 original image pixels
+compared through readback. With two panels in one original semantic Host, require whole-candidate
+refusal when only the first occurrence was actually sampled, complete two-image adoption and
+old preedit cancellation before the next focus callback. Also retain keyboard-only focus,
+foreign semantic-owner refusal without cancellation loss, clipped/fractional input and IME
+geometry, capture/wrong-button/modal controls, clipboard failure and deadline coalescing.
+Native callbacks use injected events and clipboard access. This proves neither actual OS IME
+candidate ordering nor system clipboard interoperability, named-toolkit compatibility, mixed
+toolkit hosting, multi-window behavior or performance. Readback covers original image outputs,
+not final swapchain pixels. The reference Editor's ordinary native trajectories retain their
+separate Dear-based composition scope.
 
 The neutral-dependency successor imports the separate UI library's `presentation` feature and
 its procedural four-color Image. Require the original typed handle, nominal store/slot revision,

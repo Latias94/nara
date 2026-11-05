@@ -110,8 +110,9 @@ user-authored frontends share document and Host authority without sharing their 
 The finite public surface-presenter bridge in ADR0102 permits an independently authored Nara
 frontend to prepare packets, return original backend outcomes and observe its exact presented
 journal without importing a hidden receipt factory or the game's ECS UI adapter. It is a concrete
-presentation adapter, not a new UI/component, document, platform or GPU authority. A complete
-panel attachment and the independent Editor still need the remaining R11b consumers. It owns
+presentation adapter, not a new UI/component, document, platform or GPU authority. ADR0118 adds
+the bounded image-backed native attachment; complete panel capabilities and the independent
+Editor still need their remaining R11b consumers. The surface presenter owns
 publication of presentation history only; frontend interaction, widget reducers and text-input
 lifetimes remain live caller state. Completing presentation must not restore an interaction
 snapshot captured during preparation.
@@ -143,6 +144,9 @@ Composition reads existing state and lazily initializes new state without publis
 only a successful pass adopts membership. This transaction is neither compiler acceptance nor
 presentation admission. A frontend chooses the declaration scope: omitting a slot evicts its
 local state, so drafts that must survive hidden controls need a longer-lived declared owner.
+Skipping an existing child's composition through a compatible cache hit does not omit that
+child: preserve its declared membership and dependency associations before adopting the pass.
+Actual removal follows the selected eviction policy. This does not select a public replay format.
 The store cannot release native focus/IME, cancel external tasks or discover fields nested inside
 arbitrary user state. Those remain explicit responsibilities of the existing owners. This
 prerequisite does not establish automatic dependency tracking, a general Widget trait, custom

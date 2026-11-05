@@ -42,6 +42,14 @@ winit = { version = "=0.30.13", optional = true }
 name = "panel_surface"
 required-features = ["native"]
 
+[[example]]
+name = "conformance_surface"
+required-features = ["native"]
+
 [[test]]
 name = "native_panel"
+required-features = ["native"]
+
+[[test]]
+name = "conformance_native"
 required-features = ["native"]

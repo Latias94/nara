@@ -257,6 +257,95 @@ CPU semantics or UI description compilation alone do not qualify native presenta
 This guide claims no full independent Editor, general toolkit compatibility, OS IME/accessibility
 parity, extension hot reload or performance result from this prerequisite.
 
+## Native Image Panel Attachment
+
+`nara_editor::native::EditorPanelImageHost<S>` supplies a concrete single-window attachment for
+frontends that publish complete retained images through the original `WgpuRenderHost`. `S` is
+the caller's immutable captured presentation state. A Nara adapter may retain its `UiFrame`; a
+user frontend may retain its own control geometry and text snapshot without constructing a
+Nara widget tree, journal or interaction session. The semantic `EditorPanelHost<P>` remains the
+only panel-state/action owner. The native Host creates no window, device, queue, renderer or
+document owner.
+
+Construct it with the caller's original `Arc<Window>`, logical `WindowId` and shared
+`EditorClipboard`. The default clipboard uses the desktop text backend; `with_access` accepts
+a Host-owned `EditorClipboardAccess` provider. Clones share one provider, preserve exact text
+and errors, and refuse reentrant access. Tests may inject their own provider without replacing
+the production system clipboard integration or writing to the user's clipboard.
+
+During semantic preparation, capture `context.instance_token()`. It identifies that exact live
+panel state, project, layout and binding. Relocation preserves it; hide/close/target changes,
+layout/project replacement or releasing the original state invalidates it. Retaining a token or
+image does not keep the original panel state alive. Attach it with the complete required
+`EditorPanelCapability` set before staging an image. One native image Host binds one original
+semantic Host: another Host's token or dispatch receiver refuses before routing or draining
+pending cancellation. A composition may use its own concrete enum or trait-object panel type
+for several provider implementations within that semantic owner.
+
+Capture one `EditorPanelImage::new(token, display, Arc::new(snapshot), mapping, clip)` for each
+visible native panel output. `DisplayMapping2d` describes the complete image in logical window
+coordinates and supplies its inverse to target pixels. The explicit clip, actual window scale
+and original image extent must agree. `with_window_modal(true)` makes that image a window-modal
+provider. The Host admits at most 64 attachments/images, one complete image per semantic panel
+instance in each candidate. Cropped UVs, direct rendering, out-of-panel overlays, native
+detachment and accessibility are explicit unsupported capabilities of this first path.
+
+Call `stage(&application, display_frame_index, images)` for one complete ordered window
+candidate. Draw **its** exposed displays using **its** mappings and clips through the original
+renderer, and record the original samples. Pass the opaque candidate and actual
+`WgpuWindowFrameOutcome` to `presented`. Only a complete matching native outcome adopts new
+input geometry. Submission, a copied image receipt, a foreign/superseded candidate, deferral or
+an incomplete composite list cannot substitute successful presentation. The original renderer
+retains all GPU submission and physical-retirement responsibilities. A Nara provider separately
+returns and drains its original presenter outcome before using its journal for input.
+
+Forward normalized native events with `EditorPanelPlatformEvent::from_window_event`, after
+filtering the Winit window ID. `dispatch` receives the Application, original semantic Host,
+optional event and a callback with `&mut P`, original `EditorPanelContext`, the accepted
+`EditorPanelInput<S>` and scoped `EditorPanelServices`. Its `submission`, when present, returns
+to that same semantic Host's `submit_and_drive`. Do not call another `prepare` from inside the
+callback: cancellation and input already share one original ordered candidate. `dispatch(None)`
+flushes cancellation caused by presentation, invalidation or retirement without another input.
+
+The callback receives the **accepted** snapshot and exact endpoint. Repainting or mutating
+desired state does not authorize its new hit geometry. Keep local focus/pressed/editing state
+separate from captured geometry so an ordinary press and release can share a presentation.
+Nara adapters reuse their content transform, field tokens, reducer and presenter. A custom
+frontend owns its corresponding input validation rather than borrowing another control's token.
+
+Pointer press establishes provider keyboard ownership; capture requires the matching pressed
+button, and another button's release cannot end it. Captured motion may leave the clip/image
+without clamping. Wheel values retain native Lines/Pixels and modifiers. `focus_panel` explicitly
+targets an already presented keyboard provider, including one without Pointer capability. It
+does not focus an OS window or select a local control. Its `KeyboardFocused` callback may choose
+that control and request text input. A window-modal provider blocks another provider's focus.
+
+Native text input uses `set_text_input(Some(scope))` with a retained
+`EditorPanelTextInputScope` for each local text-focus lifetime. Keep the same scope while that
+focus survives; use a fresh scope when the field/token changes, including within the same
+panel. Delivered Text/IME carries its original scope. `None` disables input, and IME preedit and
+commit wait for native readiness. Submit the caret in accepted image target pixels through
+`set_ime_area`. The Host maps and clips a nonzero exclusion area to visible content; a fully
+invisible area refuses. A zero-width caret must already be inside the visible interval and
+is never moved to the clip edge. Scope replacement, native focus loss and retirement reset
+native IME state.
+
+Services also provide explicit clipboard errors, cursor selection, immediate redraw demand and
+earliest per-panel deadlines. `next_deadline` and `poll_deadlines` let the caller's original
+event loop coalesce work without polling static panels. Declared capabilities and current
+keyboard/pointer ownership are checked for each request. Input locking, resize/scale, changed
+placement, omitted output and retirement cancel before subsequent input. `invalidate` reports
+backend/window invalidation; `close` withdraws admission and native services. Flush cancellation
+before releasing frontend state, then physically retire graphics through the original GPU Host.
+
+The [independent consumer](../../tests/fixtures/editor-ui-host-consumer/README.md) contains both
+the Nara presenter adapter and a separately authored software-painted conformance frontend.
+Their [owning unit](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#image-backed-native-panel-attachment)
+records actual qualification. The software renderer is a finite extension consumer, with
+explicit CPU raster/upload/copy work; it supplies no performance recommendation. This attachment
+does not establish named-toolkit compatibility, OS IME/accessibility parity, multi-window
+hosting, code reload or the complete self-drawn Editor.
+
 ## ImGui Reference Frontend
 
 The following controls, `ImguiEditorPanel` examples and `EditorNativeComposition` embedding apply

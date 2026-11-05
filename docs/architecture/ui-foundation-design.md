@@ -117,6 +117,17 @@ dependencies remain in the Editor package; this is not a minimal headless depend
 The [panel custody prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
 keeps its finite independent consumer distinct from native capability arbitration and the
 complete self-drawn Editor. Module/crate extraction follows actual consumer pressure.
+
+The concrete `native::EditorPanelImageHost<S>` adds a single-window image attachment over that
+same original semantic Host and renderer. Exact instance tokens observe frontend-state lifetime;
+opaque snapshots need no Nara control tree. One complete native outcome adopts the ordered
+images/mappings atomically. The Host arbitrates provider keyboard/capture/modal input and scoped
+IME, clipboard, cursor and explicit refresh, while providers keep their original controls and
+text coordinate owners. Unsupported direct rendering, out-of-panel overlay, native detach and
+accessibility requests refuse explicitly. Independent Nara and software-painted consumers use
+these same ports; the [attachment unit](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#image-backed-native-panel-attachment)
+records the actual scope rather than treating it as a complete Editor or toolkit compatibility.
+
 The [R11b dependency prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#neutral-presentation-consumption-prerequisite)
 separates the neutral packet/planner/presenter from App/ECS installation inside the current
 owners. Asset, Identity, Diagnostic, Image, Render, Window and UI Render use explicit `runtime`
@@ -375,12 +386,20 @@ bounded, but arbitrary user payload bytes remain the component author's responsi
 lookup and direct-field focus scans have documented work; no timing, allocation reduction or
 O(visible rows) claim follows from keyed retention alone.
 
+Skipping an existing child's composition for reuse is not omission from the declared state
+scope. Reuse must preserve its state membership and consuming dependency associations before
+adopting the parent pass, so a cached child's draft/preedit survives and later external changes
+still invalidate its artifacts. Actual removal applies the declared eviction/cancellation policy.
+Zed's cached-view replay carries accessed element-state and entity records forward; Nara keeps
+the equivalent retention mechanism private and must qualify it together with cache reuse.
+
 Virtualization has separate collection and active-row work. Uniform extents can derive a range
 arithmetically; measured extents need estimates, changed-size invalidation and retained geometry.
 The Open-GPUI pin implements `virtualizer` inside `open-gpui-ui-core` 0.2.0. Its outer list wrapper
 owns placement/interaction while a content renderer composes reusable controls. A measured
-geometry-cache hit avoids size callbacks, but dense metadata rebuild and the component's
-collection-wide preparation remain O(logical rows). This is a reusable packaging example,
+geometry-cache hit avoids size callbacks, but dense metadata rebuild still visits and stores
+O(logical rows) entries. The wrapper also rebuilds ordered key sets/maps, which can require
+O(n log n) key comparisons plus copied key bytes. This is a reusable packaging example,
 not evidence of O(visible rows) total work or a selected dependency.
 
 Nara's list consumers must distinguish visible, overscan and pinned editing rows from logical

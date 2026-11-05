@@ -370,7 +370,13 @@ impl ImagePainter {
         target: &wgpu::TextureView,
         group: &wgpu::BindGroup,
     ) {
-        self.draw_native(encoder, target, group, None);
+        self.draw_native(
+            encoder,
+            target,
+            group,
+            None,
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+        );
     }
 
     pub fn draw_placed(
@@ -381,7 +387,26 @@ impl ImagePainter {
         destination: [u32; 4],
         clip: [u32; 4],
     ) {
-        self.draw_native(encoder, target, group, Some((destination, clip)));
+        self.draw_native(
+            encoder,
+            target,
+            group,
+            Some((destination.map(|value| value as f32), clip)),
+            wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+        );
+    }
+
+    /// Uses one caller-admitted fractional viewport and exact native scissor.
+    pub fn draw_mapped(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        group: &wgpu::BindGroup,
+        destination: [f32; 4],
+        clip: [u32; 4],
+        load: wgpu::LoadOp<wgpu::Color>,
+    ) {
+        self.draw_native(encoder, target, group, Some((destination, clip)), load);
     }
 
     fn draw_native(
@@ -389,7 +414,8 @@ impl ImagePainter {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         group: &wgpu::BindGroup,
-        placement: Option<([u32; 4], [u32; 4])>,
+        placement: Option<([f32; 4], [u32; 4])>,
+        load: wgpu::LoadOp<wgpu::Color>,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("streams-window-exact-image-blit"),
@@ -398,7 +424,7 @@ impl ImagePainter {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -408,7 +434,7 @@ impl ImagePainter {
         pass.set_bind_group(0, group, &[]);
         if let Some(([x, y, width, height], [clip_x, clip_y, clip_width, clip_height])) = placement
         {
-            pass.set_viewport(x as f32, y as f32, width as f32, height as f32, 0.0, 1.0);
+            pass.set_viewport(x, y, width, height, 0.0, 1.0);
             pass.set_scissor_rect(clip_x, clip_y, clip_width, clip_height);
         }
         pass.draw(0..3, 0..1);

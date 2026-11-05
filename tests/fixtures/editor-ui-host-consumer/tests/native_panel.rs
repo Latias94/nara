@@ -75,7 +75,7 @@ fn independent_panel_host_presents_edits_persists_and_retires_original_work() {
             path.display()
         );
     }
-    let marker = "EDITOR_UI_HOST_OK native_presentations=6 journal_commits=5 exact_panel_results=7 nonactive_authoring=true undo_redo=true save_reopen=true source_preserved=true modal_underlay_blocked=true hidden_roundtrip_retired=true late_presentation_discarded=true stale_input_rejected=true original_hosts_retired=true input_delivery=injected_pointer_and_ime";
+    let marker = "EDITOR_UI_HOST_OK native_presentations=6 journal_commits=5 exact_panel_results=7 nonactive_authoring=true undo_redo=true save_reopen=true source_preserved=true modal_underlay_blocked=true hidden_roundtrip_retired=true late_presentation_discarded=true stale_input_rejected=true original_hosts_retired=true input_delivery=injected_pointer_and_ime native_image_host=true keyboard_clipboard=true ime_scope_ready=true mapped_caret=true cursor_refresh=true cancellation_flushed=true";
     assert!(
         output.lines().any(|line| line == marker),
         "native qualification did not reach its final marker:\n{output}\n{errors}"

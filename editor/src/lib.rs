@@ -2,6 +2,7 @@
 
 mod app;
 mod frontend;
+pub mod native;
 pub mod panels;
 mod platform;
 mod supervised_play;
@@ -21,8 +22,9 @@ pub use frontend::{
     ImguiEditorFrontend, ImguiEditorPanel, ImguiEditorPanelContext, ImguiEditorSubmission,
 };
 pub use panels::{
-    EditorPanel, EditorPanelContext, EditorPanelHost, EditorPanelSubmission, PanelActionDispatch,
-    PanelActionNotDispatched, PanelSubmissionId, PanelSubmitError,
+    EditorPanel, EditorPanelContext, EditorPanelHost, EditorPanelInstanceToken,
+    EditorPanelSubmission, PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId,
+    PanelSubmitError,
 };
 pub use platform::EditorRunError;
 #[cfg(feature = "imgui-reference")]

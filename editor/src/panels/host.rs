@@ -6,7 +6,7 @@ use crate::{
     EditorApplication, EditorApplicationUpdate,
     app::EditorApplicationDispatch,
     workspace::{
-        EditorPanelDescriptor, EditorPanelInstanceId, EditorPanelModel,
+        EditorPanelDescriptor, EditorPanelInstance, EditorPanelInstanceId, EditorPanelModel,
         EditorPanelRegistrationError,
     },
 };
@@ -44,6 +44,7 @@ pub struct EditorPanelSubmission(PreparedSubmission<()>);
 struct PanelState<P> {
     panel: P,
     binding: PanelBinding,
+    lifetime: Arc<()>,
 }
 
 /// Toolkit-independent custody for typed panel state and ordered action observations.
@@ -73,6 +74,10 @@ impl<P: EditorPanel> Default for EditorPanelHost<P> {
 }
 
 impl<P: EditorPanel> EditorPanelHost<P> {
+    pub(crate) fn identity(&self) -> &Arc<()> {
+        &self.submissions.identity
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -104,13 +109,49 @@ impl<P: EditorPanel> EditorPanelHost<P> {
         application: &EditorApplication,
         mut callback: impl FnMut(&mut P, &mut EditorPanelContext<'_, '_>),
     ) -> Option<EditorPanelSubmission> {
+        let visits = application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .enumerate()
+            .map(|(index, instance)| (index, Some(instance)));
+        self.prepare_instances(application, visits, |_, panel, context| {
+            callback(panel, context)
+        })
+    }
+
+    /// Uses the same candidate for chronologically ordered native cancellation/input deliveries.
+    /// Each callback index refers to the original visit, even when another visit was retired.
+    pub(crate) fn prepare_ordered(
+        &mut self,
+        application: &EditorApplication,
+        visits: &[EditorPanelInstanceId],
+        mut callback: impl FnMut(usize, &mut P, &mut EditorPanelContext<'_, '_>),
+    ) -> Option<EditorPanelSubmission> {
+        let visits = visits
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (index, application.panel_workspace().layout().instance(*id)));
+        self.prepare_instances(application, visits, &mut callback)
+    }
+
+    fn prepare_instances<'app>(
+        &mut self,
+        application: &'app EditorApplication,
+        visits: impl IntoIterator<Item = (usize, Option<&'app EditorPanelInstance>)>,
+        mut callback: impl FnMut(usize, &mut P, &mut EditorPanelContext<'_, '_>),
+    ) -> Option<EditorPanelSubmission> {
         self.reconcile(application);
         self.settle_pending(None, Some(PanelActionNotDispatched::Superseded));
         let frame = Arc::clone(self.frame.as_ref()?);
         let mut actions = Vec::new();
         let mut submissions = Vec::new();
         let mut panels = Vec::new();
-        for instance in application.panel_workspace().layout().instances() {
+        for (index, instance) in visits {
+            let Some(instance) = instance else {
+                continue;
+            };
             if !instance.is_visible() {
                 continue;
             }
@@ -123,6 +164,7 @@ impl<P: EditorPanel> EditorPanelHost<P> {
                 .or_insert_with(|| PanelState {
                     panel: factory(),
                     binding: PanelBinding::for_instance(&frame, instance),
+                    lifetime: Arc::new(()),
                 });
             let origin = state.binding.origin(instance.id());
             panels.push(origin.clone());
@@ -130,11 +172,13 @@ impl<P: EditorPanel> EditorPanelHost<P> {
                 application,
                 model: EditorPanelModel::new(&frame, instance),
                 origin,
+                state_lifetime: Arc::downgrade(&state.lifetime),
+                host: Arc::clone(&self.submissions.identity),
                 actions: &mut actions,
                 submissions: &mut submissions,
                 next_submission: &mut self.submissions.next_submission,
             };
-            callback(&mut state.panel, &mut context);
+            callback(index, &mut state.panel, &mut context);
         }
         let action_origins = submissions
             .iter()

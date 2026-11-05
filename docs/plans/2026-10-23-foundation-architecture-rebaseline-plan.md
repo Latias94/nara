@@ -1446,7 +1446,7 @@ not close the native all-panel font transaction: the Host must still coordinate 
 old/new presented geometry and routed input without silently dropping drafts or pending results.
 
 **Files:** `editor/src/platform/composition.rs`, `editor/src/frontend/imgui/workspace.rs`,
-`editor/src/panels/`,
+`editor/src/panels/` and `editor/src/native/`,
 `editor/src/platform/imgui/owned.rs` and keyboard/IME adapters, their actual successor modules,
 `crates/nara_ui_render/Cargo.toml` and `crates/nara_ui_render/src/integration.rs`,
 `tests/fixtures/module-consumer/editor-panel-consumer/` and
@@ -1686,6 +1686,121 @@ reference-only fields/helpers in the neutral build and large owned result/candid
 remain. Root and independent-consumer format checks pass; changed-document local file links
 resolve, excluding remote URLs and fragment validity. Documentation closure adds no native or
 performance claim beyond the executed scopes above.
+
+#### Image-backed native panel attachment
+
+Add the first concrete public native attachment above the existing semantic panel Host and
+WGPU image/composite owners. It borrows the caller's original native window and admits finite
+image-backed panel outputs, their exact immutable frontend snapshots, placement/clip and
+capabilities. An opaque panel-instance token comes from the original semantic Context; matching
+saved IDs or labels cannot bind another incarnation. The shared Host performs no layout,
+widget reduction, document mutation or GPU creation/submission. Nara content keeps its existing
+presenter/journal/interaction, while a small non-Nara consumer keeps its own buffer and controls.
+Each native attachment Host binds the original semantic Host identity. Foreign attachment and
+dispatch refuse before routing or draining cancellation. This preserves one exact ordered
+candidate for focus transfer; heterogeneous frontend state may be composed by that original
+Host's own concrete panel type, without a new action or widget dispatcher.
+
+Stage one complete window candidate with an ordered, bounded set of panel images. Adopt its
+input mapping only after the original successful native outcome covers every exact image
+occurrence, window and display frame. Deferral, foreign/superseded candidates, missing composites,
+stale native geometry, retired panel tokens and invalid device outputs cannot publish new routes.
+Atomic window adoption preserves compatible provider state; changed geometry, omitted outputs,
+focus loss, native resize/scale and retirement cancel interaction before later input. Existing
+backend permits, pending submissions and physical retirement remain with their original owners.
+
+The finite single-window Host arbitrates keyboard, pointer capture and window-modal blocking
+between attached providers. It maps native positions through the admitted image placement,
+supports out-of-bounds captured motion without clamping and preserves wheel units/modifiers.
+An explicit focus operation admits an already presented keyboard provider independently from
+pointer capability; it cannot focus an OS window or steal an underlay from a window-modal owner.
+Frontend callbacks consume their original presented snapshot and use the same semantic Context
+to queue domain work. Cancellation and ordinary input settle through one existing submission
+candidate, in actual delivery order. The Host coordinates IME readiness/candidate area, shared
+clipboard access, cursor and coalesced immediate/deadline refresh. Required unsupported services
+refuse before attachment/output publication. Direct rendering, out-of-panel overlays, native
+detachment and native accessibility remain explicit unsupported capabilities of this first path.
+
+Text service ownership additionally includes an opaque provider-local focus scope. Switching
+fields within the same panel must retire the original IME readiness, just as switching panels
+does. Text and composition delivery retains its original scope; a drain cannot select the latest
+field token. This scope is an ordinary nominal lifetime observation, not a shared widget-ID
+registry or source identity. Native acknowledgement gating does not prove arbitrary OS-event
+ordering or actual platform candidate delivery; those retain their separate qualification.
+The native mapping owner clips nonzero exclusion areas to accepted visible content, refusing
+fully invisible areas and outside zero-width carets without relocating insertion geometry.
+
+Move the existing Dear-backed clipboard's text access to a shared native owner and leave only
+the reference toolkit shim at the old seam. Preserve failure and retry behavior. Use the already
+resolved text-only clipboard backend; no alternate input/GPU owner or package/version family is
+required. Nara's adapter must reuse its content transform and field tokens rather than turn
+target pixels into a new text-coordinate authority.
+
+Qualify independently built Nara and non-Nara frontends through these same ports, including
+actual rendering, text, modal behavior, clipboard/cursor/refresh, exact prepared source edits,
+history/persistence and pending-output retirement. Keep the complete preceding Nara trajectory.
+Add observable valid-mutation refusal, focus/capture cancellation and replacement-token controls,
+fractional placement/clip tests, original outcome correlation and physical GPU cleanup. CPU
+simulation, injected native input, OS event delivery and performance remain separately scoped.
+This path is source-level native consumption, not a stable ABI, named-toolkit compatibility,
+automatic reload or complete independent Editor/R11b acceptance.
+
+Independent review corrects original semantic-owner binding before attachment/cancellation
+drain, adds a real focus entrance for keyboard-only providers, and moves final IME clipping
+into the native mapping owner. The first full-containment rule correctly exposed a partially
+clipped real text exclusion area in the fractional fixture; clipping nonzero areas preserves
+the source text/caret owner while refusing invisible caret lines. Additional review retains
+the original retired image across a no-output retry without constructing/re-retiring its
+replacement, and adds Nara adapter refusals for Point against unpresented text/preedit.
+The deterministic no-receipt control injects an empty outcome and then presents the same
+original image through the real Host; it does not simulate a successful receipt or qualify
+OS surface deferral. Initial two-panel fixture failures were focus setup and consumed-event
+expectations: dropped unready text is consumed but never reaches the provider callback.
+
+The Zed/Open-GPUI source follow-up also records cache/state membership as joint acceptance:
+cached existing children retain membership/dependency associations through parent recomposition;
+actual omission keeps its declared eviction policy. Open-GPUI ordered-key preparation has
+separate logical-entry, comparison and key-copy costs. These refine R11e's future reuse tests
+without selecting a generic retained tree, virtualizer dependency or performance claim.
+
+Serial Rust 1.95.0 qualification on November 5 uses the existing root `target` and original
+Windows/DX12 hardware Host:
+
+- Shared native services and semantic panel custody pass **33/33**, run
+  `0f76f02d-8382-4a35-afd7-df6b58bb6258`. The complete no-reference Editor library later passes
+  **192/192**, with two skipped; these cohorts overlap.
+- Default Editor library and selected public workflow integrations pass **443/443**, with
+  61 skipped, run `ed85d2b6-9e99-46df-9ea0-836419b9b58f`.
+- The independent UI Host's CPU/panel/painter cohort passes **14/14**, with two native cases
+  skipped, run `75c95fd8-e107-482f-b197-a18503362bd8`. The seven painter/control tests do not
+  import Nara UI widgets/rendering in their owning module.
+- Both independently built native workflows pass **2/2** after review corrections, run
+  `d2d3c707-5fdd-4954-9bbb-202f24347edb`. Nara preserves **6 presentations / 5 journal commits /
+  7 exact callbacks**. The non-Nara frontend completes **18 actual presentations / 7 exact
+  callbacks / 144,000 original image pixels compared**, including two-panel atomic refusal/
+  adoption, old cancellation before new focus, injected no-receipt retry and original GPU cleanup.
+- The affected reference Editor native ordinary authoring, shared clipboard/keyboard,
+  retained-draft capacity recovery and panel/GPU reconstruction workflows pass **4/4**, run
+  `3b003216-0456-46c9-970f-1d0110226d7e`. Capacity recovery takes about 93 seconds in this debug
+  run; it is correctness evidence, not an interaction-cost measurement.
+- Existing independently compiled panel consumers pass **46/46**, with four skipped, run
+  `4f8e72b5-bcc3-4141-b48f-4b60edd202c8`. The independent UI Host's normal/build dependency
+  assertions exclude every Dear package in ordinary and `native` configurations, **1/1**, run
+  `9a8690d6-5fed-4326-abd0-cd96eed41d57`.
+- The public embedded reference Host's actual hidden-window startup/paint/close passes **1/1**,
+  run `1856b634-cb7d-47a6-9cab-7fb7d6373f82`, preserving all fixture source bytes.
+- The shared image-painter helper's original two-native-window/independent-image workflow
+  passes **1/1**, run `733ae60d-a45e-4a5f-bf43-09ced8eb8714`. Its existing clear/placement
+  behavior is retained alongside the new fractional viewport/multiple-image load operation.
+- Default/all-feature and no-reference correctness Clippy, independent all-feature correctness
+  Clippy and the default Editor executable build pass. Existing non-correctness warnings remain;
+  no warning-free or whole-workspace claim follows.
+
+The fixture locks add the already resolved desktop text clipboard dependency without upgrading
+existing package versions. Root/shared/independent tests remain separate scopes, not an additive
+coverage percentage. Actual OS input and candidate ordering, system clipboard interoperability,
+final swapchain pixels, Linux/macOS, arbitrary toolkit embedding, reload, full independent
+Editor and R11a/e cost budgets remain open.
 
 #### Custom child-measurement and layout prerequisite
 
@@ -2233,6 +2348,10 @@ distributions rather than creating registry snapshots or multiplying benchmark s
 
 - After warm-up, static subtrees beside active Views avoid repeated description construction,
   layout, shaping and unchanged glyph uploads. Count comparison and composition work honestly.
+  Recompose a changed parent while a child with draft/preedit repeatedly hits its cache: retain
+  the child's declared state membership and dependency associations, then invalidate it through
+  an external result. Actual removal applies its eviction/cancellation policy and refuses the
+  old input token. Skipped composition cannot be interpreted as omitted state.
 - Local paint/interaction changes preserve unrelated text/layout; font/constraint/DPI changes
   invalidate exactly their dependent work. Failed/rejected work preserves the original route rules.
   Revalidate early cache hits when later phase facts change; regenerate or refuse affected
