@@ -50,8 +50,13 @@ The following [native text-layout unit](../../research/2026-10-27-custom-drawn-e
 is verified locally at Open-GPUI `0861f8d52b1`, without publication in this continuation. It
 preserves native tabs, Unicode separator baselines, default/explicit typography and wrapped
 hit-test errors. Core 877, affected consumers 2,964 and selected Windows 173 pass; four existing
-interactive cases remain skipped. Pending-input/blur, native upload/mapping safety and the
-wider refresh remain open, along with Nara integration and measured performance.
+interactive cases remain skipped. The subsequent
+[native-resource successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-upload-and-color-readback-successor)
+is verified locally at Open-GPUI `f1850835fbb`, without publication. It adds shared checked
+atlas admission, lease-preserving refusal, mapped color-staging release and transparent glyph
+target initialization. Focused resources 13, affected Core 54 and complete Windows 186 pass,
+with four existing interactive cases skipped. Pending-input/blur and the wider refresh remain
+open, along with Nara integration, non-Windows execution and measured performance.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

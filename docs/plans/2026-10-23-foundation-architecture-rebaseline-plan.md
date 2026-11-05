@@ -1512,8 +1512,13 @@ preserves native tab advances, single-baseline Unicode separators, default/expli
 and wrapped hit-test error semantics. Final Core 877, affected consumers 2,964 and selected
 Windows 173 pass, with the same four interactive cases skipped. Its native full-source paint/
 Submitted trajectory and independent-consumer check retain pixel/input/performance limits.
-Pending-input/blur is the remaining initial correctness unit. Native atlas upload admission and
-mapped color-staging release remain queued alongside the wider framework refresh.
+The subsequent [native-resource successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-upload-and-color-readback-successor)
+is verified locally at Open-GPUI `f1850835fbb`, without publication. Both atlas insertion APIs
+share checked admission and preserve existing leases on refusal; color readback releases staging
+maps and initializes blended glyph targets to transparent. Focused resources 13, affected Core
+54 and complete Windows 186 pass, with four existing interactive cases skipped. WARP pixel and
+debug-layer controls plus actual emoji readback retain their GPU/screen/performance limits.
+Pending-input/blur is the remaining initial correctness unit before the wider framework refresh.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

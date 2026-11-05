@@ -1783,3 +1783,48 @@ fork's lease/candidate contract. Pending-input/blur is the one remaining initial
 unit, with IME preference, modifier recognition, dropped-focus and accepted/refused transition
 prerequisites recorded in the framework plan. The wider refresh, Nara integration and measured
 performance remain open.
+
+## November 6: Native Upload And Color Readback Successor
+
+The verified local Open-GPUI successor is `f1850835fbba0255f41703b529136d45a45d6eb6` on
+`optimize/docking-graph-transaction`. It is not published by this continuation; the recorded
+published maintenance baseline remains `7a1bf6d73d4`. The cycle target remains Zed
+`635026fabc38440fce5e1767d125026a17b12012`. The framework's existing verification guide,
+candidate queue and plan own detailed commands, regression results and remaining work.
+
+This unit reconciles the remaining native resource parts of `89e8a4b9ec`. Both Windows atlas
+insertion APIs now share source admission before allocation and checked destination admission
+before UpdateSubresource. Malformed sources return an error without key publication or
+allocation/generation changes; a later refusal cancels only its unpublished allocation. Existing
+published regions and exact-instance visual leases keep their lifetime rules. The fixed target's
+void short-buffer return was deliberately adapted: its caller still publishes a successful tile,
+which would violate the fork's existing admission contract.
+
+Color glyph readback now validates BGRA dimensions, checked byte spans and native RowPitch,
+allocates output before mapping, and releases each successful map through RAII on return, error
+and Rust unwind. The existing straight-alpha conversion remains after release. Independent
+review also found an undefined initial target used for blending; the color-raster owner now
+clears it to transparent. A real Segoe UI Emoji trajectory checks visible content, repeated
+identical bytes and every pixel of an expanded transparent border. The border is an output
+control, not a deterministic missing-clear red baseline without poisoning the target.
+
+The safe mapped-readback baseline reproduced an already-mapped resource debug error on the
+first repeated read. Final focused resource tests pass 13/13, including both insertion APIs,
+three texture kinds, retry/cache-hit/lease preservation and multi-row readback at nonzero atlas
+origins. The affected Core retained-resource/cache/deferred cohort passes 54/54. The final
+complete Windows library passes 186/186 with four existing interactive cases skipped, retaining
+the real HWND text/cache paint, Submitted-frame and exact retirement trajectories. WARP and
+debug-layer initialization failures fail the resource tests instead of silently skipping them.
+
+Locked workspace and independently locked consumer compilation, Core/Windows correctness
+Clippy, root/consumer formatting and import/document/release/public-API checks pass. Independent
+review found no remaining P1/P2. The declared Rust 1.92 floor and dependency graph remain
+unchanged; execution used Rust 1.95.0. The earlier text-layout unit's 2,964 consumer tests were
+not rerun for this Windows-only resource correction.
+
+An issued UpdateSubresource call provides no asynchronous GPU completion result. Bucket
+cancellation does not guarantee immediate recovery of all reserved bucket space. Atlas/color
+glyph readback does not establish screen compositing, full native input, frame-time budgets,
+non-Windows execution or Nara renderer integration. Pending-input/blur remains the last initial
+correctness unit before the wider framework refresh. Complete R11/R12 and Editor/game-runtime
+selection remain open.
