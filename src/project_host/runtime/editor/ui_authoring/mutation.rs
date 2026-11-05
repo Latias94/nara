@@ -16,7 +16,10 @@ use super::EditorUiAuthoringFrame;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditorUiMutationAuthority {
-    PreservationSafeField,
+    SourceAdmitted {
+        structure_editing_enabled: bool,
+        structure_deletion_unavailable_reason: Option<&'static str>,
+    },
     TrustedCompiled,
 }
 
@@ -24,8 +27,8 @@ impl EditorUiAuthoringFrame {
     /// Returns whether this exact field can publish a mutation in the current execution lane.
     ///
     /// Generic authoring admits one bounded discrete edit over a preservation-safe direct record.
-    /// Continuous, direct-manipulation, and structural editing remain read-only until their owner
-    /// modules provide equally strict authoring commands.
+    /// Continuous field gestures and direct manipulation retain their compiled-lane authority.
+    /// Source structural commands separately use the document owner's construction admission.
     #[doc(hidden)]
     #[must_use]
     pub fn field_editing_enabled(&self, key: &UiAuthoringFieldKey) -> bool {
@@ -40,7 +43,7 @@ impl EditorUiAuthoringFrame {
         }
         match self.mutation_authority {
             EditorUiMutationAuthority::TrustedCompiled => true,
-            EditorUiMutationAuthority::PreservationSafeField => {
+            EditorUiMutationAuthority::SourceAdmitted { .. } => {
                 descriptor.commit_policy() == UiAuthoringCommitPolicy::Discrete
                     && !descriptor.members().is_empty()
                     && descriptor.members().len() <= MAX_AUTHORING_FIELD_WRITES
@@ -69,14 +72,39 @@ impl EditorUiAuthoringFrame {
         )
     }
 
-    /// Returns whether closed-catalog structural mutations are admitted.
+    /// Returns whether this frame can lower closed-catalog structural mutations.
+    ///
+    /// Source admission requires a complete UI projection. Each command still revalidates the
+    /// original source topology and the document owner's templates, Schema and editable properties.
     #[doc(hidden)]
     #[must_use]
     pub const fn structure_editing_enabled(&self) -> bool {
-        matches!(
-            self.mutation_authority,
-            EditorUiMutationAuthority::TrustedCompiled
-        )
+        match self.mutation_authority {
+            EditorUiMutationAuthority::TrustedCompiled => true,
+            EditorUiMutationAuthority::SourceAdmitted {
+                structure_editing_enabled,
+                ..
+            } => structure_editing_enabled,
+        }
+    }
+
+    /// Returns why the current source cannot lower a subtree deletion.
+    ///
+    /// Target-specific topology and the final document owner still validate every deletion.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn structure_deletion_unavailable_reason(&self) -> Option<&'static str> {
+        match self.mutation_authority {
+            EditorUiMutationAuthority::TrustedCompiled => None,
+            EditorUiMutationAuthority::SourceAdmitted {
+                structure_editing_enabled: false,
+                ..
+            } => Some("UI structure requires a complete source projection and admitted Schema"),
+            EditorUiMutationAuthority::SourceAdmitted {
+                structure_deletion_unavailable_reason,
+                ..
+            } => structure_deletion_unavailable_reason,
+        }
     }
 
     /// Creates one bounded, exact-revision tooling edit from the descriptor that owns UI field
@@ -148,7 +176,7 @@ impl EditorUiAuthoringFrame {
             EditorUiMutationAuthority::TrustedCompiled => {
                 Ok(EditorDocumentMutation::ApplyPrefabFieldEdit { edit })
             }
-            EditorUiMutationAuthority::PreservationSafeField => {
+            EditorUiMutationAuthority::SourceAdmitted { .. } => {
                 let writes = edit.writes().iter().map(|write| {
                     AuthoringFieldWrite::new(write.field().clone(), write.value().clone())
                 });
@@ -196,6 +224,11 @@ impl EditorUiAuthoringFrame {
         intent: &UiStructureIntent,
     ) -> Result<EditorDocumentMutation, EditorUiAuthoringEditError> {
         if !self.structure_editing_enabled() {
+            return Err(EditorUiAuthoringEditError::MutationUnavailable);
+        }
+        if matches!(intent, UiStructureIntent::Delete { .. })
+            && self.structure_deletion_unavailable_reason().is_some()
+        {
             return Err(EditorUiAuthoringEditError::MutationUnavailable);
         }
         let projection = self

@@ -4689,6 +4689,569 @@ fn open_prefab_from_scene(
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 #[test]
+fn source_admitted_ui_structure_uses_one_history_and_preserves_source_on_save_reopen() {
+    use nara_scene::{PrefabEntityTarget, SceneEntityPlacement};
+    use nara_tooling::{PrefabCompositionCommand, PrefabCompositionOutcome};
+    use nara_ui::__private::{UiCreateParameters, UiStructureIntent};
+
+    let project = TestProject::new("source-ui-structure-history");
+    project.configure_authoring_ui("Source UI Structure History");
+    project.write_ui_authoring_documents(None, None);
+    project.write_canonical_image(
+        "textures/catalog.png",
+        "8c91771d-9009-4546-8bb0-5bde2e4eefbd",
+        ImageImportSettings::default(),
+        include_bytes!("../../../tests/fixtures/images/valid-rgba-1x1.png"),
+    );
+    let path = project.root.join("prefabs/ui.prefab.json");
+    let mut original =
+        nara_scene::PrefabDocumentCandidate::decode_json_bytes(&fs::read(&path).unwrap())
+            .unwrap()
+            .into_composition_source()
+            .unwrap();
+    let opaque = SceneEntityRecord::new(nara_identity::SceneEntityId::new("opaque").unwrap())
+        .with_component(
+            ComponentTypeId::new("unavailable.Opaque"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(7),
+                ComponentValue::map([(
+                    "untouched",
+                    ComponentValue::String("preserve independent source data".into()),
+                )]),
+            )
+            .with_owner(PersistentComponentSchemaOwnerId::try_new("unavailable.owner").unwrap()),
+        );
+    original
+        .placements
+        .push(SceneEntityPlacement::root(opaque.id.clone()));
+    original.entities.push(opaque.clone());
+    fs::write(&path, original.to_json_string().unwrap()).unwrap();
+    let scene_bytes = fs::read(project.root.join("scenes/startup.scene.json")).unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let requested = editor.request_editor_image_import(
+        editor.current_frame().revision(),
+        "assets/textures/catalog.png",
+        ImageImportSettings::default(),
+    );
+    assert!(
+        matches!(
+            requested,
+            super::editor::EditorImageImportRequestResult::Started(_)
+        ),
+        "the complete UI fixture must admit its catalog image: {requested:?}"
+    );
+    assert!(matches!(
+        drive_image_import_to_terminal(&mut editor),
+        super::editor::EditorImageImportState::Succeeded { .. }
+    ));
+    drive_image_import_host_until_idle(&mut editor);
+    let index = editor.project_source_index_snapshot().unwrap();
+    let document = opened_document(editor.open_indexed_authoring_document(
+        index,
+        "prefabs/ui.prefab.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+    ));
+    editor.drive_editor_frame(Duration::ZERO);
+    let ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(ui.structure_editing_enabled());
+    assert_eq!(
+        ui.structure_deletion_unavailable_reason(),
+        Some("Entity deletion requires a Complete document without Prefab anchors")
+    );
+    assert!(!ui.direct_editing_enabled());
+    assert!(!ui.preview_omissions().is_empty());
+    let slot = editor.workspace().prefab(document).unwrap();
+    assert_eq!(
+        slot.authoring_readiness(),
+        Some(nara_scene::AuthoringDocumentReadiness::Degraded)
+    );
+    let unavailable = slot.unavailable_record_manifest().unwrap().clone();
+    let mut states = vec![slot.session().document().clone()];
+    let image = ui
+        .image_choices()
+        .unwrap()
+        .choices()
+        .iter()
+        .find(|choice| choice.project_path() == "textures/catalog.png")
+        .unwrap()
+        .selection(ui.image_choice_generation());
+    let root = nara_identity::SceneEntityId::new("ui-root").unwrap();
+    let placement = ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+        root.clone(),
+    )));
+    let mut created = Vec::new();
+    for parameters in [
+        UiCreateParameters::Container,
+        UiCreateParameters::Text {
+            content: "Source-owned text".into(),
+        },
+        UiCreateParameters::Image {
+            selection: Some(image),
+        },
+        UiCreateParameters::Button {
+            label: "Source-owned button".into(),
+            action: Some(nara_ui::UiActionId::new("test.source-ui").unwrap()),
+        },
+    ] {
+        let report = apply_source_ui_structure(
+            &mut editor,
+            UiStructureIntent::Create {
+                parameters,
+                placement: placement.clone(),
+            },
+        );
+        let Some(PrefabCompositionOutcome::Created { entity }) = report.prefab_composition_outcome
+        else {
+            panic!("source creation must return its exact stable identity");
+        };
+        let slot = editor.workspace().prefab(document).unwrap();
+        assert_eq!(slot.selection().top_entity(), Some(&entity));
+        created.push(entity);
+        states.push(slot.session().document().clone());
+    }
+    editor.drive_editor_frame(Duration::ZERO);
+    let ui = editor.current_ui_authoring_frame().unwrap();
+    let stale = ui
+        .lower_structure_intent(&UiStructureIntent::Move {
+            target: created[3].clone(),
+            placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                PrefabEntityTarget::source(created[0].clone()),
+            )),
+        })
+        .unwrap();
+    apply_source_ui_structure(
+        &mut editor,
+        UiStructureIntent::Move {
+            target: created[1].clone(),
+            placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                PrefabEntityTarget::source(created[0].clone()),
+            )),
+        },
+    );
+    states.push(
+        editor
+            .workspace()
+            .prefab(document)
+            .unwrap()
+            .session()
+            .document()
+            .clone(),
+    );
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let rejected = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(stale)],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &rejected.outcomes()[0],
+        EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact { .. })
+    ));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(document)
+            .unwrap()
+            .session()
+            .document(),
+        states.last().unwrap()
+    );
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(ui.structure_editing_enabled());
+    assert_eq!(
+        ui.structure_deletion_unavailable_reason(),
+        Some("Entity deletion requires a Complete document without Prefab anchors")
+    );
+    let target = nara_identity::SceneEntityId::new("image-node").unwrap();
+    assert!(matches!(
+        ui.lower_structure_intent(&UiStructureIntent::Delete {
+            target: target.clone(),
+        }),
+        Err(super::editor::EditorUiAuthoringEditError::MutationUnavailable)
+    ));
+    let slot = editor.workspace().prefab(document).unwrap();
+    let revision = slot.revision();
+    let history = slot.session().history_status();
+    let selection = slot.selection().clone();
+    let deletion = EditorDocumentMutation::ComposePrefab {
+        document,
+        base_revision: revision,
+        command: PrefabCompositionCommand::RemoveEntity { entity: target },
+    };
+    let refused = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(deletion)],
+        ))
+        .unwrap();
+    assert!(
+        matches!(&refused.outcomes()[0], EditorActionOutcome::Workspace(report)
+        if !report.applied && report.diagnostics.iter().any(|entry|
+            entry.code().as_str() == "scene.authoring-structure-unavailable"))
+    );
+    let slot = editor.workspace().prefab(document).unwrap();
+    assert_eq!(slot.session().document(), states.last().unwrap());
+    assert_eq!(slot.revision(), revision);
+    assert_eq!(slot.session().history_status(), history);
+    assert_eq!(slot.selection(), &selection);
+    for (undo, checkpoints) in [
+        (
+            true,
+            states[..states.len() - 1].iter().rev().collect::<Vec<_>>(),
+        ),
+        (false, states[1..].iter().collect::<Vec<_>>()),
+    ] {
+        for expected in checkpoints {
+            let frame = editor.drive_editor_frame(Duration::ZERO);
+            let base_revision = editor.workspace().document_revision(document).unwrap();
+            let mutation = if undo {
+                EditorDocumentMutation::Undo {
+                    document,
+                    base_revision,
+                }
+            } else {
+                EditorDocumentMutation::Redo {
+                    document,
+                    base_revision,
+                }
+            };
+            let report = editor
+                .dispatch_editor_actions(EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::Mutate(mutation)],
+                ))
+                .unwrap();
+            assert!(
+                matches!(&report.outcomes()[0], EditorActionOutcome::Workspace(report) if report.applied)
+            );
+            assert_eq!(
+                editor
+                    .workspace()
+                    .prefab(document)
+                    .unwrap()
+                    .session()
+                    .document(),
+                expected
+            );
+        }
+    }
+    let slot = editor.workspace().prefab(document).unwrap();
+    assert_eq!(slot.session().history_status().undo_depth, 5);
+    assert_eq!(
+        slot.unavailable_record_manifest().unwrap().entries(),
+        unavailable.entries()
+    );
+    let expected = slot.session().document().clone();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let base_revision = editor.workspace().document_revision(document).unwrap();
+    let saved = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        saved.outcomes()[0],
+        EditorActionOutcome::Persistence(
+            nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+        )
+    ));
+    drive_persistence_to_terminal(&mut editor);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Saved { .. })
+    ));
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        expected.to_json_string().unwrap().as_bytes()
+    );
+    let attempt = editor.persistence_view().attempt().unwrap();
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult { attempt }),
+        nara_tooling::EditorPersistenceRequestResult::Acknowledged { .. }
+    ));
+    assert!(matches!(
+        editor.request_persistence(EditorPersistenceCommand::Reopen {
+            document: Some(document)
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted { .. }
+    ));
+    drive_persistence_to_terminal(&mut editor);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Opened { .. })
+    ));
+    let slot = editor.workspace().prefab(document).unwrap();
+    assert_eq!(slot.session().document(), &expected);
+    assert_eq!(slot.session().history_status().undo_depth, 0);
+    assert!(!slot.is_dirty());
+    assert_eq!(
+        slot.unavailable_record_manifest().unwrap().entries(),
+        unavailable.entries()
+    );
+    assert!(slot.session().document().entities.contains(&opaque));
+    assert_eq!(
+        ui_visual_background_image_path(slot.session().document(), created[2].as_str()),
+        Some("textures/catalog.png")
+    );
+    assert_eq!(
+        fs::read(project.root.join("scenes/startup.scene.json")).unwrap(),
+        scene_bytes
+    );
+    drive_editor_close_to_completion(&mut editor);
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+fn apply_source_ui_structure(
+    editor: &mut super::editor::EditorProjectSession,
+    intent: nara_ui::__private::UiStructureIntent,
+) -> nara_tooling::EditorWorkspaceCommandReport {
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(ui.structure_editing_enabled());
+    assert!(!ui.direct_editing_enabled());
+    let slot = editor.workspace().prefab(ui.document()).unwrap();
+    let revision = slot.revision();
+    let depth = slot.session().history_status().undo_depth;
+    let mutation = ui.lower_structure_intent(&intent).unwrap();
+    let result = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(mutation)],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Workspace(report) = &result.outcomes()[0] else {
+        panic!("a frame-lowered source UI structure command must reach its document owner");
+    };
+    assert!(report.applied, "{:?}", report.diagnostics);
+    let slot = editor.workspace().prefab(ui.document()).unwrap();
+    assert_eq!(slot.revision().generation(), revision.generation() + 1);
+    assert_eq!(slot.session().history_status().undo_depth, depth + 1);
+    assert!(editor.current_ui_authoring_frame().is_none());
+    report.clone()
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[test]
+fn source_admitted_ui_structure_refuses_protected_mixed_and_incomplete_source() {
+    use nara_scene::{PrefabEntityTarget, SceneEntityPlacement};
+    use nara_ui::__private::{UiCreateParameters, UiStructureIntent, UiStructureRejection};
+
+    for incomplete in [false, true] {
+        let project = TestProject::new("source-ui-structure-protections");
+        project.configure_authoring_ui("Source UI Structure Protections");
+        project.write_ui_authoring_documents(None, None);
+        let path = project.root.join("prefabs/ui.prefab.json");
+        let mut source =
+            nara_scene::PrefabDocumentCandidate::decode_json_bytes(&fs::read(&path).unwrap())
+                .unwrap()
+                .into_composition_source()
+                .unwrap();
+        let root = nara_identity::SceneEntityId::new("ui-root").unwrap();
+        let image = nara_identity::SceneEntityId::new("image-node").unwrap();
+        let hidden = nara_identity::SceneEntityId::new("hidden").unwrap();
+        source.placements.push(SceneEntityPlacement::new(
+            PrefabEntityTarget::source(hidden.clone()),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                image.clone(),
+            ))),
+        ));
+        source
+            .entities
+            .push(SceneEntityRecord::new(hidden).with_component(
+                ComponentTypeId::new("unavailable.Opaque"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true)),
+            ));
+        if incomplete {
+            source
+                .entities
+                .iter_mut()
+                .find(|entity| entity.id == image)
+                .unwrap()
+                .components
+                .get_mut(&ComponentTypeId::new("nara.ui.UiVisual"))
+                .unwrap()
+                .version = ComponentSchemaVersion(99);
+        }
+        fs::write(&path, source.to_json_string().unwrap()).unwrap();
+        let mut editor = open_generic_editor_with_ready_index(&project);
+        let document = opened_document(editor.open_indexed_authoring_document(
+            editor.project_source_index_snapshot().unwrap(),
+            "prefabs/ui.prefab.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+        ));
+        editor.drive_editor_frame(Duration::ZERO);
+        let ui = editor.current_ui_authoring_frame().unwrap();
+        assert_eq!(ui.structure_editing_enabled(), !incomplete);
+        assert!(!ui.direct_editing_enabled());
+        let slot = editor.workspace().prefab(document).unwrap();
+        let before = slot.session().document().clone();
+        let revision = slot.revision();
+        let history = slot.session().history_status();
+        let placement = ScenePlacement::last(ScenePlacementParent::Entity(
+            PrefabEntityTarget::source(root.clone()),
+        ));
+        if incomplete {
+            assert!(
+                ui.lower_structure_intent(&UiStructureIntent::Create {
+                    parameters: UiCreateParameters::Container,
+                    placement,
+                })
+                .is_err()
+            );
+        } else {
+            for (target, reason) in [
+                (root, UiStructureRejection::ProtectedRoot),
+                (image, UiStructureRejection::OmittedSourceDescendant),
+            ] {
+                for intent in [
+                    UiStructureIntent::Delete {
+                        target: target.clone(),
+                    },
+                    UiStructureIntent::Move {
+                        target,
+                        placement: placement.clone(),
+                    },
+                ] {
+                    assert_eq!(
+                        ui.projection().unwrap().prepare_structure(&intent, None),
+                        Err(reason)
+                    );
+                    assert!(ui.lower_structure_intent(&intent).is_err());
+                }
+            }
+            assert!(
+                ui.lower_structure_intent(&UiStructureIntent::Create {
+                    parameters: UiCreateParameters::Image { selection: None },
+                    placement,
+                })
+                .is_err()
+            );
+        }
+        let slot = editor.workspace().prefab(document).unwrap();
+        assert_eq!(slot.session().document(), &before);
+        assert_eq!(slot.revision(), revision);
+        assert_eq!(slot.session().history_status(), history);
+        drive_editor_close_to_completion(&mut editor);
+    }
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[test]
+fn source_admitted_ui_structure_dispatch_refuses_missing_templates_and_wrong_schema() {
+    use nara_scene::PrefabEntityTarget;
+    use nara_tooling::{PrefabCompositionCommand, PrefabCompositionEntityDraft};
+    use nara_ui::__private::{UiCreateParameters, UiPreparedStructure, UiStructureIntent};
+
+    for missing_template in [true, false] {
+        let project = TestProject::new("source-ui-structure-schema-refusal");
+        project.configure_authoring_ui("Source UI Structure Schema Refusal");
+        project.write_ui_authoring_documents(None, None);
+        let source = nara_scene::PrefabDocumentCandidate::decode_json_bytes(
+            &fs::read(project.root.join("prefabs/ui.prefab.json")).unwrap(),
+        )
+        .unwrap()
+        .into_composition_source()
+        .unwrap();
+        let projection = nara_ui::__private::project_prefab_authoring(&source).unwrap();
+        let UiPreparedStructure::Create { recipe, placement } = projection
+            .prepare_structure(
+                &UiStructureIntent::Create {
+                    parameters: UiCreateParameters::Text {
+                        content: "Must be refused".into(),
+                    },
+                    placement: ScenePlacement::last(ScenePlacementParent::Entity(
+                        PrefabEntityTarget::source(
+                            nara_identity::SceneEntityId::new("ui-root").unwrap(),
+                        ),
+                    )),
+                },
+                None,
+            )
+            .unwrap()
+        else {
+            panic!("the original UI owner must supply a complete canonical recipe");
+        };
+        let bundle = AuthoringSchemaBundle::from_json_bytes(
+            &fs::read(project.root.join("schema/authoring.bundle.json")).unwrap(),
+        )
+        .unwrap();
+        let owners = bundle.owners().iter().map(|owner| {
+            let mut catalog = owner.current().clone();
+            if let Some(schema) = catalog
+                .components
+                .iter_mut()
+                .find(|schema| schema.id.as_str() == "nara.ui.UiText")
+            {
+                if missing_template {
+                    schema.authoring_initial_value = None;
+                } else {
+                    schema.version = ComponentSchemaVersion(2);
+                }
+            }
+            AuthoringSchemaBundleOwner::new(
+                owner.owner_id().clone(),
+                catalog,
+                owner.predecessor().cloned(),
+            )
+        });
+        fs::write(
+            project.root.join("schema/authoring.bundle.json"),
+            AuthoringSchemaBundle::new(owners)
+                .unwrap()
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut editor = open_generic_editor_with_ready_index(&project);
+        let document = opened_document(editor.open_indexed_authoring_document(
+            editor.project_source_index_snapshot().unwrap(),
+            "prefabs/ui.prefab.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+        ));
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        let slot = editor.workspace().prefab(document).unwrap();
+        let before = slot.session().document().clone();
+        let revision = slot.revision();
+        let history = slot.session().history_status();
+        let selection = slot.selection().clone();
+        let outcome = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Mutate(
+                    EditorDocumentMutation::ComposePrefab {
+                        document,
+                        base_revision: revision,
+                        command: PrefabCompositionCommand::CreateEntity {
+                            draft: PrefabCompositionEntityDraft::new(recipe.components().clone())
+                                .unwrap(),
+                            placement,
+                        },
+                    },
+                )],
+            ))
+            .unwrap();
+        assert!(matches!(
+            &outcome.outcomes()[0],
+            EditorActionOutcome::Workspace(report) if !report.applied && report.diagnostics.has_errors()
+        ));
+        let slot = editor.workspace().prefab(document).unwrap();
+        assert_eq!(slot.session().document(), &before);
+        assert_eq!(slot.revision(), revision);
+        assert_eq!(slot.session().history_status(), history);
+        assert_eq!(slot.selection(), &selection);
+        drive_editor_close_to_completion(&mut editor);
+    }
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[test]
 fn editor_ui_authoring_frame_and_continuous_gesture_share_one_exact_prefab_revision() {
     use nara_ui::__private::{
         UiAuthoringDimensionKind, UiAuthoringDirectEdit, UiAuthoringFieldKind,

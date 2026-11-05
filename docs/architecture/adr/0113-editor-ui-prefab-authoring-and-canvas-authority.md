@@ -189,6 +189,17 @@ one existing bounded structural transaction allowance. A standalone small field-
 its separate write count. Both paths retain the cumulative value/node/byte, inverse, replay and
 history limits; a full UI recipe must not depend on tuning a default to fit the field-editor count.
 
+The frame's source structural capability follows that source admission rather than requiring a
+compiled Runtime. Its authoring projection must retain the complete original UI facts/topology;
+an omitted or transformed UI source cannot lower structure. Current source Schema and document
+readiness must exist. Every resulting command still passes the same recipe/topology and source
+construction/Schema checks at dispatch. Unrelated unavailable non-UI data may remain preserved
+under operation-relative readiness; it cannot be interpreted or reconstructed by the UI adapter.
+The existing source deletion guard still requires a Complete document without Prefab anchors;
+a usable UI projection does not override that refusal for a degraded source.
+This capability does not admit continuous field gestures, Canvas manipulation or arbitrary
+whole-record edits in the data-only execution lane.
+
 Persistent UI brushes distinguish semantic role and image forms. Canonical version-one image
 brushes store a typed asset reference under ADR 0102; source Open preserves that declaration and
 its saved checkpoint. The ordinary project-content loader discovers that reference even when the

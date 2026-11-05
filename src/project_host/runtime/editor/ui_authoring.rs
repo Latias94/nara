@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use nara_scene::{
-    __private::AuthoringPreviewOmission, PrefabAuthoringSession, SceneAuthoringRevision,
+    __private::AuthoringPreviewOmission, AuthoringDocumentReadiness, PrefabAuthoringSession,
+    SceneAuthoringRevision,
 };
 use nara_tooling::{
     EditorDocumentId, EditorDocumentSourceBinding, EditorFrameRevision, EditorGestureCancelReason,
@@ -127,6 +128,8 @@ pub(super) struct EditorUiAuthoringProjectionCache {
     key: EditorUiAuthoringProjectionKey,
     omissions: EditorAuthoringPreviewOmissions,
     projection: Result<Arc<UiAuthoringProjection>, UiAuthoringProjectionError>,
+    source_projection_complete: bool,
+    source_has_prefab_anchors: bool,
 }
 
 impl EditorProjectSession {
@@ -250,74 +253,115 @@ impl EditorProjectSession {
             revision,
             gesture: gesture.as_ref().map(EditorGestureView::stamp),
         };
-        let (projection, omissions) = match self
-            .ui_authoring_projection_cache
-            .as_ref()
-            .filter(|cache| cache.key == key)
-        {
-            Some(cache) => (cache.projection.clone(), cache.omissions.clone()),
-            None => {
-                let (accepted, omissions) = if self.authoring_project().is_some() {
-                    match authoring_preview::project_prefab(document, revision, slot.session()) {
-                        Ok(projected) => projected,
-                        Err(_) => {
-                            self.ui_authoring_frame = None;
-                            self.ui_authoring_projection_cache = None;
-                            #[cfg(feature = "presentation-ui")]
-                            self.ui_preview.retire();
-                            let _ = self.diagnostics.extend(single_error(
-                                "project.editor.authoring-ui-preview-projection-rejected",
-                                "the authoring Prefab could not publish a safe UI projection",
-                            ));
-                            return;
+        let (projection, omissions, source_projection_complete, source_has_prefab_anchors) =
+            match self
+                .ui_authoring_projection_cache
+                .as_ref()
+                .filter(|cache| cache.key == key)
+            {
+                Some(cache) => (
+                    cache.projection.clone(),
+                    cache.omissions.clone(),
+                    cache.source_projection_complete,
+                    cache.source_has_prefab_anchors,
+                ),
+                None => {
+                    let (accepted, omissions) = if self.authoring_project().is_some() {
+                        match authoring_preview::project_prefab(document, revision, slot.session())
+                        {
+                            Ok(projected) => projected,
+                            Err(_) => {
+                                self.ui_authoring_frame = None;
+                                self.ui_authoring_projection_cache = None;
+                                #[cfg(feature = "presentation-ui")]
+                                self.ui_preview.retire();
+                                let _ = self.diagnostics.extend(single_error(
+                                    "project.editor.authoring-ui-preview-projection-rejected",
+                                    "the authoring Prefab could not publish a safe UI projection",
+                                ));
+                                return;
+                            }
                         }
-                    }
-                } else {
-                    (
-                        slot.session().document().clone(),
-                        EditorAuthoringPreviewOmissions::empty(document, revision),
-                    )
-                };
-                if !omissions.is_empty() {
-                    let _ = self.diagnostics.extend(single_warning(
+                    } else {
+                        (
+                            slot.session().document().clone(),
+                            EditorAuthoringPreviewOmissions::empty(document, revision),
+                        )
+                    };
+                    if !omissions.is_empty() {
+                        let _ = self.diagnostics.extend(single_warning(
                         "project.editor.authoring-ui-preview-source-omitted",
                         "the UI preview omitted source values that are unavailable to generic authoring",
                     ));
-                }
-                let projected_document = gesture.as_ref().and_then(|gesture| {
-                    let mut preview = PrefabAuthoringSession::new(accepted.clone());
-                    self.trusted_compiled().and_then(|lane| {
-                        preview
-                            .apply_patch(
-                                &gesture.preview().to_patch(),
-                                lane.plan.schema_validation().snapshot(),
-                            )
-                            .applied
-                            .then(|| preview.document().clone())
-                    })
-                });
-                let projected_document = match (gesture.is_some(), projected_document.as_ref()) {
-                    (true, None) => {
-                        let _ = self
-                            .gestures
-                            .cancel_active(EditorGestureCancelReason::InvalidPreview);
-                        self.last_gesture_cancellation =
-                            Some(EditorGestureCancelReason::InvalidPreview);
-                        gesture = None;
-                        key.gesture = None;
-                        &accepted
                     }
-                    (_, Some(projected)) => projected,
-                    (_, None) => &accepted,
-                };
-                let projection = project_prefab_authoring(projected_document).map(Arc::new);
-                self.ui_authoring_projection_cache = Some(EditorUiAuthoringProjectionCache {
-                    key,
-                    omissions: omissions.clone(),
-                    projection: projection.clone(),
-                });
-                (projection, omissions)
+                    let projected_document = gesture.as_ref().and_then(|gesture| {
+                        let mut preview = PrefabAuthoringSession::new(accepted.clone());
+                        self.trusted_compiled().and_then(|lane| {
+                            preview
+                                .apply_patch(
+                                    &gesture.preview().to_patch(),
+                                    lane.plan.schema_validation().snapshot(),
+                                )
+                                .applied
+                                .then(|| preview.document().clone())
+                        })
+                    });
+                    let projected_document = match (gesture.is_some(), projected_document.as_ref())
+                    {
+                        (true, None) => {
+                            let _ = self
+                                .gestures
+                                .cancel_active(EditorGestureCancelReason::InvalidPreview);
+                            self.last_gesture_cancellation =
+                                Some(EditorGestureCancelReason::InvalidPreview);
+                            gesture = None;
+                            key.gesture = None;
+                            &accepted
+                        }
+                        (_, Some(projected)) => projected,
+                        (_, None) => &accepted,
+                    };
+                    let projection = project_prefab_authoring(projected_document).map(Arc::new);
+                    let source_projection_complete = self.authoring_project().is_some()
+                        && projection.as_ref().is_ok_and(|projected| {
+                            project_prefab_authoring(slot.session().document())
+                                .is_ok_and(|source| &source == projected.as_ref())
+                        });
+                    let source_has_prefab_anchors = slot
+                        .session()
+                        .document()
+                        .entities
+                        .iter()
+                        .any(|entity| entity.prefab.is_some());
+                    self.ui_authoring_projection_cache = Some(EditorUiAuthoringProjectionCache {
+                        key,
+                        omissions: omissions.clone(),
+                        projection: projection.clone(),
+                        source_projection_complete,
+                        source_has_prefab_anchors,
+                    });
+                    (
+                        projection,
+                        omissions,
+                        source_projection_complete,
+                        source_has_prefab_anchors,
+                    )
+                }
+            };
+        let mutation_authority = if self.authoring_project().is_some() {
+            let structure_editing_enabled = slot.authoring_readiness().is_some()
+                && slot.session().authoring_schema_basis().is_some()
+                && source_projection_complete;
+            let structure_deletion_unavailable_reason = (slot.authoring_readiness()
+                != Some(AuthoringDocumentReadiness::Complete)
+                || source_has_prefab_anchors)
+                .then_some("Entity deletion requires a Complete document without Prefab anchors");
+            EditorUiMutationAuthority::SourceAdmitted {
+                structure_editing_enabled,
+                structure_deletion_unavailable_reason,
             }
+        } else {
+            EditorUiMutationAuthority::TrustedCompiled
         };
         #[cfg(feature = "presentation-ui")]
         let (projection, canvas_generation) = match projection {
@@ -362,11 +406,6 @@ impl EditorProjectSession {
         };
         #[cfg(not(feature = "presentation-ui"))]
         let canvas_generation = None;
-        let mutation_authority = if self.authoring_project().is_some() {
-            EditorUiMutationAuthority::PreservationSafeField
-        } else {
-            EditorUiMutationAuthority::TrustedCompiled
-        };
         self.ui_authoring_frame = Some(Arc::new(EditorUiAuthoringFrame {
             editor_frame,
             document,
