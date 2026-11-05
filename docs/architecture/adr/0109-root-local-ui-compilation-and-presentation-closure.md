@@ -147,6 +147,16 @@ order; an empty box wrapper returns none. Taffy's synthesized box baseline stays
 An ordinary Flex container's own painted text does not turn its child-based layout into a text
 leaf or supply a synthetic public baseline.
 
+An intrinsic-width query is distinct from requesting a drawable min-content layout. It uses the
+same tree and text owner, retains real intermediate dimensions/baselines for nested containers,
+and returns only the child's outer width. Source, grapheme, scale, glyph and candidate layout-work
+limits remain active; intermediate text line storage is bounded by admitted source/glyph input.
+The original output line limit applies to regular measurement and final painting. Width
+observations cannot satisfy drawable requests or populate final geometry caches. Both kinds share
+the compiler's bounded request retention and still charge candidate admission on cache hits.
+This distinction lets a finite paragraph fit its final allocation without making an exploratory
+minimum-word-width layout a prerequisite for publishing those final lines.
+
 Callbacks are repeatable preparation. Changed captured inputs require a new immutable description;
 clones share nominal identity, which is not semantic content equality or a reload codec. No
 document edit, task, subscription or native input effect may depend on callback invocation count.

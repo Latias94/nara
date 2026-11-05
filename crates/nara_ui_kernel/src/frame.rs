@@ -371,10 +371,13 @@ pub enum UiPaintPrimitive {
     },
     Text {
         key: Option<UiKey>,
-        /// Compiler-resolved content box used for both shaping and the glyph origin. Padding is
-        /// excluded; the node's layout, background, hit and semantic bounds retain its outer box.
+        /// Logical glyph draw origin and allocation after any prepared-text draw offset.
+        /// Padding is excluded; this is neither the glyph ink bound nor an additional clip.
+        /// Layout, background, hit and semantic bounds retain the original node geometry.
         rect: UiRect,
         physical_rect: UiPhysicalRect,
+        /// Published inherited/content clip, independent of the shifted draw origin. Intersect
+        /// it with the surface and actual glyph raster bounds rather than `rect`.
         clip_rect: Option<UiRect>,
         color: UiColor,
         layout: Arc<TextLayout>,

@@ -39,6 +39,7 @@ pub(super) fn compute_layout(
                 style: taffy_style(node.node.style, index == 0, environment),
                 children: node.children.clone(),
                 cache: Cache::new(),
+                cache_width_probe: false,
                 layout: Layout::new(),
                 subtree_has_custom_layout: node.node.custom_layout.is_some(),
                 first_text_baseline: None,
@@ -62,6 +63,7 @@ pub(super) fn compute_layout(
         environment,
         text_session,
         layout_work,
+        width_probe: false,
         error: None,
     };
     tree.work_stats.layout_passes = tree.work_stats.layout_passes.saturating_add(1);
@@ -83,6 +85,7 @@ struct LayoutNode {
     style: Style,
     children: Vec<usize>,
     cache: Cache,
+    cache_width_probe: bool,
     layout: Layout,
     subtree_has_custom_layout: bool,
     // Genuine source/custom baseline, distinct from Taffy's synthesized box fallback.
@@ -97,6 +100,7 @@ struct LayoutTree<'flat, 'node, 'work> {
     environment: UiEnvironment,
     text_session: &'work mut TextCompileSession,
     layout_work: &'work mut LayoutWorkBudget,
+    width_probe: bool,
     error: Option<RootCompileError>,
 }
 
@@ -209,14 +213,32 @@ impl LayoutTree<'_, '_, '_> {
                 }
             })
             .map_err(TextCompileError::Layout)
-            .and_then(|request| self.text_session.layout(self.text_engine, request))
-        {
-            Ok(layout) => {
-                *baseline = layout.lines().first().map(|line| line.baseline());
-                Size {
-                    width: layout.width(),
-                    height: layout.height(),
+            .and_then(|request| {
+                if self.width_probe && text.overflow == UiTextOverflow::Wrap {
+                    self.text_session
+                        .measure_for_width(self.text_engine, request)
+                        .map(|measured| {
+                            (
+                                measured.width(),
+                                measured.height(),
+                                measured.first_baseline(),
+                            )
+                        })
+                } else {
+                    self.text_session
+                        .layout(self.text_engine, request)
+                        .map(|layout| {
+                            (
+                                layout.width(),
+                                layout.height(),
+                                layout.lines().first().map(|line| line.baseline()),
+                            )
+                        })
                 }
+            }) {
+            Ok((width, height, first_baseline)) => {
+                *baseline = first_baseline;
+                Size { width, height }
             }
             Err(error) => {
                 self.error.get_or_insert_with(|| text_compile_error(error));
@@ -413,6 +435,32 @@ impl UiLayoutBackend for CustomChildren<'_, '_, '_, '_> {
         self.completed.len()
     }
 
+    fn min_content_width(&mut self, child: usize) -> Result<f32, UiLayoutError> {
+        self.tree.work_stats.custom_child_measurements = self
+            .tree
+            .work_stats
+            .custom_child_measurements
+            .saturating_add(1);
+        self.tree.charge()?;
+        let index = self.unplaced_child(child)?;
+        let previous_probe = self.tree.width_probe;
+        self.tree.width_probe = true;
+        let result = self.tree.independent_layout(
+            index,
+            Size::NONE,
+            Size {
+                width: AvailableSpace::MinContent,
+                height: AvailableSpace::MaxContent,
+            },
+            Point::ZERO,
+        );
+        self.tree.width_probe = previous_probe;
+        let output = result?;
+        UiSize::new(output.size.width, output.size.height)
+            .map(|size| size.width())
+            .ok_or_else(|| self.tree.reject(UiLayoutError::InvalidGeometry))
+    }
+
     fn measure(
         &mut self,
         child: usize,
@@ -519,6 +567,11 @@ impl LayoutPartialTree for LayoutTree<'_, '_, '_> {
     fn compute_child_layout(&mut self, node_id: NodeId, inputs: LayoutInput) -> LayoutOutput {
         if self.charge().is_err() {
             return LayoutOutput::HIDDEN;
+        }
+        let node = &mut self.nodes[usize::from(node_id)];
+        if node.cache_width_probe != self.width_probe {
+            node.cache.clear();
+            node.cache_width_probe = self.width_probe;
         }
         if inputs.run_mode == RunMode::PerformHiddenLayout {
             self.nodes[usize::from(node_id)].first_text_baseline = None;

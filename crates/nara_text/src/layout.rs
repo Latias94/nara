@@ -113,6 +113,41 @@ enum TextWrapping {
     MinContent,
 }
 
+/// Finite text geometry used while observing a subtree's intrinsic width.
+///
+/// This carries no drawable lines, glyph positions, raster keys or diagnostics. Its line block
+/// may exceed the engine's output line limit; a final [`TextLayout`] still requires independent
+/// admission through [`crate::TextEngine::layout`]. Source, grapheme, scale and glyph limits apply.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextWidthMeasurement {
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) first_baseline: Option<f32>,
+    pub(crate) glyph_count: usize,
+}
+
+impl TextWidthMeasurement {
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        self.width
+    }
+
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        self.height
+    }
+
+    #[must_use]
+    pub const fn first_baseline(self) -> Option<f32> {
+        self.first_baseline
+    }
+
+    #[must_use]
+    pub const fn glyph_count(self) -> usize {
+        self.glyph_count
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLayoutRequest {
     text: String,

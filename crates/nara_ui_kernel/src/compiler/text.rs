@@ -1,7 +1,8 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use nara_text::{
-    TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextPaintSnapshot, TextWindowError,
+    TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextPaintSnapshot,
+    TextWidthMeasurement, TextWindowError,
 };
 
 #[derive(Debug)]
@@ -14,8 +15,23 @@ pub(super) enum TextCompileError {
 
 const MAX_CACHED_TEXT_LAYOUTS: usize = 256;
 
+#[derive(Clone)]
+enum CachedText {
+    Layout(Arc<TextLayout>),
+    Width(TextWidthMeasurement),
+}
+
+impl CachedText {
+    fn glyph_count(&self) -> usize {
+        match self {
+            Self::Layout(layout) => layout.glyphs().len(),
+            Self::Width(measured) => measured.glyph_count(),
+        }
+    }
+}
+
 pub(super) struct TextLayoutCache {
-    entries: VecDeque<(TextLayoutRequest, Arc<TextLayout>)>,
+    entries: VecDeque<(TextLayoutRequest, CachedText)>,
     source_bytes: usize,
     glyphs: usize,
     max_entries: usize,
@@ -36,19 +52,36 @@ impl TextLayoutCache {
     }
 
     fn get(&mut self, request: &TextLayoutRequest) -> Option<Arc<TextLayout>> {
-        let index = self
-            .entries
-            .iter()
-            .position(|(cached, _)| cached == request)?;
+        match self.get_value(request, false)? {
+            CachedText::Layout(layout) => Some(layout),
+            CachedText::Width(_) => None,
+        }
+    }
+
+    fn get_width(&mut self, request: &TextLayoutRequest) -> Option<TextWidthMeasurement> {
+        match self.get_value(request, true)? {
+            CachedText::Width(measured) => Some(measured),
+            CachedText::Layout(_) => None,
+        }
+    }
+
+    fn get_value(&mut self, request: &TextLayoutRequest, width: bool) -> Option<CachedText> {
+        let index = self.entries.iter().position(|(cached, value)| {
+            cached == request && matches!(value, CachedText::Width(_)) == width
+        })?;
         let entry = self.entries.remove(index)?;
-        let layout = Arc::clone(&entry.1);
+        let value = entry.1.clone();
         self.entries.push_back(entry);
-        Some(layout)
+        Some(value)
     }
 
     fn insert(&mut self, request: TextLayoutRequest, layout: Arc<TextLayout>) {
+        self.insert_value(request, CachedText::Layout(layout));
+    }
+
+    fn insert_value(&mut self, request: TextLayoutRequest, value: CachedText) {
         let source_bytes = request.text().len();
-        let glyphs = layout.glyphs().len();
+        let glyphs = value.glyph_count();
         if self.max_entries == 0 || source_bytes > self.max_source_bytes || glyphs > self.max_glyphs
         {
             return;
@@ -57,15 +90,15 @@ impl TextLayoutCache {
             || self.source_bytes.saturating_add(source_bytes) > self.max_source_bytes
             || self.glyphs.saturating_add(glyphs) > self.max_glyphs
         {
-            let Some((request, layout)) = self.entries.pop_front() else {
+            let Some((request, value)) = self.entries.pop_front() else {
                 break;
             };
             self.source_bytes -= request.text().len();
-            self.glyphs -= layout.glyphs().len();
+            self.glyphs -= value.glyph_count();
         }
         self.source_bytes += source_bytes;
         self.glyphs += glyphs;
-        self.entries.push_back((request, layout));
+        self.entries.push_back((request, value));
     }
 }
 
@@ -75,9 +108,15 @@ impl TextLayoutCache {
 /// request-cache entries. They perform no new shaping. Each final prepared draw scans/rasterizes
 /// at most one receiver-admitted full layout; the candidate's node ceiling bounds draw count.
 /// Output glyphs (including repeated draws) are charged by the root/frame output budget.
+/// Width observations share the same source/glyph and retained-cache limits, but cannot satisfy
+/// a drawable-layout request. The engine's immutable fonts and complete request bind both kinds.
 pub(super) struct TextCompileSession {
     cache: TextLayoutCache,
     layouts: Vec<(TextLayoutRequest, Result<Arc<TextLayout>, TextLayoutError>)>,
+    widths: Vec<(
+        TextLayoutRequest,
+        Result<TextWidthMeasurement, TextLayoutError>,
+    )>,
     prepared: Vec<(TextPaintSnapshot, Result<(), TextWindowError>)>,
     used_source_bytes: usize,
     max_source_bytes: usize,
@@ -94,6 +133,7 @@ impl TextCompileSession {
         Self {
             cache,
             layouts: Vec::new(),
+            widths: Vec::new(),
             prepared: Vec::new(),
             used_source_bytes: 0,
             max_source_bytes,
@@ -197,5 +237,57 @@ impl TextCompileSession {
         self.used_shaped_glyphs = used_shaped_glyphs;
         self.layouts.push((request, Ok(Arc::clone(&layout))));
         Ok(layout)
+    }
+
+    pub(super) fn measure_for_width(
+        &mut self,
+        engine: &mut TextEngine,
+        request: TextLayoutRequest,
+    ) -> Result<TextWidthMeasurement, TextCompileError> {
+        if let Some((_, result)) = self.widths.iter().find(|(cached, _)| cached == &request) {
+            return result.clone().map_err(TextCompileError::Layout);
+        }
+        let actual = self.used_source_bytes.saturating_add(request.text().len());
+        if actual > self.max_source_bytes {
+            return Err(TextCompileError::SourceBytesLimitExceeded {
+                actual,
+                maximum: self.max_source_bytes,
+            });
+        }
+        self.used_source_bytes = actual;
+        let remaining = self
+            .max_shaped_glyphs
+            .saturating_sub(self.used_shaped_glyphs);
+        let measured = if let Some(measured) = self.cache.get_width(&request) {
+            if measured.glyph_count() > remaining {
+                return Err(TextCompileError::ShapedGlyphLimitExceeded {
+                    actual: self.max_shaped_glyphs.saturating_add(1),
+                    maximum: self.max_shaped_glyphs,
+                });
+            }
+            measured
+        } else {
+            let measured = match engine.measure_for_width_with_glyph_limit(&request, remaining) {
+                Ok(measured) => measured,
+                Err(TextLayoutError::GlyphLimitExceeded { actual, .. }) => {
+                    return Err(TextCompileError::ShapedGlyphLimitExceeded {
+                        actual: self.used_shaped_glyphs.saturating_add(actual),
+                        maximum: self.max_shaped_glyphs,
+                    });
+                }
+                Err(error) => {
+                    self.widths.push((request, Err(error.clone())));
+                    return Err(TextCompileError::Layout(error));
+                }
+            };
+            self.cache
+                .insert_value(request.clone(), CachedText::Width(measured));
+            measured
+        };
+        self.used_shaped_glyphs = self
+            .used_shaped_glyphs
+            .saturating_add(measured.glyph_count());
+        self.widths.push((request, Ok(measured)));
+        Ok(measured)
     }
 }

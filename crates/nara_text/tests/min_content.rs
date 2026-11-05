@@ -179,6 +179,166 @@ fn min_content_limits_charge_submitted_source_and_completed_shaping_on_refusal()
     );
 }
 
+#[test]
+fn width_probe_preserves_exact_min_content_geometry_without_admitting_drawable_lines() {
+    let request = TextLayoutRequest::new("A A", 20.0)
+        .unwrap()
+        .with_min_content();
+    let expected = engine(TextLimits::default()).layout(&request).unwrap();
+    let mut restricted = engine(TextLimits {
+        max_lines: 1,
+        ..TextLimits::default()
+    });
+    let measured = restricted
+        .measure_for_width_with_glyph_limit(&request, usize::MAX)
+        .unwrap();
+    assert_eq!(measured.width(), expected.width());
+    assert_eq!(measured.height(), expected.height());
+    assert_eq!(
+        measured.first_baseline(),
+        Some(expected.lines()[0].baseline())
+    );
+    assert_eq!(measured.glyph_count(), expected.glyphs().len());
+    assert_eq!(
+        restricted.layout(&request),
+        Err(TextLayoutError::LineLimitExceeded {
+            actual: 2,
+            maximum: 1,
+        })
+    );
+    assert_eq!(restricted.work_stats().layout_attempts, 2);
+    assert_eq!(restricted.work_stats().layout_source_bytes, 6);
+    assert_eq!(restricted.work_stats().shaped_glyphs, 6);
+    assert_eq!(restricted.work_stats().raster_attempts, 0);
+}
+
+#[test]
+fn width_probe_keeps_source_grapheme_scale_and_glyph_work_bounds() {
+    let mut engine = engine(TextLimits {
+        max_text_bytes: 4,
+        max_lines: 1,
+        max_glyphs: 2,
+        max_scale_factor: 1.0,
+        ..TextLimits::default()
+    });
+    let request = |text| {
+        TextLayoutRequest::new(text, 20.0)
+            .unwrap()
+            .with_min_content()
+    };
+    assert_eq!(
+        engine.measure_for_width_with_glyph_limit(&request("ééx"), usize::MAX),
+        Err(TextLayoutError::TextBytesExceeded {
+            actual: 5,
+            maximum: 4,
+        })
+    );
+    assert_eq!(
+        engine.measure_for_width_with_glyph_limit(
+            &request("A").with_scale_factor(1.5).unwrap(),
+            usize::MAX,
+        ),
+        Err(TextLayoutError::ScaleFactorExceeded {
+            actual: 1.5,
+            maximum: 1.0,
+        })
+    );
+    assert_eq!(engine.work_stats().shaped_glyphs, 0);
+    assert_eq!(
+        engine.measure_for_width_with_glyph_limit(&request("iii"), usize::MAX),
+        Err(TextLayoutError::GlyphLimitExceeded {
+            actual: 3,
+            maximum: 2,
+        })
+    );
+    assert_eq!(
+        engine.measure_for_width_with_glyph_limit(&request("A"), 0),
+        Err(TextLayoutError::GlyphLimitExceeded {
+            actual: 1,
+            maximum: 0,
+        })
+    );
+    assert_eq!(
+        engine
+            .measure_for_width_with_glyph_limit(&request("AA"), usize::MAX)
+            .unwrap()
+            .glyph_count(),
+        2
+    );
+    assert_eq!(
+        engine.work_stats(),
+        TextWorkStats {
+            layout_attempts: 5,
+            layout_source_bytes: 12,
+            shaped_glyphs: 6,
+            ..TextWorkStats::default()
+        }
+    );
+    let mut grapheme_engine = self::engine(TextLimits::default());
+    let oversized = format!("a{}", "\u{301}".repeat(nara_text::MAX_GRAPHEME_SCALARS));
+    assert!(matches!(
+        grapheme_engine.measure_for_width_with_glyph_limit(&request(&oversized), usize::MAX),
+        Err(TextLayoutError::GraphemeLimitExceeded { .. })
+    ));
+    assert_eq!(grapheme_engine.work_stats().shaped_glyphs, 0);
+}
+
+#[test]
+fn width_probe_uses_the_same_fallback_typography_and_scale_as_direct_min_content() {
+    let fonts = vec![
+        bundled_font_face().unwrap(),
+        nara_text::FontFace::from_bytes(
+            include_bytes!("fixtures/NotoSansSC-subset.otf").to_vec(),
+            0,
+        )
+        .unwrap(),
+    ];
+    let mut reference = TextEngine::with_fonts(fonts.clone(), TextLimits::default()).unwrap();
+    let mut probe = TextEngine::with_fonts(
+        fonts,
+        TextLimits {
+            max_lines: 1,
+            max_glyph_extent: 1,
+            ..TextLimits::default()
+        },
+    )
+    .unwrap();
+    for typography in [
+        nara_text::TextTypography::new(20.0).unwrap(),
+        nara_text::TextTypography::new(28.0)
+            .unwrap()
+            .with_line_height(3.0)
+            .unwrap(),
+    ] {
+        for scale in [1.0, 1.5] {
+            let request = TextLayoutRequest::from_typography("office e\u{301} 中文", typography)
+                .with_min_content()
+                .with_scale_factor(scale)
+                .unwrap();
+            let expected = reference.layout(&request).unwrap();
+            assert!(expected.lines().len() > 1);
+            assert!(
+                expected
+                    .glyphs()
+                    .iter()
+                    .any(|glyph| glyph.key().face_id() != reference.font_face_id())
+            );
+            let measured = probe
+                .measure_for_width_with_glyph_limit(&request, usize::MAX)
+                .unwrap();
+            assert_eq!(measured.width(), expected.width());
+            assert_eq!(measured.height(), expected.height());
+            assert_eq!(
+                measured.first_baseline(),
+                Some(expected.lines()[0].baseline())
+            );
+            assert_eq!(measured.glyph_count(), expected.glyphs().len());
+        }
+    }
+    assert_eq!(probe.work_stats().raster_attempts, 0);
+    assert_eq!(probe.work_stats().raster_output_bytes, 0);
+}
+
 fn engine(limits: TextLimits) -> TextEngine {
     TextEngine::new(bundled_font_face().unwrap(), limits).unwrap()
 }

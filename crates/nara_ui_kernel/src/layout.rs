@@ -209,6 +209,21 @@ impl<'a> UiLayoutChildren<'a> {
         self.backend.measure(child, constraints)
     }
 
+    /// Observes a child's exact min-content outer width before choosing its allocation.
+    ///
+    /// Uses the same authored sizes, padding, fonts and typography as regular measurement.
+    /// Nested layouts still receive real text line geometry, but wrapped text in this scoped
+    /// query produces no drawable layout and defers output line admission to regular measurement
+    /// and final paint. Source, grapheme, scale, glyph and candidate layout-work limits still
+    /// apply, including cache hits. This query cannot publish or satisfy a final text request.
+    ///
+    /// Recompute after changing the child description, typography or immutable font policy;
+    /// the compiler owns bounded request caching. As with [`Self::measure`], the child must
+    /// still be unplaced, and a failed request poisons the root.
+    pub fn min_content_width(&mut self, child: usize) -> Result<f32, UiLayoutError> {
+        self.backend.min_content_width(child)
+    }
+
     /// Places a child at an exact outer rectangle relative to this container's content origin.
     ///
     /// The compiler resolves its subtree again at this exact size, then uses the same geometry
@@ -227,6 +242,7 @@ impl<'a> UiLayoutChildren<'a> {
 
 pub(crate) trait UiLayoutBackend {
     fn len(&self) -> usize;
+    fn min_content_width(&mut self, child: usize) -> Result<f32, UiLayoutError>;
     fn measure(
         &mut self,
         child: usize,

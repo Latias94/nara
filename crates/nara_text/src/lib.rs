@@ -18,7 +18,7 @@ pub use face::{
 pub use layout::{
     GlyphRasterKey, MAX_GRAPHEME_SCALARS, PositionedGlyph, TextAlignment, TextDiagnostic,
     TextDirection, TextLayout, TextLayoutError, TextLayoutRequest, TextLine, TextRun,
-    TextTypography,
+    TextTypography, TextWidthMeasurement,
 };
 pub use limits::TextLimits;
 pub use paint::{TextPaintSnapshot, TextWindowError};

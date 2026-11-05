@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use nara_text::{
     TextEdit, TextEditError, TextEditOutcome, TextEditor, TextEngine, TextRect, TextTypography,
@@ -51,6 +54,7 @@ pub struct UiTextField {
     focus_generation: u64,
     enabled: bool,
     appearance: Option<UiTextFieldAppearance>,
+    layout: RefCell<Option<(FieldLayout, UiCustomLayout)>>,
 }
 
 impl UiTextField {
@@ -97,6 +101,7 @@ impl UiTextField {
             focus_generation: 0,
             enabled: true,
             appearance: None,
+            layout: RefCell::new(None),
         })
     }
 
@@ -301,6 +306,21 @@ impl UiTextField {
         }
         let geometry = self.geometry(viewport_width)?;
         let viewport = geometry.viewport;
+        let description = FieldLayout {
+            viewport,
+            measurement: geometry.measurement,
+        };
+        let layout = {
+            let mut cached = self.layout.borrow_mut();
+            match &*cached {
+                Some((previous, layout)) if previous == &description => layout.clone(),
+                _ => {
+                    let layout = UiCustomLayout::new(description);
+                    *cached = Some((description, layout.clone()));
+                    layout
+                }
+            }
+        };
         let minimum_height = geometry.measurement.size().height();
         let style = match style.height() {
             UiDimension::Px(height) if height.is_finite() && height >= 0.0 => {
@@ -396,10 +416,7 @@ impl UiTextField {
             UiSemantics::new(UiSemanticRole::TextInput, self.label.clone())?
                 .with_value(self.editor.text())?,
         )
-        .with_custom_layout(UiCustomLayout::new(FieldLayout {
-            viewport,
-            measurement: geometry.measurement,
-        }))
+        .with_custom_layout(layout)
         .with_child(
             UiNode::new(rect_style(viewport, UiPoint::default()).with_overflow(UiOverflow::Clip))
                 .with_children(children),
@@ -462,6 +479,7 @@ struct FieldGeometry {
     measurement: UiLayoutMeasurement,
 }
 
+#[derive(Clone, Copy, PartialEq)]
 struct FieldLayout {
     viewport: UiRect,
     measurement: UiLayoutMeasurement,

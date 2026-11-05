@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::{
     FontFace, FontFaceId, GlyphRasterKey, PositionedGlyph, TextAlignment, TextDiagnostic,
     TextDirection, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits, TextLine, TextRun,
-    TextTypography,
+    TextTypography, TextWidthMeasurement,
     face::{MAX_FONT_FACES, MAX_TOTAL_FONT_BYTES},
 };
 
@@ -22,14 +22,15 @@ use crate::{
 /// They do not affect admission, resource budgets, or publication of layout, raster, or editor state.
 /// They are not timings, retained memory measurements, or permission to perform further work.
 ///
-/// Layout counters cover only [`TextEngine::layout`] and [`TextEngine::layout_with_glyph_limit`].
+/// Layout counters cover [`TextEngine::layout`], [`TextEngine::layout_with_glyph_limit`] and
+/// [`TextEngine::measure_for_width_with_glyph_limit`].
 /// [`crate::TextEditor`] construction, edits, and projection use Parley directly and are excluded,
 /// as are font setup and validation-only calls. Window preparation includes its nested raster work.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextWorkStats {
-    /// Direct layout calls, including request validation failures. Delegation counts only once.
+    /// Direct layout/width-observation calls, including validation failures. Delegation counts once.
     pub layout_attempts: u64,
-    /// UTF-8 source bytes supplied to direct layout calls, including refused requests.
+    /// UTF-8 source bytes supplied to direct layout/width-observation calls, including refusals.
     /// This is submitted input size, not a count of bytes scanned or retained.
     pub layout_source_bytes: u64,
     /// Glyphs exposed by complete line-broken Parley layouts before Nara result admission.
@@ -196,6 +197,61 @@ impl TextEngine {
         request: &TextLayoutRequest,
         max_glyphs: usize,
     ) -> Result<TextLayout, TextLayoutError> {
+        let parley_layout = self.shape_request(request)?;
+        self.project_layout_with_glyph_limit(&parley_layout, request, max_glyphs)
+    }
+
+    /// Measures text only for a subtree-width observation, without admitting drawable output.
+    ///
+    /// Uses the same fonts, typography, wrapping and alignment as [`Self::layout`]. Real line
+    /// geometry remains available for nested container sizing, but `max_lines` applies only to
+    /// drawable layouts. Intermediate line storage is bounded by admitted source bytes and
+    /// shaped glyphs. All source, grapheme, scale and engine/caller glyph limits still apply;
+    /// work counters include completed shaping even on refusal. No raster work is performed.
+    /// Results depend on the complete request and this engine's immutable admitted font policy.
+    pub fn measure_for_width_with_glyph_limit(
+        &mut self,
+        request: &TextLayoutRequest,
+        max_glyphs: usize,
+    ) -> Result<TextWidthMeasurement, TextLayoutError> {
+        let layout = self.shape_request(request)?;
+        let glyph_count = shaped_glyph_count(&layout);
+        let max_glyphs = max_glyphs.min(self.limits.max_glyphs);
+        if glyph_count > max_glyphs {
+            return Err(TextLayoutError::GlyphLimitExceeded {
+                actual: max_glyphs + 1,
+                maximum: max_glyphs,
+            });
+        }
+        if !layout.width().is_finite() || !layout.height().is_finite() {
+            return Err(TextLayoutError::NonFiniteResult);
+        }
+        for line in layout.lines() {
+            let metrics = line.metrics();
+            if ![
+                metrics.baseline,
+                metrics.block_min_coord,
+                metrics.block_max_coord,
+                metrics.advance,
+            ]
+            .into_iter()
+            .all(f32::is_finite)
+            {
+                return Err(TextLayoutError::NonFiniteResult);
+            }
+        }
+        Ok(TextWidthMeasurement {
+            width: layout.width(),
+            height: layout.height(),
+            first_baseline: layout.lines().next().map(|line| line.metrics().baseline),
+            glyph_count,
+        })
+    }
+
+    fn shape_request(
+        &mut self,
+        request: &TextLayoutRequest,
+    ) -> Result<Layout<()>, TextLayoutError> {
         self.work_stats.layout_attempts = self.work_stats.layout_attempts.saturating_add(1);
         self.work_stats.layout_source_bytes = self
             .work_stats
@@ -227,18 +283,11 @@ impl TextEngine {
             parley_alignment(request.alignment()),
             AlignmentOptions::default(),
         );
-        for line in parley_layout.lines() {
-            for run in line.runs() {
-                for cluster in run.clusters() {
-                    self.work_stats.shaped_glyphs = self
-                        .work_stats
-                        .shaped_glyphs
-                        .saturating_add(cluster.glyphs().count() as u64);
-                }
-            }
-        }
-
-        self.project_layout_with_glyph_limit(&parley_layout, request, max_glyphs)
+        self.work_stats.shaped_glyphs = self
+            .work_stats
+            .shaped_glyphs
+            .saturating_add(shaped_glyph_count(&parley_layout) as u64);
+        Ok(parley_layout)
     }
 
     pub(crate) fn configure_editor(&self, editor: &mut PlainEditor<()>) {
@@ -438,6 +487,21 @@ impl TextEngine {
             &mut self.scale_context,
         ))
     }
+}
+
+fn shaped_glyph_count(layout: &Layout<()>) -> usize {
+    layout
+        .lines()
+        .map(|line| {
+            line.runs()
+                .map(|run| {
+                    run.clusters()
+                        .map(|cluster| cluster.glyphs().count())
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+        })
+        .sum()
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]

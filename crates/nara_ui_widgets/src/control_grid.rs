@@ -4,6 +4,8 @@ use nara_ui_kernel::{
 };
 
 /// A measured equal-width control group that wraps as its available content width narrows.
+/// The declared minimum is enlarged by actual child min-content widths under current typography.
+/// If even one cell cannot fit, it receives the available width and retains its overflow policy.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiControlGrid {
     minimum_cell_width: f32,
@@ -36,8 +38,13 @@ impl UiLayout for UiControlGrid {
             return output(0.0, 0.0, None);
         }
         let count = children.len();
+        let mut minimum_cell_width = self.minimum_cell_width;
+        for index in 0..count {
+            minimum_cell_width = minimum_cell_width.max(children.min_content_width(index)?);
+        }
         let width = match constraints.width {
             UiAvailableSpace::Definite(width) => width,
+            UiAvailableSpace::MinContent => minimum_cell_width,
             intrinsic => {
                 let mut natural: f32 = self.minimum_cell_width;
                 for index in 0..count {
@@ -50,11 +57,7 @@ impl UiLayout for UiControlGrid {
                     )?;
                     natural = natural.max(measured.size().width());
                 }
-                if intrinsic == UiAvailableSpace::MinContent {
-                    natural
-                } else {
-                    natural * count as f32 + self.gap * (count - 1) as f32
-                }
+                natural * count as f32 + self.gap * (count - 1) as f32
             }
         };
         if width <= 0.0 {
@@ -63,8 +66,7 @@ impl UiLayout for UiControlGrid {
             }
             return output(0.0, 0.0, None);
         }
-        let columns = (((width + self.gap) / (self.minimum_cell_width + self.gap)).floor()
-            as usize)
+        let columns = (((width + self.gap) / (minimum_cell_width + self.gap)).floor() as usize)
             .clamp(1, count);
         let cell_width = ((width - self.gap * (columns - 1) as f32) / columns as f32).max(0.0);
         let mut y = 0.0;

@@ -4,6 +4,8 @@ use nara_ui_kernel::{
 };
 
 /// Positions one measured child within the current root's logical content space.
+/// Width is the larger of the preferred width and actual child min-content width, capped by
+/// available bounds. The anchor and margins are in that same authored logical coordinate space.
 /// A child taller than the available allocation is clipped by its authored overflow policy;
 /// its owner supplies scrolling or paging so every offered action remains reachable.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,7 +63,8 @@ impl UiLayout for UiAnchoredPopup {
                 UiSize::new(width, height).ok_or(UiLayoutError::InvalidGeometry)?,
             ));
         }
-        let popup_width = self.preferred_width.min(available_width);
+        let minimum_width = children.min_content_width(0)?;
+        let popup_width = self.preferred_width.max(minimum_width).min(available_width);
         let measured = children.measure(
             0,
             UiLayoutConstraints {

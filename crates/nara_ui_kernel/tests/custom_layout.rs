@@ -1415,8 +1415,14 @@ impl UiLayout for GenuineBaselines {
         )?;
         assert!(minimum.size().width() < maximum.size().width());
         assert!(minimum.size().height() > maximum.size().height());
+        close(children.min_content_width(0)?, minimum.size().width());
+        assert_eq!(
+            children.measure(0, UiLayoutConstraints::MAX_CONTENT)?,
+            maximum
+        );
         close(maximum.first_baseline().unwrap(), self.baseline + 3.0);
         let prepared = children.measure(1, UiLayoutConstraints::MAX_CONTENT)?;
+        close(children.min_content_width(1)?, prepared.size().width());
         close(prepared.first_baseline().unwrap(), self.baseline + 3.0);
         assert_eq!(prepared, maximum);
         let wrapped = children.measure(2, UiLayoutConstraints::MAX_CONTENT)?;
@@ -1505,6 +1511,170 @@ fn intrinsic_minimum_differs_from_maximum_and_only_genuine_baselines_cross_the_p
         frame.diagnostics()
     );
     assert!(frame.diagnostics().is_empty());
+}
+
+struct ProbeWidthsAndHide {
+    repeats: usize,
+}
+
+impl UiLayout for ProbeWidthsAndHide {
+    fn layout(
+        &self,
+        _constraints: UiLayoutConstraints,
+        children: &mut UiLayoutChildren<'_>,
+    ) -> Result<UiLayoutOutput, UiLayoutError> {
+        for child in 0..children.len() {
+            let width = children.min_content_width(child)?;
+            for _ in 1..self.repeats {
+                close(children.min_content_width(child)?, width);
+            }
+            children.hide(child)?;
+        }
+        Ok(UiLayoutOutput::new(size(100.0, 100.0)))
+    }
+}
+
+fn width_probe_root(name: &str, text: &str, repeats: usize) -> UiRoot {
+    UiRoot::new(root_key(name), UiLayer::Base, UiStyle::fill())
+        .with_custom_layout(UiCustomLayout::new(ProbeWidthsAndHide { repeats }))
+        .with_child(
+            UiNode::new(UiStyle::flex())
+                .with_key(key("text"))
+                .with_text(UiText::new(text, 12.0).unwrap()),
+        )
+}
+
+#[test]
+fn width_probes_share_candidate_source_and_glyph_budgets_even_when_warm() {
+    for source_budget in [true, false] {
+        let policy = TextLimits {
+            max_text_bytes: if source_budget { 5 } else { 100 },
+            max_glyphs: if source_budget { 100 } else { 5 },
+            max_lines: 1,
+            ..TextLimits::default()
+        };
+        let mut compiler =
+            UiCompiler::with_text_limits(bundled_font_face().unwrap(), UiLimits::default(), policy)
+                .unwrap();
+        let source = snapshot(1, [width_probe_root("width-one", "A A", 3)]);
+        let first = compile(&mut compiler, &source);
+        assert_eq!(status(&first, "width-one"), UiRootStatus::Published);
+        assert_eq!(compiler.work_stats().text.layout_attempts, 1);
+        assert_eq!(compiler.work_stats().text.layout_source_bytes, 3);
+        assert_eq!(compiler.work_stats().text.shaped_glyphs, 3);
+        let repeated = compile(&mut compiler, &source);
+        assert_eq!(compiler.work_stats().text.layout_attempts, 1);
+        assert_eq!(repeated.paint(), first.paint());
+
+        let candidate = snapshot(
+            2,
+            [
+                width_probe_root("width-one", "A A", 3),
+                width_probe_root("width-two", "B B", 3),
+            ],
+        );
+        let before = compiler.work_stats();
+        let error = compiler
+            .compile(&candidate, environment(1.0), UiTheme::default())
+            .unwrap_err();
+        if source_budget {
+            assert!(matches!(
+                error,
+                UiCompileError::TextWorkLimitExceeded {
+                    actual: 6,
+                    maximum: 5
+                }
+            ));
+            assert_eq!(compiler.work_stats().text, before.text);
+        } else {
+            assert!(matches!(
+                error,
+                UiCompileError::ShapedGlyphLimitExceeded {
+                    actual: 6,
+                    maximum: 5
+                }
+            ));
+            assert_eq!(
+                compiler.work_stats().text.shaped_glyphs,
+                before.text.shaped_glyphs + 3
+            );
+        }
+        assert_eq!(
+            compiler.work_stats().published_frames,
+            before.published_frames
+        );
+        let recovered = compile(&mut compiler, &source);
+        assert_eq!(recovered.revision().get(), repeated.revision().get() + 1);
+        assert_eq!(status(&recovered, "width-one"), UiRootStatus::Published);
+    }
+}
+
+#[test]
+fn repeated_width_probe_cache_hits_still_consume_the_layout_work_ceiling() {
+    let mut reference = compiler(UiLimits::default());
+    compile(
+        &mut reference,
+        &snapshot(1, [width_probe_root("width-work", "A A", 1)]),
+    );
+    let maximum = reference.work_stats().layout_work_units as usize + 16;
+    let mut restricted = compiler(UiLimits::default().with_max_layout_work(maximum).unwrap());
+    let source = snapshot(2, [width_probe_root("width-work", "A A", 100)]);
+    assert!(matches!(
+        restricted.compile(&source, environment(1.0), UiTheme::default()),
+        Err(UiCompileError::LayoutWorkLimitExceeded { actual, maximum: limit })
+        if actual == maximum + 1 && limit == maximum
+    ));
+    assert!(restricted.work_stats().custom_child_measurements > 1);
+    assert_eq!(restricted.work_stats().text.layout_attempts, 1);
+    assert_eq!(restricted.work_stats().published_frames, 0);
+}
+
+struct FullMinimumAfterWidth;
+
+impl UiLayout for FullMinimumAfterWidth {
+    fn layout(
+        &self,
+        _constraints: UiLayoutConstraints,
+        children: &mut UiLayoutChildren<'_>,
+    ) -> Result<UiLayoutOutput, UiLayoutError> {
+        children.min_content_width(0)?;
+        children.measure(
+            0,
+            UiLayoutConstraints {
+                width: UiAvailableSpace::MinContent,
+                height: UiAvailableSpace::MaxContent,
+            },
+        )?;
+        children.hide(0)?;
+        Ok(UiLayoutOutput::new(size(100.0, 100.0)))
+    }
+}
+
+#[test]
+fn width_probe_scope_and_cache_cannot_admit_a_drawable_min_content_layout() {
+    let source = snapshot(
+        1,
+        [width_probe_root("width-lines", "A A", 1)
+            .with_custom_layout(UiCustomLayout::new(FullMinimumAfterWidth))],
+    );
+    let mut compiler = UiCompiler::with_text_limits(
+        bundled_font_face().unwrap(),
+        UiLimits::default(),
+        TextLimits {
+            max_lines: 1,
+            ..TextLimits::default()
+        },
+    )
+    .unwrap();
+    let frame = compile(&mut compiler, &source);
+    assert_eq!(status(&frame, "width-lines"), UiRootStatus::Absent);
+    assert!(matches!(
+        frame.root_outcomes()[0].diagnostic(),
+        Some(UiRootDiagnostic::TextRejected { message }) if message.contains("lines")
+    ));
+    assert!(frame.paint().is_empty());
+    assert_eq!(compiler.work_stats().text.layout_attempts, 2);
+    assert_eq!(compiler.work_stats().text.shaped_glyphs, 6);
 }
 
 struct CaptureOwner(std::sync::Arc<std::sync::atomic::AtomicUsize>);

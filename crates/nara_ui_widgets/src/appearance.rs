@@ -331,6 +331,13 @@ impl UiAppearance {
         if selected {
             fill = colors.selection;
         }
+        if !enabled {
+            fill = if selected {
+                mix_color(colors.selection, colors.panel, 0.6)
+            } else {
+                colors.raised
+            };
+        }
         if enabled && (state.hovered() || state.pressed()) {
             let interaction = if state.pressed() {
                 colors.pressed

@@ -105,6 +105,17 @@ wrap width replaces min-content mode. This performs one shaping operation under 
 source/glyph/line limits; an intrinsic empty/space result may internally have zero width without
 widening public finite-wrap admission.
 
+Use `UiLayoutChildren::min_content_width(child)` when a custom container only needs a subtree's
+minimum width before choosing its allocation. Wrapped text in that scoped query uses
+`TextEngine::measure_for_width_with_glyph_limit`, an observation with real dimensions/baseline
+and no drawable glyphs, raster keys or output authority. Its intermediate line storage remains
+bounded by admitted source bytes and shaped glyphs, while final output line admission is deferred.
+Direct `TextEngine::layout` and regular child measurement retain their original line limits.
+The compiler separates observation and drawable cache entries, then resolves final placement and
+paint under the original limits. A paragraph that fits the chosen width can therefore survive
+an exploratory min-content query without admitting an over-budget final layout. Source/glyph and
+candidate layout-work accounting still applies to both kinds, including compatible cache hits.
+
 ## Field and Host responsibilities
 
 An independently authored native frontend can use `nara_ui_render::UiSurfacePresenter` for one
@@ -170,6 +181,10 @@ through ordinary `UiLayoutChildren::measure`; a parent must not derive it from f
 padding. Automatic height uses the actual font line blocks plus padding; pixel height retains
 at least that minimum. Exact parent/percentage allocations must accommodate it or explicitly
 own their clipping policy.
+The field retains one immutable custom-layout description keyed by this geometry. Unchanged
+measurement reuses that description across composition; changed measurement replaces it while
+older authored snapshots retain their original description. This preserves exact-frame reuse
+without making layout identity depend on palette, focus or a fresh allocation on every paint.
 
 ## Scoped appearance and measured controls
 
@@ -184,12 +199,17 @@ padding and state visuals. Body, caption and title use absolute logical size/lin
 the original Host applies device scale once. Compact density changes spacing independently of
 text scale. Focus, selection and validation retain separate cues with unchanged hit geometry.
 `UiControlGrid` measures and baseline-aligns children, then wraps them according to available
-width. `UiAnchoredPopup` measures a single child and fits it above/below the captured logical
-anchor; its caller supplies oversized-content scrolling, dismissal, modal scope and focus
-restoration. Neither utility owns a window, input route or domain action.
+width. Its declared minimum cell width is a lower bound: actual child min-content width under
+the admitted typography determines when to wrap. A cell wider than the available allocation
+keeps its explicit overflow policy. `UiAnchoredPopup` grows from its preferred width to actual
+child min-content width before fitting available bounds above/below the captured logical anchor;
+its caller supplies oversized-content scrolling, dismissal, modal scope and focus restoration.
+Neither utility owns a window, input route or domain action.
 
-The compiler retains at most `min(max_nodes, 256)` successful plain-text layouts within its
+The compiler retains at most `min(max_nodes, 256)` successful plain-text requests within its
 original immutable font policy, additionally bounded by its source-byte and glyph limits.
+Drawable layouts and intrinsic-width observations share those bounds but cannot satisfy each
+other's requests. Exploratory geometry does not enter the final layout cache.
 Complete requests include text, typography, wrap mode/width, alignment and raster scale; brush
 colors do not change shaping. A warm compatible color change can reuse layout. Every candidate
 still charges full source/layout-glyph admission and every draw charges output independently.
