@@ -13,6 +13,23 @@ UI targets remain partial until [R11a-f](../../plans/2026-10-23-foundation-archi
 pass their independent/native and measured acceptance. This documentation update supplies no
 new performance, toolkit compatibility or platform evidence and requires no official ImGui package.
 
+The November 5 framework comparison reopens direct adoption and maintenance of the user's
+Open-GPUI extraction. The actual development baseline is `89cb76ba` on
+`optimize/docking-graph-transaction`, distinct from the older `repo-ref/open-gpui` snapshot.
+ADRs0107/0118 permit that Editor-local execution model while retaining Nara's document/history,
+game-UI and exact native View contracts. The
+[R11a comparison](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#maintained-open-gpui-comparison)
+and [engine-fit study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-maintained-open-gpui-and-engine-fit)
+record existing reuse, missing controlled selection/local text history, dependency consumption and
+native-render integration work. Source and framework tests alone select no production default,
+qualify no Nara engine View and do not close the fork's in-progress canonical docking replacement.
+Its first maintenance successor, Open-GPUI `8c58cca8`, supplies an independently locked public
+consumer and compatible dependency selection. The Windows/Rust 1.95 consumer and actual WGPU
+renderer compile, a disposable Nara-plus-framework graph compiles, and 2,590 selected framework
+library tests pass. `bce3a902` records pending upstream correctness work. These are source/framework
+prerequisites; complete Editor integration, native input, costs and game-runtime selection remain
+unqualified.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

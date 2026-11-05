@@ -1198,3 +1198,377 @@ algorithms may be adopted with pinned provenance, applicable notices and focused
 tests. Do not port Zed's entire editor/domain model merely to acquire its text cache or controls.
 This assessment is comparative design context, not adoption of another native owner or a license
 review of arbitrary Zed files.
+
+## November 5: GPUI Source Feasibility And Reopened Candidates
+
+**User-supplied context:** resuming maintenance of the user's Open-GPUI extraction is the first candidate.
+Its dependency/license processing is already done; maintaining GPUI is acceptable. Pinned upstream
+adoption remains a comparison candidate; this research selects neither route. The historical
+["Embed a complete reference toolkit" exclusion](#alternatives-under-the-nara-owned-ui-target)
+and independent-runtime preferences describe their original scope, not this reopened choice.
+
+**Evidence scope:** `repo-ref/zed` HEAD was `dd3437011469d5c2ec8c821a84cc999979625697`, clean. Facts describe
+**Zed upstream only**, not Open-GPUI's execution/backend or dependency/license processing. No Cargo,
+build, native input, benchmark or reload experiment was run. Platform/render interoperability is a
+separate investigation; this section neither resolves it nor establishes cost or impossibility.
+
+### Custom Elements And State Are Real Extension Mechanisms
+
+**Source facts:** `Render::render(&mut self, &mut Window, &mut Context<Self>) -> impl IntoElement`
+builds an entity-backed view; `RenderOnce::render(self, ...)` consumes a recipe. `Element` exposes
+`request_layout`, `prepaint` with final bounds, and `paint`, phase-local state and scoped identity;
+the default accessibility role is `None` ([contracts][zed-element]). These are source interfaces, not a dynamic ABI.
+
+`canvas` supplies two `FnOnce` callbacks with final bounds and a phase payload; it requests styled
+layout, has no ID, and implements no child composition ([canvas][z5-canvas]). Custom elements can
+request measured layout, insert hitboxes and draw paths ([layout/hitboxes][z5-layout-hit],
+[paint][z5-path-paint], [PathBuilder][z5-path-builder]). **Inference:** a graph/node tool can combine
+ordinary children with custom drawing; node/edge semantics, selection, commands and Undo remain its work.
+
+`Entity<T>` retains state independently of rebuilt descriptions. `with_element_state` keys by
+scoped ID and `TypeId`; `use_keyed_state` retains consecutive-frame state, and `use_state` defaults
+to caller location ([entity][zed-entity], [state][zed-element-state], [transfer][zed-state-transfer]).
+**Inference:** use domain keys and a draft owner across filtering; element identity/`TypeId` is not a migration schema.
+
+`Entity::update`/`cx.listener` do not automatically notify; `Entity::write` does. Opt-in cached views
+need definite outer size; notifications and bounds/clip/text-style/opacity affect validity. Replay
+preserves interaction handlers and accessed-entity membership ([update][zed-entity],
+[listener][zed-listener], [API][zed-view-identity], [cache][zed-view-cache], [replay][zed-frame-replay]).
+**Inference:** specify notification edges for separate models. The earlier
+[late-opacity caveat](#november-5-phase-validity-and-measurement-retention) still applies;
+retention/replay does not establish exact presented-input authority.
+
+### Native Text Plumbing Is Not A Finished Product Field
+
+**Source facts:** `EntityInputHandler` adapts a view to UTF-16 selection/marked ranges,
+replacement/unmarking and candidate geometry ([adapter][z5-entity-input], [protocol][z5-input-contract]).
+Windows places composition/candidate windows from range bounds, forwards result strings to replacement
+and preedit to replacement-plus-marking, and conditionally completes composition when disabling IME
+([native text handling][z5-windows-ime]). This establishes plumbing, not native language qualification.
+
+`examples/input.rs` owns content, selection, marked range and prior geometry; committed and preedit
+replacement both mutate its local content and notify. It binds editing actions itself
+([state][z5-example-state], [editing][z5-example-edit], [composition][z5-example-render]).
+**Inference:** the adapter supplies no automatic production field, submit/cancel, validation,
+project Undo or refresh policy. Edit-buffer preedit is not document acceptance.
+
+`Window::handle_input` registers during paint for the focused handle and upcoming frame;
+text/selection changes separately notify native services ([registration][z5-input-registration]).
+`ElementInputHandler` holds a strong `Entity<V>` and element bounds; cloned focus handles retain
+their entry, with last-drop cleanup queued ([adapter][z5-input-owner], [focus][z5-focus]).
+**Inference:** test retirement, focus transfer before repaint, row reuse and delayed composition against field incarnation.
+
+### Testing Hooks And Automation Have Different Authority
+
+**Source facts:** `test-support`/test builds expose `TestAppContext` input/action simulation.
+`dispatch_keystroke` creates an internal event with simulated IME, then dispatches character input;
+it does not invoke OS composition ([gating][z5-test-gates], [tests][z5-test-input], [dispatch][z5-synthetic]).
+`VisualTestContext::debug_bounds` needs selectors recorded under `debug_assertions`
+([limit][z5-debug-bounds]). The distinct `VisualTestAppContext` is macOS-gated and captures through
+`render_to_image` ([gating][z5-test-gates], [capture][z5-visual-capture]), not Windows qualification.
+
+**Inference:** these deterministic in-process hooks do not define agent transport, authentication,
+domain targets, presented-generation checks or Nara's exact operation/results. An agent adapter
+must use the product's admitted operations/results and distinguish semantic invocation,
+presented-control interaction and actual OS input.
+
+### Exact Upstream Dependency And Toolchain Constraints
+
+**Source facts:** `gpui = 0.2.2` declares `publish = true`; `gpui_platform = 0.1.0` inherits
+`publish = false`. Both inherit edition 2024 and connect through workspace paths
+([core][z5-core-manifest], [platform][z5-platform-manifest], [root][z5-root-package],
+[paths][z5-workspace-paths]). Different version numbers alone are not incompatibility;
+no registry release was checked for equivalence to this source pin.
+
+Core local dependencies include `collections`, `gpui_macros`, `gpui_shared_string`, `http_client`,
+`refineable`, `scheduler`, `sum_tree` and `gpui_util`; Windows adds `gpui_windows`
+([core][z5-core-manifest], [platform][z5-platform-manifest]), plus their derive/tracing dependencies
+([refineable][z5-refineable], [sum_tree][z5-sum-tree]). Copying only two directories loses this closure.
+A same-repository, same-revision Git pair can structurally address workspace packages without
+publishing ([Cargo discovery][z5-cargo-deps]); compilation is unqualified. Record source identity/features.
+
+Root patches pin `async-task` to `015845a19fc31752c02367567d3b8900a406f9da` and Linux `calloop` to
+`3759371fee14c40066d64777e2a36b6ffcc22590` ([patches][z5-patches]). Cargo ignores dependency patch
+tables: consumers must explicitly retain relevant root patches or qualify removal
+([Cargo scope][z5-cargo-patches]). `gpui`/`scheduler` directly declare `async-task`; `gpui_linux`
+declares `calloop` ([core][z5-core-manifest], [scheduler][z5-scheduler], [Linux][z5-linux-manifest]).
+This source selection difference is not a demonstrated compile failure or an Open-GPUI blocker.
+
+The toolchain selects Rust `1.98.1`; neither root crate declares `rust-version`
+([toolchain][z5-toolchain], [core][z5-core-manifest], [platform][z5-platform-manifest]).
+`current_platform` uses `cfg_select!`, stable since `1.95.0` ([code][z5-platform-select],
+[versioned std][z5-cfg-select]); that macro alone does not exceed [Nara's declared `1.95`](../../Cargo.toml).
+The closure's MSRV remains unverified; the dependency toolchain is not a consumer compiler guarantee.
+
+The publisher rewrites names, versions and `publish`; its hard-coded list omits `gpui_platform`,
+`gpui_windows` and `scheduler` ([publisher][z5-publisher]). A separate graph planner maps names such
+as `gpui_collections`/`gpui-macros` ([mapping][z5-publish-names]). **Inference:** unchanged manifests
+and a version label do not establish registry readiness; qualify source consumption and packaging separately.
+
+### License Declarations And Actual Reload Scope
+
+**Source declarations, not legal advice:** upstream `gpui`, `gpui_platform` and `gpui_windows`
+declare `Apache-2.0` ([core][z5-core-manifest], [platform][z5-platform-manifest], [Windows][z5-windows-manifest]).
+Zed's higher-level `ui`, `workspace`, `component`, `editor` and `ui_input` declare
+`GPL-3.0-or-later` ([ui][z5-license-ui], [workspace][z5-license-workspace],
+[component][z5-license-component], [editor][z5-license-editor], [ui_input][z5-license-ui-input]).
+These upstream declarations do not reopen the user's already processed Open-GPUI distribution.
+
+**Source facts:** optional `hot-reload` requires debug assertions and an enumerated platform.
+It connects to `dx serve --hot-patch`, filters by build/process ID, applies a Subsecond jump table
+between foreground updates and refreshes windows; `FullReloadCommand` requires restart
+([gating][z5-hot-build], [implementation][z5-hot-loader]). Render routes through `HotFn`
+([boundary][z5-hot-render]). **Inference:** meaningful development support does not establish
+a stable extension ABI, state migration, dirty-document recovery or safe unload. `Render`/`Element`
+alone provides none; distinguish supported patches from explicit build/reconstruct/restart.
+
+### Candidate Acceptance Still Required
+
+**Proposed requirements, not executed results:** qualify the maintained candidate, not assumed upstream parity.
+
+| Area | Exact required evidence |
+| --- | --- |
+| Source consumption | Build an independent consumer from the recorded candidate revision, features, lockfile and compiler; exercise the chosen native platform and custom element. Record root patch policy and actual dependency closure. Qualify registry packaging separately if promised. |
+| Product text field | Use the candidate's real field with Windows Microsoft Pinyin and a Japanese IME; capture preedit/commit/cancel, UTF-16/grapheme selection, clipboard, long-field scrolling and candidate geometry across DPI/resize. Keep drafts separate from document submission; validate exact Undo and external-model refresh outcomes. |
+| Input lifetime | Transfer focus before repaint, filter/reorder/delete the edited row, close/recreate its panel, and use a second window during composition. Preserve or cancel by declared policy; reject predecessor input/actions and prevent Editor shortcuts from consuming text-editing gestures. |
+| Custom tool and operation | Present a node/edge tool with embedded ordinary text controls, clipping, hit testing and model-key selection. Verify the same admitted document operation and exact result through user and agent adapters; synthetic tests do not satisfy OS IME acceptance. |
+| Extension iteration | Change independently authored panel behavior and state shape; prove supported migration or explicit refusal, dirty content/history/draft recovery, compile/startup/restore failures and last-good recovery. Retire old callbacks/tasks/input routes and reject delayed results. Hot patch claims name their supported change classes; unload needs separate physical-quiescence evidence. |
+
+**Current limit:** source comparison only; no adoption, native, widget, performance, ABI or unload qualification.
+
+[z5-canvas]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/canvas.rs#L8-L88
+[z5-layout-hit]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5459-L5585
+[z5-path-paint]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5005-L5028
+[z5-path-builder]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/path_builder.rs#L25-L109
+[z5-entity-input]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/input.rs#L7-L148
+[z5-input-contract]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/platform.rs#L2333-L2425
+[z5-windows-ime]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_windows/src/events.rs#L645-L764
+[z5-example-state]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/examples/input.rs#L39-L49
+[z5-example-edit]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/examples/input.rs#L349-L407
+[z5-example-render]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/examples/input.rs#L647-L681
+[z5-input-registration]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5633-L5676
+[z5-input-owner]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/input.rs#L150-L169
+[z5-focus]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L536-L673
+[z5-test-gates]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app.rs#L69-L76
+[z5-test-input]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/test_context.rs#L605-L656
+[z5-synthetic]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L5821-L5845
+[z5-debug-bounds]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/test_context.rs#L1027-L1032
+[z5-visual-capture]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/app/visual_test_context.rs#L380-L386
+[z5-core-manifest]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/Cargo.toml
+[z5-platform-manifest]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_platform/Cargo.toml
+[z5-root-package]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/Cargo.toml#L277-L279
+[z5-workspace-paths]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/Cargo.toml#L372-L384
+[z5-refineable]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/refineable/Cargo.toml
+[z5-sum-tree]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/sum_tree/Cargo.toml
+[z5-cargo-deps]: https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#specifying-dependencies-from-git-repositories
+[z5-patches]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/Cargo.toml#L1037-L1068
+[z5-cargo-patches]: https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html#the-patch-section
+[z5-scheduler]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/scheduler/Cargo.toml
+[z5-linux-manifest]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_linux/Cargo.toml
+[z5-toolchain]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/rust-toolchain.toml
+[z5-platform-select]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_platform/src/gpui_platform.rs#L61-L81
+[z5-cfg-select]: https://doc.rust-lang.org/1.95.0/std/macro.cfg_select.html
+[z5-publisher]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/tooling/xtask/src/tasks/gpui.rs#L128-L303
+[z5-publish-names]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/tooling/xtask/src/tasks/gpui/publish_plan.rs#L74-L85
+[z5-windows-manifest]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_windows/Cargo.toml#L1-L6
+[z5-license-ui]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/Cargo.toml#L1-L6
+[z5-license-workspace]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/workspace/Cargo.toml#L1-L6
+[z5-license-component]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/component/Cargo.toml#L1-L6
+[z5-license-editor]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/editor/Cargo.toml#L1-L6
+[z5-license-ui-input]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui_input/Cargo.toml#L1-L6
+[z5-hot-build]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/build.rs#L19-L29
+[z5-hot-loader]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/hot_reload.rs#L15-L108
+[z5-hot-render]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/view.rs#L339-L355
+
+## November 5: Maintained Open-GPUI And Engine Fit
+
+**Evidence:** source inspection against Nara `e65cbc39ab60959518ca3ceb03cf2373effcf354` and the
+authoritative Open-GPUI development workspace, branch `optimize/docking-graph-transaction`, at
+`89cb76ba1d59904d5c670f770aa8e30fe0346178`. The reference checkout remains a different snapshot,
+`689db5b49b33a5b2e64ba332bff72c98e70092bb`. The inspected component exports, text controller,
+Tree, VirtualizedList and ui-core match between those snapshots; docking internals and some
+native-event interfaces differ. Open-GPUI citations below pin the development base, not later
+working changes. This section assesses engine fit; dependency/build and GPU results belong to
+separate evidence. The user authorizes continued maintenance of this framework.
+
+**Recommendation — Trial:** build a complete independent GPUI Editor composition while retaining
+Nara's game UI runtime as the initial control. Complete the fork's Zed synchronization before
+engine adaptation. Then compare separate game/Editor implementations, a shared kernel and unified
+execution; the initial control does not freeze the runtime choice. Prefer existing components and
+docking over extending another Editor widget mechanism. This qualitative maintenance judgment
+is conditional on retiring displaced
+first-party UI mechanisms and counting Open-GPUI maintenance. It does not establish native readiness
+or measured savings. Universal GPUI for games remains a separate candidate requiring its own proof.
+
+| Existing owner and concrete interface | Reuse or replace in a GPUI Editor | Responsibility retained by Nara |
+| --- | --- | --- |
+| [Tooling models and actions](../../crates/nara_tooling/src/lib.rs#L21-L80) | Reuse immutable observations, queries and typed commands. | Document identity, selection, validation, history and persistence semantics. |
+| [Project Session](../../src/project_host/runtime/editor.rs#L875-L949) and [action dispatch](../../src/project_host/runtime/editor/actions.rs#L23-L76) | Reuse through EditorApplication; GPUI supplies the frontend and native host composition. | Project/document execution, revision admission, pending work, Play and close custody. |
+| [PanelHost](../../editor/src/panels/host.rs#L27-L83) and [PanelContext](../../editor/src/panels/context.rs#L24-L67) | Reuse state custody, instance tokens and exact submission results. | Panel incarnation, target binding, retirement and action/result ownership. |
+| [FieldDraft](../../editor/src/frontend/controls/field_drafts.rs#L156-L195) and [ValueDraft](../../editor/src/frontend/controls/value_draft.rs#L13-L65) | Reuse domain draft values, conflict/recovery and Apply semantics. | Invalid input, original field/schema basis and pending PanelSubmissionId; no second caret/composition owner. |
+| [OwnedInspector](../../editor/src/frontend/controls/owned_inspector.rs#L327-L349) and owned Hierarchy controls | Replace control construction, layout, scrolling, focus and text machinery with GPUI components. | Keep source projections, field classification, structural permissions and command preparation. |
+| [Workspace layout](../../editor/src/workspace/layout.rs#L71-L83) and panel instances | Keep product identities/targets; use DockSurface for detailed placement and its snapshot for the toolkit blob. | Contribution catalog, instance lifecycle, default placement intent and preference persistence. |
+| [Runtime UI adapter](../../crates/nara_ui/src/lib.rs#L21-L43), Kernel and Widgets | Retain for game consumers; GPUI Editor controls need no permanent Nara widget facade. | Scene/ECS authoring, stable source identity, game intents and admitted runtime frame/input contracts. |
+| [UI presentation](../../crates/nara_ui_render/src/lib.rs#L1-L37) and [authoring preview](../../src/project_host/runtime/editor/ui_preview.rs#L19-L52) | Retain the game/UI Canvas content pipeline when displayed inside the Editor. | The edited game's UI representation and preview validity; changing Editor chrome does not replace them. |
+
+The concrete Editor dependency set is `open-gpui`, `open-gpui-platform`, `open-gpui-ui-components`
+and `open-gpui-docking`. [Components][og5-components] already depend on command, form, resource,
+motion and ui-core; their exported [controls][og5-controls] cover more than primitive drawing.
+For selective mechanism reuse, [ui-core][og5-core] depends only on motion and exposes virtualizer,
+split, focus and [overlay helpers][og5-core-api]. Renderer-neutral state inside ui-components still brings
+that package's GPUI dependency; it is not an independent headless dependency closure.
+
+Use **one detailed docking placement owner**: DockSurface in the selected Editor shell, with
+[lazy panel factories][og5-dock-factories] and [layout/viewport snapshots][og5-dock-snapshot].
+Nara's stable panel IDs, targets and incarnation rules remain product facts. Default placement
+is an input, not a second synchronized split/tab graph. Compatible docking moves preserve the
+applicable panel state; explicit hiding/closing and target replacement follow PanelHost retirement.
+At this pin, the new [canonical runtime][og5-canonical] exists, but production
+[DockWorkspace][og5-workspace] still owns DockGraph. The canonical migration is not complete merely
+because U4 operations have landed; consume the surface facade without coupling Nara to that kernel.
+
+**Concrete integration gaps, observed in the maintained candidate:**
+
+- **Controlled selection:** [Tree rendering][og5-tree-state] prefers runtime selection over the
+  builder default, and [click handling][og5-tree-click] updates that selection before calling back.
+  [VirtualizedList][og5-list-state] also resolves from runtime selection and
+  [updates before notification][og5-list-input]. Default setters do not provide authoritative
+  reconciliation after Session rejection, external selection, Undo or document replacement.
+  Add a narrow controlled-selection contract to the framework; keep domain admission in Nara.
+- **Text state:** use the actual [TextInputController][og5-text-state] for content, caret, selection,
+  composition and local editing. Its [action/key table][og5-text-actions] has no local Undo/Redo;
+  Nara's [TextEditor](../../crates/nara_text/src/editing.rs#L181-L216) already has bounded history
+  and original-composition custody. [Preedit invokes on_change][og5-preedit], and a differing
+  [controlled value clears marked text][og5-text-sync]. Fill those required behaviors in GPUI;
+  retain Nara's domain draft/Apply boundary rather than synchronizing two editing engines.
+- **Callback and drive order:** GPUI callbacks cannot retain a borrowed PanelContext. A concrete
+  root owner can retain Application/PanelHost, queue requests with original instance/field basis,
+  run prepare/submit-and-drive, then publish results to GPUI. Preserve
+  [exact original callbacks](../../editor/src/panels/host.rs#L275-L365) and
+  [maintenance without idle Play advancement](../../src/project_host/runtime/editor/model.rs#L21-L87).
+  Rendering each GPUI view must not independently drive the Session or fabricate a new Runtime frame.
+
+**Game UI is a separate decision:** ECS-to-GPUI is not inherently a duplicated Entity graph.
+[Render/RenderOnce][og5-render] allow data-derived Element trees; one root or stateful control can
+be an Entity without turning every game node into one. Nara already
+[projects ECS children](../../crates/nara_ui/src/runtime/projection.rs#L313-L387) into UI descriptions.
+A coherent GPUI game backend is therefore possible, but must demonstrate the existing headless
+consumer, source identity, surface lifetime and
+[presented-input admission](../../crates/nara_ui/src/interaction/timeline.rs#L22-L103) contracts.
+GPUI's Window/App-oriented rendering is not already the
+[window-free immutable Kernel](../../crates/nara_ui_kernel/src/lib.rs#L1-L5) contract.
+
+**Maintenance evidence:** Nara's Hierarchy already
+[materializes visible rows](../../editor/src/frontend/controls/owned_hierarchy/presentation.rs#L561-L611).
+GPUI adds reusable [virtual Tree rendering][og5-tree-virtual] and [shared list descriptors][og5-list-data].
+That supports replacing mechanisms, not claiming all virtualization is missing today or that
+descriptor construction, filtering and document queries become proportional to visible rows.
+Retain bounded domain queries and compare equivalent document/interaction workloads.
+
+**Bounded acceptance proposal:** start with one independent GPUI root hosting Project Open/Close,
+Hierarchy, Inspector and in-window DockSurface through the existing owners. Require exact
+Apply/rejection and Undo/Save/Reopen, externally changed selection, invalid-draft recovery,
+source/schema replacement and delayed-event rejection after panel retirement. Qualify IME
+preedit/commit/cancel and local text history without document mutation during preedit.
+Then extend complete Editor workflows and native docking coverage before switching defaults and
+removing displaced implementations. These are proposed gates; this source study ran no Cargo,
+formatting, native interaction or performance experiment.
+
+[og5-components]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/Cargo.toml#L17-L29
+[og5-controls]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/lib.rs#L9-L78
+[og5-core]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_core/Cargo.toml#L17-L18
+[og5-core-api]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_core/src/lib.rs#L37-L95
+[og5-dock-factories]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_docking/src/surface/builder.rs#L92-L100
+[og5-dock-snapshot]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_docking/src/surface/state.rs#L61-L74
+[og5-canonical]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_docking/src/canonical_runtime.rs#L15-L24
+[og5-workspace]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_docking/src/workspace.rs#L14-L33
+[og5-tree-state]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/tree/mod.rs#L239-L270
+[og5-tree-click]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/tree/mod.rs#L741-L755
+[og5-list-state]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/virtualized_list/runtime.rs#L1142-L1183
+[og5-list-input]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/virtualized_list/runtime.rs#L1618-L1635
+[og5-text-state]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/text_input.rs#L253-L275
+[og5-text-actions]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/text_input.rs#L190-L250
+[og5-preedit]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/text_input.rs#L906-L923
+[og5-text-sync]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/text_input.rs#L524-L535
+[og5-render]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui/src/element.rs#L153-L175
+[og5-tree-virtual]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/tree/mod.rs#L114-L129
+[og5-list-data]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/ui_components/src/virtualized_list/data.rs#L5-L39
+
+## November 5: Rendering Seam And Executed Maintenance Baseline
+
+The maintained framework successor is
+[`8c58cca8`](https://github.com/Latias94/open-gpui/commit/8c58cca8537a8d1278e9da5cdd945e353d8b35dc),
+followed by the [upstream continuation](https://github.com/Latias94/open-gpui/commit/bce3a902e0a325035718f5f200cd9cba072fdf7b).
+Both were pushed to `maintenance/nara-editor-baseline`; the local development branch and its
+existing docking work were preserved. Nara has not installed this as its production frontend.
+
+### Actual Rendering Difference
+
+**Source facts:** the [platform selector][og5-platform] constructs the Win32 backend on Windows.
+Its [device implementation][og5-d3d11] creates D3D11 devices. Nara's current [backend dependency](../../Cargo.toml)
+is WGPU 30.0.1 and the qualified Windows Editor uses DX12. A shared version number or adapter
+name does not make the devices, textures or queues interchangeable.
+
+The public [surface element][og5-surface] and `paint_surface` use a macOS pixel buffer under
+target configuration. Windows [draw_surfaces][og5-windows-surface] performs no surface drawing;
+the [WGPU renderer][og5-wgpu-renderer] also skips that primitive. [RenderImage][og5-render-image]
+stores CPU image frames; `ImageSource::Custom` still returns that type. These inspected paths do
+not supply arbitrary retained Nara GPU-texture import. This is a concrete integration gap, not
+proof that framework reuse is impossible or a reason to preserve D3D11 permanently.
+
+**Preferred experiment, not a selected interface:** let an Open-GPUI rendering adapter consume
+Nara's existing render services and retained engine output, or adapt the WGPU backend to the
+same captured device/queue. Keep GPUI's element/layout/input execution independent of Nara
+documents and World types. Backend-specific acquisition, scene lowering, atlas resources,
+submission and shutdown belong behind that concrete adapter; do not add a parallel GPU graph or
+device owner merely to join the frameworks. The current image-backed panel attachment is not a
+mandatory route for the complete candidate.
+
+Use a real changing Scene/Game View below clipped UI and an overlapping popup. Prove exact
+presentation/input mapping, resize/DPI/color/alpha, refusal and physical retirement. Attribute
+every GPU copy and synchronization step; steady-state CPU readback is not an acceptable bridge.
+Window submission and accepted UI semantics remain different facts. The fork's current
+renderer-neutral outcome and shutdown contracts must survive a backend replacement.
+
+### Executed Source-Consumption Evidence
+
+The original locked framework example compiled, but a fresh consumer first refused withdrawn
+`spin` 0.10.0. After that correction, exact Taffy and Core Foundation patch requirements exposed
+independent-consumer conflicts. The maintenance commit permits compatible Taffy/Core Foundation/
+WGPU versions and updates `spin` to 0.12.3. It leaves other root lock records unchanged. The
+[independent application](https://github.com/Latias94/open-gpui/tree/8c58cca8537a8d1278e9da5cdd945e353d8b35dc/tests/fixtures/dependency-consumer)
+owns a separate lockfile, real component/canvas/DockSurface composition and optional actual WGPU
+renderer dependency. This is source-consumption qualification, not an engine View placeholder.
+
+All local Cargo work was serial, with one build job, Rust 1.95.0 and Nara's shared target on
+Windows 11. The [framework verification record](https://github.com/Latias94/open-gpui/blob/8c58cca8537a8d1278e9da5cdd945e353d8b35dc/docs/verification.md#independent-dependency-consumer)
+contains the reproducible durable consumer gate and limits.
+
+| Check | Actual result and scope |
+| --- | --- |
+| Development minimal docking example | Locked compilation passed; no native window was launched. |
+| Core, components and docking library cohort | 2,590/2,590 passed, no skipped selected cases; nextest `447739ea-48cb-4e78-a85f-5cb05769a64f`. Integration/native suites outside `--lib` were not selected. |
+| Independent consumer, all application targets/features | Passed with 728 resolved packages, Taffy 0.10.0, WGPU 30.0.1 and the actual WGPU renderer. The root workspace retained Taffy 0.10.1 and WGPU 30.0.0. macOS-only Core Foundation 0.10.1 was resolved, not compiled on Windows. |
+| Nara plus framework consumption | A disposable separately locked consumer compiled `nara-editor` without defaults and the four Open-GPUI entry packages, including a type implementing both EditorPanel and Render. Its 766-package graph and public API composition passed; no Editor project workflow or native integration was executed. |
+| Attribution/import boundary | Existing `xtask scan-import-boundary` passed. The fork already carries Apache-2.0 and NOTICE/source attribution. This scanner checks its declared import policy, not every distribution obligation. |
+| Formatting and review | Root/independent-consumer format checks and public-document checks passed; independent dependency-change review found no outstanding correctness finding. Linux/macOS CI and actual Rust 1.92 compilation remain unqualified locally. |
+
+The [updated upstream queue](https://github.com/Latias94/open-gpui/blob/bce3a902e0a325035718f5f200cd9cba072fdf7b/docs/imports/zed-gpui-upstream-sync-candidates.md#november-5-maintained-framework-successor)
+records current Zed `635026fabc38440fce5e1767d125026a17b12012`, five confirmed pending correctness
+units, already-covered behavior and a later coherent text refresh. Begin with arena allocation/
+nested-clear authority, then TextSystem lifetime, cached dependencies, text layout and pending
+input. These are planned owning fixes, not results of the library cohort above. Compiler, Taffy,
+font-generation and line-breaking changes belong to that refresh comparison.
+
+**Remaining decision:** source and framework capability evidence favor a maintained GPUI Editor
+trial over extending a second full Editor control stack. They establish no measured total-cost
+win, GPU sharing, OS IME, complete docking replacement or unified game runtime. Retain the actual
+game UI as the first control, then compare separate execution, shared mechanisms and unified
+execution through the complete R11a consumers before selecting the lasting boundary.
+
+[og5-platform]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_platform/src/gpui_platform.rs
+[og5-d3d11]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_windows/src/directx_devices.rs
+[og5-surface]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui/src/elements/surface.rs
+[og5-windows-surface]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_windows/src/directx_renderer.rs#L850-L855
+[og5-wgpu-renderer]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_wgpu/src/wgpu_renderer.rs#L1577-L1582
+[og5-render-image]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui/src/assets.rs#L42-L88

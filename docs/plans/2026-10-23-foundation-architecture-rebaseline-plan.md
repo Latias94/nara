@@ -106,6 +106,13 @@ The component-interface follow-up adds scoped identity/effects, repeatable prepa
 explicit custom layout/draw contract. R11f names Editor extension edit/build/reconstruct separately
 from R12's game/Play restoration; declarative syntax alone qualifies no native reload.
 
+The November 5 clarification reopens complete-framework adoption and prioritizes the user's
+existing Open-GPUI extraction, including maintaining it directly where needed. A Nara-owned,
+custom-drawn Editor need not implement every UI primitive internally. Compare that maintained
+baseline against the current independent frontend before broadening custom execution/cache
+infrastructure. Keep the current implementation until a complete replacement is qualified;
+source reuse, a working framework example and documentation amendments alone select no default.
+
 - Strategy explicitly includes installable tools and optional-language/prebuilt-Host workflows
   alongside a complete independently usable Rust path.
 - ADR 0119 replaces 0004's obsolete reflection authority: Nara Schema is semantic authority;
@@ -1385,6 +1392,100 @@ supplies notification, cached-view replay and fixed/measured list comparisons. Z
 layout tree is cleared between draws; its retained state and cached views do not require Nara to
 retain a whole Taffy arena. Open-GPUI's `virtualizer` is a workspace core module, not a selected
 third-party dependency. Borrow the mechanisms under existing owners and measured pressure.
+
+#### Maintained Open-GPUI comparison
+
+Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The
+reference pin is `689db5b49b33a5b2e64ba332bff72c98e70092bb`; upstream Zed observations use
+`dd3437011469d5c2ec8c821a84cc999979625697` and do not establish fork behavior. Earlier source
+research excluded complete-toolkit adoption under the then-selected scope; this clarification
+reopens that choice. Maintaining the fork is acceptable. Compare its actual incremental cost
+with maintaining Nara's corresponding mechanisms, without treating current code as sunk-cost
+authority or importing the entire Zed application.
+
+The user then identified `F:/SourceCodes/Rust/open-gpui` as the actual development workspace.
+Its inspected baseline is `89cb76ba1d59904d5c670f770aa8e30fe0346178` on
+`optimize/docking-graph-transaction`, 63 commits beyond the reference pin, with a clean initial
+worktree. Continue that repository's existing canonical-docking plan without overwriting its
+committed work or treating U4-U9 as complete. The reference clone is historical evidence, not a
+second framework development branch. The
+[engine-fit comparison](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-maintained-open-gpui-and-engine-fit)
+keeps framework reuse, engine View integration and game-UI ownership separate.
+
+Use the existing fork workspace and its original tests before adding production APIs. Respect its
+package/attribution cleanup and inspect the actual resolved dependency graph. Separate native
+example compilation, behavioral framework tests, complete Nara integration and matched measured
+costs. Use serial Cargo and the checkout's shared target; changes that belong to Open-GPUI stay
+in that repository rather than appearing as a second vendored copy in Nara.
+
+The executable comparison must cover:
+
+1. **Source consumption:** locked standalone framework/platform/component consumption and the
+   actual Nara dependency closure. Attribute version conflicts, target-specific dependencies,
+   root-only configuration and required framework patches. Reuse the existing import-boundary
+   and dependency-health checks; do not implement another dependency or license scanner.
+2. **Framework refresh:** reconcile the fork's existing upstream-sync plan with a recorded current
+   Zed framework revision before substantial Nara-specific UI work. Preserve package cleanup,
+   component additions and the canonical-docking work; compare behavior and dependency/API deltas
+   rather than overwriting files. Adopt coherent framework improvements and their regressions,
+   recording already-covered or deliberately divergent behavior. Include required compiler and
+   dependency changes in the cost comparison. Keep upstream tracking in the framework repository;
+   do not introduce a source-analysis or synchronization framework in Nara.
+3. **Native engine View:** real changing Scene/Game output beneath overlapping UI, with clipping,
+   resize/DPI/color/alpha, exact input geometry and healthy/device-loss retirement. No steady-state
+   CPU readback. Count GPU copies/submissions/synchronization and declare one selected native
+   window/render ownership arrangement. A framework canvas or CPU image placeholder does not
+   qualify the engine View. Source-level backend differences are integration work, not proof that
+   maintaining the candidate is impossible. Compare an Open-GPUI rendering adapter using Nara's
+   existing render services with a shared WGPU backend; the incumbent Windows D3D11 backend is
+   replaceable. Keep UI execution independent of Nara's document/World types and avoid a parallel
+   device/submission/resource-lifetime authority. Evaluate the actual adapter seam before freezing
+   renderer-facing public types.
+4. **Complete source editing:** Hierarchy and Inspector selection, local drafts, 4096-byte text,
+   composition/focus, exact command refusal/result, Undo/Redo and Save/Reopen. Existing Session
+   owners remain authoritative. A parallel framework form, document or history owner cannot
+   substitute for them. Add explicit controlled Tree/list selection so refused commands, Undo,
+   external selection and document changes cannot leave toolkit-local selection authoritative.
+   The selected GPUI field owns caret, composition and bounded local text Undo/Redo; Nara retains
+   draft value/basis, validation and document history. Do not permanently synchronize a second
+   Nara text editor behind the GPUI field. Preedit is not a committed draft/document change.
+5. **Independent extension:** a source-built external author composes ordinary controls and a
+   custom canvas/node tool through public interfaces, including cleanup and exact visible
+   observation/operation. Toolkit types stay out of shared document models. Alternate frontend
+   attachment remains required; GPUI's custom elements alone do not qualify that Host capability.
+6. **Matched costs:** current-source cold/warm idle, static Inspector beside a running Game,
+   local edit, width/theme/font changes and large logical collections. Fix numeric work/allocation,
+   CPU/P99 and retained-byte budgets before optimization; include build/iteration and framework
+   maintenance work. Framework reputation and a small example cannot establish the winning cost.
+7. **Reconstruction:** retain R11f's explicit edit/build/reconstruct and failure/recovery scope.
+   A declarative description, preserved entity or optional code-patch feature does not prove
+   compatible state transfer or installable extension reload.
+8. **Game-UI choice:** compare independent Editor/game execution, selectively shared neutral
+   mechanisms and a coherent GPUI-derived execution path for both products. Existing game UI is
+   the initial control, not a permanently frozen choice. Use real authored Scene/ECS UI, a
+   headless/public consumer, exact input/semantic/source identities and native rendering costs.
+   ECS projection may emit descriptions without one persistent GPUI entity per game entity;
+   do not reject reuse using that false requirement. Conversely, a desktop `App`/`Window` and a
+   test platform do not establish the engine's runtime lifecycle. Count the cost of maintaining
+   two text/layout/control stacks as well as extraction or adaptation work before selecting the
+   lasting shared boundary.
+
+The first [executed maintenance baseline](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-rendering-seam-and-executed-maintenance-baseline)
+is Open-GPUI `8c58cca8`, followed by its upstream continuation at `bce3a902`, both published on
+`maintenance/nara-editor-baseline`. A separately locked consumer now compiles real public
+component/canvas/docking APIs and the actual WGPU renderer with application-selected compatible
+patches. Nara Editor plus the framework also compiles in a disposable consumer. The selected
+core/component/docking library cohort passes 2,590/2,590 cases; existing import/document and format
+checks pass on Windows/Rust 1.95. These establish maintained source consumption. The five
+upstream correctness units, integrated engine View, complete editing, native input, numeric
+cost comparison and game-runtime selection remain open; no frontend/default replacement follows.
+
+An owning ADR change and default switch follow the comparison's complete evidence. Preserve
+qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
+independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
+remain open throughout this prerequisite.
+
+#### Existing Nara work evidence
 
 The first [work-observation prerequisite](../benchmarks/2026-11-04-ui-work-baseline.md) adds
 owner-local text/compiler/planner counters, description-before-reuse assertions and dependency

@@ -58,6 +58,45 @@ The Reference Game is one acceptance carrier, not the sole authority for shared 
 Named game, Editor and independent-author consumers establish the required contracts. Preserve
 existing domain, Input and render owners; do not add a universal widget tree or another GPU graph.
 
+### Maintained Open-GPUI candidate
+
+The November 5 owner clarification makes the existing Open-GPUI extraction a primary
+candidate for the Editor, including continued framework maintenance. The actual development
+workspace is `F:/SourceCodes/Rust/open-gpui`; `repo-ref/open-gpui` is its older reference snapshot.
+Nara-owned custom drawing does not require a new implementation of every UI mechanism.
+The earlier toolkit-exclusion study
+keeps its historical scope; it is not a veto on this comparison. Zed GPUI and Open-GPUI are
+different pinned implementations and need separate dependency, native and component evidence.
+
+Use the complete existing fork as the starting point for investigation, preserving its attribution
+and dependency work. Prefer coherent reuse over copying isolated framework internals whose
+contexts and lifetimes would then need reconstruction. A versioned dependency or a maintained
+source workspace can carry the chosen implementation. Packaging follows demonstrated maintenance
+and integration pressure, not a requirement to copy the repository into Nara.
+
+The current Nara-drawn executable and Runtime UI remain qualified within their recorded scope.
+An Open-GPUI candidate may replace Editor-local layout/state/input/platform work after complete
+comparison; document/workspace commands, history and game UI do not become GPUI entities. Do not
+force the candidate through the current image-backed panel attachment merely to preserve it.
+Choose native-window, GPU submission and engine-View resource custody explicitly. Public custom
+panels, alternate frontend attachment and exact visible-operation observation remain product
+requirements for either implementation. The comparison and its evidence belong to
+[R11a](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#maintained-open-gpui-comparison).
+
+Reconcile the maintained fork with a recorded current Zed framework baseline before extensive
+engine-specific UI adaptation. Its previous upstream-sync queue and custom docking work are
+inputs to that reconciliation, not a reason to overwrite either implementation. Nara's existing
+render services are a candidate backend for Open-GPUI; the fork's current Windows D3D11 backend
+is replaceable. A shared WGPU route must still prove exact resource/device and submission custody,
+clipped engine-View composition, color behavior and physical retirement.
+
+Independent product ownership does not require two permanently separate execution engines.
+Compare the current game runtime plus GPUI Editor, shared neutral mechanisms, and a GPUI-derived
+runtime for both through actual authored-game and headless/native consumers. Game ECS can project
+descriptions without duplicating every entity into GPUI state. The unresolved cost is the complete
+runtime/interface adaptation versus ongoing maintenance of two stacks; Editor adoption alone
+does not settle it. Preserve game source, command and input contracts during that comparison.
+
 ## Target topology
 
 ```mermaid
@@ -357,8 +396,10 @@ Compare reuse at the measured owner first: unchanged description, layout/measure
 text, placed raster, packet/atlas and native composition are separate artifacts. A listener,
 external model result or local edit must invalidate the consuming artifact, not merely mutate
 some retained state. Until those dependencies are represented completely, conservatively rebuild
-the affected root. Do not replace the existing owners with GPUI's App/Window/Entity model or
-assume automatic field-level dependency discovery.
+the affected root. Borrowing one mechanism does not justify replacing the existing owners with
+GPUI's App/Window/Entity model or assuming automatic field-level dependency discovery. The
+separate complete-framework comparison may select those Editor-local owners together; it still
+preserves the original document, history and game-UI owners.
 
 The [November 5 follow-up](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-phase-validity-and-measurement-retention)
 also distinguishes early cache selection from final artifact validity. A property determined

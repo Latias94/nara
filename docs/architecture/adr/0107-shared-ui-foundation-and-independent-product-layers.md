@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05 (scoped state/layout/geometry and visual component readiness)
+**Last Revised**: 2026-11-05 (scoped composition and maintained-framework comparison)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -32,6 +32,14 @@ Nara maintains independent Runtime UI and Editor UI products. Its renderer-neutr
 serves Runtime UI; Editor reuse is selective and requires concrete consumer evidence. Shared
 text, semantics, rendering or platform fundamentals do not imply a shared toolkit or require
 every Editor control to consume the Foundation. Permanent toolkit separation is legitimate.
+
+A Nara-owned, custom-drawn Editor may use a maintained UI framework. Product ownership does not
+require Nara to implement every layout, text, component or platform mechanism. The November 5
+clarification makes the user's existing Open-GPUI fork a primary comparison candidate, including
+maintaining that framework when concrete integration requires it. This reopens framework adoption;
+it does not select a new production backend or invalidate qualified Nara consumers. R11a owns the
+comparison against complete workflows and total maintenance cost. Domain-neutral Editor models,
+commands, document/history owners and independent Runtime UI remain separate from that choice.
 
 ```mermaid
 flowchart TB
@@ -198,7 +206,10 @@ Reference projects are comparative pressure, not implementation authority. Zed G
 state, notification and cached-artifact reference; Open-GPUI informs reusable component composition,
 stable keys, virtualization and logical docking. The pinned source study distinguishes retained
 entities, short-lived descriptions, cached-view replay and layout/text/raster work; it does not
-select GPUI ownership, a dependency or persistent layout storage for Nara. Dear ImGui may inform
+select GPUI ownership, a dependency or persistent layout storage for Nara. That historical
+mechanism study does not prohibit the later maintained-Open-GPUI comparison. A selected framework
+may own its Editor-local entities, windows and dispatch under the chosen Host composition; it
+must not replace document, history or game-UI authority. Dear ImGui may inform
 Editor density/style scopes, adapter and viewport failure handling; Godot may inform Theme,
 Container and custom editor-Control workflows; Bevy may inform algorithms and controlled widgets.
 The [custom-drawn Editor UI
@@ -212,9 +223,10 @@ selected Nara's own custom-drawn Editor frontend as the default destination; opt
 toolkit attachment is a separate supported design target. Concrete panel-hosting, component and
 performance successors remain unqualified until their public consumers pass. Current Dear
 support stays until qualified replacement; this does not require a shared
-game/Editor toolkit. Nara does not inherit external App/Window/Entity, Node/Object/Variant,
-global-service, toolkit-ID or public
-render-topology ownership models. The reproducible pressure matrix lives in the non-normative
+game/Editor toolkit. Nara's shared document and Runtime contracts do not inherit external
+App/Window/Entity, Node/Object/Variant, global-service, toolkit-ID or public render-topology
+ownership models. A selected Editor adapter can use its framework's local execution model.
+The reproducible pressure matrix lives in the non-normative
 [UI Foundation Design](../ui-foundation-design.md).
 
 ### Scoped visual recipes and complete property controls

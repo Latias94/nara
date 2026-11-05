@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-05 (toolkit-independent panel custody and native image attachment)
+**Last Revised**: 2026-11-05 (toolkit-independent custody and maintained-framework comparison)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -111,6 +111,16 @@ ship an ImGui extension or embed a foreign toolkit as its default. The existing 
 remains a reference and usable predecessor until the independently composed self-drawn Editor
 passes complete workflow acceptance. Neither direction
 introduces a second document/history authority or blocks independent Scene/language work.
+
+The November 5 clarification reopens direct framework adoption, prioritizing the user's existing
+Open-GPUI fork and allowing its continued maintenance. Custom-drawn describes Nara's product and
+interaction ownership; it does not require every Editor control to use Nara's current kernel.
+Compare a complete independently selected Editor composition, rather than requiring GPUI to run
+inside the Dear reference or translate its complete tree into `UiNode`. Window/input/render
+ownership may move to a selected adapter through an explicit Host composition; preserve domain
+commands, exact native View input and physical resource retirement. The comparison remains R11a
+work until integrated/native and cost evidence selects an implementation. Public attachment for
+user-authored frontends remains an independent requirement regardless of the default toolkit.
 
 ### Independent reference and self-drawn Editor implementations
 
