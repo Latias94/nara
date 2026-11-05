@@ -269,7 +269,6 @@ fn text_baseline(frame: &UiFrame, key: &UiKey) -> f32 {
 fn row_paint(frame: &UiFrame, field: &UiKey) -> Vec<UiPaintPrimitive> {
     let row = semantic(frame, field).parent().unwrap();
     let mut keys = HashSet::from([row.clone()]);
-    // Semantics arrive in parent-first order. This includes the full prepared field text.
     for node in frame.semantics() {
         if node.parent().is_some_and(|parent| keys.contains(parent)) {
             keys.insert(node.key().clone());

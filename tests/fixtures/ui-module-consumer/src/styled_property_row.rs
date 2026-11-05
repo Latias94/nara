@@ -53,8 +53,6 @@ impl StyledPropertyRow {
     ) -> Result<Self, StatusLabelError> {
         UiKeyAtom::new(scope)?;
         UiKeyAtom::new(property.id)?;
-        // Length framing keeps ("a", "bc") distinct from ("ab", "c"). Kernel key admission
-        // validates the complete scoped identities, including the caller's root, below.
         let item = format!("{}:{scope}{}", scope.len(), property.id);
         let child_key = |part: &str| -> Result<UiLocalKey, StatusLabelError> {
             let local = UiLocalKey::runtime(format!("independent.property.{part}"), &item)?;

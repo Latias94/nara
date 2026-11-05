@@ -283,8 +283,6 @@ fn retained_snapshots_keep_typography_real_faces_and_target_scale_ink_after_reco
                 if raster.width() == 0 || raster.height() == 0 {
                     continue;
                 }
-                // Pick an actual covered pixel; a line-box or advance-only clip test loses
-                // overhangs and zero-advance marks. Coordinates match renderer baseline snapping.
                 let Some(pixel) = raster.mask().iter().position(|coverage| *coverage != 0) else {
                     continue;
                 };

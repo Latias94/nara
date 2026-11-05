@@ -156,9 +156,6 @@ impl EditorGeometry {
             .collect::<Result<Vec<_>, _>>()?;
         let mut ime_area = editor.ime_cursor_area();
         if editor.raw_text().is_empty() {
-            // Parley 0.11 retains its construction size for empty-buffer IME context padding,
-            // even after FontSize changes. Keep its layout-derived vertical geometry and use
-            // the adopted size for that same three-character horizontal exclusion margin.
             ime_area.x1 = 3.0 * 0.6 * f64::from(typography.logical_size());
         }
         Ok(Self {

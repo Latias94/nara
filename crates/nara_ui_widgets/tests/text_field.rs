@@ -524,7 +524,6 @@ fn adopted_appearance_and_typography_share_paint_pointer_and_ime_coordinates() {
     field
         .edit(token, &TextEdit::End { extend: false }, &mut engine)
         .unwrap();
-    // Authored outer padding must not become a second, paint-only inset.
     let style =
         UiStyle::absolute(12.0, 10.0, 160.0, 70.0).with_padding(UiEdges::all(30.0).unwrap());
     let first = frame_with_style(&field, style, 160.0, 1);
@@ -671,7 +670,6 @@ fn adopted_appearance_and_typography_share_paint_pointer_and_ime_coordinates() {
         UiPaintPrimitive::Text { rect, layout, .. }
             if layout.typography() == larger && (rect.size().height() - window_height).abs() < 0.001
     )));
-    // The already published frame still owns its old typography and positioned glyphs.
     assert!(first.paint().iter().any(|paint| matches!(paint,
         UiPaintPrimitive::Text { layout, .. } if layout.typography() == typography
     )));

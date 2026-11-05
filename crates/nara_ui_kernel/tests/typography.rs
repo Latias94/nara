@@ -107,8 +107,6 @@ fn ordinary_and_prepared_text_share_typography_measurement_baselines_and_request
         assert_eq!(layout.lines(), original.lines());
         assert_eq!(layout.height(), original.height());
         assert!((rect.size().height() - original.height()).abs() < 0.001);
-        // Prepared windows omit glyphs without ink, including spaces. Every painted glyph
-        // still comes from the same original positioned sequence and actual selected face.
         let mut remaining = original.glyphs().iter();
         for painted in layout.glyphs() {
             remaining

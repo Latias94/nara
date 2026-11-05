@@ -81,6 +81,11 @@ publish/admit the resulting geometry through its existing Host; this local opera
 replace that presentation or input handoff. The current native Editor font policy is still fixed
 at construction; this interface alone does not qualify live Editor font switching.
 
+Pinned Parley 0.11 retains its construction-size margin for an empty buffer's IME context even
+after a FontSize change. Nara retains Parley's layout-derived vertical geometry and resolves that
+three-character horizontal exclusion margin from the adopted logical size. Reconfiguration tests
+cover the empty-buffer case rather than assuming visible text proves candidate geometry.
+
 `UiTextField::reconfigure(engine, typography)` retains that same field/focus/history while
 adopting validated size and line spacing. `set_appearance` adopts one value containing padding,
 foreground, field visual, selection and caret brushes. Drawing, Point and IME use the same adopted
