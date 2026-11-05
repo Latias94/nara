@@ -1476,9 +1476,15 @@ is Open-GPUI `8c58cca8`, followed by its upstream continuation at `bce3a902`, bo
 component/canvas/docking APIs and the actual WGPU renderer with application-selected compatible
 patches. Nara Editor plus the framework also compiles in a disposable consumer. The selected
 core/component/docking library cohort passes 2,590/2,590 cases; existing import/document and format
-checks pass on Windows/Rust 1.95. These establish maintained source consumption. The five
-upstream correctness units, integrated engine View, complete editing, native input, numeric
-cost comparison and game-runtime selection remain open; no frontend/default replacement follows.
+checks pass on Windows/Rust 1.95. These establish maintained source consumption. The subsequent
+[arena/native-frame successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-arena-and-native-frame-maintenance)
+implements separate arena allocation, nested cleanup and App-bound clear authority. Its actual
+Windows HWND and allocator Miri evidence retains the unqualified touchpad timing comparison.
+That successor is Open-GPUI `15cc4a7d85`, published and remote-verified on the same maintenance
+branch after the independent scan-scope fix `a4c5b61548`.
+The other four upstream correctness units, integrated engine View, complete editing, full native
+input, numeric cost comparison and game-runtime selection remain open; no frontend/default
+replacement follows.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;

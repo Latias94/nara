@@ -1572,3 +1572,52 @@ execution through the complete R11a consumers before selecting the lasting bound
 [og5-windows-surface]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_windows/src/directx_renderer.rs#L850-L855
 [og5-wgpu-renderer]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui_wgpu/src/wgpu_renderer.rs#L1577-L1582
 [og5-render-image]: https://github.com/Latias94/open-gpui/blob/89cb76ba1d59904d5c670f770aa8e30fe0346178/crates/gpui/src/assets.rs#L42-L88
+
+## November 5: Arena And Native Frame Maintenance
+
+The published maintenance successor is
+[`15cc4a7d85`](https://github.com/Latias94/open-gpui/commit/15cc4a7d8597fb9935b1210a1be8d8b6fc81293d),
+following the separate local-worktree scan correction
+[`a4c5b61548`](https://github.com/Latias94/open-gpui/commit/a4c5b61548171d832e555cfc7b8b93c914d58953).
+Remote `maintenance/nara-editor-baseline` was verified at that exact successor. The
+[framework verification record](https://github.com/Latias94/open-gpui/blob/15cc4a7d8597fb9935b1210a1be8d8b6fc81293d/docs/verification.md#element-arena-and-native-frame-maintenance)
+owns its reproducible commands and limits.
+
+The first correctness unit from the maintained-framework queue now implements upstream
+`ec3d887507` and `2529740084` as one owning correction. App holds the element arena in a separate
+Rc allocation. Draw scopes retain it, restore TLS on unwind and defer nested cleanup. A clear
+token keeps weak allocation identity and requires the original App. All 1,076 migrated draw/clear
+calls use that same App explicitly. The allocator additionally preserves exact allocation
+layouts, checks bounds before pointer adjustment and supports over-aligned chunk reuse; Miri
+exposed the baseline's assumption that alignment-1 chunks always fit their requested values.
+
+The fork's existing AppCell event queue already prevents nested scene draws, so this port keeps
+that owner. Its remaining Windows paint tail used to query App-owned text handlers synchronously
+while another draw could hold the App borrow. Paint now validates its native update region and
+retains the request; `CompleteNativeFrame` uses the existing post-borrow command queue for
+DirectManipulation/IME maintenance, with exact native-registration revalidation. Forced cache
+refresh also survives window throttling without overriding an already accepted initial scene's
+presentation retry. No engine document, ECS, history or GPU authority was added to GPUI.
+
+The Windows/Rust 1.95 results distinguish their scopes: 42 focused framework tests pass; the
+core/components/docking/Canvas/DevTools library cohort passes 2,984/2,984; 598 component integration
+tests pass across 18 binaries; and the Windows backend passes 162/162 with four existing
+interactive cases skipped. Workspace all-target and independently locked all-feature consumer
+compilation also pass. A new real dual-HWND test proves
+region validation, coalesced-but-retained requests, delayed IME query, absence of caught invariant
+panic, and later `WM_CHAR` input. The direct-production-file allocator fixture separately passes
+10/10 tests in each Miri borrowing model. Independent review reports no outstanding P1/P2.
+The all-feature DevTools framework adapters pass 10/10, and the test-platform Gallery convergence
+workflow passes. Core/Windows correctness Clippy, formatting, import/public-API/document/release
+checks pass. The existing UI contract gate passes its 16 registered scenarios after excluding
+local `.context` worktrees from discovery; a filesystem regression preserves those local copies
+and the focused validator cohort passes 16/16. The tooling correction stays in the existing
+discovery filter.
+
+These are bounded framework results. Miri does not compile the complete App/TLS/Window graph.
+The Windows test does not qualify full OS composition or native game View integration.
+DirectManipulation now samples after drawing, so changes can appear in a later frame; physical
+touchpad scroll, inertia, pinch and response latency remain an explicit comparison. Completing
+this correction does not establish complete Zed parity, canonical docking cutover, a measured
+Editor cost win or the lasting Editor/game-UI execution boundary. Continue with TextSystem pool
+lifetime, cached dependencies, text correctness and pending-input/blur before broad adaptation.

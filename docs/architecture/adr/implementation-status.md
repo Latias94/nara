@@ -26,9 +26,13 @@ qualify no Nara engine View and do not close the fork's in-progress canonical do
 Its first maintenance successor, Open-GPUI `8c58cca8`, supplies an independently locked public
 consumer and compatible dependency selection. The Windows/Rust 1.95 consumer and actual WGPU
 renderer compile, a disposable Nara-plus-framework graph compiles, and 2,590 selected framework
-library tests pass. `bce3a902` records pending upstream correctness work. These are source/framework
-prerequisites; complete Editor integration, native input, costs and game-runtime selection remain
-unqualified.
+library tests pass. `bce3a902` records the upstream correctness queue. Its subsequent
+[arena/native-frame unit](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-arena-and-native-frame-maintenance)
+implements separate allocation, nested cleanup, App-bound clear tokens and post-borrow Windows
+maintenance at published Open-GPUI `15cc4a7d85`, with allocator Miri and real dual-HWND evidence.
+Four other upstream units and the specific touchpad timing comparison remain open. Complete
+Editor integration, full native input, costs and game-runtime selection remain unqualified by
+these framework prerequisites.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
