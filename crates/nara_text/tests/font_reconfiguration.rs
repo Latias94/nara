@@ -3,7 +3,7 @@ use std::ops::Range;
 use nara_text::{
     FontFace, GlyphRasterError, TextDirection, TextEdit, TextEditError, TextEditOutcome,
     TextEditor, TextEngine, TextLayout, TextLayoutError, TextLimits, TextPaintSnapshot, TextRect,
-    TextSelection, TextWindowError, bundled_font_face,
+    TextSelection, TextTypography, TextWindowError, bundled_font_face,
 };
 
 const SIZE: f32 = 21.25;
@@ -159,6 +159,22 @@ fn identical_content_identities_keep_preedit_geometry_history_and_cached_paint()
 
 #[test]
 fn reconfiguration_preserves_all_32_history_entries_and_preedit_cancel_or_one_commit() {
+    for typography in [
+        TextTypography::new(SIZE).unwrap(),
+        TextTypography::new(14.0)
+            .unwrap()
+            .with_line_height(20.0)
+            .unwrap(),
+        TextTypography::new(28.0)
+            .unwrap()
+            .with_line_height(40.0)
+            .unwrap(),
+    ] {
+        check_complete_history_reconfiguration(typography);
+    }
+}
+
+fn check_complete_history_reconfiguration(typography: TextTypography) {
     let limits = TextLimits {
         max_text_bytes: 256,
         max_glyphs: 128,
@@ -170,7 +186,7 @@ fn reconfiguration_preserves_all_32_history_entries_and_preedit_cancel_or_one_co
     let mut original = engine(vec![mono.clone()], limits);
     let mut receiving = engine(vec![sans.clone(), mono.clone()], limits);
     let mut editor = TextEditor::new(&mut original, "Aé○Z", SIZE).unwrap();
-    let mut reference = TextEditor::new(&mut receiving, "Aé○Z", SIZE).unwrap();
+    let mut reference = TextEditor::with_typography(&mut receiving, "Aé○Z", typography).unwrap();
     for (draft, engine) in [
         (&mut editor, &mut original),
         (&mut reference, &mut receiving),
@@ -204,13 +220,13 @@ fn reconfiguration_preserves_all_32_history_entries_and_preedit_cancel_or_one_co
         (vec![sans.clone(), mona.clone(), mono.clone()], mona.id()),
     ] {
         let mut step = engine(fonts, limits);
-        let outcome = editor.reconfigure_fonts(&mut step).unwrap();
+        let outcome = editor.reconfigure(&mut step, typography).unwrap();
         assert!(outcome.display_changed && !outcome.text_changed && !outcome.composition_changed);
         assert_eq!(editor.layout().glyphs()[3].key().face_id(), circle_face);
         assert_eq!(editor.text(), committed);
         assert_eq!(editor.display_text(), display);
     }
-    editor.reconfigure_fonts(&mut receiving).unwrap();
+    editor.reconfigure(&mut receiving, typography).unwrap();
     assert_eq!(observe(&editor), observe(&reference));
     assert!(!old_paint.same_source(&editor.paint_snapshot()));
     assert_eq!(editor.paint_snapshot().display_text(), display);
@@ -244,12 +260,29 @@ fn reconfiguration_preserves_all_32_history_entries_and_preedit_cancel_or_one_co
 
 #[test]
 fn bidi_affinities_and_hidden_or_visible_preedit_keep_the_first_origin_across_font_changes() {
+    for typography in [
+        TextTypography::new(SIZE).unwrap(),
+        TextTypography::new(12.0)
+            .unwrap()
+            .with_line_height(18.0)
+            .unwrap(),
+        TextTypography::new(28.0)
+            .unwrap()
+            .with_line_height(40.0)
+            .unwrap(),
+    ] {
+        check_bidi_affinity_reconfiguration(typography);
+    }
+}
+
+fn check_bidi_affinity_reconfiguration(typography: TextTypography) {
     let mut carets = Vec::new();
     for downstream in [false, true] {
         let mut original = engine(vec![fira_mono()], TextLimits::default());
         let mut receiving = engine(vec![mona_sans()], TextLimits::default());
         let mut editor = TextEditor::new(&mut original, "abc אבג xyz", SIZE).unwrap();
-        let mut reference = TextEditor::new(&mut receiving, "abc אבג xyz", SIZE).unwrap();
+        let mut reference =
+            TextEditor::with_typography(&mut receiving, "abc אבג xyz", typography).unwrap();
         point_at_bidi_boundary(&mut original, &mut editor, downstream);
         point_at_bidi_boundary(&mut receiving, &mut reference, downstream);
         // Both visual sides share a byte index; comparing offsets alone would miss affinity loss.
@@ -264,7 +297,7 @@ fn bidi_affinities_and_hidden_or_visible_preedit_keep_the_first_origin_across_fo
         editor.edit(&mut original, &preedit).unwrap();
         reference.edit(&mut receiving, &preedit).unwrap();
 
-        let outcome = editor.reconfigure_fonts(&mut receiving).unwrap();
+        let outcome = editor.reconfigure(&mut receiving, typography).unwrap();
         assert!(outcome.display_changed && !outcome.text_changed && !outcome.composition_changed);
         assert_eq!(observe(&editor), observe(&reference));
         assert_eq!(editor.caret().is_none(), !downstream);
@@ -391,14 +424,18 @@ fn receiving_glyph_quota_checks_the_oldest_undo_and_farthest_redo_before_adoptio
             )
             .unwrap();
         assert_ne!(editor.text(), "ffi");
-        TextEditor::new(&mut receiving, editor.text(), SIZE).unwrap();
-        TextEditor::new(&mut receiving, editor.display_text(), SIZE).unwrap();
+        let typography = TextTypography::new(28.0)
+            .unwrap()
+            .with_line_height(40.0)
+            .unwrap();
+        TextEditor::with_typography(&mut receiving, editor.text(), typography).unwrap();
+        TextEditor::with_typography(&mut receiving, editor.display_text(), typography).unwrap();
         let before = observe(&editor);
         let paint = editor.paint_snapshot();
         let mut reference = editor.clone();
 
         assert_eq!(
-            editor.reconfigure_fonts(&mut receiving),
+            editor.reconfigure(&mut receiving, typography),
             Err(TextEditError::Layout(TextLayoutError::GlyphLimitExceeded {
                 actual: 3,
                 maximum: 2
@@ -439,16 +476,20 @@ fn layout_refusal_in_display_or_composition_origin_keeps_the_entire_original_dra
                 },
             )
             .unwrap();
+        let typography = TextTypography::new(14.0)
+            .unwrap()
+            .with_line_height(20.0)
+            .unwrap();
         if origin_overflows {
             // The current display fits; the hidden composition origin alone must refuse adoption.
-            TextEditor::new(&mut receiving, editor.display_text(), SIZE).unwrap();
+            TextEditor::with_typography(&mut receiving, editor.display_text(), typography).unwrap();
         } else {
-            TextEditor::new(&mut receiving, editor.text(), SIZE).unwrap();
+            TextEditor::with_typography(&mut receiving, editor.text(), typography).unwrap();
         }
         let before = observe(&editor);
         let paint = editor.paint_snapshot();
         assert_eq!(
-            editor.reconfigure_fonts(&mut receiving),
+            editor.reconfigure(&mut receiving, typography),
             Err(TextEditError::Layout(TextLayoutError::GlyphLimitExceeded {
                 actual: 3,
                 maximum: 2

@@ -2,7 +2,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{FontFaceId, GlyphRasterError, TextEngine, TextLayout, TextLayoutError, TextRect};
+use crate::{
+    FontFaceId, GlyphRasterError, TextEngine, TextLayout, TextLayoutError, TextRect, TextTypography,
+};
 
 /// The complete display source and its immutable editing-layout provenance.
 ///
@@ -18,22 +20,15 @@ pub struct TextPaintSnapshot {
 struct PaintSource {
     text: Arc<str>,
     font_ids: Arc<[FontFaceId]>,
-    logical_size: f32,
     layout: TextLayout,
 }
 
 impl TextPaintSnapshot {
-    pub(crate) fn new(
-        text: &str,
-        font_ids: &[FontFaceId],
-        logical_size: f32,
-        layout: TextLayout,
-    ) -> Self {
+    pub(crate) fn new(text: &str, font_ids: &[FontFaceId], layout: TextLayout) -> Self {
         Self {
             inner: Arc::new(PaintSource {
                 text: Arc::from(text),
                 font_ids: Arc::from(font_ids),
-                logical_size,
                 layout,
             }),
         }
@@ -42,6 +37,11 @@ impl TextPaintSnapshot {
     #[must_use]
     pub fn display_text(&self) -> &str {
         &self.inner.text
+    }
+
+    #[must_use]
+    pub fn typography(&self) -> TextTypography {
+        self.inner.layout.typography()
     }
 
     #[must_use]
@@ -213,6 +213,7 @@ impl TextEngine {
         let clip = clip.map(snap);
         let source = snapshot.layout();
         let mut output = TextLayout {
+            typography: source.typography,
             width: source.width,
             height: source.height,
             lines: source.lines.clone(),
@@ -239,7 +240,7 @@ impl TextEngine {
                 }
                 let mut glyph = glyph.clone();
                 glyph.key.physical_size_bits =
-                    (snapshot.inner.logical_size * target_scale).to_bits();
+                    (snapshot.typography().logical_size() * target_scale).to_bits();
                 glyph.key.subpixel_x = crate::engine::quarter_pixel(baseline[0]);
                 glyph.key.subpixel_y = crate::engine::quarter_pixel(baseline[1]);
                 let (left, top, width, height) = match footprints.get(&glyph.key()).copied() {

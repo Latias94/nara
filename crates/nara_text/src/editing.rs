@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     FontFaceId, TextEngine, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits,
-    TextPaintSnapshot,
+    TextPaintSnapshot, TextTypography,
 };
 
 const MAX_HISTORY_ENTRIES: usize = 32;
@@ -143,7 +143,7 @@ struct EditorGeometry {
 }
 
 impl EditorGeometry {
-    fn new(editor: &PlainEditor<()>) -> Result<Self, TextEditError> {
+    fn new(editor: &PlainEditor<()>, typography: TextTypography) -> Result<Self, TextEditError> {
         let selection = editor.raw_selection();
         let caret = editor
             .cursor_geometry(1.0)
@@ -154,6 +154,13 @@ impl EditorGeometry {
             .into_iter()
             .map(|(rect, _)| TextRect::from_parley(rect))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut ime_area = editor.ime_cursor_area();
+        if editor.raw_text().is_empty() {
+            // Parley 0.11 retains its construction size for empty-buffer IME context padding,
+            // even after FontSize changes. Keep its layout-derived vertical geometry and use
+            // the adopted size for that same three-character horizontal exclusion margin.
+            ime_area.x1 = 3.0 * 0.6 * f64::from(typography.logical_size());
+        }
         Ok(Self {
             selection: TextSelection {
                 anchor: selection.anchor().index(),
@@ -161,7 +168,7 @@ impl EditorGeometry {
             },
             caret,
             selection_rects,
-            ime_area: TextRect::from_parley(editor.ime_cursor_area())?,
+            ime_area: TextRect::from_parley(ime_area)?,
         })
     }
 }
@@ -181,9 +188,9 @@ enum HistoryChange {
 /// total, each admitted under the text engine's byte limit. Preedit retains the exact original
 /// editor, including its selection and cursor affinities, without recording a history entry.
 /// Commit replaces that original selection once and records at most one local edit.
-/// Resource limits and logical size are fixed at construction. Another engine can drive ordinary
-/// edits only when its complete font set and limits match exactly. [`Self::reconfigure_fonts`]
-/// explicitly adopts another ordered font set after validating every retained editing state.
+/// Resource limits are fixed at construction. Another engine can drive ordinary edits only when
+/// its complete font set and limits match exactly. [`Self::reconfigure`] explicitly adopts
+/// typography and an ordered font set after validating every retained editing state.
 ///
 /// Other editing and navigation actions first cancel active composition and then operate on the
 /// restored committed state. A caller ending a focus lifetime should send `CancelComposition`.
@@ -195,6 +202,7 @@ enum HistoryChange {
 pub struct TextEditor {
     font_ids: Vec<FontFaceId>,
     limits: TextLimits,
+    typography: TextTypography,
     editor: PlainEditor<()>,
     composition_origin: Option<PlainEditor<()>>,
     undo: VecDeque<PlainEditor<()>>,
@@ -206,18 +214,26 @@ pub struct TextEditor {
 
 impl TextEditor {
     pub fn new(engine: &mut TextEngine, text: &str, size: f32) -> Result<Self, TextEditError> {
+        Self::with_typography(engine, text, TextTypography::new(size)?)
+    }
+
+    pub fn with_typography(
+        engine: &mut TextEngine,
+        text: &str,
+        typography: TextTypography,
+    ) -> Result<Self, TextEditError> {
         validate_text(engine, text)?;
-        let request = TextLayoutRequest::new(text, size)?;
+        let request = TextLayoutRequest::from_typography(text, typography);
         engine.validate_request(&request)?;
 
-        let mut editor = PlainEditor::new(size);
+        let mut editor = PlainEditor::new(typography.logical_size());
         editor.set_text(text);
-        engine.configure_editor(&mut editor);
-        editor.set_quantize(false);
-        let (layout, geometry) = project_editor(engine, &mut editor)?;
+        engine.configure_editor_typography(&mut editor, typography);
+        let (layout, geometry) = project_editor(engine, &mut editor, typography)?;
         Ok(Self {
             font_ids: engine.font_ids().collect(),
             limits: engine.limits,
+            typography,
             editor,
             composition_origin: None,
             undo: VecDeque::with_capacity(MAX_HISTORY_ENTRIES),
@@ -228,7 +244,7 @@ impl TextEditor {
         })
     }
 
-    /// Adopts an explicitly configured font set without replacing the buffer or local history.
+    /// Adopts typography and an explicit font set without replacing the buffer or local history.
     ///
     /// The receiver must keep the original resource limits. Current display, composition origin,
     /// and all retained Undo/Redo layouts are reshaped and admitted before any state is adopted.
@@ -236,30 +252,31 @@ impl TextEditor {
     /// Refusal preserves the editor, its paint snapshot, and its previous engine association.
     ///
     /// Success keeps text, cursor affinities, composition and history without recording an edit.
-    /// A changed ordered font set invalidates paint provenance even when the glyphs are unchanged.
+    /// Changed typography or ordered fonts invalidate paint provenance even without visible ink.
     /// Reusing the same complete configuration performs no shaping and preserves that provenance.
     /// Field/Host owners separately coordinate new compilation, presentation and geometric input.
     /// Raster/target-scale admission remains a later operation and may independently refuse.
-    pub fn reconfigure_fonts(
+    pub fn reconfigure(
         &mut self,
         engine: &mut TextEngine,
+        typography: TextTypography,
     ) -> Result<TextEditOutcome, TextEditError> {
         if self.limits != engine.limits {
             return Err(TextEditError::EngineMismatch);
         }
         let font_ids = engine.font_ids().collect::<Vec<_>>();
-        if self.font_ids == font_ids {
+        if self.font_ids == font_ids && self.typography == typography {
             return Ok(TextEditOutcome::default());
         }
         let mut candidate = self.clone();
-        let (layout, geometry) = reproject_editor_fonts(engine, &mut candidate.editor)?;
+        let (layout, geometry) = reproject_editor(engine, &mut candidate.editor, typography)?;
         for retained in candidate
             .composition_origin
             .iter_mut()
             .chain(candidate.undo.iter_mut())
             .chain(candidate.redo.iter_mut())
         {
-            reproject_editor_fonts(engine, retained)?;
+            reproject_editor(engine, retained, typography)?;
         }
         let outcome = TextEditOutcome {
             display_changed: true,
@@ -271,11 +288,21 @@ impl TextEditor {
             ..TextEditOutcome::default()
         };
         candidate.font_ids = font_ids;
+        candidate.typography = typography;
         candidate.layout = layout;
         candidate.geometry = geometry;
         candidate.paint = OnceLock::new();
         *self = candidate;
         Ok(outcome)
+    }
+
+    /// Adopts the engine's ordered fonts while keeping the current typography.
+    /// Uses the same complete atomic admission as [`Self::reconfigure`].
+    pub fn reconfigure_fonts(
+        &mut self,
+        engine: &mut TextEngine,
+    ) -> Result<TextEditOutcome, TextEditError> {
+        self.reconfigure(engine, self.typography)
     }
 
     pub fn edit(
@@ -307,10 +334,10 @@ impl TextEditor {
         };
 
         validate_text(engine, candidate.raw_text())?;
-        engine.configure_editor(&mut candidate);
+        engine.configure_editor_typography(&mut candidate, self.typography);
         candidate.refresh_layout(&mut engine.font_context, &mut engine.layout_context);
         apply_action(engine, &mut candidate, action);
-        let (layout, geometry) = project_editor(engine, &mut candidate)?;
+        let (layout, geometry) = project_editor(engine, &mut candidate, self.typography)?;
 
         let outcome = TextEditOutcome {
             text_changed: !composing && self.text() != candidate.raw_text(),
@@ -360,8 +387,13 @@ impl TextEditor {
     }
 
     #[must_use]
-    pub fn logical_size(&self) -> f32 {
-        self.editor.get_font_size()
+    pub const fn logical_size(&self) -> f32 {
+        self.typography.logical_size()
+    }
+
+    #[must_use]
+    pub const fn typography(&self) -> TextTypography {
+        self.typography
     }
 
     /// The complete committed buffer, including the original selection during preedit.
@@ -393,12 +425,7 @@ impl TextEditor {
     pub fn paint_snapshot(&self) -> TextPaintSnapshot {
         self.paint
             .get_or_init(|| {
-                TextPaintSnapshot::new(
-                    self.display_text(),
-                    &self.font_ids,
-                    self.logical_size(),
-                    self.layout.clone(),
-                )
+                TextPaintSnapshot::new(self.display_text(), &self.font_ids, self.layout.clone())
             })
             .clone()
     }
@@ -686,23 +713,25 @@ fn move_to_grapheme_boundary(
     }
 }
 
-fn reproject_editor_fonts(
+fn reproject_editor(
     engine: &mut TextEngine,
     editor: &mut PlainEditor<()>,
+    typography: TextTypography,
 ) -> Result<(TextLayout, EditorGeometry), TextEditError> {
     validate_text(engine, editor.raw_text())?;
-    engine.configure_editor(editor);
-    project_editor(engine, editor)
+    engine.configure_editor_typography(editor, typography);
+    project_editor(engine, editor, typography)
 }
 
 fn project_editor(
     engine: &mut TextEngine,
     editor: &mut PlainEditor<()>,
+    typography: TextTypography,
 ) -> Result<(TextLayout, EditorGeometry), TextEditError> {
-    let request = TextLayoutRequest::new(editor.raw_text(), editor.get_font_size())?;
+    let request = TextLayoutRequest::from_typography(editor.raw_text(), typography);
     engine.validate_request(&request)?;
     let parley_layout = editor.layout(&mut engine.font_context, &mut engine.layout_context);
     let layout = engine.project_layout(parley_layout, &request)?;
-    let geometry = EditorGeometry::new(editor)?;
+    let geometry = EditorGeometry::new(editor, typography)?;
     Ok((layout, geometry))
 }

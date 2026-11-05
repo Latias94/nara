@@ -1,4 +1,6 @@
-use nara_text::{TextAlignment, TextLayoutError, TextLayoutRequest, TextPaintSnapshot};
+use nara_text::{
+    TextAlignment, TextLayoutError, TextLayoutRequest, TextPaintSnapshot, TextTypography,
+};
 use thiserror::Error;
 
 use crate::{UiImageId, UiResolvedBrush};
@@ -689,7 +691,7 @@ pub enum UiTextOverflow {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiText {
     pub(crate) content: String,
-    pub(crate) logical_size: f32,
+    pub(crate) typography: TextTypography,
     pub(crate) brush: UiBrush,
     pub(crate) alignment: UiTextAlignment,
     pub(crate) overflow: UiTextOverflow,
@@ -698,19 +700,29 @@ pub struct UiText {
 
 impl UiText {
     pub fn new(content: impl Into<String>, logical_size: f32) -> Result<Self, UiStyleError> {
-        if !logical_size.is_finite() || logical_size <= 0.0 || logical_size > 256.0 {
-            return Err(UiStyleError::InvalidTextSize {
+        let typography =
+            TextTypography::new(logical_size).map_err(|_| UiStyleError::InvalidTextSize {
                 value: logical_size,
-            });
-        }
-        Ok(Self {
+            })?;
+        Ok(Self::from_typography(content, typography))
+    }
+
+    #[must_use]
+    pub fn from_typography(content: impl Into<String>, typography: TextTypography) -> Self {
+        Self {
             content: content.into(),
-            logical_size,
+            typography,
             brush: UiBrush::Role(UiColorRole::PrimaryText),
             alignment: UiTextAlignment::Start,
             overflow: UiTextOverflow::Wrap,
             semantic_text: None,
-        })
+        }
+    }
+
+    #[must_use]
+    pub const fn with_typography(mut self, typography: TextTypography) -> Self {
+        self.typography = typography;
+        self
     }
 
     /// Replaces display content while preserving authored typography, brush, alignment and
@@ -752,7 +764,12 @@ impl UiText {
 
     #[must_use]
     pub const fn logical_size(&self) -> f32 {
-        self.logical_size
+        self.typography.logical_size()
+    }
+
+    #[must_use]
+    pub const fn typography(&self) -> TextTypography {
+        self.typography
     }
 
     #[must_use]
@@ -785,7 +802,7 @@ impl UiText {
             UiTextAlignment::Center => TextAlignment::Center,
             UiTextAlignment::End => TextAlignment::End,
         };
-        let mut request = TextLayoutRequest::new(self.content.clone(), self.logical_size)?
+        let mut request = TextLayoutRequest::from_typography(self.content.clone(), self.typography)
             .with_alignment(alignment)
             .with_scale_factor(scale_factor)?;
         if self.overflow == UiTextOverflow::Wrap
@@ -797,11 +814,6 @@ impl UiText {
     }
 
     pub(crate) fn validate(&self) -> Result<(), UiStyleError> {
-        if !self.logical_size.is_finite() || self.logical_size <= 0.0 || self.logical_size > 256.0 {
-            return Err(UiStyleError::InvalidTextSize {
-                value: self.logical_size,
-            });
-        }
         self.brush.validate()?;
         if matches!(&self.brush, UiBrush::Image { .. }) {
             return Err(UiStyleError::ImageTextUnsupported);
@@ -827,6 +839,7 @@ pub struct UiPreparedText {
     pub(crate) snapshot: TextPaintSnapshot,
     pub(crate) brush: UiBrush,
     pub(crate) semantic_text: Option<String>,
+    pub(crate) draw_offset: crate::UiPoint,
 }
 
 impl UiPreparedText {
@@ -836,7 +849,27 @@ impl UiPreparedText {
             snapshot,
             brush: UiBrush::Role(UiColorRole::PrimaryText),
             semantic_text: None,
+            draw_offset: crate::UiPoint::default(),
         }
+    }
+
+    /// Typography belongs to the adopted editing snapshot and cannot be overridden at paint time.
+    #[must_use]
+    pub fn typography(&self) -> TextTypography {
+        self.snapshot.typography()
+    }
+
+    /// Moves the snapshot's draw origin inside the unchanged content clip and measured box.
+    /// Values are authored logical offsets; admission rejects non-finite coordinates.
+    #[must_use]
+    pub fn with_draw_offset(mut self, offset: crate::UiPoint) -> Self {
+        self.draw_offset = offset;
+        self
+    }
+
+    #[must_use]
+    pub const fn draw_offset(&self) -> crate::UiPoint {
+        self.draw_offset
     }
 
     #[must_use]
@@ -852,6 +885,14 @@ impl UiPreparedText {
     }
 
     pub(crate) fn validate(&self) -> Result<(), UiStyleError> {
+        for (field, value) in [
+            ("prepared_text.draw_offset.x", self.draw_offset.x()),
+            ("prepared_text.draw_offset.y", self.draw_offset.y()),
+        ] {
+            if !value.is_finite() {
+                return Err(UiStyleError::InvalidFiniteValue { field, value });
+            }
+        }
         self.brush.validate()?;
         if matches!(&self.brush, UiBrush::Image { .. }) {
             return Err(UiStyleError::ImageTextUnsupported);

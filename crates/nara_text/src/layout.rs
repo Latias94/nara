@@ -10,6 +10,62 @@ const MAX_REQUEST_SCALE_FACTOR: f32 = 64.0;
 const MAX_REQUEST_WRAP_WIDTH: f32 = 1_000_000.0;
 pub const MAX_GRAPHEME_SCALARS: usize = 32;
 
+/// Validated logical font size and optional absolute logical line height.
+///
+/// `None` uses the actual selected fonts' ascent, descent and leading. An explicit height
+/// controls line spacing, not glyph scaling or ink bounds; smaller heights can overlap ink.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextTypography {
+    logical_size: f32,
+    line_height: Option<f32>,
+}
+
+impl TextTypography {
+    pub fn new(logical_size: f32) -> Result<Self, TextLayoutError> {
+        if !logical_size.is_finite()
+            || logical_size <= 0.0
+            || logical_size > MAX_REQUEST_LOGICAL_SIZE
+        {
+            return Err(TextLayoutError::InvalidLogicalSize {
+                value: logical_size,
+            });
+        }
+        Ok(Self {
+            logical_size,
+            line_height: None,
+        })
+    }
+
+    pub fn with_line_height(mut self, height: f32) -> Result<Self, TextLayoutError> {
+        if !height.is_finite() || height <= 0.0 {
+            return Err(TextLayoutError::InvalidLineHeight { value: height });
+        }
+        self.line_height = Some(height);
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn with_auto_line_height(mut self) -> Self {
+        self.line_height = None;
+        self
+    }
+
+    #[must_use]
+    pub const fn logical_size(self) -> f32 {
+        self.logical_size
+    }
+
+    #[must_use]
+    pub const fn line_height(self) -> Option<f32> {
+        self.line_height
+    }
+
+    pub(crate) fn parley_line_height(self) -> parley::LineHeight {
+        self.line_height
+            .map_or_else(parley::LineHeight::default, parley::LineHeight::Absolute)
+    }
+}
+
 pub(crate) fn validate_graphemes(text: &str) -> Result<(), TextLayoutError> {
     let mut boundaries = GraphemeClusterSegmenter::new().segment_str(text);
     let mut start = boundaries.next().unwrap_or(0);
@@ -60,7 +116,7 @@ enum TextWrapping {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLayoutRequest {
     text: String,
-    logical_size: f32,
+    typography: TextTypography,
     wrapping: TextWrapping,
     alignment: TextAlignment,
     scale_factor: f32,
@@ -68,21 +124,28 @@ pub struct TextLayoutRequest {
 
 impl TextLayoutRequest {
     pub fn new(text: impl Into<String>, logical_size: f32) -> Result<Self, TextLayoutError> {
-        if !logical_size.is_finite()
-            || logical_size <= 0.0
-            || logical_size > MAX_REQUEST_LOGICAL_SIZE
-        {
-            return Err(TextLayoutError::InvalidLogicalSize {
-                value: logical_size,
-            });
-        }
-        Ok(Self {
+        Ok(Self::from_typography(
+            text,
+            TextTypography::new(logical_size)?,
+        ))
+    }
+
+    /// Constructs a request from an already validated typography value.
+    #[must_use]
+    pub fn from_typography(text: impl Into<String>, typography: TextTypography) -> Self {
+        Self {
             text: text.into(),
-            logical_size,
+            typography,
             wrapping: TextWrapping::Natural,
             alignment: TextAlignment::Start,
             scale_factor: 1.0,
-        })
+        }
+    }
+
+    #[must_use]
+    pub const fn with_typography(mut self, typography: TextTypography) -> Self {
+        self.typography = typography;
+        self
     }
 
     pub fn with_wrap_width(mut self, width: f32) -> Result<Self, TextLayoutError> {
@@ -126,7 +189,12 @@ impl TextLayoutRequest {
 
     #[must_use]
     pub const fn logical_size(&self) -> f32 {
-        self.logical_size
+        self.typography.logical_size()
+    }
+
+    #[must_use]
+    pub const fn typography(&self) -> TextTypography {
+        self.typography
     }
 
     /// Returns the explicit finite wrap width, or `None` for natural or min-content layout.
@@ -292,6 +360,7 @@ impl TextLine {
 /// Immutable owned output of one bounded layout operation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLayout {
+    pub(crate) typography: TextTypography,
     pub(crate) width: f32,
     pub(crate) height: f32,
     pub(crate) lines: Vec<TextLine>,
@@ -301,6 +370,11 @@ pub struct TextLayout {
 }
 
 impl TextLayout {
+    #[must_use]
+    pub const fn typography(&self) -> TextTypography {
+        self.typography
+    }
+
     #[must_use]
     pub const fn width(&self) -> f32 {
         self.width
@@ -336,6 +410,8 @@ impl TextLayout {
 pub enum TextLayoutError {
     #[error("logical text size {value} is invalid")]
     InvalidLogicalSize { value: f32 },
+    #[error("logical text line height {value} must be finite and positive")]
+    InvalidLineHeight { value: f32 },
     #[error("text scale factor {value} is invalid")]
     InvalidScaleFactor { value: f32 },
     #[error("text wrap width {value} is invalid")]

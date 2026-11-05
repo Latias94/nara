@@ -97,6 +97,67 @@ horizontal pan. It owns no journal, receipt or domain history. CPU tests cover v
 geometry, identity and bounds; the native output consumer supplies actual routed drag/wheel
 and cancellation evidence, including dragging across changed presentations.
 
+`styled_property_row::StyledPropertyRow` is another independently authored **normal library**
+component in the base dependency closure. It combines a body label, the original retained
+`UiTextField`, a controlled Apply-style button and a caption status inside a bordered, rounded
+`UiVisual`. Its public constructor takes a root, an explicit collection scope, a `StyledProperty`
+with an item ID/label/initial value/action label/action ID, the effective `UiAppearance`, and the
+caller's `TextEngine`. Its visual keys frame scope and item ID independently; equal labels and
+reordered items do not supply identity. The caller retains each row in its original
+`UiStateStore` by parent/item key and exact binding/schema. Selection and replacement keep the
+store's existing membership rules. The component creates no document, command, journal,
+native, ECS, renderer or GPU owner and adds no dependencies.
+
+Use `set_appearance(effective_scope, engine)` between membership passes to adopt an ordinary
+appearance value. Resolve an optional local palette with `local_override.unwrap_or(parent)`;
+removing the override restores that parent value. There is no global theme mutation or override registry.
+The row uses shared `UiAppearance` body/caption text, regular control metrics and secondary button
+recipes; the field's solid brushes, padding, selection and focus outline are resolved from those
+same metrics/palette. Reconfiguration admits typography and retained local history on the same
+field before adopting the new appearance. Failed admission retains the previous editor and
+appearance. Color-only changes retain compatible editing-layout provenance. Density changes
+insets/gaps/padding; explicit user text scale changes font size and line height. Host/native scale
+remains the original compiler/presenter transform.
+
+`authored_node(outer_width, status, engine)` takes an explicit logical width. It measures label,
+action and status text through public `TextEngine` APIs first because `UiTextField::authored_node`
+requires its viewport before custom child layout runs. The private immutable layout description
+then measures all four actual child subtrees through `UiLayoutChildren` and places their exact
+outer boxes. Inline mode reserves eight body-size units plus input padding for the editable value
+and aligns actual first-line baselines. The field supplies its actual outer measurement and
+baseline through the same public child measurement, including negative line-block origins;
+the component does not reconstruct field metrics from font size or padding.
+When that inline budget does not fit, label and field each take the content width, followed by
+the measured action/status footer. The footer wraps onto separate lines when it cannot reserve
+four caption-size units after the button. Labels/status wrap; the button clips its visual text
+within its padded box and keeps its full semantic action/name. Widths too small for control
+padding plus one content unit refuse explicitly. Changed captured geometry gets a new layout
+description; compatible compositions share the previous one.
+
+The parent must allocate the requested outer width, use the same ordered fonts for text and
+compilation, and recompose after width or typography changes. The field clips its display at the
+resolved viewport and keeps the entire admitted UTF-8 value in its buffer and semantic value.
+Callers obtain point/IME viewport width from the field's actual presented rectangle, reduce focus
+and edit through `field_mut()`, and reduce already admitted button batches through `reduce_button`.
+`button()` exposes the original key/action. The generic store's direct-field focus/text helpers
+do not discover this nested field; callers use its original field API explicitly. Input admission,
+focus retirement, application of intents and domain history stay with their original owners.
+
+The added `tests/styled_property_row.rs` CPU workflows cover two equal-label keyed rows with
+reorder; draft/preedit/selection/focus and Undo/Redo across palette, density and text-scale changes;
+palette override removal with exact sibling paint preservation; independent normal/compact,
+user-text-scale and native-scale geometry; actual wide-row baselines and narrow overflow; a full
+4,096-byte committed value containing CJK/combining text; updated Point/IME padding; and refusal
+without replacing a retained editor. A real admitted Noto CJK fallback additionally checks exact
+font provenance and baseline alignment through both densities, 1×/2× text scale, full 4,096-byte
+history and active preedit. Existing independent consumer tests and assertions remain unchanged.
+The styled consumer's seven CPU tests pass in the current integration; native presentation is
+separately qualified. The finite default font policy still reports missing glyphs for other text:
+complete CJK semantics alone does not prove complete CJK glyph coverage.
+There is no text-measurement cache in this component, no virtualized membership, native input or
+accessibility proof, measured performance improvement, or complete styled-library qualification.
+The main integration's additional native evidence has its own scope.
+
 Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
 
 ```text

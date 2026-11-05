@@ -12,6 +12,7 @@ use thiserror::Error;
 use crate::{
     FontFace, FontFaceId, GlyphRasterKey, PositionedGlyph, TextAlignment, TextDiagnostic,
     TextDirection, TextLayout, TextLayoutError, TextLayoutRequest, TextLimits, TextLine, TextRun,
+    TextTypography,
     face::{MAX_FONT_FACES, MAX_TOTAL_FONT_BYTES},
 };
 
@@ -206,6 +207,9 @@ impl TextEngine {
                 .ranged_builder(&mut self.font_context, request.text(), 1.0, false);
         builder.push_default(StyleProperty::FontFamily(self.font_families.clone()));
         builder.push_default(StyleProperty::FontSize(request.logical_size()));
+        builder.push_default(StyleProperty::LineHeight(
+            request.typography().parley_line_height(),
+        ));
         builder.push_default(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
 
         let mut parley_layout = builder.build(request.text());
@@ -243,6 +247,17 @@ impl TextEngine {
         let styles = editor.edit_styles();
         styles.insert(StyleProperty::FontFamily(self.font_families.clone()));
         styles.insert(StyleProperty::TextWrapMode(TextWrapMode::Wrap));
+    }
+
+    pub(crate) fn configure_editor_typography(
+        &self,
+        editor: &mut PlainEditor<()>,
+        typography: TextTypography,
+    ) {
+        self.configure_editor(editor);
+        let styles = editor.edit_styles();
+        styles.insert(StyleProperty::FontSize(typography.logical_size()));
+        styles.insert(StyleProperty::LineHeight(typography.parley_line_height()));
     }
 
     pub(crate) fn project_layout(
@@ -379,6 +394,7 @@ impl TextEngine {
         }
 
         Ok(TextLayout {
+            typography: request.typography(),
             width: layout.width(),
             height: layout.height(),
             lines,

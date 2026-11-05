@@ -291,13 +291,7 @@ pub(super) fn lower_packet(
                 layout,
                 ..
             } => {
-                let Some(text_rect) = environment
-                    .physical_rect(*content_rect)
-                    .and_then(packet_rect)
-                else {
-                    continue;
-                };
-                let Some(clip) = packet_clip(*clip_rect, environment, text_rect) else {
+                let Some(clip) = packet_surface_clip(*clip_rect, environment) else {
                     continue;
                 };
                 append_glyphs(
@@ -307,7 +301,7 @@ pub(super) fn lower_packet(
                     layout,
                     GlyphAppendContext {
                         content_rect: *content_rect,
-                        clip,
+                        clip: Some(clip),
                         color: *color,
                         environment,
                         atlas,
@@ -653,6 +647,12 @@ fn packet_clip(
     environment: UiEnvironment,
     primitive_rect: UiPacketRect,
 ) -> Option<Option<UiPacketRect>> {
+    packet_surface_clip(clip, environment)?
+        .intersect(primitive_rect)
+        .map(Some)
+}
+
+fn packet_surface_clip(clip: Option<UiRect>, environment: UiEnvironment) -> Option<UiPacketRect> {
     let authored_content = UiRect::new(UiPoint::default(), environment.logical_size())?;
     let physical_content = environment
         .physical_rect(authored_content)
@@ -661,10 +661,7 @@ fn packet_clip(
         Some(clip) => environment.physical_rect(clip).and_then(packet_rect)?,
         None => physical_content,
     };
-    physical_content
-        .intersect(physical_clip)
-        .and_then(|clip| clip.intersect(primitive_rect))
-        .map(Some)
+    physical_content.intersect(physical_clip)
 }
 
 fn primitive_clip(

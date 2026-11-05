@@ -580,6 +580,23 @@ font provenance and shaped-line metrics. Forced palettes, contrast preference an
 motion are distinct policies; platform integration and unsupported font formats remain
 explicit qualification gaps.
 
+The [styled workspace unit](../plans/2026-11-05-styled-source-workspace-plan.md) now supplies the
+shared CPU prerequisite: validated typography with atomic full-history adoption; a field-owned
+minimum box/actual baseline shared by painting, Point and IME; a prepared-text draw offset
+independent of clipping through packet lowering; immutable scoped `UiAppearance` recipes; measured
+control groups and one-child anchored popup fitting. Body/caption/title, Normal/Compact density
+and user text scale resolve to logical units before the original Host transform. Fira Sans Regular
+is an explicit admitted face rather than synthetic conversion of the original bundled Bold.
+The independent styled row consumes these interfaces without reconstructing field baselines.
+
+The original compiler additionally retains at most `min(max_nodes, 256)` successful plain-text
+requests, bounded by its source-byte and glyph limits. Complete request identity and immutable
+compiler font policy permit compatible color-only shaping reuse; complete candidate and per-draw
+admission remain in force. Cache loss reconstructs equivalent output. These bounded content
+counts do not measure heap allocation, native frame-tail budgets or incremental layout/paint.
+Shared/independent CPU evidence and the still-running Editor/native/visual integration are
+recorded separately in the unit; no complete-library or platform-preference claim follows.
+
 ### Interface alternatives
 
 | Alternative | Benefit | Cost and disposition |

@@ -220,7 +220,10 @@ pub(super) fn compile_root(
                             &text.snapshot,
                             clip,
                             scale_factor,
-                            [content_rect.origin().x(), content_rect.origin().y()],
+                            [
+                                content_rect.origin().x() + text.draw_offset.x(),
+                                content_rect.origin().y() + text.draw_offset.y(),
+                            ],
                             [physical_origin.x(), physical_origin.y()],
                         )
                         .map_err(|error| text_compile_error(TextCompileError::Window(error)))?,
@@ -279,6 +282,21 @@ pub(super) fn compile_root(
         }
         if let (Some(text), Some((content_rect, text_clip))) = (&node.node.text, text_geometry) {
             if !content_rect.size().is_empty() && !matches!(text_clip, ClipState::Empty) {
+                let draw_rect = match text {
+                    UiNodeText::Plain(_) => content_rect,
+                    UiNodeText::Prepared(text) => UiRect::from_origin_size(
+                        content_rect.origin().x() + text.draw_offset.x(),
+                        content_rect.origin().y() + text.draw_offset.y(),
+                        content_rect.size().width(),
+                        content_rect.size().height(),
+                    )
+                    .ok_or_else(|| {
+                        RootCompileError::Local(UiRootDiagnostic::LayoutRejected {
+                            message: "Prepared text draw origin exceeds finite logical geometry"
+                                .into(),
+                        })
+                    })?,
+                };
                 let text_layout = match text {
                     UiNodeText::Plain(text) => {
                         let wrap_width = (text.overflow == UiTextOverflow::Wrap)
@@ -310,8 +328,8 @@ pub(super) fn compile_root(
                     root_order(node, 2),
                     UiPaintPrimitive::Text {
                         key: node.key.clone(),
-                        rect: content_rect,
-                        physical_rect: environment.snap(content_rect),
+                        rect: draw_rect,
+                        physical_rect: environment.snap(draw_rect),
                         clip_rect: text_clip.rect(),
                         color: match text.brush().resolve(theme) {
                             crate::UiResolvedBrush::Solid(color) => color,

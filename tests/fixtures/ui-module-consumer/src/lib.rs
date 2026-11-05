@@ -13,6 +13,7 @@ pub mod keyed_editors;
 pub mod measured_column;
 #[cfg(feature = "presentation")]
 pub mod presentation;
+pub mod styled_property_row;
 
 pub type StatusLabelError = Box<dyn std::error::Error + Send + Sync + 'static>;
 

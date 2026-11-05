@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-04
+**Last Revised**: 2026-11-05
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0095: Plugin-Owned Specialized
 Domains and Project Configuration;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
@@ -53,7 +53,11 @@ resource limits. An explicit local font reconfiguration may atomically reshape a
 of the current display, composition origin and all bounded Undo/Redo states before adopting another
 ordered font set. It preserves buffers, compatible selection/affinities, composition and history
 without recording an edit; any refused state keeps the previous editor and font association.
-Logical size and limits remain fixed. Already published paint snapshots retain their original
+An explicit local typography reconfiguration uses the same atomic admission to change logical
+font size and automatic or absolute logical line height. Absolute line height controls line
+spacing, independently of actual font ascent/descent and painted ink; small line heights may
+overlap ink. Field clipping, Point, caret/selection and IME placement share the complete resolved
+text geometry. Original limits remain fixed. Already published paint snapshots retain their original
 font provenance; a changed font set requires a new snapshot even when no visible glyph changes.
 Field identity/focus, matching compiler/planner configuration and presentation/input handoff
 remain with their original callers. Raster and target-scale admission remain separate and can

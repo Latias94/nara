@@ -57,14 +57,18 @@ shaper, including when insertion or deletion joins neighboring text. Every opera
 selection, layout, composition and history together after complete validation. A rejected
 operation preserves the previous observations and history. Another engine may drive an existing
 editor for ordinary actions only with the currently configured ordered font identities and
-original complete limits; the logical size stays fixed for that editor.
+original complete limits and adopted typography.
 
-`TextEditor::reconfigure_fonts(&mut replacement_engine)` explicitly changes the ordered font
-selection. The replacement engine must keep the original limits. Reconfiguration reshapes and
+`TextEditor::reconfigure(&mut replacement_engine, typography)` explicitly changes the ordered
+font selection and validated `TextTypography`. Logical size and optional absolute logical line
+height are distinct; an automatic height uses the actual selected fonts' metrics. An absolute
+height controls line spacing and may be smaller than the glyph ink. It does not scale glyphs or
+define their clip. `reconfigure_fonts` retains the adopted typography. The replacement engine
+must keep the original limits. Reconfiguration reshapes and
 admits layouts of the current display, composition origin and every retained Undo/Redo state
 before adopting anything. Refusal preserves all editor observations, history, cached paint and
 the previous font association. This complete-state operation can reshape up to 34 bounded
-buffers. Reusing the same font set/order and limits is a no-op and preserves paint identity.
+buffers. Reusing the same font set/order, typography and limits is a no-op and preserves paint identity.
 Glyph raster/target-scale admission remains separate and may refuse later painting; successful
 layout reconfiguration alone grants no draw or presentation authority.
 
@@ -76,6 +80,12 @@ focus token and enabled state. The caller must coordinate matching compiler/plan
 publish/admit the resulting geometry through its existing Host; this local operation does not
 replace that presentation or input handoff. The current native Editor font policy is still fixed
 at construction; this interface alone does not qualify live Editor font switching.
+
+`UiTextField::reconfigure(engine, typography)` retains that same field/focus/history while
+adopting validated size and line spacing. `set_appearance` adopts one value containing padding,
+foreground, field visual, selection and caret brushes. Drawing, Point and IME use the same adopted
+padding. Resolve the new typography before publishing its dependent geometry; an older frame
+does not authorize Point with a successor field's layout.
 
 `Preedit` changes `display_text()` and its layout while `text()` retains the original committed
 buffer. Its optional cursor endpoints are UTF-8 byte offsets relative to the proposed preedit.
@@ -138,11 +148,55 @@ is bounded raster/scan work, not a claim of constant-time scrolling or cached ra
 Snapshot publication retains one bounded copy of the editing layout until its display changes.
 Field selection, pointer mapping and IME continue to use the complete editing layout.
 
+`UiPreparedText::with_draw_offset` shifts that immutable layout's drawing origin in authored
+logical units while retaining the content clip and intrinsic measurement. Window preparation
+and final raster placement use the same shifted origin. This lets a field include negative line
+block origins under short line spacing without shifting its clip or reshaping a substring.
+Non-finite offsets are refused at normal style admission.
+
 `UiTextField::authored_node` draws its text, selection and caret within one content clip. Pass the
 caller's resolved logical viewport width to drawing, pointer mapping and `ime_area()` consistently.
 The candidate area is local logical geometry; the Host translates it to the actual native window
 and scale. Semantic values contain committed text, including an empty string, while preedit stays
 out of both the field value and its internal text semantics.
+`layout_measurement(width)` exposes the same geometry's minimum outer size and actual first
+baseline without shaping again. The authored field's custom layout publishes that baseline
+through ordinary `UiLayoutChildren::measure`; a parent must not derive it from font size or
+padding. Automatic height uses the actual font line blocks plus padding; pixel height retains
+at least that minimum. Exact parent/percentage allocations must accommodate it or explicitly
+own their clipping policy.
+
+## Scoped appearance and measured controls
+
+`nara_ui_widgets::UiAppearance` is a caller-owned effective value containing a semantic palette,
+`UiDensity` and independent user text scale. Pass the nearest intended scope explicitly and
+replace a local override with its parent's value to reset it. Resolving a recipe performs no
+domain action, listener registration or document mutation. Other libraries can use their own
+roles and drawing while consuming the same low-level interfaces.
+
+Use `text(role)`, `control_metrics(size)`, `button(...)` and `field(...)` to share typography,
+padding and state visuals. Body, caption and title use absolute logical size/line-height pairs;
+the original Host applies device scale once. Compact density changes spacing independently of
+text scale. Focus, selection and validation retain separate cues with unchanged hit geometry.
+`UiControlGrid` measures and baseline-aligns children, then wraps them according to available
+width. `UiAnchoredPopup` measures a single child and fits it above/below the captured logical
+anchor; its caller supplies oversized-content scrolling, dismissal, modal scope and focus
+restoration. Neither utility owns a window, input route or domain action.
+
+The compiler retains at most `min(max_nodes, 256)` successful plain-text layouts within its
+original immutable font policy, additionally bounded by its source-byte and glyph limits.
+Complete requests include text, typography, wrap mode/width, alignment and raster scale; brush
+colors do not change shaping. A warm compatible color change can reuse layout. Every candidate
+still charges full source/layout-glyph admission and every draw charges output independently.
+Eviction or a new compiler rebuilds equivalent output. These bounds describe retained content,
+not measured heap allocation or a native frame-time result.
+
+The [independent styled property row](../../tests/fixtures/ui-module-consumer/src/styled_property_row.rs)
+combines retained text with a label, action and status through these public interfaces. The
+[styled workspace plan](../plans/2026-11-05-styled-source-workspace-plan.md) records first-party
+integration and actual qualification separately from the complete future component library.
+
+## Field input lifetimes
 
 A field incarnation has a unique live key even when its semantic property is equal to an earlier
 field. After admitting focus, the Host obtains a `UiTextInputToken` through `focus()` or by reducing

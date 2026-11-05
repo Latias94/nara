@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use nara_text::bundled_font_face;
+use nara_text::{TextTypography, bundled_font_face};
 
 use crate::{
     UiAuthoringSnapshotBuilder, UiBrush, UiColorRole, UiCompiler, UiDimension, UiEdges,
@@ -69,6 +69,12 @@ fn presentation_invalidation_requires_original_authority_and_preserves_the_insta
 fn dynamic_text_content_preserves_authored_presentation() {
     let authored = UiText::new("Score", 16.0)
         .unwrap()
+        .with_typography(
+            TextTypography::new(14.0)
+                .unwrap()
+                .with_line_height(20.0)
+                .unwrap(),
+        )
         .with_brush(UiBrush::Role(UiColorRole::Warning))
         .with_alignment(UiTextAlignment::Center)
         .with_overflow(UiTextOverflow::Clip)
@@ -78,6 +84,7 @@ fn dynamic_text_content_preserves_authored_presentation() {
 
     assert_eq!(projected.content(), "Score 000300");
     assert_eq!(projected.logical_size(), authored.logical_size());
+    assert_eq!(projected.typography(), authored.typography());
     assert_eq!(projected.brush(), authored.brush());
     assert_eq!(projected.alignment(), authored.alignment());
     assert_eq!(projected.overflow(), authored.overflow());

@@ -46,7 +46,7 @@ fn rejected_root(name: &str) -> UiRoot {
 }
 
 #[test]
-fn identical_compiles_repeat_layout_and_preserve_frame_contents() {
+fn identical_compiles_repeat_layout_and_reuse_text_while_preserving_frame_contents() {
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
         .with_root(text_root("label", "Unchanged"))
         .build()
@@ -92,7 +92,10 @@ fn identical_compiles_repeat_layout_and_preserve_frame_contents() {
     );
     assert_eq!(second_stats.layout_passes, first_stats.layout_passes + 1);
     assert!(second_stats.measurement_callbacks > first_stats.measurement_callbacks);
-    assert!(second_stats.text.layout_attempts > first_stats.text.layout_attempts);
+    assert_eq!(
+        second_stats.text.layout_attempts,
+        first_stats.text.layout_attempts
+    );
     assert_eq!(second_stats.retained_roots, 0);
     assert_eq!(second.revision().get(), first.revision().get() + 1);
     assert_eq!(second.source_revision(), first.source_revision());
@@ -142,7 +145,7 @@ fn root_local_retention_is_failure_fallback_without_interactive_reuse() {
     assert_eq!(after.layout_passes, before.layout_passes + 1);
     assert_eq!(after.layout_nodes_created, before.layout_nodes_created + 2);
     assert!(after.measurement_callbacks > before.measurement_callbacks);
-    assert!(after.text.layout_attempts > before.text.layout_attempts);
+    assert_eq!(after.text.layout_attempts, before.text.layout_attempts);
     assert_eq!(
         retained.root_outcomes()[0].status(),
         UiRootStatus::RetainedVisual

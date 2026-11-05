@@ -14,7 +14,7 @@ use self::{
     cache::{RootCache, RootVisual},
     order::{FrameOrder, FrameOrdered},
     root::{CompiledRoot, RootBudget, RootCompileError},
-    text::TextCompileSession,
+    text::{TextCompileSession, TextLayoutCache},
 };
 
 mod cache;
@@ -81,6 +81,7 @@ impl LayoutWorkBudget {
 /// Stateful owner of text measurement, bounded last-good roots, and frame revisions.
 pub struct UiCompiler {
     text_engine: TextEngine,
+    text_layout_cache: TextLayoutCache,
     work_stats: UiCompileWorkStats,
     limits: UiLimits,
     max_text_work_bytes: usize,
@@ -117,6 +118,11 @@ impl UiCompiler {
         let max_shaped_glyphs = text_limits.max_glyphs;
         Ok(Self {
             text_engine: TextEngine::with_fonts(font_faces, text_limits)?,
+            text_layout_cache: TextLayoutCache::new(
+                limits.max_nodes,
+                max_text_work_bytes,
+                max_shaped_glyphs,
+            ),
             work_stats: UiCompileWorkStats::default(),
             limits,
             max_text_work_bytes,
@@ -144,6 +150,28 @@ impl UiCompiler {
         snapshot: &UiAuthoringSnapshot,
         environment: UiEnvironment,
         theme: UiTheme,
+    ) -> Result<Arc<UiFrame>, UiCompileError> {
+        let cache = std::mem::replace(
+            &mut self.text_layout_cache,
+            TextLayoutCache::new(
+                self.limits.max_nodes,
+                self.max_text_work_bytes,
+                self.max_shaped_glyphs,
+            ),
+        );
+        let mut text_session =
+            TextCompileSession::new(cache, self.max_text_work_bytes, self.max_shaped_glyphs);
+        let result = self.compile_candidate(snapshot, environment, theme, &mut text_session);
+        self.text_layout_cache = text_session.into_cache();
+        result
+    }
+
+    fn compile_candidate(
+        &mut self,
+        snapshot: &UiAuthoringSnapshot,
+        environment: UiEnvironment,
+        theme: UiTheme,
+        text_session: &mut TextCompileSession,
     ) -> Result<Arc<UiFrame>, UiCompileError> {
         self.work_stats.compile_attempts = self.work_stats.compile_attempts.saturating_add(1);
         if environment.theme_revision() != theme.revision() {
@@ -174,8 +202,6 @@ impl UiCompiler {
         let mut shaped_glyphs = 0usize;
         let mut paint_count = 0usize;
         let mut mesh_counts = MeshCounts::default();
-        let mut text_session =
-            TextCompileSession::new(self.max_text_work_bytes, self.max_shaped_glyphs);
         let mut layout_work = LayoutWorkBudget {
             used: 0,
             maximum: self.limits.max_layout_work,
@@ -192,7 +218,7 @@ impl UiCompiler {
                     environment,
                     theme,
                     self.limits,
-                    &mut text_session,
+                    text_session,
                     &mut layout_work,
                     RootBudget::new(
                         shaped_glyphs,

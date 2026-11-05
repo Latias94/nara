@@ -131,6 +131,15 @@ pub fn bundled_font_face() -> Result<FontFace, FontFaceError> {
         .clone()
 }
 
+/// A regular-weight bundled face for dense interfaces without synthetic weight conversion.
+pub fn bundled_regular_font_face() -> Result<FontFace, FontFaceError> {
+    static FACE: OnceLock<Result<FontFace, FontFaceError>> = OnceLock::new();
+    FACE.get_or_init(|| {
+        FontFace::from_bytes(include_bytes!("../assets/FiraSans-Regular.ttf").to_vec(), 0)
+    })
+    .clone()
+}
+
 fn preferred_family_name(face: &Face<'_>) -> Option<String> {
     [name_id::TYPOGRAPHIC_FAMILY, name_id::FAMILY]
         .into_iter()
