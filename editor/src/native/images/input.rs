@@ -154,7 +154,7 @@ impl<S> EditorPanelImageHost<S> {
         Ok(self.deliver_input(application, semantic, vec![delivery], true, callback))
     }
 
-    fn deliver_input<P: EditorPanel>(
+    pub(super) fn deliver_input<P: EditorPanel>(
         &mut self,
         application: &EditorApplication,
         semantic: &mut EditorPanelHost<P>,
@@ -493,11 +493,11 @@ impl<S> EditorPanelImageHost<S> {
         geometry::target_position(image.mapping, logical, extrapolate)
     }
 
-    fn modal(&self) -> Option<&EditorPanelImage<S>> {
+    pub(super) fn modal(&self) -> Option<&EditorPanelImage<S>> {
         self.accepted.iter().rev().find(|image| image.window_modal)
     }
 
-    fn pointer_target(&self) -> Option<EditorPanelImage<S>> {
+    pub(super) fn pointer_target(&self) -> Option<EditorPanelImage<S>> {
         if let Some(capture) = &self.capture {
             return Some(capture.image.clone());
         }
@@ -505,6 +505,13 @@ impl<S> EditorPanelImageHost<S> {
             return None;
         }
         let logical = self.geometry.logical_position(self.pointer?)?;
+        self.pointer_target_at(logical)
+    }
+
+    pub(super) fn pointer_target_at(&self, logical: [f32; 2]) -> Option<EditorPanelImage<S>> {
+        if let Some(capture) = &self.capture {
+            return Some(capture.image.clone());
+        }
         if let Some(modal) = self.modal() {
             return geometry::hit(modal, logical).then(|| modal.clone());
         }
@@ -525,7 +532,7 @@ impl<S> EditorPanelImageHost<S> {
             .cloned()
     }
 
-    fn claim_keyboard(&mut self, image: Option<&EditorPanelImage<S>>) {
+    pub(super) fn claim_keyboard(&mut self, image: Option<&EditorPanelImage<S>>) {
         let next = image.filter(|image| self.has(image, EditorPanelCapability::Keyboard));
         if self
             .keyboard
@@ -609,7 +616,7 @@ impl<S> EditorPanelImageHost<S> {
         (vec![self.delivery(image, kind, None)], true)
     }
 
-    fn delivery(
+    pub(super) fn delivery(
         &self,
         image: EditorPanelImage<S>,
         kind: EditorPanelInputKind,
@@ -661,13 +668,17 @@ impl<S> EditorPanelImageHost<S> {
         }
     }
 
-    fn is_accepted(&self, image: &EditorPanelImage<S>) -> bool {
+    pub(super) fn is_accepted(&self, image: &EditorPanelImage<S>) -> bool {
         self.accepted.iter().any(|accepted| {
             same_endpoint(accepted, image) && Arc::ptr_eq(&accepted.snapshot, &image.snapshot)
         })
     }
 
-    fn has(&self, image: &EditorPanelImage<S>, capability: EditorPanelCapability) -> bool {
+    pub(super) fn has(
+        &self,
+        image: &EditorPanelImage<S>,
+        capability: EditorPanelCapability,
+    ) -> bool {
         self.capabilities(&image.token)
             .is_some_and(|caps| caps.has(capability))
     }
@@ -692,6 +703,6 @@ impl<S> EditorPanelImageHost<S> {
     }
 }
 
-fn same_endpoint<S>(left: &EditorPanelImage<S>, right: &EditorPanelImage<S>) -> bool {
+pub(super) fn same_endpoint<S>(left: &EditorPanelImage<S>, right: &EditorPanelImage<S>) -> bool {
     left.token == right.token && left.display == right.display
 }

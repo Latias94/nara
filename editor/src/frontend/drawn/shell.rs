@@ -447,6 +447,29 @@ impl ShellControls {
             .ok_or_else(|| "The workspace shell frame has retired".into())
     }
 
+    pub(in crate::frontend::drawn) fn owns_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        self.retained(frame).is_ok_and(|compiled| {
+            compiled.generation == self.generation
+                && compiled.offset == self.document_offset
+                && compiled.source_offset == self.source_offset
+                && self.basis.as_ref() == Some(&compiled.basis)
+                && compiled.buttons.get(key).is_some_and(|binding| {
+                    binding.button.action() == action
+                        && match binding.control {
+                            Control::OpenSource(index) => {
+                                binding.source == compiled.basis.source(index)
+                            }
+                            _ => true,
+                        }
+                })
+        })
+    }
+
     pub(in crate::frontend::drawn) fn cancel_input(&mut self) -> Result<(), String> {
         self.generation = self
             .generation

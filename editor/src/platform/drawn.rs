@@ -36,11 +36,12 @@ use crate::{
 use super::EditorRunError;
 
 mod graphics;
+mod operations;
 mod recovery;
 #[cfg(all(test, target_os = "windows", not(feature = "imgui-reference")))]
 mod tests;
 
-const CAPABILITIES: [EditorPanelCapability; 8] = [
+const CAPABILITIES: [EditorPanelCapability; 9] = [
     EditorPanelCapability::Pointer,
     EditorPanelCapability::Wheel,
     EditorPanelCapability::Keyboard,
@@ -49,6 +50,7 @@ const CAPABILITIES: [EditorPanelCapability; 8] = [
     EditorPanelCapability::Cursor,
     EditorPanelCapability::Refresh,
     EditorPanelCapability::WindowModal,
+    EditorPanelCapability::ObservedOperations,
 ];
 const SHELL_KIND: &str = "nara.drawn.workspace";
 const SHELL_HEIGHT: f32 = 320.0;
@@ -199,41 +201,54 @@ impl DrawnNative {
     }
 
     fn dispatch(&mut self, event: Option<EditorPanelPlatformEvent>) -> Result<bool, String> {
+        self.dispatch_input(event, None)
+    }
+
+    fn dispatch_input(
+        &mut self,
+        event: Option<EditorPanelPlatformEvent>,
+        observation: Option<&crate::native::EditorPanelImageObservation<UiFrame>>,
+    ) -> Result<bool, String> {
         let ui = self.application.current_ui_authoring_frame();
         let surfaces = &mut self.surfaces;
         let graphics = self.graphics.as_ref();
         let mut error = None;
-        let outcome = self
-            .native
-            .dispatch(
+        let mut deliver =
+            |panel: &mut DrawnPanel,
+             context: &mut crate::EditorPanelContext<'_, '_>,
+             event: &crate::native::EditorPanelInput<UiFrame>,
+             services: &mut crate::native::EditorPanelServices<'_>| {
+                if error.is_some() {
+                    return;
+                }
+                let instance = event.endpoint.instance();
+                let Some(surface) = surfaces.get_mut(&instance) else {
+                    return;
+                };
+                let Some(journal) = graphics.and_then(|graphics| graphics.journal(instance)) else {
+                    return;
+                };
+                if let Err(failure) =
+                    surface
+                        .input
+                        .deliver(panel, context, event, services, journal, ui.as_deref())
+                {
+                    error = Some(failure);
+                }
+            };
+        let outcome = match observation {
+            Some(observation) => self.native.dispatch_observed(
                 &self.application,
                 &mut self.panels,
-                event,
-                |panel, context, event, services| {
-                    if error.is_some() {
-                        return;
-                    }
-                    let instance = event.endpoint.instance();
-                    let Some(surface) = surfaces.get_mut(&instance) else {
-                        return;
-                    };
-                    let Some(journal) = graphics.and_then(|graphics| graphics.journal(instance))
-                    else {
-                        return;
-                    };
-                    if let Err(failure) = surface.input.deliver(
-                        panel,
-                        context,
-                        event,
-                        services,
-                        journal,
-                        ui.as_deref(),
-                    ) {
-                        error = Some(failure);
-                    }
-                },
-            )
-            .map_err(|error| error.to_string())?;
+                observation,
+                event.ok_or("An observed input requires an explicit event")?,
+                &mut deliver,
+            ),
+            None => self
+                .native
+                .dispatch(&self.application, &mut self.panels, event, &mut deliver),
+        }
+        .map_err(|error| error.to_string())?;
         if let Some(error) = error {
             return Err(error);
         }

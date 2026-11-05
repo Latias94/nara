@@ -382,6 +382,20 @@ impl OwnedInspector {
         Ok(displayed)
     }
 
+    pub(super) fn owns_component_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        self.live_component(frame, key).is_ok_and(|displayed| {
+            displayed
+                .buttons
+                .get(key)
+                .is_some_and(|(_, button)| button.action() == action)
+        })
+    }
+
     pub(super) fn dispatch_components(
         &mut self,
         frame: &Arc<UiFrame>,

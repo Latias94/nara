@@ -416,6 +416,23 @@ test a button by bypassing its controller and submitting a document mutation dir
 observations carry stable identity, role/value/actions, state and mapped bounds rather than labels
 or coordinates alone. Absent semantic support is an explicit capability outcome.
 
+Image-backed native observation is issued by the original image Host only after complete-window
+presentation admission. It captures the original instance, output occurrence, immutable provider
+snapshot, mapping/clip and native geometry; keyboard/text input additionally checks the observed
+focus lifetime. An unchanged panel may remain observable while another panel presents. Pending
+or replaced output cannot authorize input. Continuous accepted-image identity is nominal:
+restoring earlier content/mapping after withdrawal cannot revive an old observation. Read-only
+semantic inspection must not prepare actions
+or supersede a pending submission. Original submission IDs remain observable without transferring
+result ownership from their existing callback.
+
+Physical observed input returns through the existing native router, including capture, modal
+outside-click dismissal and IME retirement acknowledgment. A distinct cooperative capability
+admits typed provider operations to that same callback. The provider validates its original
+control identity and owned action before reducing it; the Host defines no shared widget payload
+or string command bus. Native admission, provider acceptance and domain completion are separate
+outcomes. Native accessibility remains a separately qualified capability.
+
 Tests and future agent/debug clients need request-specific completion and a subsequent matching
 observation; dispatch acceptance is not Save, compilation, presentation or physical-close completion.
 A live preview may never become globally idle, so waits target a named outcome/revision and have

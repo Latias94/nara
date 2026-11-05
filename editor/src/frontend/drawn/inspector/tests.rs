@@ -424,6 +424,51 @@ fn clipboard_denial_keeps_text_selection_and_focus_and_allows_retry() {
 }
 
 #[test]
+fn observed_component_actions_require_the_original_live_behavior_owner() {
+    let mut fixture = Fixture::new();
+    let frame = fixture.compile();
+    let menu = frame
+        .semantics()
+        .iter()
+        .find(|node| node.role() == UiSemanticRole::Button && node.name() == "Add Component")
+        .unwrap();
+    let removal = frame
+        .semantics()
+        .iter()
+        .find(|node| {
+            node.role() == UiSemanticRole::Button && node.name() == format!("Remove {COMPONENT}")
+        })
+        .unwrap();
+    let menu_key = menu.key().clone();
+    let menu_action = menu.actions()[0].clone();
+    let removal_key = removal.key().clone();
+    let removal_action = removal.actions()[0].clone();
+    let (_, submission) = fixture.visit(|owner, context| {
+        assert!(owner.owns_action(&frame, &menu_key, &menu_action));
+        assert!(owner.owns_action(&frame, &removal_key, &removal_action));
+        assert!(!owner.owns_action(&frame, &menu_key, &removal_action));
+        assert!(!owner.owns_action(&frame, &input(&frame, "label"), &menu_action));
+        assert!(
+            owner
+                .inspector
+                .activate_component(&frame, &menu_key, context.model().frame())
+                .unwrap()
+                .is_none()
+        );
+        assert!(!owner.owns_action(&frame, &menu_key, &menu_action));
+        assert!(!owner.owns_action(&frame, &removal_key, &removal_action));
+    });
+    assert!(submission.is_none());
+    let current = fixture.compile();
+    let (_, submission) = fixture.visit(|owner, _| {
+        assert!(owner.owns_action(&current, &menu_key, &menu_action));
+        assert!(owner.owns_action(&current, &removal_key, &removal_action));
+        assert!(!owner.owns_action(&frame, &menu_key, &menu_action));
+    });
+    assert!(submission.is_none());
+}
+
+#[test]
 fn stale_component_activation_reports_locally_without_submitting() {
     let mut fixture = Fixture::new();
     let frame = fixture.compile();

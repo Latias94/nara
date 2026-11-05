@@ -78,6 +78,19 @@ docking, multi-window hosting, dynamic loading, rendering performance or the
 complete independent Editor. Semantic panel lifetime and Surface/input lifetime
 remain distinct. No ImGui feature or extension is enabled.
 
+The `ui_operations` successor uses read-only `EditorPanelHost::inspect` and the original
+submission's `submissions()` iterator without superseding pending edits. Its two CPU cases
+retain distinct same-control scopes for the Nara and independently authored frontend.
+Its ignored native test launches each existing complete example with `--observed-operations`:
+accepted `EditorPanelImageObservation` values supply exact endpoint/snapshot/mapping and text
+scope; observed platform input and typed provider requests return through the same reducers.
+The examples retain their original presentation counts, source/history/persistence results,
+image readback and retirement assertions. The foreign frontend additionally covers modal
+outside-click routing, outside wheel refusal, wrong-button capture and the no-text-scope IME
+Disabled acknowledgment. The
+[operations unit](../../../docs/plans/2026-11-05-presented-ui-operations-plan.md)
+records qualification separately from OS input, accessibility and future remote transport.
+
 `drawn_editor` is a normal executable consumer of the public
 `nara_editor::run_drawn(EditorLaunchOptions)` entry. It requires exactly one
 explicit project-root argument and leaves the native event loop, graphics,
@@ -129,6 +142,7 @@ cargo +1.95.0 build --locked --manifest-path tests/fixtures/editor-ui-host-consu
 $env:WGPU_BACKEND = 'dx12'
 $env:NARA_WGPU_FORCE_FALLBACK = '0'
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --features native --test native_panel --test conformance_native --run-ignored only --test-threads=1 --no-fail-fast
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --features native --test ui_operations --run-ignored only --test-threads=1 --no-fail-fast
 cargo +1.95.0 fmt --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --all -- --check
 ```
 

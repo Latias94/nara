@@ -17,6 +17,7 @@ use nara_ui_kernel::{
     UiInputEvent, UiInteractionSession, UiRouteStamp, UiSeatId, UiSemanticRole, UiSurfaceId,
 };
 
+use super::super::{DrawnPanel, PanelControls, input::PanelInput};
 use super::*;
 
 fn fixture(count: usize) -> EditorFrameModel {
@@ -285,6 +286,150 @@ fn routed_semantic_activation_uses_the_controlled_button_binding() {
         })) if actual == document
     ));
     assert!(shell.dispatch(&frame, batch).unwrap().intents().is_empty());
+}
+
+#[test]
+fn observations_require_the_latest_original_frame_and_live_action_owner() {
+    let model = fixture(2);
+    let environment = UiEnvironment::new(
+        UiSurfaceId::new(1).unwrap(),
+        1200.0,
+        1000.0,
+        2.0,
+        1,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+    let mut shell = controller();
+    let frame = shell.compile(&model, environment).unwrap();
+    let target = key(
+        &shell,
+        &frame,
+        Control::Document(model.workspace().documents[0].document),
+    );
+    let action = UiActionId::new("shell.activate").unwrap();
+    assert!(shell.owns_action(&frame, &target, &action));
+    assert!(!shell.owns_action(
+        &frame,
+        &target,
+        &UiActionId::new("foreign.activate").unwrap(),
+    ));
+    let mut panel = DrawnPanel(PanelControls::Shell(shell));
+    let input = PanelInput::default();
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal
+        .install_surface(environment.surface_id(), 1)
+        .unwrap();
+    assert!(input.observe(&panel, &journal, &frame).is_err());
+    let receipt = authority
+        .submit(&mut journal, Arc::clone(&frame), 1)
+        .unwrap();
+    let snapshot = input.observe(&panel, &journal, &frame).unwrap();
+    assert_eq!(snapshot.route(), UiRouteStamp::from_receipt(receipt));
+    let node = snapshot
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &target)
+        .unwrap();
+    assert_eq!(node.actions(), std::slice::from_ref(&action));
+    assert_eq!(
+        Some(node.physical_rect()),
+        environment.physical_rect(node.rect()),
+    );
+    let next_receipt = authority
+        .submit(&mut journal, Arc::clone(&frame), 2)
+        .unwrap();
+    let latest = input.observe(&panel, &journal, &frame).unwrap();
+    assert_ne!(snapshot.route(), latest.route());
+    assert_eq!(latest.route(), UiRouteStamp::from_receipt(next_receipt));
+    let foreign = DrawnPanel(PanelControls::Shell(controller()));
+    assert!(input.observe(&foreign, &journal, &frame).is_err());
+    panel.cancel_input().unwrap();
+    let retired = input.observe(&panel, &journal, &frame).unwrap();
+    assert!(retired.nodes().iter().all(|node| node.actions().is_empty()));
+    let replacement = panel.compile(&model, None, environment).unwrap();
+    assert!(!Arc::ptr_eq(&frame, &replacement));
+    assert!(input.observe(&panel, &journal, &replacement).is_err());
+    authority
+        .submit(&mut journal, Arc::clone(&replacement), 3)
+        .unwrap();
+    assert!(input.observe(&panel, &journal, &frame).is_err());
+    assert!(input.observe(&panel, &journal, &replacement).is_ok());
+}
+
+#[test]
+fn observations_keep_disabled_and_modal_inert_states_distinct() {
+    let model = fixture(1);
+    let environment = UiEnvironment::new(
+        UiSurfaceId::new(1).unwrap(),
+        1200.0,
+        1000.0,
+        1.0,
+        1,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+    let mut shell = controller();
+    let frame = shell.compile(&model, environment).unwrap();
+    let undo = key(&shell, &frame, Control::Undo);
+    let mut panel = DrawnPanel(PanelControls::Shell(shell));
+    let input = PanelInput::default();
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal
+        .install_surface(environment.surface_id(), 1)
+        .unwrap();
+    authority
+        .submit(&mut journal, Arc::clone(&frame), 1)
+        .unwrap();
+    let snapshot = input.observe(&panel, &journal, &frame).unwrap();
+    let disabled = snapshot
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &undo)
+        .unwrap();
+    assert!(!disabled.state().enabled());
+    assert!(!disabled.state().inert());
+    assert!(disabled.actions().is_empty());
+    let PanelControls::Shell(shell) = &mut panel.0 else {
+        panic!("expected the original shell")
+    };
+    let modal = open_menu(shell, &model, environment);
+    let document = key(
+        shell,
+        &modal,
+        Control::Document(model.workspace().documents[0].document),
+    );
+    let dismissal = key(shell, &modal, Control::DismissMenu);
+    authority
+        .submit(&mut journal, Arc::clone(&modal), 2)
+        .unwrap();
+    let snapshot = input.observe(&panel, &journal, &modal).unwrap();
+    let inert = snapshot
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &document)
+        .unwrap();
+    assert!(inert.state().enabled());
+    assert!(inert.state().inert());
+    assert!(!inert.state().focusable());
+    assert!(inert.actions().is_empty());
+    let dismissal = snapshot
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &dismissal)
+        .unwrap();
+    assert!(dismissal.state().enabled());
+    assert!(!dismissal.state().inert());
+    assert_eq!(
+        dismissal.actions(),
+        &[UiActionId::new("shell.activate").unwrap()],
+    );
 }
 
 #[test]

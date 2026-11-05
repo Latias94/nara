@@ -170,6 +170,10 @@ pub enum EditorPanelCancelReason {
 /// delivery, and only reaches a keyboard owner that explicitly enabled text input.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditorPanelInputKind {
+    /// An explicit provider-defined request admitted through an exact image observation.
+    /// The caller captures its typed payload in the ordinary input callback; the provider
+    /// resolves it against this delivery's original snapshot and its normal behavior owner.
+    ObservedOperation,
     PointerMoved,
     PointerLeft,
     PointerButton {

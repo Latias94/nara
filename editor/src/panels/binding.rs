@@ -67,6 +67,21 @@ impl EditorPanelInstanceToken {
         self.instance
     }
 
+    /// Returns the exact document resolved when this token was captured.
+    ///
+    /// This does not follow later active-document changes. Use [`Self::is_current`] to check
+    /// whether the captured binding is still live.
+    #[must_use]
+    pub const fn document(&self) -> Option<EditorDocumentId> {
+        self.binding.document
+    }
+
+    /// Returns the registered panel kind captured by this token.
+    #[must_use]
+    pub fn kind(&self) -> &str {
+        &self.binding.kind
+    }
+
     /// Checks the original project, layout and complete instance binding without changing it.
     #[must_use]
     pub fn is_current(&self, application: &crate::EditorApplication) -> bool {

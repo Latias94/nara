@@ -373,6 +373,53 @@ explicit CPU raster/upload/copy work; it supplies no performance recommendation.
 does not establish named-toolkit compatibility, OS IME/accessibility parity, multi-window
 hosting, code reload or the complete self-drawn Editor.
 
+### Observe And Operate Presented Controls
+
+`EditorPanelImageHost::observe(&application)` returns opaque `EditorPanelImageObservation<S>`
+values for its currently accepted images, in paint order. Each retains the original endpoint,
+provider snapshot, mapping/clip and native geometry. The token exposes its captured `kind()` and
+`document()` so equal-label controls can be distinguished by exact panel/document scope.
+`window_bounds(target_pixel_bounds)` maps visible bounds into logical window coordinates; it
+does not grant pointer access through an overlapping image or modal provider.
+
+Use `EditorPanelHost::inspect(&application, token, callback)` to read the exact live panel and
+current model without preparing actions. It refuses foreign or retired state and does not
+instantiate a panel, reconcile it or supersede a pending submission. Keep observation separate
+from `prepare`, which intentionally replaces the previous action candidate.
+
+`dispatch_observed` routes a normalized platform event through the original native router after
+checking the observed image and geometry. Pointer input retains actual occlusion and capture;
+a modal's outside click still reaches that modal's dismissal path. Keyboard/text requires the
+observed keyboard endpoint and exact current text scope. Observe again after focus changes.
+An IME `Disabled` acknowledgment may finish a retired scope through an observation without a
+current text scope; old preedit and commit still cannot enter a successor field. Window focus,
+resize and other lifecycle events use ordinary `dispatch`.
+
+A provider declaring `ObservedOperations` plus its required `Keyboard` capability can use
+`invoke_observed` for a typed semantic request captured by its callback. This capability grants
+neither native accessibility nor a common widget vocabulary. The callback may first receive
+ordinary cancellation deliveries; execute the captured request only for `ObservedOperation`.
+Resolve its original control, owned behavior action, enabled/inert state and current draft
+through the provider's existing reducer. Report unsupported or stale requests explicitly.
+Nara adapters use `UiSemanticSnapshot` and `UiAccessibilityInput`; other frontends retain their
+own control/snapshot types.
+
+Return `outcome.submission` to the same semantic Host. Its borrowing `submissions()` iterator
+exposes original `(EditorPanelInstanceId, PanelSubmissionId)` pairs in ledger order, including
+entries whose action slots may later be filtered. It transfers no completion ownership: the
+panel's original `action_finished` callback still receives each result. Native admission,
+provider acceptance, exact action result, persistence terminal and a later matching presentation
+are distinct observations. Wait for the named result with a timeout rather than global idle.
+
+An observation can survive an unrelated panel repaint when its own output remains accepted.
+Replacing its output, snapshot, mapping, geometry or instance refuses instead of redirecting
+input. The original attachment tracks one nominal lifetime for its continuously accepted exact
+image. Restoring an earlier image or mapping after withdrawal starts a new lifetime; it cannot
+revive an earlier observation, even when output receipts and snapshot allocations match again.
+Retained observations do not keep semantic panel state alive. The
+[operations unit](../plans/2026-11-05-presented-ui-operations-plan.md) records actual qualification
+and remaining agent/platform scope.
+
 ## ImGui Reference Frontend
 
 The following controls, `ImguiEditorPanel` examples and `EditorNativeComposition` embedding apply

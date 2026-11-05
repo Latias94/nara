@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use nara::{project_host::EditorUiAuthoringFrame, tooling::EditorFrameModel};
 use nara_text::FontFace;
-use nara_ui_kernel::{UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiRootKey};
+use nara_ui_kernel::{UiActionId, UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiRootKey};
 use nara_ui_widgets::UiAppearance;
 
 use crate::{EditorPanel, PanelActionDispatch, PanelSubmissionId};
@@ -154,6 +154,16 @@ impl DrawnPanel {
             PanelControls::Hierarchy { owner, .. } => owner
                 .as_ref()
                 .is_some_and(|owner| owner.retains_frame(frame)),
+        }
+    }
+
+    fn owns_action(&self, frame: &Arc<UiFrame>, key: &UiKey, action: &UiActionId) -> bool {
+        match &self.0 {
+            PanelControls::Shell(shell) => shell.owns_action(frame, key, action),
+            PanelControls::Inspector(inspector) => inspector.owns_action(frame, key, action),
+            PanelControls::Hierarchy { owner, .. } => owner
+                .as_ref()
+                .is_some_and(|owner| owner.owns_action(frame, key, action)),
         }
     }
 

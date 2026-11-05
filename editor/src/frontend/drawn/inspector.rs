@@ -8,7 +8,7 @@ use nara::tooling::{
 };
 use nara_text::{FontFace, TextEdit, TextEditOutcome};
 use nara_ui_kernel::{
-    UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRect, UiRootKey, UiTheme,
+    UiActionId, UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRect, UiRootKey, UiTheme,
 };
 use nara_ui_widgets::{UiAppearance, UiTextInputToken};
 
@@ -450,6 +450,15 @@ impl InspectorControls {
 
     pub(super) fn retains_frame(&self, frame: &Arc<UiFrame>) -> bool {
         self.inspector.retains_frame(frame)
+    }
+
+    pub(super) fn owns_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        self.inspector.owns_action(frame, key, action)
     }
 
     pub(super) fn invalidated_controls(

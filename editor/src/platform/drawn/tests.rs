@@ -33,6 +33,7 @@ mod captures;
 mod driver;
 mod fixture;
 mod lifecycle;
+mod operations;
 mod ordinary;
 mod specialized;
 mod styled;
@@ -161,6 +162,7 @@ impl Workflow<'_> {
         self.switch_document(scene)?;
         self.hierarchy_filter_completion()?;
         self.ordinary(fixture::SCENE, EditorDocumentKind::Scene)?;
+        self.observed_inspector_workflow()?;
         self.inspector_edit_and_restore()?;
         self.switch_document(prefab)?;
         self.ordinary(fixture::PREFAB, EditorDocumentKind::Prefab)?;

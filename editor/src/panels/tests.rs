@@ -21,8 +21,8 @@ use crate::{
     EditorLaunchOptions,
     app::PersistenceFixture,
     workspace::{
-        EditorNativeWindowId, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelTarget,
-        EditorRenderViewId,
+        EditorNativeWindowId, EditorPanelMultiplicity, EditorPanelPlacement, EditorPanelSourceKind,
+        EditorPanelTarget, EditorRenderViewId,
     },
 };
 
@@ -219,7 +219,7 @@ fn exact_results_are_ordered_once_and_keep_owned_query_observations() {
     let (_fixture, mut application) = application();
     let mut host = EditorPanelHost::new();
     let observed = Rc::new(Observations::default());
-    register(&mut host, &mut application, &observed, "test.semantic");
+    let instance = register(&mut host, &mut application, &observed, "test.semantic");
     let basis = current_basis(&application);
     let mut ids = Vec::new();
     let submission = host
@@ -235,6 +235,11 @@ fn exact_results_are_ordered_once_and_keep_owned_query_observations() {
         })
         .unwrap();
     assert_ne!(ids[0], ids[1]);
+    assert_eq!(submission.submissions().len(), ids.len());
+    assert_eq!(
+        submission.submissions().collect::<Vec<_>>(),
+        ids.iter().map(|id| (instance, *id)).collect::<Vec<_>>()
+    );
     assert!(observed.finished.borrow().is_empty());
     host.submit_and_drive(&mut application, submission, Duration::ZERO);
     let finished = observed.finished.borrow().clone();
@@ -251,9 +256,235 @@ fn exact_results_are_ordered_once_and_keep_owned_query_observations() {
         assert_eq!(page.entities.len(), index + 1);
     }
     let empty = host.prepare(&application, |_, _| {}).unwrap();
+    assert_eq!(empty.submissions().len(), 0);
+    assert_eq!(empty.submissions().next(), None);
     host.submit_and_drive(&mut application, empty, Duration::ZERO);
     assert_eq!(*observed.finished.borrow(), finished);
     assert_eq!(current_basis(&application), basis);
+    close(&mut application);
+}
+
+#[test]
+fn inspecting_a_pending_candidate_preserves_its_original_dispatch_and_single_callback() {
+    let (_fixture, mut application) = application();
+    let mut host = EditorPanelHost::new();
+    let observed = Rc::new(Observations::default());
+    let instance = register(&mut host, &mut application, &observed, "test.semantic");
+    let basis = current_basis(&application);
+    let mut token = None;
+    let mut id = None;
+    let submission = host
+        .prepare(&application, |panel, context| {
+            panel.visits += 1;
+            token = Some(context.instance_token());
+            id = Some(
+                context
+                    .submit(EditorAction::Navigate(
+                        EditorNavigationAction::SelectEntity {
+                            document: basis.document,
+                            entity: Some(SceneEntityId::new("beta").unwrap()),
+                        },
+                    ))
+                    .unwrap(),
+            );
+        })
+        .unwrap();
+    let token = token.unwrap();
+    let id = id.unwrap();
+    let before = application.current_frame().unwrap();
+    assert_eq!(
+        submission.submissions().collect::<Vec<_>>(),
+        [(instance, id)]
+    );
+    let mut foreign = token.clone();
+    foreign.host = Arc::new(());
+    let lifetime = Arc::new(());
+    let mut different_lifetime = token.clone();
+    different_lifetime.state_lifetime = Arc::downgrade(&lifetime);
+    let mut different_incarnation = token.clone();
+    different_incarnation.binding.incarnation = Arc::default();
+    for invalid in [&foreign, &different_lifetime, &different_incarnation] {
+        assert!(invalid.is_current(&application));
+        assert!(
+            host.inspect(&application, invalid, |_, _| unreachable!())
+                .is_none()
+        );
+    }
+    assert_eq!(
+        host.inspect(&application, &token, |panel, model| {
+            assert!(std::ptr::eq(model.frame(), before.as_ref()));
+            assert_eq!(model.instance().id(), instance);
+            assert_eq!(model.document().unwrap().document, basis.document);
+            (panel.serial, panel.visits)
+        }),
+        Some((1, 1))
+    );
+    assert!(Arc::ptr_eq(
+        host.submissions.pending.as_ref().unwrap(),
+        &submission.0.ledger
+    ));
+    assert!(observed.finished.borrow().is_empty());
+    assert!(observed.dropped.borrow().is_empty());
+    assert_eq!(observed.created.get(), 1);
+    assert!(Arc::ptr_eq(&before, &application.current_frame().unwrap()));
+    host.submit_and_drive(&mut application, submission, Duration::ZERO);
+    let finished = observed.finished.borrow().clone();
+    assert_eq!(finished.len(), 1);
+    assert_eq!((finished[0].0, finished[0].1), (1, id));
+    assert!(matches!(
+        &finished[0].2,
+        PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)) if report.applied
+    ));
+    assert_eq!(
+        host.inspect(&application, &token, |panel, model| {
+            assert_eq!(
+                model.selection().unwrap().top_entity(),
+                Some(&SceneEntityId::new("beta").unwrap())
+            );
+            panel.visits
+        }),
+        Some(1)
+    );
+    let empty = host.prepare(&application, |_, _| {}).unwrap();
+    host.submit_and_drive(&mut application, empty, Duration::ZERO);
+    assert_eq!(*observed.finished.borrow(), finished);
+    assert_eq!(observed.created.get(), 1);
+    close(&mut application);
+}
+
+#[test]
+fn inspection_uses_current_models_and_exact_non_active_source_metadata() {
+    use nara::tooling::EditorProjectBrowserAction;
+
+    let (_fixture, mut application) = application();
+    let scene = current_basis(&application);
+    let locator = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .document(scene.document)
+        .unwrap()
+        .source_binding
+        .as_ref()
+        .unwrap()
+        .locator()
+        .to_owned();
+    let mut host = EditorPanelHost::new();
+    let observed = Rc::new(Observations::default());
+    let source = register(&mut host, &mut application, &observed, "test.semantic");
+    assert!(application.panel_workspace_mut().layout_mut().set_target(
+        source,
+        EditorPanelTarget::Source {
+            kind: EditorPanelSourceKind::Scene,
+            locator,
+        },
+    ));
+    let active = application
+        .panel_workspace_mut()
+        .open("test.semantic", EditorPanelTarget::ActiveDocument)
+        .unwrap();
+    let workspace = application
+        .panel_workspace_mut()
+        .open("test.semantic", EditorPanelTarget::Workspace)
+        .unwrap();
+    let mut tokens = Vec::new();
+    let pending = host
+        .prepare(&application, |_, context| {
+            tokens.push(context.instance_token())
+        })
+        .unwrap();
+    let source = tokens
+        .iter()
+        .find(|token| token.instance() == source)
+        .unwrap();
+    let active = tokens
+        .iter()
+        .find(|token| token.instance() == active)
+        .unwrap();
+    let workspace = tokens
+        .iter()
+        .find(|token| token.instance() == workspace)
+        .unwrap();
+    assert_eq!(source.document(), Some(scene.document));
+    assert_eq!(active.document(), Some(scene.document));
+    assert_eq!(workspace.document(), None);
+    let path = "blueprints/external.prefab.json";
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application
+        .current_frame()
+        .unwrap()
+        .project_browser()
+        .entry(path)
+        .is_none()
+    {
+        assert!(Instant::now() < deadline, "the Prefab was not indexed");
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    dispatch(
+        &mut application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+            relative_path: path.into(),
+        }),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .active_document
+        == Some(scene.document)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the Prefab did not become active"
+        );
+        application.advance(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let current = application.current_frame().unwrap();
+    let prefab = current.workspace().active_document.unwrap();
+    assert_ne!(prefab, scene.document);
+    assert_eq!(
+        current.workspace().document(prefab).unwrap().kind,
+        nara::tooling::EditorDocumentKind::Prefab
+    );
+    assert!(!Arc::ptr_eq(host.frame.as_ref().unwrap(), &current));
+    assert_eq!(source.kind(), "test.semantic");
+    assert_eq!(source.document(), Some(scene.document));
+    assert_eq!(active.document(), Some(scene.document));
+    assert!(source.is_current(&application));
+    assert!(!active.is_current(&application));
+    assert_eq!(
+        host.inspect(&application, source, |panel, model| {
+            assert!(std::ptr::eq(model.frame(), current.as_ref()));
+            assert_eq!(model.document().unwrap().document, scene.document);
+            assert_ne!(model.frame().workspace().active_document, source.document());
+            panel.serial
+        }),
+        Some(1)
+    );
+    assert!(
+        host.inspect(&application, active, |_, _| unreachable!())
+            .is_none()
+    );
+    assert_eq!(
+        host.inspect(&application, workspace, |panel, model| {
+            assert!(std::ptr::eq(model.frame(), current.as_ref()));
+            assert!(model.document().is_none());
+            panel.serial
+        }),
+        Some(3)
+    );
+    assert!(Arc::ptr_eq(
+        host.submissions.pending.as_ref().unwrap(),
+        &pending.0.ledger
+    ));
+    assert!(Arc::ptr_eq(&current, &application.current_frame().unwrap()));
+    assert_eq!(observed.created.get(), 3);
+    assert!(observed.dropped.borrow().is_empty());
+    assert!(observed.finished.borrow().is_empty());
+    drop(pending);
     close(&mut application);
 }
 
@@ -269,34 +500,90 @@ fn instance_tokens_bind_the_original_state_through_relocation_and_hidden_round_t
     });
     let original = original.unwrap();
     assert_eq!(original.instance(), instance);
+    assert_eq!(
+        original.document(),
+        Some(current_basis(&application).document)
+    );
+    assert_eq!(original.kind(), "test.endpoint");
     assert!(original.is_current(&application));
+    let mut foreign = EditorPanelHost::<Probe>::new();
+    foreign
+        .install_registered_panel(&application, "test.endpoint", || unreachable!())
+        .unwrap();
+    assert!(
+        foreign
+            .inspect(&application, &original, |_, _| unreachable!())
+            .is_none()
+    );
     {
         let layout = application.panel_workspace_mut().layout_mut();
         assert!(layout.place(instance, EditorPanelPlacement::Bottom));
         assert!(layout.set_native_window(instance, EditorNativeWindowId(9)));
         assert!(layout.set_render_view(instance, Some(EditorRenderViewId(11))));
     }
+    assert_eq!(
+        host.inspect(&application, &original, |panel, model| {
+            assert_eq!(model.instance().placement(), EditorPanelPlacement::Bottom);
+            assert_eq!(model.instance().native_window(), EditorNativeWindowId(9));
+            assert_eq!(model.instance().render_view(), Some(EditorRenderViewId(11)));
+            panel.serial
+        }),
+        Some(1)
+    );
     let _ = host.prepare(&application, |_, context| {
         assert_eq!(context.instance_token(), original);
         assert!(context.matches_instance(&original));
     });
     assert!(original.is_current(&application));
-    {
-        let layout = application.panel_workspace_mut().layout_mut();
-        assert!(layout.set_visible(instance, false));
-        assert!(layout.reopen(instance));
-    }
+    assert!(
+        application
+            .panel_workspace_mut()
+            .layout_mut()
+            .set_visible(instance, false)
+    );
+    assert!(
+        host.inspect(&application, &original, |_, _| unreachable!())
+            .is_none()
+    );
+    assert!(
+        application
+            .panel_workspace_mut()
+            .layout_mut()
+            .reopen(instance)
+    );
     assert!(!original.is_current(&application));
+    assert!(
+        host.inspect(&application, &original, |_, _| unreachable!())
+            .is_none()
+    );
+    assert_eq!(observed.created.get(), 1);
+    assert!(observed.dropped.borrow().is_empty());
+    let mut replacement = None;
     let _ = host.prepare(&application, |panel, context| {
         assert_eq!(panel.serial, 2);
         assert!(!context.matches_instance(&original));
-        let replacement = context.instance_token();
-        assert_eq!(replacement.instance(), original.instance());
-        assert_ne!(replacement, original);
-        assert!(replacement.is_current(&application));
+        replacement = Some(context.instance_token());
     });
+    let replacement = replacement.unwrap();
+    assert_eq!(replacement.instance(), original.instance());
+    assert_ne!(replacement, original);
+    assert!(replacement.is_current(&application));
+    assert!(
+        host.inspect(&application, &original, |_, _| unreachable!())
+            .is_none()
+    );
+    assert_eq!(
+        host.inspect(&application, &replacement, |panel, _| panel.serial),
+        Some(2)
+    );
+    assert_eq!(observed.created.get(), 2);
     close(&mut application);
     assert!(!original.is_current(&application));
+    assert!(
+        host.inspect(&application, &replacement, |_, _| unreachable!())
+            .is_none()
+    );
+    assert_eq!(observed.created.get(), 2);
 }
 
 #[test]
@@ -331,6 +618,10 @@ fn native_deliveries_keep_chronological_repeated_visits_in_one_original_candidat
         )
         .unwrap();
     assert_eq!(visits, [(0, second, 1), (2, second, 1)]);
+    assert_eq!(
+        candidate.submissions().collect::<Vec<_>>(),
+        ids.iter().map(|id| (second, *id)).collect::<Vec<_>>()
+    );
     assert!(observed.finished.borrow().is_empty());
     host.submit_and_drive(&mut application, candidate, Duration::ZERO);
     let finished = observed.finished.borrow();
@@ -547,18 +838,21 @@ fn retiring_an_earlier_panel_keeps_the_surviving_original_action_slot() {
     let second = register(&mut host, &mut application, &observed, "test.second");
     let basis = current_basis(&application);
     let before = application.current_frame().unwrap();
+    let mut retired = None;
     let mut survivor = None;
     let submission = host
         .prepare(&application, |_, context| {
             if context.model().instance().id() == first {
-                context
-                    .submit(EditorAction::Navigate(
-                        EditorNavigationAction::SelectEntity {
-                            document: basis.document,
-                            entity: Some(SceneEntityId::new("beta").unwrap()),
-                        },
-                    ))
-                    .unwrap();
+                retired = Some(
+                    context
+                        .submit(EditorAction::Navigate(
+                            EditorNavigationAction::SelectEntity {
+                                document: basis.document,
+                                entity: Some(SceneEntityId::new("beta").unwrap()),
+                            },
+                        ))
+                        .unwrap(),
+                );
             } else {
                 assert_eq!(context.model().instance().id(), second);
                 survivor = Some(
@@ -570,10 +864,14 @@ fn retiring_an_earlier_panel_keeps_the_surviving_original_action_slot() {
         })
         .unwrap();
     assert_eq!(submission.0.ledger.submissions[1].slot, 1);
+    let original = [(first, retired.unwrap()), (second, survivor.unwrap())];
+    assert_eq!(submission.submissions().len(), original.len());
+    assert_eq!(submission.submissions().collect::<Vec<_>>(), original);
     application
         .panel_workspace_mut()
         .layout_mut()
         .set_visible(first, false);
+    assert_eq!(submission.submissions().collect::<Vec<_>>(), original);
     host.submit_and_drive(&mut application, submission, Duration::ZERO);
     let finished = observed.finished.borrow();
     assert_eq!(finished.len(), 1);
@@ -747,13 +1045,16 @@ fn project_replacement_rejects_only_the_matching_original_candidate() {
     let observed = Rc::new(Observations::default());
     register(&mut host, &mut application, &observed, "test.semantic");
     let basis = current_basis(&application);
+    let mut token = None;
     let old = host
         .prepare(&application, |_, context| {
+            token = Some(context.instance_token());
             context
                 .submit(EditorAction::QueryDocumentEntities(query(&basis, 1)))
                 .unwrap();
         })
         .unwrap();
+    let token = token.unwrap();
     let generation = application.workspace_generation();
     assert!(application.request_project_replacement(
         fixture.project_root().to_owned(),
@@ -771,6 +1072,13 @@ fn project_replacement_rejects_only_the_matching_original_candidate() {
         std::thread::sleep(Duration::from_millis(1));
     }
     let replacement = application.current_frame().unwrap();
+    assert!(!token.is_current(&application));
+    assert!(
+        host.inspect(&application, &token, |_, _| unreachable!())
+            .is_none()
+    );
+    assert_eq!(observed.created.get(), 1);
+    assert!(observed.dropped.borrow().is_empty());
     assert_eq!(
         host.submit_and_drive(&mut application, old, Duration::from_secs(1)),
         EditorApplicationUpdate::idle()
@@ -804,7 +1112,7 @@ fn closing_filter_reports_the_original_hole_and_delivers_later_resolution() {
     let (_fixture, mut application) = application();
     let mut host = EditorPanelHost::new();
     let observed = Rc::new(Observations::default());
-    register(&mut host, &mut application, &observed, "test.semantic");
+    let instance = register(&mut host, &mut application, &observed, "test.semantic");
     let basis = current_basis(&application);
     let patch = crate::app::named_root_patch(&application, basis.document, "dirty-root");
     dispatch(
@@ -845,6 +1153,11 @@ fn closing_filter_reports_the_original_hole_and_delivers_later_resolution() {
             );
         })
         .unwrap();
+    assert_eq!(submission.submissions().len(), ids.len());
+    assert_eq!(
+        submission.submissions().collect::<Vec<_>>(),
+        ids.iter().map(|id| (instance, *id)).collect::<Vec<_>>()
+    );
     host.submit_and_drive(&mut application, submission, Duration::ZERO);
     let finished = observed.finished.borrow();
     assert_eq!(finished.len(), 2);

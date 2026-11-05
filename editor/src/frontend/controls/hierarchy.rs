@@ -6,7 +6,7 @@ use nara::{
 };
 use nara_text::{FontFace, TextEdit, TextEditOutcome};
 use nara_ui_kernel::{
-    UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRect, UiRootKey, UiTheme,
+    UiActionId, UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRect, UiRootKey, UiTheme,
 };
 use nara_ui_widgets::{UiAppearance, UiIntentBatch, UiTextInputToken};
 
@@ -89,6 +89,18 @@ impl HierarchyControls {
         match self {
             Self::Source(owner) => owner.retains_frame(frame),
             Self::Ui(owner) => owner.retains_frame(frame),
+        }
+    }
+
+    pub(in crate::frontend) fn owns_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        match self {
+            Self::Source(owner) => owner.owns_action(frame, key, action),
+            Self::Ui(owner) => owner.owns_action(frame, key, action),
         }
     }
 

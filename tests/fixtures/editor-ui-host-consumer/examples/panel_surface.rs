@@ -1,6 +1,8 @@
 //! Native public image-panel consumption with injected events, not OS input automation.
 #![forbid(unsafe_code)]
 
+#[path = "panel_surface/observation.rs"]
+mod observation;
 #[allow(dead_code)]
 #[path = "../../render-composition-consumer/tests/support/window_gpu.rs"]
 mod window_gpu;
@@ -32,10 +34,10 @@ use nara_editor::{
     PanelActionDispatch, PanelSubmissionId,
     native::{
         EditorClipboard, EditorClipboardAccess, EditorPanelCancelReason, EditorPanelCapability,
-        EditorPanelImage, EditorPanelImageError, EditorPanelImageHost, EditorPanelImageStatus,
-        EditorPanelImeArea, EditorPanelInput, EditorPanelInputKind, EditorPanelPlatformEvent,
-        EditorPanelServiceError, EditorPanelServices, EditorPanelTextInputScope,
-        EditorPanelWheelDelta,
+        EditorPanelImage, EditorPanelImageError, EditorPanelImageHost, EditorPanelImageObservation,
+        EditorPanelImageStatus, EditorPanelImeArea, EditorPanelInput, EditorPanelInputKind,
+        EditorPanelPlatformEvent, EditorPanelServiceError, EditorPanelServices,
+        EditorPanelTextInputScope, EditorPanelWheelDelta,
     },
 };
 use nara_editor_ui_host_consumer::{
@@ -56,10 +58,11 @@ use nara_render_wgpu::{
 };
 use nara_text::{TextEdit, bundled_font_face};
 use nara_ui_kernel::{
-    UiActivationSource, UiButtonPhase, UiCompiler, UiDispatchBatch, UiEnvironment, UiFrame,
-    UiInputEvent, UiInteractionSession, UiModifiers, UiNavigation, UiPaintPrimitive, UiPoint,
-    UiPointerButton, UiPointerId, UiPointerInput, UiResolvedBrush, UiRouteStamp, UiScrollDelta,
-    UiSeatId, UiSize, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
+    UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiCompiler, UiDispatchBatch,
+    UiEnvironment, UiFrame, UiInputEvent, UiInteractionSession, UiModifiers, UiNavigation,
+    UiPaintPrimitive, UiPoint, UiPointerButton, UiPointerId, UiPointerInput, UiResolvedBrush,
+    UiRouteStamp, UiScrollDelta, UiSeatId, UiSize, UiSurfaceContentTransform, UiSurfaceGenerations,
+    UiSurfaceId, UiTheme,
 };
 use nara_ui_render::{UiPreparedImages, UiSurfacePresentationEvent, UiSurfacePresenter};
 use nara_ui_widgets::UiTextInputToken;
@@ -176,6 +179,7 @@ struct NaraInputAdapter<'a> {
     text_scope: &'a mut Option<(UiTextInputToken, EditorPanelTextInputScope)>,
     old_token: &'a mut Option<UiTextInputToken>,
     evidence: &'a mut NativeServiceEvidence,
+    operation: Option<&'a UiAccessibilityInput>,
 }
 
 impl NaraInputAdapter<'_> {
@@ -324,10 +328,27 @@ impl NaraInputAdapter<'_> {
                 _ => None,
             });
         let mut action = None;
-        if let Some(event) = event {
+        let outcome = if matches!(input.kind, EditorPanelInputKind::ObservedOperation) {
+            let request = self
+                .operation
+                .ok_or_else(|| io::Error::other("observed operation has no typed UI request"))?;
+            assert_eq!(request.route(), route);
             let outcome = self
                 .interaction
-                .dispatch(self.presenter.journal(), route, event)?;
+                .dispatch_accessibility(self.presenter.journal(), request.clone())?;
+            if let Some(reason) = outcome.rejection() {
+                return Err(observation::ObservedUiOperationRefused(reason.clone()).into());
+            }
+            Some(outcome)
+        } else {
+            event
+                .map(|event| {
+                    self.interaction
+                        .dispatch(self.presenter.journal(), route, event)
+                })
+                .transpose()?
+        };
+        if let Some(outcome) = outcome {
             if let Some(batch) = outcome.consumed() {
                 action = reduce_panel(panel, context, self.document, batch)?;
             }
@@ -587,6 +608,8 @@ struct Probe {
     stage: u8,
     presentations: usize,
     commits: usize,
+    observed_operations: bool,
+    retained_observation: Option<EditorPanelImageObservation<UiFrame>>,
     started: Instant,
 }
 
@@ -649,6 +672,8 @@ impl Probe {
             stage: 0,
             presentations: 0,
             commits: 0,
+            observed_operations: std::env::args().any(|arg| arg == "--observed-operations"),
+            retained_observation: None,
             started: Instant::now(),
         })
     }
@@ -678,6 +703,7 @@ impl Probe {
                 EditorPanelCapability::Cursor,
                 EditorPanelCapability::Refresh,
                 EditorPanelCapability::WindowModal,
+                EditorPanelCapability::ObservedOperations,
             ],
         )?;
         if let Some(retired) = &self.retired_native_token {
@@ -739,6 +765,15 @@ impl Probe {
     }
 
     fn dispatch(&mut self, event: Option<EditorPanelPlatformEvent>) -> Result<bool> {
+        self.dispatch_input(None, event, None)
+    }
+
+    fn dispatch_input(
+        &mut self,
+        observation: Option<&EditorPanelImageObservation<UiFrame>>,
+        event: Option<EditorPanelPlatformEvent>,
+        operation: Option<UiAccessibilityInput>,
+    ) -> Result<bool> {
         let mut result = Ok(());
         let mut id = None;
         let mut adapter = NaraInputAdapter {
@@ -750,31 +785,57 @@ impl Probe {
             text_scope: &mut self.text_scope,
             old_token: &mut self.old_token,
             evidence: &mut self.native_evidence,
+            operation: operation.as_ref(),
         };
-        let outcome = self.native.dispatch(
-            &self.application,
-            &mut self.panels,
-            event,
-            |panel, context, input, services| {
-                if result.is_ok() {
-                    result = adapter
-                        .input(panel, context, input, services)
-                        .map(|submitted| {
-                            if let Some(submitted) = submitted {
-                                assert!(id.replace(submitted).is_none());
-                            }
-                        });
-                }
-            },
-        )?;
+        let callback = |panel: &mut DraftPanel,
+                        context: &mut EditorPanelContext<'_, '_>,
+                        input: &EditorPanelInput<UiFrame>,
+                        services: &mut EditorPanelServices<'_>| {
+            if result.is_ok() {
+                result = adapter
+                    .input(panel, context, input, services)
+                    .map(|submitted| {
+                        if let Some(submitted) = submitted {
+                            assert!(id.replace(submitted).is_none());
+                        }
+                    });
+            }
+        };
+        let outcome = match observation {
+            Some(observation) if operation.is_some() => self.native.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                observation,
+                callback,
+            ),
+            Some(observation) => self.native.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                observation,
+                event.unwrap(),
+                callback,
+            ),
+            None => self
+                .native
+                .dispatch(&self.application, &mut self.panels, event, callback),
+        }?;
         result?;
         if let Some(id) = id {
             assert!(self.action.is_none());
-            self.action = Some(outcome.submission.ok_or_else(|| {
+            let submission = outcome.submission.ok_or_else(|| {
                 io::Error::other("native input lost its original semantic submission")
-            })?);
+            })?;
+            assert_eq!(submission.submissions().len(), 1);
+            assert_eq!(
+                submission.submissions().collect::<Vec<_>>(),
+                [(self.instance, id)]
+            );
+            self.action = Some(submission);
             self.action_id = Some(id);
         } else {
+            if let Some(submission) = &outcome.submission {
+                assert_eq!(submission.submissions().len(), 0);
+            }
             drop(outcome.submission);
         }
         Ok(outcome.consumed)
@@ -788,12 +849,17 @@ impl Probe {
     }
 
     fn key(&mut self, key: Key, text: Option<&str>) -> Result<()> {
-        assert!(self.dispatch(Some(EditorPanelPlatformEvent::logical_key(
+        let event = EditorPanelPlatformEvent::logical_key(
             key,
             ElementState::Pressed,
             false,
             text.map(str::to_owned),
-        )))?);
+        );
+        assert!(if self.observed_operations {
+            self.observed_event(event)?
+        } else {
+            self.dispatch(Some(event))?
+        });
         Ok(())
     }
 
@@ -1108,6 +1174,12 @@ impl Probe {
             assert_eq!(candidate.images()[0].is_window_modal(), modal);
             Some(candidate)
         };
+        if let Some(candidate) = &candidate {
+            let observations = self.native.observe(&self.application)?;
+            assert!(observations.iter().all(|observation| {
+                !Arc::ptr_eq(observation.snapshot(), candidate.images()[0].snapshot())
+            }));
+        }
         self.dispatch(None)?;
         if retire_before_composite && !self.retired {
             self.retire_panel()?;
@@ -1443,11 +1515,28 @@ impl Probe {
         if !self.draw(self.stage == 4)? {
             return Ok(false);
         }
+        if self.observed_operations {
+            self.check_observation_replacement()?;
+        }
         match self.stage {
             0 => {
                 self.window_event(WindowEvent::Focused(true))?;
-                self.click_control("Caption")?;
+                if self.observed_operations {
+                    self.check_foreign_observation()?;
+                    let before_focus = self.observe_panel()?;
+                    assert!(!before_focus.owns_keyboard());
+                    assert!(before_focus.text_scope().is_none());
+                    self.invoke_control("Caption", false)?;
+                    self.refuse_observed_scope(&before_focus)?;
+                } else {
+                    self.click_control("Caption")?;
+                }
                 let first_scope = self.text_scope.clone().unwrap();
+                let first_observation = if self.observed_operations {
+                    Some(self.observe_panel()?)
+                } else {
+                    None
+                };
                 self.window_event(WindowEvent::Ime(Ime::Preedit(
                     "not ready".into(),
                     Some((0, 9)),
@@ -1494,6 +1583,9 @@ impl Probe {
                 let second_scope = self.text_scope.as_ref().unwrap();
                 assert_ne!(second_scope.0, first_scope.0);
                 assert_ne!(second_scope.1, first_scope.1);
+                if let Some(first_observation) = first_observation {
+                    self.refuse_observed_scope(&first_observation)?;
+                }
                 self.window_event(WindowEvent::Ime(Ime::Enabled))?;
                 self.window_event(WindowEvent::Ime(Ime::Preedit(
                     "old scope".into(),
@@ -1505,10 +1597,17 @@ impl Probe {
                 self.window_event(WindowEvent::Ime(Ime::Enabled))?;
                 assert_eq!(self.native_evidence.ime_enabled, 2);
                 self.command("a")?;
-                self.window_event(WindowEvent::Ime(Ime::Preedit(
-                    "candidate".into(),
-                    Some((0, 9)),
-                )))?;
+                if self.observed_operations {
+                    self.observed_event(EditorPanelPlatformEvent::Ime(Ime::Preedit(
+                        "candidate".into(),
+                        Some((0, 9)),
+                    )))?;
+                } else {
+                    self.window_event(WindowEvent::Ime(Ime::Preedit(
+                        "candidate".into(),
+                        Some((0, 9)),
+                    )))?;
+                }
                 drop(
                     self.panels
                         .prepare(&self.application, |panel, _| {
@@ -1517,7 +1616,13 @@ impl Probe {
                         })
                         .unwrap(),
                 );
-                self.window_event(WindowEvent::Ime(Ime::Commit("native draft".into())))?;
+                if self.observed_operations {
+                    self.observed_event(EditorPanelPlatformEvent::Ime(Ime::Commit(
+                        "native draft".into(),
+                    )))?;
+                } else {
+                    self.window_event(WindowEvent::Ime(Ime::Commit("native draft".into())))?;
+                }
                 self.assert_draft("native draft");
                 for delta in [
                     MouseScrollDelta::LineDelta(0.0, 1.0),
@@ -1538,7 +1643,12 @@ impl Probe {
                 assert!(self.evidence.finished.borrow().is_empty());
             }
             1 => {
-                self.click_control("Review change")?;
+                if self.observed_operations {
+                    self.invoke_control("Review change", false)?;
+                    self.invoke_control("Review change", true)?;
+                } else {
+                    self.click_control("Review change")?;
+                }
                 drop(
                     self.panels
                         .prepare(&self.application, |panel, _| {
@@ -1558,18 +1668,81 @@ impl Probe {
                 );
                 self.click_control("Review change")?;
                 assert!(self.action.is_none());
+                if self.observed_operations {
+                    let before = current(&self.application);
+                    let basis = self.application.document_query_basis(self.document)?;
+                    let source = self
+                        .application
+                        .read_document_property(property(&basis))?
+                        .value;
+                    let bytes = fs::read(self.project.root().join(SOURCE))?;
+                    let frame = Arc::clone(self.presenter.journal().latest(self.surface)?.frame());
+                    let token = self.native_token.as_ref().unwrap().clone();
+                    let panel_before = self
+                        .panels
+                        .inspect(&self.application, &token, |panel, _| {
+                            panel.compose(frame.source_revision().get()).unwrap()
+                        })
+                        .unwrap();
+                    let interaction_before = self.interaction.semantic_snapshot(
+                        self.presenter.journal(),
+                        self.route.unwrap(),
+                        UiSeatId::PRIMARY,
+                    )?;
+                    let error = self
+                        .invoke_inert_control("Review change")
+                        .expect_err("the original kernel must refuse the inert authored action");
+                    assert!(matches!(
+                        error.downcast_ref::<observation::ObservedUiOperationRefused>(),
+                        Some(observation::ObservedUiOperationRefused(
+                            nara_ui_kernel::UiNonActivation::TargetOutsideModal { target }
+                        )) if frame.semantics().iter().any(|node| node.name() == "Review change" && node.key() == target)
+                    ));
+                    assert!(self.action.is_none() && self.action_id.is_none());
+                    assert!(self.evidence.finished.borrow().is_empty());
+                    assert!(Arc::ptr_eq(&before, &current(&self.application)));
+                    assert_eq!(current(&self.application).workspace(), before.workspace());
+                    assert_eq!(self.application.document_query_basis(self.document)?, basis);
+                    assert_eq!(
+                        self.application
+                            .read_document_property(property(&basis))?
+                            .value,
+                        source
+                    );
+                    assert_eq!(fs::read(self.project.root().join(SOURCE))?, bytes);
+                    assert_eq!(
+                        self.panels.inspect(&self.application, &token, |panel, _| {
+                            panel.compose(frame.source_revision().get()).unwrap()
+                        }),
+                        Some(panel_before)
+                    );
+                    assert_eq!(
+                        self.interaction.semantic_snapshot(
+                            self.presenter.journal(),
+                            self.route.unwrap(),
+                            UiSeatId::PRIMARY,
+                        )?,
+                        interaction_before
+                    );
+                }
                 drop(
                     self.panels
                         .prepare(&self.application, |panel, _| assert_eq!(panel.reviews(), 1))
                         .unwrap(),
                 );
-                self.click_control("Apply caption")?;
+                if self.observed_operations {
+                    self.invoke_control("Apply caption", false)?;
+                    self.invoke_control("Apply caption", true)?;
+                } else {
+                    self.click_control("Apply caption")?;
+                }
                 let action = self
                     .action
                     .take()
                     .ok_or_else(|| io::Error::other("presented modal did not emit Apply"))?;
                 let id = self.action_id.take().unwrap();
                 assert!(self.evidence.finished.borrow().is_empty());
+                self.inspect_pending_apply(&action, id)?;
                 self.panels
                     .submit_and_drive(&mut self.application, action, Duration::ZERO);
                 let evidence = self.evidence.finished.borrow();
@@ -1732,6 +1905,7 @@ impl Probe {
             self.presenter.drain()?;
         }
         self.pending_frame = None;
+        self.retained_observation = None;
         self.presenter.retire(1000)?;
         self.presenter.drain()?;
         assert!(self.presenter.is_quiescent());
@@ -1843,5 +2017,10 @@ fn main() -> Result<()> {
     println!(
         "EDITOR_UI_HOST_OK native_presentations=6 journal_commits=5 exact_panel_results=7 nonactive_authoring=true undo_redo=true save_reopen=true source_preserved=true modal_underlay_blocked=true hidden_roundtrip_retired=true late_presentation_discarded=true stale_input_rejected=true original_hosts_retired=true input_delivery=injected_pointer_and_ime native_image_host=true keyboard_clipboard=true ime_scope_ready=true mapped_caret=true cursor_refresh=true cancellation_flushed=true"
     );
+    if std::env::args().any(|arg| arg == "--observed-operations") {
+        println!(
+            "EDITOR_UI_OBSERVATION_OK original_journal_reducer=true typed_focus_apply=true observed_key_text_ime=true exact_scope=true stale_output_instance=true foreign_host=true pending_submission_preserved=true exact_result_ids=true"
+        );
+    }
     Ok(())
 }

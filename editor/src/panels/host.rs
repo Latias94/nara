@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    binding::PanelBinding,
+    binding::{EditorPanelInstanceToken, PanelBinding},
     context::EditorPanelContext,
     submission::{
         PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId, PreparedSubmission,
@@ -40,6 +40,22 @@ pub trait EditorPanel {
 /// Host or a later candidate cannot consume or settle its original observations.
 #[must_use]
 pub struct EditorPanelSubmission(PreparedSubmission<()>);
+
+impl EditorPanelSubmission {
+    /// Observes every original panel/submission identity in ledger order, including entries
+    /// whose action slots may later be filtered because their panel retired or closing began.
+    ///
+    /// Borrowing these identities neither consumes the candidate nor grants completion ownership.
+    pub fn submissions(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (EditorPanelInstanceId, PanelSubmissionId)> + '_ {
+        self.0
+            .ledger
+            .submissions
+            .iter()
+            .map(|submission| (submission.origin.instance, submission.id))
+    }
+}
 
 #[cfg(test)]
 impl EditorPanelSubmission {
@@ -125,6 +141,39 @@ impl<P: EditorPanel> EditorPanelHost<P> {
         }
         self.factories.insert(kind.to_owned(), Box::new(factory));
         Ok(())
+    }
+
+    /// Inspects this Host's exact retained panel state against the Application's current model.
+    ///
+    /// Foreign, retired or replaced tokens refuse without calling the callback or a factory.
+    /// This does not reconcile state, prepare actions or supersede a pending candidate. It
+    /// observes semantic state only and establishes no native input or presentation claim.
+    pub fn inspect<R>(
+        &self,
+        application: &EditorApplication,
+        token: &EditorPanelInstanceToken,
+        callback: impl FnOnce(&P, EditorPanelModel<'_>) -> R,
+    ) -> Option<R> {
+        if !Arc::ptr_eq(&token.host, self.identity()) || !token.is_current(application) {
+            return None;
+        }
+        let state = self.instances.get(&token.instance)?;
+        let lifetime = token.state_lifetime.upgrade()?;
+        let frame = application.current_frame()?;
+        let instance = application
+            .panel_workspace()
+            .layout()
+            .instance(token.instance)?;
+        if !Arc::ptr_eq(&lifetime, &state.lifetime)
+            || !Arc::ptr_eq(&token.binding.incarnation, &state.binding.incarnation)
+            || !state.binding.matches(&frame, instance)
+        {
+            return None;
+        }
+        Some(callback(
+            &state.panel,
+            EditorPanelModel::new(&frame, instance),
+        ))
     }
 
     /// Reconciles live instances and prepares their actions against one retained admitted frame.

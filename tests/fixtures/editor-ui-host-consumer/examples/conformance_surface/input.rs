@@ -26,11 +26,20 @@ pub fn reduce(
     services: &mut EditorPanelServices<'_>,
     evidence: &mut InputEvidence,
     document: EditorDocumentId,
+    operation: Option<&Input>,
 ) -> Result<()> {
     let before = panel.compose();
     let mut apply = false;
     let mut sync_text = false;
     match &event.kind {
+        EditorPanelInputKind::ObservedOperation => {
+            let request = operation.ok_or_else(|| {
+                std::io::Error::other("observed operation has no typed frontend request")
+            })?;
+            assert!(matches!(request, Input::Focus(_) | Input::Activate(_)));
+            apply = panel.reduce(&event.snapshot, request)?;
+            sync_text = true;
+        }
         EditorPanelInputKind::KeyboardFocused => {
             panel.reduce(&event.snapshot, &Input::Focus(Control::Field))?;
             sync_text = true;
@@ -66,6 +75,11 @@ pub fn reduce(
                 }
                 sync_text = true;
             }
+        }
+        EditorPanelInputKind::ModalOutsidePointer { button, state } => {
+            evidence
+                .modal_outside
+                .push((context.model().instance().id(), *button, *state));
         }
         EditorPanelInputKind::Key(key) if key.state == ElementState::Pressed && !key.repeat => {
             let command = if cfg!(target_os = "macos") {
@@ -198,6 +212,7 @@ pub fn reduce(
             sync_text = true;
         }
         EditorPanelInputKind::ImeDisabled => {
+            evidence.ime_disabled += 1;
             if evidence.scope.as_ref().map(|(_, scope)| scope) == event.text_scope.as_ref() {
                 if let Some((token, _)) = &evidence.scope {
                     panel.reduce(
@@ -212,6 +227,7 @@ pub fn reduce(
         }
         EditorPanelInputKind::ImeEnabled => {
             assert!(services.ime_ready()?);
+            evidence.ime_enabled += 1;
             sync_text = true;
         }
         EditorPanelInputKind::Wheel { delta, .. } => {
@@ -222,9 +238,12 @@ pub fn reduce(
     if apply {
         let basis = context.document_query_basis(document)?;
         let prepared = panel.prepare_edit(context, &basis, super::entity("caption"))?;
-        context
+        let id = context
             .commit_authoring_edit(prepared)
             .map_err(|(error, _)| error)?;
+        evidence
+            .submissions
+            .push((context.model().instance().id(), id));
     }
     if sync_text {
         if let Some(token) = panel.input_token() {

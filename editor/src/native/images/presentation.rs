@@ -117,6 +117,7 @@ impl<S> EditorPanelImageHost<S> {
             token,
             capabilities,
             deadline: None,
+            observation_lifetime: None,
         });
         Ok(())
     }
@@ -264,6 +265,21 @@ impl<S> EditorPanelImageHost<S> {
         match validation {
             Ok(EditorPanelImageStatus::Presented) => {
                 self.withdraw_incompatible(&candidate.images);
+                for next in &candidate.images {
+                    let unchanged = self.accepted.iter().any(|previous| {
+                        super::input::same_endpoint(previous, next)
+                            && Arc::ptr_eq(previous.snapshot(), next.snapshot())
+                            && previous.compatible(next)
+                    });
+                    let attachment = self
+                        .attachments
+                        .iter_mut()
+                        .find(|attachment| attachment.token == next.token)
+                        .expect("a validated image has its original attachment");
+                    if !unchanged || attachment.observation_lifetime.is_none() {
+                        attachment.observation_lifetime = Some(Arc::new(()));
+                    }
+                }
                 self.accepted = candidate.images.clone();
                 self.reconcile_input_policy(application);
                 let modal = self
@@ -449,6 +465,7 @@ impl<S> EditorPanelImageHost<S> {
         for entry in &mut self.attachments {
             if !self.accepted.iter().any(|image| image.token == entry.token) {
                 entry.deadline = None;
+                entry.observation_lifetime = None;
             }
         }
         if locked && decision.is_none() {
@@ -467,6 +484,7 @@ impl<S> EditorPanelImageHost<S> {
         for entry in &mut self.attachments {
             if !self.accepted.iter().any(|image| image.token == entry.token) {
                 entry.deadline = None;
+                entry.observation_lifetime = None;
             }
         }
     }
@@ -477,6 +495,7 @@ impl<S> EditorPanelImageHost<S> {
         self.pending = None;
         for entry in &mut self.attachments {
             entry.deadline = None;
+            entry.observation_lifetime = None;
         }
         self.reset_ime();
         self.reset_cursor();

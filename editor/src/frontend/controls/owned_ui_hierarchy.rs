@@ -25,7 +25,7 @@ use nara::{
 };
 use nara_text::{FontFace, TextEdit, TextEditOutcome, TextEngine, TextEngineCreateError};
 use nara_ui_kernel::{
-    UiAuthoringError, UiAuthoringSnapshot, UiCompileError, UiCompiler, UiDispatchBatch,
+    UiActionId, UiAuthoringError, UiAuthoringSnapshot, UiCompileError, UiCompiler, UiDispatchBatch,
     UiEnvironment, UiFrame, UiKey, UiKeyError, UiPoint, UiRect, UiRootKey, UiStyleError, UiTheme,
 };
 use nara_ui_widgets::{
@@ -477,6 +477,16 @@ impl OwnedUiHierarchy {
             return Err(OwnedUiHierarchyError::ChangedProjection);
         }
         Ok(button)
+    }
+
+    pub(super) fn owns_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        self.live_button(frame, key)
+            .is_ok_and(|displayed| displayed.button.action() == action)
     }
 
     pub(super) fn invalidated_controls(

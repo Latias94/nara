@@ -24,6 +24,7 @@ use super::EditorClipboard;
 mod events;
 mod geometry;
 mod input;
+mod observation;
 mod presentation;
 mod services;
 
@@ -34,6 +35,7 @@ pub use events::{
     EditorPanelCancelReason, EditorPanelInputKind, EditorPanelKeyEvent, EditorPanelPlatformEvent,
     EditorPanelWheelDelta,
 };
+pub use observation::EditorPanelImageObservation;
 pub use services::{EditorPanelImeArea, EditorPanelServiceError, EditorPanelServices};
 
 /// The finite per-window attachment and complete-candidate image limit.
@@ -91,6 +93,9 @@ pub enum EditorPanelCapability {
     Cursor,
     Refresh,
     WindowModal,
+    /// Cooperative provider-defined semantic operation through an exact accepted observation.
+    /// This grants no native accessibility integration or control identity vocabulary.
+    ObservedOperations,
     OutsidePanelOverlay,
     DirectRendering,
     NativeDetach,
@@ -112,6 +117,7 @@ impl Capabilities {
             C::Cursor => 1 << 5,
             C::Refresh => 1 << 6,
             C::WindowModal => 1 << 7,
+            C::ObservedOperations => 1 << 8,
             C::OutsidePanelOverlay | C::DirectRendering | C::NativeDetach | C::Accessibility => {
                 return None;
             }
@@ -131,6 +137,7 @@ impl Capabilities {
             (C::TextInput, C::Keyboard),
             (C::WindowModal, C::Keyboard),
             (C::WindowModal, C::Pointer),
+            (C::ObservedOperations, C::Keyboard),
         ] {
             if admitted.has(capability) && !admitted.has(prerequisite) {
                 return Err(EditorPanelImageError::MissingCapability(prerequisite));
@@ -441,6 +448,16 @@ pub enum EditorPanelImageError {
     SupersededFrame,
     #[error("the display frame index must be newer than the last accepted native frame")]
     StaleDisplayFrame,
+    #[error("the observation belongs to another native image panel Host")]
+    ForeignObservation,
+    #[error("the observed output, snapshot or native geometry is no longer accepted")]
+    StaleObservation,
+    #[error("the observed keyboard endpoint or text-focus lifetime has changed")]
+    ChangedInputScope,
+    #[error("the observed panel does not own this pointer event")]
+    PointerBlocked,
+    #[error("window-wide lifecycle events cannot target a panel observation")]
+    UnsupportedObservedEvent,
     #[error("the native outcome does not cover the exact window, display frame and all images")]
     IncompletePresentation,
     #[error("native pointer, wheel or IME data is invalid")]
@@ -471,6 +488,7 @@ struct Attachment {
     token: EditorPanelInstanceToken,
     capabilities: Capabilities,
     deadline: Option<Instant>,
+    observation_lifetime: Option<Arc<()>>,
 }
 
 struct PointerCapture<S> {

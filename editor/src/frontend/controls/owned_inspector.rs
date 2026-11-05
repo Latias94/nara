@@ -415,6 +415,63 @@ impl OwnedInspector {
         self.retained(frame).is_ok()
     }
 
+    pub(in crate::frontend) fn owns_action(
+        &self,
+        frame: &Arc<UiFrame>,
+        key: &UiKey,
+        action: &UiActionId,
+    ) -> bool {
+        let Ok(compiled) = self.retained(frame) else {
+            return false;
+        };
+        if self.owns_component_action(frame, key, action) {
+            return true;
+        }
+        if key == &self.recovery_button.key {
+            return compiled.recovery.as_ref().is_some_and(|recovery| {
+                self.frames
+                    .last()
+                    .and_then(|latest| latest.recovery.as_ref())
+                    == Some(recovery)
+                    && self
+                        .recovery_control(recovery)
+                        .is_ok_and(|button| button.action() == action)
+            });
+        }
+        let Some(button) = compiled.buttons.get(key) else {
+            return false;
+        };
+        if button.button.action() != action {
+            return false;
+        }
+        let Ok(field) = self.live_field(frame, &button.field) else {
+            return false;
+        };
+        let Some(control) = self.controls.get(&field.key) else {
+            return false;
+        };
+        match &button.action {
+            InspectorButtonAction::Operation(_) | InspectorButtonAction::Copy => true,
+            InspectorButtonAction::Reference(reference) => control
+                .reference(reference.input.as_ref())
+                .is_some_and(|picker| {
+                    picker.revision == reference.revision
+                        && picker
+                            .buttons
+                            .get(&reference.action)
+                            .is_some_and(|button| button.key == *key)
+                }),
+            InspectorButtonAction::Structure(action) => match &control.input {
+                FieldInput::Structured(controls) => controls
+                    .buttons
+                    .get(action)
+                    .is_some_and(|button| button.key == *key),
+                _ => false,
+            },
+            InspectorButtonAction::SourceTool(_) => control.tool.is_some(),
+        }
+    }
+
     pub(in crate::frontend) fn invalidated_controls(
         &self,
         previous: &Arc<UiFrame>,

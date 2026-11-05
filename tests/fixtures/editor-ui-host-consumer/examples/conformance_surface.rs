@@ -29,11 +29,14 @@ use nara::{
     },
 };
 use nara_editor::{
-    EditorPanelHost, EditorPanelInstanceToken, PanelActionDispatch,
+    EditorPanelContext, EditorPanelHost, EditorPanelInstanceToken, PanelActionDispatch,
+    PanelSubmissionId,
     native::{
         EditorClipboard, EditorClipboardAccess, EditorPanelCapability, EditorPanelImage,
-        EditorPanelImageError, EditorPanelImageFrame, EditorPanelImageHost, EditorPanelImageStatus,
-        EditorPanelPlatformEvent, EditorPanelTextInputScope,
+        EditorPanelImageError, EditorPanelImageFrame, EditorPanelImageHost,
+        EditorPanelImageObservation, EditorPanelImageStatus, EditorPanelInput,
+        EditorPanelInputKind, EditorPanelPlatformEvent, EditorPanelServices,
+        EditorPanelTextInputScope,
     },
     workspace::{
         EditorPanelDescriptor, EditorPanelInstanceId, EditorPanelMultiplicity,
@@ -42,7 +45,7 @@ use nara_editor::{
 };
 use nara_editor_ui_host_consumer::{
     COMPONENT, Evidence, FIELD, INITIAL, Result,
-    conformance::{ConformancePanel, InputToken, Snapshot, SoftwarePainter},
+    conformance::{ConformancePanel, Control, Input, InputToken, Snapshot, SoftwarePainter},
     project::{
         self, Application, Project, SOURCE, current, entity, open_secondary, persistence, property,
     },
@@ -60,7 +63,7 @@ use winit::{
     window::{Window, WindowId as NativeWindowId},
 };
 
-const CAPABILITIES: [EditorPanelCapability; 8] = [
+const CAPABILITIES: [EditorPanelCapability; 9] = [
     EditorPanelCapability::Pointer,
     EditorPanelCapability::Wheel,
     EditorPanelCapability::Keyboard,
@@ -69,6 +72,7 @@ const CAPABILITIES: [EditorPanelCapability; 8] = [
     EditorPanelCapability::Cursor,
     EditorPanelCapability::Refresh,
     EditorPanelCapability::WindowModal,
+    EditorPanelCapability::ObservedOperations,
 ];
 
 #[derive(Default)]
@@ -102,6 +106,10 @@ struct InputEvidence {
     mapped_point: Option<[f32; 2]>,
     cancellations: usize,
     wheel: Vec<nara_editor::native::EditorPanelWheelDelta>,
+    submissions: Vec<(EditorPanelInstanceId, PanelSubmissionId)>,
+    ime_enabled: usize,
+    ime_disabled: usize,
+    modal_outside: Vec<(EditorPanelInstanceId, MouseButton, ElementState)>,
 }
 
 struct Probe {
@@ -126,6 +134,9 @@ struct Probe {
     retired_absence_checked: bool,
     fractional: bool,
     stage: u8,
+    observed_operations: bool,
+    retained_observation: Option<EditorPanelImageObservation<Snapshot>>,
+    cached_underlay: Option<EditorPanelImage<Snapshot>>,
     started: Instant,
 }
 
@@ -190,6 +201,9 @@ impl Probe {
             retired_absence_checked: false,
             fractional: false,
             stage: 0,
+            observed_operations: std::env::args().any(|arg| arg == "--observed-operations"),
+            retained_observation: None,
+            cached_underlay: None,
             started: Instant::now(),
         })
     }
@@ -267,7 +281,38 @@ impl Probe {
             self.native
                 .attach(&self.application, token.clone(), CAPABILITIES)?;
             let (mapping, clip) = self.placement();
+            let underlay = if self.observed_operations && self.stage == 3 {
+                let mut captured = None;
+                drop(
+                    self.panels
+                        .prepare(&self.application, |panel, context| {
+                            if context.model().instance().kind() == "consumer.second-image" {
+                                captured =
+                                    Some((context.instance_token(), Arc::new(panel.compose())));
+                            }
+                        })
+                        .unwrap(),
+                );
+                let (token, snapshot) = captured.unwrap();
+                self.native
+                    .attach(&self.application, token.clone(), CAPABILITIES)?;
+                let cached = self.cached_underlay.as_ref().unwrap();
+                assert_eq!(
+                    self.painter.paint(cached.snapshot(), 1.0)?,
+                    self.painter.paint(&snapshot, 1.0)?
+                );
+                Some((token, snapshot))
+            } else {
+                None
+            };
             let gpu = self.gpu.as_mut().unwrap();
+            let mut images = Vec::new();
+            if let Some((token, snapshot)) = underlay {
+                let display = gpu.mirror(self.cached_underlay.as_ref().unwrap().display())?;
+                images.push(EditorPanelImage::new(
+                    token, display, snapshot, mapping, clip,
+                ));
+            }
             let display = gpu.render(
                 &snapshot,
                 &mut self.painter,
@@ -275,12 +320,20 @@ impl Probe {
             )?;
             let image = EditorPanelImage::new(token, display, Arc::clone(&snapshot), mapping, clip)
                 .with_window_modal(snapshot.popup_open());
-            let next = self
-                .native
-                .stage(&self.application, gpu.frame, vec![image])?;
+            images.push(image);
+            let next = self.native.stage(&self.application, gpu.frame, images)?;
             self.pending = Some(next.clone());
             Some(next)
         };
+        if let Some(candidate) = &candidate {
+            let observations = self.native.observe(&self.application)?;
+            for image in candidate.images() {
+                assert!(observations.iter().all(|observation| {
+                    observation.endpoint() != image.endpoint()
+                        || !Arc::ptr_eq(observation.snapshot(), image.snapshot())
+                }));
+            }
+        }
         if retire && !self.retired {
             self.retire_pending_panel()?;
             self.retired = true;
@@ -335,9 +388,36 @@ impl Probe {
             return Ok(false);
         }
         let pending = self.pending.take().unwrap();
-        let image = &pending.images()[0];
-        assert_eq!(outcome.composites().len(), 1);
-        let composite = outcome.composites()[0];
+        let image = pending
+            .images()
+            .iter()
+            .find(|image| image.token().instance() == self.instance)
+            .unwrap();
+        if self.observed_operations && self.stage == 3 {
+            assert_eq!(pending.images().len(), 2);
+            assert_eq!(outcome.composites().len(), 2);
+            for image in pending.images() {
+                assert_eq!(
+                    outcome
+                        .composites()
+                        .iter()
+                        .filter(|composite| {
+                            composite.image() == image.display().receipt()
+                                && composite.occurrence() == image.display().occurrence()
+                                && composite.window() == outcome.window().unwrap()
+                        })
+                        .count(),
+                    1
+                );
+            }
+        } else {
+            assert_eq!(outcome.composites().len(), 1);
+        }
+        let composite = outcome
+            .composites()
+            .iter()
+            .find(|composite| composite.occurrence() == image.display().occurrence())
+            .unwrap();
         assert_eq!(composite.window(), outcome.window().unwrap());
         assert_eq!(composite.image(), image.display().receipt());
         assert_eq!(composite.occurrence(), image.display().occurrence());
@@ -352,27 +432,373 @@ impl Probe {
     }
 
     fn event(&mut self, event: Option<EditorPanelPlatformEvent>) -> Result<bool> {
+        self.deliver_input(None, event, None)
+    }
+
+    fn deliver_input(
+        &mut self,
+        observation: Option<&EditorPanelImageObservation<Snapshot>>,
+        event: Option<EditorPanelPlatformEvent>,
+        operation: Option<Input>,
+    ) -> Result<bool> {
         let mut reduced = Ok(());
+        let start = self.input.submissions.len();
         let input = &mut self.input;
         let document = self.document;
-        let outcome = self.native.dispatch(
-            &self.application,
-            &mut self.panels,
-            event,
-            |panel, context, event, services| {
-                if reduced.is_ok() {
-                    reduced = input::reduce(panel, context, event, services, input, document);
-                }
-            },
-        )?;
+        let callback = |panel: &mut ConformancePanel,
+                        context: &mut EditorPanelContext<'_, '_>,
+                        event: &EditorPanelInput<Snapshot>,
+                        services: &mut EditorPanelServices<'_>| {
+            if reduced.is_ok() {
+                reduced = input::reduce(
+                    panel,
+                    context,
+                    event,
+                    services,
+                    input,
+                    document,
+                    operation.as_ref(),
+                );
+            }
+        };
+        let outcome = match observation {
+            Some(observation) if operation.is_some() => self.native.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                observation,
+                callback,
+            ),
+            Some(observation) => self.native.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                observation,
+                event.unwrap(),
+                callback,
+            ),
+            None => self
+                .native
+                .dispatch(&self.application, &mut self.panels, event, callback),
+        }?;
         reduced.map_err(|error| {
             io::Error::other(format!("conformance stage {}: {error}", self.stage))
         })?;
         if let Some(candidate) = outcome.submission {
+            let ids = candidate.submissions().collect::<Vec<_>>();
+            assert_eq!(ids, self.input.submissions[start..]);
+            if !ids.is_empty() {
+                let before = current(&self.application);
+                let observations = self.native.observe(&self.application)?;
+                for (instance, _) in &ids {
+                    let observed = observations
+                        .iter()
+                        .find(|observation| observation.endpoint().token().instance() == *instance)
+                        .unwrap();
+                    assert_eq!(
+                        self.panels.inspect(
+                            &self.application,
+                            observed.endpoint().token(),
+                            |panel, model| {
+                                assert_eq!(model.instance().id(), *instance);
+                                (panel.draft().to_owned(), panel.popup_open())
+                            }
+                        ),
+                        Some(("native draft".into(), false))
+                    );
+                }
+                assert!(Arc::ptr_eq(&before, &current(&self.application)));
+                assert!(self.evidence.finished.borrow().is_empty());
+                assert_eq!(candidate.submissions().collect::<Vec<_>>(), ids);
+            }
             self.panels
                 .submit_and_drive(&mut self.application, candidate, Duration::ZERO);
+            for (instance, id) in ids {
+                assert_eq!(instance, self.instance);
+                let finished = self.evidence.finished.borrow();
+                let matching = finished
+                    .iter()
+                    .filter(|(_, actual, _)| *actual == id)
+                    .collect::<Vec<_>>();
+                assert_eq!(matching.len(), 1);
+                assert_eq!(matching[0].0, 1);
+                assert!(matches!(
+                    &matching[0].2,
+                    PanelActionDispatch::Dispatched(EditorActionOutcome::Workspace(report)) if report.applied
+                ));
+            }
+        } else {
+            assert_eq!(self.input.submissions.len(), start);
         }
         Ok(outcome.consumed)
+    }
+
+    fn observe_token(
+        &mut self,
+        token: &EditorPanelInstanceToken,
+    ) -> Result<EditorPanelImageObservation<Snapshot>> {
+        let observation = self
+            .native
+            .observe(&self.application)?
+            .into_iter()
+            .find(|observation| observation.endpoint().token() == token)
+            .ok_or_else(|| io::Error::other("the original panel has no accepted observation"))?;
+        assert_eq!(observation.endpoint(), observation.image().endpoint());
+        assert!(Arc::ptr_eq(
+            observation.snapshot(),
+            observation.image().snapshot()
+        ));
+        assert_eq!(
+            observation.display_frame_index(),
+            self.gpu.as_ref().unwrap().frame
+        );
+        let size = self.window.inner_size();
+        assert_eq!(
+            observation.geometry().physical_size,
+            [size.width, size.height]
+        );
+        assert_eq!(
+            observation.geometry().scale_factor,
+            self.window.scale_factor()
+        );
+        let field = observation.snapshot().geometry().field;
+        assert!(
+            observation
+                .window_bounds(DisplayRect {
+                    min: [field.x0, field.y0],
+                    max: [field.x1, field.y1],
+                })
+                .is_some()
+        );
+        Ok(observation)
+    }
+
+    fn observed_event(&mut self, event: EditorPanelPlatformEvent) -> Result<bool> {
+        let token = self.last_image.as_ref().unwrap().token().clone();
+        let observation = self.observe_token(&token)?;
+        assert!(observation.owns_keyboard());
+        assert_eq!(
+            observation.text_scope(),
+            self.input.scope.as_ref().map(|(_, scope)| scope)
+        );
+        self.deliver_input(Some(&observation), Some(event), None)
+    }
+
+    fn invoke_control(&mut self, request: Input) -> Result<()> {
+        let token = self.last_image.as_ref().unwrap().token().clone();
+        let observation = self.observe_token(&token)?;
+        assert!(self.deliver_input(Some(&observation), None, Some(request))?);
+        Ok(())
+    }
+
+    fn observed_ime_scope_gap(&mut self, token: &EditorPanelInstanceToken) -> Result<()> {
+        let scope_a = self.observe_token(token)?;
+        assert!(scope_a.owns_keyboard() && scope_a.text_scope().is_some());
+        assert!(self.input.ime_enabled > 0);
+        assert!(self.deliver_input(Some(&scope_a), None, Some(Input::Focus(Control::Review)))?);
+        let without_scope = self.observe_token(token)?;
+        assert!(without_scope.owns_keyboard());
+        assert!(without_scope.text_scope().is_none());
+        let disabled = self.input.ime_disabled;
+        assert!(self.deliver_input(
+            Some(&without_scope),
+            Some(EditorPanelPlatformEvent::Ime(Ime::Disabled)),
+            None
+        )?);
+        assert_eq!(self.input.ime_disabled, disabled + 1);
+        assert!(self.observe_token(token)?.text_scope().is_none());
+        assert!(self.deliver_input(
+            Some(&without_scope),
+            None,
+            Some(Input::Focus(Control::Field))
+        )?);
+        let scope_b = self.observe_token(token)?;
+        assert_eq!(scope_a.endpoint(), scope_b.endpoint());
+        assert!(scope_b.owns_keyboard() && scope_b.text_scope().is_some());
+        assert_ne!(scope_a.text_scope(), scope_b.text_scope());
+        let enabled = self.input.ime_enabled;
+        assert!(self.deliver_input(
+            Some(&scope_b),
+            Some(EditorPanelPlatformEvent::Ime(Ime::Enabled)),
+            None
+        )?);
+        assert_eq!(self.input.ime_enabled, enabled + 1);
+        self.refuse_observed_input(&scope_a, EditorPanelImageError::ChangedInputScope)
+    }
+
+    fn observed_modal_outside(&mut self) -> Result<()> {
+        let observations = self.native.observe(&self.application)?;
+        assert_eq!(observations.len(), 2);
+        let modal = observations
+            .iter()
+            .find(|observation| observation.image().is_window_modal())
+            .unwrap();
+        let underlay = observations
+            .iter()
+            .find(|observation| !observation.image().is_window_modal())
+            .unwrap();
+        let states = observations
+            .iter()
+            .map(|observation| {
+                self.panels
+                    .inspect(
+                        &self.application,
+                        observation.endpoint().token(),
+                        |panel, _| panel.compose(),
+                    )
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert!(self.event(Some(EditorPanelPlatformEvent::PointerMoved {
+            physical_position: [-10.0, -10.0]
+        }))?);
+        assert!(matches!(
+            self.native.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                underlay,
+                EditorPanelPlatformEvent::PointerButton {
+                    button: MouseButton::Left,
+                    state: ElementState::Pressed
+                },
+                |_, _, _, _| panic!("modal outside press reached the underlying provider"),
+            ),
+            Err(EditorPanelImageError::PointerBlocked)
+        ));
+        assert!(matches!(
+            self.native.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                modal,
+                EditorPanelPlatformEvent::Wheel {
+                    delta: nara_editor::native::EditorPanelWheelDelta::Lines([0.0, 1.0]),
+                    phase: winit::event::TouchPhase::Moved,
+                },
+                |_, _, _, _| panic!("outside wheel borrowed modal pointer fallback"),
+            ),
+            Err(EditorPanelImageError::PointerBlocked)
+        ));
+        let start = self.input.modal_outside.len();
+        for state in [ElementState::Pressed, ElementState::Released] {
+            assert!(self.deliver_input(
+                Some(modal),
+                Some(EditorPanelPlatformEvent::PointerButton {
+                    button: MouseButton::Left,
+                    state,
+                }),
+                None
+            )?);
+        }
+        assert_eq!(
+            self.input.modal_outside[start..],
+            [
+                (self.instance, MouseButton::Left, ElementState::Pressed),
+                (self.instance, MouseButton::Left, ElementState::Released),
+            ]
+        );
+        for (observation, state) in observations.iter().zip(states) {
+            assert_eq!(
+                self.panels.inspect(
+                    &self.application,
+                    observation.endpoint().token(),
+                    |panel, _| panel.compose()
+                ),
+                Some(state)
+            );
+        }
+        let instance = underlay.endpoint().token().instance();
+        assert!(
+            self.application
+                .panel_workspace_mut()
+                .layout_mut()
+                .set_visible(instance, false)
+        );
+        drop(
+            self.panels
+                .prepare(&self.application, |_, context| {
+                    assert_ne!(context.model().instance().id(), instance)
+                })
+                .unwrap(),
+        );
+        self.event(None)?;
+        Ok(())
+    }
+
+    fn refuse_observed_input(
+        &mut self,
+        observation: &EditorPanelImageObservation<Snapshot>,
+        error: EditorPanelImageError,
+    ) -> Result<()> {
+        let token = observation.endpoint().token().clone();
+        let before = self
+            .panels
+            .inspect(&self.application, &token, |panel, _| panel.compose());
+        let scope = self.input.scope.clone();
+        let counts = (
+            self.input.cancellations,
+            self.input.submissions.len(),
+            self.evidence.finished.borrow().len(),
+        );
+        for event in [
+            EditorPanelPlatformEvent::logical_key(
+                Key::Character("stale".into()),
+                ElementState::Pressed,
+                false,
+                Some("stale".into()),
+            ),
+            EditorPanelPlatformEvent::Text("stale observation".into()),
+            EditorPanelPlatformEvent::Ime(Ime::Commit("stale observation".into())),
+        ] {
+            assert!(matches!(
+                self.native.dispatch_observed(
+                    &self.application, &mut self.panels, observation, event,
+                    |_, _, _, _| panic!("refused observed input reached the frontend"),
+                ),
+                Err(actual) if actual == error
+            ));
+        }
+        assert_eq!(
+            self.panels
+                .inspect(&self.application, &token, |panel, _| panel.compose()),
+            before
+        );
+        assert_eq!(self.input.scope, scope);
+        assert_eq!(
+            (
+                self.input.cancellations,
+                self.input.submissions.len(),
+                self.evidence.finished.borrow().len()
+            ),
+            counts
+        );
+        Ok(())
+    }
+
+    fn refuse_observed_endpoint(
+        &mut self,
+        observation: &EditorPanelImageObservation<Snapshot>,
+    ) -> Result<()> {
+        assert!(matches!(
+            self.native.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                observation,
+                |_, _, _, _| panic!("replaced observation reached the frontend"),
+            ),
+            Err(EditorPanelImageError::StaleObservation)
+        ));
+        self.refuse_observed_input(observation, EditorPanelImageError::StaleObservation)
+    }
+
+    fn check_observation_replacement(&mut self) -> Result<()> {
+        if let Some(previous) = self.retained_observation.clone() {
+            self.refuse_observed_endpoint(&previous)?;
+        }
+        if self.stage == 8 {
+            assert!(self.native.observe(&self.application)?.is_empty());
+        } else {
+            let token = self.last_image.as_ref().unwrap().token().clone();
+            self.retained_observation = Some(self.observe_token(&token)?);
+        }
+        Ok(())
     }
 
     fn focus(&mut self, token: &EditorPanelInstanceToken) -> Result<()> {
@@ -385,7 +811,7 @@ impl Probe {
             token,
             |panel, context, event, services| {
                 if reduced.is_ok() {
-                    reduced = input::reduce(panel, context, event, services, input, document);
+                    reduced = input::reduce(panel, context, event, services, input, document, None);
                 }
             },
         )?;
@@ -427,12 +853,12 @@ impl Probe {
     fn key(&mut self, key: Key, modifiers: ModifiersState) -> Result<()> {
         self.event(Some(EditorPanelPlatformEvent::ModifiersChanged(modifiers)))?;
         for state in [ElementState::Pressed, ElementState::Released] {
-            self.event(Some(EditorPanelPlatformEvent::logical_key(
-                key.clone(),
-                state,
-                false,
-                None,
-            )))?;
+            let event = EditorPanelPlatformEvent::logical_key(key.clone(), state, false, None);
+            if self.observed_operations {
+                assert!(self.observed_event(event)?);
+            } else {
+                self.event(Some(event))?;
+            }
         }
         self.event(Some(EditorPanelPlatformEvent::ModifiersChanged(
             ModifiersState::empty(),
@@ -664,7 +1090,49 @@ impl Probe {
     }
 
     fn presentation_controls(&mut self) -> Result<()> {
+        let inspect_current =
+            |probe: &mut Self, observation: &EditorPanelImageObservation<Snapshot>| -> Result<()> {
+                let before = current(&probe.application);
+                let token = observation.endpoint().token().clone();
+                let state = probe
+                    .panels
+                    .inspect(&probe.application, &token, |panel, _| panel.compose())
+                    .unwrap();
+                let finished = probe.evidence.finished.borrow().len();
+                let mut calls = 0;
+                let outcome = probe.native.invoke_observed(
+                    &probe.application,
+                    &mut probe.panels,
+                    observation,
+                    |panel, context, event, _| {
+                        assert!(matches!(
+                            event.kind,
+                            EditorPanelInputKind::ObservedOperation
+                        ));
+                        assert_eq!(event.endpoint, observation.endpoint());
+                        assert!(Arc::ptr_eq(&event.snapshot, observation.snapshot()));
+                        assert_eq!(context.model().instance().id(), token.instance());
+                        assert_eq!(panel.compose(), state);
+                        calls += 1;
+                    },
+                )?;
+                assert!(outcome.consumed);
+                assert_eq!(calls, 1);
+                let candidate = outcome.submission.unwrap();
+                assert_eq!(candidate.submissions().len(), 0);
+                drop(candidate);
+                assert!(Arc::ptr_eq(&before, &current(&probe.application)));
+                assert_eq!(probe.evidence.finished.borrow().len(), finished);
+                assert_eq!(
+                    probe
+                        .panels
+                        .inspect(&probe.application, &token, |panel, _| panel.compose()),
+                    Some(state)
+                );
+                Ok(())
+            };
         let image = self.last_image.as_ref().unwrap().clone();
+        let observation = self.observe_token(image.token())?;
         let mut foreign = EditorPanelImageHost::new(
             Arc::clone(&self.window),
             WindowId::PRIMARY,
@@ -681,6 +1149,26 @@ impl Probe {
             ))
         ));
         foreign.attach(&self.application, image.token().clone(), CAPABILITIES)?;
+        assert!(foreign.observe(&self.application)?.is_empty());
+        assert!(matches!(
+            foreign.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                &observation,
+                |_, _, _, _| panic!("foreign observed operation reached the frontend"),
+            ),
+            Err(EditorPanelImageError::ForeignObservation)
+        ));
+        assert!(matches!(
+            foreign.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                &observation,
+                EditorPanelPlatformEvent::Text("foreign observation".into()),
+                |_, _, _, _| panic!("foreign observed input reached the frontend"),
+            ),
+            Err(EditorPanelImageError::ForeignObservation)
+        ));
         self.gpu.as_mut().unwrap().begin(&self.window)?;
         let frame = self.gpu.as_ref().unwrap().frame;
         let original = self
@@ -702,15 +1190,37 @@ impl Probe {
                 .presented(&self.application, original, &outcome)?,
             EditorPanelImageStatus::Presented
         );
+        let unchanged = self.observe_token(image.token())?;
+        assert_eq!(observation.endpoint(), unchanged.endpoint());
+        assert!(Arc::ptr_eq(observation.snapshot(), unchanged.snapshot()));
+        assert!(observation.display_frame_index() < unchanged.display_frame_index());
+        self.event(Some(EditorPanelPlatformEvent::Focused(true)))?;
+        inspect_current(self, &observation)?;
         foreign.close();
         self.gpu.as_mut().unwrap().begin(&self.window)?;
         let frame = self.gpu.as_ref().unwrap().frame;
         let old = self
             .native
             .stage(&self.application, frame, vec![image.clone()])?;
+        let mut bounds = image.mapping().panel_rect();
+        bounds.min[0] += 8.0;
+        bounds.max[0] -= 8.0;
+        let remapped = EditorPanelImage::new(
+            image.token().clone(),
+            image.display().clone(),
+            Arc::clone(image.snapshot()),
+            DisplayMapping2d::fit(
+                image.mapping().target(),
+                bounds,
+                self.window.scale_factor() as f32,
+                DisplayScale::Fit,
+            )
+            .unwrap(),
+            image.clip(),
+        );
         let original = self
             .native
-            .stage(&self.application, frame, vec![image.clone()])?;
+            .stage(&self.application, frame, vec![remapped.clone()])?;
         let outcome = self
             .gpu
             .as_mut()
@@ -726,6 +1236,11 @@ impl Probe {
                 .presented(&self.application, original, &outcome)?,
             EditorPanelImageStatus::Presented
         );
+        let moved = self.observe_token(image.token())?;
+        assert_eq!(unchanged.endpoint(), moved.endpoint());
+        assert!(Arc::ptr_eq(unchanged.snapshot(), moved.snapshot()));
+        assert_ne!(unchanged.image().mapping(), moved.image().mapping());
+        self.refuse_observed_endpoint(&unchanged)?;
         self.gpu.as_mut().unwrap().begin(&self.window)?;
         let frame = self.gpu.as_ref().unwrap().frame;
         let missing = self
@@ -741,6 +1256,7 @@ impl Probe {
             self.native.presented(&self.application, missing, &outcome),
             Err(EditorPanelImageError::IncompletePresentation)
         ));
+        assert!(self.native.observe(&self.application)?.is_empty());
         assert!(!self.event(Some(EditorPanelPlatformEvent::Text("unpresented".into())))?);
         self.gpu.as_mut().unwrap().begin(&self.window)?;
         let frame = self.gpu.as_ref().unwrap().frame;
@@ -755,6 +1271,15 @@ impl Probe {
                 .presented(&self.application, restored, &outcome)?,
             EditorPanelImageStatus::Presented
         );
+        for stale in [&observation, &unchanged, &moved] {
+            self.refuse_observed_endpoint(stale)?;
+        }
+        let fresh = self.observe_token(observation.endpoint().token())?;
+        assert_eq!(fresh.endpoint(), observation.endpoint());
+        assert!(Arc::ptr_eq(fresh.snapshot(), observation.snapshot()));
+        assert_eq!(fresh.image().mapping(), observation.image().mapping());
+        assert_eq!(fresh.image().clip(), observation.image().clip());
+        inspect_current(self, &fresh)?;
         self.last_outcome = Some(outcome);
         Ok(())
     }
@@ -806,16 +1331,29 @@ impl Probe {
             .window
             .inner_size()
             .to_logical::<f32>(self.window.scale_factor());
-        let placements = [
-            DisplayRect {
-                min: [0.0, 0.0],
-                max: [size.width / 2.0, size.height],
-            },
-            DisplayRect {
-                min: [size.width / 2.0, 0.0],
-                max: [size.width, size.height],
-            },
-        ];
+        let placements = if self.observed_operations {
+            [
+                DisplayRect {
+                    min: [0.0, 0.0],
+                    max: [size.width * 0.75, size.height],
+                },
+                DisplayRect {
+                    min: [size.width * 0.25, 0.0],
+                    max: [size.width, size.height],
+                },
+            ]
+        } else {
+            [
+                DisplayRect {
+                    min: [0.0, 0.0],
+                    max: [size.width / 2.0, size.height],
+                },
+                DisplayRect {
+                    min: [size.width / 2.0, 0.0],
+                    max: [size.width, size.height],
+                },
+            ]
+        };
         self.native
             .attach(&self.application, secondary.clone(), CAPABILITIES)?;
         let gpu = self.gpu.as_mut().unwrap();
@@ -878,10 +1416,107 @@ impl Probe {
                 .presented(&self.application, complete, &outcome)?,
             EditorPanelImageStatus::Presented
         );
+        let primary_observation = self.observe_token(&primary)?;
+        let secondary_observation = self.observe_token(&secondary)?;
+        if self.observed_operations {
+            self.cached_underlay = Some(secondary_observation.image().clone());
+        }
+        assert_ne!(
+            primary_observation.endpoint(),
+            secondary_observation.endpoint()
+        );
+        assert_ne!(
+            primary_observation.snapshot().incarnation(),
+            secondary_observation.snapshot().incarnation()
+        );
+        assert_eq!(
+            primary_observation.snapshot().geometry(),
+            secondary_observation.snapshot().geometry()
+        );
+        assert_eq!(
+            primary_observation.snapshot().hit_test(40.0, 30.0),
+            Some(Control::Field)
+        );
+        assert_eq!(
+            secondary_observation.snapshot().hit_test(40.0, 30.0),
+            Some(Control::Field)
+        );
+        let primary_bounds = primary_observation
+            .window_bounds(DisplayRect {
+                min: [12.0, 12.0],
+                max: [172.0, 52.0],
+            })
+            .unwrap();
+        let secondary_bounds = secondary_observation
+            .window_bounds(DisplayRect {
+                min: [12.0, 12.0],
+                max: [172.0, 52.0],
+            })
+            .unwrap();
+        if self.observed_operations {
+            assert!(primary_bounds.min[0] < secondary_bounds.min[0]);
+            assert!(primary_bounds.max[0] > secondary_bounds.min[0]);
+        } else {
+            assert!(primary_bounds.max[0] <= secondary_bounds.min[0]);
+        }
         self.last_outcome = Some(outcome);
         self.event(Some(EditorPanelPlatformEvent::Focused(true)))?;
-        self.focus(&primary)?;
+        if self.observed_operations {
+            assert!(self.deliver_input(
+                Some(&primary_observation),
+                None,
+                Some(Input::Focus(Control::Field)),
+            )?);
+        } else {
+            self.focus(&primary)?;
+        }
+        let focused_primary = self.observe_token(&primary)?;
+        assert!(focused_primary.owns_keyboard());
+        assert_eq!(
+            focused_primary.text_scope(),
+            self.input.scope.as_ref().map(|(_, scope)| scope)
+        );
+        self.refuse_observed_input(
+            &primary_observation,
+            EditorPanelImageError::ChangedInputScope,
+        )?;
+        assert_eq!(
+            self.panels
+                .inspect(&self.application, &secondary, |panel, _| panel
+                    .input_token()),
+            Some(None)
+        );
+        let blocked_point = [
+            if self.observed_operations {
+                (secondary_bounds.min[0] + primary_bounds.max[0]) * 0.5
+            } else {
+                (secondary_bounds.min[0] + secondary_bounds.max[0]) * 0.5
+            },
+            (secondary_bounds.min[1] + secondary_bounds.max[1]) * 0.5,
+        ];
+        assert!(secondary_bounds.contains(blocked_point));
+        if self.observed_operations {
+            assert!(primary_bounds.contains(blocked_point));
+        }
+        assert!(matches!(
+            self.native.dispatch_observed(
+                &self.application,
+                &mut self.panels,
+                &primary_observation,
+                EditorPanelPlatformEvent::PointerMoved {
+                    physical_position: [
+                        f64::from(blocked_point[0]) * self.window.scale_factor(),
+                        f64::from(blocked_point[1]) * self.window.scale_factor(),
+                    ],
+                },
+                |_, _, _, _| panic!("observed pointer crossed into another panel"),
+            ),
+            Err(EditorPanelImageError::PointerBlocked)
+        ));
         self.ime(Ime::Enabled)?;
+        if self.observed_operations {
+            self.observed_ime_scope_gap(&primary)?;
+        }
         self.ime(Ime::Preedit("first composition".into(), Some((0, 17))))?;
         assert!(
             self.snapshot()
@@ -894,23 +1529,45 @@ impl Probe {
         let mut reduced = Ok(());
         let input = &mut self.input;
         let document = self.document;
-        let outcome = self.native.focus_panel(
-            &self.application,
-            &mut self.panels,
-            &secondary,
-            |panel, context, event, services| {
-                visits.push((context.model().instance().id(), event.kind.clone()));
-                if reduced.is_ok() {
-                    reduced = input::reduce(panel, context, event, services, input, document);
-                }
-            },
-        )?;
+        let operation = Input::Focus(Control::Field);
+        let callback = |panel: &mut ConformancePanel,
+                        context: &mut EditorPanelContext<'_, '_>,
+                        event: &EditorPanelInput<Snapshot>,
+                        services: &mut EditorPanelServices<'_>| {
+            visits.push((context.model().instance().id(), event.kind.clone()));
+            if reduced.is_ok() {
+                reduced = input::reduce(
+                    panel,
+                    context,
+                    event,
+                    services,
+                    input,
+                    document,
+                    Some(&operation),
+                );
+            }
+        };
+        let outcome = if self.observed_operations {
+            self.native.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                &secondary_observation,
+                callback,
+            )
+        } else {
+            self.native
+                .focus_panel(&self.application, &mut self.panels, &secondary, callback)
+        }?;
         reduced?;
         assert!(outcome.consumed);
         assert!(
             matches!(visits.as_slice(), [(previous, nara_editor::native::EditorPanelInputKind::Cancelled(_)),
-            (next, nara_editor::native::EditorPanelInputKind::KeyboardFocused)]
-            if *previous == self.instance && *next == second)
+            (next, kind)]
+            if *previous == self.instance && *next == second && *kind == if self.observed_operations {
+                EditorPanelInputKind::ObservedOperation
+            } else {
+                EditorPanelInputKind::KeyboardFocused
+            })
         );
         if let Some(candidate) = outcome.submission {
             self.panels
@@ -918,6 +1575,18 @@ impl Probe {
         }
         assert_eq!(self.snapshot().1.display_text(), INITIAL);
         assert_ne!(self.input.scope.as_ref().unwrap().1, old_scope);
+        self.refuse_observed_input(&focused_primary, EditorPanelImageError::ChangedInputScope)?;
+        self.refuse_observed_input(
+            &secondary_observation,
+            EditorPanelImageError::ChangedInputScope,
+        )?;
+        let focused_secondary = self.observe_token(&secondary)?;
+        assert!(focused_secondary.owns_keyboard());
+        assert_ne!(focused_secondary.text_scope(), focused_primary.text_scope());
+        assert_eq!(
+            focused_secondary.text_scope(),
+            self.input.scope.as_ref().map(|(_, scope)| scope)
+        );
         let stale = self.native.dispatch(
             &self.application,
             &mut self.panels,
@@ -992,8 +1661,24 @@ impl Probe {
         );
         self.event(Some(EditorPanelPlatformEvent::Focused(true)))?;
         self.focus(image.token())?;
+        let keyboard_only = self.observe_token(image.token())?;
+        assert!(matches!(
+            self.native.invoke_observed(
+                &self.application,
+                &mut self.panels,
+                &keyboard_only,
+                |_, _, _, _| panic!("undeclared observed operations reached the frontend"),
+            ),
+            Err(EditorPanelImageError::MissingCapability(
+                EditorPanelCapability::ObservedOperations
+            ))
+        ));
         self.command("a", false)?;
-        self.event(Some(EditorPanelPlatformEvent::Text("keyboard only".into())))?;
+        if self.observed_operations {
+            self.observed_event(EditorPanelPlatformEvent::Text("keyboard only".into()))?;
+        } else {
+            self.event(Some(EditorPanelPlatformEvent::Text("keyboard only".into())))?;
+        }
         assert_eq!(self.draft(), "keyboard only");
         self.command("z", false)?;
         assert_eq!(self.draft(), INITIAL);
@@ -1079,19 +1764,36 @@ impl Probe {
         if !self.draw(self.stage == 8)? {
             return Ok(false);
         }
+        if self.observed_operations {
+            self.check_observation_replacement()?;
+        }
         match self.stage {
             0 => {
                 self.presentation_controls()?;
                 self.two_panel_controls()?;
                 self.keyboard_and_semantic_owner_controls()?;
                 self.event(Some(EditorPanelPlatformEvent::Focused(true)))?;
-                self.click([40.0, 30.0])?;
+                if self.observed_operations {
+                    self.invoke_control(Input::Focus(Control::Field))?;
+                } else {
+                    self.click([40.0, 30.0])?;
+                }
                 self.ime(Ime::Commit("must wait for Enabled".into()))?;
                 assert_eq!(self.draft(), INITIAL);
                 self.ime(Ime::Enabled)?;
                 self.command("a", false)?;
-                self.ime(Ime::Preedit("candidate".into(), Some((0, 9))))?;
-                self.ime(Ime::Commit("native draft".into()))?;
+                if self.observed_operations {
+                    self.observed_event(EditorPanelPlatformEvent::Ime(Ime::Preedit(
+                        "candidate".into(),
+                        Some((0, 9)),
+                    )))?;
+                    self.observed_event(EditorPanelPlatformEvent::Ime(Ime::Commit(
+                        "native draft".into(),
+                    )))?;
+                } else {
+                    self.ime(Ime::Preedit("candidate".into(), Some((0, 9))))?;
+                    self.ime(Ime::Commit("native draft".into()))?;
+                }
                 self.old_token = self.snapshot().1.input_token();
                 assert_eq!(self.draft(), "native draft");
                 assert!(self.evidence.finished.borrow().is_empty());
@@ -1121,6 +1823,18 @@ impl Probe {
                 }))?;
                 assert!(self.pointer([-30.0, -20.0])?);
                 assert!(self.input.mapped_point.unwrap()[0] < 0.0);
+                if self.observed_operations {
+                    assert!(
+                        self.observed_event(EditorPanelPlatformEvent::PointerButton {
+                            button: MouseButton::Right,
+                            state: ElementState::Released,
+                        })?
+                    );
+                    assert!(self.observed_event(EditorPanelPlatformEvent::PointerMoved {
+                        physical_position: [-10.0, -10.0],
+                    })?);
+                    assert!(self.input.mapped_point.unwrap()[0] < 0.0);
+                }
                 self.event(Some(EditorPanelPlatformEvent::PointerButton {
                     button: MouseButton::Right,
                     state: ElementState::Released,
@@ -1131,14 +1845,56 @@ impl Probe {
                     state: ElementState::Released,
                 }))?;
                 assert!(!self.pointer([-20.0, -10.0])?);
-                self.click([40.0, 90.0])?;
+                if self.observed_operations {
+                    self.invoke_control(Input::Focus(Control::Review))?;
+                    self.invoke_control(Input::Activate(Control::Review))?;
+                } else {
+                    self.click([40.0, 90.0])?;
+                }
                 assert!(self.snapshot().1.popup_open());
+                if self.observed_operations {
+                    let second = self
+                        .application
+                        .panel_workspace()
+                        .layout()
+                        .instances()
+                        .iter()
+                        .find(|panel| panel.kind() == "consumer.second-image")
+                        .unwrap()
+                        .id();
+                    assert!(
+                        self.application
+                            .panel_workspace_mut()
+                            .layout_mut()
+                            .reopen(second)
+                    );
+                }
             }
             3 => {
+                if self.observed_operations {
+                    self.observed_modal_outside()?;
+                }
                 assert!(self.pointer([-10.0, -10.0])?);
                 self.click([40.0, 90.0])?;
                 assert!(self.snapshot().1.popup_open());
-                self.click([230.0, 58.0])?;
+                if self.observed_operations {
+                    let token = self.last_image.as_ref().unwrap().token().clone();
+                    let before = self
+                        .panels
+                        .inspect(&self.application, &token, |panel, _| panel.compose())
+                        .unwrap();
+                    self.invoke_control(Input::Activate(Control::Review))?;
+                    assert_eq!(
+                        self.panels
+                            .inspect(&self.application, &token, |panel, _| panel.compose()),
+                        Some(before)
+                    );
+                    assert!(self.evidence.finished.borrow().is_empty());
+                    self.invoke_control(Input::Focus(Control::Apply))?;
+                    self.invoke_control(Input::Activate(Control::Apply))?;
+                } else {
+                    self.click([230.0, 58.0])?;
+                }
                 let finished = self.evidence.finished.borrow();
                 assert_eq!(finished.len(), 1);
                 assert!(
@@ -1301,6 +2057,8 @@ impl Probe {
         }));
         self.last_image = None;
         self.pending = None;
+        self.retained_observation = None;
+        self.cached_underlay = None;
         assert_eq!(
             self.evidence.dropped.borrow().len(),
             self.evidence.created.get()
@@ -1411,5 +2169,13 @@ fn main() -> Result<()> {
     println!(
         "EDITOR_FOREIGN_UI_OK native_presentations=18 exact_panel_results=7 readback_pixels=144000 public_image_host=true widgets_required=false source_preserved=true clipboard_cursor_refresh=true capture_modal_retirement=true keyboard_only_focus=true semantic_owner_fenced=true two_panel_atomic=true input_delivery=injected"
     );
+    if std::env::args().any(|arg| arg == "--observed-operations") {
+        println!(
+            "EDITOR_FOREIGN_UI_OBSERVATION_OK original_controls_reducer=true typed_focus_apply=true observed_key_text_ime=true two_panel_scope=true occluded_pointer=true stale_output_geometry_instance=true foreign_host=true capability_denied=true pending_submission_preserved=true exact_result_ids=true"
+        );
+        println!(
+            "EDITOR_FOREIGN_UI_OBSERVATION_EDGE_OK modal_outside_original_provider=true modal_wheel_refused=true ime_disabled_without_scope=true stale_scope_commit_refused=true wrong_button_capture_preserved=true"
+        );
+    }
     Ok(())
 }

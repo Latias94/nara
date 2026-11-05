@@ -163,6 +163,21 @@ results, review corrections and cost observations belong to the unit. This remai
 styled source-workspace slice; a broad polished library, persistent preferences, font-family/style
 selection, platform accessibility, docking, the remaining Editor tools and R11a/e budgets stay open.
 
+The [presented UI operations unit](../../plans/2026-11-05-presented-ui-operations-plan.md) adds
+opaque original-image observations, non-preparing semantic inspection and borrowing original
+submission IDs. Physical input keeps native arbitration; opt-in typed provider requests use the
+same callback and reducers without a universal control schema. Nara publishes actions only for
+enabled, non-inert controls with a live behavior owner. The complete drawn Inspector/Shell field,
+history and Save/Reopen trajectory passes on Windows/DX12, followed by all original source/UI/
+retirement checks. Independent Nara and foreign frontend native consumers pass original and
+observed-operation trajectories, including old output/focus refusal, modal outside clicks,
+wrong-button capture and empty-scope IME acknowledgment. Their unit records exact runs, original
+counts, corrections and injected-event/readback limits. Graph operations, animating-View request
+waits, agent transport, OS accessibility and broader R11d/R11f/performance qualification stay open.
+The same source comparison refines the numeric recipe/support inventory and corrects pressed
+appearance during drag-out, with 218 shared kernel/widget regressions. This adds no new palette,
+font-loading service or visual-catalogue approval.
+
 The [keyed local-state prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#keyed-local-state-composition-prerequisite)
 adds exact parent/child scoping, typed store/incarnation handles, explicit model/schema
 compatibility and transactional membership. A separately authored row composite consumes this

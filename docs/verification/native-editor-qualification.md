@@ -95,6 +95,17 @@ toolkit hosting, multi-window behavior or performance. Readback covers original 
 not final swapchain pixels. The reference Editor's ordinary native trajectories retain their
 separate Dear-based composition scope.
 
+For the [presented operations unit](../plans/2026-11-05-presented-ui-operations-plan.md), also run
+the independently locked `ui_operations` test target with `--run-ignored only`, after building
+both native examples. It launches each example's `--observed-operations` trajectory through the
+public observation ports. Preserve their complete six/five and eighteen-presentation histories,
+original source/result/retirement assertions and foreign image readback. Require exact instance
+and same-label control scoping, read-only inspection while an edit candidate is pending, original
+submission IDs, changed-focus and replaced-output refusal. The foreign trajectory additionally
+requires occluded pointer and modal outside-click routing, wheel refusal outside the modal,
+wrong-button capture retention and IME Disabled acknowledgment between text scopes. These are
+injected native events through actual accepted images, not OS automation or accessibility.
+
 The neutral-dependency successor imports the separate UI library's `presentation` feature and
 its procedural four-color Image. Require the original typed handle, nominal store/slot revision,
 exact shared pixel allocation, color space and retention owner in the submitted packet, plus
@@ -182,6 +193,14 @@ projection, persistence, unknown-data, retirement and reconstruction assertions.
 Local Hierarchy Enter must retain editing rather than submit an Inspector action. Click the same
 filter or specialized form field again and deliver more text; then exercise filter Escape and
 same-field refocus without a manual interaction reset. Preserve the exact source and history.
+
+The presented-operations extension observes the Inspector through the public native observation
+and read-only semantic inspection ports, then focuses and edits the original field, applies one
+source edit and drives Shell Undo/Redo/Save/Reopen. Match original submission IDs and distinct
+persistence attempts. Refuse text through the pre-focus observation and semantic operations
+through replaced output; disabled Apply advertises no action and refuses its original previously
+enabled action. Restore the complete original source before continuing the existing styled,
+specialized UI and physical-retirement trajectory. A direct domain mutation is no substitute.
 
 An anchored Document actions menu must remain open through repeated paints. Drain the old
 image's actual cancellation after staging the modal successor but before its original window

@@ -45,6 +45,25 @@ fn workspace_decision() -> (EditorFrameClock, EditorWorkspaceIntentView) {
 }
 
 #[test]
+fn observed_provider_operations_require_keyboard_without_granting_native_accessibility() {
+    assert_eq!(
+        Capabilities::admit([C::ObservedOperations]),
+        Err(EditorPanelImageError::MissingCapability(C::Keyboard))
+    );
+    let capabilities = Capabilities::admit([C::ObservedOperations, C::Keyboard]).unwrap();
+    assert!(capabilities.has(C::ObservedOperations));
+    for capability in [C::Pointer, C::TextInput, C::WindowModal, C::Accessibility] {
+        assert!(!capabilities.has(capability));
+    }
+    assert_eq!(
+        Capabilities::admit([C::ObservedOperations, C::Keyboard, C::Accessibility]),
+        Err(EditorPanelImageError::UnsupportedCapability(
+            C::Accessibility
+        ))
+    );
+}
+
+#[test]
 fn ordinary_images_stay_locked_and_empty_decisions_grant_no_exception() {
     let (_, decision) = workspace_decision();
     let ordinary = ImageInputPolicy::default();

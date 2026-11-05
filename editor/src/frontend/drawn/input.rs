@@ -3,9 +3,10 @@ use std::sync::Arc;
 use nara::project_host::EditorUiAuthoringFrame;
 use nara_text::TextEdit;
 use nara_ui_kernel::{
-    UiActivationSource, UiButtonPhase, UiFrame, UiFrameJournal, UiInputEvent, UiInteractionSession,
-    UiKey, UiModifiers, UiNavigation, UiPoint, UiPointerButton, UiPointerId, UiPointerInput,
-    UiRect, UiRouteStamp, UiSeatId, UiSemanticRole,
+    UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiButtonPhase, UiFrame,
+    UiFrameJournal, UiInputEvent, UiInteractionSession, UiKey, UiModifiers, UiNavigation, UiPoint,
+    UiPointerButton, UiPointerId, UiPointerInput, UiRect, UiRouteStamp, UiSeatId, UiSemanticRole,
+    UiSemanticSnapshot,
 };
 use nara_ui_widgets::UiTextInputToken;
 use winit::{
@@ -66,6 +67,31 @@ struct TextFocus {
 }
 
 impl PanelInput {
+    pub(crate) fn observe(
+        &self,
+        panel: &DrawnPanel,
+        journal: &UiFrameJournal,
+        frame: &Arc<UiFrame>,
+    ) -> Result<UiSemanticSnapshot, String> {
+        let accepted = journal
+            .latest(frame.environment().surface_id())
+            .map_err(|error| error.to_string())?;
+        if !Arc::ptr_eq(accepted.frame(), frame) {
+            return Err("Observed controls do not match the latest UI presentation".into());
+        }
+        if !panel.retains_frame(frame) {
+            return Err("Observed controls belong to a retired projection".into());
+        }
+        self.interaction
+            .semantic_snapshot_with_action_authority(
+                journal,
+                UiRouteStamp::from_receipt(accepted.receipt()),
+                UiSeatId::PRIMARY,
+                |key, action| panel.owns_action(frame, key, action),
+            )
+            .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn reconcile(
         &mut self,
         panel: &mut DrawnPanel,
@@ -139,6 +165,41 @@ impl PanelInput {
         journal: &UiFrameJournal,
         ui: Option<&EditorUiAuthoringFrame>,
     ) -> Result<(), String> {
+        self.deliver_with_operation(panel, context, event, services, journal, ui, None)
+    }
+
+    pub(crate) fn operate(
+        &mut self,
+        panel: &mut DrawnPanel,
+        context: &mut EditorPanelContext<'_, '_>,
+        event: &EditorPanelInput<UiFrame>,
+        services: &mut EditorPanelServices<'_>,
+        journal: &UiFrameJournal,
+        ui: Option<&EditorUiAuthoringFrame>,
+        request: &UiAccessibilityInput,
+    ) -> Result<(), String> {
+        self.deliver_with_operation(panel, context, event, services, journal, ui, Some(request))
+    }
+
+    fn deliver_with_operation(
+        &mut self,
+        panel: &mut DrawnPanel,
+        context: &mut EditorPanelContext<'_, '_>,
+        event: &EditorPanelInput<UiFrame>,
+        services: &mut EditorPanelServices<'_>,
+        journal: &UiFrameJournal,
+        ui: Option<&EditorUiAuthoringFrame>,
+        request: Option<&UiAccessibilityInput>,
+    ) -> Result<(), String> {
+        match (&event.kind, request) {
+            (EditorPanelInputKind::ObservedOperation, None) => {
+                return Err("Observed operations require a typed provider request".into());
+            }
+            (EditorPanelInputKind::ObservedOperation, Some(_)) | (_, None) => {}
+            (_, Some(_)) => {
+                return Err("Provider requests require an ObservedOperation delivery".into());
+            }
+        }
         let frame = &event.snapshot;
         let surface = frame.environment().surface_id();
         if matches!(event.kind, EditorPanelInputKind::Cancelled(_)) {
@@ -185,6 +246,51 @@ impl PanelInput {
             return Err("Native input and UI presentation do not match".into());
         }
         let route = UiRouteStamp::from_receipt(accepted.receipt());
+        if let Some(request) = request {
+            if request.route() != route {
+                return Err("Observed operation rejected: stale UI presentation route".into());
+            }
+            if request.seat() != UiSeatId::PRIMARY {
+                return Err("Observed operation rejected: unsupported input seat".into());
+            }
+            let snapshot = self.observe(panel, journal, frame)?;
+            let target = match request.request() {
+                UiAccessibilityRequest::FocusTarget { target }
+                | UiAccessibilityRequest::SemanticAction { target, .. } => target,
+            };
+            let node = snapshot
+                .nodes()
+                .iter()
+                .find(|node| node.key() == target)
+                .ok_or("Observed operation rejected: target is stale or hidden")?;
+            if node.state().inert() {
+                return Err("Observed operation rejected: target is inert".into());
+            }
+            if !node.state().enabled() {
+                return Err("Observed operation rejected: target is disabled".into());
+            }
+            match request.request() {
+                UiAccessibilityRequest::FocusTarget { target } => {
+                    if !node.state().focusable() {
+                        return Err("Observed operation rejected: target is not focusable".into());
+                    }
+                    if node.role() == UiSemanticRole::TextInput {
+                        let _ = panel
+                            .text_controls()
+                            .ok_or("Observed operation rejected: text controls are retired")?
+                            .input_token(frame, target)
+                            .map_err(|error| format!("Observed operation rejected: {error}"))?;
+                    }
+                }
+                UiAccessibilityRequest::SemanticAction { action, .. } => {
+                    if !node.actions().contains(action) {
+                        return Err(
+                            "Observed operation rejected: action is stale or unsupported".into(),
+                        );
+                    }
+                }
+            }
+        }
         if matches!(
             event.kind,
             EditorPanelInputKind::ModalOutsidePointer {
@@ -324,7 +430,20 @@ impl PanelInput {
                 _ => routed,
             };
         }
-        if let Some(routed) = routed {
+        if let Some(request) = request {
+            let outcome = self
+                .interaction
+                .dispatch_accessibility(journal, request.clone())
+                .map_err(|error| format!("Observed operation rejected: {error}"))?;
+            if let Some(reason) = outcome.rejection() {
+                return Err(format!("Observed operation rejected: {reason:?}"));
+            }
+            if let Some(batch) = outcome.consumed() {
+                panel
+                    .reduce(frame, batch, context, ui)
+                    .map_err(|error| format!("Observed operation rejected: {error}"))?;
+            }
+        } else if let Some(routed) = routed {
             let outcome = self
                 .interaction
                 .dispatch(journal, route, routed)
