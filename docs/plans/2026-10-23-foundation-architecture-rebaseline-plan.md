@@ -1526,9 +1526,17 @@ preference and replay validate the original focus/context through callbacks whil
 completed-action reports. Core 901, affected consumers 2,964 and complete Windows 187 pass;
 four existing interactive cases remain skipped. Actual native handler/WM_CHAR/Submitted and
 teardown evidence keeps live OS IME, latency and non-Windows scope explicit. All five initial
-correctness units now have executed scope; the wider refresh remains open. The next queued GPU
-record/color-transfer unit has source-mapped consumers and pixel/ABI acceptance requirements,
-without an implementation or performance claim.
+correctness units now have executed scope; the wider refresh remains open.
+The following [GPU-record/color-transfer successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-gpu-records-and-windows-color-transfer)
+is verified locally at Open-GPUI `871c012c96c`, without publication. It uses initialized
+PaddedBool32 fields and direct shared-record upload while preserving the
+fork's clip/tile/transform ABI. It corrects Windows transfer powers under the existing gamma-2.2
+approximation. Core/WGPU 941, affected consumers 2,964 and Windows 188 pass; four existing
+interactive cases remain skipped. Actual gradient, sprite, decoration, opacity, rounded-clip
+and cached/deferred pixel controls pass through debug runtime shaders and embedded FXC bytes,
+with exact native/platform release. The latter uses unoptimized Rust with FXC `/O3`, without
+a Rust performance claim. Mac header/Metal, WGPU scene pixels, mixed-DPI/native accessibility,
+broader platform execution and numeric costs remain separately qualified scope.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

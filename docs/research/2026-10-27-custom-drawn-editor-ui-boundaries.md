@@ -1883,3 +1883,48 @@ next GPU record/color-transfer unit with complete Rust/shader consumers, initial
 ABI checks and actual gradient/sprite readback. That source preparation is not implementation
 or pixel qualification. Wider font/text/layout/API and platform reconciliation, engine rendering
 integration, measured performance and complete R11/R12 remain open.
+
+## November 6: GPU Records And Windows Color Transfer
+
+The verified local Open-GPUI successor is `871c012c96c671f7e543175f7af8e1ee0d2ea29e`, following
+`cde23d44ada` on `optimize/docking-graph-transaction`. It remains unpublished by this
+continuation. The recorded published baseline remains
+`7a1bf6d73d4`; the fixed Zed comparison target remains
+`635026fabc38440fce5e1767d125026a17b12012`. The framework's existing verification guide,
+candidate queue, migration guide and plan own the commands, ABI contract and remaining work.
+
+The unit adapts `f28177003499ec9c5052d1883fee62b148451c59` and
+`b9419ae72814157164b09592ab2466f9f4709f09`. GPU-facing sprite and underline flags now use
+private, fully initialized zero/one PaddedBool32 storage. Author-facing bool inputs remain;
+custom renderer-record consumers migrate with bool `.into()` values. Existing clip, exact
+atlas-generation and transform layout remain. DirectX uploads the shared sprite slice,
+removing its duplicate record and per-frame conversion vector. This removes source-level work
+without establishing a measured performance gain.
+
+The safe old-layout regression fails on the sprite field's one-byte width without reading
+uninitialized padding. The native old-shader regression fails on an Oklab interior pixel:
+RGBA `[1,1,1,255]` instead of expected RGB `[99,99,99]`, with channel margin 6. Corrected
+Windows transfer powers preserve the existing approximate gamma-2.2 contract. They do not
+select Nara's complete color-management policy or impose byte parity on WGPU's piecewise sRGB.
+
+Complete Core/WGPU passes 941/941, affected UI/components/docking/Canvas 2,964/2,964 and
+Windows 188/188, with four existing interactive Windows cases skipped. The expanded native
+trajectory checks independent gradient/solid/alpha oracles, alternating grayscale image
+instances, opacity, three text decorations, translated rounded clips, complete cached/deferred
+RGBA equality and exact native/platform retirement. Actual draw-time cache mode is published
+through the existing accepted-frame transaction and matched to the Submitted generation,
+preserving legitimate accessibility/inspector bypass. Debug runtime shaders and embedded FXC
+artifacts each pass the native trajectory. The latter disables Rust optimization/debug
+assertions while retaining production FXC `/O3`; it is not optimized Rust performance evidence.
+
+Locked workspace and independent-consumer compilation, Core/Windows/WGPU correctness Clippy,
+root/consumer formatting and import/document/release/public-API checks pass. Independent review
+finds no outstanding P1/P2 after correcting the fixture's draw-time accessibility-mode custody.
+
+Observed captures use scale 1.5 and cached replay, retaining `(3,3,3,3)` consumer counts on both
+root notifications. Native accessibility activation, other DPI scales/migration, generated
+macOS scene headers, Metal execution, WGPU scene pixels, Linux/browser execution and OS
+compositor output remain unqualified. The declared Rust 1.92 floor and dependencies remain
+unchanged; execution uses Rust 1.95.0. Wider font/text/layout/API and platform reconciliation,
+canonical docking U4-U9, Nara rendering integration, numeric cost budgets and full R11/R12
+remain open. This framework prerequisite selects no new Editor or game-runtime default.

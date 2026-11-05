@@ -62,7 +62,15 @@ It preserves admitted focus/context ownership, modifier routing, original deadli
 completed-action observation. Core 901, affected consumers 2,964 and Windows 187 pass, with
 four existing interactive cases skipped. All five initial correctness units have executed scope;
 the wider framework refresh, Nara integration, live OS IME, non-Windows execution and measured
-performance remain open. The queued GPU record/color study adds no implementation qualification.
+performance remain open. The following
+[GPU-record/color-transfer successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-gpu-records-and-windows-color-transfer)
+is verified locally at Open-GPUI `871c012c96c`, without publication. It adds initialized shared
+flag storage, direct DirectX sprite upload and corrected Windows
+transfer powers. Core/WGPU 941, affected consumers 2,964 and Windows 188 pass, with four
+existing interactive cases skipped. Actual Windows pixels, cached/deferred replay and exact
+release pass through both debug runtime shaders and embedded FXC artifacts. These results do
+not qualify macOS header/Metal, WGPU scene pixels, Nara rendering integration, measured costs
+or a new Editor/game default.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
