@@ -2058,3 +2058,64 @@ macOS compilation, native execution and cross-size identity remain unqualified o
 host. Windows submission is not glyph-pixel/compositor evidence. OS font-change watching,
 custom variation-axis APIs, measured costs, full framework refresh, Nara engine View integration
 and complete R11/R12 retain their separate scope.
+
+## November 6: Cosmic Paragraph Shaping And Public Paint
+
+The verified local Open-GPUI successor is `f48d20d27862e45ff27fcd7ba4f261fd9119d0f7`, following
+the independent Core correction `3d0714f44e206a14fda7d6d830c7a58ce06bc94a` after `b803d542b67`
+on `optimize/docking-graph-transaction`, without publication. It adapts
+`c214057e086517920b214800725c5d16294ddf0d` against fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. The existing Cosmic 0.19 adapter passes multiple
+BiDi paragraphs into one ShapeLine, which asserts when their directions differ. The original
+four-case baseline reproduces three direction assertions and a width-oracle failure later
+traced to the fixture's zero-width separator assumption.
+
+The adapter now shapes B-class separators and adjacent paragraphs independently, then restores
+their original UTF-8 glyph indices and horizontal offsets on one logical baseline. Widths sum
+and ascent/descent take maxima; source bytes and public newline/wrapping policy remain. A private
+monotone FontRun cursor keeps configuration and zero-length boundaries without repeated full
+run scans per segment. This removes source-level repeated traversal without a measured timing
+claim. Direct `unicode-bidi` uses the already resolved 0.3.18; both lockfiles change only that
+package edge, without dependency/compiler version updates.
+
+Eight expanded cases pass after correcting a fixture's zero-width separator assumption.
+An additional regression then finds that segment-local missing reporting splits the source
+CRLF grapheme. Raw missing indices now aggregate before glyph-output conversion, restore source
+offsets and report once against the complete original text and FontRuns. Complete graphemes and
+source proportional/monospace class therefore retain their original owner contract.
+
+The first public run passes nine unit cases but exposes a pre-existing Core/fixed-target
+closest-hit defect at the last LTR glyph: a position in its left quarter jumps to the line end.
+The public assertion is retained and the owning final-cluster comparison has a separate Core
+regression. This bounded LTR correction does not establish general visual RTL caret mapping.
+The isolated Core regression fails before correction, then all ten selected unit cases pass.
+The public trajectory exposes an invalid glyph-atlas diagnostic assumption; a public text-system
+delegate now observes successful paint-raster calls while direct software-raster oracle calls
+remain separate. The corrected complete public trajectory passes 1/1 without relaxing its
+source, geometry, notification, reconstruction or lifetime assertions.
+Final all-feature Core/WGPU/Windows plus public paragraph consumer passes 1,207/1,207:
+Core 943, WGPU 66, Windows 197 and public consumer 1, with four existing interactive Windows
+cases skipped. Existing real Windows text/input/rendering and exact release remain qualified
+for their own backend; the Cosmic paragraph consumer keeps its headless/software scope.
+Affected UI core/components/docking/Canvas passes 2,964/2,964 across 25 binaries with no skipped
+cases, including existing text-field, virtualized collection, overlay and docking consumers.
+Locked workspace and independently locked consumer compilation, Core/WGPU/Windows correctness
+Clippy, root/consumer formatting and existing import/document/release/API-tier checks pass on
+Windows 11/Rust 1.95.0 with one build job. Existing nonblocking warnings remain. Independent
+production and observation reviews leave no outstanding P1/P2. Rust 1.92 remains declared and
+unexecuted; other native platforms, browser execution and measured costs remain unqualified.
+
+Tracked unmodified Noto Sans Hebrew Regular 3.000 from official notofonts revision
+`ffebf8c1ee449e544955a7e813c54f9b73848eac` retains its OFL, exact blob and SHA-256. Real bases
+and zero-advance marks shape and raster at scales 1.0/1.5 with original source indices. This
+fixture has no Latin `m`; the existing primary filter can omit it from an explicit fallback
+chain, while the retained database face serves Cosmic's automatic fallback. Actual selected
+glyph evidence is separate from general configured-fallback priority.
+
+The public consumer uses HeadlessAppContext, Render, canvas, shape and paint with independent
+segment recipes. Its trajectory includes notification, changed text size/canvas layout bounds,
+repeated frames, different-size window reconstruction and exact App TextSystem/one shutdown.
+TestPlatform accepted paint and actual paint-raster calls plus Swash raster do not establish
+GPU/native submission, backend resize acknowledgement, compositor output or engine View integration.
+Unicode wrapping, full script/caret support, fallback-policy reconciliation, measured budgets,
+remaining platform execution and complete R11/R12 retain their separate scope.

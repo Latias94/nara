@@ -86,6 +86,17 @@ include configured cascade identity and reviewed attribute/traits corrections; M
 execution remains unqualified. The earlier shared Core/WGPU/consumer results keep their original
 scope. Variable-axis reconstruction, OS font watching, the remaining refresh, Nara integration
 and measured budgets remain open.
+The subsequent [Cosmic paragraph successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-cosmic-paragraph-shaping-and-public-paint)
+is verified locally at Open-GPUI `f48d20d27862e45ff27fcd7ba4f261fd9119d0f7`, following Core
+correction `3d0714f44e2`, without publication. It adapts `c214057e08`, preserving original
+run/glyph geometry and full-source missing-grapheme reporting through B-class segments.
+Its public consumer also qualifies a bounded Core terminal
+closest-hit correction. Complete Core/WGPU/Windows plus public paragraph consumer passes
+1,207/1,207 with four existing interactive Windows cases skipped. Affected UI core/components,
+docking and Canvas pass 2,964/2,964 with no skips. Actual Cosmic Hebrew raster and public
+paint/reconstruction retain headless/software scope. Full RTL caret, configured
+fallback priority, Unicode wrapping, remaining platforms, Nara integration and measured budgets
+remain open.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

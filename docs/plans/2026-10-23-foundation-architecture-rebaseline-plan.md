@@ -1557,6 +1557,19 @@ independent-consumer compilation, Windows correctness Clippy and formatting/docu
 CoreText source, configured-cascade identity, shared traits validation and five deterministic tests
 are prepared; macOS compilation/execution remains open. Nondefault variable axes, OS font watching,
 Unicode wrapping, the remaining layout/API refresh and numeric costs retain their separate scope.
+The following [Cosmic paragraph successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-cosmic-paragraph-shaping-and-public-paint)
+is verified locally at Open-GPUI `f48d20d27862e45ff27fcd7ba4f261fd9119d0f7`, following the
+independent Core correction `3d0714f44e2`, without publication. It adapts `c214057e08` against
+the same fixed target. B-class segments retain source/glyph geometry
+and clipped FontRun configuration; missing raw indices aggregate against the complete original
+source so CRLF stays whole. A real public consumer also exposes and retains an owning Core
+final-glyph closest-hit correction. Complete all-feature Core/WGPU/Windows plus public paragraph
+consumer passes 1,207/1,207, with four existing interactive Windows cases skipped.
+Affected UI core/components/docking/Canvas passes 2,964/2,964 with no skipped cases; locked
+compilation, correctness Clippy, formatting and existing document/import/API checks pass. Actual Hebrew
+glyph/raster and public accepted paint/reconstruction retain headless/software scope; prior
+native Windows tests qualify their own backend. General fallback priority, full RTL caret,
+Unicode wrapping, remaining API/platform work and numeric budgets remain open.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
