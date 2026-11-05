@@ -1700,7 +1700,8 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
     );
     let semantics = session
         .semantic_snapshot_with_action_authority(&journal, route, SEAT, |key, action| {
-            key == &exact_key("modal", "retry") && action == &UiActionId::new("retry").unwrap()
+            (key == &exact_key("modal", "retry") && action == &UiActionId::new("retry").unwrap())
+                || key == &exact_key("base", "first")
         })
         .unwrap();
     let base = semantics
@@ -1711,6 +1712,7 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
     assert!(base.state().inert());
     assert!(base.state().enabled());
     assert!(!base.state().focusable());
+    assert!(base.actions().is_empty());
     let retry = semantics
         .nodes()
         .iter()
@@ -1737,7 +1739,7 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
         .unwrap();
     let latest_route = submit(&mut journal, compile(&mut compiler, &disabled_retry, 2), 11);
     let latest_semantics = session
-        .semantic_snapshot(&journal, latest_route, SEAT)
+        .semantic_snapshot_with_action_authority(&journal, latest_route, SEAT, |_, _| true)
         .unwrap();
     let disabled_retry = latest_semantics
         .nodes()
@@ -1746,6 +1748,7 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
         .unwrap();
     assert!(!disabled_retry.state().enabled());
     assert!(!disabled_retry.state().focusable());
+    assert!(disabled_retry.actions().is_empty());
     assert!(disabled_retry.state().focused());
     assert!(!disabled_retry.state().pressed());
     let disabled_activation = session

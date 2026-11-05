@@ -342,7 +342,8 @@ impl UiInteractionSession {
     /// Projects actionable semantics only when the exact presented behavior owner resolves them.
     ///
     /// The predicate is evaluated against authored semantic actions after exact receipt resolution;
-    /// returning `false` keeps the descriptive node while withholding the platform action.
+    /// disabled or inert nodes withhold actions. Returning `false` keeps an available descriptive
+    /// node while withholding the platform action.
     pub fn semantic_snapshot_with_action_authority(
         &self,
         journal: &UiFrameJournal,
@@ -396,7 +397,9 @@ impl UiInteractionSession {
                 let actions = node
                     .actions()
                     .iter()
-                    .filter(|action| owns_action(node.key(), action))
+                    .filter(|action| {
+                        node.enabled() && active && !inert && owns_action(node.key(), action)
+                    })
                     .cloned()
                     .collect();
                 Some(UiSemanticFact::from_frame_node(

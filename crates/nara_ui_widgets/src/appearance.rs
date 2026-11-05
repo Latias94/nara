@@ -338,7 +338,7 @@ impl UiAppearance {
                 colors.raised
             };
         }
-        if enabled && (state.hovered() || state.pressed()) {
+        if enabled && state.hovered() {
             let interaction = if state.pressed() {
                 colors.pressed
             } else {

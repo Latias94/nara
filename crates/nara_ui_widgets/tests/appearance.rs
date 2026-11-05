@@ -201,6 +201,44 @@ fn focused_pressed_selected_control_keeps_its_focus_border_and_disabled_behavior
     );
     assert_eq!(active.visual().border(), unselected.visual().border());
     assert!(intents.intents().is_empty());
+    for (point, hovered) in [
+        (UiPoint::new(150.0, 70.0), false),
+        (UiPoint::new(20.0, 20.0), true),
+    ] {
+        let outcome = interaction
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Pointer(UiPointerInput::moved(
+                    UiSeatId::PRIMARY,
+                    UiPointerId::PRIMARY,
+                    point,
+                )),
+            )
+            .unwrap();
+        state
+            .reduce_batch(&button, outcome.consumed().unwrap(), &mut intents)
+            .unwrap();
+        assert!(state.pressed() && state.focused());
+        assert_eq!(state.hovered(), hovered);
+        let dragged = scope
+            .button(
+                &button,
+                state,
+                UiButtonVariant::Secondary,
+                UiControlSize::Regular,
+                true,
+            )
+            .unwrap();
+        let expected = if hovered { &active } else { &initial };
+        assert_eq!(
+            dragged.visual().background(),
+            expected.visual().background()
+        );
+        assert_eq!(dragged.visual().border(), active.visual().border());
+        assert_eq!(dragged.metrics(), initial.metrics());
+        assert!(intents.intents().is_empty());
+    }
     let disabled = button.with_enabled(false);
     let disabled_style = scope
         .button(
