@@ -1828,3 +1828,58 @@ glyph readback does not establish screen compositing, full native input, frame-t
 non-Windows execution or Nara renderer integration. Pending-input/blur remains the last initial
 correctness unit before the wider framework refresh. Complete R11/R12 and Editor/game-runtime
 selection remain open.
+
+## November 6: Pending Input And Native Handler Successor
+
+The verified local Open-GPUI successor is `cde23d44adae92b8ad55f760a120865be23e34aa`, after
+the separate native-cache fixture correction `fb196f8a9c876c2981c18d58b54c59966dce4084`.
+Both remain local on `optimize/docking-graph-transaction`; this continuation publishes neither.
+The recorded published maintenance baseline remains `7a1bf6d73d4`, and this cycle's fixed Zed
+target remains `635026fabc38440fce5e1767d125026a17b12012`. The framework's existing verification
+guide, candidate queue and plan own the detailed commands, failures and dispositions.
+
+The last initial correctness unit adapts `bc7041c600`, `ba42ab9d98` and `f66ed399cd`, with
+`dc1e815e47`, `a8cae3bd77` and `e463c5ab74` prerequisites. Recognized standalone modifier
+releases now share keystroke interception/observation. Multi-modifier gestures do not generate
+phantom standalone releases, and only an entire singleton-modifier prefix introduces the
+modifier timeout. An intercepted modifier preserves the preceding chord's original deadline.
+
+The existing focus owner settles pending input once after accepted focus/blur/drop transitions,
+with deferred observation. Refused candidates retain their original input, timer and notification
+state. Active pending and native IME preference validate focus plus dispatch context. Replay
+keeps that original recipient across observers and input listeners, stopping old action/text
+delivery after a target change or window retirement. Completed actions retain their keystroke
+report while interaction remains admitted, including actions that move focus. No additional
+focus, pending-status or input execution owner was introduced.
+
+The original registered baseline ran 20 cases: eight passed and twelve failed, including one
+fixture that attempted to open a replacement after last-window App shutdown. Subsequent review
+and red controls exposed callback retarget, same-focus context invalidation, an overly broad
+modifier timeout and a lost completed-action report. Final Core passes 901/901, including all
+24 input scenarios. UI core/components/docking/Canvas passes 2,964/2,964 across 25 binaries.
+Complete Windows passes 187/187 with four existing interactive cases skipped. The new native
+consumer uses a public Render view, two actual text handlers, production PlatformInput
+callbacks, leased IME-preference queries and HWND WM_CHAR delivery. It checks current accepted,
+nonempty renderer-Submitted generations, handler replacement, correct text recipient and exact
+window/platform/OLE/text-system teardown. Synthetic keys and WM_CHAR do not establish live OS
+keyboard translation or IME composition; deterministic timeout evidence comes from Core.
+
+The broader run also reproduced an existing native cache-fixture failure. Low-overhead tracing
+identified a legitimate native-hover Window::refresh while every cache key/resource still
+matched. The fixture now requests pointer-transparent, nonactivating creation, checks native
+facts and finishes one explicit newer initialization submission before freezing its single
+baseline. Original replay/model/child and teardown assertions remain. Temporary probes were
+removed; the production cache and Window refresh owners retain their original code. The
+verification guide preserves the failed runs and the separate intrusive diagnostic limit.
+
+Locked workspace and independent-consumer compilation, correctness Clippy, root/consumer
+formatting and import/document/release/public-API checks pass. Independent source, scenario and
+native-fixture reviews find no remaining P1/P2 within this unit. The declared Rust 1.92 floor
+and dependency graph remain unchanged; execution used Rust 1.95.0.
+
+All five initial correctness units now have implemented, executed scope. They do not complete
+the wider framework refresh or select Nara's frontend/runtime UI. The existing plan queues the
+next GPU record/color-transfer unit with complete Rust/shader consumers, initialized flag-width
+ABI checks and actual gradient/sprite readback. That source preparation is not implementation
+or pixel qualification. Wider font/text/layout/API and platform reconciliation, engine rendering
+integration, measured performance and complete R11/R12 remain open.

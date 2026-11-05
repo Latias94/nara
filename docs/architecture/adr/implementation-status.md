@@ -55,8 +55,14 @@ interactive cases remain skipped. The subsequent
 is verified locally at Open-GPUI `f1850835fbb`, without publication. It adds shared checked
 atlas admission, lease-preserving refusal, mapped color-staging release and transparent glyph
 target initialization. Focused resources 13, affected Core 54 and complete Windows 186 pass,
-with four existing interactive cases skipped. Pending-input/blur and the wider refresh remain
-open, along with Nara integration, non-Windows execution and measured performance.
+with four existing interactive cases skipped. The following
+[pending-input/native-handler successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-pending-input-and-native-handler-successor)
+is verified locally at Open-GPUI `cde23d44ada`, after cache-fixture correction `fb196f8a9c8`.
+It preserves admitted focus/context ownership, modifier routing, original deadlines and exact
+completed-action observation. Core 901, affected consumers 2,964 and Windows 187 pass, with
+four existing interactive cases skipped. All five initial correctness units have executed scope;
+the wider framework refresh, Nara integration, live OS IME, non-Windows execution and measured
+performance remain open. The queued GPU record/color study adds no implementation qualification.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

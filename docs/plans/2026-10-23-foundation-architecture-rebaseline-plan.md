@@ -1518,7 +1518,17 @@ share checked admission and preserve existing leases on refusal; color readback 
 maps and initializes blended glyph targets to transparent. Focused resources 13, affected Core
 54 and complete Windows 186 pass, with four existing interactive cases skipped. WARP pixel and
 debug-layer controls plus actual emoji readback retain their GPU/screen/performance limits.
-Pending-input/blur is the remaining initial correctness unit before the wider framework refresh.
+The subsequent [pending-input and native-handler successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-pending-input-and-native-handler-successor)
+is verified locally at Open-GPUI `cde23d44ada`, following the separate cache-fixture correction
+`fb196f8a9c8`. Recognized modifiers, exact singleton timeout and accepted focus/blur/drop
+settlement now preserve refused candidates, original deadlines and deferred observation. IME
+preference and replay validate the original focus/context through callbacks while retaining
+completed-action reports. Core 901, affected consumers 2,964 and complete Windows 187 pass;
+four existing interactive cases remain skipped. Actual native handler/WM_CHAR/Submitted and
+teardown evidence keeps live OS IME, latency and non-Windows scope explicit. All five initial
+correctness units now have executed scope; the wider refresh remains open. The next queued GPU
+record/color-transfer unit has source-mapped consumers and pixel/ABI acceptance requirements,
+without an implementation or performance claim.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
