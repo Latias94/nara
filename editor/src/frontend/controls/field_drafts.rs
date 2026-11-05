@@ -1,7 +1,7 @@
 //! Shared private field drafts for the Editor frontend.
 
-pub(in crate::frontend::imgui) mod references;
-pub(in crate::frontend::imgui) mod structure;
+pub(in crate::frontend) mod references;
+pub(in crate::frontend) mod structure;
 
 use std::collections::{HashMap, HashSet};
 
@@ -17,25 +17,25 @@ use nara::{
     },
 };
 
-use super::authoring::{
-    self,
-    value_draft::{self, RootDraft},
+use super::authoring;
+use super::value_draft::{self, RootDraft};
+use crate::panels::{
+    PanelActionDispatch, PanelActionNotDispatched, PanelSubmissionId, PanelSubmitError,
 };
-use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
 
 // Clean entries are reclaimable. Retained edits are admitted before any input is enabled.
 const MAX_RETAINED_FIELD_DRAFTS: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(super) struct FieldKey {
-    pub(super) document: EditorDocumentId,
-    pub(super) entity: SceneEntityId,
-    pub(super) component: ComponentTypeId,
-    pub(super) field: ComponentFieldId,
+pub(in crate::frontend) struct FieldKey {
+    pub(in crate::frontend) document: EditorDocumentId,
+    pub(in crate::frontend) entity: SceneEntityId,
+    pub(in crate::frontend) component: ComponentTypeId,
+    pub(in crate::frontend) field: ComponentFieldId,
 }
 
 impl FieldKey {
-    pub(super) fn from_target(target: &EditorFieldTarget) -> Self {
+    pub(in crate::frontend) fn from_target(target: &EditorFieldTarget) -> Self {
         Self {
             document: target.document(),
             entity: target.entity().clone(),
@@ -46,15 +46,15 @@ impl FieldKey {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct FieldBasis {
-    pub(super) target: EditorFieldTarget,
-    pub(super) catalog: Option<AuthoringSchemaBasis>,
-    pub(super) document_version: ComponentSchemaVersion,
-    pub(super) field: SceneInspectorFieldView,
+pub(in crate::frontend) struct FieldBasis {
+    pub(in crate::frontend) target: EditorFieldTarget,
+    pub(in crate::frontend) catalog: Option<AuthoringSchemaBasis>,
+    pub(in crate::frontend) document_version: ComponentSchemaVersion,
+    pub(in crate::frontend) field: SceneInspectorFieldView,
 }
 
 impl FieldBasis {
-    pub(super) fn new(
+    pub(in crate::frontend) fn new(
         frame: &EditorFrameModel,
         scene: &EditorSceneModel,
         entity: &SceneEntityId,
@@ -90,7 +90,7 @@ impl FieldBasis {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) enum Candidate {
+pub(in crate::frontend) enum Candidate {
     Text(String),
     Bool(bool),
     Structured(RootDraft),
@@ -120,7 +120,10 @@ impl Candidate {
         }
     }
 
-    pub(super) fn value(&self, shape: &ComponentValueShape) -> Result<ComponentValue, String> {
+    pub(in crate::frontend) fn value(
+        &self,
+        shape: &ComponentValueShape,
+    ) -> Result<ComponentValue, String> {
         let value = match self {
             Self::Text(text) => value_draft::parse_scalar(shape, text)?,
             Self::Bool(value) => ComponentValue::Bool(*value),
@@ -138,7 +141,7 @@ impl Candidate {
         Ok(value)
     }
 
-    pub(super) fn copy_text(&self) -> String {
+    pub(in crate::frontend) fn copy_text(&self) -> String {
         match self {
             Self::Text(text) => text.clone(),
             Self::Bool(value) => value.to_string(),
@@ -150,20 +153,20 @@ impl Candidate {
     }
 }
 
-pub(super) struct FieldDraft {
-    pub(super) basis: FieldBasis,
-    pub(super) candidate: Candidate,
-    pub(super) dirty: bool,
-    pub(super) conflict: bool,
-    pub(super) incompatible: bool,
-    pub(super) queued: bool,
-    pub(super) pending: Option<PanelSubmissionId>,
-    pub(super) error: Option<String>,
-    pub(super) remove_intent: bool,
+pub(in crate::frontend) struct FieldDraft {
+    pub(in crate::frontend) basis: FieldBasis,
+    pub(in crate::frontend) candidate: Candidate,
+    pub(in crate::frontend) dirty: bool,
+    pub(in crate::frontend) conflict: bool,
+    pub(in crate::frontend) incompatible: bool,
+    pub(in crate::frontend) queued: bool,
+    pub(in crate::frontend) pending: Option<PanelSubmissionId>,
+    pub(in crate::frontend) error: Option<String>,
+    pub(in crate::frontend) remove_intent: bool,
 }
 
 impl FieldDraft {
-    pub(super) fn new(basis: FieldBasis) -> Self {
+    pub(in crate::frontend) fn new(basis: FieldBasis) -> Self {
         Self {
             candidate: Candidate::from_field(&basis.field),
             basis,
@@ -177,7 +180,7 @@ impl FieldDraft {
         }
     }
 
-    pub(super) fn synchronize(&mut self, current: FieldBasis) {
+    pub(in crate::frontend) fn synchronize(&mut self, current: FieldBasis) {
         if !self.dirty && !self.in_flight() && self.basis != current {
             *self = Self::new(current);
         } else if !self.basis.compatible(&current) {
@@ -187,47 +190,47 @@ impl FieldDraft {
         }
     }
 
-    pub(super) fn in_flight(&self) -> bool {
+    pub(in crate::frontend) fn in_flight(&self) -> bool {
         self.queued || self.pending.is_some()
     }
 }
 
 #[derive(Default)]
-pub(super) struct FieldEditors {
-    pub(super) drafts: HashMap<FieldKey, FieldDraft>,
-    pub(super) painted: HashSet<FieldKey>,
+pub(in crate::frontend) struct FieldEditors {
+    pub(in crate::frontend) drafts: HashMap<FieldKey, FieldDraft>,
+    pub(in crate::frontend) painted: HashSet<FieldKey>,
 }
 
-pub(super) struct PreparedFieldEdit {
-    pub(super) key: FieldKey,
-    pub(super) action: EditorAction,
+pub(in crate::frontend) struct PreparedFieldEdit {
+    pub(in crate::frontend) key: FieldKey,
+    pub(in crate::frontend) action: EditorAction,
 }
 
 impl FieldEditors {
-    pub(super) fn retained_count(&self) -> usize {
+    pub(in crate::frontend) fn retained_count(&self) -> usize {
         self.drafts
             .values()
             .filter(|draft| draft.dirty || draft.in_flight())
             .count()
     }
 
-    pub(super) fn at_capacity(&self) -> bool {
+    pub(in crate::frontend) fn at_capacity(&self) -> bool {
         self.retained_count() >= MAX_RETAINED_FIELD_DRAFTS
     }
 
-    pub(super) fn has_draft_capacity(&self, key: &FieldKey) -> bool {
+    pub(in crate::frontend) fn has_draft_capacity(&self, key: &FieldKey) -> bool {
         self.drafts
             .get(key)
             .is_some_and(|draft| draft.dirty || draft.in_flight())
             || !self.at_capacity()
     }
 
-    pub(super) fn clear(&mut self) {
+    pub(in crate::frontend) fn clear(&mut self) {
         self.drafts.clear();
         self.painted.clear();
     }
 
-    pub(super) fn begin_paint(&mut self, frame: &EditorFrameModel) {
+    pub(in crate::frontend) fn begin_paint(&mut self, frame: &EditorFrameModel) {
         // Keep the previous presentation's clean controls for stable active input. Clean controls
         // which stop being presented are reclaimable; dirty drafts never depend on paint coverage.
         self.drafts
@@ -306,7 +309,7 @@ impl FieldEditors {
         }
     }
 
-    pub(super) fn admitted(
+    pub(in crate::frontend) fn admitted(
         &mut self,
         key: &FieldKey,
         result: Result<PanelSubmissionId, PanelSubmitError>,
@@ -328,7 +331,11 @@ impl FieldEditors {
         }
     }
 
-    pub(super) fn action_finished(&mut self, id: PanelSubmissionId, result: &PanelActionDispatch) {
+    pub(in crate::frontend) fn action_finished(
+        &mut self,
+        id: PanelSubmissionId,
+        result: &PanelActionDispatch,
+    ) {
         let key = self
             .drafts
             .iter()
@@ -343,9 +350,9 @@ impl FieldEditors {
         } else if let Some(draft) = self.drafts.get_mut(&key) {
             draft.pending = None;
             draft.error = Some(match result {
-                PanelActionDispatch::NotDispatched(super::PanelActionNotDispatched::Superseded) =>
+                PanelActionDispatch::NotDispatched(PanelActionNotDispatched::Superseded) =>
                     "This edit was not submitted. Your input is retained; apply it again.".to_owned(),
-                PanelActionDispatch::NotDispatched(super::PanelActionNotDispatched::Closing) =>
+                PanelActionDispatch::NotDispatched(PanelActionNotDispatched::Closing) =>
                     "Finish or cancel closing the document before applying this retained edit.".to_owned(),
                 PanelActionDispatch::NotDispatched(_) =>
                     "The editing context changed before this edit was applied. Review the current value and try again.".to_owned(),
@@ -356,6 +363,6 @@ impl FieldEditors {
     }
 }
 
-pub(super) fn source(field: &SceneInspectorFieldView) -> Option<&ComponentValue> {
+pub(in crate::frontend) fn source(field: &SceneInspectorFieldView) -> Option<&ComponentValue> {
     field.value.as_ref().or(field.default_value.as_ref())
 }

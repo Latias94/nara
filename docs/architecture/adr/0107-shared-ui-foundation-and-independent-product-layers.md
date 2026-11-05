@@ -217,6 +217,26 @@ global-service, toolkit-ID or public
 render-topology ownership models. The reproducible pressure matrix lives in the non-normative
 [UI Foundation Design](../ui-foundation-design.md).
 
+### Scoped visual recipes and complete property controls
+
+The [styled workspace unit](../../plans/2026-11-05-styled-source-workspace-plan.md) supplies the
+first shared visual slice through real Editor and independent-library consumers. `nara_text`
+owns admitted typography, actual face/line geometry and atomic retained-buffer adoption.
+The kernel owns scoped measurement, layout facts and renderer-neutral output; prepared text's
+draw origin does not replace its clip. `nara_ui_widgets` owns explicit immutable appearance
+values and control recipes, including density/text-scale separation, state cues and measured
+groups/popups. Its palette is a library vocabulary, not a central extension-role registry.
+Other libraries may compose controls, add their own roles or draw through the original low-level
+interfaces without inheriting first-party visuals. The original compiler's bounded compatible
+plain-text cache owns no document or input authority and preserves complete candidate admission.
+
+Both Editor compositions consume the original complete Inspector/draft controls from the shared
+frontend controls module. Extraction removes the old Dear ownership rather than keeping a second
+property preparation or history path. The independently drawn composition remains selectable and
+uses the original semantic/native/image Hosts. Functional/native and fixed-content visual results
+have separate scope; full component-library, default-switch, docking, multiple-window, native
+preference/accessibility and R11e cost qualification remain open.
+
 ## Alternatives Considered
 
 ### One Godot-style UI product for games and Editor

@@ -1,11 +1,11 @@
 use super::*;
-use crate::frontend::imgui::field_drafts::references::entity_choices;
+use crate::frontend::controls::field_drafts::references::entity_choices;
 use nara::tooling::SceneInspectorEntityRow;
 
 const TARGETS_PER_PAGE: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(in crate::frontend::imgui) enum ReferenceAction {
+pub(in crate::frontend) enum ReferenceAction {
     Toggle,
     Previous,
     Next,
@@ -171,6 +171,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "imgui-reference")]
     #[test]
     fn navigation_before_repaint_updates_focus_but_refuses_old_menu_activation() {
         use nara::tooling::{EditorActionBatch, EditorNavigationAction};
@@ -377,6 +378,7 @@ pub(super) struct ReferenceBinding {
 pub(super) struct ReferencePicker {
     open: bool,
     page: usize,
+    pub(super) appearance: UiAppearance,
     pub(super) revision: u64,
     pub(super) buttons: HashMap<ReferenceAction, ButtonControl>,
 }
@@ -423,6 +425,7 @@ pub(super) fn reference_nodes(
     rows: &[SceneInspectorEntityRow],
     context: ReferenceContext<'_>,
 ) -> Result<Vec<(UiNode, DisplayedButton)>, OwnedInspectorError> {
+    let height = inspector_control_height(picker.appearance, 30.0)?;
     let mut descriptions = vec![(
         ReferenceAction::Toggle,
         if picker.open {
@@ -487,16 +490,22 @@ pub(super) fn reference_nodes(
                 UiActionId::new("Reference control")?,
             )?
             .with_enabled(context.enabled && available);
-            let node = button
+            let node = picker
+                .appearance
+                .button(
+                    &button,
+                    control.state,
+                    UiButtonVariant::Secondary,
+                    UiControlSize::Regular,
+                    action == ReferenceAction::Toggle && picker.open,
+                )?
                 .authored_node(
+                    &button,
                     root,
                     UiStyle::flex()
                         .with_width(UiDimension::Px(context.width))
-                        .with_height(UiDimension::Px(30.0))
+                        .with_height(UiDimension::Px(height))
                         .with_flex_shrink(0.0),
-                    UiVisual::role(button_color(control.state, &button)),
-                    UiBrush::Role(UiColorRole::PrimaryText),
-                    TEXT_SIZE,
                 )?
                 .with_semantics(
                     UiSemantics::new(UiSemanticRole::Button, name)?

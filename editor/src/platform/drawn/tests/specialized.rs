@@ -164,7 +164,7 @@ impl Workflow<'_> {
         }
         self.click(HIERARCHY, "Add UI node")?;
         self.click(HIERARCHY, "Kind: Text")?;
-        self.replace_text("Text", "Cancelled native draft")?;
+        self.local_field_enter_keeps_focus("Text", "Cancelled native draft")?;
         self.event(EditorPanelPlatformEvent::Ime(Ime::Preedit(
             "cancel preedit".into(),
             Some((0, 14)),

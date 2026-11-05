@@ -304,6 +304,18 @@ semantic panel access without requiring Dear. The independently selected drawn e
 its own initial source-workspace Shell over the native capabilities below. The [panel custody prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
 owns its independent consumer and verification scope; remaining R11b attachment work stays open.
 
+The [styled successor](../../plans/2026-11-05-styled-source-workspace-plan.md) extracts the complete
+Inspector and original field drafts into shared frontend controls, then adds that same consumer
+to the independently drawn workspace. Shell, ordinary/specialized Hierarchy and Inspector adopt
+explicit library appearance inputs while retaining their original mutation, tool, exact-result,
+history and persistence owners. An anchored menu's control scope is distinct from the Host's
+native keyboard ownership: restore the current trigger only after the matching successor image
+is accepted, using the existing native focus operation. An old image's replacement cancellation
+retires its original control generation; it cannot revoke a pending or already accepted successor.
+These are concrete frontend controls and attachment behavior, not a universal widget tree or an
+extension ABI. Complete replacement/default switching and later workspace layout retain their
+existing qualification requirements.
+
 Workspace owns contribution and panel-instance identity, document targeting, placement and
 versioned layout preferences. Each frontend owns its internal control tree or immediate context,
 drafts and local interaction. Host owns native windows, seat-level focus/capture/IME arbitration,

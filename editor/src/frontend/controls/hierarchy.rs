@@ -8,7 +8,7 @@ use nara_text::{FontFace, TextEdit, TextEditOutcome};
 use nara_ui_kernel::{
     UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiPoint, UiRect, UiRootKey, UiTheme,
 };
-use nara_ui_widgets::{UiIntentBatch, UiTextInputToken};
+use nara_ui_widgets::{UiAppearance, UiIntentBatch, UiTextInputToken};
 
 use crate::panels::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
 
@@ -51,6 +51,13 @@ impl HierarchySubmission {
 }
 
 impl HierarchyControls {
+    pub(in crate::frontend) fn set_appearance(&mut self, appearance: UiAppearance) {
+        match self {
+            Self::Source(owner) => owner.set_appearance(appearance),
+            Self::Ui(owner) => owner.set_appearance(appearance),
+        }
+    }
+
     pub(in crate::frontend) fn new(
         root: UiRootKey,
         fonts: Vec<FontFace>,

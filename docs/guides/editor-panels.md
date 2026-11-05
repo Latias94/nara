@@ -35,6 +35,16 @@ Its current engineering controls qualify functional workflows, not finished comp
 styling. The [visual prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
 separately covers typography, density, scoped styles, responsive sizing and visual/native checks.
 
+The [styled workspace unit](../plans/2026-11-05-styled-source-workspace-plan.md) adds the original
+complete property Inspector to that separate executable. Both frontends use the same retained
+field drafts, component/reference/recursive controls and source-tool result handling. The drawn
+Shell, Hierarchy and Inspector use the shared typography/appearance recipes documented in
+[editable text](editable-text.md#scoped-appearance-and-measured-controls), with a regular primary
+face, measured control groups and an anchored Document actions menu. Current source-built
+composition inputs support density/text scale; this does not add a persisted user-preference UI.
+The complete future component catalogue, Scene/Game and other panel breadth, docking, native
+multi-window behavior and default switch retain their separate plans.
+
 `EditorPanelHost<P>` retains typed per-instance state and one current submission candidate.
 `EditorPanel` supplies the optional `action_finished` callback; it has no drawing method.
 `host.prepare(&application, |panel, context| { ... })` gives the caller mutable access to its

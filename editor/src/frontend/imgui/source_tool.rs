@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use dear_imgui_rs::Ui;
 use nara::{
     reflect::ComponentValue,
-    scene::{SceneEntityId, ScenePatchOperation},
+    scene::SceneEntityId,
     tooling::{
         EditorActionOutcome, EditorDocumentId, EditorDocumentKind, EditorDocumentQueryBasis,
         EditorFrameModel, EditorPropertyTarget, EditorSourceToolAction,
@@ -14,9 +14,9 @@ use nara::{
 };
 
 use super::{ImguiTextOwner, PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
+use crate::frontend::controls::source_tool::operation_label;
 
 mod owned;
-pub(super) use owned::OwnedSourceToolPresentation;
 
 const MAX_NAME_BYTES: usize = 256;
 const MAX_FEEDBACK_CHARS: usize = 1024;
@@ -713,32 +713,6 @@ impl SourceToolWidgets {
                 )
             })
             .flatten()
-    }
-}
-
-fn operation_label(operation: &ScenePatchOperation) -> String {
-    match operation {
-        ScenePatchOperation::SetField {
-            entity,
-            component,
-            field,
-            value,
-            ..
-        } => format!(
-            "{} / {} / {}: {}",
-            entity.as_str(),
-            component.as_str(),
-            field.as_str(),
-            super::authoring::value_label(Some(value))
-        ),
-        ScenePatchOperation::AddEntity { entity } => {
-            format!("Create entity {}", entity.id.as_str())
-        }
-        ScenePatchOperation::SetPlacements { .. } => "Update source hierarchy".to_owned(),
-        ScenePatchOperation::AddComponent {
-            entity, component, ..
-        } => format!("Add {} to {}", component.as_str(), entity.as_str()),
-        other => format!("{other:?}"),
     }
 }
 

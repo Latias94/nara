@@ -302,6 +302,13 @@ fn exact_ledger_result_ids_preserve_refusal_not_dispatched_and_queue_capacity_er
     let own = id(11);
     let other = id(12);
     owner.admitted(Ok(own));
+    owner.set_appearance(
+        UiAppearance::default()
+            .with_density(nara_ui_widgets::UiDensity::Compact)
+            .with_text_scale(2.0)
+            .unwrap(),
+    );
+    paint(&mut owner, &model);
     owner.action_finished(
         other,
         &PanelActionDispatch::NotDispatched(PanelActionNotDispatched::Closing),

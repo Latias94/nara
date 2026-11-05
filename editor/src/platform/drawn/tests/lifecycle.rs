@@ -277,7 +277,7 @@ impl Workflow<'_> {
         self.native.retry_graphics()?;
         self.wait(
             "present new original images after graphics recovery",
-            |workflow| workflow.native.presented.len() == 2,
+            |workflow| workflow.native.presented.len() == 3,
         )?;
         let replacement = self
             .native
@@ -322,7 +322,7 @@ impl Workflow<'_> {
                     .into(),
             );
         }
-        self.verify_two_original_composites()?;
+        self.verify_workspace_composites()?;
         for (path, original) in [
             fixture::SCENE,
             fixture::PREFAB,

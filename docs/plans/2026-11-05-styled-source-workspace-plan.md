@@ -1,6 +1,7 @@
 # Styled Source Workspace and Reusable Control Recipes
 
-**Status:** Implementation in progress; visual, native and cost qualification pending
+**Status:** Implemented; bounded shared, independent and Windows/DX12 qualification below.
+The component catalogue, broader platform support and R11a/e cost budgets remain open.
 **Parent:** [R11b visual prerequisite](2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
 **Owners:** Shared text, controlled widgets, Editor presentation and the existing native Host
 
@@ -162,3 +163,179 @@ A compatible appearance change cannot hide and blur a live small-viewport filter
 Inspector input/clipboard/stale-action refusals need local feedback, and component terminal
 results must retain their original submission ID. Editor/native corrections and their full
 verification remain in progress.
+
+Editor integration also exposed a dependency-identity error in the new field measurement:
+constructing a fresh custom-layout description during every unchanged composition invalidated
+the original Inspector/form snapshot comparison. The field now retains one geometry-keyed
+description; compatible color/focus redraws reuse it, while changed measurement replaces it.
+Old authored snapshots keep the original immutable description. The existing exact-frame reuse
+and source/history pressure tests remain acceptance requirements.
+
+Native image compatibility changes when a menu admits or releases window-modal scope. The old
+image's `OutputReplaced` cancellation must retire its original input, not cancel a successor
+already admitted by the presenter. Test this through the actual native Host with repeated paints
+and focus restoration. Menu-outside dismissal also uses the actual popup viewport inside its
+panel image: a click on a blocked Shell button, empty Shell space or another panel closes the
+menu without applying the underlying action.
+
+Final review also separates local Hierarchy editing from Inspector Apply. Enter keeps the
+Hierarchy field's original local input lifetime; Inspector Enter still uses its original prepared
+field action. When Escape finishes and blurs a local filter, reduce the original interaction
+cancellation before clearing native text services. Otherwise the kernel can keep a focused key
+whose field has no token, preventing a second click from admitting text. The native trajectory
+must cover Enter, same-field refocus and further input in both ordinary and specialized fields,
+plus Escape and same-filter refocus, without a fixture-injected focus reset.
+
+The reference thousand-declaration trajectory exposed a separate information-retention issue:
+moving every detail into the virtualized source prefix made the source count disappear during
+scrolling. Pin the count when the viewport can accommodate it; retain a scrollable fallback in
+tiny viewports. Preserve the complete original filtering, wheel, unknown-data, Inspector draft,
+document-switch, history and persistence assertions rather than relaxing them for the new style.
+
+The final shared review found that an unconditional min-content layout probe could reject a
+paragraph whose final allocated width fits: the probe first broke at word width and exceeded the
+output line ceiling. A concrete `min_content_width` query now observes the same subtree and shaper
+without producing drawable text. Direct layout and final measurement/paint retain the original
+line limits. Observation entries remain separate from drawable entries within the same bounded
+cache, with full source/glyph/layout-work accounting and no exploratory geometry in the final
+cache. Shared regressions cover a 257-word paragraph and one-line wide-versus-narrow controls.
+The isolated 20-wrapper/one-glyph regression then reproduces excessive recursive work when
+every width-probe dispatch clears its cache (`2124e270-f4db-4737-9355-ae6e84062f36`): 20,001
+reached operations exceed the caller's 20,000 allowance. One private per-node cache now carries
+its measurement mode and clears only when that mode changes. Existing custom-subtree final-layout
+recomputation remains active, and compatible requests within a mode still charge work on hits.
+The correction adds no second retained layout arena or public cache owner.
+
+The first actual Windows/DX12 complete trajectory passes in 68.920 seconds
+(`3b4d0c93-164e-45e7-b5b8-eafaa789e826`). It retains all original source/UI/retirement assertions
+and adds the complete Inspector, active-preedit appearance adoption and native menu scope/focus
+cases. GPU output readbacks at the actual 1.5 native scale expose coherent field geometry but
+also unnecessary emphasis on disabled primary actions and clipping in enlarged tool groups.
+Refinement neutralizes disabled fill, keeps ordinary destructive entry points quieter than their
+confirmation, and makes groups choose columns from actual child min-content widths. Popup width
+similarly grows to actual min-content before fitting available bounds. The refined native result
+then passes in 69.573 seconds (`6e432cb5-01bf-4367-8800-ba70b746d849`); final review adds the
+input and intrinsic-measurement corrections above. The final qualification below supersedes
+these intermediate runs and retains their visual findings.
+
+## Owner-local work observations
+
+The existing Inspector probe and current Shell regressions pass 27/27 after the reference/public
+cohort's final work assertion is reconciled with compatible text reuse. Width-dependent wrapped
+text and target-scale changes reshape; color/hover and an unchanged immutable font policy do not.
+Every candidate still performs source/output admission. The final shared widget cohort passes
+39/39, including actual min-content group/popup fitting and the retained field description.
+
+These are serial **debug** CPU observations on the current Windows machine with other workloads
+uncontrolled. They are not release comparisons, GPU timings, input-to-presentation latency,
+memory measurements or R11e budget acceptance. This recorded checkpoint predates the final
+intrinsic-width observation correction; later correctness runs do not remeasure these timings.
+
+| Probe | Samples | P50 / P95 / P99 | Observed work and remaining cost |
+| --- | ---: | --- | --- |
+| Unchanged complete Inspector | 512 after 16 warmups | 0.233 / 0.344 / 0.453 ms | Reuses all 512 original frames with zero new compiler work; still builds 512 descriptions / 23,552 authored-node occurrences |
+| Inspector local edit plus composition | 128 | 7.082 / 7.744 / 8.318 ms | 128 new compiler frames; 6,144 layout-node occurrences; one new plain-text layout request; 2,960 compiler raster attempts and 3,220 full prepared-glyph scans |
+
+The local edit probe's text-engine counters exclude Parley's internal editing work. Zero editor
+`layout_attempts` is not zero editing cost. These results keep description construction, bounded
+full-history/text work and prepared-window raster/scan costs visible for the later R11e comparison.
+
+The separate three-document Shell probe records one sample per transition, not distributions:
+cold 5.499 ms, unchanged 0.054 ms, palette 0.789 ms, width 0.771 ms and text-scale 3.814 ms.
+Cold compilation creates 36 nodes, invokes 300 measurement callbacks and shapes 25 requests.
+Unchanged composition enters no compiler work; palette and Clip-only width changes each rebuild
+36 nodes / 300 callbacks but shape zero new requests. Text scale reshapes 25 requests. Thus the
+bounded shaping cache does not establish incremental layout, cheap arbitrary composition or
+retained GPU updates. Packet/planner, upload, GPU, allocation/RSS and end-to-end budgets remain
+under the original R11a/R11e owners.
+
+## Final qualification
+
+The corrected shared text/kernel/widgets/presentation and game-UI cohort passes **509/509**
+(`94afc12c-1e02-46f5-ab2b-92ced394b128`), including the deep auto-layout regression. Its isolated
+red run above establishes the owning cache defect; no higher work ceiling was required for green.
+Earlier shared checkpoints pass 378/378 before the mode-cache correction and 261 with two
+fixture-identity corrections during initial implementation. These cohorts overlap.
+
+The complete default Editor library and selected public integrations pass **494/494**, with
+61 ignored cases (`eb720ef2-a853-47df-850a-007d83a94615`). The earlier 493-case run passed 492
+and exposed the work-pressure assertion corrected above. The clean 494-case run includes the
+new pinned source-count regression and precedes the final private mode-cache correction; the
+affected frontend and native reruns qualify that final integration separately.
+The final affected frontend cohort passes **269/269**
+(`8043b62d-2e7f-49c1-88b4-614378667722`). The original reference native cohort initially passes
+38 of 39 in `bbe91ac4-209e-42c9-a89f-2ebcd1404764`, exposing the source-count regression above.
+After its owning correction and the final shared cache change, both complete native Hierarchy
+trajectories pass **2/2** (`d66bfa9c-d86e-46b0-98a9-2cfb47b944a1`): ordinary Scene/Prefab
+arrangement/removal/history/persistence and the 1,024-declaration filter/wheel/text-lifetime
+workflow with unknown source records and retained Inspector input. The broader 38-case pass
+and final two-case retry are separate runs; neither is represented as one clean 39-case run.
+The final no-reference Editor library passes **245/245**, with three ignored native cases
+(`e89d7cd4-bcac-4d70-9582-9a40087c7f3f`), under `--no-default-features`. This scope includes
+the drawn Shell and adapter correctness tests without initializing the Dear reference.
+
+The final actual Windows/DX12 drawn trajectory passes **1/1** in 88.396 seconds
+(`f258a6bb-1cfe-4f76-b502-21717f0a2c30`). It preserves the full original source/UI/4096-byte/
+history/persistence/retirement/reconstruction path and adds local Enter/refocus, filter
+Escape/refocus and Inspector dirty-Discard/refocus without synthetic interaction resets.
+The exact original Shell, Hierarchy and Inspector images all participate in real native
+composites. Pointer, keyboard and IME events are injected through production adapters;
+this does not qualify real OS IME delivery, system clipboard or native accessibility.
+
+Final fixed-content artifacts are the original GPU panel-output readbacks and text metadata
+in local `nara-styled-qualified-0114ed98942c4d3b9093ad8c449dc26c` under the platform temporary
+directory: `drawn-normal-inspector`, `drawn-compact-large-text-preedit` and
+`drawn-anchored-actions-menu` in PPM plus lossless PNG conversion. They use the actual 1.5 native
+scale, 1800×1650 physical window, Fira Sans Regular and configured SimHei fallback. Review confirms
+consistent field/control typography and alignment, quiet ordinary removal entry, neutral disabled
+primary actions, wrapped enlarged toolbar groups, retained preedit and visible menu focus.
+Source IDs, explicit workflow controls and diagnostic detail still make this an engineering
+source workspace; this is not approval of a finished broad component catalogue.
+
+The native path exercises both densities and 1×/2× user text scale at that actual OS scale.
+Shared packet/geometry tests additionally exercise 1/1.25/1.5/2 scales; no native monitor/DPI
+transition, Linux/macOS, color-emoji/font-family selection or forced-preference qualification is
+claimed. Readbacks compose original panel texels at their actual bounds, not the final OS
+swapchain. Capture and unoptimized trajectory duration are not performance measurements.
+
+The independently locked UI-library consumer passes **37/37** with all optional features
+(`0c3112e8-7bf6-4af9-a911-c5f1ea768481`). Its seven styled-property-row cases retain actual
+fallback metrics, full text/edit history, scoped override removal, sibling isolation and real
+child measurement. The same library adds no Editor/ECS/native owner; these CPU results remain
+separate from first-party native visual review.
+
+The independently locked reference panel consumer passes **46/46**, with four ignored native
+cases (`346c63b8-cfb6-4f9b-8147-d39e4cefe1b5`), preserving its public source/import/instance and
+exact-result assertions. Its separately selected real Windows/DX12 embedded Host startup,
+paint and ordinary-close trajectory passes **1/1**
+(`3d5e89f4-af67-4f4a-a92e-e556d6565d8c`).
+
+The independently locked no-reference public UI Host consumer passes **14/14**, with two ignored
+native cases (`89fc54bc-8629-470d-b11e-5e17ef67c92d`). All three examples build, including the
+ordinary public `drawn_editor` entry. Its actual Windows/DX12 Nara and independently painted
+frontend trajectories pass **2/2** (`0b205262-a728-4945-a8dd-86118b04559e`), retaining their
+original complete source/history/persistence, stale-route/output refusal and physical-retirement
+assertions. The latter frontend adopts no Nara widget tree; this proves the existing public
+image/semantic Host remains consumable alongside the first-party recipe changes, not compatibility
+with a named external toolkit or automatic extension reload.
+
+Correctness Clippy passes for all targets/features of Text, kernel, widgets, UI presentation,
+game UI and Editor. Existing non-correctness warnings remain; this unit does not claim a
+warning-free repository. The shared typography/recipe prerequisite is `fc7824a`; its final
+measurement/reuse correction is `c569c94`.
+
+Both default Editor binaries and the separately built `--no-default-features` production
+`nara-editor-drawn` binary build with the pinned toolchain and locked offline graph. Public-entry
+normal/build/feature dependency inspection excludes Dear/ImGui packages, `imgui-reference` and
+`editor-imgui`. These are build/dependency results; this unit's actual event-loop evidence is the
+complete native trajectory above, while ordinary executable startup/close retains the preceding
+independent-workspace unit's scope. Root and three affected independent-workspace formatting checks
+and changed-document file targets pass.
+
+Independent final reviews close the concrete input, stale-output, measurement and cache-work
+findings described above. This unit supplies the first shared recipes and complete property
+workspace, with original source and physical lifetime authority. It leaves broad component
+catalogues, Editor information design, persistent preferences, font-family/style choice,
+platform accessibility, docking/multiple windows, remaining Editor tools, extension code
+reconstruction and R11a/e end-to-end budgets open under their existing owners. The full foundation
+Goal remains active.

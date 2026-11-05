@@ -90,6 +90,9 @@ impl OwnedHierarchy {
     ) -> Result<TextEditOutcome, OwnedHierarchyError> {
         let input = self.live_input(frame, field)?;
         self.check_token(token)?;
+        if self.retained(frame)?.appearance != self.appearance {
+            return Err(OwnedHierarchyError::ChangedProjection);
+        }
         if input.display_text != self.filter.editor().display_text() {
             return Err(OwnedHierarchyError::ChangedProjection);
         }
@@ -168,6 +171,9 @@ impl OwnedHierarchy {
     ) -> Result<UiRect, OwnedHierarchyError> {
         let input = self.live_input(frame, field)?;
         self.check_token(token)?;
+        if self.retained(frame)?.appearance != self.appearance {
+            return Err(OwnedHierarchyError::ChangedProjection);
+        }
         Ok(self.filter.ime_area(input.width)?)
     }
 

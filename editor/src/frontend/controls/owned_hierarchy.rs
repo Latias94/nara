@@ -23,8 +23,8 @@ use nara_ui_kernel::{
     UiEnvironment, UiFrame, UiKey, UiKeyError, UiPoint, UiRect, UiRootKey, UiStyleError, UiTheme,
 };
 use nara_ui_widgets::{
-    UiButton, UiButtonState, UiIntentBatch, UiIntentBatchError, UiTextField, UiTextFieldError,
-    UiTextInputToken, UiWidgetError,
+    UiAppearance, UiButton, UiButtonState, UiIntentBatch, UiIntentBatchError, UiTextField,
+    UiTextFieldError, UiTextInputToken, UiTextRole, UiWidgetError,
 };
 use thiserror::Error;
 
@@ -41,10 +41,6 @@ mod tests;
 use projection::{HierarchyProjectionWork, SourceProjection};
 
 const RETAINED_FRAMES: usize = 3;
-const TEXT_SIZE: f32 = 16.0;
-const INSET: f32 = 12.0;
-const SOURCE_ROW_HEIGHT: f32 = 68.0;
-const CHOICE_HEIGHT: f32 = 30.0;
 const FILTER_TEXT_BYTES: usize = 1024;
 
 type DocumentScope = (EditorDocumentId, EditorDocumentKind, SceneAuthoringSourceId);
@@ -134,6 +130,7 @@ struct CompiledHierarchy {
     frame: Arc<UiFrame>,
     snapshot: UiAuthoringSnapshot,
     theme: UiTheme,
+    appearance: UiAppearance,
     basis: Option<HierarchyBasis>,
     observation: Arc<AtomicBool>,
     viewport_observation: Arc<()>,
@@ -150,6 +147,9 @@ pub(in crate::frontend) struct OwnedHierarchy {
     projection: Option<SourceProjection>,
     paint_dirty: bool,
     root: UiRootKey,
+    appearance: UiAppearance,
+    explicit_appearance: bool,
+    metrics: Option<presentation::Metrics>,
     engine: TextEngine,
     compiler: UiCompiler,
     filter: UiTextField,
@@ -165,6 +165,7 @@ pub(in crate::frontend) struct OwnedHierarchy {
     choices: Option<Choices>,
     removal: Option<HierarchyBasis>,
     source_scroll: f32,
+    reveal_selection: bool,
     choice_scroll: f32,
     queued: bool,
     pending: Option<PanelSubmissionId>,
@@ -205,13 +206,23 @@ impl OwnedHierarchy {
             },
         )?;
         let compiler = UiCompiler::with_fonts(fonts, Default::default())?;
-        let filter = UiTextField::new(root.clone(), "Filter entities", "", TEXT_SIZE, &mut engine)?;
+        let appearance = UiAppearance::default();
+        let filter = UiTextField::with_typography(
+            root.clone(),
+            "Filter entities",
+            "",
+            appearance.typography(UiTextRole::Body)?,
+            &mut engine,
+        )?;
         Ok(Self {
             work: Default::default(),
             projection_work: Default::default(),
             projection: None,
             paint_dirty: true,
             root,
+            appearance,
+            explicit_appearance: false,
+            metrics: None,
             engine,
             compiler,
             filter,
@@ -227,12 +238,21 @@ impl OwnedHierarchy {
             choices: None,
             removal: None,
             source_scroll: 0.0,
+            reveal_selection: false,
             choice_scroll: 0.0,
             queued: false,
             pending: None,
             error: None,
             input_error: None,
         })
+    }
+
+    pub(in crate::frontend) fn set_appearance(&mut self, appearance: UiAppearance) {
+        self.explicit_appearance = true;
+        if self.appearance != appearance {
+            self.appearance = appearance;
+            self.invalidate_actions();
+        }
     }
 
     pub(super) fn compiled_frame(&self) -> Option<&Arc<UiFrame>> {
@@ -404,13 +424,7 @@ impl OwnedHierarchy {
             }
             Control::ShowSelection => {
                 self.clear_filter()?;
-                if let Some(scene) = model.workspace().active_scene.as_ref()
-                    && let Some(index) = scene.editor.inspector.entities.iter().position(|row| {
-                        Some(&row.id) == scene.editor.inspector.selected_entity.as_ref()
-                    })
-                {
-                    self.source_scroll = index as f32 * SOURCE_ROW_HEIGHT;
-                }
+                self.reveal_selection = true;
                 self.invalidate_actions();
                 return Ok(None);
             }
@@ -422,6 +436,7 @@ impl OwnedHierarchy {
             }
             Control::CancelRemoval => {
                 self.removal = None;
+                self.choice_scroll = 0.0;
                 self.invalidate_actions();
                 return Ok(None);
             }
@@ -456,6 +471,7 @@ impl OwnedHierarchy {
             Control::Remove => {
                 self.removal = Some(basis);
                 self.choices = None;
+                self.choice_scroll = 0.0;
                 self.invalidate_actions();
                 return Ok(None);
             }
@@ -646,7 +662,7 @@ impl OwnedHierarchy {
         }
         let source_limit = compiled.source_limit;
         let choice_limit = compiled.choice_limit;
-        let (offset, limit) = if self.choices.is_some() {
+        let (offset, limit) = if self.choices.is_some() || self.removal.is_some() {
             (&mut self.choice_scroll, choice_limit)
         } else {
             (&mut self.source_scroll, source_limit)
@@ -670,6 +686,8 @@ impl Drop for OwnedHierarchy {
 
 #[derive(Debug, Error)]
 pub(super) enum OwnedHierarchyError {
+    #[error(transparent)]
+    Appearance(#[from] nara_ui_widgets::UiAppearanceError),
     #[error(transparent)]
     Engine(#[from] TextEngineCreateError),
     #[error(transparent)]

@@ -7,7 +7,7 @@ use nara::{
 };
 
 use super::*;
-use crate::frontend::imgui::source_tool::OwnedSourceToolPresentation;
+use crate::frontend::controls::source_tool::OwnedSourceToolPresentation;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ToolBasis {
@@ -72,7 +72,7 @@ pub(super) struct DisplayedTool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::frontend::imgui) enum ToolAction {
+pub(in crate::frontend) enum ToolAction {
     Prepare,
     Accept,
 }
@@ -94,7 +94,7 @@ impl ToolAction {
 }
 
 impl OwnedInspector {
-    pub(in crate::frontend::imgui) fn retire_tool_controls(&mut self) {
+    pub(in crate::frontend) fn retire_tool_controls(&mut self) {
         self.controls.retain(|_, control| control.tool.is_none());
     }
 
@@ -124,19 +124,20 @@ impl OwnedInspector {
         let current = source(&control.basis.field)
             .and_then(nara::reflect::ComponentValue::as_i64)
             .ok_or(OwnedInspectorError::ChangedProjection)?;
-        let mut nodes = vec![self.label(
+        let mut nodes = vec![self.caption(
             &format!("{identity}.tool.current"),
             &format!("Current value: {current}"),
         )?];
         if parameter.parse::<i64>().is_err() {
-            nodes.push(self.label(
+            nodes.push(self.error_label(
                 &format!("{identity}.tool.invalid"),
                 "Enter an i64 integer before preparing a proposal",
             )?);
         }
         if let Some(error) = &tool.error {
-            nodes.push(self.label(&format!("{identity}.tool.error"), error)?);
+            nodes.push(self.error_label(&format!("{identity}.tool.error"), error)?);
         }
+        let height = inspector_control_height(self.appearance, 30.0)?;
         for action in [ToolAction::Prepare, ToolAction::Accept] {
             if action == ToolAction::Accept {
                 let Some(review) =
@@ -144,7 +145,7 @@ impl OwnedInspector {
                 else {
                     continue;
                 };
-                nodes.push(self.label(&format!("{identity}.tool.review"), "Source-tool review")?);
+                nodes.push(self.caption(&format!("{identity}.tool.review"), "Source-tool review")?);
                 nodes.push(self.label(&format!("{identity}.tool.title"), &review.title)?);
                 for (index, operation) in review.operations.iter().enumerate() {
                     nodes.push(
@@ -159,7 +160,7 @@ impl OwnedInspector {
                 displayed.enabled[action.index()] = enabled && current.is_some();
                 displayed.review = Some(review.request.clone());
                 if current.is_none() {
-                    nodes.push(self.label(&format!("{identity}.tool.stale"), "Review belongs to another source observation or entity; prepare a new proposal")?);
+                    nodes.push(self.error_label(&format!("{identity}.tool.stale"), "Review belongs to another source observation or entity; prepare a new proposal")?);
                 }
             }
             let key = UiKey::scoped(
@@ -175,17 +176,27 @@ impl OwnedInspector {
                 UiActionId::new(action.label())?,
             )?
             .with_enabled(displayed.enabled[action.index()]);
+            let variant = match action {
+                ToolAction::Prepare => UiButtonVariant::Secondary,
+                ToolAction::Accept => UiButtonVariant::Primary,
+            };
             nodes.push(
-                button.authored_node(
-                    &self.root,
-                    UiStyle::flex()
-                        .with_width(UiDimension::Px(width))
-                        .with_height(UiDimension::Px(30.0))
-                        .with_flex_shrink(0.0),
-                    UiVisual::role(button_color(tool.buttons[action.index()], &button)),
-                    UiBrush::Role(UiColorRole::PrimaryText),
-                    TEXT_SIZE,
-                )?,
+                self.appearance
+                    .button(
+                        &button,
+                        tool.buttons[action.index()],
+                        variant,
+                        UiControlSize::Regular,
+                        false,
+                    )?
+                    .authored_node(
+                        &button,
+                        &self.root,
+                        UiStyle::flex()
+                            .with_width(UiDimension::Px(width))
+                            .with_height(UiDimension::Px(height))
+                            .with_flex_shrink(0.0),
+                    )?,
             );
             buttons.insert(
                 key,
@@ -198,13 +209,13 @@ impl OwnedInspector {
         }
         if let Some(presentation) = presentation {
             for (index, feedback) in presentation.feedback.iter().enumerate() {
-                nodes.push(self.label(&format!("{identity}.tool.feedback.{index}"), feedback)?);
+                nodes.push(self.caption(&format!("{identity}.tool.feedback.{index}"), feedback)?);
             }
         }
         Ok(Some((nodes, displayed)))
     }
 
-    pub(in crate::frontend::imgui) fn source_tool_action(
+    pub(in crate::frontend) fn source_tool_action(
         &self,
         frame: &Arc<UiFrame>,
         button: &UiKey,
@@ -286,7 +297,7 @@ impl OwnedInspector {
         }
     }
 
-    pub(in crate::frontend::imgui) fn tool_queued(
+    pub(in crate::frontend) fn tool_queued(
         &mut self,
         frame: &Arc<UiFrame>,
         input: &UiKey,
@@ -300,17 +311,13 @@ impl OwnedInspector {
         Ok(())
     }
 
-    pub(in crate::frontend::imgui) fn is_tool_input(
-        &self,
-        frame: &Arc<UiFrame>,
-        input: &UiKey,
-    ) -> bool {
+    pub(in crate::frontend) fn is_tool_input(&self, frame: &Arc<UiFrame>, input: &UiKey) -> bool {
         self.live_input(frame, input)
             .ok()
             .is_some_and(|displayed| self.controls[&displayed.key].tool.is_some())
     }
 
-    pub(in crate::frontend::imgui) fn prepare_tool_input(
+    pub(in crate::frontend) fn prepare_tool_input(
         &self,
         frame: &Arc<UiFrame>,
         input: &UiKey,
@@ -333,7 +340,7 @@ impl OwnedInspector {
         self.source_tool_action(frame, button, model)
     }
 
-    pub(in crate::frontend::imgui) fn discard_tool_input(
+    pub(in crate::frontend) fn discard_tool_input(
         &mut self,
         frame: &Arc<UiFrame>,
         input: &UiKey,

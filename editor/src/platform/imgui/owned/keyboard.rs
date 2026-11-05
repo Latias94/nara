@@ -268,9 +268,9 @@ impl NativeImgui {
                 Key::Named(NamedKey::Delete) => Some(TextEdit::Delete),
                 Key::Named(NamedKey::Enter | NamedKey::Escape) if !repeat => {
                     let operation = if key == Key::Named(NamedKey::Escape) {
-                        crate::frontend::imgui::InspectorOperation::Discard
+                        crate::frontend::controls::owned_inspector::InspectorOperation::Discard
                     } else {
-                        crate::frontend::imgui::InspectorOperation::Apply
+                        crate::frontend::controls::owned_inspector::InspectorOperation::Apply
                     };
                     if let Some(model) = application.current_frame()
                         && let Err(error) = self.frontend.owned_operation(

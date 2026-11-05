@@ -12,11 +12,15 @@ use nara::tooling::{
 };
 use nara_text::FontFace;
 use nara_ui_kernel::{
-    UiActionId, UiAuthoringSnapshotBuilder, UiBrush, UiColorRole, UiCompiler, UiDispatchBatch,
-    UiEnvironment, UiFrame, UiKey, UiLayer, UiLocalKey, UiNode, UiOverflow, UiRoot, UiRootKey,
-    UiRootStatus, UiStyle, UiText, UiTextOverflow, UiTheme, UiVisual,
+    UiActionId, UiAuthoringSnapshotBuilder, UiCompiler, UiCustomLayout, UiDimension,
+    UiDispatchBatch, UiEdges, UiEnvironment, UiFrame, UiKey, UiLayer, UiLocalKey, UiNode,
+    UiOverflow, UiPositionMode, UiRect, UiRoot, UiRootKey, UiRootStatus, UiStyle, UiTextOverflow,
+    UiTheme, UiVisual,
 };
-use nara_ui_widgets::{UiButton, UiButtonState, UiButtonVisualState, UiIntentBatch};
+use nara_ui_widgets::{
+    UiAnchoredPopup, UiAppearance, UiButton, UiButtonState, UiButtonVariant, UiControlGrid,
+    UiControlSize, UiIntentBatch, UiTextRole,
+};
 
 use crate::{PanelActionDispatch, PanelSubmissionId};
 
@@ -29,9 +33,12 @@ mod tests;
 const DOCUMENTS_PER_PAGE: usize = 4;
 const SOURCES_PER_PAGE: usize = 4;
 const RETAINED_FRAMES: usize = 3;
-const INSET: f32 = 8.0;
-const GAP: f32 = 6.0;
-const TEXT_SIZE: f32 = 14.0;
+const MENU_CONTROLS: [Control; 4] = [
+    Control::MenuRefresh,
+    Control::MenuReopen,
+    Control::MenuClose,
+    Control::DismissMenu,
+];
 
 #[derive(Clone, PartialEq, Eq)]
 struct ShellBasis {
@@ -259,6 +266,10 @@ impl ShellBasis {
             Control::AcknowledgeClose => self.workspace_intent.result().map(|_| {
                 EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult)
             }),
+            Control::MenuRefresh => self.action(Control::RefreshSources),
+            Control::MenuReopen => self.action(Control::Reopen),
+            Control::MenuClose => self.action(Control::Close),
+            Control::OpenMenu | Control::DismissMenu => None,
             Control::PreviousDocuments
             | Control::NextDocuments
             | Control::PreviousSources
@@ -269,6 +280,11 @@ impl ShellBasis {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
+    OpenMenu,
+    DismissMenu,
+    MenuRefresh,
+    MenuReopen,
+    MenuClose,
     RefreshSources,
     OpenSource(usize),
     PreviousSources,
@@ -293,6 +309,11 @@ enum Control {
 impl Control {
     fn identity(self) -> String {
         match self {
+            Self::OpenMenu => "menu.open".into(),
+            Self::DismissMenu => "menu.dismiss".into(),
+            Self::MenuRefresh => "menu.refresh".into(),
+            Self::MenuReopen => "menu.reopen".into(),
+            Self::MenuClose => "menu.close".into(),
             Self::RefreshSources => "sources.refresh".into(),
             Self::OpenSource(index) => format!("source.{index}"),
             Self::PreviousSources => "sources.previous".into(),
@@ -338,11 +359,14 @@ struct CompiledShell {
     generation: u64,
     offset: usize,
     source_offset: usize,
+    appearance: UiAppearance,
+    scroll: f32,
     buttons: HashMap<UiKey, Binding>,
 }
 
 pub(in crate::frontend::drawn) struct ShellControls {
     root: UiRootKey,
+    menu_root: UiRootKey,
     compiler: UiCompiler,
     frames: Vec<CompiledShell>,
     basis: Option<ShellBasis>,
@@ -351,6 +375,15 @@ pub(in crate::frontend::drawn) struct ShellControls {
     next_snapshot: u64,
     document_offset: usize,
     source_offset: usize,
+    appearance: UiAppearance,
+    scroll: f32,
+    scroll_limit: f32,
+    menu_anchor: Option<UiRect>,
+    menu_environment: Option<UiEnvironment>,
+    menu_scroll: f32,
+    menu_scroll_limit: f32,
+    menu_navigation: Option<Control>,
+    focus_request: Option<Control>,
     paint_dirty: bool,
     last_result: Option<PanelSubmissionId>,
     result_count: u64,
@@ -361,10 +394,15 @@ pub(in crate::frontend::drawn) struct ShellControls {
 impl ShellControls {
     pub(in crate::frontend::drawn) fn new(
         root: UiRootKey,
+        menu_root: UiRootKey,
         fonts: Vec<FontFace>,
     ) -> Result<Self, String> {
+        if root == menu_root {
+            return Err("Workspace and action-menu roots must be distinct".into());
+        }
         Ok(Self {
             root,
+            menu_root,
             compiler: UiCompiler::with_fonts(fonts, Default::default())
                 .map_err(|error| error.to_string())?,
             frames: Vec::new(),
@@ -374,6 +412,15 @@ impl ShellControls {
             next_snapshot: 1,
             document_offset: 0,
             source_offset: 0,
+            appearance: UiAppearance::default(),
+            scroll: 0.0,
+            scroll_limit: 0.0,
+            menu_anchor: None,
+            menu_environment: None,
+            menu_scroll: 0.0,
+            menu_scroll_limit: 0.0,
+            menu_navigation: None,
+            focus_request: None,
             paint_dirty: true,
             last_result: None,
             result_count: 0,
@@ -386,6 +433,11 @@ impl ShellControls {
         self.frames
             .iter()
             .any(|compiled| Arc::ptr_eq(&compiled.frame, frame))
+    }
+
+    pub(in crate::frontend::drawn) fn input_basis_is_current(&self, frame: &Arc<UiFrame>) -> bool {
+        self.retained(frame)
+            .is_ok_and(|compiled| compiled.generation == self.generation)
     }
 
     fn retained(&self, frame: &Arc<UiFrame>) -> Result<&CompiledShell, String> {
@@ -401,7 +453,24 @@ impl ShellControls {
             .checked_add(1)
             .ok_or_else(|| "Workspace shell input identities are exhausted".to_owned())?;
         self.states.clear();
+        self.menu_anchor = None;
+        self.menu_environment = None;
+        self.menu_scroll = 0.0;
+        self.menu_scroll_limit = 0.0;
+        self.menu_navigation = None;
+        self.focus_request = None;
         self.paint_dirty = true;
+        Ok(())
+    }
+
+    pub(in crate::frontend::drawn) fn set_appearance(
+        &mut self,
+        appearance: UiAppearance,
+    ) -> Result<(), String> {
+        if self.appearance != appearance {
+            self.cancel_input()?;
+            self.appearance = appearance;
+        }
         Ok(())
     }
 
@@ -481,6 +550,27 @@ impl ShellControls {
             return Err("The original source binding changed; use the current controls".into());
         }
         match control {
+            Control::OpenMenu => {
+                let anchor = frame
+                    .semantics()
+                    .iter()
+                    .find(|node| node.key() == key)
+                    .map(|node| node.rect())
+                    .ok_or("The action menu anchor is no longer presented")?;
+                let first = MENU_CONTROLS.into_iter().find(|control| {
+                    *control == Control::DismissMenu || compiled.basis.action(*control).is_some()
+                });
+                self.cancel_input()?;
+                self.menu_anchor = Some(anchor);
+                self.menu_environment = Some(frame.environment());
+                self.focus_request = first;
+                self.menu_navigation = first;
+                Ok(None)
+            }
+            Control::DismissMenu => {
+                self.dismiss_menu()?;
+                Ok(None)
+            }
             Control::PreviousDocuments | Control::NextDocuments => {
                 let next =
                     if control == Control::PreviousDocuments {
@@ -544,11 +634,24 @@ impl ShellControls {
         model: &EditorFrameModel,
         environment: UiEnvironment,
     ) -> Result<Arc<UiFrame>, String> {
-        let width = environment.logical_size().width() - 2.0 * INSET;
-        if width < 944.0 || environment.logical_size().height() < 272.0 {
-            return Err("The workspace shell needs at least 960 by 272 logical pixels".into());
+        let inset = self.appearance.panel_inset();
+        let width = environment.logical_size().width() - 2.0 * inset;
+        let minimum_height = 96.0_f32.max(
+            self.appearance
+                .control_metrics(UiControlSize::Small)
+                .map_err(|error| error.to_string())?
+                .height()
+                + 32.0,
+        );
+        if width < 296.0 || environment.logical_size().height() < minimum_height {
+            return Err(format!(
+                "The workspace shell needs at least 320 by {minimum_height} logical pixels for the current appearance"
+            ));
         }
         let basis = ShellBasis::capture(model);
+        if self.menu_anchor.is_some() && self.menu_environment != Some(environment) {
+            self.dismiss_menu()?;
+        }
         let offset = self
             .document_offset
             .min(last_page_offset(basis.documents.len(), DOCUMENTS_PER_PAGE));
@@ -572,14 +675,15 @@ impl ShellControls {
             && previous.generation == self.generation
             && previous.offset == self.document_offset
             && previous.source_offset == self.source_offset
+            && previous.appearance == self.appearance
+            && previous.scroll == self.scroll
             && previous.frame.environment() == environment
         {
             return Ok(Arc::clone(&previous.frame));
         }
 
-        let mut nodes = Vec::new();
+        let mut groups = Vec::new();
         let mut buttons = HashMap::new();
-        let half = (width - GAP) / 2.0;
         let count = basis.documents.len();
         let first = if count == 0 {
             0
@@ -599,18 +703,17 @@ impl ShellControls {
             EditorAuthoringReadiness::Complete => "ready",
             EditorAuthoringReadiness::Degraded => "needs attention",
         };
-        nodes.push(label(
+        let project = self.label(
             "project",
             &format!(
                 "Nara | Project: {readiness} | Documents {first}-{last}/{count} | {dirty} unsaved",
             ),
-            [INSET, 6.0, half, 20.0],
-        )?);
-        nodes.push(label(
+        )?;
+        let result = self.label(
             "action-result",
             &format!("{} | {} refused", self.feedback, self.failed_count),
-            [INSET + half + GAP, 6.0, half, 20.0],
-        )?);
+        )?;
+        groups.push(self.group(240.0, vec![project, result])?);
         let (document_text, source_text) = if let Some(document) = basis.active_document() {
             (
                 format!(
@@ -633,37 +736,30 @@ impl ShellControls {
         } else {
             ("No active document".into(), "Source: none selected".into())
         };
-        nodes.push(label(
-            "document",
-            &document_text,
-            [INSET, 28.0, half, 20.0],
-        )?);
-        nodes.push(label(
-            "source",
-            &source_text,
-            [INSET + half + GAP, 28.0, half, 20.0],
+        groups.push(self.group(
+            260.0,
+            vec![
+                self.label("document", &document_text)?,
+                self.label("source", &source_text)?,
+            ],
         )?);
 
-        let page_width = 148.0;
-        let tab_width = (width - 2.0 * page_width - 5.0 * GAP) / DOCUMENTS_PER_PAGE as f32;
-        nodes.push(self.button(
+        let mut tabs = vec![self.button(
             &basis,
             Control::PreviousDocuments,
             "Previous documents",
             self.document_offset > 0,
             false,
-            [INSET, 52.0, page_width, 32.0],
             &mut buttons,
-        )?);
-        for (index, document) in basis
+        )?];
+        for document in basis
             .documents
             .iter()
             .skip(self.document_offset)
             .take(DOCUMENTS_PER_PAGE)
-            .enumerate()
         {
             let control = Control::Document(document.document);
-            nodes.push(self.button(
+            tabs.push(self.button(
                 &basis,
                 control,
                 &format!(
@@ -675,73 +771,62 @@ impl ShellControls {
                 ),
                 basis.action(control).is_some(),
                 document.active,
-                [
-                    INSET + page_width + GAP + index as f32 * (tab_width + GAP),
-                    52.0,
-                    tab_width,
-                    32.0,
-                ],
                 &mut buttons,
             )?);
         }
-        nodes.push(self.button(
+        tabs.push(self.button(
             &basis,
             Control::NextDocuments,
             "Next documents",
             self.document_offset < last_page_offset(basis.documents.len(), DOCUMENTS_PER_PAGE),
             false,
-            [INSET + width - page_width, 52.0, page_width, 32.0],
             &mut buttons,
         )?);
+        groups.push(self.group(110.0, tabs)?);
 
-        let toolbar_width = (width - 4.0 * GAP) / 5.0;
-        for (index, (control, text)) in [
+        let mut toolbar = Vec::new();
+        for (control, text) in [
             (Control::Undo, "Undo"),
             (Control::Redo, "Redo"),
             (Control::Save, "Save"),
             (Control::Reopen, "Reopen"),
             (Control::Close, "Close document"),
+            (Control::OpenMenu, "Document actions"),
         ]
         .into_iter()
-        .enumerate()
         {
-            nodes.push(self.button(
+            toolbar.push(self.button(
                 &basis,
                 control,
                 text,
-                basis.action(control).is_some(),
+                control == Control::OpenMenu || basis.action(control).is_some(),
                 false,
-                [
-                    INSET + index as f32 * (toolbar_width + GAP),
-                    90.0,
-                    toolbar_width,
-                    32.0,
-                ],
                 &mut buttons,
             )?);
         }
-        nodes.push(label(
-            "persistence",
-            &feedback::persistence_status(basis.persistence),
-            [INSET, 126.0, half, 20.0],
-        )?);
-        nodes.push(label(
-            "close-status",
-            &feedback::workspace_status(&basis.workspace_intent, &basis.documents),
-            [INSET + half + GAP, 126.0, half, 20.0],
+        groups.push(self.group(94.0, toolbar)?);
+        groups.push(self.group(
+            220.0,
+            vec![
+                self.label(
+                    "persistence",
+                    &feedback::persistence_status(basis.persistence),
+                )?,
+                self.label(
+                    "close-status",
+                    &feedback::workspace_status(&basis.workspace_intent, &basis.documents),
+                )?,
+            ],
         )?);
 
-        let acknowledge_width = 268.0;
-        nodes.push(self.button(
+        let mut acknowledgments = vec![self.button(
             &basis,
             Control::AcknowledgePersistence,
             "Acknowledge persistence result",
             basis.action(Control::AcknowledgePersistence).is_some(),
             false,
-            [INSET, 148.0, acknowledge_width, 28.0],
             &mut buttons,
-        )?);
-        let decision_width = (width - acknowledge_width - 3.0 * GAP) / 3.0;
+        )?];
         let decisions: &[(Control, &str)] = if basis.workspace_intent.phase()
             == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
         {
@@ -755,22 +840,17 @@ impl ShellControls {
         } else {
             &[]
         };
-        for (index, &(control, text)) in decisions.iter().enumerate() {
-            nodes.push(self.button(
+        for &(control, text) in decisions {
+            acknowledgments.push(self.button(
                 &basis,
                 control,
                 text,
                 basis.action(control).is_some(),
                 false,
-                [
-                    INSET + acknowledge_width + GAP + index as f32 * (decision_width + GAP),
-                    148.0,
-                    decision_width,
-                    28.0,
-                ],
                 &mut buttons,
             )?);
         }
+        groups.push(self.group(180.0, acknowledgments)?);
 
         let source_first = if source_count == 0 {
             0
@@ -781,44 +861,34 @@ impl ShellControls {
             .source_offset
             .saturating_add(SOURCES_PER_PAGE)
             .min(source_count);
-        nodes.push(label(
+        let sources = self.label(
             "sources",
             &format!(
                 "Sources {source_first}-{source_last}/{source_count} | {}",
                 feedback::source_status(basis.browser.status()),
             ),
-            [INSET, 184.0, half, 20.0],
-        )?);
-        nodes.push(label(
-            "open-status",
-            &feedback::open_status(&basis.document_open),
-            [INSET + half + GAP, 184.0, half, 20.0],
-        )?);
-        let source_width = (width - (SOURCES_PER_PAGE - 1) as f32 * GAP) / SOURCES_PER_PAGE as f32;
-        for (slot, (index, entry)) in basis
+        )?;
+        let open = self.label("open-status", &feedback::open_status(&basis.document_open))?;
+        groups.push(self.group(240.0, vec![sources, open])?);
+        let mut sources = Vec::new();
+        for (index, entry) in basis
             .sources()
             .skip(self.source_offset)
             .take(SOURCES_PER_PAGE)
-            .enumerate()
         {
             let control = Control::OpenSource(index);
-            nodes.push(self.button(
+            sources.push(self.button(
                 &basis,
                 control,
                 &format!("Open {}", entry.relative_path()),
                 basis.action(control).is_some(),
                 false,
-                [
-                    INSET + slot as f32 * (source_width + GAP),
-                    206.0,
-                    source_width,
-                    26.0,
-                ],
                 &mut buttons,
             )?);
         }
-        let source_action_width = (width - 4.0 * GAP) / 5.0;
-        for (slot, (control, text, enabled)) in [
+        groups.push(self.group(180.0, sources)?);
+        let mut source_actions = Vec::new();
+        for (control, text, enabled) in [
             (
                 Control::PreviousSources,
                 "Previous sources",
@@ -846,51 +916,195 @@ impl ShellControls {
             ),
         ]
         .into_iter()
-        .enumerate()
         {
-            nodes.push(self.button(
+            source_actions.push(self.button(
                 &basis,
                 control,
                 text,
                 enabled,
                 false,
-                [
-                    INSET + slot as f32 * (source_action_width + GAP),
-                    238.0,
-                    source_action_width,
-                    26.0,
-                ],
                 &mut buttons,
             )?);
         }
+        groups.push(self.group(138.0, source_actions)?);
+
+        let content_key = UiLocalKey::runtime("nara.shell.layout", "content")
+            .map_err(|error| error.to_string())?;
+        let content = UiNode::new(
+            UiStyle::flex()
+                .with_position_mode(UiPositionMode::Absolute)
+                .with_left(UiDimension::Px(inset))
+                .with_top(UiDimension::Px(inset - self.scroll))
+                .with_width(UiDimension::Px(width))
+                .with_gap(self.appearance.gap())
+                .with_flex_shrink(0.0),
+        )
+        .with_key(content_key.clone())
+        .with_children(groups);
 
         let root = UiRoot::new(
             self.root.clone(),
             UiLayer::Base,
             UiStyle::fill().with_overflow(UiOverflow::Clip),
         )
-        .with_visual(UiVisual::role(UiColorRole::Surface))
-        .with_children(nodes);
-        let snapshot = UiAuthoringSnapshotBuilder::new(self.next_snapshot)
-            .with_root(root)
-            .build()
-            .map_err(|error| error.to_string())?;
+        .with_visual(UiVisual::solid(self.appearance.palette().window))
+        .with_child(content);
+        let mut snapshot = UiAuthoringSnapshotBuilder::new(self.next_snapshot).with_root(root);
+        if let Some(anchor) = self.menu_anchor {
+            let mut menu = Vec::new();
+            for (control, label) in [
+                (Control::MenuRefresh, "Refresh project sources"),
+                (Control::MenuReopen, "Reopen active document"),
+                (Control::MenuClose, "Close active document"),
+                (Control::DismissMenu, "Close actions menu"),
+            ] {
+                menu.push(self.button(
+                    &basis,
+                    control,
+                    label,
+                    control == Control::DismissMenu || basis.action(control).is_some(),
+                    false,
+                    &mut buttons,
+                )?);
+            }
+            let content = UiNode::new(
+                UiStyle::flex()
+                    .with_gap(self.appearance.gap())
+                    .with_flex_shrink(0.0)
+                    .with_top(UiDimension::Px(-self.menu_scroll)),
+            )
+            .with_children(menu);
+            let menu = UiNode::new(
+                UiStyle::flex()
+                    .with_padding(UiEdges::all(8.0).map_err(|error| error.to_string())?)
+                    .with_overflow(UiOverflow::Clip),
+            )
+            .with_key(
+                UiLocalKey::runtime("nara.shell.layout", "menu-viewport")
+                    .map_err(|error| error.to_string())?,
+            )
+            .with_visual(UiVisual::solid(self.appearance.palette().raised))
+            .with_child(content);
+            snapshot = snapshot.with_root(
+                UiRoot::new(self.menu_root.clone(), UiLayer::Modal, UiStyle::fill())
+                    .with_custom_layout(UiCustomLayout::new(
+                        UiAnchoredPopup::new(anchor, 272.0, 8.0, 4.0)
+                            .map_err(|error| error.to_string())?,
+                    ))
+                    .with_child(menu),
+            );
+        }
+        let snapshot = snapshot.build().map_err(|error| error.to_string())?;
         let next_snapshot = self
             .next_snapshot
             .checked_add(1)
             .ok_or_else(|| "Workspace shell snapshot identities are exhausted".to_owned())?;
-        let theme = UiTheme::new(environment.theme_revision().get(), Default::default())
-            .map_err(|error| error.to_string())?;
+        let theme = UiTheme::new(
+            environment.theme_revision().get(),
+            self.appearance.palette().kernel_palette(),
+        )
+        .map_err(|error| error.to_string())?;
         let frame = self
             .compiler
             .compile(&snapshot, environment, theme)
             .map_err(|error| error.to_string())?;
         self.next_snapshot = next_snapshot;
-        if !frame.root_outcomes().iter().any(|outcome| {
-            outcome.key() == &self.root && outcome.status() == UiRootStatus::Published
-        }) {
+        let expected_roots = if self.menu_anchor.is_some() { 2 } else { 1 };
+        if frame.root_outcomes().len() != expected_roots
+            || frame
+                .root_outcomes()
+                .iter()
+                .any(|outcome| outcome.status() != UiRootStatus::Published)
+        {
             self.cancel_input()?;
             return Err("The workspace shell controls could not be published".into());
+        }
+        if self.menu_anchor.is_some() {
+            let viewport = frame.layouts().iter().find(|layout| {
+                layout.key().is_some_and(|key| {
+                    key.local_key().is_some_and(|local| {
+                        local
+                            == &UiLocalKey::runtime("nara.shell.layout", "menu-viewport")
+                                .expect("fixed menu identity is bounded")
+                    })
+                })
+            });
+            let available = viewport.map_or(0.0, |layout| {
+                (layout.rect().size().height() - 16.0).max(0.0)
+            });
+            let content = MENU_CONTROLS.len() as f32
+                * self
+                    .appearance
+                    .control_metrics(UiControlSize::Small)
+                    .map_err(|error| error.to_string())?
+                    .height()
+                + 3.0 * self.appearance.gap();
+            self.menu_scroll_limit = (content - available).max(0.0);
+            if let Some(control) = self
+                .focus_request
+                .filter(|control| MENU_CONTROLS.contains(control))
+                && let Some((key, _)) = buttons
+                    .iter()
+                    .find(|(_, binding)| binding.control == control && binding.button.enabled())
+                && let Some(target) = frame
+                    .layouts()
+                    .iter()
+                    .find(|layout| layout.key() == Some(key))
+                && let Some(viewport) = viewport
+            {
+                let min = viewport.rect().origin().y() + 8.0;
+                let max = viewport.rect().max().y() - 8.0;
+                let delta = reveal_delta(target.rect(), min, max);
+                let next = (self.menu_scroll + delta).clamp(0.0, self.menu_scroll_limit);
+                if next != self.menu_scroll {
+                    self.menu_scroll = next;
+                    return self.compile(model, environment);
+                }
+            }
+            if self.menu_scroll > self.menu_scroll_limit {
+                self.menu_scroll = self.menu_scroll_limit;
+                return self.compile(model, environment);
+            }
+        }
+        self.scroll_limit = frame
+            .layouts()
+            .iter()
+            .find(|layout| {
+                layout
+                    .key()
+                    .is_some_and(|key| key.local_key() == Some(&content_key))
+            })
+            .map_or(0.0, |layout| {
+                (layout.rect().size().height() + 2.0 * inset - environment.logical_size().height())
+                    .max(0.0)
+            });
+        if self.scroll > self.scroll_limit {
+            self.cancel_input()?;
+            self.scroll = self.scroll_limit;
+            return self.compile(model, environment);
+        }
+        if self.focus_request == Some(Control::OpenMenu)
+            && self.menu_anchor.is_none()
+            && let Some((key, _)) = buttons
+                .iter()
+                .find(|(_, binding)| binding.control == Control::OpenMenu)
+            && let Some(target) = frame
+                .layouts()
+                .iter()
+                .find(|layout| layout.key() == Some(key))
+        {
+            let delta = reveal_delta(
+                target.rect(),
+                inset,
+                environment.logical_size().height() - inset,
+            );
+            let next = (self.scroll + delta).clamp(0.0, self.scroll_limit);
+            if next != self.scroll {
+                self.cancel_input()?;
+                self.scroll = next;
+                self.focus_request = Some(Control::OpenMenu);
+                return self.compile(model, environment);
+            }
         }
         self.states.retain(|key, _| buttons.contains_key(key));
         self.frames.push(CompiledShell {
@@ -900,6 +1114,8 @@ impl ShellControls {
             generation: self.generation,
             offset: self.document_offset,
             source_offset: self.source_offset,
+            appearance: self.appearance,
+            scroll: self.scroll,
             buttons,
         });
         if self.frames.len() > RETAINED_FRAMES {
@@ -916,7 +1132,6 @@ impl ShellControls {
         text: &str,
         enabled: bool,
         selected: bool,
-        rect: [f32; 4],
         buttons: &mut HashMap<UiKey, Binding>,
     ) -> Result<UiNode, String> {
         let source = match control {
@@ -932,8 +1147,16 @@ impl ShellControls {
                 )
             },
         );
+        let root = if matches!(
+            control,
+            Control::MenuRefresh | Control::MenuReopen | Control::MenuClose | Control::DismissMenu
+        ) {
+            &self.menu_root
+        } else {
+            &self.root
+        };
         let key = UiKey::scoped(
-            self.root.clone(),
+            root.clone(),
             UiLocalKey::runtime("nara.shell", format!("{}.{}", self.generation, identity))
                 .map_err(|error| error.to_string())?,
         )
@@ -950,24 +1173,16 @@ impl ShellControls {
         .map_err(|error| error.to_string())?
         .with_enabled(enabled);
         let state = self.states.get(&key).copied().unwrap_or_default();
-        let (background, foreground) = match state.visual_state(&button) {
-            UiButtonVisualState::Disabled => (UiColorRole::Panel, UiColorRole::Disabled),
-            UiButtonVisualState::Pressed | UiButtonVisualState::Focused => {
-                (UiColorRole::Focus, UiColorRole::Surface)
-            }
-            UiButtonVisualState::Hovered => (UiColorRole::Accent, UiColorRole::Surface),
-            UiButtonVisualState::Idle if selected => (UiColorRole::Accent, UiColorRole::Surface),
-            UiButtonVisualState::Idle => (UiColorRole::Panel, UiColorRole::PrimaryText),
+        let variant = match control {
+            Control::Save | Control::SaveBeforeClose => UiButtonVariant::Primary,
+            Control::DiscardBeforeClose => UiButtonVariant::Destructive,
+            Control::Document(_) | Control::OpenSource(_) => UiButtonVariant::Quiet,
+            _ => UiButtonVariant::Secondary,
         };
-        let node = button
-            .authored_node(
-                &self.root,
-                UiStyle::absolute(rect[0], rect[1], rect[2], rect[3])
-                    .with_overflow(UiOverflow::Clip),
-                UiVisual::role(background),
-                UiBrush::Role(foreground),
-                TEXT_SIZE,
-            )
+        let node = self
+            .appearance
+            .button(&button, state, variant, UiControlSize::Small, selected)
+            .and_then(|recipe| recipe.authored_node(&button, root, UiStyle::flex()))
             .map_err(|error| error.to_string())?;
         buttons.insert(
             key,
@@ -978,6 +1193,169 @@ impl ShellControls {
             },
         );
         Ok(node)
+    }
+
+    pub(in crate::frontend::drawn) fn dismiss_menu(&mut self) -> Result<bool, String> {
+        if self.menu_anchor.is_none() {
+            return Ok(false);
+        }
+        self.cancel_input()?;
+        self.focus_request = Some(Control::OpenMenu);
+        Ok(true)
+    }
+
+    pub(in crate::frontend::drawn) fn menu_outside(
+        &self,
+        frame: &Arc<UiFrame>,
+        point: nara_ui_kernel::UiPoint,
+    ) -> bool {
+        self.menu_anchor.is_some()
+            && self
+                .retained(frame)
+                .is_ok_and(|compiled| compiled.generation == self.generation)
+            && frame
+                .layouts()
+                .iter()
+                .find(|layout| {
+                    layout.key().is_some_and(|key| {
+                        key.root_key() == &self.menu_root
+                            && key.local_key().is_some_and(|local| {
+                                local
+                                    == &UiLocalKey::runtime("nara.shell.layout", "menu-viewport")
+                                        .expect("fixed menu identity is bounded")
+                            })
+                    })
+                })
+                .is_some_and(|layout| !layout.rect().contains(point))
+    }
+
+    pub(in crate::frontend::drawn) fn take_focus_request(
+        &mut self,
+        frame: &Arc<UiFrame>,
+    ) -> Option<UiKey> {
+        let control = self.focus_request?;
+        let compiled = self.retained(frame).ok()?;
+        let key = compiled
+            .buttons
+            .iter()
+            .find(|(_, binding)| binding.control == control && binding.button.enabled())
+            .map(|(key, _)| key.clone())?;
+        let target = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &key && node.enabled())?;
+        if target
+            .clip_rect()
+            .is_some_and(|clip| target.rect().intersect(clip) != Some(target.rect()))
+        {
+            return None;
+        }
+        self.focus_request = None;
+        Some(key)
+    }
+
+    pub(in crate::frontend::drawn) fn navigate_menu(
+        &mut self,
+        frame: &Arc<UiFrame>,
+        previous: bool,
+    ) -> Result<bool, String> {
+        if self.menu_anchor.is_none() {
+            return Ok(false);
+        }
+        let compiled = self.retained(frame)?;
+        if compiled.generation != self.generation {
+            return Ok(true);
+        }
+        let enabled = MENU_CONTROLS
+            .into_iter()
+            .filter(|control| {
+                compiled
+                    .buttons
+                    .values()
+                    .any(|binding| binding.control == *control && binding.button.enabled())
+            })
+            .collect::<Vec<_>>();
+        let focused = compiled
+            .buttons
+            .iter()
+            .find(|(key, binding)| {
+                MENU_CONTROLS.contains(&binding.control)
+                    && self.states.get(*key).is_some_and(|state| state.focused())
+            })
+            .map(|(_, binding)| binding.control)
+            .or(self.menu_navigation);
+        let current =
+            focused.and_then(|control| enabled.iter().position(|candidate| *candidate == control));
+        let next = match current {
+            Some(index) if previous => (index + enabled.len() - 1) % enabled.len(),
+            Some(index) => (index + 1) % enabled.len(),
+            None if previous => enabled.len().saturating_sub(1),
+            None => 0,
+        };
+        if let Some(control) = enabled.get(next).copied() {
+            self.focus_request = Some(control);
+            self.menu_navigation = Some(control);
+            self.paint_dirty = true;
+        }
+        Ok(true)
+    }
+
+    fn group(&self, minimum_cell_width: f32, children: Vec<UiNode>) -> Result<UiNode, String> {
+        Ok(UiNode::new(UiStyle::flex().with_flex_shrink(0.0))
+            .with_custom_layout(UiCustomLayout::new(
+                UiControlGrid::new(minimum_cell_width, self.appearance.gap())
+                    .map_err(|error| error.to_string())?,
+            ))
+            .with_children(children))
+    }
+
+    fn label(&self, key: &str, text: &str) -> Result<UiNode, String> {
+        let text = self
+            .appearance
+            .text(bounded_text(text, 180), UiTextRole::Caption, true)
+            .map_err(|error| error.to_string())?
+            .with_overflow(UiTextOverflow::Clip);
+        Ok(UiNode::new(UiStyle::flex().with_overflow(UiOverflow::Clip))
+            .with_key(
+                UiLocalKey::runtime("nara.shell.label", key).map_err(|error| error.to_string())?,
+            )
+            .with_text(text))
+    }
+
+    pub(in crate::frontend::drawn) fn scroll(
+        &mut self,
+        frame: &Arc<UiFrame>,
+        delta: f32,
+    ) -> Result<bool, String> {
+        if !delta.is_finite() {
+            return Err("Workspace scroll delta must be finite".into());
+        }
+        if self.retained(frame)?.generation != self.generation {
+            return Ok(false);
+        }
+        if self.menu_anchor.is_some() {
+            self.focus_request = None;
+            let next = (self.menu_scroll + delta).clamp(0.0, self.menu_scroll_limit);
+            let changed = self.menu_scroll != next;
+            self.menu_scroll = next;
+            self.paint_dirty |= changed;
+            return Ok(changed);
+        }
+        let next = (self.scroll + delta).clamp(0.0, self.scroll_limit);
+        if next == self.scroll {
+            return Ok(false);
+        }
+        self.cancel_input()?;
+        self.scroll = next;
+        Ok(true)
+    }
+}
+
+fn reveal_delta(target: UiRect, min: f32, max: f32) -> f32 {
+    if target.origin().y() < min {
+        target.origin().y() - min
+    } else {
+        (target.max().y() - max).max(0.0)
     }
 }
 
@@ -1051,16 +1429,4 @@ fn kind_label(kind: EditorDocumentKind) -> String {
         EditorDocumentKind::Prefab => "Prefab".into(),
         EditorDocumentKind::Extension(name) => bounded_text(name, 20),
     }
-}
-
-fn label(key: &str, text: &str, rect: [f32; 4]) -> Result<UiNode, String> {
-    Ok(UiNode::new(
-        UiStyle::absolute(rect[0], rect[1], rect[2], rect[3]).with_overflow(UiOverflow::Clip),
-    )
-    .with_key(UiLocalKey::runtime("nara.shell.label", key).map_err(|error| error.to_string())?)
-    .with_text(
-        UiText::new(bounded_text(text, 180), TEXT_SIZE)
-            .map_err(|error| error.to_string())?
-            .with_overflow(UiTextOverflow::Clip),
-    ))
 }

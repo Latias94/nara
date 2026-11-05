@@ -143,7 +143,7 @@ impl InspectorPressure {
     fn scope(self) -> &'static str {
         match self {
             Self::LocalColor => {
-                "Toggle_hover_alternates_secondary_text/panel;prepared_reducer_states"
+                "Toggle_hover_alternates_shared_recipe_hover/raised;prepared_reducer_states"
             }
             Self::ThemePalette => "distinct_panel+primary_text_palette_and_matching_theme_revision",
             Self::FontEnvironment => {
@@ -478,10 +478,13 @@ fn assert_pressure_output(
         }
     }
     let palette = input.theme.palette();
-    let expected = if input.toggle_state.is_some_and(UiButtonState::hovered) {
-        palette.secondary_text
+    let colors = panel.owner.appearance.palette();
+    let expected = if input.toggle_state.is_some_and(UiButtonState::pressed) {
+        colors.pressed
+    } else if input.toggle_state.is_some_and(UiButtonState::hovered) {
+        colors.hover
     } else {
-        palette.panel
+        colors.raised
     };
     let brush = frame.paint().iter().find_map(|primitive| match primitive {
         UiPaintPrimitive::Rect {
@@ -496,7 +499,16 @@ fn assert_pressure_output(
     for primitive in frame.paint() {
         if let UiPaintPrimitive::Text { color, layout, .. } = primitive {
             text_primitives += 1;
-            assert_eq!(*color, palette.primary_text);
+            assert!(
+                [
+                    colors.text,
+                    colors.muted_text,
+                    colors.disabled_text,
+                    colors.danger_text,
+                    colors.on_accent
+                ]
+                .contains(color)
+            );
             assert!(
                 layout
                     .glyphs()
@@ -506,6 +518,7 @@ fn assert_pressure_output(
         }
     }
     assert!(text_primitives > 0);
+    assert!(frame.paint().iter().any(|primitive| matches!(primitive, UiPaintPrimitive::Text { color, .. } if *color == palette.primary_text)));
 }
 
 fn text_work_delta(before: TextWorkStats, after: TextWorkStats) -> TextWorkStats {
@@ -562,9 +575,13 @@ fn assert_full_compile_work(panel: OwnedPanelWork, compiler: UiCompileWorkStats,
     assert_eq!(compiler.layout_passes, calls);
     assert_eq!(compiler.layout_nodes_created, panel.authored_nodes);
     assert!(compiler.measurement_callbacks > 0);
-    assert!(compiler.text.layout_attempts > 0);
-    assert!(compiler.text.layout_source_bytes > 0);
-    assert!(compiler.text.shaped_glyphs > 0);
+    if compiler.text.layout_attempts == 0 {
+        assert_eq!(compiler.text.layout_source_bytes, 0);
+        assert_eq!(compiler.text.shaped_glyphs, 0);
+    } else {
+        assert!(compiler.text.layout_source_bytes > 0);
+        assert!(compiler.text.shaped_glyphs > 0);
+    }
     assert_eq!(compiler.retained_roots, 0);
 }
 
@@ -595,6 +612,12 @@ fn inspector_change_pressure_recompiles_and_preserves_source_history_and_drafts(
             compiler_work_delta(compiler, panel.owner.compiler.work_stats()),
             3,
         );
+        let text = text_work_delta(compiler.text, panel.owner.compiler.work_stats().text);
+        if matches!(pressure, InspectorPressure::Dpi | InspectorPressure::Width) {
+            assert!(text.layout_attempts > 0);
+        } else {
+            assert_eq!(text.layout_attempts, 0, "{}", pressure.workload());
+        }
         panel.assert_local_history();
         assert_pressure_source(&project, &application, &model, &sources);
     }
@@ -622,6 +645,10 @@ fn inspector_changed_palette_at_the_same_theme_revision_refuses_frame_reuse() {
         panel_work_delta(before, panel.owner.work),
         compiler_work_delta(compiler, panel.owner.compiler.work_stats()),
         1,
+    );
+    assert_eq!(
+        panel.owner.compiler.work_stats().text.layout_attempts,
+        compiler.text.layout_attempts
     );
     assert!(observed_drafts(&panel.fields) == drafts);
     panel.assert_local_history();

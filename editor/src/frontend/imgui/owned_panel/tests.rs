@@ -15,10 +15,12 @@ use nara_ui_widgets::{UiTextFieldError, UiTextInputToken};
 
 use super::super::{
     ImguiEditorFrontend,
-    field_drafts::FieldKey,
     interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
-    owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspectorError, ReferenceAction},
     submission_tests::Harness,
+};
+use crate::frontend::controls::{
+    field_drafts::FieldKey,
+    owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspectorError, ReferenceAction},
 };
 use crate::workspace::EditorPanelInstanceId;
 

@@ -563,7 +563,7 @@ fn thousand_source_rows_and_all_parent_order_choices_compile_only_the_visible_sl
     );
     assert!(frame.hit_regions().len() < 36);
     assert!(owner.controls.len() < 36);
-    assert!(owner.scroll(&frame, SOURCE_ROW_HEIGHT * 1199.0).unwrap());
+    assert!(owner.scroll(&frame, f32::MAX).unwrap());
     assert!(owner.activate(&frame, &first, &model, false).is_err());
     let bottom = paint(&mut owner, &model);
     assert!(

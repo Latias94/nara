@@ -8,7 +8,6 @@ use nara::tooling::{
 mod authoring;
 #[cfg(test)]
 mod canvas_admission_tests;
-mod field_drafts;
 mod field_editor;
 mod game;
 #[cfg(test)]
@@ -17,10 +16,8 @@ pub(in crate::frontend) mod interaction_tests;
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
 mod owned_hierarchy_panel;
-mod owned_inspector;
 mod owned_panel;
 mod owned_scene;
-pub(crate) use owned_inspector::InspectorOperation;
 pub(crate) use owned_panel::ImguiOwnedImage;
 pub(crate) use view::SceneViewPlacement;
 mod prefab_extraction;

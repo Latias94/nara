@@ -4,8 +4,9 @@ use nara::{
     tooling::{EditorFieldTarget, SceneInspectorEntityRow},
 };
 
-use super::{
-    super::{ImguiTextOwner, observe_text_owner},
+use super::super::{ImguiTextOwner, observe_text_owner};
+use crate::frontend::controls::{
+    authoring::value_label,
     value_draft::{ChildDraft, RootDraft, ValueDraft},
 };
 
@@ -21,7 +22,7 @@ pub(in crate::frontend::imgui) fn show_root(
     text_owner: &mut Option<ImguiTextOwner>,
 ) -> bool {
     if draft.node.is_none() {
-        ui.text_wrapped(super::value_label(source));
+        ui.text_wrapped(value_label(source));
         if button(ui, target, "root", "Edit value", editable) {
             draft.node = Some(ValueDraft::from_value(shape, source));
         }

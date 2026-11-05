@@ -329,7 +329,7 @@ pub(super) struct ImguiPanelWidgets {
     pub owned_hierarchy: Option<crate::frontend::controls::HierarchyControls>,
     pub hierarchy_pending: Vec<crate::frontend::controls::HierarchySubmission>,
     pub hierarchy_read_only: bool,
-    pub owned_inspector: Option<super::owned_inspector::OwnedInspector>,
+    pub owned_inspector: Option<crate::frontend::controls::owned_inspector::OwnedInspector>,
     pub owned_pending: Vec<super::owned_panel::OwnedSubmission>,
     pub owned_revision: u64,
     pub incarnation: std::sync::Arc<submission::PanelIncarnation>,

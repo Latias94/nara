@@ -1,16 +1,110 @@
 use nara::{
+    reflect::{ComponentPropertyPath, ComponentValue, ComponentValueKind},
     scene::{
-        AuthoringDocumentReadiness, PrefabEntityOrigin, PrefabEntityTarget, ScenePlacement,
-        ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey, SourceDocumentOrigin,
+        AuthoringDocumentReadiness, PrefabEntityOrigin, PrefabEntityTarget, SceneEntityId,
+        ScenePlacement, ScenePlacementParent, ScenePlacementSlot, SourceDocumentKey,
+        SourceDocumentOrigin,
     },
     tooling::{
         EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
-        EditorFrameModel, EditorPersistenceOperation, EditorPersistenceRejection,
-        EditorPersistenceRequestKind, EditorPersistenceResult, EditorPlayState,
-        EditorRuntimeAvailability, EditorSceneModel, PrefabCompositionCommand,
-        PrefabCompositionEntityDraft, SceneCompositionCommand,
+        EditorDocumentQueryBasis, EditorFrameModel, EditorPersistenceOperation,
+        EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
+        EditorPlayState, EditorPropertyTarget, EditorRuntimeAvailability, EditorSceneModel,
+        PrefabCompositionCommand, PrefabCompositionEntityDraft, SceneCompositionCommand,
+        SceneInspectorComponentView, SceneInspectorFieldView,
     },
 };
+
+pub(in crate::frontend) fn field_source_text(field: &SceneInspectorFieldView) -> String {
+    let value = field.value.as_ref().or(field.default_value.as_ref());
+    if field.value_kind == ComponentValueKind::AssetRef {
+        if let Some(ComponentValue::Map(fields)) = value {
+            if let (Some(kind), Some(value)) = (
+                fields.get("kind").and_then(ComponentValue::as_str),
+                fields.get("value").and_then(ComponentValue::as_str),
+            ) {
+                return if kind == "stable_id" {
+                    format!("stable_id:{value}")
+                } else {
+                    value.to_owned()
+                };
+            }
+        }
+        return String::new();
+    }
+    if let Some(value) = value {
+        return value_label(Some(value));
+    }
+    match field.value_kind {
+        ComponentValueKind::Bool => "false".to_owned(),
+        ComponentValueKind::I64 | ComponentValueKind::U64 => "0".to_owned(),
+        ComponentValueKind::F64 => "0.0".to_owned(),
+        _ => String::new(),
+    }
+}
+
+pub(in crate::frontend) fn value_label(value: Option<&ComponentValue>) -> String {
+    match value {
+        None => "<missing>".to_owned(),
+        Some(ComponentValue::Null) => "null".to_owned(),
+        Some(ComponentValue::Bool(value)) => value.to_string(),
+        Some(ComponentValue::I64(value)) => value.to_string(),
+        Some(ComponentValue::U64(value)) => value.to_string(),
+        Some(ComponentValue::F64(value)) => value.get().to_string(),
+        Some(ComponentValue::String(value)) => value.clone(),
+        Some(ComponentValue::List(values)) => format!("[{} items]", values.len()),
+        Some(ComponentValue::Map(values)) => format!("{{{} fields}}", values.len()),
+        Some(ComponentValue::EntityReference(reference)) => match reference {
+            nara::identity::EntityReference::SceneLocal { entity } => {
+                format!("scene-local:{}", entity.as_str())
+            }
+            nara::identity::EntityReference::Persistent { entity } => {
+                format!("{}:{}", entity.namespace.as_str(), entity.entity)
+            }
+            nara::identity::EntityReference::Authored { reference } => {
+                use nara::identity::{AuthoredReferenceTarget, PrefabEntityOrigin};
+                let origin_label = |origin: &PrefabEntityOrigin| match origin {
+                    PrefabEntityOrigin::SourceEntity(entity) => format!("source:{entity}"),
+                    PrefabEntityOrigin::InstanceAddition(entity) => format!("addition:{entity}"),
+                };
+                let endpoint = match &reference.target {
+                    AuthoredReferenceTarget::Entity(origin) => origin_label(origin),
+                    AuthoredReferenceTarget::Input(input) => format!("input:{input}"),
+                };
+                let route = reference
+                    .through
+                    .iter()
+                    .map(|hop| origin_label(&hop.anchor))
+                    .collect::<Vec<_>>();
+                if route.is_empty() {
+                    endpoint
+                } else {
+                    format!("{} / {endpoint}", route.join(" / "))
+                }
+            }
+        },
+    }
+}
+
+pub(in crate::frontend) fn property_target(
+    frame: &EditorFrameModel,
+    scene: &EditorSceneModel,
+    entity: &SceneEntityId,
+    component: &SceneInspectorComponentView,
+    field: &SceneInspectorFieldView,
+) -> Option<EditorPropertyTarget> {
+    let document = frame.workspace().document(scene.document)?;
+    Some(EditorPropertyTarget {
+        basis: EditorDocumentQueryBasis {
+            document: document.document,
+            revision: scene.revision,
+            schema: document.authoring_schema_basis.clone(),
+        },
+        entity: entity.clone(),
+        component: component.component.clone(),
+        property: ComponentPropertyPath::new(field.id.clone()),
+    })
+}
 
 pub(super) fn entity_removal_unavailable_reason(
     frame: &EditorFrameModel,

@@ -41,6 +41,13 @@ pub trait EditorPanel {
 #[must_use]
 pub struct EditorPanelSubmission(PreparedSubmission<()>);
 
+#[cfg(test)]
+impl EditorPanelSubmission {
+    pub(crate) fn has_submissions_for_test(&self) -> bool {
+        !self.0.ledger.submissions.is_empty()
+    }
+}
+
 struct PanelState<P> {
     panel: P,
     binding: PanelBinding,

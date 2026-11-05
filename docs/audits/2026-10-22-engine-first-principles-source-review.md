@@ -245,7 +245,7 @@ Design priority: high for an integrated editor. Classification: explicitly defer
 
 [authoring_field_change_is_preservation_safe](../../crates/nara_scene/src/authoring_decode.rs#L2509)
 unconditionally excludes `EntityRef` fields. The
-[frontend draft](../../editor/src/frontend/imgui/authoring/value_draft.rs#L181) also rejects that
+[frontend draft](../../editor/src/frontend/controls/value_draft.rs) also rejects that
 shape. Even a complete source-local Scene cannot connect `Switch.target -> Door` through the
 ordinary Inspector/field-edit action. A reference-bearing record or container has related limits.
 

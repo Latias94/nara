@@ -28,6 +28,10 @@ use nara::{
 };
 
 use super::ImguiEditorFrontend;
+use crate::frontend::controls::{
+    field_drafts::{Candidate, FieldEditors, FieldKey},
+    owned_inspector::OwnedInspector,
+};
 use crate::{EditorApplication, EditorLaunchOptions};
 
 mod entity_references;
@@ -43,9 +47,9 @@ const UNKNOWN_COMPONENT: &str = "studio.unavailable.Payload";
 
 /// The existing Inspector draft used by the cross-panel Hierarchy regression.
 pub(in crate::frontend) struct RetainedInspectorDraft {
-    inspector: super::owned_inspector::OwnedInspector,
-    fields: super::field_drafts::FieldEditors,
-    key: super::field_drafts::FieldKey,
+    inspector: OwnedInspector,
+    fields: FieldEditors,
+    key: FieldKey,
 }
 
 impl RetainedInspectorDraft {
@@ -53,8 +57,8 @@ impl RetainedInspectorDraft {
         model: &EditorFrameModel,
         environment: nara_ui_kernel::UiEnvironment,
     ) -> Self {
-        use super::field_drafts::FieldEditors;
-        use super::owned_inspector::{InspectorBinding, OwnedInspector};
+        use crate::frontend::controls::field_drafts::FieldEditors;
+        use crate::frontend::controls::owned_inspector::{InspectorBinding, OwnedInspector};
         use nara_text::TextEdit;
         use nara_ui_kernel::{UiRootKey, UiSemanticRole, UiTheme};
 
@@ -110,7 +114,7 @@ impl RetainedInspectorDraft {
     pub(in crate::frontend) fn assert_retained(&self) {
         assert_eq!(
             self.fields.drafts[&self.key].candidate,
-            super::field_drafts::Candidate::Text("42".into()),
+            Candidate::Text("42".into()),
         );
         assert!(self.fields.drafts[&self.key].dirty);
     }

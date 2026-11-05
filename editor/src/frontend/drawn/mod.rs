@@ -3,22 +3,27 @@ use std::sync::Arc;
 use nara::{project_host::EditorUiAuthoringFrame, tooling::EditorFrameModel};
 use nara_text::FontFace;
 use nara_ui_kernel::{UiDispatchBatch, UiEnvironment, UiFrame, UiKey, UiRootKey};
+use nara_ui_widgets::UiAppearance;
 
 use crate::{EditorPanel, PanelActionDispatch, PanelSubmissionId};
 
 use super::controls::HierarchyControls;
 
 pub(crate) mod input;
+mod inspector;
 mod shell;
+mod text_controls;
 
 pub(crate) struct DrawnPanel(PanelControls);
 
 enum PanelControls {
     Shell(shell::ShellControls),
+    Inspector(inspector::InspectorControls),
     Hierarchy {
         root: UiRootKey,
         fonts: Vec<FontFace>,
         owner: Option<HierarchyControls>,
+        appearance: UiAppearance,
     },
 }
 
@@ -26,6 +31,7 @@ impl EditorPanel for DrawnPanel {
     fn action_finished(&mut self, id: PanelSubmissionId, result: PanelActionDispatch) {
         match &mut self.0 {
             PanelControls::Shell(shell) => shell.action_finished(id, &result),
+            PanelControls::Inspector(inspector) => inspector.action_finished(id, &result),
             PanelControls::Hierarchy {
                 owner: Some(owner), ..
             } => owner.action_finished(id, &result),
@@ -37,7 +43,10 @@ impl EditorPanel for DrawnPanel {
 impl DrawnPanel {
     pub(crate) fn shell(root: UiRootKey, fonts: Vec<FontFace>) -> Result<Self, String> {
         Ok(Self(PanelControls::Shell(shell::ShellControls::new(
-            root, fonts,
+            root,
+            UiRootKey::runtime("nara.drawn", "workspace-menu")
+                .map_err(|error| error.to_string())?,
+            fonts,
         )?)))
     }
 
@@ -46,7 +55,45 @@ impl DrawnPanel {
             root,
             fonts,
             owner: None,
+            appearance: UiAppearance::default(),
         })
+    }
+
+    pub(crate) fn inspector(root: UiRootKey, fonts: Vec<FontFace>) -> Result<Self, String> {
+        Ok(Self(PanelControls::Inspector(
+            inspector::InspectorControls::new(root, fonts)?,
+        )))
+    }
+
+    pub(crate) fn set_appearance(&mut self, appearance: UiAppearance) -> Result<(), String> {
+        match &mut self.0 {
+            PanelControls::Shell(shell) => shell.set_appearance(appearance)?,
+            PanelControls::Inspector(inspector) => inspector.set_appearance(appearance),
+            PanelControls::Hierarchy {
+                appearance: current,
+                owner,
+                ..
+            } => {
+                *current = appearance;
+                if let Some(owner) = owner {
+                    owner.set_appearance(appearance);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn compile_panel(
+        &mut self,
+        context: &mut crate::EditorPanelContext<'_, '_>,
+        ui: Option<&EditorUiAuthoringFrame>,
+        environment: UiEnvironment,
+    ) -> Result<Arc<UiFrame>, String> {
+        if let PanelControls::Inspector(inspector) = &mut self.0 {
+            inspector.compile(context, environment)
+        } else {
+            self.compile(context.model().frame(), ui, environment)
+        }
     }
 
     pub(crate) fn compile(
@@ -57,7 +104,15 @@ impl DrawnPanel {
     ) -> Result<Arc<UiFrame>, String> {
         match &mut self.0 {
             PanelControls::Shell(shell) => shell.compile(model, environment),
-            PanelControls::Hierarchy { root, fonts, owner } => {
+            PanelControls::Inspector(_) => {
+                Err("Inspector compilation requires scoped document access".into())
+            }
+            PanelControls::Hierarchy {
+                root,
+                fonts,
+                owner,
+                appearance,
+            } => {
                 let specialized = ui.is_some();
                 if owner
                     .as_ref()
@@ -75,10 +130,19 @@ impl DrawnPanel {
                         specialized,
                     )?);
                 }
+                let theme = nara_ui_kernel::UiTheme::new(
+                    environment.theme_revision().get(),
+                    appearance.palette().kernel_palette(),
+                )
+                .map_err(|error| error.to_string())?;
                 owner
                     .as_mut()
                     .expect("the current projection was constructed")
-                    .compile(model, ui, environment, Default::default(), false)
+                    .set_appearance(*appearance);
+                owner
+                    .as_mut()
+                    .expect("the current projection was constructed")
+                    .compile(model, ui, environment, theme, false)
             }
         }
     }
@@ -86,15 +150,24 @@ impl DrawnPanel {
     pub(crate) fn retains_frame(&self, frame: &Arc<UiFrame>) -> bool {
         match &self.0 {
             PanelControls::Shell(shell) => shell.retains_frame(frame),
+            PanelControls::Inspector(inspector) => inspector.retains_frame(frame),
             PanelControls::Hierarchy { owner, .. } => owner
                 .as_ref()
                 .is_some_and(|owner| owner.retains_frame(frame)),
         }
     }
 
+    fn input_basis_is_current(&self, frame: &Arc<UiFrame>) -> bool {
+        match &self.0 {
+            PanelControls::Shell(shell) => shell.input_basis_is_current(frame),
+            _ => self.retains_frame(frame),
+        }
+    }
+
     pub(crate) fn cancel_input(&mut self) -> Result<(), String> {
         match &mut self.0 {
             PanelControls::Shell(shell) => shell.cancel_input(),
+            PanelControls::Inspector(inspector) => inspector.cancel_input(),
             PanelControls::Hierarchy {
                 owner: Some(owner), ..
             } => owner.cancel_input(),
@@ -110,6 +183,7 @@ impl DrawnPanel {
         ui: Option<&EditorUiAuthoringFrame>,
     ) -> Result<(), String> {
         match &mut self.0 {
+            PanelControls::Inspector(inspector) => inspector.reduce(frame, batch, context)?,
             PanelControls::Shell(shell) => {
                 let intents = shell.dispatch(frame, batch)?;
                 for intent in intents.intents() {
@@ -159,10 +233,64 @@ impl DrawnPanel {
         Ok(())
     }
 
-    fn hierarchy_mut(&mut self) -> Option<&mut HierarchyControls> {
+    fn text_controls(&mut self) -> Option<text_controls::TextControls<'_>> {
         match &mut self.0 {
-            PanelControls::Hierarchy { owner, .. } => owner.as_mut(),
+            PanelControls::Hierarchy { owner, .. } => {
+                owner.as_mut().map(text_controls::TextControls::Hierarchy)
+            }
+            PanelControls::Inspector(inspector) => {
+                Some(text_controls::TextControls::Inspector(inspector))
+            }
             PanelControls::Shell(_) => None,
+        }
+    }
+
+    fn scroll(&mut self, frame: &Arc<UiFrame>, delta: f32) -> Result<bool, String> {
+        match &mut self.0 {
+            PanelControls::Hierarchy {
+                owner: Some(owner), ..
+            } => owner.scroll(frame, delta),
+            PanelControls::Inspector(inspector) => inspector.scroll(frame, delta),
+            PanelControls::Shell(shell) => shell.scroll(frame, delta),
+            _ => Ok(false),
+        }
+    }
+
+    fn flush_services(
+        &mut self,
+        services: &mut crate::native::EditorPanelServices<'_>,
+    ) -> Result<(), String> {
+        if let PanelControls::Inspector(inspector) = &mut self.0 {
+            inspector.flush_services(services)?;
+        }
+        Ok(())
+    }
+
+    fn dismiss_menu(&mut self) -> Result<bool, String> {
+        match &mut self.0 {
+            PanelControls::Shell(shell) => shell.dismiss_menu(),
+            _ => Ok(false),
+        }
+    }
+
+    fn menu_outside(&self, frame: &Arc<UiFrame>, point: nara_ui_kernel::UiPoint) -> bool {
+        match &self.0 {
+            PanelControls::Shell(shell) => shell.menu_outside(frame, point),
+            _ => false,
+        }
+    }
+
+    fn take_focus_request(&mut self, frame: &Arc<UiFrame>) -> Option<UiKey> {
+        match &mut self.0 {
+            PanelControls::Shell(shell) => shell.take_focus_request(frame),
+            _ => None,
+        }
+    }
+
+    fn navigate_menu(&mut self, frame: &Arc<UiFrame>, previous: bool) -> Result<bool, String> {
+        match &mut self.0 {
+            PanelControls::Shell(shell) => shell.navigate_menu(frame, previous),
+            _ => Ok(false),
         }
     }
 
@@ -180,6 +308,9 @@ impl DrawnPanel {
                 owner: Some(owner), ..
             } => owner.invalidated_controls(previous, candidate),
             PanelControls::Shell(_) => Ok(Vec::new()),
+            PanelControls::Inspector(inspector) => {
+                inspector.invalidated_controls(previous, candidate)
+            }
             _ => Err("Hierarchy controls are retired".into()),
         }
     }

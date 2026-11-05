@@ -90,6 +90,7 @@ fn successor(
 fn controller() -> ShellControls {
     ShellControls::new(
         UiRootKey::runtime("editor.shell", "tests").unwrap(),
+        UiRootKey::runtime("editor.shell", "tests.menu").unwrap(),
         vec![nara_text::bundled_font_face().unwrap()],
     )
     .unwrap()
@@ -97,6 +98,29 @@ fn controller() -> ShellControls {
 
 fn environment() -> UiEnvironment {
     UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 1200.0, 272.0, 1.0, 1, 1, 1, 1).unwrap()
+}
+
+fn open_menu(
+    shell: &mut ShellControls,
+    model: &EditorFrameModel,
+    environment: UiEnvironment,
+) -> Arc<UiFrame> {
+    let mut frame = shell.compile(model, environment).unwrap();
+    for _ in 0..64 {
+        let target = key(shell, &frame, Control::OpenMenu);
+        if frame.semantics().iter().any(|node| {
+            node.key() == &target
+                && node
+                    .clip_rect()
+                    .is_none_or(|clip| node.rect().intersect(clip) == Some(node.rect()))
+        }) {
+            shell.activate(&frame, &target, model).unwrap();
+            return shell.compile(model, environment).unwrap();
+        }
+        assert!(shell.scroll(&frame, 40.0).unwrap());
+        frame = shell.compile(model, environment).unwrap();
+    }
+    panic!("the menu trigger must remain reachable by scrolling the actual shell");
 }
 
 fn key(controller: &ShellControls, frame: &Arc<UiFrame>, control: Control) -> UiKey {
@@ -863,8 +887,19 @@ fn source_semantics_route_the_actual_path_from_the_reserved_shell_area() {
     assert_eq!(semantic.role(), UiSemanticRole::Button);
     assert_eq!(semantic.name(), "Open prefabs/ui.prefab.json");
     assert!(semantic.enabled());
-    assert!(semantic.rect().origin().y() >= 184.0);
-    assert!(semantic.rect().max().y() <= 264.0);
+    let source_heading = frame
+        .layouts()
+        .iter()
+        .find(|layout| {
+            layout.key().is_some_and(|key| {
+                key.local_key()
+                    == Some(&UiLocalKey::runtime("nara.shell.label", "sources").unwrap())
+            })
+        })
+        .unwrap()
+        .rect();
+    assert!(semantic.rect().origin().y() >= source_heading.max().y());
+    assert!(semantic.rect().max().y() <= environment().logical_size().height());
     let (mut journal, authority) =
         nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
     journal
@@ -1145,4 +1180,373 @@ fn source_open_feedback_uses_closed_english_messages() {
         message,
         "Source action refused; review the current project source"
     );
+}
+
+#[test]
+fn anchored_menu_blocks_underlay_and_dismissal_restores_the_current_trigger() {
+    let model = fixture(1);
+    let mut shell = controller();
+    let base = shell.compile(&model, environment()).unwrap();
+    let trigger = key(&shell, &base, Control::OpenMenu);
+    assert!(shell.activate(&base, &trigger, &model).unwrap().is_none());
+    let menu = shell.compile(&model, environment()).unwrap();
+    assert!(menu.blocks_unhandled_input());
+    assert!(
+        menu.root_outcomes()
+            .iter()
+            .all(|root| root.status() == UiRootStatus::Published)
+    );
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal
+        .install_surface(environment().surface_id(), 1)
+        .unwrap();
+    let receipt = authority
+        .submit(&mut journal, Arc::clone(&menu), 1)
+        .unwrap();
+    let underlay = key(&shell, &menu, Control::Close);
+    let mut interaction = UiInteractionSession::default();
+    let outcome = interaction
+        .dispatch(
+            &journal,
+            UiRouteStamp::from_receipt(receipt),
+            UiInputEvent::SemanticAction {
+                seat: UiSeatId::PRIMARY,
+                target: underlay,
+                action: UiActionId::new("shell.activate").unwrap(),
+            },
+        )
+        .unwrap();
+    if let Some(batch) = outcome.consumed() {
+        assert!(shell.dispatch(&menu, batch).unwrap().intents().is_empty());
+    }
+    let dismiss = key(&shell, &menu, Control::DismissMenu);
+    assert!(shell.activate(&menu, &dismiss, &model).unwrap().is_none());
+    assert!(shell.activate(&menu, &dismiss, &model).is_err());
+    let restored = shell.compile(&model, environment()).unwrap();
+    assert!(!restored.blocks_unhandled_input());
+    assert_eq!(
+        shell.take_focus_request(&restored),
+        Some(key(&shell, &restored, Control::OpenMenu))
+    );
+}
+
+#[test]
+fn menu_refuses_changed_action_basis_and_retires_its_anchor_on_resize() {
+    let model = fixture(1);
+    let mut shell = controller();
+    let base = shell.compile(&model, environment()).unwrap();
+    let trigger = key(&shell, &base, Control::OpenMenu);
+    shell.activate(&base, &trigger, &model).unwrap();
+    let menu = shell.compile(&model, environment()).unwrap();
+    let close = key(&shell, &menu, Control::MenuClose);
+    let mut changed = model.workspace().clone();
+    changed.documents[0].dirty = true;
+    let changed = successor(
+        &model,
+        changed,
+        EditorPersistenceView::Idle,
+        Default::default(),
+    );
+    assert!(shell.activate(&menu, &close, &changed).is_err());
+    let resized = shell
+        .compile(
+            &model,
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 960.0, 320.0, 1.5, 1, 1, 1, 1)
+                .unwrap(),
+        )
+        .unwrap();
+    assert!(!resized.blocks_unhandled_input());
+    assert!(shell.activate(&menu, &close, &model).is_err());
+}
+
+#[test]
+fn oversized_menu_scrolls_every_original_action_into_its_clipped_viewport() {
+    let model = fixture(1);
+    let mut shell = controller();
+    shell
+        .set_appearance(UiAppearance::default().with_text_scale(4.0).unwrap())
+        .unwrap();
+    let environment = UiEnvironment::new(
+        UiSurfaceId::new(1).unwrap(),
+        1200.0,
+        128.0,
+        1.25,
+        1,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+    let mut base = shell.compile(&model, environment).unwrap();
+    for _ in 0..32 {
+        let trigger = key(&shell, &base, Control::OpenMenu);
+        if base.semantics().iter().any(|node| node.key() == &trigger) {
+            break;
+        }
+        assert!(shell.scroll(&base, 40.0).unwrap());
+        base = shell.compile(&model, environment).unwrap();
+    }
+    let trigger = key(&shell, &base, Control::OpenMenu);
+    shell.activate(&base, &trigger, &model).unwrap();
+    let mut frame = shell.compile(&model, environment).unwrap();
+    assert!(shell.menu_scroll_limit > 0.0);
+    for control in [
+        Control::MenuRefresh,
+        Control::MenuReopen,
+        Control::MenuClose,
+        Control::DismissMenu,
+    ] {
+        for _ in 0..12 {
+            let target = key(&shell, &frame, control);
+            let node = frame.semantics().iter().find(|node| node.key() == &target);
+            if node.is_some_and(|node| {
+                node.clip_rect()
+                    .is_some_and(|clip| node.rect().intersect(clip) == Some(node.rect()))
+            }) {
+                break;
+            }
+            shell.scroll(&frame, 40.0).unwrap();
+            frame = shell.compile(&model, environment).unwrap();
+        }
+        let target = key(&shell, &frame, control);
+        let node = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &target)
+            .unwrap();
+        assert!(
+            node.clip_rect()
+                .is_some_and(|clip| node.rect().intersect(clip) == Some(node.rect())),
+            "{} must remain reachable",
+            control.identity()
+        );
+    }
+    assert!(frame.blocks_unhandled_input());
+    assert!(shell.dismiss_menu().unwrap());
+}
+
+#[test]
+fn menu_keyboard_navigation_reveals_hidden_actions_and_hover_does_not_reverse_wheel_scroll() {
+    let model = fixture(1);
+    let environment = UiEnvironment::new(
+        UiSurfaceId::new(1).unwrap(),
+        1200.0,
+        128.0,
+        1.25,
+        1,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+    let mut shell = controller();
+    shell
+        .set_appearance(UiAppearance::default().with_text_scale(2.0).unwrap())
+        .unwrap();
+    open_menu(&mut shell, &model, environment);
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
+    journal
+        .install_surface(environment.surface_id(), 1)
+        .unwrap();
+    let mut interaction = UiInteractionSession::default();
+    let mut epoch = 0;
+    let mut present = |shell: &mut ShellControls, event: Option<UiInputEvent>| {
+        let frame = shell.compile(&model, environment).unwrap();
+        epoch += 1;
+        let receipt = authority
+            .submit(&mut journal, Arc::clone(&frame), epoch)
+            .unwrap();
+        let route = UiRouteStamp::from_receipt(receipt);
+        if let Some(batch) = interaction
+            .reconcile_latest_presentation(&journal, environment.surface_id(), &[])
+            .unwrap()
+        {
+            shell.dispatch(&frame, &batch).unwrap();
+        }
+        if let Some(target) = shell.take_focus_request(&frame) {
+            let outcome = interaction
+                .dispatch(
+                    &journal,
+                    route,
+                    UiInputEvent::FocusTarget {
+                        seat: UiSeatId::PRIMARY,
+                        target,
+                    },
+                )
+                .unwrap();
+            shell.dispatch(&frame, outcome.consumed().unwrap()).unwrap();
+        }
+        if let Some(event) = event {
+            let outcome = interaction.dispatch(&journal, route, event).unwrap();
+            if let Some(batch) = outcome.consumed() {
+                shell.dispatch(&frame, batch).unwrap();
+            }
+        }
+        frame
+    };
+    let mut frame = present(&mut shell, None);
+    for control in [
+        Control::MenuRefresh,
+        Control::MenuReopen,
+        Control::MenuClose,
+        Control::DismissMenu,
+        Control::MenuRefresh,
+    ] {
+        let target = key(&shell, &frame, control);
+        assert!(
+            shell
+                .states
+                .get(&target)
+                .is_some_and(|state| state.focused()),
+            "{} must receive actual admitted focus",
+            control.identity()
+        );
+        let semantic = frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == &target)
+            .unwrap();
+        assert!(
+            semantic
+                .clip_rect()
+                .is_none_or(|clip| semantic.rect().intersect(clip) == Some(semantic.rect()))
+        );
+        assert!(shell.navigate_menu(&frame, false).unwrap());
+        frame = present(&mut shell, None);
+    }
+    shell.navigate_menu(&frame, true).unwrap();
+    frame = present(&mut shell, None);
+    let refresh = key(&shell, &frame, Control::MenuRefresh);
+    let rect = frame
+        .semantics()
+        .iter()
+        .find(|node| node.key() == &refresh)
+        .unwrap()
+        .rect();
+    let point = nara_ui_kernel::UiPoint::new(rect.origin().x() + 8.0, rect.origin().y() + 8.0);
+    present(
+        &mut shell,
+        Some(UiInputEvent::Pointer(
+            nara_ui_kernel::UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                nara_ui_kernel::UiPointerId::PRIMARY,
+                point,
+            ),
+        )),
+    );
+    shell.scroll(&frame, 42.0).unwrap();
+    let requested = shell.menu_scroll;
+    present(
+        &mut shell,
+        Some(UiInputEvent::Pointer(
+            nara_ui_kernel::UiPointerInput::moved(
+                UiSeatId::PRIMARY,
+                nara_ui_kernel::UiPointerId::PRIMARY,
+                point,
+            ),
+        )),
+    );
+    assert_eq!(shell.menu_scroll, requested);
+}
+
+#[test]
+fn first_menu_focus_reveals_the_enabled_dismissal_after_disabled_actions() {
+    let mut browser = browser(1, []);
+    browser.synchronize(
+        EditorProjectBrowserStatus::Ready,
+        None,
+        None,
+        None,
+        true,
+        false,
+    );
+    let model = with_browser(&fixture(0), browser.view());
+    let environment = UiEnvironment::new(
+        UiSurfaceId::new(1).unwrap(),
+        1200.0,
+        128.0,
+        1.25,
+        1,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+    let mut shell = controller();
+    shell
+        .set_appearance(UiAppearance::default().with_text_scale(2.0).unwrap())
+        .unwrap();
+    let frame = open_menu(&mut shell, &model, environment);
+    let expected = key(&shell, &frame, Control::DismissMenu);
+    assert_eq!(shell.take_focus_request(&frame), Some(expected.clone()));
+    let node = frame
+        .semantics()
+        .iter()
+        .find(|node| node.key() == &expected)
+        .unwrap();
+    assert!(
+        node.clip_rect()
+            .is_none_or(|clip| node.rect().intersect(clip) == Some(node.rect()))
+    );
+    assert!(shell.menu_scroll > 0.0);
+}
+
+#[test]
+fn workspace_plain_text_reuses_compatible_measurement_for_palette_and_resize() {
+    let model = fixture(3);
+    let mut shell = controller();
+    let mut samples = Vec::new();
+    let mut observe = |label: &str, shell: &mut ShellControls, environment| {
+        let start = std::time::Instant::now();
+        let frame = shell.compile(&model, environment).unwrap();
+        samples.push((
+            label.to_owned(),
+            start.elapsed().as_nanos(),
+            shell.compiler.work_stats(),
+        ));
+        frame
+    };
+    let cold = observe("cold", &mut shell, environment());
+    let idle = observe("idle", &mut shell, environment());
+    assert!(Arc::ptr_eq(&cold, &idle));
+    let before = shell.compiler.work_stats();
+    let mut palette = shell.appearance.palette();
+    palette.raised = nara_ui_kernel::UiColor::rgba(0.07, 0.09, 0.12, 1.0);
+    shell
+        .set_appearance(shell.appearance.with_palette(palette).unwrap())
+        .unwrap();
+    let recolored = observe("palette", &mut shell, environment());
+    assert!(!Arc::ptr_eq(&idle, &recolored));
+    assert_eq!(
+        shell.compiler.work_stats().text.layout_attempts,
+        before.text.layout_attempts
+    );
+    assert_eq!(
+        cold.semantics()
+            .iter()
+            .map(|node| (node.name(), node.rect()))
+            .collect::<Vec<_>>(),
+        recolored
+            .semantics()
+            .iter()
+            .map(|node| (node.name(), node.rect()))
+            .collect::<Vec<_>>()
+    );
+    let wide =
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 1300.0, 320.0, 1.0, 1, 1, 1, 1).unwrap();
+    observe("resize", &mut shell, wide);
+    assert_eq!(
+        shell.compiler.work_stats().text.layout_attempts,
+        before.text.layout_attempts
+    );
+    shell
+        .set_appearance(shell.appearance.with_text_scale(2.0).unwrap())
+        .unwrap();
+    observe("text-scale", &mut shell, wide);
+    assert!(shell.compiler.work_stats().text.layout_attempts > before.text.layout_attempts);
+    for (label, elapsed_ns, work) in samples {
+        eprintln!("STYLED_SHELL work={label} one_sample_ns={elapsed_ns} cumulative={work:?}");
+    }
 }

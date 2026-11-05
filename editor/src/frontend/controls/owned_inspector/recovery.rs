@@ -19,7 +19,7 @@ impl DisplayedRecovery {
 }
 
 impl OwnedInspector {
-    pub(in crate::frontend::imgui) fn copy_draft(
+    pub(in crate::frontend) fn copy_draft(
         &self,
         frame: &Arc<UiFrame>,
         button: &UiKey,
@@ -44,7 +44,7 @@ impl OwnedInspector {
         Ok(draft.candidate.copy_text())
     }
 
-    pub(in crate::frontend::imgui) fn copy_finished(
+    pub(in crate::frontend) fn copy_finished(
         &mut self,
         frame: &Arc<UiFrame>,
         button: &UiKey,
@@ -90,18 +90,33 @@ impl OwnedInspector {
         }
         let recovery = DisplayedRecovery::capture(fields);
         let button = self.recovery_control(&recovery)?;
+        let height = inspector_control_height(self.appearance, 30.0)?;
         let node = UiNode::new(UiStyle::flex().with_gap(4.0).with_flex_shrink(0.0))
             .with_key(UiLocalKey::runtime("nara.inspector.recovery", "group")?)
+            .with_visual(UiVisual::solid(self.appearance.palette().panel))
             .with_semantics(UiSemantics::new(UiSemanticRole::Group, "Retained drafts")?)
-            .with_child(self.label("draft-capacity", &format!(
+            .with_child(self.caption("draft-capacity", &format!(
                 "{} retained field drafts. Discard {} unsubmitted drafts to free capacity; queued and pending edits are preserved.",
                 fields.retained_count(), recovery.drafts.len(),
             ))?)
-            .with_child(button.authored_node(&self.root,
-                UiStyle::flex().with_width(UiDimension::Px(width)).with_height(UiDimension::Px(30.0)).with_flex_shrink(0.0),
-                UiVisual::role(button_color(self.recovery_button.state, &button)),
-                UiBrush::Role(UiColorRole::PrimaryText), TEXT_SIZE,
-            )?);
+            .with_child(
+                self.appearance
+                    .button(
+                        &button,
+                        self.recovery_button.state,
+                        UiButtonVariant::Destructive,
+                        UiControlSize::Regular,
+                        false,
+                    )?
+                    .authored_node(
+                        &button,
+                        &self.root,
+                        UiStyle::flex()
+                            .with_width(UiDimension::Px(width))
+                            .with_height(UiDimension::Px(height))
+                            .with_flex_shrink(0.0),
+                    )?,
+            );
         Ok(Some((node, recovery)))
     }
 
@@ -128,5 +143,5 @@ impl OwnedInspector {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "imgui-reference"))]
 mod tests;

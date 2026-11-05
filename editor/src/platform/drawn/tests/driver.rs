@@ -201,6 +201,16 @@ impl Workflow<'_> {
         role: UiSemanticRole,
         name: &str,
     ) -> TestResult<[f64; 2]> {
+        self.control_point(kind, role, name, true)
+    }
+
+    pub(super) fn control_point(
+        &self,
+        kind: &str,
+        role: UiSemanticRole,
+        name: &str,
+        require_hit: bool,
+    ) -> TestResult<[f64; 2]> {
         let id = self.panel_id(kind)?;
         let frame = self.panel_frame(kind)?;
         let mut nodes = frame
@@ -222,9 +232,10 @@ impl Workflow<'_> {
             rect.origin().x() + rect.size().width() * 0.5,
             rect.origin().y() + rect.size().height() * 0.5,
         );
-        if frame
-            .hit_test(point)
-            .is_none_or(|hit| hit.key() != node.key())
+        if require_hit
+            && frame
+                .hit_test(point)
+                .is_none_or(|hit| hit.key() != node.key())
         {
             return Err(format!(
                 "the actual {name:?} control does not own its pointer point"
@@ -343,7 +354,11 @@ impl Workflow<'_> {
     }
 
     pub(super) fn field_value(&self, name: &str) -> TestResult<String> {
-        self.panel_frame(HIERARCHY)?
+        self.panel_field_value(HIERARCHY, name)
+    }
+
+    pub(super) fn panel_field_value(&self, kind: &str, name: &str) -> TestResult<String> {
+        self.panel_frame(kind)?
             .semantics()
             .iter()
             .find(|node| node.role() == UiSemanticRole::TextInput && node.name() == name)
@@ -353,8 +368,12 @@ impl Workflow<'_> {
     }
 
     pub(super) fn focus_field(&mut self, name: &str) -> TestResult {
+        self.focus_panel_field(HIERARCHY, name)
+    }
+
+    pub(super) fn focus_panel_field(&mut self, kind: &str, name: &str) -> TestResult {
         self.paint()?;
-        let position = self.point(HIERARCHY, UiSemanticRole::TextInput, name)?;
+        let position = self.point(kind, UiSemanticRole::TextInput, name)?;
         self.pointer(position)?;
         self.mouse(ElementState::Pressed)?;
         self.paint()?;
@@ -366,7 +385,11 @@ impl Workflow<'_> {
     }
 
     pub(super) fn replace_text(&mut self, name: &str, text: &str) -> TestResult {
-        self.focus_field(name)?;
+        self.replace_panel_text(HIERARCHY, name, text)
+    }
+
+    pub(super) fn replace_panel_text(&mut self, kind: &str, name: &str, text: &str) -> TestResult {
+        self.focus_panel_field(kind, name)?;
         self.event(EditorPanelPlatformEvent::ModifiersChanged(
             ModifiersState::CONTROL,
         ))?;
@@ -376,7 +399,7 @@ impl Workflow<'_> {
         ))?;
         self.event(EditorPanelPlatformEvent::Ime(Ime::Commit(text.into())))?;
         self.paint()?;
-        if self.field_value(name)? != text {
+        if self.panel_field_value(kind, name)? != text {
             return Err(format!(
                 "the presented {name:?} field did not accept actual keyboard/IME input"
             ));
@@ -629,11 +652,7 @@ impl Workflow<'_> {
                         return;
                     };
                     let frame = if compile {
-                        panel.compile(
-                            context.model().frame(),
-                            ui.as_deref(),
-                            previous.environment(),
-                        )
+                        panel.compile_panel(context, ui.as_deref(), previous.environment())
                     } else {
                         Ok(Arc::clone(previous))
                     };
@@ -682,7 +701,7 @@ impl Workflow<'_> {
             .map_err(|error| error.to_string())
     }
 
-    pub(super) fn verify_two_original_composites(&mut self) -> TestResult<WgpuWindowFrameOutcome> {
+    pub(super) fn verify_workspace_composites(&mut self) -> TestResult<WgpuWindowFrameOutcome> {
         if cfg!(feature = "imgui-reference") {
             return Err(
                 "the independent acceptance must not compile the reference context owner".into(),
@@ -690,25 +709,31 @@ impl Workflow<'_> {
         }
         let shell = self.panel_id(SHELL)?;
         let hierarchy = self.panel_id(HIERARCHY)?;
-        if self.native.presented.len() != 2 || self.native.surfaces.len() != 2 {
+        let inspector = self.panel_id(INSPECTOR)?;
+        if self.native.presented.len() != 3 || self.native.surfaces.len() != 3 {
             return Err(
-                "the source workspace must own two actual simultaneous panel images".into(),
+                "the source workspace must own three actual simultaneous panel images".into(),
             );
         }
         self.panel_frame(SHELL)?;
         self.panel_frame(HIERARCHY)?;
+        self.panel_frame(INSPECTOR)?;
         let candidate = self.stage_controls(false)?;
-        if candidate.images().len() != 2
-            || ![shell, hierarchy].iter().all(|id| {
+        if candidate.images().len() != 3
+            || ![shell, hierarchy, inspector].iter().all(|id| {
                 candidate
                     .images()
                     .iter()
                     .any(|image| image.token().instance() == *id)
             })
-            || candidate.images()[0].display().receipt()
-                == candidate.images()[1].display().receipt()
+            || (0..3).any(|index| {
+                ((index + 1)..3).any(|other| {
+                    candidate.images()[index].display().receipt()
+                        == candidate.images()[other].display().receipt()
+                })
+            })
         {
-            return Err("the two panels do not own distinct original GPU images".into());
+            return Err("the three panels do not own distinct original GPU images".into());
         }
         let gpu = self
             .native
@@ -719,7 +744,7 @@ impl Workflow<'_> {
         let window = outcome
             .window()
             .ok_or("the hidden native window was not actually presented")?;
-        if outcome.composites().len() != 2
+        if outcome.composites().len() != 3
             || candidate.images().iter().any(|image| {
                 outcome
                     .composites()
@@ -733,7 +758,9 @@ impl Workflow<'_> {
                     != 1
             })
         {
-            return Err("the original native outcome lacks both exact image composites".into());
+            return Err(
+                "the original native outcome lacks all three exact image composites".into(),
+            );
         }
         gpu.complete(&outcome)?;
         let accepted = candidate
@@ -748,7 +775,7 @@ impl Workflow<'_> {
             .map_err(|error| error.to_string())?
             != EditorPanelImageStatus::Presented
         {
-            return Err("the original native Host did not adopt both panel composites".into());
+            return Err("the original native Host did not adopt all three panel composites".into());
         }
         self.native.presented = accepted;
         self.native.dispatch(None)?;
@@ -773,7 +800,7 @@ impl Workflow<'_> {
         {
             return Err("the closing filter must begin empty and without composition".into());
         }
-        let original = self.verify_two_original_composites()?;
+        let original = self.verify_workspace_composites()?;
         if !self.event(EditorPanelPlatformEvent::Ime(Ime::Preedit(
             "closing preedit".into(),
             Some((0, 15)),
@@ -945,9 +972,9 @@ impl Workflow<'_> {
             .as_mut()
             .ok_or("the original GPU Host is closed")?;
         let original_outcome = gpu.present(&self.native.window, &candidate)?;
-        if original_outcome.window().is_none() || original_outcome.composites().len() != 2 {
+        if original_outcome.window().is_none() || original_outcome.composites().len() != 3 {
             return Err(
-                "the retiring panel candidate did not reach actual two-image native presentation"
+                "the retiring panel candidate did not reach actual three-image native presentation"
                     .into(),
             );
         }
@@ -1017,7 +1044,7 @@ impl Workflow<'_> {
                     .into(),
             );
         }
-        self.verify_two_original_composites()?;
+        self.verify_workspace_composites()?;
         Ok(())
     }
 

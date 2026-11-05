@@ -2,7 +2,7 @@ use super::*;
 use nara_ui_kernel::UiPositionMode;
 
 impl OwnedInspector {
-    pub(in crate::frontend::imgui) fn scroll(
+    pub(in crate::frontend) fn scroll(
         &mut self,
         frame: &Arc<UiFrame>,
         delta: f32,
@@ -45,7 +45,7 @@ impl OwnedInspector {
                 .with_top(UiDimension::Px(-self.scroll_pixels))
                 .with_width(UiDimension::Percent(1.0))
                 .with_flex_shrink(0.0)
-                .with_padding(UiEdges::all(PANEL_INSET)?)
+                .with_padding(UiEdges::all(self.appearance.panel_inset())?)
                 .with_gap(8.0),
         )
         .with_key(
@@ -60,7 +60,7 @@ impl OwnedInspector {
             UiLayer::Base,
             UiStyle::fill().with_overflow(UiOverflow::Clip),
         )
-        .with_visual(UiVisual::role(UiColorRole::Panel))
+        .with_visual(UiVisual::solid(self.appearance.palette().window))
         .with_child(content);
         Ok(UiAuthoringSnapshotBuilder::new(self.next_snapshot)
             .with_root(root)

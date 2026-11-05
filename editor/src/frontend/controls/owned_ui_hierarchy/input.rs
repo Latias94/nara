@@ -151,6 +151,9 @@ impl OwnedUiHierarchy {
         let input = self.live_input(frame, field)?;
         let kind = input.kind;
         self.check_token(kind, token)?;
+        if self.retained(frame)?.appearance != self.appearance {
+            return Err(OwnedUiHierarchyError::ChangedProjection);
+        }
         if input.display_text != self.field(kind)?.editor().display_text() {
             return Err(OwnedUiHierarchyError::ChangedProjection);
         }
@@ -229,6 +232,9 @@ impl OwnedUiHierarchy {
     ) -> Result<UiRect, OwnedUiHierarchyError> {
         let input = self.live_input(frame, field)?;
         self.check_token(input.kind, token)?;
+        if self.retained(frame)?.appearance != self.appearance {
+            return Err(OwnedUiHierarchyError::ChangedProjection);
+        }
         Ok(self.field(input.kind)?.ime_area(input.width)?)
     }
 

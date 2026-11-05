@@ -26,6 +26,9 @@ use winit::window::Window;
 
 use crate::{native::EditorPanelImageFrame, workspace::EditorPanelInstanceId};
 
+#[cfg(all(test, target_os = "windows", not(feature = "imgui-reference")))]
+mod capture_tests;
+
 pub(super) struct Graphics {
     host: WgpuRenderHost,
     policy: WgpuPolicyInstallation<WgpuStockPolicy>,

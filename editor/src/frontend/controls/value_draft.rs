@@ -11,12 +11,12 @@ use nara::{
 };
 
 #[derive(Default, Clone, Debug, PartialEq)]
-pub(in crate::frontend::imgui) struct RootDraft {
+pub(in crate::frontend) struct RootDraft {
     pub node: Option<ValueDraft>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(in crate::frontend::imgui) enum ValueDraft {
+pub(in crate::frontend) enum ValueDraft {
     Null,
     Bool(Option<bool>),
     Text {
@@ -45,7 +45,7 @@ pub(in crate::frontend::imgui) enum ValueDraft {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(in crate::frontend::imgui) struct ChildDraft {
+pub(in crate::frontend) struct ChildDraft {
     pub id: u64,
     pub node: ValueDraft,
 }
@@ -292,7 +292,7 @@ impl ValueDraft {
     }
 }
 
-pub(in crate::frontend::imgui) fn supported(shape: &ComponentValueShape) -> bool {
+pub(in crate::frontend) fn supported(shape: &ComponentValueShape) -> bool {
     match shape {
         ComponentValueShape::Scalar { .. }
         | ComponentValueShape::EntityRef
@@ -347,7 +347,7 @@ fn scalar_text(shape: &ComponentValueShape, value: &ComponentValue) -> String {
     }
 }
 
-pub(in crate::frontend::imgui) fn parse_scalar(
+pub(in crate::frontend) fn parse_scalar(
     shape: &ComponentValueShape,
     text: &str,
 ) -> Result<ComponentValue, String> {

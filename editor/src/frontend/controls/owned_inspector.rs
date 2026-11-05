@@ -12,30 +12,35 @@ use nara::{
         SceneInspectorFieldState,
     },
 };
-use nara_text::{FontFace, TextEdit, TextEditOutcome, TextEngine, TextEngineCreateError};
+use nara_text::{
+    FontFace, TextEdit, TextEditOutcome, TextEngine, TextEngineCreateError, TextTypography,
+};
 use nara_ui_kernel::{
     UiActionId, UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiBrush,
-    UiColorRole, UiCompileError, UiCompiler, UiDimension, UiDispatchBatch, UiEdges, UiEnvironment,
+    UiCompileError, UiCompiler, UiDimension, UiDispatchBatch, UiEdges, UiEnvironment,
     UiFlexDirection, UiFrame, UiKey, UiKeyError, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPoint,
     UiRect, UiRoot, UiRootKey, UiRootStatus, UiSemanticRole, UiSemantics, UiStyle, UiStyleError,
     UiText, UiTextOverflow, UiTheme, UiVisual,
 };
+#[cfg(test)]
+use nara_ui_widgets::UiButtonVisualState;
 use nara_ui_widgets::{
-    UiButton, UiButtonState, UiButtonVisualState, UiIntentBatch, UiIntentBatchError, UiTextField,
-    UiTextFieldError, UiTextInputToken, UiWidgetError,
+    UiAppearance, UiAppearanceError, UiAppearancePalette, UiButton, UiButtonState, UiButtonVariant,
+    UiControlSize, UiIntentBatch, UiIntentBatchError, UiTextField, UiTextFieldAppearance,
+    UiTextFieldError, UiTextInputToken, UiTextRole, UiWidgetError,
 };
 use thiserror::Error;
 
-use super::PanelSubmissionId;
 use super::authoring;
 use super::field_drafts::structure::{self, DraftAction, DraftInput};
 use super::field_drafts::{
     Candidate, FieldBasis, FieldDraft, FieldEditors, FieldKey, PreparedFieldEdit, source,
 };
-use crate::frontend::controls::editing_enabled;
+use super::{editing_enabled, value_draft};
+use crate::panels::PanelSubmissionId;
 
-const TEXT_SIZE: f32 = 16.0;
-const PANEL_INSET: f32 = 12.0;
+#[cfg(all(test, feature = "imgui-reference"))]
+const TEXT_SIZE: f32 = 14.0;
 const RETAINED_FRAMES: usize = 3;
 
 mod components;
@@ -45,12 +50,13 @@ mod structured;
 mod tools;
 mod viewport;
 
-pub(super) use components::ComponentSubmission;
+#[cfg(feature = "imgui-reference")]
+pub(in crate::frontend) use components::ComponentSubmission;
 use components::{ComponentControls, CompositionBasis, DisplayedComposition};
 use recovery::DisplayedRecovery;
-pub(super) use references::ReferenceAction;
+pub(in crate::frontend) use references::ReferenceAction;
 use references::{ReferenceBinding, ReferencePicker};
-pub(super) use tools::ToolAction;
+pub(in crate::frontend) use tools::ToolAction;
 use tools::{DisplayedTool, ToolBasis, ToolControl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +82,7 @@ impl InspectorOperation {
         }
     }
 
-    pub(super) const fn label(self) -> &'static str {
+    pub(in crate::frontend) const fn label(self) -> &'static str {
         match self {
             Self::Apply => "Apply",
             Self::Discard => "Discard",
@@ -88,7 +94,7 @@ impl InspectorOperation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum InspectorBinding {
+pub(in crate::frontend) enum InspectorBinding {
     Composition,
     Field(FieldKey),
     Copy {
@@ -280,6 +286,8 @@ struct DisplayedInput {
     field: UiKey,
     display_text: String,
     width: f32,
+    typography: TextTypography,
+    padding: UiEdges,
 }
 
 #[derive(Clone)]
@@ -302,6 +310,7 @@ struct CompiledInspector {
     frame: Arc<UiFrame>,
     snapshot: UiAuthoringSnapshot,
     theme: UiTheme,
+    appearance: UiAppearance,
     projected_fields: HashMap<UiKey, DisplayedField>,
     fields: HashMap<UiKey, DisplayedField>,
     inputs: HashMap<UiKey, DisplayedInput>,
@@ -313,13 +322,16 @@ struct CompiledInspector {
 }
 
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
-pub(super) struct OwnedInspector {
+pub(in crate::frontend) struct OwnedInspector {
     work: crate::frontend::controls::OwnedPanelWork,
     root: UiRootKey,
     content_key: UiKey,
     scroll_pixels: f32,
     engine: TextEngine,
     compiler: UiCompiler,
+    appearance: UiAppearance,
+    appearance_override: Option<UiAppearance>,
+    appearance_dirty: bool,
     next_identity: u64,
     next_snapshot: u64,
     controls: HashMap<FieldKey, FieldControl>,
@@ -331,7 +343,9 @@ pub(super) struct OwnedInspector {
 
 impl OwnedInspector {
     #[cfg(test)]
-    pub(super) fn work_for_test(&self) -> ([u64; 4], nara_ui_kernel::UiCompileWorkStats) {
+    pub(in crate::frontend) fn work_for_test(
+        &self,
+    ) -> ([u64; 4], nara_ui_kernel::UiCompileWorkStats) {
         (
             [
                 self.work.compile_calls,
@@ -343,7 +357,10 @@ impl OwnedInspector {
         )
     }
 
-    pub(super) fn new(root: UiRootKey, faces: Vec<FontFace>) -> Result<Self, OwnedInspectorError> {
+    pub(in crate::frontend) fn new(
+        root: UiRootKey,
+        faces: Vec<FontFace>,
+    ) -> Result<Self, OwnedInspectorError> {
         let engine = TextEngine::with_fonts(faces.clone(), Default::default())?;
         let compiler = UiCompiler::with_fonts(faces, Default::default())?;
         let content_key = UiKey::scoped(
@@ -361,6 +378,9 @@ impl OwnedInspector {
             scroll_pixels: 0.0,
             engine,
             compiler,
+            appearance: UiAppearance::default(),
+            appearance_override: None,
+            appearance_dirty: false,
             next_identity: 1,
             next_snapshot: 1,
             controls: HashMap::new(),
@@ -374,16 +394,28 @@ impl OwnedInspector {
         })
     }
 
+    pub(in crate::frontend) fn set_appearance(&mut self, appearance: UiAppearance) {
+        if self.appearance_override != Some(appearance) {
+            self.appearance = appearance;
+            self.appearance_override = Some(appearance);
+            self.appearance_dirty = true;
+        }
+    }
+
     #[cfg(test)]
-    pub(super) fn root_key(&self) -> &UiRootKey {
+    pub(in crate::frontend) fn root_key(&self) -> &UiRootKey {
         &self.root
     }
 
-    pub(super) fn compiled_frame(&self) -> Option<&Arc<UiFrame>> {
+    pub(in crate::frontend) fn compiled_frame(&self) -> Option<&Arc<UiFrame>> {
         self.frames.last().map(|compiled| &compiled.frame)
     }
 
-    pub(super) fn invalidated_controls(
+    pub(in crate::frontend) fn retains_frame(&self, frame: &Arc<UiFrame>) -> bool {
+        self.retained(frame).is_ok()
+    }
+
+    pub(in crate::frontend) fn invalidated_controls(
         &self,
         previous: &Arc<UiFrame>,
         candidate: &Arc<UiFrame>,
@@ -416,12 +448,12 @@ impl OwnedInspector {
     }
 
     #[cfg(test)]
-    pub(super) fn authoring_snapshot(&self) -> Option<&UiAuthoringSnapshot> {
+    pub(in crate::frontend) fn authoring_snapshot(&self) -> Option<&UiAuthoringSnapshot> {
         self.frames.last().map(|compiled| &compiled.snapshot)
     }
 
     /// Call the existing FieldEditors::begin_paint once before painting this panel's fields.
-    pub(super) fn compile(
+    pub(in crate::frontend) fn compile(
         &mut self,
         model: &EditorFrameModel,
         fields: &mut FieldEditors,
@@ -431,12 +463,22 @@ impl OwnedInspector {
         tool_presentation: Option<&super::source_tool::OwnedSourceToolPresentation>,
     ) -> Result<Arc<UiFrame>, OwnedInspectorError> {
         self.work.compile_calls = self.work.compile_calls.saturating_add(1);
+        self.appearance = match self.appearance_override {
+            Some(appearance) => appearance,
+            None => inspector_appearance(theme)?,
+        };
         self.read_only = read_only;
-        let width = environment.logical_size().width() - 2.0 * PANEL_INSET;
+        let width = environment.logical_size().width() - 2.0 * self.appearance.panel_inset();
         if width <= 16.0 {
             return Err(OwnedInspectorError::InvalidViewport);
         }
-        let mut nodes = vec![self.label("heading", "Inspector")?];
+        let mut nodes = vec![
+            self.label_node(
+                "heading",
+                self.appearance
+                    .text("Inspector", UiTextRole::Title, false)?,
+            )?,
+        ];
         let mut displayed = HashMap::new();
         let mut inputs = HashMap::new();
         let mut buttons = HashMap::new();
@@ -445,7 +487,7 @@ impl OwnedInspector {
         let mut composition = self.begin_components(model, width, &mut component_nodes)?;
         if let Some(scene) = model.workspace().active_scene.as_ref() {
             if let Some(entity) = scene.editor.inspector.selected_entity_view.as_ref() {
-                nodes.push(self.label("selection", entity.id.as_str())?);
+                nodes.push(self.caption("selection", entity.id.as_str())?);
                 nodes.extend(component_nodes);
                 for component in &entity.components {
                     let expanded = self.component_header(
@@ -460,7 +502,7 @@ impl OwnedInspector {
                         let basis = FieldBasis::new(model, scene, &entity.id, component, field);
                         let key = FieldKey::from_target(&basis.target);
                         if !fields.painted.insert(key.clone()) {
-                            nodes.push(self.label(
+                            nodes.push(self.caption(
                                 &format!("duplicate.{}", visible.len()),
                                 "This field already has an editor in this panel",
                             )?);
@@ -502,10 +544,10 @@ impl OwnedInspector {
                     }
                 }
                 if entity.components.is_empty() {
-                    nodes.push(self.label("empty", "No components")?);
+                    nodes.push(self.caption("empty", "No components")?);
                 }
             } else {
-                nodes.push(self.label("empty", "Select an entity")?);
+                nodes.push(self.caption("empty", "Select an entity")?);
             }
             let mut retained = fields
                 .drafts
@@ -531,7 +573,7 @@ impl OwnedInspector {
             for key in retained {
                 let owner = (key.entity.clone(), key.component.clone());
                 if retained_owner.as_ref() != Some(&owner) {
-                    nodes.push(self.label(
+                    nodes.push(self.caption(
                         &format!("retained.{}", visible.len()),
                         &format!(
                             "Retained input: {} / {}",
@@ -558,7 +600,7 @@ impl OwnedInspector {
                 visible.push(key);
             }
         } else {
-            nodes.push(self.label("empty", "No active document")?);
+            nodes.push(self.caption("empty", "No active document")?);
         }
         self.controls.retain(|key, _| visible.contains(key));
         let projected_recovery = self.recovery_node(fields, width)?.map(|(node, recovery)| {
@@ -571,9 +613,11 @@ impl OwnedInspector {
         let mut snapshot = self.viewport_snapshot(nodes)?;
         self.work.record_snapshot(&snapshot);
         if let Some(previous) = self.frames.last()
+            && !self.appearance_dirty
             && previous.snapshot.roots() == snapshot.roots()
             && previous.frame.environment() == environment
             && previous.theme == theme
+            && previous.appearance == self.appearance
             && previous.projected_fields == displayed
             && previous.projected_recovery == projected_recovery
             && previous.projected_composition == projected_composition
@@ -660,6 +704,7 @@ impl OwnedInspector {
             frame: Arc::clone(&frame),
             snapshot,
             theme,
+            appearance: self.appearance,
             projected_fields,
             fields: displayed,
             inputs,
@@ -669,10 +714,11 @@ impl OwnedInspector {
             projected_composition,
             composition,
         });
+        self.appearance_dirty = false;
         Ok(frame)
     }
 
-    pub(super) fn binding(
+    pub(in crate::frontend) fn binding(
         &self,
         frame: &Arc<UiFrame>,
         key: &UiKey,
@@ -718,7 +764,7 @@ impl OwnedInspector {
     }
 
     #[cfg(test)]
-    pub(super) fn focus(
+    pub(in crate::frontend) fn focus(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -742,7 +788,7 @@ impl OwnedInspector {
         Ok(token)
     }
 
-    pub(super) fn blur(
+    pub(in crate::frontend) fn blur(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -759,7 +805,7 @@ impl OwnedInspector {
     }
 
     #[cfg(test)]
-    pub(super) fn set_enabled(
+    pub(in crate::frontend) fn set_enabled(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -781,7 +827,7 @@ impl OwnedInspector {
         Ok(text.set_enabled(enabled && allowed, &mut self.engine)?)
     }
 
-    pub(super) fn input_token(
+    pub(in crate::frontend) fn input_token(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -793,7 +839,7 @@ impl OwnedInspector {
             .input_token())
     }
 
-    pub(super) fn cancel_input(&mut self) -> Result<(), OwnedInspectorError> {
+    pub(in crate::frontend) fn cancel_input(&mut self) -> Result<(), OwnedInspectorError> {
         let mut failure = None;
         for control in self.controls.values_mut() {
             for text in control.texts_mut() {
@@ -828,7 +874,7 @@ impl OwnedInspector {
         }
     }
 
-    pub(super) fn is_composing(
+    pub(in crate::frontend) fn is_composing(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -844,7 +890,7 @@ impl OwnedInspector {
         Ok(text.editor().is_composing())
     }
 
-    pub(super) fn selected_text(
+    pub(in crate::frontend) fn selected_text(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -866,7 +912,7 @@ impl OwnedInspector {
         Ok((!range.is_empty()).then(|| text.editor().text()[range].to_owned()))
     }
 
-    pub(super) fn input_error(
+    pub(in crate::frontend) fn input_error(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -890,7 +936,7 @@ impl OwnedInspector {
         }
     }
 
-    pub(super) fn edit(
+    pub(in crate::frontend) fn edit(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -921,7 +967,7 @@ impl OwnedInspector {
         Ok(outcome)
     }
 
-    pub(super) fn point(
+    pub(in crate::frontend) fn point(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -938,6 +984,8 @@ impl OwnedInspector {
             .get(field)
             .ok_or(OwnedInspectorError::UnknownControl)?;
         let display_text = input.display_text.clone();
+        let typography = input.typography;
+        let padding = input.padding;
         let control = self
             .controls
             .get_mut(&displayed.key)
@@ -947,7 +995,10 @@ impl OwnedInspector {
         let text = control
             .text_at_mut(field)
             .ok_or(OwnedInspectorError::ReadOnlyField)?;
-        if display_text != text.editor().display_text() {
+        if display_text != text.editor().display_text()
+            || typography != text.editor().typography()
+            || Some(padding) != text.appearance().map(|appearance| appearance.padding)
+        {
             return Err(OwnedInspectorError::ChangedProjection);
         }
         if text.editor().is_composing() {
@@ -1003,7 +1054,7 @@ impl OwnedInspector {
     }
 
     /// Returns field-local geometry; the Host maps it through the actual displayed image.
-    pub(super) fn ime_area(
+    pub(in crate::frontend) fn ime_area(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -1021,11 +1072,16 @@ impl OwnedInspector {
             .inputs
             .get(field)
             .ok_or(OwnedInspectorError::UnknownControl)?;
+        if input.typography != text.editor().typography()
+            || Some(input.padding) != text.appearance().map(|appearance| appearance.padding)
+        {
+            return Err(OwnedInspectorError::ChangedProjection);
+        }
         Ok(text.ime_area(input.width)?)
     }
 
     /// Reduces Host-admitted routing facts. Returned intents still require explicit activation.
-    pub(super) fn dispatch(
+    pub(in crate::frontend) fn dispatch(
         &mut self,
         frame: &Arc<UiFrame>,
         dispatch: &UiDispatchBatch,
@@ -1114,7 +1170,7 @@ impl OwnedInspector {
         Ok(intents)
     }
 
-    pub(super) fn activate(
+    pub(in crate::frontend) fn activate(
         &mut self,
         frame: &Arc<UiFrame>,
         button: &UiKey,
@@ -1148,7 +1204,7 @@ impl OwnedInspector {
         }
     }
 
-    pub(super) fn operate(
+    pub(in crate::frontend) fn operate(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -1375,9 +1431,32 @@ impl OwnedInspector {
     }
 
     fn label(&self, identity: &str, text: &str) -> Result<UiNode, OwnedInspectorError> {
+        self.label_node(
+            identity,
+            self.appearance.text(text, UiTextRole::Body, false)?,
+        )
+    }
+
+    fn caption(&self, identity: &str, text: &str) -> Result<UiNode, OwnedInspectorError> {
+        self.label_node(
+            identity,
+            self.appearance.text(text, UiTextRole::Caption, true)?,
+        )
+    }
+
+    fn error_label(&self, identity: &str, text: &str) -> Result<UiNode, OwnedInspectorError> {
+        self.label_node(
+            identity,
+            self.appearance
+                .text(text, UiTextRole::Caption, false)?
+                .with_brush(UiBrush::Solid(self.appearance.palette().danger_text)),
+        )
+    }
+
+    fn label_node(&self, identity: &str, text: UiText) -> Result<UiNode, OwnedInspectorError> {
         Ok(UiNode::new(UiStyle::flex().with_flex_shrink(0.0))
             .with_key(UiLocalKey::runtime("nara.inspector.label", identity)?)
-            .with_text(UiText::new(text, TEXT_SIZE)?.with_overflow(UiTextOverflow::Clip)))
+            .with_text(text.with_overflow(UiTextOverflow::Clip)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1396,6 +1475,10 @@ impl OwnedInspector {
         tool_presentation: Option<&super::source_tool::OwnedSourceToolPresentation>,
         model: &EditorFrameModel,
     ) -> Result<UiNode, OwnedInspectorError> {
+        let appearance = self.appearance;
+        let typography: TextTypography = appearance.typography(UiTextRole::Body)?;
+        let field_height = inspector_control_height(appearance, 36.0)?;
+        let button_height = inspector_control_height(appearance, 30.0)?;
         if !fields.drafts.contains_key(&key)
             && self
                 .controls
@@ -1445,22 +1528,22 @@ impl OwnedInspector {
             )?;
             let mut unavailable = None;
             let input = if let Some(tool) = &tool_basis {
-                FieldInput::Text(Box::new(UiTextField::new(
+                FieldInput::Text(Box::new(UiTextField::with_typography(
                     self.root.clone(),
                     tool.label.clone(),
                     &tool.initial.to_string(),
-                    TEXT_SIZE,
+                    typography,
                     &mut self.engine,
                 )?))
             } else if let Some(draft) = draft
                 && scalar_text(&draft.basis)
                 && let Candidate::Text(value) = &draft.candidate
             {
-                match UiTextField::new(
+                match UiTextField::with_typography(
                     self.root.clone(),
                     draft.basis.field.path.to_string(),
                     value,
-                    TEXT_SIZE,
+                    typography,
                     &mut self.engine,
                 ) {
                     Ok(text) => FieldInput::Text(Box::new(text)),
@@ -1525,11 +1608,26 @@ impl OwnedInspector {
                 && draft.is_some_and(|draft| !draft.incompatible && !draft.in_flight())
         };
         let enabled = control.allowed && control.host_enabled;
+        let invalid = if let Some(tool) = &control.tool {
+            tool.error.is_some()
+                || control
+                    .text()
+                    .is_some_and(|text| text.editor().text().parse::<i64>().is_err())
+        } else {
+            draft.is_some_and(|draft| draft.error.is_some() || draft.incompatible)
+                || matches!(&basis.field.state, SceneInspectorFieldState::InvalidPath(_))
+        };
         for text in control.texts_mut() {
             if !enabled {
                 text.blur(&mut self.engine)?;
             }
             text.set_enabled(enabled, &mut self.engine)?;
+        }
+        if let FieldInput::Text(text) = &mut control.input {
+            text.reconfigure(&mut self.engine, typography)?;
+            text.set_appearance(inspector_field_appearance(
+                appearance, text, width, invalid,
+            )?);
         }
         let input = control.input_key().clone();
         let control_key = control
@@ -1544,7 +1642,7 @@ impl OwnedInspector {
                     &self.root,
                     UiStyle::flex()
                         .with_width(UiDimension::Px(width))
-                        .with_height(UiDimension::Px(36.0))
+                        .with_height(UiDimension::Px(field_height))
                         .with_flex_shrink(0.0),
                     width,
                 )
@@ -1562,8 +1660,11 @@ impl OwnedInspector {
         let display_text = control
             .text()
             .map(|text| text.editor().display_text().to_owned());
+        let padding = control
+            .text()
+            .and_then(|text| text.appearance().map(|appearance| appearance.padding));
         let states = control.buttons;
-        let mut children = vec![self.label(
+        let mut children = vec![self.caption(
             &format!("{identity}.path"),
             &format!(
                 "{}{}",
@@ -1572,7 +1673,7 @@ impl OwnedInspector {
             ),
         )?];
         if let Some(label) = tool_label {
-            children.push(self.label(&format!("{identity}.tool.label"), &label)?);
+            children.push(self.caption(&format!("{identity}.tool.label"), &label)?);
         }
         if let Some(node) = text_node {
             inputs.insert(
@@ -1583,6 +1684,8 @@ impl OwnedInspector {
                         .clone()
                         .ok_or(OwnedInspectorError::ReadOnlyField)?,
                     width,
+                    typography,
+                    padding: padding.ok_or(OwnedInspectorError::ChangedProjection)?,
                 },
             );
             children.push(node);
@@ -1630,6 +1733,7 @@ impl OwnedInspector {
                     .reference
                     .as_mut()
                     .ok_or(OwnedInspectorError::ReadOnlyField)?;
+                picker.appearance = appearance;
                 for (node, button) in references::reference_nodes(
                     &self.root,
                     &mut self.next_identity,
@@ -1654,18 +1758,22 @@ impl OwnedInspector {
                     UiActionId::new(InspectorOperation::Toggle.label())?,
                 )?
                 .with_enabled(operations[InspectorOperation::Toggle.index()]);
-                let role = button_color(states[InspectorOperation::Toggle.index()], &button);
                 children.push(
-                    button
+                    appearance
+                        .button(
+                            &button,
+                            states[InspectorOperation::Toggle.index()],
+                            UiButtonVariant::Secondary,
+                            UiControlSize::Regular,
+                            *value,
+                        )?
                         .authored_node(
+                            &button,
                             &self.root,
                             UiStyle::flex()
                                 .with_width(UiDimension::Px(width))
-                                .with_height(UiDimension::Px(36.0))
+                                .with_height(UiDimension::Px(field_height))
                                 .with_flex_shrink(0.0),
-                            UiVisual::role(role),
-                            UiBrush::Role(UiColorRole::PrimaryText),
-                            TEXT_SIZE,
                         )?
                         .with_semantics(
                             UiSemantics::new(UiSemanticRole::Button, button.label())?
@@ -1683,19 +1791,19 @@ impl OwnedInspector {
                 );
             }
             if draft.incompatible {
-                children.push(self.label(
+                children.push(self.error_label(
                     &format!("{identity}.incompatible"),
                     "The schema or source changed. Retained input requires Discard before reopening.",
                 )?);
             } else if draft.conflict {
-                children.push(self.label(
+                children.push(self.error_label(
                     &format!("{identity}.conflict"),
                     "Conflict: review the current value before choosing Reapply.",
                 )?);
             }
             if draft.conflict || draft.incompatible || (tool_parameter && draft.dirty) {
                 if let Some(current) = &current {
-                    children.push(self.label(
+                    children.push(self.caption(
                         &format!("{identity}.current"),
                         &format!(
                             "Current: {}",
@@ -1710,26 +1818,26 @@ impl OwnedInspector {
                         .nth(128)
                         .map_or(retained.len(), |(offset, _)| offset);
                     let suffix = if end < retained.len() { "…" } else { "" };
-                    children.push(self.label(
+                    children.push(self.caption(
                         &format!("{identity}.retained"),
                         &format!("Retained: {}{suffix}", &retained[..end]),
                     )?);
                 }
             }
             if draft.remove_intent {
-                children.push(self.label(
+                children.push(self.caption(
                     &format!("{identity}.remove"),
                     "Retained intent: remove the authored override",
                 )?);
             }
             if draft.in_flight() {
-                children.push(self.label(
+                children.push(self.caption(
                     &format!("{identity}.pending"),
                     "Submitting this field edit...",
                 )?);
             }
             if let Some(error) = &draft.error {
-                children.push(self.label(&format!("{identity}.error"), error)?);
+                children.push(self.error_label(&format!("{identity}.error"), error)?);
             }
             let mut actions = Vec::new();
             for operation in InspectorOperation::FOOTER {
@@ -1746,18 +1854,29 @@ impl OwnedInspector {
                     UiActionId::new(operation.label())?,
                 )?
                 .with_enabled(operations[operation.index()]);
-                let role = button_color(states[operation.index()], &button);
+                let variant = match operation {
+                    InspectorOperation::Apply | InspectorOperation::Reapply => {
+                        UiButtonVariant::Primary
+                    }
+                    _ => UiButtonVariant::Secondary,
+                };
                 actions.push(
-                    button.authored_node(
-                        &self.root,
-                        UiStyle::flex()
-                            .with_width(UiDimension::Px((width - 12.0) / 4.0))
-                            .with_height(UiDimension::Px(30.0))
-                            .with_flex_shrink(0.0),
-                        UiVisual::role(role),
-                        UiBrush::Role(UiColorRole::PrimaryText),
-                        TEXT_SIZE,
-                    )?,
+                    appearance
+                        .button(
+                            &button,
+                            states[operation.index()],
+                            variant,
+                            UiControlSize::Regular,
+                            false,
+                        )?
+                        .authored_node(
+                            &button,
+                            &self.root,
+                            UiStyle::flex()
+                                .with_width(UiDimension::Px((width - 12.0) / 4.0))
+                                .with_height(UiDimension::Px(button_height))
+                                .with_flex_shrink(0.0),
+                        )?,
                 );
                 buttons.insert(
                     button_key,
@@ -1788,16 +1907,22 @@ impl OwnedInspector {
                 )?;
                 let state = self.controls[&key].copy_button;
                 children.push(
-                    button.authored_node(
-                        &self.root,
-                        UiStyle::flex()
-                            .with_width(UiDimension::Px(width))
-                            .with_height(UiDimension::Px(30.0))
-                            .with_flex_shrink(0.0),
-                        UiVisual::role(button_color(state, &button)),
-                        UiBrush::Role(UiColorRole::PrimaryText),
-                        TEXT_SIZE,
-                    )?,
+                    appearance
+                        .button(
+                            &button,
+                            state,
+                            UiButtonVariant::Quiet,
+                            UiControlSize::Regular,
+                            false,
+                        )?
+                        .authored_node(
+                            &button,
+                            &self.root,
+                            UiStyle::flex()
+                                .with_width(UiDimension::Px(width))
+                                .with_height(UiDimension::Px(button_height))
+                                .with_flex_shrink(0.0),
+                        )?,
                 );
                 buttons.insert(
                     button_key,
@@ -1808,15 +1933,15 @@ impl OwnedInspector {
                     },
                 );
                 if let Some(feedback) = &self.controls[&key].copy_feedback {
-                    children.push(self.label(&format!("{identity}.copy-feedback"), feedback)?);
+                    children.push(self.caption(&format!("{identity}.copy-feedback"), feedback)?);
                 }
             }
         }
         if let Some(unavailable) = unavailable {
-            children.push(self.label(&format!("{identity}.unavailable"), &unavailable)?);
+            children.push(self.error_label(&format!("{identity}.unavailable"), &unavailable)?);
         }
         if !current_supported {
-            children.push(self.label(
+            children.push(self.caption(
                 &format!("{identity}.readonly"),
                 if current.is_some() {
                     "Read-only: this field shape is not yet supported by this panel"
@@ -1825,12 +1950,12 @@ impl OwnedInspector {
                 },
             )?);
         } else if !capacity && !tool_parameter {
-            children.push(self.label(
+            children.push(self.caption(
                 &format!("{identity}.capacity"),
                 "Field draft capacity reached. Discard retained edits to enable another field.",
             )?);
         } else if !editable {
-            children.push(self.label(
+            children.push(self.caption(
                 &format!("{identity}.readonly"),
                 "Read-only in the current editing context",
             )?);
@@ -1838,10 +1963,11 @@ impl OwnedInspector {
         if let Some(current) = &current
             && let SceneInspectorFieldState::InvalidPath(reason) = &current.field.state
         {
-            children.push(self.label(&format!("{identity}.path-error"), reason)?);
+            children.push(self.error_label(&format!("{identity}.path-error"), reason)?);
         }
         let node = UiNode::new(UiStyle::flex().with_gap(4.0).with_flex_shrink(0.0))
             .with_key(control_key)
+            .with_visual(UiVisual::solid(appearance.palette().panel))
             .with_semantics(UiSemantics::new(
                 UiSemanticRole::Group,
                 basis.field.path.to_string(),
@@ -1877,13 +2003,43 @@ impl OwnedInspector {
     }
 }
 
-fn button_color(state: UiButtonState, button: &UiButton) -> UiColorRole {
-    match state.visual_state(button) {
-        UiButtonVisualState::Disabled => UiColorRole::Disabled,
-        UiButtonVisualState::Pressed | UiButtonVisualState::Focused => UiColorRole::Focus,
-        UiButtonVisualState::Hovered => UiColorRole::SecondaryText,
-        UiButtonVisualState::Idle => UiColorRole::Panel,
+fn inspector_field_appearance(
+    appearance: UiAppearance,
+    text: &UiTextField,
+    width: f32,
+    invalid: bool,
+) -> Result<UiTextFieldAppearance, UiAppearanceError> {
+    let mut field = appearance.field(text.input_token().is_some(), text.enabled(), invalid)?;
+    let padding = field.padding;
+    if width <= padding.left() + padding.right() {
+        let inline = (width - 1.0) * 0.5;
+        field.padding = UiEdges::new(inline, inline, padding.top(), padding.bottom())?;
     }
+    Ok(field)
+}
+
+fn inspector_control_height(
+    appearance: UiAppearance,
+    minimum: f32,
+) -> Result<f32, UiAppearanceError> {
+    Ok(minimum.max(appearance.control_metrics(UiControlSize::Regular)?.height()))
+}
+
+fn inspector_appearance(theme: UiTheme) -> Result<UiAppearance, UiAppearanceError> {
+    let colors = theme.palette();
+    UiAppearance::default().with_palette(UiAppearancePalette {
+        window: colors.surface,
+        panel: colors.panel,
+        text: colors.primary_text,
+        muted_text: colors.secondary_text,
+        disabled_text: colors.disabled,
+        accent: colors.accent,
+        focus: colors.focus,
+        danger: colors.danger,
+        danger_text: colors.danger,
+        positive: colors.positive,
+        ..UiAppearancePalette::default()
+    })
 }
 
 fn scalar_input(basis: &FieldBasis) -> bool {
@@ -1898,7 +2054,7 @@ fn scalar_input(basis: &FieldBasis) -> bool {
 }
 
 fn supported_input(basis: &FieldBasis) -> bool {
-    authoring::value_draft::supported(&basis.field.shape)
+    value_draft::supported(&basis.field.shape)
 }
 
 fn scalar_text(basis: &FieldBasis) -> bool {
@@ -1955,7 +2111,7 @@ fn current_basis(model: &EditorFrameModel, key: &FieldKey) -> Option<(FieldBasis
 }
 
 #[derive(Debug, Error)]
-pub(super) enum OwnedInspectorError {
+pub(in crate::frontend) enum OwnedInspectorError {
     #[error(transparent)]
     Engine(#[from] TextEngineCreateError),
     #[error(transparent)]
@@ -1966,6 +2122,8 @@ pub(super) enum OwnedInspectorError {
     Key(#[from] UiKeyError),
     #[error(transparent)]
     Style(#[from] UiStyleError),
+    #[error(transparent)]
+    Appearance(#[from] UiAppearanceError),
     #[error(transparent)]
     TextField(#[from] UiTextFieldError),
     #[error(transparent)]
@@ -2010,5 +2168,5 @@ pub(super) enum OwnedInspectorError {
     InvalidCandidate(String),
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "imgui-reference"))]
 mod tests;

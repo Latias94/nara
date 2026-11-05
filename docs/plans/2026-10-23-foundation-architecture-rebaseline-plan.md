@@ -1819,11 +1819,13 @@ workflow cannot close R11b/foundation or establish R11e performance budgets.
 
 #### Styled source workspace and component-library prerequisite
 
-**State:** research and design targets; no polished-library qualification. The first independent
-source workspace remains a functional/ownership checkpoint. Its engineering controls do not
-establish the component library's appearance, layout ergonomics or product visual acceptance.
-Complete this bounded visual consumer before expanding first-party component recipes or treating
-the current Shell's fixed rectangles as their public interface.
+**State:** the [styled source-workspace unit](2026-11-05-styled-source-workspace-plan.md) implements
+the first shared typography/appearance recipes, measured controls, anchored menu and complete
+shared Inspector in the independent composition. Its actual qualification and remaining limits
+belong to that unit. The first workspace remains an engineering authoring page, with source IDs
+and explicit workflow feedback; it does not establish a finished component catalogue or full
+Editor visual acceptance. Qualify further recipes through complete visual consumers rather than
+treating the Shell's arrangement as their public interface.
 
 **Sources:** the [November 5 style/layout study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
 pins Zed GPUI/Open-GPUI, upstream `repo-ref/imgui` and `repo-ref/godot`. The

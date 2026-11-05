@@ -594,8 +594,9 @@ requests, bounded by its source-byte and glyph limits. Complete request identity
 compiler font policy permit compatible color-only shaping reuse; complete candidate and per-draw
 admission remain in force. Cache loss reconstructs equivalent output. These bounded content
 counts do not measure heap allocation, native frame-tail budgets or incremental layout/paint.
-Shared/independent CPU evidence and the still-running Editor/native/visual integration are
-recorded separately in the unit; no complete-library or platform-preference claim follows.
+Shared/independent CPU, complete source-workspace/native and fixed-content visual evidence are
+recorded separately in the unit. The original complete Inspector now serves both compositions;
+no complete-library, full Editor replacement or platform-preference claim follows.
 
 ### Interface alternatives
 

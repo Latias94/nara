@@ -14,10 +14,8 @@ use nara_ui_widgets::UiTextInputToken;
 use super::*;
 use crate::{
     EditorApplication, EditorLaunchOptions,
-    frontend::imgui::{
-        interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
-        submission::{self, PanelOrigin, Recipient},
-    },
+    frontend::imgui::interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
+    panels::submission::{self, PanelOrigin},
 };
 
 fn application(project: InteractionProject) -> (InteractionProject, EditorApplication) {
@@ -526,7 +524,7 @@ fn capacity_recovery_is_atomic_preserves_submissions_and_recreates_fresh_control
                     incarnation: Default::default(),
                 },
                 slot,
-                Recipient::Authoring,
+                (),
             )
             .unwrap();
             fields.admitted(&edit.key, Ok(id));

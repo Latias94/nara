@@ -1,21 +1,16 @@
 use dear_imgui_rs::Ui;
-use nara::{
-    reflect::{ComponentValue, ComponentValueKind},
-    tooling::{
-        EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation,
-        EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-        EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
-        EditorPersistenceView, EditorPlayState, EditorReopenTarget, EditorRuntimeAvailability,
-        EditorSceneModel, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        SceneInspectorFieldView,
-    },
+use nara::tooling::{
+    EditorAction, EditorDocumentId, EditorDocumentKind, EditorDocumentMutation, EditorFrameModel,
+    EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRejection,
+    EditorPersistenceRequestKind, EditorPersistenceResult, EditorPersistenceView, EditorPlayState,
+    EditorReopenTarget, EditorRuntimeAvailability, EditorSceneModel, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction,
 };
 
-use super::field_editor::FieldEditors;
+use crate::frontend::controls::field_drafts::FieldEditors;
 use crate::frontend::controls::{editing_enabled, persistence_allows};
 
 pub(super) mod recursive_controls;
-pub(super) mod value_draft;
 
 #[derive(Default)]
 pub(super) struct ImguiAuthoringPanels {
@@ -209,77 +204,6 @@ fn enabled_button(ui: &Ui, enabled: bool, label: &str) -> bool {
         super::interaction_tests::record_control(ui, label);
     }
     clicked
-}
-
-pub(super) fn field_source_text(field: &SceneInspectorFieldView) -> String {
-    let value = field.value.as_ref().or(field.default_value.as_ref());
-    if field.value_kind == ComponentValueKind::AssetRef {
-        if let Some(ComponentValue::Map(fields)) = value {
-            if let (Some(kind), Some(value)) = (
-                fields.get("kind").and_then(ComponentValue::as_str),
-                fields.get("value").and_then(ComponentValue::as_str),
-            ) {
-                return if kind == "stable_id" {
-                    format!("stable_id:{value}")
-                } else {
-                    value.to_owned()
-                };
-            }
-        }
-        return String::new();
-    }
-    if let Some(value) = value {
-        return value_label(Some(value));
-    }
-    match field.value_kind {
-        ComponentValueKind::Bool => "false".to_owned(),
-        ComponentValueKind::I64 | ComponentValueKind::U64 => "0".to_owned(),
-        ComponentValueKind::F64 => "0.0".to_owned(),
-        _ => String::new(),
-    }
-}
-
-pub(super) fn value_label(value: Option<&ComponentValue>) -> String {
-    match value {
-        None => "<missing>".to_owned(),
-        Some(ComponentValue::Null) => "null".to_owned(),
-        Some(ComponentValue::Bool(value)) => value.to_string(),
-        Some(ComponentValue::I64(value)) => value.to_string(),
-        Some(ComponentValue::U64(value)) => value.to_string(),
-        Some(ComponentValue::F64(value)) => value.get().to_string(),
-        Some(ComponentValue::String(value)) => value.clone(),
-        Some(ComponentValue::List(values)) => format!("[{} items]", values.len()),
-        Some(ComponentValue::Map(values)) => format!("{{{} fields}}", values.len()),
-        Some(ComponentValue::EntityReference(reference)) => match reference {
-            nara::identity::EntityReference::SceneLocal { entity } => {
-                format!("scene-local:{}", entity.as_str())
-            }
-            nara::identity::EntityReference::Persistent { entity } => {
-                format!("{}:{}", entity.namespace.as_str(), entity.entity)
-            }
-            nara::identity::EntityReference::Authored { reference } => {
-                use nara::identity::{AuthoredReferenceTarget, PrefabEntityOrigin};
-                let origin_label = |origin: &PrefabEntityOrigin| match origin {
-                    PrefabEntityOrigin::SourceEntity(entity) => format!("source:{entity}"),
-                    PrefabEntityOrigin::InstanceAddition(entity) => format!("addition:{entity}"),
-                };
-                let endpoint = match &reference.target {
-                    AuthoredReferenceTarget::Entity(origin) => origin_label(origin),
-                    AuthoredReferenceTarget::Input(input) => format!("input:{input}"),
-                };
-                let route = reference
-                    .through
-                    .iter()
-                    .map(|hop| origin_label(&hop.anchor))
-                    .collect::<Vec<_>>();
-                if route.is_empty() {
-                    endpoint
-                } else {
-                    format!("{} / {endpoint}", route.join(" / "))
-                }
-            }
-        },
-    }
 }
 
 #[cfg(test)]

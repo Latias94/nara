@@ -17,15 +17,16 @@ use nara::{
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{UiPaintPrimitive, UiSurfaceId};
 
-use super::super::{
-    PanelActionDispatch, PanelActionNotDispatched, PanelSubmitError,
-    interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
-    submission::{self, PanelOrigin, Recipient},
-};
 use super::*;
+use crate::frontend::imgui::interaction_tests::{CUSTOM_COMPONENT, InteractionProject};
+use crate::panels::{
+    PanelActionDispatch, PanelActionNotDispatched, PanelSubmitError,
+    submission::{self, PanelOrigin},
+};
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
 mod components;
+mod styled;
 mod work_costs;
 
 fn application() -> (InteractionProject, EditorApplication) {
@@ -469,7 +470,7 @@ fn boolean_activation_retains_refused_candidates_and_uses_exact_application_resu
             incarnation: Default::default(),
         },
         0,
-        Recipient::Authoring,
+        (),
     )
     .unwrap();
     let other = submission::enqueue(
@@ -480,7 +481,7 @@ fn boolean_activation_retains_refused_candidates_and_uses_exact_application_resu
             incarnation: Default::default(),
         },
         1,
-        Recipient::Authoring,
+        (),
     )
     .unwrap();
     fields.admitted(&key, Ok(own));
@@ -886,7 +887,7 @@ fn invalid_number_and_u64_actions_keep_exact_drafts_and_submission_completion() 
                 incarnation: Default::default(),
             },
             0,
-            Recipient::Authoring,
+            (),
         )
         .unwrap()
     };

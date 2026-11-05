@@ -45,6 +45,11 @@ impl OwnedInspector {
         let Candidate::Structured(root) = &draft.candidate else {
             return Err(OwnedInspectorError::ChangedDraft);
         };
+        let appearance = self.appearance;
+        let typography: TextTypography = appearance.typography(UiTextRole::Body)?;
+        let field_height = inspector_control_height(appearance, 36.0)?;
+        let button_height = inspector_control_height(appearance, 30.0)?;
+        let invalid = draft.error.is_some() || draft.incompatible;
         let rows = structure::rows(root, &draft.basis.field.shape);
         let control = self
             .controls
@@ -69,17 +74,19 @@ impl OwnedInspector {
                                 format!("{identity}.{index}"),
                             )?)
                             .with_text(
-                                UiText::new(label, TEXT_SIZE)?.with_overflow(UiTextOverflow::Clip),
+                                appearance
+                                    .text(label, UiTextRole::Caption, true)?
+                                    .with_overflow(UiTextOverflow::Clip),
                             ),
                     );
                 }
                 StructuredRow::Text { input, label, text } => {
                     if !controls.inputs.contains_key(&input) {
-                        match UiTextField::new(
+                        match UiTextField::with_typography(
                             self.root.clone(),
                             &label,
                             &text,
-                            TEXT_SIZE,
+                            typography,
                             &mut self.engine,
                         ) {
                             Ok(text) => {
@@ -93,7 +100,15 @@ impl OwnedInspector {
                                             format!("{identity}.{index}"),
                                         )?)
                                         .with_text(
-                                            UiText::new(format!("Read-only: {error}"), TEXT_SIZE)?
+                                            appearance
+                                                .text(
+                                                    format!("Read-only: {error}"),
+                                                    UiTextRole::Caption,
+                                                    false,
+                                                )?
+                                                .with_brush(UiBrush::Solid(
+                                                    appearance.palette().danger_text,
+                                                ))
                                                 .with_overflow(UiTextOverflow::Clip),
                                         ),
                                 );
@@ -105,16 +120,20 @@ impl OwnedInspector {
                         .inputs
                         .get_mut(&input)
                         .ok_or(OwnedInspectorError::RetiredField)?;
+                    text.reconfigure(&mut self.engine, typography)?;
                     if !enabled {
                         text.blur(&mut self.engine)?;
                     }
                     text.set_enabled(enabled, &mut self.engine)?;
+                    text.set_appearance(inspector_field_appearance(
+                        appearance, text, width, invalid,
+                    )?);
                     nodes.push(
                         text.authored_node(
                             &self.root,
                             UiStyle::flex()
                                 .with_width(UiDimension::Px(width))
-                                .with_height(UiDimension::Px(36.0))
+                                .with_height(UiDimension::Px(field_height))
                                 .with_flex_shrink(0.0),
                             width,
                         )?
@@ -129,10 +148,16 @@ impl OwnedInspector {
                             field: owner.clone(),
                             display_text: text.editor().display_text().to_owned(),
                             width,
+                            typography,
+                            padding: text
+                                .appearance()
+                                .ok_or(OwnedInspectorError::ChangedProjection)?
+                                .padding,
                         },
                     );
                     if structure::is_entity_reference(&draft.basis.field.shape, &input) {
                         let picker = controls.references.entry(input.clone()).or_default();
+                        picker.appearance = appearance;
                         for (node, button) in references::reference_nodes(
                             &self.root,
                             &mut self.next_identity,
@@ -179,17 +204,26 @@ impl OwnedInspector {
                     let state = &controls.buttons[&action];
                     let button = UiButton::new(state.key.clone(), label, UiActionId::new(label)?)?
                         .with_enabled(actions_enabled && available);
+                    let variant = match action.operation {
+                        structure::StructureOperation::RemoveItem(_)
+                        | structure::StructureOperation::RemoveEntry(_) => {
+                            UiButtonVariant::Destructive
+                        }
+                        structure::StructureOperation::ConfirmSome
+                        | structure::StructureOperation::ConfirmItem
+                        | structure::StructureOperation::ConfirmEntry => UiButtonVariant::Primary,
+                        _ => UiButtonVariant::Secondary,
+                    };
                     nodes.push(
-                        button
+                        appearance
+                            .button(&button, state.state, variant, UiControlSize::Regular, false)?
                             .authored_node(
+                                &button,
                                 &self.root,
                                 UiStyle::flex()
                                     .with_width(UiDimension::Px(width))
-                                    .with_height(UiDimension::Px(30.0))
+                                    .with_height(UiDimension::Px(button_height))
                                     .with_flex_shrink(0.0),
-                                UiVisual::role(button_color(state.state, &button)),
-                                UiBrush::Role(UiColorRole::PrimaryText),
-                                TEXT_SIZE,
                             )?
                             .with_semantics(
                                 UiSemantics::new(UiSemanticRole::Button, name)?

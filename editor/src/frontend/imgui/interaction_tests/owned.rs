@@ -5,10 +5,10 @@ use nara_ui_kernel::{
 };
 
 use super::*;
-use crate::frontend::imgui::owned_inspector::InspectorBinding;
+use crate::frontend::controls::owned_inspector::InspectorBinding;
 use crate::workspace::EditorPanelInstanceId;
 
-pub(super) use crate::frontend::imgui::owned_inspector::InspectorOperation;
+pub(super) use crate::frontend::controls::owned_inspector::InspectorOperation;
 
 pub(super) struct CpuOwnedInput {
     journal: UiFrameJournal,

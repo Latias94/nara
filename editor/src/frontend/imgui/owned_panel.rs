@@ -12,12 +12,15 @@ use nara_ui_widgets::UiTextInputToken;
 use crate::frontend::controls::editing_enabled;
 use crate::workspace::EditorPanelInstanceId;
 
-use super::owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspector};
 use super::{ImguiEditorFrontend, ImguiEditorPanelContext, ImguiViewImage};
+use crate::frontend::controls::{
+    field_drafts::PreparedFieldEdit,
+    owned_inspector::{ComponentSubmission, InspectorBinding, InspectorOperation, OwnedInspector},
+};
 
 pub(super) enum OwnedSubmission {
-    Composition(super::owned_inspector::ComponentSubmission),
-    Field(super::field_drafts::PreparedFieldEdit),
+    Composition(ComponentSubmission),
+    Field(PreparedFieldEdit),
     SourceTool(EditorSourceToolAction),
 }
 

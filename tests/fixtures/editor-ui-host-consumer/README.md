@@ -87,12 +87,15 @@ The fixture's optional `native` feature is unnecessary for this example.
 
 Its scope is the independently drawn source workspace: source opening,
 document tabs, ordinary and specialized UI Hierarchy controls, structural
-editing, Undo/Redo and Save/Reopen through the existing owners. It does not
-establish complete Editor parity, Inspector/Scene/Game tools, docking,
-multi-window support, performance or native acceptance by itself. Build and
+editing, the complete shared property Inspector, Undo/Redo and Save/Reopen
+through the existing owners. The styled successor adds scoped typography and
+control recipes plus an anchored document-action menu. It does not establish
+complete Editor parity, Scene/Game tools, docking, multi-window support,
+performance or native acceptance by itself. Build and
 dependency checks establish public-entry consumption and the selected dependency
 graph; interactive workflow qualification belongs to the
-[independent drawn workspace plan](../../../docs/plans/2026-11-05-independent-drawn-source-workspace-plan.md).
+[independent drawn workspace plan](../../../docs/plans/2026-11-05-independent-drawn-source-workspace-plan.md)
+and its [styled successor](../../../docs/plans/2026-11-05-styled-source-workspace-plan.md).
 
 Build, inspect dependencies and run the entry serially from the repository root
 with the same `target`:

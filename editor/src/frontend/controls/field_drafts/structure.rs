@@ -1,9 +1,9 @@
 use nara::reflect::{ComponentValue, ComponentValueKind, ComponentValueShape};
 
-use super::super::authoring::value_draft::{self, ChildDraft, RootDraft, ValueDraft};
+use super::super::value_draft::{self, ChildDraft, RootDraft, ValueDraft};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub(in crate::frontend::imgui) struct DraftPath(Vec<PathSegment>);
+pub(in crate::frontend) struct DraftPath(Vec<PathSegment>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum PathSegment {
@@ -36,19 +36,19 @@ impl DraftPath {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(in crate::frontend::imgui) enum DraftInput {
+pub(in crate::frontend) enum DraftInput {
     Value(DraftPath),
     MapKey { parent: DraftPath, child: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(in crate::frontend::imgui) struct DraftAction {
+pub(in crate::frontend) struct DraftAction {
     pub path: DraftPath,
     pub operation: StructureOperation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::frontend::imgui) enum StructureOperation {
+pub(in crate::frontend) enum StructureOperation {
     Open,
     Boolean(bool),
     EmptyString,
@@ -70,7 +70,7 @@ pub(in crate::frontend::imgui) enum StructureOperation {
     EmptyKey,
 }
 
-pub(in crate::frontend::imgui) enum StructuredRow {
+pub(in crate::frontend) enum StructuredRow {
     Label(String),
     Text {
         input: DraftInput,
@@ -85,7 +85,7 @@ pub(in crate::frontend::imgui) enum StructuredRow {
     },
 }
 
-pub(in crate::frontend::imgui) fn rows(
+pub(in crate::frontend) fn rows(
     root: &RootDraft,
     shape: &ComponentValueShape,
 ) -> Vec<StructuredRow> {
@@ -495,7 +495,7 @@ fn node_rows(
     }
 }
 
-pub(in crate::frontend::imgui) fn apply(
+pub(in crate::frontend) fn apply(
     root: &mut RootDraft,
     shape: &ComponentValueShape,
     source: Option<&ComponentValue>,
@@ -714,7 +714,7 @@ fn text_shape(shape: &ComponentValueShape) -> bool {
     }
 }
 
-pub(in crate::frontend::imgui) fn is_entity_reference(
+pub(in crate::frontend) fn is_entity_reference(
     shape: &ComponentValueShape,
     input: &DraftInput,
 ) -> bool {
@@ -900,10 +900,7 @@ fn node_mut<'a>(root: &'a mut RootDraft, segments: &[PathSegment]) -> Option<&'a
     Some(node)
 }
 
-pub(in crate::frontend::imgui) fn text<'a>(
-    root: &'a RootDraft,
-    input: &DraftInput,
-) -> Option<&'a str> {
+pub(in crate::frontend) fn text<'a>(root: &'a RootDraft, input: &DraftInput) -> Option<&'a str> {
     match input {
         DraftInput::Value(path) => match node(root, &path.0)? {
             ValueDraft::Text { text, .. } => Some(text),
@@ -919,7 +916,7 @@ pub(in crate::frontend::imgui) fn text<'a>(
     }
 }
 
-pub(in crate::frontend::imgui) fn set_text(
+pub(in crate::frontend) fn set_text(
     root: &mut RootDraft,
     input: &DraftInput,
     text: &str,

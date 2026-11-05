@@ -10,6 +10,7 @@ use nara_ui_kernel::{
     UiEnvironment, UiFrame, UiRootKey, UiSize, UiSurfaceContentTransform, UiSurfaceGenerations,
     UiSurfaceId,
 };
+use nara_ui_widgets::UiAppearance;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -50,7 +51,7 @@ const CAPABILITIES: [EditorPanelCapability; 8] = [
     EditorPanelCapability::WindowModal,
 ];
 const SHELL_KIND: &str = "nara.drawn.workspace";
-const SHELL_HEIGHT: f32 = 272.0;
+const SHELL_HEIGHT: f32 = 320.0;
 
 struct PanelSurface {
     token: EditorPanelInstanceToken,
@@ -58,6 +59,7 @@ struct PanelSurface {
     bounds: DisplayRect,
     scale: f32,
     specialized: bool,
+    kind: String,
     input: PanelInput,
 }
 
@@ -71,11 +73,14 @@ pub(super) struct DrawnNative {
     next_surface: u64,
     display_frame: u64,
     fonts: Vec<FontFace>,
+    appearance: UiAppearance,
     presented: BTreeMap<EditorPanelInstanceId, Arc<UiFrame>>,
     started: Instant,
     closing: bool,
     recovery: Option<recovery::Recovery>,
     cleanup_errors: Vec<String>,
+    #[cfg(test)]
+    drain_staged_cancellation_for_test: bool,
 }
 
 impl DrawnNative {
@@ -130,6 +135,17 @@ impl DrawnNative {
                 },
             )
             .map_err(|error| error.to_string())?;
+        let inspector_fonts = fonts.clone();
+        panels
+            .install_registered_panel(&application, "nara.inspector", move || {
+                DrawnPanel::inspector(
+                    UiRootKey::runtime("nara.drawn", "inspector")
+                        .expect("the inspector root is bounded"),
+                    inspector_fonts.clone(),
+                )
+                .expect("the admitted font policy constructs inspector controls")
+            })
+            .map_err(|error| error.to_string())?;
         let hierarchy_fonts = fonts.clone();
         panels
             .install_registered_panel(&application, "nara.hierarchy", move || {
@@ -147,7 +163,7 @@ impl DrawnNative {
                     .panel_workspace_mut()
                     .layout_mut()
                     .set_target(instance.id(), EditorPanelTarget::Workspace);
-            } else if instance.kind() != "nara.hierarchy" {
+            } else if !matches!(instance.kind(), "nara.hierarchy" | "nara.inspector") {
                 application
                     .panel_workspace_mut()
                     .layout_mut()
@@ -171,11 +187,14 @@ impl DrawnNative {
             next_surface: 1,
             display_frame: 0,
             fonts,
+            appearance: UiAppearance::default(),
             presented: BTreeMap::new(),
             started: Instant::now(),
             closing: false,
             recovery: None,
             cleanup_errors: Vec::new(),
+            #[cfg(test)]
+            drain_staged_cancellation_for_test: false,
         })
     }
 
@@ -290,17 +309,7 @@ impl DrawnNative {
             .find(|instance| instance.kind() == SHELL_KIND)
             .map(|instance| instance.id());
         let mut withdraw = self.surfaces.values().any(|surface| {
-            let expected = if Some(surface.token.instance()) == shell_instance {
-                DisplayRect {
-                    min: [0.0, 0.0],
-                    max: [logical.width, SHELL_HEIGHT],
-                }
-            } else {
-                DisplayRect {
-                    min: [0.0, SHELL_HEIGHT],
-                    max: [logical.width, logical.height],
-                }
-            };
+            let expected = panel_bounds(&surface.kind, logical.width, logical.height);
             surface.bounds != expected || surface.scale != scale
         });
         drop(self.panels.prepare(&self.application, |panel, _| {
@@ -318,29 +327,25 @@ impl DrawnNative {
             .graphics
             .as_ref()
             .ok_or("The graphics Host is closed")?;
+        let appearance = self.appearance;
         drop(self.panels.prepare(&self.application, |panel, context| {
             if error.is_some() {
                 return;
             }
+            if let Err(failure) = panel.set_appearance(appearance) {
+                error = Some(failure);
+                return;
+            }
             let instance = context.model().instance().id();
             let token = context.instance_token();
-            let shell = context.model().instance().kind() == SHELL_KIND;
-            let bounds = if shell {
-                DisplayRect {
-                    min: [0.0, 0.0],
-                    max: [logical.width, SHELL_HEIGHT],
-                }
-            } else {
-                DisplayRect {
-                    min: [0.0, SHELL_HEIGHT],
-                    max: [logical.width, logical.height],
-                }
-            };
+            let kind = context.model().instance().kind().to_owned();
+            let specialized = kind == "nara.hierarchy" && ui.is_some();
+            let bounds = panel_bounds(&kind, logical.width, logical.height);
             let compatible = surfaces.get(&instance).is_some_and(|surface| {
                 surface.token == token
                     && surface.bounds == bounds
                     && surface.scale == scale
-                    && surface.specialized == (!shell && ui.is_some())
+                    && surface.specialized == specialized
             });
             if !compatible {
                 let Some(surface) = UiSurfaceId::new(*next_surface) else {
@@ -359,7 +364,8 @@ impl DrawnNative {
                         surface,
                         bounds,
                         scale,
-                        specialized: !shell && ui.is_some(),
+                        specialized,
+                        kind,
                         input: PanelInput::default(),
                     },
                 );
@@ -391,9 +397,9 @@ impl DrawnNative {
                         )
                         .map_err(|error| error.to_string())
                     });
-            match environment.and_then(|environment| {
-                panel.compile(context.model().frame(), ui.as_deref(), environment)
-            }) {
+            match environment
+                .and_then(|environment| panel.compile_panel(context, ui.as_deref(), environment))
+            {
                 Ok(frame) => compiled.push((instance, token, bounds, frame)),
                 Err(failure) => error = Some(failure),
             }
@@ -438,6 +444,14 @@ impl DrawnNative {
             .native
             .stage(&self.application, gpu.frame, images)
             .map_err(|error| error.to_string())?;
+        #[cfg(test)]
+        if std::mem::take(&mut self.drain_staged_cancellation_for_test) {
+            self.dispatch(None)?;
+        }
+        let gpu = self
+            .graphics
+            .as_mut()
+            .ok_or("The graphics Host is closed")?;
         let outcome = gpu.present(&self.window, &candidate)?;
         let accepted = candidate
             .images()
@@ -466,6 +480,7 @@ impl DrawnNative {
             .native
             .presented(&self.application, candidate, &outcome)
             .map_err(|error| error.to_string())?;
+        let mut focus_requests = Vec::new();
         if status == EditorPanelImageStatus::Presented {
             let previous = std::mem::replace(&mut self.presented, accepted);
             let surfaces = &mut self.surfaces;
@@ -492,6 +507,9 @@ impl DrawnNative {
                     ) {
                         error.get_or_insert(failure);
                     }
+                    if surface.input.take_native_focus_request() {
+                        focus_requests.push(context.instance_token());
+                    }
                 }
             }));
             if let Some(error) = error {
@@ -502,11 +520,21 @@ impl DrawnNative {
             self.window.request_redraw();
         }
         self.dispatch(None)?;
+        for token in focus_requests {
+            self.keyboard_services(Some(&token))?;
+        }
         self.refresh_keyboard()?;
         Ok(status == EditorPanelImageStatus::Presented)
     }
 
     fn refresh_keyboard(&mut self) -> Result<(), String> {
+        self.keyboard_services(None)
+    }
+
+    fn keyboard_services(
+        &mut self,
+        focus: Option<&EditorPanelInstanceToken>,
+    ) -> Result<(), String> {
         let ui = self.application.current_ui_authoring_frame();
         let surfaces = &mut self.surfaces;
         let graphics = self
@@ -514,30 +542,39 @@ impl DrawnNative {
             .as_ref()
             .ok_or("The graphics Host is closed")?;
         let mut error = None;
-        let outcome = self
-            .native
-            .refresh_keyboard_services(
+        let mut deliver =
+            |panel: &mut DrawnPanel,
+             context: &mut crate::EditorPanelContext<'_, '_>,
+             event: &crate::native::EditorPanelInput<UiFrame>,
+             services: &mut crate::native::EditorPanelServices<'_>| {
+                let instance = event.endpoint.instance();
+                if let (Some(surface), Some(journal)) =
+                    (surfaces.get_mut(&instance), graphics.journal(instance))
+                {
+                    if let Err(failure) = surface.input.deliver(
+                        panel,
+                        context,
+                        event,
+                        services,
+                        journal,
+                        ui.as_deref(),
+                    ) {
+                        error.get_or_insert(failure);
+                    }
+                }
+            };
+        let outcome = match focus {
+            Some(token) => {
+                self.native
+                    .focus_panel(&self.application, &mut self.panels, token, &mut deliver)
+            }
+            None => self.native.refresh_keyboard_services(
                 &self.application,
                 &mut self.panels,
-                |panel, context, event, services| {
-                    let instance = event.endpoint.instance();
-                    if let (Some(surface), Some(journal)) =
-                        (surfaces.get_mut(&instance), graphics.journal(instance))
-                    {
-                        if let Err(failure) = surface.input.deliver(
-                            panel,
-                            context,
-                            event,
-                            services,
-                            journal,
-                            ui.as_deref(),
-                        ) {
-                            error.get_or_insert(failure);
-                        }
-                    }
-                },
-            )
-            .map_err(|error| error.to_string())?;
+                &mut deliver,
+            ),
+        }
+        .map_err(|error| error.to_string())?;
         if let Some(error) = error {
             return Err(error);
         }
@@ -572,8 +609,27 @@ impl DrawnNative {
     }
 }
 
+fn panel_bounds(kind: &str, width: f32, height: f32) -> DisplayRect {
+    let divider = (width * 0.52).floor();
+    match kind {
+        SHELL_KIND => DisplayRect {
+            min: [0.0, 0.0],
+            max: [width, SHELL_HEIGHT],
+        },
+        "nara.inspector" => DisplayRect {
+            min: [divider + 1.0, SHELL_HEIGHT],
+            max: [width, height],
+        },
+        _ => DisplayRect {
+            min: [0.0, SHELL_HEIGHT],
+            max: [divider, height],
+        },
+    }
+}
+
 fn font_policy() -> Result<Vec<FontFace>, String> {
-    let mut fonts = vec![nara_text::bundled_font_face().map_err(|error| error.to_string())?];
+    let mut fonts =
+        vec![nara_text::bundled_regular_font_face().map_err(|error| error.to_string())?];
     if let Some(path) = std::env::var_os("NARA_EDITOR_CJK_FONT") {
         let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
         if metadata.len() > nara_text::MAX_FONT_CONTAINER_BYTES as u64 {

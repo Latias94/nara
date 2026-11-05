@@ -28,12 +28,14 @@ use nara_ui_kernel::{
 use nara_ui_widgets::UiTextInputToken;
 
 use super::super::{
-    field_editor::FieldEditors,
-    owned_inspector::{OwnedInspector, OwnedInspectorError},
     submission::{self, PanelOrigin, Recipient},
     ui_interaction_tests::{clear_controls, control_rect},
 };
 use super::*;
+use crate::frontend::controls::{
+    field_drafts::FieldEditors,
+    owned_inspector::{OwnedInspector, OwnedInspectorError},
+};
 
 const COMPONENT: &str = "test.source-tool.Amount";
 const FIELD: &str = "amount";

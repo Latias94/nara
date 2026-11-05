@@ -490,7 +490,22 @@ impl AuthoringWorkflow<'_> {
         self.hierarchy_probe(
             UiSemanticRole::Text,
             &format!("{matching} of {total} source entities"),
-        )?;
+        )
+        .map_err(|error| {
+            let Ok((frame, _)) = self.owned_test_panel_image(PANEL) else {
+                return error;
+            };
+            format!(
+                "{error}; viewport {:?}, presented text {:?}",
+                frame.environment().logical_size(),
+                frame
+                    .semantics()
+                    .iter()
+                    .filter(|node| node.role() == UiSemanticRole::Text)
+                    .map(|node| (node.name(), node.parent()))
+                    .collect::<Vec<_>>()
+            )
+        })?;
         Ok(())
     }
 

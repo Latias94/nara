@@ -173,6 +173,31 @@ preedit and invalidate the affected geometry. Visual review, native input, OS ac
 per-stage performance remain distinct evidence; the initial engineering UI qualifies none of
 them merely by drawing the controls.
 
+The current [styled workspace unit](../plans/2026-11-05-styled-source-workspace-plan.md) adds the
+original complete shared Inspector as a third simultaneous panel. Require all three distinct
+original GPU images/composites. Add a real component through Inspector controls, edit Unicode
+text with injected IME, adopt both densities and 1×/2× user text scale during preedit, then
+Apply exactly once and complete document Undo/Redo. Preserve all original source capacity,
+projection, persistence, unknown-data, retirement and reconstruction assertions.
+Local Hierarchy Enter must retain editing rather than submit an Inspector action. Click the same
+filter or specialized form field again and deliver more text; then exercise filter Escape and
+same-field refocus without a manual interaction reset. Preserve the exact source and history.
+
+An anchored Document actions menu must remain open through repeated paints. Drain the old
+image's actual cancellation after staging the modal successor but before its original window
+presentation, while the journal still observes the old frame. Its successor controls must
+survive and receive actual native keyboard ownership after acceptance. Verify Tab navigation
+and scroll to every enabled action in short CPU viewports. Escape, the close button, a blocked
+Shell button, empty Shell space and another panel all dismiss without applying the underlay;
+Enter then reopens the menu from the restored current trigger. Real focus loss and retirement
+retain their separate full-cancellation behavior.
+
+Set `NARA_DRAWN_CAPTURE_DIR` to a fresh explicit artifact directory to read back current original
+GPU panel outputs during that trajectory. The fixture writes PPM plus frame/font/scale/geometry
+metadata, refuses overwrite and bounds images to 2048×2048 physical pixels. It composes actual
+panel texels at original fitted bounds with nearest sampling, rather than reading the final OS
+swapchain. Record that limit during visual review; capture work is outside cost measurements.
+
 ## UI Work Probes
 
 The [R11a work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) records owner-local work

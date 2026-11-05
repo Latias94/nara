@@ -29,16 +29,19 @@ use crate::{
     EditorApplicationActionDispatch, EditorLaunchOptions, native::EditorPanelPlatformEvent,
 };
 
+mod captures;
 mod driver;
 mod fixture;
 mod lifecycle;
 mod ordinary;
 mod specialized;
+mod styled;
 
 type TestResult<T = ()> = Result<T, String>;
 
 const HIERARCHY: &str = "nara.hierarchy";
 const SHELL: &str = "nara.drawn.workspace";
+const INSPECTOR: &str = "nara.inspector";
 const TIMEOUT: Duration = Duration::from_secs(180);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -156,7 +159,9 @@ impl Workflow<'_> {
         let prefab = self.open_source(fixture::PREFAB)?;
         let preserved = self.open_source(fixture::PRESERVED)?;
         self.switch_document(scene)?;
+        self.hierarchy_filter_completion()?;
         self.ordinary(fixture::SCENE, EditorDocumentKind::Scene)?;
+        self.inspector_edit_and_restore()?;
         self.switch_document(prefab)?;
         self.ordinary(fixture::PREFAB, EditorDocumentKind::Prefab)?;
         self.switch_document(preserved)?;

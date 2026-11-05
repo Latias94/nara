@@ -3,7 +3,7 @@
 use dear_imgui_rs::Ui;
 use nara::tooling::SceneInspectorEntityRow;
 
-use super::super::field_drafts::references::{entity_choices, entity_label};
+use crate::frontend::controls::field_drafts::references::{entity_choices, entity_label};
 
 pub(in crate::frontend::imgui) fn show(
     ui: &Ui,

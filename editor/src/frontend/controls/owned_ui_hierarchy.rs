@@ -29,8 +29,8 @@ use nara_ui_kernel::{
     UiEnvironment, UiFrame, UiKey, UiKeyError, UiPoint, UiRect, UiRootKey, UiStyleError, UiTheme,
 };
 use nara_ui_widgets::{
-    UiButton, UiButtonState, UiIntentBatch, UiIntentBatchError, UiTextField, UiTextFieldError,
-    UiTextInputToken, UiWidgetError,
+    UiAppearance, UiButton, UiButtonState, UiIntentBatch, UiIntentBatchError, UiTextField,
+    UiTextFieldError, UiTextInputToken, UiTextRole, UiWidgetError,
 };
 use thiserror::Error;
 
@@ -44,10 +44,6 @@ mod presentation;
 mod tests;
 
 const RETAINED_FRAMES: usize = 3;
-const TEXT_SIZE: f32 = 16.0;
-const INSET: f32 = 12.0;
-const ROW_HEIGHT: f32 = 30.0;
-const SOURCE_ROW_HEIGHT: f32 = 52.0;
 // Match the authoring owner's creation-text contract; paint windows budget visible glyphs.
 const FIELD_TEXT_BYTES: usize = 4096;
 
@@ -297,6 +293,7 @@ struct CompiledHierarchy {
     frame: Arc<UiFrame>,
     snapshot: UiAuthoringSnapshot,
     theme: UiTheme,
+    appearance: UiAppearance,
     basis: Option<UiHierarchyBasis>,
     form: Option<u64>,
     observation: Arc<AtomicBool>,
@@ -315,6 +312,9 @@ struct SubmissionContext {
 /// Compiled specialized UI tree/forms. Source mutations, history and persistence stay in Session.
 pub(in crate::frontend) struct OwnedUiHierarchy {
     root: UiRootKey,
+    appearance: UiAppearance,
+    explicit_appearance: bool,
+    metrics: Option<presentation::Metrics>,
     engine: TextEngine,
     compiler: UiCompiler,
     basis: Option<UiHierarchyBasis>,
@@ -372,6 +372,9 @@ impl OwnedUiHierarchy {
     ) -> Result<Self, OwnedUiHierarchyError> {
         Ok(Self {
             root,
+            appearance: UiAppearance::default(),
+            explicit_appearance: false,
+            metrics: None,
             engine: TextEngine::with_fonts(
                 fonts.clone(),
                 nara_text::TextLimits {
@@ -400,6 +403,14 @@ impl OwnedUiHierarchy {
             error: None,
             input_error: None,
         })
+    }
+
+    pub(in crate::frontend) fn set_appearance(&mut self, appearance: UiAppearance) {
+        self.explicit_appearance = true;
+        if self.appearance != appearance {
+            self.appearance = appearance;
+            self.invalidate_actions();
+        }
     }
 
     pub(super) fn compiled_frame(&self) -> Option<&Arc<UiFrame>> {
@@ -802,11 +813,11 @@ impl OwnedUiHierarchy {
             .map(|(kind, label, value)| {
                 Ok(FormField {
                     kind,
-                    input: UiTextField::new(
+                    input: UiTextField::with_typography(
                         self.root.clone(),
                         label,
                         value,
-                        TEXT_SIZE,
+                        self.appearance.typography(UiTextRole::Body)?,
                         &mut self.engine,
                     )?,
                 })
@@ -1001,6 +1012,8 @@ impl Drop for OwnedUiHierarchy {
 
 #[derive(Debug, Error)]
 pub(super) enum OwnedUiHierarchyError {
+    #[error(transparent)]
+    Appearance(#[from] nara_ui_widgets::UiAppearanceError),
     #[error(transparent)]
     Engine(#[from] TextEngineCreateError),
     #[error(transparent)]

@@ -8,6 +8,17 @@ fn catalog_uses_complete_owner_recipes_one_prefab_history_record_and_exact_sourc
     let frame = paint(&mut owner, &fixture, 800.0);
     let mut routing = RoutedInput::new(&frame);
     for (index, kind) in UiCatalogNodeKind::ALL.into_iter().enumerate() {
+        let density = if index < 2 {
+            nara_ui_widgets::UiDensity::Normal
+        } else {
+            nara_ui_widgets::UiDensity::Compact
+        };
+        owner.set_appearance(
+            UiAppearance::default()
+                .with_density(density)
+                .with_text_scale(if index % 2 == 0 { 1.0 } else { 2.0 })
+                .unwrap(),
+        );
         let before = fixture.ui();
         let history = fixture.history();
         click_current(&mut owner, &mut routing, &fixture, "Add UI node");
@@ -194,6 +205,12 @@ fn not_dispatched_and_admission_refusal_preserve_form_for_explicit_retry_and_ign
         .into_action(&fixture.model(), &fixture.ui(), false)
         .unwrap();
     owner.admitted(Ok(id(1)));
+    owner.set_appearance(
+        UiAppearance::default()
+            .with_density(nara_ui_widgets::UiDensity::Compact)
+            .with_text_scale(2.0)
+            .unwrap(),
+    );
     let pending = paint(&mut owner, &fixture, 800.0);
     assert!(!enabled(&pending, "Apply structure change"));
     assert!(owner.escape(&pending).unwrap());

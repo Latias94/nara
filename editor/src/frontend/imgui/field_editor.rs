@@ -21,14 +21,19 @@ use nara::{
     tooling::EditorFieldTarget,
 };
 
-use super::authoring::{self, recursive_controls, value_draft};
-use super::field_drafts::{Candidate, FieldBasis, FieldDraft, FieldKey, source};
-pub(super) use super::field_drafts::{FieldEditors, PreparedFieldEdit};
+use super::authoring::{self, recursive_controls};
 use super::{
     ImguiEditorPanelContext, ImguiTextOwner, PanelActionDispatch, PanelSubmissionId,
     observe_text_owner,
 };
-use crate::frontend::controls::editing_enabled;
+use crate::frontend::controls::{
+    authoring::{property_target, value_label},
+    editing_enabled,
+    field_drafts::{
+        Candidate, FieldBasis, FieldDraft, FieldEditors, FieldKey, PreparedFieldEdit, source,
+    },
+    value_draft,
+};
 
 impl FieldEditors {
     #[allow(clippy::too_many_arguments)]
@@ -52,18 +57,18 @@ impl FieldEditors {
             if field.required { " *" } else { "" }
         ));
         if !self.painted.insert(key.clone()) {
-            ui.text_wrapped(authoring::value_label(source(field)));
+            ui.text_wrapped(value_label(source(field)));
             ui.text_disabled("This field already has an editor in this panel");
             return None;
         }
         if !value_draft::supported(&field.shape) {
-            ui.text_wrapped(authoring::value_label(source(field)));
+            ui.text_wrapped(value_label(source(field)));
             ui.text_disabled("This field shape is read-only in the generic Inspector");
             self.show_requested_recovery(ui, &key);
             return None;
         }
         if !self.has_draft_capacity(&key) {
-            ui.text_wrapped(authoring::value_label(source(field)));
+            ui.text_wrapped(value_label(source(field)));
             ui.text_disabled(
                 "Field draft capacity reached. Discard retained edits to open another editor.",
             );
@@ -86,10 +91,7 @@ impl FieldEditors {
         let mut converted = None;
         if draft.incompatible {
             ui.text_wrapped("The schema or source changed. Copy the retained input, then reopen the current field.");
-            ui.text_wrapped(format!(
-                "Current: {}",
-                authoring::value_label(source(field))
-            ));
+            ui.text_wrapped(format!("Current: {}", value_label(source(field))));
             show_copy(ui, &draft.candidate);
             discard = button(ui, &key, "Discard draft and reopen", !pending);
         } else {
@@ -98,10 +100,7 @@ impl FieldEditors {
                     [1.0, 0.7, 0.2, 1.0],
                     "Conflict: review the accepted value before reapplying.",
                 );
-                ui.text_wrapped(format!(
-                    "Current: {}",
-                    authoring::value_label(source(field))
-                ));
+                ui.text_wrapped(format!("Current: {}", value_label(source(field))));
                 ui.text("Retained draft:");
                 if draft.remove_intent {
                     ui.text("Remove the authored override");
@@ -493,26 +492,6 @@ impl ImguiEditorPanelContext<'_, '_> {
             .fields
             .admitted(&prepared.key, result);
     }
-}
-
-pub(super) fn property_target(
-    frame: &EditorFrameModel,
-    scene: &EditorSceneModel,
-    entity: &SceneEntityId,
-    component: &SceneInspectorComponentView,
-    field: &SceneInspectorFieldView,
-) -> Option<nara::tooling::EditorPropertyTarget> {
-    let document = frame.workspace().document(scene.document)?;
-    Some(nara::tooling::EditorPropertyTarget {
-        basis: nara::tooling::EditorDocumentQueryBasis {
-            document: document.document,
-            revision: scene.revision,
-            schema: document.authoring_schema_basis.clone(),
-        },
-        entity: entity.clone(),
-        component: component.component.clone(),
-        property: nara::reflect::ComponentPropertyPath::new(field.id.clone()),
-    })
 }
 
 fn show_copy(ui: &Ui, candidate: &Candidate) {

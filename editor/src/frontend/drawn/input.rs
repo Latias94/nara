@@ -17,17 +17,46 @@ use winit::{
 use crate::{
     EditorPanelContext,
     native::{
-        EditorPanelImeArea, EditorPanelInput, EditorPanelInputKind, EditorPanelServices,
-        EditorPanelTextInputScope, EditorPanelWheelDelta,
+        EditorPanelCancelReason, EditorPanelImeArea, EditorPanelInput, EditorPanelInputKind,
+        EditorPanelServices, EditorPanelTextInputScope, EditorPanelWheelDelta,
     },
 };
 
-use super::DrawnPanel;
+use super::{DrawnPanel, text_controls::TextControls};
+
+pub(super) fn clipboard_edit(
+    owner: &mut TextControls<'_>,
+    frame: &Arc<UiFrame>,
+    field: &UiKey,
+    token: UiTextInputToken,
+    key: &str,
+    read: impl FnOnce() -> Result<String, String>,
+    write: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Option<TextEdit>, String> {
+    let result = if key.eq_ignore_ascii_case("v") {
+        read().map(|text| Some(TextEdit::Insert(text)))
+    } else if let Some(text) = owner.selected_text(frame, field, token)? {
+        write(&text).map(|()| {
+            key.eq_ignore_ascii_case("x")
+                .then(|| TextEdit::Insert(String::new()))
+        })
+    } else {
+        Ok(None)
+    };
+    match result {
+        Ok(edit) => Ok(edit),
+        Err(error) => {
+            owner.input_error(frame, field, token, error);
+            Ok(None)
+        }
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct PanelInput {
     interaction: UiInteractionSession,
     text: Option<TextFocus>,
+    native_focus_requested: bool,
 }
 
 struct TextFocus {
@@ -64,14 +93,35 @@ impl PanelInput {
         {
             panel.reduce(&frame, &batch, context, ui)?;
         }
+        if let Some(target) = panel.take_focus_request(&frame) {
+            let outcome = self
+                .interaction
+                .dispatch(
+                    journal,
+                    UiRouteStamp::from_receipt(presented.receipt()),
+                    UiInputEvent::FocusTarget {
+                        seat: UiSeatId::PRIMARY,
+                        target,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            if let Some(batch) = outcome.consumed() {
+                panel.reduce(&frame, batch, context, ui)?;
+                self.native_focus_requested = true;
+            }
+        }
         self.retire_text(panel, &frame);
         Ok(())
+    }
+
+    pub(crate) fn take_native_focus_request(&mut self) -> bool {
+        std::mem::take(&mut self.native_focus_requested)
     }
 
     fn retire_text(&mut self, panel: &mut DrawnPanel, frame: &Arc<UiFrame>) {
         let current = self.text.as_ref().is_some_and(|focus| {
             panel
-                .hierarchy_mut()
+                .text_controls()
                 .and_then(|owner| owner.input_token(frame, &focus.field).ok().flatten())
                 == Some(focus.token)
         });
@@ -92,6 +142,16 @@ impl PanelInput {
         let frame = &event.snapshot;
         let surface = frame.environment().surface_id();
         if matches!(event.kind, EditorPanelInputKind::Cancelled(_)) {
+            if matches!(
+                event.kind,
+                EditorPanelInputKind::Cancelled(EditorPanelCancelReason::OutputReplaced)
+            ) && (!panel.input_basis_is_current(frame)
+                || !journal
+                    .latest(surface)
+                    .is_ok_and(|presented| Arc::ptr_eq(presented.frame(), frame)))
+            {
+                return Ok(());
+            }
             if let Ok(presented) = journal.latest(surface) {
                 let route = UiRouteStamp::from_receipt(presented.receipt());
                 let outcome = self
@@ -112,6 +172,7 @@ impl PanelInput {
                 }
             }
             panel.cancel_input()?;
+            self.native_focus_requested = false;
             self.text = None;
             self.interaction.clear_surface_state(surface);
             return Ok(());
@@ -124,6 +185,19 @@ impl PanelInput {
             return Err("Native input and UI presentation do not match".into());
         }
         let route = UiRouteStamp::from_receipt(accepted.receipt());
+        if matches!(
+            event.kind,
+            EditorPanelInputKind::ModalOutsidePointer {
+                state: ElementState::Pressed,
+                ..
+            }
+        ) {
+            panel.dismiss_menu()?;
+            services
+                .request_redraw()
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
         self.retire_text(panel, frame);
         let transform = frame.environment().content_transform();
         let point = event.target_position.map(|[x, y]| {
@@ -143,6 +217,20 @@ impl PanelInput {
             event.modifiers.alt_key(),
             event.modifiers.super_key(),
         );
+        if matches!(
+            event.kind,
+            EditorPanelInputKind::PointerButton {
+                button: MouseButton::Left,
+                state: ElementState::Pressed
+            }
+        ) && point.is_some_and(|point| panel.menu_outside(frame, point))
+        {
+            panel.dismiss_menu()?;
+            services
+                .request_redraw()
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
         let pointer = match &event.kind {
             EditorPanelInputKind::PointerMoved => point
                 .map(|point| UiPointerInput::moved(UiSeatId::PRIMARY, UiPointerId::PRIMARY, point)),
@@ -178,9 +266,7 @@ impl PanelInput {
                         *y as f32 / transform.content_scale_factor()
                     }
                 };
-                if let Some(owner) = panel.hierarchy_mut() {
-                    owner.scroll(frame, -delta)?;
-                }
+                panel.scroll(frame, -delta)?;
                 None
             }
             _ => None,
@@ -196,14 +282,15 @@ impl PanelInput {
             .as_ref()
             .and_then(|focus| {
                 panel
-                    .hierarchy_mut()
+                    .text_controls()
                     .map(|owner| owner.is_composing(frame, &focus.field, focus.token))
             })
             .transpose()?
             .unwrap_or(false);
         if composing && key.is_some() {
             if key.is_some_and(|key| key.logical_key == Key::Named(NamedKey::Escape)) {
-                if let (Some(focus), Some(owner)) = (self.text.as_ref(), panel.hierarchy_mut()) {
+                if let (Some(focus), Some(mut owner)) = (self.text.as_ref(), panel.text_controls())
+                {
                     owner.edit(
                         frame,
                         &focus.field,
@@ -219,6 +306,7 @@ impl PanelInput {
         }
         if let Some(key) = key {
             routed = match key.logical_key {
+                Key::Named(NamedKey::Tab) if panel.navigate_menu(frame, modifiers.shift())? => None,
                 Key::Named(NamedKey::Tab) => Some(UiInputEvent::Navigate {
                     seat: UiSeatId::PRIMARY,
                     direction: if modifiers.shift() {
@@ -255,7 +343,7 @@ impl PanelInput {
             .map(|node| node.key().clone());
         let next_text = focused.and_then(|field| {
             panel
-                .hierarchy_mut()
+                .text_controls()
                 .and_then(|owner| owner.input_token(frame, &field).ok().flatten())
                 .map(|token| (field, token))
         });
@@ -280,9 +368,10 @@ impl PanelInput {
         );
         let original_scope = self.text.as_ref().map(|focus| &focus.scope);
         let scope_current = !text_event || event.text_scope.as_ref() == original_scope;
+        let mut clear_finished_focus = false;
         if let Some(focus) = self.text.as_ref() {
             if scope_current {
-                if let Some(owner) = panel.hierarchy_mut() {
+                if let Some(mut owner) = panel.text_controls() {
                     let edit = match &event.kind {
                         EditorPanelInputKind::Text(text)
                             if !modifiers.control()
@@ -313,32 +402,25 @@ impl PanelInput {
                             Key::Character(value) if command && value.eq_ignore_ascii_case("a") => {
                                 Some(TextEdit::SelectAll)
                             }
-                            Key::Character(value) if command && value.eq_ignore_ascii_case("v") => {
-                                Some(TextEdit::Insert(
-                                    services
-                                        .read_clipboard()
-                                        .map_err(|error| error.to_string())?,
-                                ))
-                            }
                             Key::Character(value)
                                 if command
                                     && (value.eq_ignore_ascii_case("c")
-                                        || value.eq_ignore_ascii_case("x")) =>
+                                        || value.eq_ignore_ascii_case("x")
+                                        || value.eq_ignore_ascii_case("v")) =>
                             {
-                                if let Some(text) =
-                                    owner.selected_text(frame, &focus.field, focus.token)?
-                                {
-                                    services
-                                        .write_clipboard(&text)
-                                        .map_err(|error| error.to_string())?;
-                                    if value.eq_ignore_ascii_case("x") {
-                                        Some(TextEdit::Insert(String::new()))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
+                                clipboard_edit(
+                                    &mut owner,
+                                    frame,
+                                    &focus.field,
+                                    focus.token,
+                                    value.as_str(),
+                                    || services.read_clipboard().map_err(|error| error.to_string()),
+                                    |text| {
+                                        services
+                                            .write_clipboard(text)
+                                            .map_err(|error| error.to_string())
+                                    },
+                                )?
                             }
                             Key::Character(value) if command && value.eq_ignore_ascii_case("z") => {
                                 Some(if modifiers.shift() {
@@ -368,8 +450,15 @@ impl PanelInput {
                             Key::Named(NamedKey::Delete) => Some(TextEdit::Delete),
                             Key::Named(NamedKey::Escape) => {
                                 if !owner.escape(frame)? {
-                                    owner.finish_input(frame, &focus.field, true)?;
+                                    owner.discard_input(frame, &focus.field, context)?;
+                                    clear_finished_focus =
+                                        owner.input_token(frame, &focus.field).ok().flatten()
+                                            != Some(focus.token);
                                 }
+                                None
+                            }
+                            Key::Named(NamedKey::Enter) if !key.repeat => {
+                                owner.apply_input(frame, &focus.field, context)?;
                                 None
                             }
                             _ => edit,
@@ -413,8 +502,24 @@ impl PanelInput {
                 }
             }
         } else if key.is_some_and(|key| key.logical_key == Key::Named(NamedKey::Escape)) {
-            if let Some(owner) = panel.hierarchy_mut() {
+            panel.dismiss_menu()?;
+            if let Some(mut owner) = panel.text_controls() {
                 owner.escape(frame)?;
+            }
+        }
+        if clear_finished_focus {
+            let outcome = self
+                .interaction
+                .dispatch(
+                    journal,
+                    route,
+                    UiInputEvent::SeatCancelled {
+                        seat: UiSeatId::PRIMARY,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            if let Some(batch) = outcome.consumed() {
+                panel.reduce(frame, batch, context, ui)?;
             }
         }
         self.retire_text(panel, frame);
@@ -440,7 +545,7 @@ impl PanelInput {
                     format!("Updating text services after {:?}: {error}", event.kind)
                 })?;
             if let Some(focus) = self.text.as_ref() {
-                if let Some(owner) = panel.hierarchy_mut() {
+                if let Some(mut owner) = panel.text_controls() {
                     let area = owner.ime_area(frame, &focus.field, focus.token)?;
                     let field = frame
                         .layouts()
@@ -498,6 +603,7 @@ impl PanelInput {
                 .request_redraw()
                 .map_err(|error| error.to_string())?;
         }
+        panel.flush_services(services)?;
         Ok(())
     }
 }

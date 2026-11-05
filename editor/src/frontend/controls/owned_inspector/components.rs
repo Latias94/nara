@@ -80,13 +80,13 @@ pub(super) struct ComponentControls {
     error: Option<String>,
 }
 
-pub(in crate::frontend::imgui) struct ComponentSubmission {
+pub(in crate::frontend) struct ComponentSubmission {
     basis: CompositionBasis,
     action: EditorAction,
 }
 
 impl ComponentSubmission {
-    pub(in crate::frontend::imgui) fn into_action(
+    pub(in crate::frontend) fn into_action(
         self,
         model: &EditorFrameModel,
         read_only: bool,
@@ -168,9 +168,10 @@ impl OwnedInspector {
                     .with_flex_shrink(0.0),
             )
             .with_key(UiLocalKey::runtime("nara.inspector.label", "placement")?)
-            .with_text(UiText::new(
+            .with_text(self.appearance.text(
                 placement_intent_label(entity.placement.as_ref()),
-                TEXT_SIZE,
+                UiTextRole::Caption,
+                true,
             )?),
         );
         if displayed.basis.has_prefab {
@@ -183,7 +184,7 @@ impl OwnedInspector {
             )?);
         }
         if let Some(error) = &self.components.error {
-            nodes.push(self.label("composition.error", error)?);
+            nodes.push(self.error_label("composition.error", error)?);
         }
         nodes.push(self.component_button(
             ComponentAction::Menu,
@@ -208,7 +209,7 @@ impl OwnedInspector {
                     &mut displayed,
                 )?);
                 if let Some(reason) = reason {
-                    nodes.push(self.label(&format!("{label}.unavailable"), reason)?);
+                    nodes.push(self.caption(&format!("{label}.unavailable"), reason)?);
                 }
             }
         }
@@ -235,7 +236,7 @@ impl OwnedInspector {
             return Ok(false);
         }
         if let Some(reason) = component.access.read_only_reason() {
-            nodes.push(self.label(
+            nodes.push(self.caption(
                 &format!("{name}.read-only"),
                 &format!("Read-only component: {reason:?}"),
             )?);
@@ -259,7 +260,7 @@ impl OwnedInspector {
             displayed,
         )?);
         if component.fields.is_empty() {
-            nodes.push(self.label(&format!("{name}.empty"), "No inspectable fields")?);
+            nodes.push(self.caption(&format!("{name}.empty"), "No inspectable fields")?);
         }
         Ok(true)
     }
@@ -292,15 +293,28 @@ impl OwnedInspector {
         let control = &self.components.buttons[&action];
         let button = UiButton::new(control.key.clone(), label, UiActionId::new(label)?)?
             .with_enabled(enabled);
-        let node = button.authored_node(
+        let variant = match &action {
+            ComponentAction::Fold(_) | ComponentAction::Remove(_) => UiButtonVariant::Quiet,
+            _ => UiButtonVariant::Secondary,
+        };
+        let height = inspector_control_height(self.appearance, 30.0)?;
+        let mut recipe = self.appearance.button(
+            &button,
+            control.state,
+            variant,
+            UiControlSize::Regular,
+            action == ComponentAction::Menu && self.components.menu,
+        )?;
+        if matches!(action, ComponentAction::Remove(_)) && enabled {
+            recipe = recipe.with_text_brush(UiBrush::Solid(self.appearance.palette().danger_text));
+        }
+        let node = recipe.authored_node(
+            &button,
             &self.root,
             UiStyle::flex()
                 .with_width(UiDimension::Px(width))
-                .with_height(UiDimension::Px(30.0))
+                .with_height(UiDimension::Px(height))
                 .with_flex_shrink(0.0),
-            UiVisual::role(button_color(control.state, &button)),
-            UiBrush::Role(UiColorRole::PrimaryText),
-            TEXT_SIZE,
         )?;
         displayed
             .buttons
@@ -395,7 +409,7 @@ impl OwnedInspector {
         Ok(())
     }
 
-    pub(in crate::frontend::imgui) fn activate_component(
+    pub(in crate::frontend) fn activate_component(
         &mut self,
         frame: &Arc<UiFrame>,
         key: &UiKey,
@@ -482,7 +496,7 @@ impl OwnedInspector {
         Ok(Some(ComponentSubmission { basis, action }))
     }
 
-    pub(in crate::frontend::imgui) fn component_submission_failed(&mut self, error: String) {
+    pub(in crate::frontend) fn component_submission_failed(&mut self, error: String) {
         self.components.error = Some(error);
     }
 

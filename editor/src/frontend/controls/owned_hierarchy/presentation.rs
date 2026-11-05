@@ -6,16 +6,59 @@ use std::{
 
 use nara::tooling::SceneInspectorEntityRow;
 use nara_ui_kernel::{
-    UiActionId, UiAuthoringSnapshotBuilder, UiBrush, UiColorRole, UiDimension, UiLayer, UiLocalKey,
-    UiNode, UiOverflow, UiRoot, UiRootStatus, UiStyle, UiText, UiTextOverflow, UiVisual,
+    UiActionId, UiAuthoringSnapshotBuilder, UiDimension, UiEdges, UiLayer, UiLocalKey, UiNode,
+    UiOverflow, UiRoot, UiRootStatus, UiStyle, UiTextOverflow, UiVisual,
 };
-use nara_ui_widgets::UiButtonVisualState;
+use nara_ui_widgets::{UiAppearanceError, UiAppearancePalette, UiButtonVariant, UiControlSize};
 
 use super::*;
 
 const MAX_PRESENTATION_BYTES: usize = 128;
 // Leave the rest of the shared frame's glyph allowance for chrome and the local filter.
 const ROW_PRESENTATION_BYTES: usize = 2048;
+
+#[derive(Clone, Copy)]
+pub(super) struct Metrics {
+    appearance: UiAppearance,
+    body: f32,
+    caption: f32,
+    title: f32,
+    action: f32,
+    field: f32,
+    source_row: f32,
+}
+
+impl Metrics {
+    fn new(appearance: UiAppearance, engine: &mut TextEngine) -> Result<Self, UiAppearanceError> {
+        let mut measure = |role| {
+            let layout = engine.layout(&nara_text::TextLayoutRequest::from_typography(
+                "Ag",
+                appearance.typography(role)?,
+            ))?;
+            Ok::<_, UiAppearanceError>(line_box(&layout))
+        };
+        let body = measure(UiTextRole::Body)?;
+        let caption = measure(UiTextRole::Caption)?;
+        let title = measure(UiTextRole::Title)?;
+        let action = appearance.control_metrics(UiControlSize::Small)?;
+        let field = appearance.control_metrics(UiControlSize::Regular)?;
+        let action = action
+            .height()
+            .max(body + action.padding().top() + action.padding().bottom());
+        let field = field
+            .height()
+            .max(body + field.padding().top() + field.padding().bottom());
+        Ok(Self {
+            appearance,
+            body,
+            caption,
+            title,
+            action,
+            field,
+            source_row: action + 2.0 * caption + 2.0 * appearance.gap(),
+        })
+    }
+}
 
 impl OwnedHierarchy {
     pub(in crate::frontend::controls) fn compile(
@@ -26,11 +69,26 @@ impl OwnedHierarchy {
         read_only: bool,
     ) -> Result<Arc<UiFrame>, OwnedHierarchyError> {
         self.work.compile_calls = self.work.compile_calls.saturating_add(1);
+        if !self.explicit_appearance
+            && self
+                .frames
+                .last()
+                .is_none_or(|previous| previous.theme != theme)
+        {
+            let appearance = reference_appearance(theme)?;
+            if self.appearance != appearance {
+                self.appearance = appearance;
+                self.invalidate_actions();
+            }
+        }
         let painted_clean = !self.paint_dirty;
         self.paint_dirty = true;
-        let width = environment.logical_size().width() - 2.0 * INSET;
+        let appearance = self.appearance;
+        let inset = appearance.panel_inset();
+        let gap = appearance.gap();
+        let width = environment.logical_size().width() - 2.0 * inset;
         let height = environment.logical_size().height();
-        if width <= 16.0 || height <= 2.0 * INSET {
+        if width <= 1.0 || height <= 0.0 {
             return Err(OwnedHierarchyError::InvalidViewport);
         }
         if painted_clean
@@ -39,6 +97,7 @@ impl OwnedHierarchy {
             && previous.read_only == read_only
             && previous.frame.environment() == environment
             && previous.theme == theme
+            && previous.appearance == appearance
             && Arc::ptr_eq(&previous.observation, &self.observation)
             && previous.observation.load(Ordering::Relaxed)
         {
@@ -48,6 +107,16 @@ impl OwnedHierarchy {
             self.paint_dirty = false;
             return Ok(Arc::clone(&previous.frame));
         }
+        let metrics = match self.metrics {
+            Some(metrics)
+                if metrics.appearance.density() == appearance.density()
+                    && metrics.appearance.text_scale() == appearance.text_scale() =>
+            {
+                metrics
+            }
+            _ => Metrics::new(appearance, &mut self.engine)?,
+        };
+        self.metrics = Some(metrics);
         if self
             .projection
             .as_ref()
@@ -68,15 +137,16 @@ impl OwnedHierarchy {
         let scope = basis.as_ref().map(HierarchyBasis::scope);
         if self.scope != scope {
             self.filter.blur(&mut self.engine)?;
-            self.filter = UiTextField::new(
+            self.filter = UiTextField::with_typography(
                 self.root.clone(),
                 "Filter entities",
                 "",
-                TEXT_SIZE,
+                appearance.typography(UiTextRole::Body)?,
                 &mut self.engine,
             )?;
             self.scope = scope;
             self.source_scroll = 0.0;
+            self.reveal_selection = false;
             self.input_error = None;
         }
         if self.basis != basis {
@@ -95,20 +165,44 @@ impl OwnedHierarchy {
 
         let mut nodes = Vec::new();
         let mut buttons = HashMap::new();
-        let half = (width - 6.0) / 2.0;
+        self.filter
+            .reconfigure(&mut self.engine, appearance.typography(UiTextRole::Body)?)?;
+        let mut field_appearance = appearance.field(
+            self.filter.input_token().is_some(),
+            self.filter.enabled(),
+            self.input_error.is_some(),
+        )?;
+        let padding = field_appearance.padding;
+        if width <= padding.left() + padding.right() {
+            let inline = (width - 1.0) * 0.5;
+            field_appearance.padding =
+                UiEdges::new(inline, inline, padding.top(), padding.bottom())?;
+        }
+        let field_height = metrics
+            .field
+            .max(line_box(self.filter.editor().layout()) + padding.top() + padding.bottom());
+        self.filter.set_appearance(field_appearance);
+        let action_height = metrics.action;
+        let top = if height < 4.0 * action_height + 2.0 * inset {
+            2.0
+        } else {
+            inset
+        };
+        let half = ((width - gap) / 2.0).max(1.0);
         let busy = self.queued || self.pending.is_some();
         let editing = basis.as_ref().is_some_and(|basis| basis.editing) && !busy;
         let selected = basis.as_ref().and_then(|basis| basis.selected.as_ref());
         let mut source_limit = 0.0;
         let mut choice_limit = 0.0;
-        let show_filter = self.removal.is_none() && self.choices.is_none() && height >= 180.0;
+        let show_filter = self.removal.is_none()
+            && self.choices.is_none()
+            && (self.filter.input_token().is_some()
+                || height
+                    >= 2.0 * top + field_height + 2.0 * action_height + 3.0 * gap + metrics.body);
         if !show_filter {
             self.filter.blur(&mut self.engine)?;
         }
         if let Some(removal) = self.removal.clone() {
-            // Confirmation is a complete panel mode: its actions never depend on chrome scroll.
-            let top = if height < 128.0 { 2.0 } else { INSET };
-            let action_height = (height - 2.0 * top).min(30.0);
             let entity = removal
                 .selected
                 .as_ref()
@@ -118,7 +212,7 @@ impl OwnedHierarchy {
                 Control::ConfirmRemoval,
                 "Confirm removal",
                 editing && unchanged && removal.removal_reason.is_none(),
-                [INSET, top, half, action_height],
+                [inset, top, half, action_height],
                 false,
                 &mut buttons,
             )?);
@@ -126,41 +220,48 @@ impl OwnedHierarchy {
                 Control::CancelRemoval,
                 "Cancel removal",
                 true,
-                [INSET + half + 6.0, top, half, action_height],
+                [inset + half + gap, top, half, action_height],
                 false,
                 &mut buttons,
             )?);
-            let y = top + action_height + 6.0;
-            let remaining = (height - y - top).max(0.0);
-            if remaining > 0.0 {
-                nodes.push(wrapped_label(
-                    "removal-question",
-                    &format!("Remove the source-local branch rooted at {entity}?"),
-                    INSET,
-                    y,
-                    width,
-                    remaining.min(44.0),
+            let y = top + action_height + gap;
+            let viewport_height = (height - y - top).max(0.0);
+            let mut messages = vec![
+                ("removal-question", format!("Remove the source-local branch rooted at {entity}?")),
+                ("removal-warning", if unchanged {
+                    "Removal is refused if the source-local hierarchy cannot be resolved"
+                } else {
+                    "The original selection or source changed. Cancel this confirmation before retrying."
+                }.to_owned()),
+            ];
+            if let Some(error) = &self.error {
+                messages.push(("error", error.clone()));
+            }
+            let row_height = 2.0 * metrics.body + gap;
+            choice_limit = (messages.len() as f32 * row_height - viewport_height).max(0.0);
+            self.choice_scroll = self.choice_scroll.clamp(0.0, choice_limit);
+            let mut children = Vec::new();
+            for index in visible_range(
+                messages.len(),
+                self.choice_scroll,
+                viewport_height,
+                row_height,
+            ) {
+                let (identity, message) = &messages[index];
+                children.push(wrapped_label(
+                    appearance,
+                    identity,
+                    message,
+                    [
+                        0.0,
+                        index as f32 * row_height - self.choice_scroll,
+                        width,
+                        row_height - gap,
+                    ],
                 )?);
             }
-            let y = y + 48.0;
-            if height > y + top {
-                nodes.push(wrapped_label("removal-warning", if unchanged {
-                "Removal is refused if the source-local hierarchy cannot be resolved"
-            } else {
-                "The original selection or source changed. Cancel this confirmation before retrying."
-                }, INSET, y, width, (height - y - top).min(44.0))?);
-            }
-            if let Some(error) = &self.error
-                && height > y + 48.0 + top
-            {
-                nodes.push(wrapped_label(
-                    "error",
-                    error,
-                    INSET,
-                    y + 48.0,
-                    width,
-                    height - y - 48.0 - top,
-                )?);
+            if viewport_height > 0.0 {
+                nodes.push(viewport(inset, y, width, viewport_height, children));
             }
         } else if let Some(choices) = &self.choices {
             let menu_kind = choices.kind;
@@ -175,19 +276,31 @@ impl OwnedHierarchy {
                 MenuKind::Parent => count + 1,
                 MenuKind::Order => count * 2 + 2,
             };
-            let top = if height < 128.0 { 2.0 } else { INSET };
-            let action_height = (height - 2.0 * top).min(28.0);
+            let side_by_side = height < 2.0 * top + 2.0 * action_height + gap;
+            let close_width = if side_by_side { half } else { width };
             nodes.push(self.button(
                 Control::CloseChoices,
                 "Close choices",
                 true,
-                [INSET, top, width, action_height],
+                [inset, top, close_width, action_height],
                 false,
                 &mut buttons,
             )?);
-            let mut y = top + action_height + 4.0;
-            if height > 160.0 {
+            let viewport_x = if side_by_side {
+                inset + half + gap
+            } else {
+                inset
+            };
+            let viewport_width = if side_by_side { half } else { width };
+            let mut y = if side_by_side {
+                top
+            } else {
+                top + action_height + gap
+            };
+            if height > y + metrics.caption + gap + 2.0 * action_height {
                 nodes.push(label(
+                    appearance,
+                    UiTextRole::Caption,
                     "choices-target",
                     &format!(
                         "{:?} choices for {}",
@@ -197,25 +310,36 @@ impl OwnedHierarchy {
                             .as_ref()
                             .map_or("the original entity", SceneEntityId::as_str)
                     ),
-                    INSET,
-                    y,
-                    width,
-                    20.0,
+                    [viewport_x, y, viewport_width, metrics.caption],
                 )?);
-                y += 24.0;
-            }
-            if let Some(error) = &self.error
-                && height > y + 100.0
-            {
-                nodes.push(wrapped_label("error", error, INSET, y, width, 44.0)?);
-                y += 48.0;
+                y += metrics.caption + gap;
             }
             let viewport_height = (height - y - top).max(0.0);
-            choice_limit = (count as f32 * CHOICE_HEIGHT - viewport_height).max(0.0);
+            let choice_height = action_height + gap;
+            let error_height = self
+                .error
+                .as_ref()
+                .map_or(0.0, |_| 2.0 * metrics.body + gap);
+            choice_limit = (error_height + count as f32 * choice_height - viewport_height).max(0.0);
             self.choice_scroll = self.choice_scroll.clamp(0.0, choice_limit);
-            let range = visible_range(count, self.choice_scroll, viewport_height, CHOICE_HEIGHT);
+            let range = visible_range(
+                count,
+                (self.choice_scroll - error_height).max(0.0),
+                (viewport_height - (error_height - self.choice_scroll).max(0.0)).max(0.0),
+                choice_height,
+            );
             let text_limit = row_text_limit(range.len(), 1);
             let mut children = Vec::new();
+            if let Some(error) = &self.error
+                && self.choice_scroll < error_height
+            {
+                children.push(wrapped_label(
+                    appearance,
+                    "error",
+                    error,
+                    [0.0, -self.choice_scroll, viewport_width, 2.0 * metrics.body],
+                )?);
+            }
             for index in range {
                 let control = projected_choice(
                     menu_kind,
@@ -234,36 +358,54 @@ impl OwnedHierarchy {
                     editing && enabled,
                     [
                         0.0,
-                        index as f32 * CHOICE_HEIGHT - self.choice_scroll,
-                        width,
-                        CHOICE_HEIGHT,
+                        error_height + index as f32 * choice_height - self.choice_scroll,
+                        viewport_width,
+                        action_height,
                     ],
                     false,
                     &mut buttons,
                 )?);
             }
             if viewport_height > 0.0 {
-                nodes.push(viewport(y, width, viewport_height, children));
+                nodes.push(viewport(
+                    viewport_x,
+                    y,
+                    viewport_width,
+                    viewport_height,
+                    children,
+                ));
             }
         } else {
-            let compact = height < 360.0;
-            let tiny = height < 180.0;
+            let expanded = height
+                >= 2.0 * inset
+                    + metrics.title
+                    + field_height
+                    + 3.0 * action_height
+                    + 6.0 * gap
+                    + 2.0 * metrics.source_row;
+            let mut y = top;
             if show_filter {
-                let filter_y = if compact { INSET } else { 38.0 };
-                if !compact {
-                    nodes.push(label("heading", "Hierarchy", INSET, INSET, width, 22.0)?);
+                if expanded {
+                    nodes.push(label(
+                        appearance,
+                        UiTextRole::Title,
+                        "heading",
+                        "Hierarchy",
+                        [inset, y, width, metrics.title],
+                    )?);
+                    y += metrics.title + gap;
                 }
                 nodes.push(self.filter.authored_node(
                     &self.root,
-                    UiStyle::absolute(INSET, filter_y, width, 34.0),
+                    UiStyle::absolute(inset, y, width, field_height),
                     width,
                 )?);
-                let buttons_y = filter_y + 40.0;
+                y += field_height + gap;
                 nodes.push(self.button(
                     Control::ClearFilter,
                     "Clear filter",
                     !self.filter.editor().text().is_empty() || self.filter.editor().is_composing(),
-                    [INSET, buttons_y, half, 28.0],
+                    [inset, y, half, action_height],
                     false,
                     &mut buttons,
                 )?);
@@ -271,24 +413,15 @@ impl OwnedHierarchy {
                     Control::ShowSelection,
                     "Show selection",
                     selected.is_some(),
-                    [INSET + half + 6.0, buttons_y, half, 28.0],
+                    [inset + half + gap, y, half, action_height],
                     false,
                     &mut buttons,
                 )?);
+                y += action_height + gap;
             }
-            let action_height = if tiny {
-                ((height - 8.0) / 3.0).clamp(1.0, 28.0)
-            } else {
-                30.0
-            };
-            let action_y = if tiny {
-                2.0
-            } else if compact {
-                86.0
-            } else {
-                112.0
-            };
-            let third = (width - 12.0) / 3.0;
+            let single_toolbar = height < y + 2.0 * action_height + 2.0 * gap + top + metrics.body;
+            let columns = if single_toolbar { 5.0 } else { 3.0 };
+            let third = ((width - (columns - 1.0) * gap) / columns).max(1.0);
             for (column, control, name, enabled) in [
                 (0.0, Control::Root, "+ Root", editing),
                 (1.0, Control::Child, "+ Child", editing && selected_exists),
@@ -307,29 +440,28 @@ impl OwnedHierarchy {
                     control,
                     name,
                     enabled,
-                    [
-                        INSET + column * (third + 6.0),
-                        action_y,
-                        third,
-                        action_height,
-                    ],
+                    [inset + column * (third + gap), y, third, action_height],
                     false,
                     &mut buttons,
                 )?);
             }
             let placement = basis.as_ref().and_then(|basis| basis.placement.as_ref());
-            let parent_y = if tiny {
-                action_y + action_height + 2.0
-            } else if compact {
-                122.0
+            let parent_y = if single_toolbar {
+                y
             } else {
-                196.0
+                y + action_height + gap
             };
+            let parent_x = if single_toolbar {
+                inset + 3.0 * (third + gap)
+            } else {
+                inset
+            };
+            let parent_width = if single_toolbar { third } else { half };
             nodes.push(self.button(
                 Control::Parent,
                 "Parent",
                 editing && selected_exists,
-                [INSET, parent_y, half, action_height],
+                [parent_x, parent_y, parent_width, action_height],
                 false,
                 &mut buttons,
             )?);
@@ -337,63 +469,50 @@ impl OwnedHierarchy {
                 Control::Order,
                 "Order",
                 editing && selected_exists && placement.is_some(),
-                [INSET + half + 6.0, parent_y, half, action_height],
+                [
+                    parent_x + parent_width + gap,
+                    parent_y,
+                    parent_width,
+                    action_height,
+                ],
                 false,
                 &mut buttons,
             )?);
-            if !compact {
-                nodes.push(label(
+            y = parent_y + action_height + gap;
+            let mut viewport_height = (height - y - top).max(0.0);
+            let mut details = Vec::new();
+            if expanded {
+                details.push((
                     "source-kind",
-                    "Source declarations; resolved hierarchy is unavailable in this view",
-                    INSET,
-                    148.0,
-                    width,
-                    20.0,
-                )?);
-                nodes.push(label(
-                    "placement",
-                    &placement_intent_label(placement),
-                    INSET,
-                    171.0,
-                    width,
-                    20.0,
-                )?);
-            }
-            let mut y = parent_y + action_height + 6.0;
-            if compact && height >= 240.0 {
-                nodes.push(label(
+                    "Source declarations; resolved hierarchy is unavailable in this view"
+                        .to_owned(),
+                    false,
+                ));
+                details.push(("placement", placement_intent_label(placement), false));
+            } else {
+                details.push((
                     "source-kind",
-                    "Source declarations; authored placement intent",
-                    INSET,
-                    y,
-                    width,
-                    20.0,
-                )?);
-                y += 24.0;
+                    "Source declarations; authored placement intent".to_owned(),
+                    false,
+                ));
             }
             if let Some(reason) = basis.as_ref().and_then(|basis| basis.removal_reason) {
-                nodes.push(label("removal-unavailable", reason, INSET, y, width, 20.0)?);
-                y += 24.0;
+                details.push(("removal-unavailable", reason.to_owned(), false));
             }
             if busy {
-                nodes.push(label(
+                details.push((
                     "pending",
-                    "Awaiting the exact Hierarchy action result",
-                    INSET,
-                    y,
-                    width,
-                    20.0,
-                )?);
-                y += 24.0;
+                    "Awaiting the exact Hierarchy action result".to_owned(),
+                    false,
+                ));
             }
             if let Some(error) = &self.error {
-                nodes.push(wrapped_label("error", error, INSET, y, width, 44.0)?);
-                y += 48.0;
+                details.push(("error", error.clone(), true));
             }
             if let Some(error) = &self.input_error {
-                nodes.push(wrapped_label("input-error", error, INSET, y, width, 40.0)?);
-                y += 44.0;
+                details.push(("input-error", error.clone(), true));
             }
+            let mut children = Vec::new();
             if let Some(scene) = model
                 .workspace()
                 .active_scene
@@ -412,42 +531,59 @@ impl OwnedHierarchy {
                 let matches = projection.matching_count();
                 let diagnostics = &scene.editor.inspector.diagnostics;
                 let total = matches + diagnostics.iter().len();
-                if !compact {
+                let count = format!(
+                    "{matches} of {} source entities",
+                    scene.editor.inspector.entities.len()
+                );
+                if viewport_height >= metrics.caption + gap + metrics.body {
                     nodes.push(label(
+                        appearance,
+                        UiTextRole::Caption,
                         "source-count",
-                        &format!(
-                            "{matches} of {} source entities",
-                            scene.editor.inspector.entities.len()
-                        ),
-                        INSET,
-                        y,
-                        width,
-                        20.0,
+                        &count,
+                        [inset, y, width, metrics.caption],
                     )?);
-                    y += 24.0;
+                    y += metrics.caption + gap;
+                    viewport_height = (height - y - top).max(0.0);
+                } else {
+                    details.insert(0, ("source-count", count, false));
                 }
-                let viewport_height = (height - y - INSET).max(0.0);
-                source_limit = (total as f32 * SOURCE_ROW_HEIGHT - viewport_height).max(0.0);
+                let prefix_height = details
+                    .iter()
+                    .map(|(_, _, wrapped)| {
+                        if *wrapped {
+                            2.0 * metrics.body + gap
+                        } else {
+                            metrics.caption + gap
+                        }
+                    })
+                    .sum::<f32>();
+                if self.reveal_selection {
+                    self.source_scroll = prefix_height
+                        + projection.selected_index.unwrap_or(0) as f32 * metrics.source_row;
+                    self.reveal_selection = false;
+                }
+                source_limit =
+                    (prefix_height + total as f32 * metrics.source_row - viewport_height).max(0.0);
                 self.source_scroll = self.source_scroll.clamp(0.0, source_limit);
                 let range = visible_range(
                     total,
-                    self.source_scroll,
-                    viewport_height,
-                    SOURCE_ROW_HEIGHT,
+                    (self.source_scroll - prefix_height).max(0.0),
+                    (viewport_height - (prefix_height - self.source_scroll).max(0.0)).max(0.0),
+                    metrics.source_row,
                 );
                 let text_limit = row_text_limit(range.len(), 3);
                 let visible_sources = projection.visible_sources(range.clone());
-                let mut children = Vec::new();
                 for (offset, index) in visible_sources.into_iter().enumerate() {
                     let row = &scene.editor.inspector.entities[index];
-                    let top =
-                        (range.start + offset) as f32 * SOURCE_ROW_HEIGHT - self.source_scroll;
+                    let top = prefix_height + (range.start + offset) as f32 * metrics.source_row
+                        - self.source_scroll;
                     let name = format!("Select {}", row.id.as_str());
                     children.push(self.button(
                         Control::Select(row.id.clone()),
                         &presentation_text_with_limit(&name, text_limit),
                         basis.as_ref().is_some_and(|basis| basis.navigation) && !busy,
-                        [0.0, top, width, 26.0],
+                        [0.0, top, width, action_height],
                         Some(&row.id) == selected,
                         &mut buttons,
                     )?);
@@ -460,21 +596,24 @@ impl OwnedHierarchy {
                     );
                     let identity = self.controls[&Control::Select(row.id.clone())].identity;
                     children.push(label(
+                        appearance,
+                        UiTextRole::Caption,
                         &format!("source.{identity}.metadata"),
                         &presentation_text_with_limit(&metadata, text_limit),
-                        0.0,
-                        top + 28.0,
-                        width,
-                        17.0,
+                        [0.0, top + action_height + gap, width, metrics.caption],
                     )?);
                     let placement = placement_intent_label(row.placement.as_ref());
                     children.push(label(
+                        appearance,
+                        UiTextRole::Caption,
                         &format!("source.{identity}.placement"),
                         &presentation_text_with_limit(&placement, text_limit),
-                        0.0,
-                        top + 46.0,
-                        width,
-                        20.0,
+                        [
+                            0.0,
+                            top + action_height + gap + metrics.caption,
+                            width,
+                            metrics.caption,
+                        ],
                     )?);
                 }
                 let diagnostic_start = range.start.saturating_sub(matches);
@@ -485,7 +624,8 @@ impl OwnedHierarchy {
                     .take(diagnostic_end.saturating_sub(diagnostic_start))
                     .enumerate()
                 {
-                    let top = (matches + diagnostic_start + offset) as f32 * SOURCE_ROW_HEIGHT
+                    let top = prefix_height
+                        + (matches + diagnostic_start + offset) as f32 * metrics.source_row
                         - self.source_scroll;
                     let text = format!(
                         "{:?} {}: {}",
@@ -494,40 +634,63 @@ impl OwnedHierarchy {
                         diagnostic.summary().as_str()
                     );
                     children.push(wrapped_label(
+                        appearance,
                         &format!("diagnostic.{}", diagnostic_start + offset),
                         &presentation_text_with_limit(&text, text_limit),
-                        0.0,
-                        top,
-                        width,
-                        SOURCE_ROW_HEIGHT,
+                        [0.0, top, width, metrics.source_row - gap],
                     )?);
                 }
                 if total == 0 {
                     children.push(label(
+                        appearance,
+                        UiTextRole::Body,
                         "empty-source",
                         if self.filter.editor().text().is_empty() {
                             "No entities"
                         } else {
                             "No matching source entities"
                         },
-                        0.0,
-                        0.0,
-                        width,
-                        20.0,
+                        [0.0, prefix_height - self.source_scroll, width, metrics.body],
                     )?);
                 }
-                if viewport_height > 0.0 {
-                    nodes.push(viewport(y, width, viewport_height, children));
-                }
             } else {
-                nodes.push(label(
+                children.push(label(
+                    appearance,
+                    UiTextRole::Body,
                     "no-document",
                     "No active document",
-                    INSET,
-                    y,
-                    width,
-                    20.0,
+                    [0.0, 0.0, width, metrics.body],
                 )?);
+            }
+            let mut detail_y = -self.source_scroll;
+            for (identity, text, wrapped) in details {
+                let line_height = if wrapped {
+                    2.0 * metrics.body
+                } else {
+                    metrics.caption
+                };
+                if detail_y + line_height > 0.0 && detail_y < viewport_height {
+                    children.push(if wrapped {
+                        wrapped_label(
+                            appearance,
+                            identity,
+                            &text,
+                            [0.0, detail_y, width, line_height],
+                        )?
+                    } else {
+                        label(
+                            appearance,
+                            UiTextRole::Caption,
+                            identity,
+                            &text,
+                            [0.0, detail_y, width, line_height],
+                        )?
+                    });
+                }
+                detail_y += line_height + gap;
+            }
+            if viewport_height > 0.0 {
+                nodes.push(viewport(inset, y, width, viewport_height, children));
             }
         }
         let root = UiRoot::new(
@@ -535,7 +698,7 @@ impl OwnedHierarchy {
             UiLayer::Base,
             UiStyle::fill().with_overflow(UiOverflow::Clip),
         )
-        .with_visual(UiVisual::role(UiColorRole::Panel))
+        .with_visual(UiVisual::solid(appearance.palette().panel))
         .with_children(nodes);
         let snapshot = UiAuthoringSnapshotBuilder::new(self.next_snapshot)
             .with_root(root)
@@ -553,6 +716,7 @@ impl OwnedHierarchy {
             && previous.snapshot.roots() == snapshot.roots()
             && previous.frame.environment() == environment
             && previous.theme == theme
+            && previous.appearance == appearance
             && previous.basis == basis
             && Arc::ptr_eq(&previous.observation, &self.observation)
             && previous.source_limit == source_limit
@@ -607,6 +771,7 @@ impl OwnedHierarchy {
             frame: Arc::clone(&frame),
             snapshot,
             theme,
+            appearance,
             basis,
             observation: Arc::clone(&self.observation),
             viewport_observation: Arc::clone(&self.viewport_observation),
@@ -663,21 +828,29 @@ impl OwnedHierarchy {
             UiActionId::new("hierarchy.activate")?,
         )?
         .with_enabled(enabled);
-        let color = match control.state.visual_state(&button) {
-            UiButtonVisualState::Disabled => UiColorRole::Disabled,
-            UiButtonVisualState::Pressed | UiButtonVisualState::Focused => UiColorRole::Focus,
-            UiButtonVisualState::Hovered => UiColorRole::SecondaryText,
-            UiButtonVisualState::Idle if selected => UiColorRole::Focus,
-            UiButtonVisualState::Idle => UiColorRole::Panel,
+        let variant = match action {
+            Control::ConfirmRemoval => UiButtonVariant::Destructive,
+            Control::Root | Control::Child => UiButtonVariant::Secondary,
+            _ => UiButtonVariant::Quiet,
         };
-        let node = button.authored_node(
+        let mut recipe = self.appearance.button(
+            &button,
+            control.state,
+            variant,
+            UiControlSize::Small,
+            selected,
+        )?;
+        if action == Control::Remove && enabled {
+            recipe = recipe.with_text_brush(nara_ui_kernel::UiBrush::Solid(
+                self.appearance.palette().danger_text,
+            ));
+        }
+        let node = recipe.authored_node(
+            &button,
             &self.root,
             UiStyle::absolute(rect[0], rect[1], rect[2], rect[3])
                 .with_overflow(UiOverflow::Clip)
                 .with_width(UiDimension::Px(rect[2])),
-            UiVisual::role(color),
-            UiBrush::Role(UiColorRole::PrimaryText),
-            TEXT_SIZE,
         )?;
         displayed.insert(
             control.key.clone(),
@@ -766,42 +939,73 @@ fn visible_range(
     start..end
 }
 
-fn viewport(y: f32, width: f32, height: f32, children: Vec<UiNode>) -> UiNode {
-    UiNode::new(UiStyle::absolute(INSET, y, width, height).with_overflow(UiOverflow::Clip))
+fn viewport(x: f32, y: f32, width: f32, height: f32, children: Vec<UiNode>) -> UiNode {
+    UiNode::new(UiStyle::absolute(x, y, width, height).with_overflow(UiOverflow::Clip))
         .with_children(children)
 }
 
 fn label(
+    appearance: UiAppearance,
+    role: UiTextRole,
     identity: &str,
     text: &str,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
+    rect: [f32; 4],
 ) -> Result<UiNode, OwnedHierarchyError> {
-    Ok(
-        UiNode::new(UiStyle::absolute(x, y, width, height).with_overflow(UiOverflow::Clip))
-            .with_key(UiLocalKey::runtime("nara.hierarchy.label", identity)?)
-            .with_text(
-                UiText::new(presentation_text(text), TEXT_SIZE)?
-                    .with_overflow(UiTextOverflow::Clip),
-            ),
+    Ok(UiNode::new(
+        UiStyle::absolute(rect[0], rect[1], rect[2], rect[3]).with_overflow(UiOverflow::Clip),
     )
+    .with_key(UiLocalKey::runtime("nara.hierarchy.label", identity)?)
+    .with_text(
+        appearance
+            .text(presentation_text(text), role, role == UiTextRole::Caption)?
+            .with_overflow(UiTextOverflow::Clip),
+    ))
 }
 
 fn wrapped_label(
+    appearance: UiAppearance,
     identity: &str,
     text: &str,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
+    rect: [f32; 4],
 ) -> Result<UiNode, OwnedHierarchyError> {
-    Ok(
-        UiNode::new(UiStyle::absolute(x, y, width, height).with_overflow(UiOverflow::Clip))
-            .with_key(UiLocalKey::runtime("nara.hierarchy.label", identity)?)
-            .with_text(UiText::new(presentation_text(text), TEXT_SIZE)?),
+    Ok(UiNode::new(
+        UiStyle::absolute(rect[0], rect[1], rect[2], rect[3]).with_overflow(UiOverflow::Clip),
     )
+    .with_key(UiLocalKey::runtime("nara.hierarchy.label", identity)?)
+    .with_text(appearance.text(presentation_text(text), UiTextRole::Body, false)?))
+}
+
+fn line_box(layout: &nara_text::TextLayout) -> f32 {
+    let (min, max) = layout
+        .lines()
+        .iter()
+        .fold((0.0_f32, layout.height()), |(min, max), line| {
+            (min.min(line.block_min()), max.max(line.block_max()))
+        });
+    max - min
+}
+
+fn reference_appearance(theme: UiTheme) -> Result<UiAppearance, UiAppearanceError> {
+    let colors = theme.palette();
+    UiAppearance::default().with_palette(UiAppearancePalette {
+        window: colors.surface,
+        panel: colors.panel,
+        raised: colors.panel,
+        input: colors.surface,
+        border: colors.secondary_text,
+        text: colors.primary_text,
+        muted_text: colors.secondary_text,
+        disabled_text: colors.disabled,
+        accent: colors.accent,
+        on_accent: colors.primary_text,
+        selection: colors.accent,
+        focus: colors.focus,
+        danger: colors.danger,
+        danger_text: colors.danger,
+        positive: colors.positive,
+        hover: colors.secondary_text,
+        pressed: colors.focus,
+    })
 }
 
 fn choice(control: &Control, basis: &HierarchyBasis) -> (String, bool) {

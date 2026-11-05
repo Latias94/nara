@@ -34,6 +34,7 @@ use crate::panels::{
 };
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
+mod appearance;
 mod boundaries;
 mod filter;
 mod long_content;

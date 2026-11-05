@@ -1,12 +1,12 @@
 use nara::tooling::SceneInspectorEntityRow;
 
-pub(in crate::frontend::imgui) fn entity_choices(
+pub(in crate::frontend) fn entity_choices(
     rows: &[SceneInspectorEntityRow],
 ) -> impl ExactSizeIterator<Item = (&str, String)> + DoubleEndedIterator {
     rows.iter().map(|row| (row.id.as_str(), entity_label(row)))
 }
 
-pub(in crate::frontend::imgui) fn entity_label(row: &SceneInspectorEntityRow) -> String {
+pub(in crate::frontend) fn entity_label(row: &SceneInspectorEntityRow) -> String {
     let name = row
         .name
         .as_deref()
