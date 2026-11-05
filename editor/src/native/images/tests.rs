@@ -3,7 +3,14 @@
 
 use std::sync::Arc;
 
-use nara::render::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d};
+use nara::{
+    render::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d},
+    scene::{SceneAuthoringSession, SceneDocument},
+    tooling::{
+        EditorFrameClock, EditorWorkspace, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+        EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
+    },
+};
 use winit::{
     event::{ElementState, Ime, MouseButton},
     keyboard::{Key, NamedKey},
@@ -12,8 +19,102 @@ use winit::{
 use super::{
     Capabilities, EditorClipboard, EditorPanelCapability as C, EditorPanelImageError,
     EditorPanelImeArea, EditorPanelPlatformEvent, EditorPanelServiceError, EditorPanelServices,
-    EditorPanelTextInputScope, EditorPanelWindowGeometry, geometry, services::ServiceRequests,
+    EditorPanelTextInputScope, EditorPanelWindowGeometry, ImageInputPolicy, geometry,
+    services::ServiceRequests,
 };
+
+fn workspace_decision() -> (EditorFrameClock, EditorWorkspaceIntentView) {
+    let mut workspace = EditorWorkspace::new();
+    workspace
+        .open_scene_session(
+            "Source",
+            SceneAuthoringSession::new(SceneDocument::default()),
+        )
+        .unwrap();
+    let document = workspace.active_document().unwrap();
+    let mut clock = EditorFrameClock::new();
+    let prompt = clock.issue_close_prompt(document);
+    let view = EditorWorkspaceIntentView::new(
+        Some(EditorWorkspaceIntent::CloseDocument { document }),
+        Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+        Some(document),
+        Some(prompt),
+        None,
+    );
+    (clock, view)
+}
+
+#[test]
+fn ordinary_images_stay_locked_and_empty_decisions_grant_no_exception() {
+    let (_, decision) = workspace_decision();
+    let ordinary = ImageInputPolicy::default();
+    assert_eq!(ordinary, ImageInputPolicy::Ordinary);
+    assert!(ordinary.allows_input(false, Some(decision)));
+    assert!(!ordinary.allows_input(true, Some(decision)));
+    assert!(!ordinary.allows_input(true, None));
+    for current in [
+        EditorWorkspaceIntentView::default(),
+        EditorWorkspaceIntentView::new(
+            Some(EditorWorkspaceIntent::Exit),
+            Some(EditorWorkspaceIntentPhase::RetiringRuntime),
+            None,
+            None,
+            None,
+        ),
+    ] {
+        let policy = ImageInputPolicy::WorkspaceDecision(current);
+        assert!(!policy.allows_input(true, Some(current)));
+        assert!(!policy.allows_input(false, Some(current)));
+    }
+}
+
+#[test]
+fn workspace_decision_input_expires_with_the_exact_prompt_or_view() {
+    let (mut clock, current) = workspace_decision();
+    let policy = ImageInputPolicy::WorkspaceDecision(current);
+    assert!(policy.allows_input(true, Some(current)));
+    assert!(policy.allows_input(false, Some(current)));
+    assert!(!policy.allows_input(true, None));
+    let document = current.decision_document().unwrap();
+    let replacement_prompt = clock.issue_close_prompt(document);
+    let replacement = EditorWorkspaceIntentView::new(
+        current.intent(),
+        current.phase(),
+        Some(document),
+        Some(replacement_prompt),
+        None,
+    );
+    let saving = EditorWorkspaceIntentView::new(
+        current.intent(),
+        Some(EditorWorkspaceIntentPhase::Saving),
+        Some(document),
+        current.decision_prompt(),
+        None,
+    );
+    for successor in [replacement, saving, EditorWorkspaceIntentView::default()] {
+        assert!(!policy.allows_input(true, Some(successor)));
+        assert!(!policy.allows_input(false, Some(successor)));
+        assert_ne!(policy, ImageInputPolicy::WorkspaceDecision(successor));
+    }
+}
+
+#[test]
+fn terminal_workspace_decision_input_expires_after_acknowledgement() {
+    let current = EditorWorkspaceIntentView::new(
+        None,
+        None,
+        None,
+        None,
+        Some(EditorWorkspaceIntentResult::Cancelled {
+            intent: EditorWorkspaceIntent::Exit,
+        }),
+    );
+    let policy = ImageInputPolicy::WorkspaceDecision(current);
+    assert!(policy.allows_input(true, Some(current)));
+    assert!(policy.allows_input(false, Some(current)));
+    assert!(!policy.allows_input(true, Some(EditorWorkspaceIntentView::default())));
+    assert!(!policy.allows_input(false, None));
+}
 
 fn mapping() -> DisplayMapping2d {
     DisplayMapping2d::fit(

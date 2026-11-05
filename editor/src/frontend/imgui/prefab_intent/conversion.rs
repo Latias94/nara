@@ -13,6 +13,7 @@ use nara::{
 };
 
 use super::{ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId, button};
+use crate::frontend::controls::editing_enabled;
 
 const CONVERT_LABEL: &str = "Convert Entire Instance to Local";
 const CONVERSION_SCOPE: &str = "Converts the entire selected instance, including all nested projected instances and overlay additions. The anchor and its ordinary local children are preserved; other instances stay linked.";
@@ -61,7 +62,7 @@ impl ConversionUi {
                 .document(document)
                 .map(|tab| tab.title.as_str())
         });
-        let editing = !context.input.read_only && super::super::authoring::editing_enabled(frame);
+        let editing = !context.input.read_only && editing_enabled(frame);
         let (visible, action) = self.paint(ui, view, title, editing);
         if let Some(action) = action {
             self.submit(context, action);

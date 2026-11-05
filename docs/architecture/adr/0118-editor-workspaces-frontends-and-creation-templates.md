@@ -128,6 +128,14 @@ The self-drawn composition must ultimately build and run without a required Dear
 renderer, docking/input service or package dependency in its selected dependency closure.
 Exact executable, feature and crate organization follows the concrete consumers.
 
+The first concrete successor entry is the separately selected `nara-editor-drawn` source
+workspace. Its private shell and existing extracted ordinary/specialized Hierarchy controllers
+use the original semantic panel/native image/presenter/render owners. Its selected build uses
+`--no-default-features`; the reference executable remains separately selected. The
+[initial workflow unit](../../plans/2026-11-05-independent-drawn-source-workspace-plan.md)
+owns source structure, document switching, history and exact persistence qualification. It does
+not claim the remaining Inspector, Browser, Scene/Game, workspace or project-manager matrix.
+
 Retain the reference until the self-drawn composition covers the agreed complete incumbent
 workflow matrix, native lifetime/input behavior and measured work budgets. Then switch the
 default composition and remove the displaced first-party ImGui implementation and migration-only
@@ -139,8 +147,8 @@ adapter during migration.
 Existing selected Nara panels hosted by Dear are bounded implementation/evidence, not the
 destination or a required stepping stone. Their corresponding Dear painters have already been
 removed in some scopes. Identify the actual complete reference revision and any coverage gaps
-before using it as an oracle; current mixed code does not prove that an intact pure-ImGui
-reference or the independent self-drawn Editor exists. Preserve qualified semantic/shared
+before using it as an oracle; current mixed code does not prove an intact pure-ImGui reference
+or qualify the independent successor's remaining workflows. Preserve qualified semantic/shared
 mechanisms and actual historical evidence while moving future development to separate compositions.
 If a historical revision supplies reference source, requalify its integration with the current
 semantic owners before using it for comparison; historical native results do not transfer by name.
@@ -292,8 +300,8 @@ history owner even if the originating panel subsequently retires.
 
 The `imgui-reference` feature selects the current reference frontend and is default-enabled
 until complete successor acceptance. Disabling defaults preserves Application, workspace and
-semantic panel access without requiring Dear. This library selection alone does not provide the
-independent Editor shell or the native capabilities below. The [panel custody prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
+semantic panel access without requiring Dear. The independently selected drawn executable supplies
+its own initial source-workspace Shell over the native capabilities below. The [panel custody prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#toolkit-independent-panel-custody-prerequisite)
 owns its independent consumer and verification scope; remaining R11b attachment work stays open.
 
 Workspace owns contribution and panel-instance identity, document targeting, placement and

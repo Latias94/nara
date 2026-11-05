@@ -107,7 +107,9 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(matches!(error, EditorRunError::EventLoop(message) if message == "lost event pump"));
+        assert!(
+            matches!(error, EditorRunError::EventLoop(message) if message == "lost event pump")
+        );
 
         let error = editor_run_result(
             Some(EditorRunError::EventLoop("lost event pump".to_owned())),

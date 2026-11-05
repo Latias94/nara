@@ -18,6 +18,23 @@ For a domain-owned non-Scene document, see the [document extension guide](editor
 
 ## Toolkit-Independent Semantic Panels
 
+The independently selected first-party source workspace is available as
+`nara-editor-drawn`. Build/run it without the reference toolkit:
+
+```text
+cargo +1.95.0 run -p nara-editor --no-default-features --bin nara-editor-drawn -- <project-root> [--profile <profile>]
+```
+
+It consumes the same semantic/native panel interfaces described below. Its
+[owning unit](../plans/2026-11-05-independent-drawn-source-workspace-plan.md) records actual
+workflow qualification and remaining panels. Its initial workflow includes source opening,
+document tabs, ordinary and specialized UI structure, Undo/Redo and Save/Reopen. Keep the
+default reference for workflows not yet supplied by that composition; starting the successor
+is not a default switch.
+Its current engineering controls qualify functional workflows, not finished component-library
+styling. The [visual prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
+separately covers typography, density, scoped styles, responsive sizing and visual/native checks.
+
 `EditorPanelHost<P>` retains typed per-instance state and one current submission candidate.
 `EditorPanel` supplies the optional `action_finished` callback; it has no drawing method.
 `host.prepare(&application, |panel, context| { ... })` gives the caller mutable access to its

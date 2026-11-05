@@ -326,8 +326,8 @@ impl ImguiEditorPanelContext<'_, '_> {
 
 #[derive(Default)]
 pub(super) struct ImguiPanelWidgets {
-    pub owned_hierarchy: Option<super::owned_hierarchy_panel::HierarchyControls>,
-    pub hierarchy_pending: Vec<super::owned_hierarchy_panel::HierarchySubmission>,
+    pub owned_hierarchy: Option<crate::frontend::controls::HierarchyControls>,
+    pub hierarchy_pending: Vec<crate::frontend::controls::HierarchySubmission>,
     pub hierarchy_read_only: bool,
     pub owned_inspector: Option<super::owned_inspector::OwnedInspector>,
     pub owned_pending: Vec<super::owned_panel::OwnedSubmission>,

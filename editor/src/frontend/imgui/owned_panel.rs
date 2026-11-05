@@ -9,6 +9,7 @@ use nara_ui_kernel::{
 };
 use nara_ui_widgets::UiTextInputToken;
 
+use crate::frontend::controls::editing_enabled;
 use crate::workspace::EditorPanelInstanceId;
 
 use super::owned_inspector::{InspectorBinding, InspectorOperation, OwnedInspector};
@@ -733,7 +734,7 @@ pub(super) fn paint(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         let tools = context.widgets.authoring.source_tool.owned_presentation(
             context.input.frame,
             review.as_ref(),
-            !context.input.read_only && super::authoring::editing_enabled(context.input.frame),
+            !context.input.read_only && editing_enabled(context.input.frame),
         );
         context
             .widgets

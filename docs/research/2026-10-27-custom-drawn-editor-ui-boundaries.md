@@ -353,7 +353,7 @@ native receipts, final health/refusal controls and numbers belong in the cost/qu
 
 | Nara owner now | Concrete implication for R11 |
 | --- | --- |
-| Private [Inspector](../../editor/src/frontend/imgui/owned_inspector.rs) and [Hierarchy presentation](../../editor/src/frontend/imgui/owned_hierarchy/presentation.rs) | R11a must keep pre-reuse description/comparison and full filter/count/index work visible. R11e can gate description construction on explicit unchanged observation/local-state/style/geometry dependencies; model publication and exact action validation retain their owners. Do not substitute pointer equality or a global frame revision for those dependencies. |
+| Private [Inspector](../../editor/src/frontend/imgui/owned_inspector.rs) and [Hierarchy presentation](../../editor/src/frontend/controls/owned_hierarchy/presentation.rs) | R11a must keep pre-reuse description/comparison and full filter/count/index work visible. R11e can gate description construction on explicit unchanged observation/local-state/style/geometry dependencies; model publication and exact action validation retain their owners. Do not substitute pointer equality or a global frame revision for those dependencies. |
 | [UiCompiler/root](../../crates/nara_ui_kernel/src/compiler/root.rs), [root fallback](../../crates/nara_ui_kernel/src/compiler.rs) and [candidate-local text session](../../crates/nara_ui_kernel/src/compiler/text.rs) | Compilation currently builds a fresh Taffy tree; fallback is inert recovery. R11b's custom-layout consumer must exercise child measurement/placement without exporting Taffy storage. R11e should first compare unchanged component/root output reuse with persistent-layout work under measured pressure; the Zed source does not mandate a persistent arena or prove it faster. |
 | [Widgets](../../crates/nara_ui_widgets/src/lib.rs), [text editing](../../crates/nara_text/src/editing.rs) and the selected component/attachment owner | R11b should make two same-label keyed editors, reorder/filter and custom row/canvas composition work through public scoped services. Component keys, compatible state, owned effects and invalidation belong to the existing UI/panel lifetimes; original document commands stay in Session. Borrow the Open-GPUI outer-wrapper/content split, while making editable focus/IME eviction explicit. No universal UI model owner or GPUI dependency is proposed. |
 | [TextEngine window preparation](../../crates/nara_text/src/paint.rs) | Prepared sources avoid reshaping, but each window preparation still scans admitted glyphs and rasterizes distinct placed keys with call-local footprint reuse. R11e should distinguish source layout, placed raster-bounds/masks and clipping/placement dependencies; keep ordered font content, scale and subpixel identity complete, with bounded retained bytes and cache-loss fallback. |
@@ -490,6 +490,264 @@ copying. Neither geometry reuse nor a bounded number of rendered rows proves O(v
 work. The current design/plan now name these separate costs without selecting this module as
 a dependency.
 
+## November 5 style, layout and component-library readiness
+
+**Scope and evidence:** the visible Editor's poor appearance motivates this bounded source study.
+This is research/design pressure, **not an implemented polished component library**, an adoption
+decision or a visual/native/performance qualification. Existing execution-model and virtualizer
+findings above stand; this follow-up concerns visual consistency, layout and extension ergonomics.
+Local `rev-parse HEAD`, origin and clean worktrees were checked on November 5, 2026:
+
+| Mandatory primary input | Verified local HEAD |
+| --- | --- |
+| Zed GPUI, `repo-ref/zed` | `dd3437011469d5c2ec8c821a84cc999979625697` (same as above) |
+| Open-GPUI component companion, `repo-ref/open-gpui` | `689db5b49b33a5b2e64ba332bff72c98e70092bb` (same as above) |
+| Upstream C++ Dear ImGui, `repo-ref/imgui` | `9d0b72573a27d860280811d58ef9ed62f4d46c05` |
+| Godot, `repo-ref/godot` | `fefec82d74b46f5e6cc31f373071058f80a5cbee` |
+
+Native toolkit source facts below refer to those pins, not release names or current upstream
+behavior. Official frontend documentation and W3C specifications cited in the contract inventory
+were consulted on November 5, 2026.
+
+### Nara: existing mechanisms versus visual prerequisites
+
+These are November 5 working-tree observations, including concurrent successor work, not a release claim.
+
+| Area | Source fact now | Nara inference / readiness gap |
+| --- | --- | --- |
+| Layout and drawing | [`UiStyle`](../../crates/nara_ui_kernel/src/style.rs#L175-L200) has Flex/Absolute, Auto/Px/Percent, grow/shrink, gap/padding, stacking and Visible/Clip overflow; [`UiVisual`](../../crates/nara_ui_kernel/src/style.rs#L520-L585) carries border/radii separately. [`UiLayout`](../../crates/nara_ui_kernel/src/layout.rs#L7-L59) already exposes intrinsic constraints and a real first baseline. | Use these mechanisms; settle min/max sizing, per-axis overflow/scroll, border-box accounting and baseline-aligned component recipes through a real consumer. A new layout engine is not the prerequisite. |
+| Theme | [`UiThemePalette`/`UiTheme`](../../crates/nara_ui_kernel/src/style.rs#L870-L968) are ten color roles plus an immutable revision. | Missing library-level semantic metrics, typography/elevation roles and scoped resolution cannot be supplied by changing accent RGB alone. Keep a renderer-neutral snapshot; do not require the game's `nara_ui` adapter. |
+| Text and controls | [`UiText`](../../crates/nara_ui_kernel/src/style.rs#L680-L713) accepts explicit size/brush/alignment and Wrap/Clip. [`UiCompiler::with_fonts`](../../crates/nara_ui_kernel/src/compiler.rs#L94-L119) already admits multiple fonts; [`UiButton::authored_node`](../../crates/nara_ui_widgets/src/button.rs#L64-L92) takes caller-supplied style, visual, brush and size. | Font fallback and controlled behavior exist. An integrated inherited typography/density/locale scope, measured truncation policy and coherent variant/state recipes remain separate work. |
+| Drawn Shell | [`shell.rs`](../../editor/src/frontend/drawn/shell.rs#L29-L34) fixes inset/gap/text at 8/6/14; [`compile`](../../editor/src/frontend/drawn/shell.rs#L542-L578) refuses less than 960 by 272 logical pixels and can reuse an unchanged frame. [`Theme construction`](../../editor/src/frontend/drawn/shell.rs#L867-L887) uses the default palette; [`buttons`](../../editor/src/frontend/drawn/shell.rs#L952-L970) use absolute rectangles and conflate pressed/focused colors. | This is useful workflow plumbing, not evidence of responsive layout or a finished visual system. Keep its exact controls/results while replacing presentation recipes; retain the corrected shared controller paths above. |
+
+### Tokens, density and variants: inspect the recipes, not only the palette
+
+**Source facts:**
+
+- Zed distinguishes surface/elevated surface, filled/ghost element states, text/icon emphasis and
+  focused/selected/disabled borders ([roles][n5-zed-colors]). `DynamicSpacing` supplies density-specific
+  tuples; `ButtonSize` resolves compact/default/medium/large to 18/22/28/32 base pixels in rems.
+  Button padding/gap consume those tokens ([spacing][n5-zed-spacing], [sizes][n5-zed-sizes],
+  [button recipe][n5-zed-button]). Filled, tinted, outlined, subtle and transparent are distinct
+  emphasis variants; selected style is a separate input ([variants][n5-zed-variants],
+  [selection recipe][n5-zed-button]).
+- Open-GPUI's `ThemeDesignScales` owns typography, spacing, radius, elevation, density and motion.
+  Explicit component size wins over the density default; Button and TextInput resolve the same
+  metric families ([scales][n5-open-scales], [recipes][n5-open-recipes]). Button exposes primary,
+  secondary, outline, ghost and destructive variants ([variants][n5-open-variants]); rendering uses minimum height, padding,
+  line height, semantic disabled/selected state and keyboard-visible focus ([button][n5-open-button]).
+- ImGui separates window padding, frame padding, inter-item, inner-item and table-cell spacing;
+  its constructor uses `(8,8)`, `(4,3)`, `(8,4)`, `(4,4)` and `(4,2)` respectively
+  ([defaults][n5-imgui-style]). `ButtonEx` measures label plus frame padding, selects normal/hover/
+  held colors and draws navigation focus separately. `SmallButton` removes vertical frame padding
+  while preserving text baseline alignment ([button][n5-imgui-button]).
+- Godot's generated `EditorTheme` selects Modern/Classic recipes and merges an optional custom
+  Theme ([generation][n5-godot-generation], [merge][n5-godot-merge]). Compact/default/spacious
+  spacing presets use base/extra spacing `(2,2)`/`(4,0)`/`(6,2)`, not uniform bitmap scaling
+  ([spacing][n5-godot-spacing]). Modern Button installs normal/hover/pressed/focus/disabled
+  StyleBoxes and text/icon colors, with `align_to_largest_stylebox` enabled
+  ([recipe][n5-godot-button]); Button caches largest state margins ([margins][n5-godot-margins]).
+  `Theme::set_type_variation` defines a visual type variant; `Control::set_theme_type_variation`
+  selects it independently of interaction state ([definition][n5-godot-variation],
+  [selection and subtree Theme assignment][n5-godot-theme-assignment]).
+
+**Nara inference:** choose a small dense desktop recipe before expanding the catalogue: background/
+panel/elevated surfaces; normal/muted/disabled/on-accent text; border/divider/focus/selection/error;
+control height, inline/block padding, icon gap, row indent, section gap, radius and stroke.
+Use compact/default metrics independently of monitor DPI. Define primary/secondary/quiet/destructive
+variants and the combined hover/pressed/selected/focus/disabled/read-only/invalid matrix.
+Preserve focus and error as independent indicators, reserve their geometry to prevent layout jumps,
+and distinguish visible stroke bounds from hit targets. Reference numbers are comparison inputs,
+not a prescribed Nara palette or a promise to implement every token family immediately.
+
+### Scoped overrides, ownership and invalidation
+
+**Source facts and ergonomic tradeoffs:**
+
+| Mechanism | Actual scope and update behavior | Extension implication |
+| --- | --- | --- |
+| Zed GPUI | `StyleRefinement` applies base, focus, keyboard focus-visible, hover and active refinements in explicit order. `with_text_style` pushes/pops inherited text refinements ([states][n5-zed-states], [text scope][n5-zed-text-scope]); `TextStyle` includes font/fallbacks/features/size/line height ([typography][n5-zed-typography]). | Fluent composition is backed by explicit property/state precedence; arbitrary box properties are not thereby inherited like text. |
+| Open-GPUI | Resolution selects nearest subtree, window, app, then builtin. `ThemeScope` restores scope across layout/prepaint/paint and forces cached-child refresh when effective context changes ([resolver][n5-open-resolver], [scope][n5-open-scope]). Source revision is metadata excluded from effective-content equality ([snapshot][n5-open-snapshot]). | A local preview can override siblings safely; cached children and detached content still need the correct dependency/captured context. |
+| ImGui C++ | `PushStyleColor`/`PopStyleColor` and `PushStyleVar`/`PopStyleVar` save and restore `ImGuiContext::Style` ([colors][n5-imgui-color-stack], [metrics][n5-imgui-var-stack]). `BeginDisabled` also sets item flags and restores alpha when leaving the disabled scope ([disabled][n5-imgui-disabled]). | Overrides are lexical call scopes, requiring balanced cleanup; dimmed paint alone does not disable behavior. Product variants can wrap these APIs without changing the toolkit owner. |
+| Godot | `Theme` groups fonts, sizes, colors, constants, icons and StyleBoxes. `Control::add_theme_*_override` supplies local exceptions before cached type/variation lookup, then branch Theme owners, context and fallback ([types][n5-godot-types], [lookup][n5-godot-lookup], [owners][n5-godot-owners]). Theme changes clear caches, redraw and update minimum size; mutable StyleBox/font overrides subscribe to resource changes ([override lifecycle][n5-godot-overrides], [invalidation][n5-godot-invalidation]). | Composed custom Controls inherit editor styling with local exceptions, but shared mutable resources and broad notification fan-out have real ownership/work costs. |
+
+**Nara inference:** propose explicit defaults < nearest scope < component variant/size < local
+override precedence, with declared state-layer ordering and a reset/removal rule. Scope values
+must be immutable or owner-versioned and restored on early return; composition resolves them
+without document mutation, listener installation or a new global UI authority.
+Keep style dependencies separate from component incarnation, edit buffer and semantic document
+identity. Color-only changes should not reshape text; font/line-height/density/locale changes
+must invalidate affected intrinsic measurements, layout, hit/semantic geometry and paint.
+Existing unchanged-frame reuse must include effective scoped inputs. A detached popup must choose
+live inheritance or an opening snapshot explicitly: Open-GPUI captures the opening theme and uses
+the visible committed anchor's displayed/layout bounds ([overlay adapter][n5-open-overlay]).
+That is a useful policy example, not Nara's adopted popup lifetime or a cache-performance result.
+
+### Layout, text overflow and popup placement are component contracts
+
+**Source facts:**
+
+- GPUI exposes min/max size, padding/margin, flex basis/wrap/grow/shrink and per-axis overflow
+  ([box style][n5-zed-box]). Its text measurement receives known dimensions plus available
+  space, separates wrapping from truncation and rejects truncated-layout reuse for an unconstrained
+  intrinsic probe ([measurement][n5-zed-measure]). This is a concrete failure mode to test.
+- ImGui offers `SameLine`, `BeginGroup`, `SetNextItemWidth`, `GetContentRegionAvail` and
+  `AlignTextToFramePadding`; zero item size selects intrinsic defaults, negative size consumes
+  remaining space ([layout API][n5-imgui-layout], [size resolution][n5-imgui-size]).
+  Combo placement uses expected popup size; popup fitting tries the previous/preferred direction
+  against allowed and avoid rectangles before fallback ([combo][n5-imgui-combo], [fit][n5-imgui-fit]).
+- Godot combines computed minimum size with custom minimum componentwise. `BoxContainer`
+  sums visible children's primary-axis minima plus themed separation, then distributes extra
+  space by `SIZE_EXPAND` stretch ratios, clamping and redistributing at limits
+  ([minimum][n5-godot-minimum], [box minimum][n5-godot-box-min], [stretch][n5-godot-stretch]).
+  `SIZE_FILL` controls filling the allocation separately; Container owns child geometry and
+  coalesces sort requests ([allocation][n5-godot-container]). Minimum-size invalidation propagates
+  upwards and schedules an update rather than relying on repaint alone ([update][n5-godot-min-update]).
+- GPUI anchors use laid-out child bounds before comparing/flipping attached placement and snapping into
+  the viewport ([anchor][n5-zed-anchor]). Godot MenuButton starts from its screen rectangle,
+  handles native/embedder transform and RTL alignment, and selects initial keyboard focus
+  ([menu][n5-godot-menu]). A high z-index alone supplies none of this.
+
+**Nara inference:** a component declares intrinsic/min/preferred/max size and baseline, shrink/
+grow policy, padding/border accounting and wrap/clip/measured-ellipsis policy; display truncation
+must retain full semantic text and source identity. Use child measurement already present to
+prove toolbar overflow, aligned label/value rows, bounded scroll regions and narrow-window fallback.
+Popup placement needs one explicit coordinate space, current anchor identity, available bounds,
+measured content, preferred side/offset, flip/shift policy and bounded internal scrolling.
+Trigger disappearance, scroll/resize/scale changes, dismissal and focus restoration must reconcile
+through the original presented/input Host; a paint-only overlay cannot become independent authority.
+
+### Typography, scale, locale and custom composition
+
+**Source facts:** ImGui separates unscaled base font size, user font scale and DPI font scale;
+`ScaleAllSizes` excludes fonts and warns against repeatedly rescaling rounded metrics
+([fonts][n5-imgui-fonts], [scale][n5-imgui-scale]). GPUI converts measurement constraints across
+device scale and snaps measured extents to device pixels ([scale][n5-zed-scale]).
+Godot Button passes language/locale and inherited or explicit direction to text shaping;
+translation/theme changes reshape and update minimum size ([shaping][n5-godot-shaping],
+[notifications][n5-godot-text-update]). These facts do not qualify equivalent Nara behavior.
+
+**Source facts:** ImGui's canvas example reserves a layout/interaction item with `InvisibleButton`
+and draws through the window DrawList ([custom canvas][n5-imgui-canvas]). Godot's actual curve
+plugin composes `HFlowContainer`, Button, numeric editor, MenuButton and custom `CurveEdit`,
+refreshes themed metrics/icons, then installs the composite through `add_custom_control`
+([composition][n5-godot-composite], [plugin][n5-godot-plugin]). These are concrete extension
+ergonomics: ordinary controls and custom drawing participate in the same layout/style services.
+
+**Nara inference:** expose equivalent composition outcomes through existing owners, not a copied
+Godot node/resource graph, GPUI Entity model or ImGui global style stack. Keep density, user text
+scale and native DPI independent; use admitted font identity/fallback, line height and baseline
+for both measuring and painting. Locale/direction are explicit inputs even before full localization.
+Missing glyphs, combining characters, CJK, mixed RTL/LTR labels, long paths and IME text need
+declared behavior; a font atlas or a palette switch does not establish that behavior.
+
+### Proposed typography and design-system contract inventory
+
+**Proposed readiness requirements, not implemented features:** this evidence complements the
+[style design inventory](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness).
+It selects no public APIs or CSS/DOM engine. A recipe records **owner, input, units, precedence,
+fallback, error, invalidation, lifetime and acceptance**. Cases below prompt qualification of the
+selected slice; axes, emoji/color-font coverage and native forced-color integration require explicit
+support/deferred states, not inferred support from a mature reference.
+
+**Native mechanisms and their limits:**
+
+- GPUI distinguishes family resolution from the actual fonts used in shaped runs. `Font` includes
+  family, features, fallbacks, weight and style; `resolve_font` can use a default stack and panics
+  if no candidate resolves. `baseline_offset` centers primary-font ascent/descent inside the
+  supplied line height ([font system][n5r-zed-fonts]). On Windows, DirectWrite supplies line metrics
+  and the glyph-run callback records the returned font face, including a face not originally
+  created by GPUI ([platform implementation][n5r-zed-fallback]). Resolving a family successfully
+  therefore does not prove cluster coverage, identical fallback metrics or portable line geometry.
+- Godot's `Font` computes ascent/descent maxima across its fallback RIDs; changing fallback
+  resources clears string caches and emits `changed` ([font resource][n5r-godot-font]).
+  TextServerAdvanced retries failed shaped subruns with subsequent fonts, optionally system fonts,
+  and accumulates actual font metrics and glyph offsets ([shaper][n5r-godot-fallback]).
+  A conservative font-wide metric and a particular shaped line's metric are different contracts.
+- ImGui's `MergeMode` combines glyph sources; `GlyphOffset` and advance limits align differing
+  fonts/icons. `PixelSnapH` rounds advances and explicitly prevents fractional font sizes from
+  working correctly; font data must remain alive for the atlas lifetime
+  ([configuration][n5r-imgui-glyphs]). Glyph merging and raster sharpness alone do not establish
+  contextual shaping or baseline compatibility.
+
+**Small frontend comparison, as contract evidence:**
+
+- Radix Themes separates text/code/emphasis/quote font families and exposes typography tokens
+  ([typography][n5r-radix-type]). Its spacing scale is tokenized; theme scaling jointly changes
+  spacing, font size and line height, whereas Nara's proposed independent user text scaling must
+  remain a distinct input ([spacing/scaling][n5r-radix-space]). Buttons separate size, variant and
+  `highContrast`; loading preserves normal size while disabling the button. Ghost buttons use
+  negative margins for optical alignment while retaining interaction padding
+  ([component contract][n5r-radix-button]). Copy the explicit decisions, not those layout tricks.
+- Fluent distinguishes raw global tokens from semantic aliases, including compound typography
+  and shadow values ([token layers][n5r-fluent-tokens]). W3C distinguishes forced user palettes from
+  a preference for greater contrast, and reduced motion from an animation's visual style
+  ([preferences][n5r-media]). Open-GPUI's resolver makes reduced motion a floor that an explicit
+  component request cannot relax ([motion resolution][n5r-open-motion]).
+- W3C sizing distinguishes min-content, max-content and available-space-dependent fit-content;
+  they are not interchangeable meanings of "auto" ([intrinsic definitions][n5r-sizing]).
+  WCAG 2.2 supplies comparison cases for text enlargement, spacing overrides, visible/unobscured
+  focus and target size with exceptions. Its text-spacing criterion does not prescribe default
+  spacing, and CSS-pixel target rules do not directly define native logical units
+  ([criteria][n5r-wcag]). These are native design/acceptance prompts, not a conformance claim.
+
+**Unit boundary:** font units-per-em resolve against authored logical font size, not glyph bitmap
+height ([metric conversion][n5r-zed-fonts]). A relative design step must declare its base/mapping
+before producing logical dimensions. Physical/device pixels here mean target raster pixels after
+the native scale transform ([measurement conversion][n5-zed-scale]), not calibrated points or
+millimeters. Zed density tuples and Radix scaling inform recipes; they establish no Nara browser
+`px`/`rem` compatibility or inherited-root-font-size promise.
+
+**Readiness and cost are observable dependencies:** GPUI font installation clears family
+resolution and advances a generation; in-progress layouts may still finish with old fonts
+([installation][n5r-zed-fonts]). Its line cache rejects old-generation reuse and rotates current/
+previous frame entries; keys include text, size, actual font runs, wrap width and forced width
+([cache][zed-lines], [keys and generation check][zed-line-key]). Godot exposes separate string/
+paragraph cache capacities ([resource caches][n5r-godot-font]); no foreign cache proves Nara's cost.
+GPUI's load cache records requesting views and notifies them on completion ([load lifetime][n5r-zed-assets]).
+Its image element uses ready image dimensions for auto sizing and supports loading/error
+replacements ([image layout][n5r-zed-images]). Thus resource completion can invalidate intrinsic
+size, not just pixels; font admission, image decoding and GPU residency are separate readiness.
+
+| Contract and concrete owner | Input, units and precedence | Fallback and error | Invalidation and lifetime | Proposed acceptance pressure |
+| --- | --- | --- | --- | --- |
+| Font identity/admission: `nara_text`; Host selects/discovers faces | Immutable face content and collection index, ordered fallbacks, features, locale/direction; font units resolve to authored logical size. Host supplies the finite ordered set; discovery stays outside text resolution. | Distinguish failed face admission, unresolved cluster and raster refusal; retain actual face provenance per glyph/run. Axes/synthesis require complete identity before support. | Font-set changes invalidate shaping, metrics and derived snapshots; published snapshots retain their admitted fonts. | Qualified Latin/CJK/combining cases use the same measured/raster face and bounded diagnostics; emoji/color fonts and axes expose actual coverage or deferral. |
+| Line box and baseline: `nara_text` plus kernel measurement; component typography recipe | Resolve role/inherited/local size and line height to logical units; distinguish multiplier, ascent/descent, leading and ink bounds. | Declare extra-leading distribution and too-small-line-height behavior; do not silently clip fallback ink or substitute primary-font bounds for shaped metrics. | Font, text, line height and spacing invalidate intrinsic size/baseline and hit geometry; retain only with those inputs. | Mixed-font rows, diacritics, icons and editable caret align at a real baseline without state-driven height jumps. |
+| Density and scale: component/Editor recipes plus native Host | Relative recipe metrics resolve to logical dimensions; user font enlargement, view zoom and monitor logical-to-device scale are distinct inputs. Apply each declared transform once. | Reject nonfinite/nonpositive scales; declare minimum readable geometry and unavailable preference handling. | Density/font scaling affects layout; device scale affects raster/snapping and presented geometry. Window/target changes cannot reuse stale transforms. | 100/125/150/200% monitor scale and independent text enlargement, including 200% as a comparison case; no cumulative rounding or double scaling. |
+| Overflow and complete values: widgets/Editor plus semantic Host | Full source text, width and line budget; explicit wrap/clip/measured-ellipsis policy after typography resolution. | Missing ellipsis glyph and over-budget text need declared outcomes; complete values remain available through semantics and keyboard-accessible reveal/copy. | Text/font/width changes invalidate display measurement; truncation never rewrites semantic value, draft or source identity. | Long paths, RTL and narrow label/value rows remain identifiable and editable; a tooltip alone is insufficient. |
+| Tokens, variants and interaction: component library/Editor; Host owns focus/preferences | Semantic roles, scoped theme, size/variant and combined state; use declared scope/state precedence and a separately qualified forced-palette policy. | Builtin fallback or explicit unsupported role/preference; disabled/read-only/loading differ behaviorally. Keep non-color focus/selection/error cues. | Color-only change invalidates paint; metric changes invalidate layout. Scope removal restores defaults; detached menus choose live or captured context. | Visible/unobscured keyboard focus across combined states; record which contrast themes and native preference paths were tested or deferred. |
+| Icons, optics and motion: recipes plus text/render owners and Host | Logical icon envelope, optical offset, hit target and stroke; device snapping is distinct from logical layout. Reduced-motion preference is a floor. | Missing icon retains a meaningful label/semantic name; decorative animation may stop without losing pending/result meaning. | Asset/scale changes invalidate relevant geometry/raster; animation schedules end with visibility/owner lifetime and preference changes. | Fractional DPI, icon/text balance, stable hit boxes and static reduced-motion feedback; snapping does not round every text advance. |
+| Intrinsic sizing and popup: kernel, component layout and original presented/input Host | Known versus available size, min/preferred/max, baseline/aspect ratio; explicit logical/screen/device anchor conversion and fit/flip/shift policy. | Unbounded probes cannot reuse truncated measurements; undersized viewport uses declared scroll/overflow/refusal, not invented geometry. | Content/font/image/anchor/scroll/viewport changes remeasure or reposition. Trigger removal closes attachment; focus restoration uses current identity. | Narrow toolbar, growing field and popup at every edge; indefinite constraints and native monitor changes preserve accepted input geometry. |
+| Async readiness: Host asset owner, `nara_text`, presentation planner/backend | Pending/ready/failed font or image generation; placeholder extent is logical, decoded dimensions and GPU readiness are separate inputs. | Declare retain-old versus placeholder/reflow policy; rejected replacement keeps a coherent admitted state and exposes failure. | Completion invalidates dependent measures/layout/paint; obsolete results cannot replace a newer request. Consumer subscriptions detach; shared tasks/cache retention and GPU retirement follow their owners. | Delayed/failed font/image, completion after popup closure, changed fallback and device loss; no stale metrics, lost drafts or false ready state. |
+| Work and caches: existing component/kernel/text/render owners under R11a/R11e | Attribute resolution, probes, shaping, raster and upload separately; keys include effective inputs, not revision alone. Measure counts/time/retained bytes. | Bound entries/bytes and negative-result policy; eviction/cache loss rebuilds equivalent output within existing admission limits. | Record hit/miss/eviction and invalidation reason; layout, glyph, image and target caches have separate lifetimes. | Cold/warm idle, hover, edit, resize and color/font/density changes; no effects during measurement and no claim of constant work from visible-node count. |
+
+These evidence/limit mappings refine R11b's visual consumer; R11a retains baseline ownership and R11e
+retains measured optimization. [ADR 0031][n5r-nara-fonts] still bounds font admission and editing;
+shared text/kernel/render contracts do not move Editor recipes into the game's `nara_ui` adapter.
+Select support per consumer and record deferred cells before expanding the catalogue.
+
+### Complete visual consumer and readiness gates
+
+**Nara proposal, not implemented:** use the independently drawn Editor's initial source workspace
+to finish one coherent visual slice: document tabs and a compact toolbar,
+selectable source/hierarchy rows, one editable property group with label/value alignment,
+inline invalid/disabled/pending/result feedback, and one anchored actions menu. Use existing
+selection/edit/Undo/Save/Reopen owners and exact results. Include one independently authored
+composite row with custom decoration and scoped styling. A grid of disconnected widgets cannot
+establish that these parts work together or that the Editor looks coherent.
+
+| Readiness gate | Required evidence before claiming a reusable polished slice |
+| --- | --- |
+| Constraints and interaction | Widen/narrow through a documented minimum; long labels, missing values, all combined states, keyboard traversal, clipping/scroll boundaries and popup edges; repeated composition cannot duplicate an edit. |
+| Visual quality | Review actual before/after captures at fixed content/size/fonts: surface hierarchy, alignment/baselines, density, icon/text balance, contrast, focus/error visibility and stable geometry; approve a coherent page before generalizing recipes. |
+| Scope and extension | Same composite under default and local overrides; siblings remain unchanged, removal restores defaults, theme switch preserves drafts, and an independent consumer needs no engine-private styling or layout hooks. |
+| Performance | Attribute composition/style resolution, intrinsic measurement/layout, shaping/raster, packet/upload and retained bytes separately at idle, hover, one edit, resize and theme/density change. Check bounded caches, cache loss and popup closure; report measured results, not foreign-framework speed claims. |
+| Native and international text | Actual drawn executable at 100/125/150/200% scale, monitor-scale/font changes and compact/default density; CJK/fallback/RTL/long-path cases, accepted hit geometry, keyboard/focus/IME/clipboard and popup dismissal. Apply the existing [native qualification procedure](../verification/native-editor-qualification.md); state each tested OS and missing coverage. |
+
+The resulting targets belong to the [UI design](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness)
+and [R11b visual prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite).
+This study is evidence for those targets rather than production code or a qualification receipt.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml
@@ -588,3 +846,73 @@ a dependency.
 [open-snapshot]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L506-L551
 [open-list-reveal]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/virtualized_list/render.rs#L71-L118
 [open-measured-tests]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/virtualizer.rs#L1788-L1880
+[n5-zed-colors]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/theme/src/styles/colors.rs#L15-L115
+[n5-zed-spacing]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/styles/spacing.rs#L29-L54
+[n5-zed-sizes]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/components/button/button_like.rs#L451-L473
+[n5-zed-variants]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/components/button/button_like.rs#L125-L153
+[n5-zed-button]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/components/button/button_like.rs#L756-L850
+[n5-zed-states]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/div.rs#L3467-L3585
+[n5-zed-text-scope]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/window.rs#L4359-L4372
+[n5-zed-typography]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/style.rs#L435-L482
+[n5-zed-box]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/style.rs#L180-L276
+[n5-zed-measure]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/text.rs#L654-L753
+[n5-zed-anchor]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/anchored.rs#L161-L291
+[n5-zed-scale]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/taffy.rs#L235-L273
+[n5-open-scales]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/tokens.rs#L308-L390
+[n5-open-recipes]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/theme/recipes/design.rs#L9-L40
+[n5-open-variants]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/button.rs#L25-L37
+[n5-open-button]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/button.rs#L438-L520
+[n5-open-resolver]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/theme/resolver.rs#L12-L24
+[n5-open-scope]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/theme/scope.rs#L64-L134
+[n5-open-snapshot]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/theme/snapshot.rs#L117-L144
+[n5-open-overlay]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_components/src/overlay/adapter.rs#L220-L284
+[n5-imgui-style]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L1564-L1592
+[n5-imgui-button]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui_widgets.cpp#L788-L843
+[n5-imgui-color-stack]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L3747-L3783
+[n5-imgui-var-stack]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L3841-L3898
+[n5-imgui-disabled]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L8531-L8556
+[n5-imgui-layout]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.h#L552-L603
+[n5-imgui-size]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L11962-L11978
+[n5-imgui-combo]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui_widgets.cpp#L2035-L2061
+[n5-imgui-fit]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L13006-L13077
+[n5-imgui-fonts]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.h#L519-L537
+[n5-imgui-scale]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.cpp#L1662-L1682
+[n5-imgui-canvas]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui_demo.cpp#L10670-L10700
+[n5-godot-generation]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/themes/editor_theme_manager.cpp#L210-L230
+[n5-godot-merge]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/themes/editor_theme_manager.cpp#L689-L709
+[n5-godot-spacing]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/themes/editor_theme_manager.cpp#L392-L438
+[n5-godot-button]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/themes/theme_modern.cpp#L467-L499
+[n5-godot-margins]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/button.cpp#L59-L96
+[n5-godot-variation]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/resources/theme.cpp#L1405-L1421
+[n5-godot-theme-assignment]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L3842-L3888
+[n5-godot-types]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/resources/theme.h#L49-L65
+[n5-godot-lookup]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L3993-L4014
+[n5-godot-owners]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/theme/theme_owner.cpp#L178-L261
+[n5-godot-overrides]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L4271-L4312
+[n5-godot-invalidation]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L4926-L4935
+[n5-godot-minimum]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L2231-L2247
+[n5-godot-min-update]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/control.cpp#L1971-L2005
+[n5-godot-box-min]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/box_container.cpp#L319-L356
+[n5-godot-stretch]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/box_container.cpp#L162-L204
+[n5-godot-container]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/container.cpp#L133-L191
+[n5-godot-menu]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/menu_button.cpp#L81-L117
+[n5-godot-shaping]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/button.cpp#L568-L579
+[n5-godot-text-update]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/button.cpp#L185-L208
+[n5-godot-composite]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/scene/curve_editor_plugin.cpp#L961-L1022
+[n5-godot-plugin]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/editor/scene/curve_editor_plugin.cpp#L1031-L1048
+[n5r-zed-fonts]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/text_system.rs
+[n5r-zed-fallback]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_windows/src/direct_write.rs
+[n5r-godot-font]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/resources/font.cpp#L111-L375
+[n5r-godot-fallback]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/modules/text_server_adv/text_server_adv.cpp#L7101-L7520
+[n5r-imgui-glyphs]: https://github.com/ocornut/imgui/blob/9d0b72573a27d860280811d58ef9ed62f4d46c05/imgui.h#L3708-L3741
+[n5r-radix-type]: https://www.radix-ui.com/themes/docs/theme/typography
+[n5r-radix-space]: https://www.radix-ui.com/themes/docs/theme/spacing#scaling
+[n5r-radix-button]: https://www.radix-ui.com/themes/docs/components/button
+[n5r-fluent-tokens]: https://fluent2.microsoft.design/design-tokens
+[n5r-media]: https://www.w3.org/TR/mediaqueries-5/#forced-colors
+[n5r-open-motion]: https://github.com/Latias94/open-gpui/blob/689db5b49b33a5b2e64ba332bff72c98e70092bb/crates/ui_core/src/tokens.rs#L385-L402
+[n5r-sizing]: https://www.w3.org/TR/css-sizing-3/#intrinsic
+[n5r-wcag]: https://www.w3.org/TR/WCAG22/
+[n5r-zed-assets]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/asset_cache.rs#L14-L66
+[n5r-zed-images]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/img.rs#L302-L431
+[n5r-nara-fonts]: ../architecture/adr/0031-text-and-font-strategy.md

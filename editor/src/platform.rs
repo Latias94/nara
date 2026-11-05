@@ -21,7 +21,9 @@ use crate::EditorLaunchOptions;
 
 #[cfg(feature = "imgui-reference")]
 mod composition;
+mod drawn;
 mod game_input;
+pub use drawn::run_drawn;
 #[cfg(feature = "imgui-reference")]
 mod imgui;
 mod termination;
@@ -131,6 +133,40 @@ fn persistence_poll_deadline(
     operation: Option<EditorPersistenceOperation>,
 ) -> Option<Instant> {
     operation.is_some().then_some(now + PERSISTENCE_POLL_DELAY)
+}
+
+fn editor_frame_maintenance_deadline(
+    frame: &nara::tooling::EditorFrameModel,
+    now: Instant,
+) -> Option<Instant> {
+    let deadline = (frame.project_browser().has_pending_work()
+        || frame.document_open().has_pending_work()
+        || frame.authoring_retirement_pending()
+        || frame.authoring_operation_work_pending()
+        || frame.source_tool().has_pending_work()
+        || frame.prefab_conversion().phase.work_pending()
+        || matches!(
+            frame.project_content(),
+            nara::tooling::EditorProjectContentView::RefreshPending { .. }
+        ))
+    .then_some(now + Duration::from_millis(16));
+    earliest_deadline(
+        earliest_deadline(
+            earliest_deadline(
+                deadline,
+                earliest_deadline(
+                    frame
+                        .scene_preview_work_pending()
+                        .then_some(now + Duration::from_millis(8)),
+                    frame
+                        .scene_preview_recheck_after()
+                        .and_then(|delay| now.checked_add(delay)),
+                ),
+            ),
+            play_lifecycle_poll_deadline(now, frame.play().state()),
+        ),
+        persistence_poll_deadline(now, frame.persistence().operation()),
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -268,6 +304,89 @@ mod tests {
             );
         }
         assert_eq!(persistence_poll_deadline(now, None), None);
+    }
+
+    #[test]
+    fn shared_maintenance_keeps_source_open_and_browser_work_awake_until_idle() {
+        use nara::tooling::{
+            EditorAuthoringReadiness, EditorDocumentOpenId, EditorDocumentOpenPhase,
+            EditorDocumentOpenView, EditorFrameClock, EditorPlayView, EditorProjectBrowserState,
+            EditorProjectBrowserStatus, EditorProjectContentView, EditorProjectReadinessView,
+            EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability, EditorWorkspace,
+        };
+        use std::sync::Arc;
+
+        let now = Instant::now();
+        let registry = nara::reflect::ComponentRegistryBuilder::new()
+            .freeze()
+            .unwrap();
+        let workspace = EditorWorkspace::new().model(&registry, None);
+        let mut browser = EditorProjectBrowserState::new();
+        let mut clock = EditorFrameClock::new();
+        let mut publish = |browser| {
+            clock.publish(
+                workspace.clone(),
+                EditorProjectView::new(
+                    EditorProjectReadinessView::new(
+                        EditorAuthoringReadiness::Complete,
+                        EditorRuntimeAvailability::TrustedInProcess,
+                    ),
+                    browser,
+                    EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+                    Default::default(),
+                    EditorProjectContentView::NotInstalled,
+                    Default::default(),
+                ),
+                Default::default(),
+                EditorReopenTarget::Unavailable,
+                None,
+            )
+        };
+        let idle = publish(browser.view());
+        assert_eq!(super::editor_frame_maintenance_deadline(&idle, now), None);
+        for phase in [
+            EditorDocumentOpenPhase::Preparing,
+            EditorDocumentOpenPhase::Cancelling,
+        ] {
+            let opening = idle.clone().with_document_open(EditorDocumentOpenView::new(
+                Some((
+                    EditorDocumentOpenId::new(idle.revision(), 1),
+                    Arc::from("prefabs/next.prefab.json"),
+                    phase,
+                )),
+                None,
+            ));
+            assert_eq!(
+                super::editor_frame_maintenance_deadline(&opening, now),
+                Some(now + Duration::from_millis(16))
+            );
+        }
+        browser.synchronize(
+            EditorProjectBrowserStatus::NotRequested,
+            None,
+            None,
+            None,
+            true,
+            false,
+        );
+        let scanning = publish(browser.view());
+        assert_eq!(
+            super::editor_frame_maintenance_deadline(&scanning, now),
+            Some(now + Duration::from_millis(16))
+        );
+        browser.synchronize(
+            EditorProjectBrowserStatus::NotRequested,
+            None,
+            None,
+            None,
+            false,
+            true,
+        );
+        let finished = publish(browser.view());
+        assert_eq!(
+            super::editor_frame_maintenance_deadline(&finished, now),
+            None
+        );
     }
 
     #[test]

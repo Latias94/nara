@@ -32,6 +32,7 @@ use super::field_drafts::structure::{self, DraftAction, DraftInput};
 use super::field_drafts::{
     Candidate, FieldBasis, FieldDraft, FieldEditors, FieldKey, PreparedFieldEdit, source,
 };
+use crate::frontend::controls::editing_enabled;
 
 const TEXT_SIZE: f32 = 16.0;
 const PANEL_INSET: f32 = 12.0;
@@ -313,7 +314,7 @@ struct CompiledInspector {
 
 /// Panel-local CPU controls. The Host owns presentation receipts and native input admission.
 pub(super) struct OwnedInspector {
-    work: super::owned_work::OwnedPanelWork,
+    work: crate::frontend::controls::OwnedPanelWork,
     root: UiRootKey,
     content_key: UiKey,
     scroll_pixels: f32,
@@ -476,7 +477,7 @@ impl OwnedInspector {
                             continue;
                         }
                         let editable = !read_only
-                            && authoring::editing_enabled(model)
+                            && editing_enabled(model)
                             && component.access.is_editable()
                             && field.capabilities.contains(&ComponentCapability::Edit);
                         let tool_basis = ToolBasis::capture(model, &key, &basis).filter(|_| {
@@ -1944,7 +1945,7 @@ fn current_basis(model: &EditorFrameModel, key: &FieldKey) -> Option<(FieldBasis
         .fields
         .iter()
         .find(|field| field.id == key.field)?;
-    let editable = authoring::editing_enabled(model)
+    let editable = editing_enabled(model)
         && component.access.is_editable()
         && field.capabilities.contains(&ComponentCapability::Edit);
     Some((

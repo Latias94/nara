@@ -22,6 +22,10 @@ name = "nara-editor"
 path = "src/main.rs"
 required-features = ["imgui-reference"]
 
+[[bin]]
+name = "nara-editor-drawn"
+path = "src/drawn_main.rs"
+
 [[test]]
 name = "application_contract"
 path = "tests/application_contract.rs"
@@ -60,6 +64,7 @@ nara_ui_widgets.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
+wgpu.workspace = true
 winit.workspace = true
 
 [dev-dependencies]

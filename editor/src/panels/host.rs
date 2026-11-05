@@ -99,6 +99,27 @@ impl<P: EditorPanel> EditorPanelHost<P> {
         Ok(())
     }
 
+    pub(crate) fn install_registered_panel(
+        &mut self,
+        application: &EditorApplication,
+        kind: &str,
+        factory: impl Fn() -> P + 'static,
+    ) -> Result<(), EditorPanelRegistrationError> {
+        if self.factories.contains_key(kind) {
+            return Err(EditorPanelRegistrationError::Duplicate(kind.to_owned()));
+        }
+        if application
+            .panel_workspace()
+            .registry()
+            .descriptor(kind)
+            .is_none()
+        {
+            return Err(EditorPanelRegistrationError::Missing(kind.to_owned()));
+        }
+        self.factories.insert(kind.to_owned(), Box::new(factory));
+        Ok(())
+    }
+
     /// Reconciles live instances and prepares their actions against one retained admitted frame.
     ///
     /// The callback chooses the panel's presentation or semantic operation. It receives each

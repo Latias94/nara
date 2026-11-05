@@ -1,7 +1,7 @@
 use nara_ui_kernel::UiAuthoringSnapshot;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct OwnedPanelWork {
+pub(in crate::frontend) struct OwnedPanelWork {
     pub compile_calls: u64,
     pub built_snapshots: u64,
     pub authored_nodes: u64,
@@ -17,8 +17,8 @@ impl OwnedPanelWork {
     }
 }
 
-#[cfg(test)]
-pub(super) fn measure_calls(
+#[cfg(all(test, feature = "imgui-reference"))]
+pub(in crate::frontend) fn measure_calls(
     _workload: &str,
     mut operation: impl FnMut(),
     samples: usize,

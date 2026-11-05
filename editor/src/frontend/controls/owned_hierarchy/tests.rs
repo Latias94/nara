@@ -27,10 +27,10 @@ use nara_ui_kernel::{
 };
 
 use super::*;
-use crate::frontend::imgui::{
+use crate::frontend::imgui::interaction_tests::{CUSTOM_COMPONENT, InteractionProject};
+use crate::panels::{
     PanelActionNotDispatched,
-    interaction_tests::{CUSTOM_COMPONENT, InteractionProject},
-    submission::{self, PanelOrigin, Recipient},
+    submission::{self, PanelOrigin},
 };
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
@@ -243,7 +243,7 @@ fn id(mut serial: u64) -> PanelSubmissionId {
             incarnation: Default::default(),
         },
         0,
-        Recipient::Hierarchy,
+        (),
     )
     .unwrap()
 }

@@ -28,12 +28,14 @@ use nara_ui_widgets::{
 };
 use thiserror::Error;
 
-use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError, authoring};
+use crate::panels::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
+
+use super::{OwnedPanelWork, authoring, compose_action, editing_enabled, placement_intent_label};
 
 mod input;
 mod presentation;
 mod projection;
-#[cfg(test)]
+#[cfg(all(test, feature = "imgui-reference"))]
 mod tests;
 
 use projection::{HierarchyProjectionWork, SourceProjection};
@@ -142,8 +144,8 @@ struct CompiledHierarchy {
 }
 
 /// Private source-declaration panel. Session owns selection, commands, history and persistence.
-pub(super) struct OwnedHierarchy {
-    work: super::owned_work::OwnedPanelWork,
+pub(in crate::frontend) struct OwnedHierarchy {
+    work: OwnedPanelWork,
     projection_work: HierarchyProjectionWork,
     projection: Option<SourceProjection>,
     paint_dirty: bool,
@@ -171,14 +173,14 @@ pub(super) struct OwnedHierarchy {
 }
 
 /// Move-only preparation. It grants no authority until the original basis is checked again.
-pub(in crate::frontend::imgui) struct HierarchySubmission {
+pub(in crate::frontend) struct HierarchySubmission {
     basis: HierarchyBasis,
     observation: Arc<AtomicBool>,
     action: EditorAction,
 }
 
 impl HierarchySubmission {
-    pub(in crate::frontend::imgui) fn into_action(
+    pub(super) fn into_action(
         self,
         model: &EditorFrameModel,
         read_only: bool,
@@ -490,7 +492,7 @@ impl OwnedHierarchy {
                 } else {
                     ScenePlacementParent::Root
                 };
-                authoring::compose_action(
+                compose_action(
                     scene,
                     SceneCompositionCommand::CreateEntity {
                         kind: if basis.capabilities.generic_authoring {
@@ -506,7 +508,7 @@ impl OwnedHierarchy {
                 if self.removal.as_ref() != Some(&basis) {
                     return Err(OwnedHierarchyError::ChangedConfirmation);
                 }
-                authoring::compose_action(
+                compose_action(
                     scene,
                     SceneCompositionCommand::RemoveEntity {
                         entity: selected()?,
@@ -553,7 +555,7 @@ impl OwnedHierarchy {
                         }
                     }
                 };
-                authoring::compose_action(
+                compose_action(
                     scene,
                     SceneCompositionCommand::MoveEntity {
                         target: PrefabEntityTarget::source(selected()?),

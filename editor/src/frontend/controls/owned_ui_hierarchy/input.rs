@@ -76,7 +76,7 @@ impl OwnedUiHierarchy {
         Ok(())
     }
 
-    pub(in crate::frontend::imgui) fn input_token(
+    pub(in crate::frontend::controls) fn input_token(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -85,7 +85,7 @@ impl OwnedUiHierarchy {
         Ok(self.field(input.kind)?.input_token())
     }
 
-    pub(in crate::frontend::imgui) fn blur(
+    pub(in crate::frontend::controls) fn blur(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -100,7 +100,9 @@ impl OwnedUiHierarchy {
         Ok(())
     }
 
-    pub(in crate::frontend::imgui) fn cancel_input(&mut self) -> Result<(), OwnedUiHierarchyError> {
+    pub(in crate::frontend::controls) fn cancel_input(
+        &mut self,
+    ) -> Result<(), OwnedUiHierarchyError> {
         self.blur_fields()?;
         self.invalidate_actions();
         for control in self.controls.values_mut() {
@@ -109,7 +111,7 @@ impl OwnedUiHierarchy {
         Ok(())
     }
 
-    pub(in crate::frontend::imgui) fn edit(
+    pub(in crate::frontend::controls) fn edit(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -138,7 +140,7 @@ impl OwnedUiHierarchy {
         }
     }
 
-    pub(in crate::frontend::imgui) fn point(
+    pub(in crate::frontend::controls) fn point(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -192,7 +194,7 @@ impl OwnedUiHierarchy {
         )?)
     }
 
-    pub(in crate::frontend::imgui) fn selected_text(
+    pub(in crate::frontend::controls) fn selected_text(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -208,7 +210,7 @@ impl OwnedUiHierarchy {
         Ok((!range.is_empty()).then(|| input.editor().text()[range].to_owned()))
     }
 
-    pub(in crate::frontend::imgui) fn is_composing(
+    pub(in crate::frontend::controls) fn is_composing(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -219,7 +221,7 @@ impl OwnedUiHierarchy {
         Ok(self.field(kind)?.editor().is_composing())
     }
 
-    pub(in crate::frontend::imgui) fn ime_area(
+    pub(in crate::frontend::controls) fn ime_area(
         &self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -230,7 +232,7 @@ impl OwnedUiHierarchy {
         Ok(self.field(input.kind)?.ime_area(input.width)?)
     }
 
-    pub(in crate::frontend::imgui) fn input_error(
+    pub(in crate::frontend::controls) fn input_error(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,
@@ -242,7 +244,7 @@ impl OwnedUiHierarchy {
         }
     }
 
-    pub(in crate::frontend::imgui) fn finish_input(
+    pub(in crate::frontend::controls) fn finish_input(
         &mut self,
         frame: &Arc<UiFrame>,
         field: &UiKey,

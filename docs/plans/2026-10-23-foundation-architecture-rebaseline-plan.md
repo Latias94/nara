@@ -1802,6 +1802,81 @@ coverage percentage. Actual OS input and candidate ordering, system clipboard in
 final swapchain pixels, Linux/macOS, arbitrary toolkit embedding, reload, full independent
 Editor and R11a/e cost budgets remain open.
 
+#### Independent drawn source workspace
+
+The [first successor workflow](2026-11-05-independent-drawn-source-workspace-plan.md) now launches
+an independently selected Nara composition without the reference toolkit. The ordinary source
+and specialized UI Hierarchy controllers move out of the Dear adapter and serve both
+compositions. A drawn document shell connects the original semantic panel/native image/
+presenter/WGPU owners through presented input. Its Windows/DX12 trajectory qualifies source
+create/move/delete, all four UI recipes, full 4,096-byte text, document switching, history and
+exact Save/Reopen. Source identity refresh, conflicting placement refusal, projection/instance
+retirement and explicit graphics reconstruction keep their original owner checks. The unit
+records overlapping CPU, independent public-entry, reference regression and build scopes
+separately. Subsequent Inspector, Scene/Game, Browser/import and workspace workflows extend
+that same composition. The default switch still requires the full agreed matrix; this first
+workflow cannot close R11b/foundation or establish R11e performance budgets.
+
+#### Styled source workspace and component-library prerequisite
+
+**State:** research and design targets; no polished-library qualification. The first independent
+source workspace remains a functional/ownership checkpoint. Its engineering controls do not
+establish the component library's appearance, layout ergonomics or product visual acceptance.
+Complete this bounded visual consumer before expanding first-party component recipes or treating
+the current Shell's fixed rectangles as their public interface.
+
+**Sources:** the [November 5 style/layout study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
+pins Zed GPUI/Open-GPUI, upstream `repo-ref/imgui` and `repo-ref/godot`. The
+[UI design](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness)
+records targets and current gaps. Reuse existing state/layout/drawing/text/native owners;
+select exact style and component API shapes through this consumer.
+
+**Complete consumer:** extend the independently drawn source workspace with visually coherent
+document tabs, a compact toolbar, selectable source/hierarchy rows, one editable property group,
+inline disabled/read-only/invalid/pending/result feedback and one anchored action menu. Preserve
+exact selection, editing, history and Save/Reopen. Add one separately authored decorated row with
+scoped styling and ordinary text/keyboard behavior. These elements must work together in a real
+page, including narrow-window fallback, rather than only in disconnected widget demos.
+
+**Work and acceptance:**
+
+1. Complete the [style design inventory](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness):
+   font identities/fallback/features/readiness, line metrics/baselines/ink bounds, unit/scale
+   conversion, numeric density/spacing/size recipes, color/state roles and extension slots,
+   constraints/overflow, overlays and accessibility preferences. For each record its owner,
+   inputs/units, precedence/reset, fallback/error, invalidation, lifetime/cost and acceptance.
+   Include mature frontend token/typography/component systems as comparative primary evidence;
+   no CSS/DOM implementation or universal design-token registry is selected.
+2. Review a small visual specification and actual fixed-content captures: surface hierarchy,
+   text emphasis, baseline/alignment, spacing/density, states, focus/error contrast and icon/text
+   balance. Record normal/compact metrics independently from DPI and user text scale.
+3. Define required semantic tokens, typography/metrics, component variants and state precedence;
+   scope/default/local overrides have explicit removal/reset. Color/brush changes preserve
+   compatible text/layout work; font/fallback, line-height, locale/direction, density and
+   constraints invalidate actual dependent measurement, placement, hit/semantics and paint.
+4. Use existing intrinsic child measurement for min/preferred/max sizing, baseline-aligned
+   label/value rows, shrink/grow and bounded overflow/scroll. Long paths/CJK/combining/RTL labels
+   keep full source and semantic text through their stated wrapping or display-truncation policy.
+   Ordinary page authors do not manually maintain control rectangles.
+5. Measure and anchor the menu in one explicit coordinate space; constrain it to available
+   bounds, reconcile scroll/resize/scale/anchor removal and preserve dismissal/focus/modal
+   behavior. Define live inheritance versus opening-snapshot theme scope explicitly.
+6. Independently consume the decorated row under default and local styles; siblings remain
+   unchanged, removing an override restores defaults, and compatible theme changes retain
+   drafts/preedit/history. Custom drawing and full foreign-frontend attachment keep their
+   separate public capabilities; no central widget enum or new global theme owner is required.
+7. Qualify the actual drawn composition with the existing native procedure. Target
+   100/125/150/200% scale, window/font changes and both densities; report which combinations
+   actually ran. Keep native OS candidate/accessibility and untested platforms explicit.
+   Attribute composition/style resolution, measurement/layout, shaping/raster, packet/upload
+   and retained bytes at idle, hover, one edit, resize and theme/density changes against R11a.
+   Visual consistency and functional tests alone do not meet R11e's performance budget.
+
+**Exit:** one approved complete visual workflow and an independently consumed styled composite
+with documented scope, actual captures/measurements and native results. Broader component
+catalogues, advanced effects, docking/multiple windows and reload retain their own consumer
+requirements. This adds no CSS parser, copied foreign toolkit ownership or styling-script layer.
+
 #### Custom child-measurement and layout prerequisite
 
 Provide one public immutable layout description on an admitted node/root. Scope child operations

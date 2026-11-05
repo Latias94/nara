@@ -371,7 +371,7 @@ impl ExternalCadenceHost {
                                     "quiet maintenance did not advance its observation and select the earliest owner deadline without presentation: now={now:?}; before={maintenance_before:?}; next={next_observation:?}; expected={expected_deadline:?}; flow={:?}; repaint={:?}; frame_maintenance={:?}; presentation={:?}; preview_pending={}; preview_recheck={:?}",
                                     event_loop.control_flow(),
                                     self.host.repaint_deadline,
-                                    imgui_frame_maintenance_deadline(&frame, now),
+                                    editor_frame_maintenance_deadline(&frame, now),
                                     imgui_next_presentation_deadline(&self.host.application, Some(native), now),
                                     frame.scene_preview_work_pending(),
                                     frame.scene_preview_recheck_after(),
@@ -402,7 +402,12 @@ impl ExternalCadenceHost {
             ) {
                 return self.fail(
                     event_loop,
-                    format!("real supervised Play failed: {:?}", frame.play().result()),
+                    format!(
+                        "real supervised Play failed: {:?}; diagnostics {:?}; output {:?}",
+                        frame.play().result(),
+                        external.diagnostics(),
+                        external.output()
+                    ),
                 );
             }
         } else if self.play_requested {

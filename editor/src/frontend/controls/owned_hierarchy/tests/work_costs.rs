@@ -1,5 +1,5 @@
 use super::*;
-use crate::frontend::imgui::owned_work::{OwnedPanelWork, measure_calls};
+use crate::frontend::controls::{OwnedPanelWork, measure_calls};
 use std::hint::black_box;
 
 fn compile_probe(

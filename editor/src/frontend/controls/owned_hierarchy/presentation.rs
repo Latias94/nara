@@ -18,7 +18,7 @@ const MAX_PRESENTATION_BYTES: usize = 128;
 const ROW_PRESENTATION_BYTES: usize = 2048;
 
 impl OwnedHierarchy {
-    pub(in crate::frontend::imgui) fn compile(
+    pub(in crate::frontend::controls) fn compile(
         &mut self,
         model: &EditorFrameModel,
         environment: UiEnvironment,
@@ -352,7 +352,7 @@ impl OwnedHierarchy {
                 )?);
                 nodes.push(label(
                     "placement",
-                    &authoring::placement_intent_label(placement),
+                    &placement_intent_label(placement),
                     INSET,
                     171.0,
                     width,
@@ -467,7 +467,7 @@ impl OwnedHierarchy {
                         width,
                         17.0,
                     )?);
-                    let placement = authoring::placement_intent_label(row.placement.as_ref());
+                    let placement = placement_intent_label(row.placement.as_ref());
                     children.push(label(
                         &format!("source.{identity}.placement"),
                         &presentation_text_with_limit(&placement, text_limit),

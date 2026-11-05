@@ -5,3 +5,5 @@ pub(crate) mod imgui;
 pub use imgui::{
     ImguiEditorFrontend, ImguiEditorPanel, ImguiEditorPanelContext, ImguiEditorSubmission,
 };
+pub(crate) mod controls;
+pub(crate) mod drawn;

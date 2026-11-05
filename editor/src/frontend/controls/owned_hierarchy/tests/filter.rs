@@ -636,10 +636,7 @@ fn thousand_source_rows_and_all_parent_order_choices_compile_only_the_visible_sl
 
 #[test]
 fn filtering_scrolling_and_reordering_keep_session_selection_and_unrelated_inspector_drafts() {
-    use crate::frontend::imgui::{
-        field_drafts::{Candidate, FieldEditors},
-        owned_inspector::{InspectorBinding, OwnedInspector},
-    };
+    use crate::frontend::imgui::interaction_tests::RetainedInspectorDraft;
 
     let (_project, mut application) = application(EditorDocumentKind::Scene, 12);
     let model = application.current_frame().unwrap();
@@ -655,47 +652,7 @@ fn filtering_scrolling_and_reordering_keep_session_selection_and_unrelated_inspe
         ),
     );
     let model = application.current_frame().unwrap();
-    let mut fields = FieldEditors::default();
-    let mut inspector = OwnedInspector::new(
-        UiRootKey::runtime("editor.inspector", "hierarchy-draft-test").unwrap(),
-        vec![nara_text::bundled_font_face().unwrap()],
-    )
-    .unwrap();
-    fields.begin_paint(&model);
-    let inspected = inspector
-        .compile(
-            &model,
-            &mut fields,
-            environment(800.0),
-            UiTheme::default(),
-            false,
-            None,
-        )
-        .unwrap();
-    let value = inspected
-        .semantics()
-        .iter()
-        .find(|node| node.role() == UiSemanticRole::TextInput && node.name() == "value")
-        .unwrap()
-        .key()
-        .clone();
-    let InspectorBinding::Field(key) = inspector.binding(&inspected, &value).unwrap() else {
-        panic!("the actual Inspector owns the draft")
-    };
-    let token = inspector.focus(&inspected, &value).unwrap();
-    inspector
-        .edit(&inspected, &value, token, &TextEdit::SelectAll, &mut fields)
-        .unwrap();
-    inspector
-        .edit(
-            &inspected,
-            &value,
-            token,
-            &TextEdit::Insert("42".into()),
-            &mut fields,
-        )
-        .unwrap();
-    assert_eq!(fields.drafts[&key].candidate, Candidate::Text("42".into()));
+    let mut inspector = RetainedInspectorDraft::new(&model, environment(800.0));
 
     let mut owner = controller();
     let frame = paint(&mut owner, &model);
@@ -716,7 +673,7 @@ fn filtering_scrolling_and_reordering_keep_session_selection_and_unrelated_inspe
             .iter()
             .any(|node| node.name() == "Select entity-0000")
     );
-    assert_eq!(fields.drafts[&key].candidate, Candidate::Text("42".into()));
+    inspector.assert_retained();
     assert_eq!(
         application.current_frame().unwrap().workspace(),
         model.workspace()
@@ -727,7 +684,7 @@ fn filtering_scrolling_and_reordering_keep_session_selection_and_unrelated_inspe
     let bottom = paint(&mut owner, &model);
     assert!(!owner.controls.contains_key(&Control::Select(entity(0))));
     assert_eq!(owner.input_token(&bottom, &field).unwrap(), Some(token));
-    assert_eq!(fields.drafts[&key].candidate, Candidate::Text("42".into()));
+    inspector.assert_retained();
     assert_eq!(
         application.current_frame().unwrap().workspace(),
         model.workspace()
@@ -755,17 +712,5 @@ fn filtering_scrolling_and_reordering_keep_session_selection_and_unrelated_inspe
             .undo_depth
             + 1
     );
-    fields.begin_paint(&reordered);
-    inspector
-        .compile(
-            &reordered,
-            &mut fields,
-            environment(800.0),
-            UiTheme::default(),
-            false,
-            None,
-        )
-        .unwrap();
-    assert_eq!(fields.drafts[&key].candidate, Candidate::Text("42".into()));
-    assert!(fields.drafts[&key].dirty);
+    inspector.reconcile(&reordered, environment(800.0));
 }

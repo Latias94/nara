@@ -208,7 +208,7 @@ impl Drop for UiProject {
     }
 }
 
-pub(super) fn setup_ui_prefab_source(application: &mut EditorApplication) {
+pub(in crate::frontend) fn setup_ui_prefab_source(application: &mut EditorApplication) {
     let frame = application.current_frame().unwrap();
     let scene = frame.workspace().active_scene.as_ref().unwrap();
     application.submit_and_drive(

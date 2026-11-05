@@ -14,7 +14,7 @@ foundation must be deep: callers provide a small set of typed facts and receive
 an immutable result whose ordering, interaction, semantics, resource ownership,
 and failure outcome are already resolved.
 
-The default Editor is Nara-drawn. Users must be able to attach another UI implementation through
+The target default Editor is Nara-drawn. Users must be able to attach another UI implementation through
 public Host/panel interfaces without changing engine-private code. Nara need not distribute an
 official ImGui extension. Complex graph/timeline tools and future automation constrain those
 interfaces before broad component-library work; complete products and transports can follow later.
@@ -42,14 +42,17 @@ flowchart TB
 
 The diagram describes separate implementations, not two toolkits that must run together. The
 successor must have a build/run closure that needs no Dear context, renderer, input or docking
-service. Package/executable/feature structure remains an implementation decision. Keep the
+service. The first source workspace selects `nara-editor-drawn` with `imgui-reference` disabled. Keep the
 reference as a workflow oracle until complete acceptance, then remove its first-party code and
 migration-only bridges. Product Host conformance may separately exercise optional mixed content.
 
 The current checkout already contains selected Nara controls hosted by Dear and has removed
 some original Dear painters. Preserve their actual evidence and reusable mechanisms. Establish
-the exact reference revision and any missing reference workflows explicitly; this document
-claims neither an intact pure-ImGui reference nor an independent self-drawn implementation today.
+the exact reference revision and any missing reference workflows explicitly. The
+[independent source workspace](../plans/2026-11-05-independent-drawn-source-workspace-plan.md)
+now has its own executable, shell and input/presentation composition. Its source-workflow
+qualification is separate from complete replacement acceptance; an intact pure-ImGui reference
+is not implied by the existing hosted-panel evidence.
 
 The Reference Game is one acceptance carrier, not the sole authority for shared interfaces.
 Named game, Editor and independent-author consumers establish the required contracts. Preserve
@@ -280,10 +283,12 @@ Editor UI is a separate product layer:
 Editor document -> EditorSnapshot -> EditorActionEnvelope -> applied/rejected/conflict
 ```
 
-The Nara-drawn Editor is the selected default destination. Ordinary Inspector, source Hierarchy, specialized
-UI Hierarchy and Scene controls have scoped qualification; remaining specialized panels and
-workspace still need independent successor implementation and qualification. Dear supplies the
-current surrounding Shell and registered source-built panel interface; that existing mixed
+The Nara-drawn Editor is the selected default destination. Ordinary Inspector, source Hierarchy,
+specialized UI Hierarchy and Scene controls have scoped reference-composition qualification.
+The ordinary and specialized Hierarchy controllers now live outside that adapter and also serve
+the independent source workspace's own Shell. Inspector, Scene/Game, remaining specialized panels,
+Browser/import breadth and workspace layout still need successor implementation and qualification.
+Dear supplies the default reference composition's surrounding Shell; that existing mixed
 composition is recorded evidence rather than the prescribed migration route. Historical
 egui-first, fixed-layout records do not describe the destination or establish today's capability.
 
@@ -487,6 +492,93 @@ Custom visuals still need keyboard/text behavior, semantic actions and an explic
 capability outcome. Painting pixels alone does not provide those services. The first composite
 and custom-drawn consumers determine the minimum required tokens, roles and gestures; no CSS
 engine, complete theme language or catalogue of every platform gesture is selected in advance.
+
+### Style, layout and visual component readiness
+
+The initial independent source workspace qualifies authoring and Host workflows with engineering
+controls. It does not establish a polished component library, responsive desktop layout or a
+finished Editor visual design. Its current palette-only `UiTheme`, per-panel visual recipes and
+many absolute control rectangles make those limits concrete. Preserve its qualified commands,
+field capacity, state and input lifetimes while replacing presentation recipes.
+
+The [November 5 primary-source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
+compares Zed GPUI and Open-GPUI, upstream C++ ImGui and Godot. GPUI informs composable
+refinements, inherited text and separate variants/state; ImGui informs dense tool metrics,
+baseline alignment and scoped overrides; Godot informs theme-driven minimum sizes, Container
+allocation and custom editor-control composition. Their implementations do not select a Nara
+dependency, public object model or style engine.
+
+Before expanding the component catalogue, qualify one styled source-workspace workflow under
+the existing owners. The selected design targets are:
+
+- A small library-level visual vocabulary: surface and text emphasis, border/divider,
+  focus/selection/error, control heights, spacing/indent, typography, icon gap and stroke/radius.
+  Density, user text scale and device DPI remain separate inputs. Add tokens required by the
+  complete consumer rather than a speculative catalogue.
+- Explicit defaults, nearest scope, component variant/size and local override precedence,
+  including state-layer ordering and removal/reset behavior. Resolve immutable or owner-versioned
+  inputs without a global mutable style stack or another UI state authority. A library may
+  compose ordinary controls or use low-level drawing without adopting first-party visuals.
+- Persistent interaction state independent of resolved appearance. Preserve drafts, preedit and
+  semantic identity across compatible style changes. Focus, selected, pressed, disabled,
+  read-only and invalid states have distinct combined behavior and visual indicators.
+- Intrinsic/minimum/preferred/maximum size, real baseline, padding/border accounting and
+  shrink/grow/overflow behavior exercised through existing child measurement. Long text uses
+  an explicit wrap/clip/measured-truncation policy while keeping full semantic/source values.
+  General page layout must not require each panel to position its own controls absolutely.
+- Anchored menus measured in an explicit coordinate space against available bounds, with
+  flip/shift, bounded scrolling, dismissal and focus-restoration policies. Their theme scope,
+  anchor disappearance and resize/scroll/scale changes retain original presented/input custody.
+- Dependency-complete invalidation: color-only updates preserve compatible measurement;
+  typography, font/fallback, locale, density and constraints invalidate the measurements and
+  geometry they affect. Effective scoped inputs participate in unchanged-output reuse; theme
+  revision alone does not prove equality or a performance improvement.
+
+The first visual consumer combines tabs, toolbar, hierarchy rows, an editable property group,
+status/validation feedback and an anchored action menu through selection/edit/Undo/Save/Reopen.
+One independently authored decorated row uses local styling without changing siblings. Review
+actual fixed-content captures and compact/default density before generalizing recipes. Verify
+constraints, keyboard/focus/IME, international text, native scale and per-stage work using the
+existing qualification procedure. Record actual platform/scale coverage and remaining gaps.
+Passing functional source acceptance cannot substitute for visual approval or measured budgets.
+Concrete Rust style/component interfaces remain provisional until that consumer uses them.
+
+The style specification must inventory the following before declaring its first reusable
+library slice ready. Each entry records owner, input identity, units, defaults and numeric
+values, precedence/reset, fallback/error behavior, invalidation, retained lifetime/cost and
+an observable acceptance case. Mark implemented mechanisms, required next work and deferred
+capabilities separately. A list of token names is insufficient.
+
+| Design area | Contract to settle through the visual consumer |
+| --- | --- |
+| Font policy | Admitted font content/face identity, family/weight/style/features and ordered fallback; missing glyph and unavailable-font outcomes; old layouts retain their original provenance. Optional variable-font axes and dynamic loading need explicit support states. |
+| Text metrics | Logical size, line box/line height, actual baseline and ink overhang, alignment and multi-font runs; distinguish typographic advance from painted bounds. Derive control size from content and padding plus its minimum hit target rather than a universal fixed row height. |
+| Units and scale | Logical/authored versus physical units, native DPI, user text scale, component density and view zoom; identify the single conversion owner and round once at the correct boundary. Text and icons remain aligned at fractional scale. |
+| Visual roles | Semantic surfaces/text/borders, elevation, focus/selection/error and disabled/read-only feedback; specify color/alpha meaning through existing rendering contracts. Library-owned roles and overrides need an extension path rather than editing a central catalogue. |
+| Component recipes | Named size/emphasis variants, slot/content composition, label/icon/value alignment, icon optical size, padding/gap/radius/stroke and the full combined state matrix. Focus and validation indicators reserve geometry and remain distinguishable from hover/press. |
+| Layout | Intrinsic/min/preferred/max constraints, flex allocation, baseline, padding/border box, overflow/scroll, toolbar collapse and narrow-window policy; declared limits and unsupported requests produce explicit outcomes. |
+| Text presentation | Wrap, clip and measured ellipsis, long paths/numbers, multiline and empty/missing values; full source/semantic values remain available. Language, direction, bidi, CJK, combining and IME behavior participate in the same measurement and input basis. |
+| Overlays | Anchor geometry and coordinate space, measured available bounds, placement/fitting/scroll, stacking/modal scope, inherited theme lifetime, dismissal and focus restoration; old snapshots cannot authorize successor input. |
+| Preferences | Keyboard-visible focus, contrast and non-color cues, reduced motion/transparency, high-contrast/system-theme policy and user scale. Native accessibility and actual OS preference integration require separate platform qualification. |
+| Resource readiness | Font/icon/image pending, available, failed and replaced states; define fallback size and whether loading may shift layout. Publication invalidates the original consumers without losing drafts or reusing stale glyph/resource identities. |
+| Icons and motion | Icon resources, logical/optical size, baseline and pixel-snapping rules; no implicit dependency on a particular icon font. Motion uses the existing explicit clock/deadline and scoped lifetime, has interruption/reduced-motion behavior and cannot repeat domain effects during composition. |
+| Product preferences | Distinguish reusable library defaults from Editor user/workspace preferences and game-authored style. Document scope, persistence/versioning, override reset and reconstruction behavior without storing runtime font handles or function pointers as durable data. |
+| Change and reuse | Effective scoped inputs and state precedence, immutable prior output, exact measurement/paint invalidation, cache bounds/eviction/loss and style restoration. Style changes do not create document edits or a second state/history owner. |
+
+Numeric recipes and visual comparisons belong to the component library's specification.
+Shared text/kernel/layout/render contracts remain independent of Editor-specific palette,
+density and docking; the game UI adapter can choose its own recipes. Frontend-framework
+references should inform semantic tokens, scoped composition and sizing behavior without
+introducing a CSS parser, DOM owner or web-unit compatibility promise. The first styled consumer
+selects the minimum concrete interface; the inventory keeps later unsupported capabilities
+visible instead of pretending that all of them already work.
+The study's typography follow-up additionally compares official Radix Themes, Fluent and W3C
+contracts. Relative design steps must resolve through a declared logical base before native
+pixel conversion; font units, glyph bitmap size and CSS `rem` are not interchangeable units.
+Font-family resolution is not evidence of complete cluster coverage. Retain actual admitted
+font provenance and shaped-line metrics. Forced palettes, contrast preference and reduced
+motion are distinct policies; platform integration and unsupported font formats remain
+explicit qualification gaps.
 
 ### Interface alternatives
 

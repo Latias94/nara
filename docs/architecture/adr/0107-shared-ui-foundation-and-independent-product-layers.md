@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05 (scoped component state, child layout and captured geometry)
+**Last Revised**: 2026-11-05 (scoped state/layout/geometry and visual component readiness)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -199,11 +199,14 @@ state, notification and cached-artifact reference; Open-GPUI informs reusable co
 stable keys, virtualization and logical docking. The pinned source study distinguishes retained
 entities, short-lived descriptions, cached-view replay and layout/text/raster work; it does not
 select GPUI ownership, a dependency or persistent layout storage for Nara. Dear ImGui may inform
-Editor adapter and viewport failure handling; Godot may inform Control and author workflows; Bevy
-may inform algorithms and controlled widgets. The [custom-drawn Editor UI
+Editor density/style scopes, adapter and viewport failure handling; Godot may inform Theme,
+Container and custom editor-Control workflows; Bevy may inform algorithms and controlled widgets.
+The [custom-drawn Editor UI
 study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md) adds pinned Fyrox and
-Xilem/Masonry source observations; Unity 6.0's [EditorWindow
-guide](https://docs.unity3d.com/6000.0/Documentation/Manual/UIE-HowTo-CreateEditorWindow.html)
+Xilem/Masonry source observations and the November 5 GPUI/ImGui/Godot style/layout comparison.
+The [visual component prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
+separates the functional source workspace from polished-library qualification. Unity 6.0's
+[EditorWindow guide](https://docs.unity3d.com/6000.0/Documentation/Manual/UIE-HowTo-CreateEditorWindow.html)
 grounds explicit UI reconstruction/state restoration, not automatic state survival. The user
 selected Nara's own custom-drawn Editor frontend as the default destination; optional user-authored
 toolkit attachment is a separate supported design target. Concrete panel-hosting, component and

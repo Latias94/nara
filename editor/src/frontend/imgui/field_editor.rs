@@ -28,6 +28,7 @@ use super::{
     ImguiEditorPanelContext, ImguiTextOwner, PanelActionDispatch, PanelSubmissionId,
     observe_text_owner,
 };
+use crate::frontend::controls::editing_enabled;
 
 impl FieldEditors {
     #[allow(clippy::too_many_arguments)]
@@ -435,7 +436,7 @@ impl ImguiEditorPanelContext<'_, '_> {
             component.component.as_str()
         ));
         let editable = !self.input.read_only
-            && authoring::editing_enabled(frame)
+            && editing_enabled(frame)
             && component.access.is_editable()
             && field.capabilities.contains(&ComponentCapability::Edit);
         if let Some(target) = property_target(frame, scene, entity, component, field)

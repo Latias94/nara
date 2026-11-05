@@ -69,7 +69,7 @@ fn protected_roots_and_mixed_descendants_display_owner_reason_while_selection_re
 }
 
 #[test]
-fn preservation_safe_structure_read_only_does_not_disable_ui_tree_navigation() {
+fn source_admitted_structure_uses_owner_recipes_without_enabling_direct_manipulation() {
     let project = UiProject::new();
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(&project.0).with_profile("desktop"));
@@ -85,10 +85,11 @@ fn preservation_safe_structure_read_only_does_not_disable_ui_tree_navigation() {
         application,
         project,
     };
-    assert!(!fixture.ui().structure_editing_enabled());
+    assert!(fixture.ui().structure_editing_enabled());
+    assert!(!fixture.ui().direct_editing_enabled());
     let mut owner = controller();
     let frame = paint(&mut owner, &fixture, 800.0);
-    assert!(!enabled(&frame, "Add UI node"));
+    assert!(enabled(&frame, "Add UI node"));
     assert!(!enabled(&frame, "Move subtree"));
     assert!(enabled(&frame, "Select UI image-node"));
     let mut routing = RoutedInput::new(&frame);

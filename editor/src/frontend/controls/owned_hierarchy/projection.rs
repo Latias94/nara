@@ -82,7 +82,7 @@ impl SourceProjection {
             selected: inspector.selected_entity.clone(),
             placement: selected.and_then(|row| row.placement.clone()),
             capabilities: inspector.composition.clone(),
-            editing: !read_only && authoring::editing_enabled(model),
+            editing: !read_only && editing_enabled(model),
             navigation: !read_only && model.workspace_intent().intent().is_none(),
             read_only,
             removal_reason: authoring::entity_removal_unavailable_reason(model, scene, has_prefab),

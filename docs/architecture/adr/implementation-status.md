@@ -130,6 +130,31 @@ are injected and image readback is not a final swapchain oracle. Named-toolkit c
 OS candidate delivery, direct native drawing/overlays/detach/accessibility, full Editor,
 extension reconstruction and measured performance remain separate work under R11b-f.
 
+The [independent drawn source workspace](../../plans/2026-11-05-independent-drawn-source-workspace-plan.md)
+adds a separately selected production entry and Shell over those same owners. Ordinary source
+and specialized UI Hierarchy controls move out of the Dear adapter and serve both compositions;
+the successor owns no second mutation/history/identity/GPU authority. Source UI capability uses
+the existing source templates and complete original UI projection, with a separate deletion
+refusal for degraded documents. Its completeness predicate follows the existing projection cache.
+The final reference/default Editor and selected public integrations pass 472/472; the
+no-reference library passes 220/220, with the Shell separately passing 19/19. Those
+overlapping CPU cohorts include Shell exact requests/results, shared maintenance wakes and
+pointer Cancel across composition blur at normal/compact heights. The Windows/DX12 production
+trajectory passes source structure/history/persistence, all four UI recipes, complete 4,096-byte
+native text, source refresh/refusal, projection/instance retirement and explicit graphics
+reconstruction. Original graphics remain owned until physical close completes; diagnostic
+reporting alone cannot install a replacement. Executable startup, independent public-entry
+consumption and affected reference results are recorded in the unit. The complete replacement
+matrix, default switch and cost budgets remain open.
+
+The [style/layout study](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
+pins GPUI, upstream ImGui and Godot separately from Nara qualification. The
+[styled-workspace prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
+requires one coherent visual authoring page, scoped styles, measured size/overflow/menu behavior
+and an independently consumed decorated row before broad component-library claims. These are
+design and execution targets. The source workspace's functional results do not qualify visual
+polish, a theme/typography system or responsive component layout.
+
 The [keyed local-state prerequisite](../../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#keyed-local-state-composition-prerequisite)
 adds exact parent/child scoping, typed store/incarnation handles, explicit model/schema
 compatibility and transactional membership. A separately authored row composite consumes this

@@ -16,6 +16,7 @@ use nara::{
 };
 
 use super::{ImguiEditorPanelContext, PanelActionDispatch, PanelSubmissionId};
+use crate::frontend::controls::editing_enabled;
 
 const PAGE_ROWS: usize = 64;
 const DETAIL_BYTES: usize = 16 * 1024;
@@ -122,8 +123,7 @@ impl ImguiPrefabIntent {
                 return;
             }
         };
-        let editing =
-            !context.input.read_only && super::authoring::editing_enabled(context.input.frame);
+        let editing = !context.input.read_only && editing_enabled(context.input.frame);
         if self.basis.is_none() {
             self.refresh(context, current.clone());
         }

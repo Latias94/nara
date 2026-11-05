@@ -37,10 +37,8 @@ impl<S> EditorPanelImageHost<S> {
     ) -> Result<EditorPanelInputOutcome, EditorPanelImageError> {
         self.check_semantic(semantic)?;
         self.reconcile(application);
-        let locked = application.ordinary_input_locked();
-        if locked {
-            self.withdraw_all(EditorPanelCancelReason::ApplicationInputLocked);
-        }
+        let locked = application.ordinary_input_locked()
+            && self.current_workspace_decision(application).is_none();
         if let Some(event) = &event {
             event.validate()?;
         }
@@ -62,9 +60,10 @@ impl<S> EditorPanelImageHost<S> {
 
     /// Transfers keyboard ownership to an original panel's currently accepted image.
     ///
-    /// The native window must already be focused and ordinary application input unlocked. The
-    /// target must declare `Keyboard`; `Pointer` is not required. While a window-modal image is
-    /// accepted, only that provider can receive focus. This method does not focus the OS window
+    /// The native window must already be focused. Locked input admits only the first-party shell's
+    /// currently accepted exact workspace decision. The target must declare `Keyboard`;
+    /// `Pointer` is not required. While a window-modal image is accepted, only that provider can
+    /// receive focus. This method does not focus the OS window
     /// or select a local widget.
     ///
     /// The old owner's cancellation precedes `KeyboardFocused` in one original semantic
@@ -88,8 +87,11 @@ impl<S> EditorPanelImageHost<S> {
             return Err(EditorPanelImageError::Closed);
         }
         self.reconcile(application);
-        if application.ordinary_input_locked() {
-            self.withdraw_all(EditorPanelCancelReason::ApplicationInputLocked);
+        if application.ordinary_input_locked()
+            && self
+                .current_workspace_decision(application)
+                .is_none_or(|image| &image.token != token)
+        {
             return Err(EditorPanelImageError::InputLocked);
         }
         if !self.focused {
@@ -119,6 +121,35 @@ impl<S> EditorPanelImageHost<S> {
             return Err(EditorPanelImageError::ModalBlocked);
         }
         self.claim_keyboard(Some(&image));
+        let delivery = self.delivery(image, EditorPanelInputKind::KeyboardFocused, None);
+        Ok(self.deliver_input(application, semantic, vec![delivery], true, callback))
+    }
+
+    /// Refreshes services for the already-owned accepted keyboard endpoint without claiming focus.
+    /// Original cancellations and the refresh share the same semantic candidate.
+    pub(crate) fn refresh_keyboard_services<P: EditorPanel>(
+        &mut self,
+        application: &EditorApplication,
+        semantic: &mut EditorPanelHost<P>,
+        callback: impl FnMut(
+            &mut P,
+            &mut EditorPanelContext<'_, '_>,
+            &EditorPanelInput<S>,
+            &mut EditorPanelServices<'_>,
+        ),
+    ) -> Result<EditorPanelInputOutcome, EditorPanelImageError> {
+        self.check_semantic(semantic)?;
+        self.reconcile(application);
+        let image = self
+            .keyboard
+            .as_ref()
+            .filter(|image| {
+                self.is_accepted(image) && self.has(image, EditorPanelCapability::Keyboard)
+            })
+            .cloned();
+        let Some(image) = image else {
+            return self.dispatch(application, semantic, None, callback);
+        };
         let delivery = self.delivery(image, EditorPanelInputKind::KeyboardFocused, None);
         Ok(self.deliver_input(application, semantic, vec![delivery], true, callback))
     }

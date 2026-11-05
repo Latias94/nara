@@ -1,6 +1,8 @@
 # Native Editor Qualification
 
-This is the manual Windows/DX12 qualification gate for the selected Dear frontend.
+This documents Windows/DX12 qualification for the selected Editor compositions. The reference
+trajectories retain their Dear-based scope; the independent drawn source workspace has its own
+explicit no-reference build and trajectory below.
 Ordinary workspace tests exclude these ignored cases and do not establish native acceptance.
 For a Windows/DX12 release qualification, run the three critical trajectories and the additional
 groups required by the claimed capabilities. For development changes to native view/input, device
@@ -121,6 +123,55 @@ and final Surface retirement. The full total is 19 presentations and 18 journal 
 Error/panic child modes must also exercise a pending mesh submission. This is finite child-layout,
 custom geometry and pointer/keyboard-control acceptance; curve hit testing, general logical-key
 delivery, cross-window capture and the complete R11b/R11c consumers remain separate.
+
+## Independent Drawn Source Workspace
+
+The [initial successor workflow](../plans/2026-11-05-independent-drawn-source-workspace-plan.md)
+uses its own executable, drawn Shell, source chooser, document tabs and ordinary/specialized
+Hierarchy controls. Run its native trajectory without the reference feature:
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+$env:NARA_EDITOR_CJK_FONT = 'C:\Windows\Fonts\simhei.ttf'
+cargo +1.95.0 nextest run --locked --offline -p nara-editor --no-default-features --lib --run-ignored only -E 'test(native_drawn_source_workspace_preserves_structure_history_and_persistence)' --test-threads=1 --no-fail-fast
+cargo +1.95.0 build --locked --offline -p nara-editor --no-default-features --bin nara-editor-drawn
+```
+
+Require source opening through presented Shell controls, exact document tabs, Scene/Prefab
+create/move/delete and cancellation, protected UI root refusal, all four specialized recipes,
+text/IME and chooser Escape, one-history-entry mutations, Undo/Redo and exact Save/Reopen/
+acknowledgments. Compare complete saved source, including unknown data. Exercise late text and
+held-pointer releases across ordinary/UI projection replacement, simultaneous original Shell/
+Hierarchy composites, dirty Close Cancel/Discard and graphics reconstruction. Preserve controller
+state and dirty history while replacing native Surfaces. Send wheel input immediately after a
+filter edit and before successor presentation; its stale observation must refuse without pausing
+the workspace. Deliver the original IME disable acknowledgment while rendering is paused,
+including native focus events when replacement initialization has failed and no graphics exist.
+After reconstruction, refocus and commit text with an Enabled event and no additional Disabled
+acknowledgment. Hide/reopen the actual panel incarnation,
+then close with active preedit and an original candidate pending; require late input/output refusal
+and original physical GPU retirement.
+
+Build the separately locked `drawn_editor` consumer and inspect its normal/build/feature graph
+using its [documented commands](../../tests/fixtures/editor-ui-host-consumer/README.md).
+Launch the actual production binary and public-entry consumer separately from the hidden native
+workflow. Dependency exclusion, executable startup and injected presented-input qualification
+are distinct evidence. Inspector, Scene/Game, Browser/import breadth, layout/docking, full
+replacement/default switch, actual OS IME ordering, device-loss recovery and performance remain
+outside this initial consumer.
+
+The [styled-workspace prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite)
+adds a separate visual/layout consumer over that composition. Preserve the full functional
+trajectory while reviewing actual fixed-content captures, compact/default density, typography/
+baseline, combined interaction states, scoped overrides, long international text and anchored
+menu fitting/dismissal. Target 100/125/150/200% native scale and record actual coverage, font/
+scale transitions and missing platform behavior. Theme changes must retain compatible drafts/
+preedit and invalidate the affected geometry. Visual review, native input, OS accessibility and
+per-stage performance remain distinct evidence; the initial engineering UI qualifies none of
+them merely by drawing the controls.
 
 ## UI Work Probes
 

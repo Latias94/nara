@@ -36,9 +36,9 @@ use crate::frontend::imgui::{ImguiEditorFrontend, ImguiViewImage};
 use crate::{EditorApplication, supervised_play::SupervisedPlayWake};
 
 use super::{
-    EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
-    explicit_gpu_retry_requested, image_import_poll_deadline, persistence_poll_deadline,
-    platform_gpu_error, play_lifecycle_poll_deadline,
+    EditorGpuRecovery, EditorRunError, earliest_deadline, editor_frame_maintenance_deadline,
+    editor_window_packet, explicit_gpu_retry_requested, image_import_poll_deadline,
+    platform_gpu_error,
     termination::{editor_run_result, finish_open_host_shutdown},
 };
 
@@ -2407,44 +2407,10 @@ fn imgui_next_deadline(
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
     }
     if let Some(frame) = application.current_frame() {
-        deadline = earliest_deadline(deadline, imgui_frame_maintenance_deadline(&frame, now));
+        deadline = earliest_deadline(deadline, editor_frame_maintenance_deadline(&frame, now));
     }
     deadline = earliest_deadline(deadline, application.session_close_retry_deadline());
     deadline
-}
-
-fn imgui_frame_maintenance_deadline(
-    frame: &nara::tooling::EditorFrameModel,
-    now: Instant,
-) -> Option<Instant> {
-    let deadline = (frame.project_browser().has_pending_work()
-        || frame.document_open().has_pending_work()
-        || frame.authoring_retirement_pending()
-        || frame.authoring_operation_work_pending()
-        || frame.source_tool().has_pending_work()
-        || frame.prefab_conversion().phase.work_pending()
-        || matches!(
-            frame.project_content(),
-            nara::tooling::EditorProjectContentView::RefreshPending { .. }
-        ))
-    .then_some(now + Duration::from_millis(16));
-    earliest_deadline(
-        earliest_deadline(
-            earliest_deadline(
-                deadline,
-                earliest_deadline(
-                    frame
-                        .scene_preview_work_pending()
-                        .then_some(now + Duration::from_millis(8)),
-                    frame
-                        .scene_preview_recheck_after()
-                        .and_then(|delay| now.checked_add(delay)),
-                ),
-            ),
-            play_lifecycle_poll_deadline(now, frame.play().state()),
-        ),
-        persistence_poll_deadline(now, frame.persistence().operation()),
-    )
 }
 
 fn imgui_next_presentation_deadline(
@@ -2728,7 +2694,7 @@ mod opening_tests {
             original_generation
         );
         assert_eq!(
-            imgui_frame_maintenance_deadline(&frame, Instant::now()),
+            editor_frame_maintenance_deadline(&frame, Instant::now()),
             None
         );
         application
@@ -2819,12 +2785,12 @@ mod opening_tests {
             .with_image_import(None, false)
             .with_source_asset_import(None, false)
             .with_authoring_retirement_pending(true);
-        let retirement_deadline = imgui_frame_maintenance_deadline(&retiring_frame, now);
+        let retirement_deadline = editor_frame_maintenance_deadline(&retiring_frame, now);
         let retirement_presentation = imgui_frame_presentation_deadline(&retiring_frame, now);
         let retired_frame = retiring_frame
             .with_authoring_retirement_pending(false)
             .with_scene_preview_work(false, None, 0);
-        let retired_deadline = imgui_frame_maintenance_deadline(&retired_frame, now);
+        let retired_deadline = editor_frame_maintenance_deadline(&retired_frame, now);
         let tool_frame =
             retired_frame
                 .clone()
@@ -2833,7 +2799,7 @@ mod opening_tests {
                     ..Default::default()
                 });
         assert_eq!(
-            imgui_frame_maintenance_deadline(&tool_frame, now),
+            editor_frame_maintenance_deadline(&tool_frame, now),
             Some(now + Duration::from_millis(16)),
         );
         assert_eq!(imgui_frame_presentation_deadline(&tool_frame, now), None);
@@ -2841,7 +2807,7 @@ mod opening_tests {
             .clone()
             .with_authoring_operation_work_pending(true);
         assert_eq!(
-            imgui_frame_maintenance_deadline(&schema_frame, now),
+            editor_frame_maintenance_deadline(&schema_frame, now),
             Some(now + Duration::from_millis(16)),
         );
         assert_eq!(imgui_frame_presentation_deadline(&schema_frame, now), None);
@@ -2861,15 +2827,15 @@ mod opening_tests {
             1,
         );
         assert_eq!(
-            imgui_frame_maintenance_deadline(&rechecking_frame, now),
+            editor_frame_maintenance_deadline(&rechecking_frame, now),
             Some(now + Duration::from_millis(500)),
         );
         assert_eq!(
-            imgui_frame_maintenance_deadline(&pending_preview_frame, now),
+            editor_frame_maintenance_deadline(&pending_preview_frame, now),
             Some(now + Duration::from_millis(8)),
         );
         assert_eq!(
-            imgui_frame_maintenance_deadline(&earlier_recheck_frame, now),
+            editor_frame_maintenance_deadline(&earlier_recheck_frame, now),
             Some(now + Duration::from_millis(2)),
         );
         assert_eq!(

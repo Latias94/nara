@@ -5,8 +5,9 @@ use std::{
 };
 
 use nara_ui_kernel::{
-    UiActionId, UiAuthoringSnapshotBuilder, UiBrush, UiColorRole, UiLayer, UiLocalKey, UiNode,
-    UiOverflow, UiRoot, UiRootStatus, UiStyle, UiText, UiTextOverflow, UiVisual,
+    UiActionId, UiAuthoringSnapshotBuilder, UiBrush, UiCaptureContinuity, UiColorRole,
+    UiInteraction, UiLayer, UiLocalKey, UiNode, UiOverflow, UiRoot, UiRootStatus, UiStyle, UiText,
+    UiTextOverflow, UiVisual,
 };
 use nara_ui_widgets::UiButtonVisualState;
 
@@ -24,7 +25,7 @@ enum FormRow {
 }
 
 impl OwnedUiHierarchy {
-    pub(in crate::frontend::imgui) fn compile(
+    pub(in crate::frontend::controls) fn compile(
         &mut self,
         model: &EditorFrameModel,
         ui: &EditorUiAuthoringFrame,
@@ -289,7 +290,11 @@ impl OwnedUiHierarchy {
                     2.0,
                     Control::Delete,
                     "Delete subtree",
-                    editing && structural,
+                    editing
+                        && structural
+                        && basis
+                            .as_ref()
+                            .is_some_and(|basis| basis.deletion_unavailable_reason.is_none()),
                 ),
             ] {
                 nodes.push(self.button(
@@ -309,7 +314,10 @@ impl OwnedUiHierarchy {
             } else if basis.as_ref().is_some_and(|basis| !basis.structure) {
                 Some("Structure changes are unavailable in preservation-safe authoring".to_owned())
             } else {
-                None
+                basis
+                    .as_ref()
+                    .and_then(|basis| basis.deletion_unavailable_reason)
+                    .map(|reason| format!("Deletion unavailable: {reason}"))
             };
             let mut y = top + action_height + 4.0;
             // Keep the exact refusal visible before optional diagnostics in compact tree mode.
@@ -402,11 +410,15 @@ impl OwnedUiHierarchy {
             .with_root(root)
             .build()?;
         if self.frames.last().is_some_and(|previous| {
-            previous.frame.environment() != environment
-                || previous.theme != theme
-                || previous.scroll_limit != scroll_limit
+            previous.frame.environment() != environment || previous.theme != theme
         }) {
             self.invalidate_actions();
+        } else if self
+            .frames
+            .last()
+            .is_some_and(|previous| previous.scroll_limit != scroll_limit)
+        {
+            self.viewport_observation = Arc::new(());
         }
         let form = self.form.as_ref().map(|form| form.identity);
         if let Some(previous) = self.frames.last()
@@ -497,7 +509,7 @@ impl OwnedUiHierarchy {
                 rows.push(FormRow::ChoosePlacement);
                 rows.push(FormRow::Message(
                     "placement",
-                    authoring::placement_intent_label(Some(placement)),
+                    placement_intent_label(Some(placement)),
                 ));
                 match kind {
                     UiCatalogNodeKind::Container => {}
@@ -526,7 +538,7 @@ impl OwnedUiHierarchy {
                 rows.push(FormRow::ChoosePlacement);
                 rows.push(FormRow::Message(
                     "placement",
-                    authoring::placement_intent_label(Some(placement)),
+                    placement_intent_label(Some(placement)),
                 ));
             }
             StructureDialog::Delete { target } => {
@@ -612,13 +624,20 @@ impl OwnedUiHierarchy {
             UiButtonVisualState::Idle if selected => UiColorRole::Focus,
             UiButtonVisualState::Idle => UiColorRole::Panel,
         };
-        let node = button.authored_node(
-            &self.root,
-            UiStyle::absolute(rect[0], rect[1], rect[2], rect[3]).with_overflow(UiOverflow::Clip),
-            UiVisual::role(color),
-            UiBrush::Role(UiColorRole::PrimaryText),
-            TEXT_SIZE,
-        )?;
+        let node = button
+            .authored_node(
+                &self.root,
+                UiStyle::absolute(rect[0], rect[1], rect[2], rect[3])
+                    .with_overflow(UiOverflow::Clip),
+                UiVisual::role(color),
+                UiBrush::Role(UiColorRole::PrimaryText),
+                TEXT_SIZE,
+            )?
+            .with_interaction(
+                UiInteraction::focus_target()
+                    .with_enabled(enabled)
+                    .with_capture_continuity(UiCaptureContinuity::TargetGeometry),
+            );
         displayed.insert(
             control.key.clone(),
             DisplayedButton {

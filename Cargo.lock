@@ -2154,6 +2154,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wgpu",
  "windows-sys 0.61.2",
  "winit",
 ]

@@ -264,20 +264,23 @@ impl<S> EditorPanelImageHost<S> {
         match validation {
             Ok(EditorPanelImageStatus::Presented) => {
                 self.withdraw_incompatible(&candidate.images);
-                let modal = candidate
-                    .images
+                self.accepted = candidate.images.clone();
+                self.reconcile_input_policy(application);
+                let modal = self
+                    .accepted
                     .iter()
                     .rev()
-                    .find(|image| image.window_modal);
+                    .find(|image| image.window_modal)
+                    .map(|image| image.token.clone());
                 if let Some(modal) = modal {
                     self.cancel_where(
-                        |image| image.token != modal.token,
+                        |image| image.token != modal,
                         EditorPanelCancelReason::ModalAdmitted,
                     );
                 }
                 if let Some(capture) = &mut self.capture {
-                    if let Some(next) = candidate
-                        .images
+                    if let Some(next) = self
+                        .accepted
                         .iter()
                         .find(|image| image.token == capture.image.token)
                     {
@@ -286,8 +289,8 @@ impl<S> EditorPanelImageHost<S> {
                 }
                 for owner in [&mut self.keyboard, &mut self.hovered] {
                     if let Some(previous) = owner {
-                        if let Some(next) = candidate
-                            .images
+                        if let Some(next) = self
+                            .accepted
                             .iter()
                             .find(|image| image.token == previous.token)
                         {
@@ -295,7 +298,6 @@ impl<S> EditorPanelImageHost<S> {
                         }
                     }
                 }
-                self.accepted = candidate.images.clone();
                 self.last_display_frame = Some(candidate.display_frame_index);
                 Ok(EditorPanelImageStatus::Presented)
             }
@@ -405,6 +407,53 @@ impl<S> EditorPanelImageHost<S> {
                 .any(|image| !image.display.output().is_current())
         }) {
             self.pending = None;
+        }
+        self.reconcile_input_policy(application);
+    }
+
+    pub(super) fn current_workspace_decision(
+        &self,
+        application: &EditorApplication,
+    ) -> Option<&EditorPanelImage<S>> {
+        let current = application.current_frame()?.workspace_intent();
+        self.accepted.iter().rev().find(|image| {
+            image
+                .input_policy
+                .is_current_workspace_decision(Some(current))
+                && image.token.is_current(application)
+                && image.display.output().is_current()
+        })
+    }
+
+    fn reconcile_input_policy(&mut self, application: &EditorApplication) {
+        let locked = application.ordinary_input_locked();
+        let current = application
+            .current_frame()
+            .map(|frame| frame.workspace_intent());
+        let decision = self
+            .current_workspace_decision(application)
+            .map(|image| image.token.clone());
+        let allowed = |image: &EditorPanelImage<S>| {
+            image.input_policy.allows_input(locked, current)
+                && (!locked || decision.as_ref() == Some(&image.token))
+        };
+        self.cancel_where(
+            |image| !allowed(image),
+            if locked {
+                EditorPanelCancelReason::ApplicationInputLocked
+            } else {
+                EditorPanelCancelReason::OutputReplaced
+            },
+        );
+        self.accepted.retain(allowed);
+        for entry in &mut self.attachments {
+            if !self.accepted.iter().any(|image| image.token == entry.token) {
+                entry.deadline = None;
+            }
+        }
+        if locked && decision.is_none() {
+            self.reset_ime();
+            self.reset_cursor();
         }
     }
 

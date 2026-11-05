@@ -34,11 +34,13 @@ use nara_ui_widgets::{
 };
 use thiserror::Error;
 
-use super::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError, authoring};
+use crate::panels::{PanelActionDispatch, PanelSubmissionId, PanelSubmitError};
+
+use super::{editing_enabled, placement_intent_label};
 
 mod input;
 mod presentation;
-#[cfg(test)]
+#[cfg(all(test, feature = "imgui-reference"))]
 mod tests;
 
 const RETAINED_FRAMES: usize = 3;
@@ -63,6 +65,7 @@ struct UiHierarchyBasis {
     images: Result<UiImageChoiceSet, UiStructureRejection>,
     image_generation: UiImageChoiceGeneration,
     structure: bool,
+    deletion_unavailable_reason: Option<&'static str>,
     editing: bool,
     navigation: bool,
     read_only: bool,
@@ -102,7 +105,8 @@ impl UiHierarchyBasis {
             images: ui.image_choices().cloned(),
             image_generation: ui.image_choice_generation(),
             structure: ui.structure_editing_enabled(),
-            editing: !read_only && authoring::editing_enabled(model),
+            deletion_unavailable_reason: ui.structure_deletion_unavailable_reason(),
+            editing: !read_only && editing_enabled(model),
             navigation: !read_only && model.workspace_intent().intent().is_none(),
             read_only,
         })
@@ -309,7 +313,7 @@ struct SubmissionContext {
 }
 
 /// Compiled specialized UI tree/forms. Source mutations, history and persistence stay in Session.
-pub(super) struct OwnedUiHierarchy {
+pub(in crate::frontend) struct OwnedUiHierarchy {
     root: UiRootKey,
     engine: TextEngine,
     compiler: UiCompiler,
@@ -334,7 +338,7 @@ pub(super) struct OwnedUiHierarchy {
 }
 
 /// Move-only action prepared by the UI owner, never rebased to a new form or active source.
-pub(in crate::frontend::imgui) struct UiHierarchySubmission {
+pub(in crate::frontend) struct UiHierarchySubmission {
     basis: UiHierarchyBasis,
     observation: Arc<AtomicBool>,
     form_observation: Option<Arc<AtomicBool>>,
@@ -342,7 +346,7 @@ pub(in crate::frontend::imgui) struct UiHierarchySubmission {
 }
 
 impl UiHierarchySubmission {
-    pub(in crate::frontend::imgui) fn into_action(
+    pub(super) fn into_action(
         self,
         model: &EditorFrameModel,
         ui: &EditorUiAuthoringFrame,
@@ -918,7 +922,7 @@ impl OwnedUiHierarchy {
                 ));
             }
             PanelActionDispatch::NotDispatched(reason) => {
-                use super::PanelActionNotDispatched;
+                use crate::panels::PanelActionNotDispatched;
                 let reason = match reason {
                     PanelActionNotDispatched::Superseded => {
                         "a later submission replaced the prepared batch"

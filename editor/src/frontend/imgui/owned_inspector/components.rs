@@ -9,6 +9,7 @@ use nara::{
 };
 
 use super::*;
+use crate::frontend::controls::{compose_action, placement_intent_label};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ComponentAction {
@@ -51,7 +52,7 @@ impl CompositionBasis {
             kind: scene.kind,
             entity: entity.id.clone(),
             has_prefab: entity.has_prefab,
-            editing: !read_only && authoring::editing_enabled(model),
+            editing: !read_only && editing_enabled(model),
             capabilities: scene.editor.inspector.composition.clone(),
             components: entity
                 .components
@@ -168,7 +169,7 @@ impl OwnedInspector {
             )
             .with_key(UiLocalKey::runtime("nara.inspector.label", "placement")?)
             .with_text(UiText::new(
-                authoring::placement_intent_label(entity.placement.as_ref()),
+                placement_intent_label(entity.placement.as_ref()),
                 TEXT_SIZE,
             )?),
         );
@@ -446,14 +447,14 @@ impl OwnedInspector {
                     entity,
                 })
             }
-            ComponentAction::Add(component) => authoring::compose_action(
+            ComponentAction::Add(component) => compose_action(
                 scene,
                 SceneCompositionCommand::AddComponent {
                     entity,
                     component: component.clone(),
                 },
             ),
-            ComponentAction::Remove(component) => authoring::compose_action(
+            ComponentAction::Remove(component) => compose_action(
                 scene,
                 SceneCompositionCommand::RemoveComponent {
                     entity,

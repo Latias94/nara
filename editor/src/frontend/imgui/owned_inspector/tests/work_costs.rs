@@ -7,7 +7,7 @@ use nara_ui_kernel::{
     UiRouteStamp, UiSeatId, UiThemePalette,
 };
 
-use crate::frontend::imgui::owned_work::{OwnedPanelWork, measure_calls};
+use crate::frontend::controls::{OwnedPanelWork, measure_calls};
 
 #[test]
 fn unchanged_inspector_reuses_the_frame_after_rebuilding_its_description() {
@@ -67,7 +67,7 @@ fn measure_owned_inspector_unchanged_and_local_edit_work() {
     }
     let before = owner.work;
     let compiler = owner.compiler.work_stats();
-    let elapsed = crate::frontend::imgui::owned_work::measure_calls(
+    let elapsed = measure_calls(
         "inspector_unchanged",
         || {
             assert!(Arc::ptr_eq(&frame, &paint(&mut owner, &mut fields, &model),));
@@ -81,7 +81,7 @@ fn measure_owned_inspector_unchanged_and_local_edit_work() {
     );
     let field = input(&owner, &frame, "label");
     let mut edits = 0_u64;
-    let elapsed = crate::frontend::imgui::owned_work::measure_calls(
+    let elapsed = measure_calls(
         "inspector_local_edit",
         || {
             edits += 1;

@@ -38,8 +38,102 @@ mod nested_references;
 mod owned;
 mod recursive_shapes;
 
-pub(super) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
+pub(in crate::frontend) const CUSTOM_COMPONENT: &str = "studio.interaction.Health";
 const UNKNOWN_COMPONENT: &str = "studio.unavailable.Payload";
+
+/// The existing Inspector draft used by the cross-panel Hierarchy regression.
+pub(in crate::frontend) struct RetainedInspectorDraft {
+    inspector: super::owned_inspector::OwnedInspector,
+    fields: super::field_drafts::FieldEditors,
+    key: super::field_drafts::FieldKey,
+}
+
+impl RetainedInspectorDraft {
+    pub(in crate::frontend) fn new(
+        model: &EditorFrameModel,
+        environment: nara_ui_kernel::UiEnvironment,
+    ) -> Self {
+        use super::field_drafts::FieldEditors;
+        use super::owned_inspector::{InspectorBinding, OwnedInspector};
+        use nara_text::TextEdit;
+        use nara_ui_kernel::{UiRootKey, UiSemanticRole, UiTheme};
+
+        let mut fields = FieldEditors::default();
+        let mut inspector = OwnedInspector::new(
+            UiRootKey::runtime("editor.inspector", "hierarchy-draft-test").unwrap(),
+            vec![nara_text::bundled_font_face().unwrap()],
+        )
+        .unwrap();
+        fields.begin_paint(model);
+        let inspected = inspector
+            .compile(
+                model,
+                &mut fields,
+                environment,
+                UiTheme::default(),
+                false,
+                None,
+            )
+            .unwrap();
+        let value = inspected
+            .semantics()
+            .iter()
+            .find(|node| node.role() == UiSemanticRole::TextInput && node.name() == "value")
+            .unwrap()
+            .key()
+            .clone();
+        let InspectorBinding::Field(key) = inspector.binding(&inspected, &value).unwrap() else {
+            panic!("the actual Inspector owns the draft")
+        };
+        let token = inspector.focus(&inspected, &value).unwrap();
+        inspector
+            .edit(&inspected, &value, token, &TextEdit::SelectAll, &mut fields)
+            .unwrap();
+        inspector
+            .edit(
+                &inspected,
+                &value,
+                token,
+                &TextEdit::Insert("42".into()),
+                &mut fields,
+            )
+            .unwrap();
+        let draft = Self {
+            inspector,
+            fields,
+            key,
+        };
+        draft.assert_retained();
+        draft
+    }
+
+    pub(in crate::frontend) fn assert_retained(&self) {
+        assert_eq!(
+            self.fields.drafts[&self.key].candidate,
+            super::field_drafts::Candidate::Text("42".into()),
+        );
+        assert!(self.fields.drafts[&self.key].dirty);
+    }
+
+    pub(in crate::frontend) fn reconcile(
+        &mut self,
+        model: &EditorFrameModel,
+        environment: nara_ui_kernel::UiEnvironment,
+    ) {
+        self.fields.begin_paint(model);
+        self.inspector
+            .compile(
+                model,
+                &mut self.fields,
+                environment,
+                nara_ui_kernel::UiTheme::default(),
+                false,
+                None,
+            )
+            .unwrap();
+        self.assert_retained();
+    }
+}
 
 thread_local! {
     static CONTROLS: RefCell<BTreeMap<String, DisplayRect>> = RefCell::default();

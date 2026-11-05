@@ -8,6 +8,7 @@ use std::{collections::VecDeque, sync::Arc, time::Instant};
 
 use nara::{
     render::{DisplayMapping2d, DisplayRect},
+    tooling::EditorWorkspaceIntentView,
     window::WindowId,
 };
 use nara_render_wgpu::{WgpuDisplayOccurrence, WgpuImageDisplay, WgpuSubmittedImageReceipt};
@@ -173,6 +174,28 @@ impl EditorPanelImageEndpoint {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ImageInputPolicy {
+    #[default]
+    Ordinary,
+    WorkspaceDecision(EditorWorkspaceIntentView),
+}
+
+impl ImageInputPolicy {
+    fn is_current_workspace_decision(self, current: Option<EditorWorkspaceIntentView>) -> bool {
+        matches!(self, Self::WorkspaceDecision(view)
+            if Some(view) == current
+                && (view.decision_prompt().is_some() || view.result().is_some()))
+    }
+
+    fn allows_input(self, locked: bool, current: Option<EditorWorkspaceIntentView>) -> bool {
+        match self {
+            Self::Ordinary => !locked,
+            Self::WorkspaceDecision(_) => self.is_current_workspace_decision(current),
+        }
+    }
+}
+
 /// One whole-image output and its immutable frontend snapshot in logical window coordinates.
 ///
 /// A complete window candidate admits at most one image per semantic panel instance. Distinct
@@ -185,6 +208,7 @@ pub struct EditorPanelImage<S> {
     mapping: DisplayMapping2d,
     clip: DisplayRect,
     window_modal: bool,
+    input_policy: ImageInputPolicy,
 }
 
 impl<S> Clone for EditorPanelImage<S> {
@@ -196,6 +220,7 @@ impl<S> Clone for EditorPanelImage<S> {
             mapping: self.mapping,
             clip: self.clip,
             window_modal: self.window_modal,
+            input_policy: self.input_policy,
         }
     }
 }
@@ -208,6 +233,7 @@ impl<S> std::fmt::Debug for EditorPanelImage<S> {
             .field("mapping", &self.mapping)
             .field("clip", &self.clip)
             .field("window_modal", &self.window_modal)
+            .field("input_policy", &self.input_policy)
             .finish_non_exhaustive()
     }
 }
@@ -230,6 +256,7 @@ impl<S> EditorPanelImage<S> {
             mapping,
             clip,
             window_modal: false,
+            input_policy: ImageInputPolicy::Ordinary,
         }
     }
 
@@ -238,6 +265,17 @@ impl<S> EditorPanelImage<S> {
     #[must_use]
     pub fn with_window_modal(mut self, window_modal: bool) -> Self {
         self.window_modal = window_modal;
+        self
+    }
+
+    /// Captures the first-party shell's exact workspace decision without granting action authority.
+    /// Views without a decision prompt or result leave the image's input policy unchanged.
+    /// Captured decision input expires when that exact view changes.
+    #[must_use]
+    pub(crate) fn with_workspace_decision(mut self, decision: &EditorWorkspaceIntentView) -> Self {
+        if decision.decision_prompt().is_some() || decision.result().is_some() {
+            self.input_policy = ImageInputPolicy::WorkspaceDecision(*decision);
+        }
         self
     }
 
@@ -285,6 +323,7 @@ impl<S> EditorPanelImage<S> {
             && self.mapping == successor.mapping
             && self.clip == successor.clip
             && self.window_modal == successor.window_modal
+            && self.input_policy == successor.input_policy
     }
 }
 

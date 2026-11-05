@@ -260,7 +260,7 @@ fn queued_component_refuses_same_revision_schema_replacement_at_submission() {
     let scene = original.workspace().active_scene.as_ref().unwrap();
     send(
         &mut application,
-        authoring::compose_action(
+        crate::frontend::controls::compose_action(
             scene,
             SceneCompositionCommand::RemoveComponent {
                 entity: scene.selection.top_entity().unwrap().clone(),

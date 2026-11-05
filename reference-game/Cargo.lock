@@ -1965,6 +1965,7 @@ dependencies = [
 name = "nara-editor"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "dear-imgui-rs",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
@@ -1979,6 +1980,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "wgpu",
  "windows-sys 0.61.2",
  "winit",
 ]

@@ -27,6 +27,7 @@ pub use panels::{
     PanelSubmitError,
 };
 pub use platform::EditorRunError;
+pub use platform::run_drawn;
 #[cfg(feature = "imgui-reference")]
 pub use platform::{
     EditorCompositionError, EditorNativeComposition, EditorNativeEvent, EditorNativeHost, run,

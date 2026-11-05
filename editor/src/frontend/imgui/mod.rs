@@ -1,3 +1,4 @@
+use crate::frontend::controls::{editing_enabled, persistence_allows};
 use dear_imgui_rs::{Condition, TextureId, Ui};
 use nara::tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorFrameModel, EditorNavigationAction,
@@ -11,17 +12,14 @@ mod field_drafts;
 mod field_editor;
 mod game;
 #[cfg(test)]
-mod interaction_tests;
+pub(in crate::frontend) mod interaction_tests;
 #[cfg(all(test, target_os = "windows"))]
 pub(crate) use interaction_tests::InteractionProject;
 mod layout;
-mod owned_hierarchy;
 mod owned_hierarchy_panel;
 mod owned_inspector;
 mod owned_panel;
 mod owned_scene;
-mod owned_ui_hierarchy;
-mod owned_work;
 pub(crate) use owned_inspector::InspectorOperation;
 pub(crate) use owned_panel::ImguiOwnedImage;
 pub(crate) use view::SceneViewPlacement;
@@ -34,7 +32,7 @@ mod submission;
 mod submission_tests;
 mod ui_authoring;
 #[cfg(test)]
-mod ui_interaction_tests;
+pub(in crate::frontend) mod ui_interaction_tests;
 #[cfg(test)]
 mod ui_structure_tests;
 #[cfg(all(test, target_os = "windows"))]
@@ -730,7 +728,7 @@ impl ImguiEditorFrontend {
                     ui,
                     &frame,
                     !read_only
-                        && authoring::editing_enabled(&frame)
+                        && editing_enabled(&frame)
                         && application
                             .prefab_extraction_view()
                             .is_ok_and(|view| !view.writes_fenced),
@@ -1042,7 +1040,7 @@ fn show_dirty_close_dialog(ui: &Ui, frame: &EditorFrameModel, actions: &mut Vec<
                         .map_or("Unsaved", |binding| binding.locator())
                 ));
                 let save_enabled = frame.persistence().operation().is_none()
-                    && authoring::persistence_allows(
+                    && persistence_allows(
                         frame.persistence().result(),
                         EditorPersistenceRequestKind::Save,
                         prompt.document(),
@@ -1113,7 +1111,7 @@ fn paint_source_tool(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         context.input.frame,
         context.model.document().map(|document| document.document),
         review.as_ref(),
-        !context.input.read_only && authoring::editing_enabled(context.input.frame),
+        !context.input.read_only && editing_enabled(context.input.frame),
     );
     if let Some(owner) = context.widgets.source_tool.text_owner() {
         context.output.text_owner = Some(owner);

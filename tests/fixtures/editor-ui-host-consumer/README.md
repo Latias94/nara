@@ -78,6 +78,44 @@ docking, multi-window hosting, dynamic loading, rendering performance or the
 complete independent Editor. Semantic panel lifetime and Surface/input lifetime
 remain distinct. No ImGui feature or extension is enabled.
 
+`drawn_editor` is a normal executable consumer of the public
+`nara_editor::run_drawn(EditorLaunchOptions)` entry. It requires exactly one
+explicit project-root argument and leaves the native event loop, graphics,
+input, Application and Session to the production Editor. It has no test-only
+success mode, private Editor hooks, custom runtime owner or Dear dependency.
+The fixture's optional `native` feature is unnecessary for this example.
+
+Its scope is the independently drawn source workspace: source opening,
+document tabs, ordinary and specialized UI Hierarchy controls, structural
+editing, Undo/Redo and Save/Reopen through the existing owners. It does not
+establish complete Editor parity, Inspector/Scene/Game tools, docking,
+multi-window support, performance or native acceptance by itself. Build and
+dependency checks establish public-entry consumption and the selected dependency
+graph; interactive workflow qualification belongs to the
+[independent drawn workspace plan](../../../docs/plans/2026-11-05-independent-drawn-source-workspace-plan.md).
+
+Build, inspect dependencies and run the entry serially from the repository root
+with the same `target`:
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'target'
+cargo +1.95.0 build --locked --offline --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --no-default-features --example drawn_editor
+$drawnDependencyTree = cargo +1.95.0 tree --locked --offline --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --no-default-features --edges normal,build,features --prefix none
+if ($LASTEXITCODE -ne 0) { throw 'Drawn Editor dependency inspection failed.' }
+if ($drawnDependencyTree -match 'dear-imgui|imgui-reference|editor-imgui|^imgui(?:[-\s]|$)') { throw 'Unexpected ImGui dependency or feature in the drawn Editor graph.' }
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+cargo +1.95.0 run --locked --offline --manifest-path tests/fixtures/editor-ui-host-consumer/Cargo.toml --no-default-features --example drawn_editor -- tests/fixtures/generic-editor/known-unbound
+```
+
+The exclusion check must find no Dear/ImGui package, `imgui-reference` feature or
+`editor-imgui` feature. Replace the final fixture path with an ordinary local
+project root to edit that project. This starts the production window and runs
+until normal Editor shutdown; it does not inject input or terminate after a
+synthetic success signal. DX12 selects the Windows backend; choose the appropriate
+backend on other platforms. The existing lockfile and workspace are reused.
+
 Run serially from the repository root, reusing its `target`:
 
 ```powershell

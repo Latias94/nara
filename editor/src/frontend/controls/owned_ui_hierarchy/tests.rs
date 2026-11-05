@@ -18,10 +18,10 @@ use nara_ui_kernel::{
 use serde_json::{Value, json};
 
 use super::*;
-use crate::frontend::imgui::{
+use crate::frontend::imgui::ui_interaction_tests::{UiProject, setup_ui_prefab_source};
+use crate::panels::{
     PanelActionNotDispatched,
-    submission::{self, PanelOrigin, Recipient},
-    ui_interaction_tests::{UiProject, setup_ui_prefab_source},
+    submission::{self, PanelOrigin},
 };
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
@@ -217,7 +217,7 @@ fn id(mut serial: u64) -> PanelSubmissionId {
             incarnation: Default::default(),
         },
         0,
-        Recipient::Hierarchy,
+        (),
     )
     .unwrap()
 }
