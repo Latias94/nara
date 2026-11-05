@@ -1997,3 +1997,64 @@ separately; the missing-family installation test does not qualify it. Font prewa
 policy, Unicode wrapping, layered text, window-local Rc state, Taffy and other
 API/platform reconciliation, engine View integration, measured budgets and full R11/R12 remain
 open. This prerequisite selects no new Nara Editor or game-runtime execution default.
+
+## November 6: Native Font Reselection And Retained Faces
+
+The verified local Open-GPUI successor is `b803d542b674af34feea0ca277b2ac6721de9a0e`, following
+`ed2a55383f4` on `optimize/docking-graph-transaction`, without publication. The fixed Zed target
+remains `635026fabc38440fce5e1767d125026a17b12012`. Its DirectWrite implementation
+retains the same already-matched descriptor and system-only fallback gaps. These are owning
+corrections found during comparison; a newer source tree is not evidence of complete behavior.
+The framework's verification guide, candidate queue and existing plan own the detailed runs.
+
+DirectWrite now revalidates selections after successful private or system collection publication.
+Unchanged actual faces retain their FontIds and refresh collection/fallback metadata; changed
+faces append records while old glyph identities remain usable. Complete requested descriptors
+partition features and fallback configuration. Named private fallback precedes system fallback.
+Native identity-cache entries retain the face whose IUnknown address they index. Unknown callback
+faces retain their actual identity and simulation instead of resolving family/weight/style again.
+Identity reuse requires exact COM or native FontFace5 equality, with conservative allocation
+when equivalence is unsupported or unconfirmed.
+
+The first baseline exposed a fixture assumption as well as the defects: DirectWrite synthesizes
+Bold from Regular and already reports weight 700. Corrected controls use simulation flags,
+actual fixture outlines and captured metrics. The corrected five-case baseline passes the
+original missing-family native trajectory and fails the four new cases. An isolated cold-cache
+callback also fails after confusing a retained synthetic face with a newer real Bold selection.
+
+The first focused correction passes 6/6, but a stronger complete run passes only 194/195 with
+four existing interactive cases skipped. Shaping again through the observed synthetic FontId
+loses its 620-unit advance. The collection construction now retains the actual face for glyph
+work and uses its unmodified backing file/index for format selection, so DirectWrite reapplies
+the effective weight/style. Both second-shaping assertions and a previously unregistered native
+synthetic-face case remain. The corrected focused cohort passes 9/9, including real `fi`
+ligature configuration, stable IDs across multiple installs and successful system refresh.
+Complete Windows then passes 197/197 with four existing interactive cases skipped, retaining
+native rendering/input, cached/deferred pixels, candidate refusal/retry and exact release.
+The earlier shared Core/WGPU 999 and component/consumer 2,964 results keep their original
+scope; they were not rerun for this private native-platform correction.
+
+Locked workspace and independently locked consumer compilation, Windows correctness Clippy,
+root/consumer formatting and existing import/document/release/API-tier checks pass on Windows
+11/Rust 1.95.0 with one build job. Existing nonblocking warnings remain. The declared Rust 1.92
+floor and dependency versions remain unchanged; that compiler floor is unexecuted. Independent
+Windows review, Mac source review and main integration resolve the confirmed findings while
+retaining the unexecuted platform and variable-axis limits below.
+
+The two native installation scenarios share the complete public Render/shape/paint/Submitted
+and exact retirement fixture. They verify the original App/Window TextSystem, explicit child
+notification, new accepted/nonempty submitted generations and old-layout repaint. Private Noto
+fallback checks actual face/glyph/source indices and visible repeated raster at scales 1.0/1.5.
+Windows failed-batch recovery retains the prior published collection until the next successful
+publication; the builder may retain earlier valid files. This is not batch-atomic rollback.
+
+CoreText source and five deterministic tests prepare matching selection invalidation, private
+cascade construction and complete native feature/cascade identity. The obsolete OpenType module
+is removed. Independent source review identifies locked CoreFoundation typed-dictionary equality
+and an unchecked fallback traits path. The owner now compares complete attributes through CFType
+and shares non-panicking traits validation before primary/fallback property matching, retaining
+valid no-`m` fallback faces. Prepared mixed-script tests span 12/16/32px and old-layout raster.
+macOS compilation, native execution and cross-size identity remain unqualified on this Windows
+host. Windows submission is not glyph-pixel/compositor evidence. OS font-change watching,
+custom variation-axis APIs, measured costs, full framework refresh, Nara engine View integration
+and complete R11/R12 retain their separate scope.

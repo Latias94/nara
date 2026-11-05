@@ -78,6 +78,14 @@ face identities and exact public-context TextSystem ownership retain candidate r
 release. Core/WGPU 999, affected consumers 2,964 and Windows 189 pass; four existing interactive
 cases remain skipped. Native existing-family reselection and Windows/CoreText missing reporting
 remain open, as do the remaining framework refresh, Nara integration and measured budgets.
+The subsequent [native-font successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-font-reselection-and-retained-faces)
+is verified locally at Open-GPUI `b803d542b674af34feea0ca277b2ac6721de9a0e`, without publication.
+DirectWrite selection/fallback refresh and retained actual native faces pass focused 9 and complete
+Windows 197 cases, with four existing interactive cases skipped. CoreText source and five tests
+include configured cascade identity and reviewed attribute/traits corrections; Mac compilation/
+execution remains unqualified. The earlier shared Core/WGPU/consumer results keep their original
+scope. Variable-axis reconstruction, OS font watching, the remaining refresh, Nara integration
+and measured budgets remain open.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

@@ -1545,8 +1545,18 @@ accessors share the App's exact TextSystem. Core/WGPU 999, affected consumers 2,
 189 pass, with four existing interactive cases skipped; locked compilation, correctness Clippy,
 formatting and existing document/import/API checks pass. Deterministic fallback/software raster,
 native new-family installation and exact retirement retain their stated limits. Native
-existing-family reselection is the next queued font consumer; Windows/CoreText missing reporting,
+existing-family reselection was the next queued font consumer; Windows/CoreText missing reporting,
 the later Web Canvas layer, the remaining text/layout/API refresh and measured costs remain open.
+The following [native-font successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-font-reselection-and-retained-faces)
+is verified locally at Open-GPUI `b803d542b674af34feea0ca277b2ac6721de9a0e`, without publication.
+DirectWrite now revalidates collection selections, resolves private fallback and preserves exact
+native callback simulations, old glyphs and unchanged face IDs. Corrected focused 9/9 and complete
+Windows 197/197 pass, with four existing interactive cases skipped. The record retains the
+intermediate second-shaping failure and its owning correction, plus successful workspace/
+independent-consumer compilation, Windows correctness Clippy and formatting/document checks.
+CoreText source, configured-cascade identity, shared traits validation and five deterministic tests
+are prepared; macOS compilation/execution remains open. Nondefault variable axes, OS font watching,
+Unicode wrapping, the remaining layout/API refresh and numeric costs retain their separate scope.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
