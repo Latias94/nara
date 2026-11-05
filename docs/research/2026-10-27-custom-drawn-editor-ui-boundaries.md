@@ -1743,3 +1743,43 @@ not change; that compiler floor was not executed in this unit. Text layout and p
 are the two remaining initial correctness units, followed by the coherent font/text/layout/API and
 platform/render refresh. Full R11/R12, integrated engine View, Editor/game execution selection,
 complete native input and measured performance remain open.
+
+## November 6: Native Text Layout Successor
+
+The verified local Open-GPUI successor is `0861f8d52b175e5c41b4d0081e121ed957e7f8ec` on
+`optimize/docking-graph-transaction`. It is not published by this continuation; the recorded
+maintenance branch remains at the previously verified `7a1bf6d73d4`. The cycle's fixed upstream
+target is still Zed `635026fabc38440fce5e1767d125026a17b12012`. The framework's existing
+verification guide, candidate queue and plan own the detailed results and next input unit.
+
+The fourth priority unit adapts upstream `0294cfb58e`, `979cd3fdf0`, `ac6818fb2d` and
+`e71963a599` within DirectWrite and the existing wrapped LineLayout. Native zero-glyph tab runs
+retain their actual advance and source-byte caret entries; U+2028/U+2029 segments keep one
+logical baseline without deleting source characters. Empty typography configuration applies
+the standard liga/clig/calt defaults, preserving explicit disabling. Wrapped exact hit testing
+returns the current row's end rather than panicking in the floating-point gap outside the
+unwrapped width. Closest-index and caret affinity retain their existing behavior.
+
+Core regressions reproduced two unwrap panics, and the corrected Windows baseline reproduced
+four missing-feature failures while its explicit-disable control passed. Final execution passes
+Core 877/877, affected UI/component/docking/Canvas 2,964/2,964, eight focused native/text cases
+and selected Windows 173/173. Four existing interactive Windows cases remain skipped. Native
+font/layout oracles cover real distinct FontRun identities, widths and hit positions. A public
+Render/canvas/WindowTextSystem trajectory retains complete source through actual paint, a
+notified newer accepted/nonempty renderer-Submitted generation and exact window/platform/OLE/
+text-system retirement. The counter does not isolate notification causality from VSync, and
+submission is not screen/glyph pixel readback or native keyboard/IME qualification.
+
+Locked workspace and independent-consumer compilation, correctness Clippy, formatting and
+import/document/release/public-API checks pass. Independent review found no remaining P1/P2.
+The Rust 1.92 floor and dependency graph remain unchanged; execution used Rust 1.95.0.
+
+Source reconciliation also identified `89e8a4b9ec` callback safety prerequisites. This unit
+adopts mutable callback provenance and nullable-array admission. The remaining mapped color
+staging release and atlas upload validation are queued separately: a malformed source must
+return an error without publishing a tile or consuming its allocation. Copying upstream's
+void-return upload guard would still let its caller publish success and would not satisfy the
+fork's lease/candidate contract. Pending-input/blur is the one remaining initial correctness
+unit, with IME preference, modifier recognition, dropped-focus and accepted/refused transition
+prerequisites recorded in the framework plan. The wider refresh, Nara integration and measured
+performance remain open.

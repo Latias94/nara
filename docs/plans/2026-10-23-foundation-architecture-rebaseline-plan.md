@@ -1506,8 +1506,16 @@ journals and inherited opacity through admitted/rejected candidates. Core 873, a
 UI/component/docking/Canvas 2,964 and selected Windows 165 pass; four existing interactive cases
 remain skipped. Its real HWND cache matrix and independent-consumer compilation retain the
 explicit non-view/external-group notification limits and unmeasured performance scope.
-The other two initial correctness units, integrated engine View, complete editing, full native
-input, numeric cost comparison and game-runtime selection remain open; no frontend/default
+The next [native text-layout successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-text-layout-successor)
+is verified locally at Open-GPUI `0861f8d52b1`; it is not published by this continuation. It
+preserves native tab advances, single-baseline Unicode separators, default/explicit typography
+and wrapped hit-test error semantics. Final Core 877, affected consumers 2,964 and selected
+Windows 173 pass, with the same four interactive cases skipped. Its native full-source paint/
+Submitted trajectory and independent-consumer check retain pixel/input/performance limits.
+Pending-input/blur is the remaining initial correctness unit. Native atlas upload admission and
+mapped color-staging release remain queued alongside the wider framework refresh.
+Integrated engine View, complete editing, full native input, numeric cost comparison and
+game-runtime selection remain open; no frontend/default
 replacement follows.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve

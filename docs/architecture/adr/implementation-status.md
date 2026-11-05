@@ -43,9 +43,15 @@ The subsequent [cached-dependency qualification](../../research/2026-10-27-custo
 at published Open-GPUI `7a1bf6d73d4` adds nested-draw read isolation, paint/deferred subscriptions,
 stable deferred replay and admitted opacity convergence. Core 873, affected consumers 2,964 and
 selected Windows 165 pass, with four existing interactive cases skipped; the native cache matrix
-uses actual Submitted frames and retirement. Text layout and pending-input/blur remain the two
-initial units before the broader refresh. This framework evidence establishes no Nara toolkit
+uses actual Submitted frames and retirement. At that checkpoint, text layout and pending-input/blur
+remained the two initial units before the broader refresh. This framework evidence establishes no Nara toolkit
 default, complete engine View or measured runtime budget.
+The following [native text-layout unit](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-native-text-layout-successor)
+is verified locally at Open-GPUI `0861f8d52b1`, without publication in this continuation. It
+preserves native tabs, Unicode separator baselines, default/explicit typography and wrapped
+hit-test errors. Core 877, affected consumers 2,964 and selected Windows 173 pass; four existing
+interactive cases remain skipped. Pending-input/blur, native upload/mapping safety and the
+wider refresh remain open, along with Nara integration and measured performance.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
