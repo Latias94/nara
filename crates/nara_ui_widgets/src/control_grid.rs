@@ -76,13 +76,7 @@ impl UiLayout for UiControlGrid {
             let mut row = Vec::<UiLayoutMeasurement>::with_capacity(end - start);
             let mut baseline: Option<f32> = None;
             for index in start..end {
-                let measured = children.measure(
-                    index,
-                    UiLayoutConstraints {
-                        width: UiAvailableSpace::Definite(cell_width),
-                        height: UiAvailableSpace::MaxContent,
-                    },
-                )?;
+                let measured = children.measure_at_width(index, cell_width)?;
                 if let Some(child_baseline) = measured.first_baseline() {
                     baseline = Some(baseline.map_or(child_baseline, |old| old.max(child_baseline)));
                 }

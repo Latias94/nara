@@ -435,10 +435,36 @@ fn assert_pressure_output(
         .find(|node| node.key() == &panel.label)
         .unwrap();
     assert_eq!(field.value(), Some(PRESSURE_DRAFT));
+    let row_key = frame
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(&panel.label))
+        .unwrap()
+        .route_parent()
+        .unwrap();
+    let row = frame
+        .layouts()
+        .iter()
+        .find(|layout| layout.key() == Some(row_key))
+        .unwrap();
+    let siblings = frame
+        .layouts()
+        .iter()
+        .filter(|layout| {
+            layout.route_parent() == Some(row_key) && layout.key() != Some(&panel.label)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(siblings.len(), 3);
     assert_eq!(
-        field.rect().size().width(),
-        input.environment.logical_size().width() - 24.0,
+        row.rect().size().width(),
+        input.environment.logical_size().width() - 2.0 * panel.owner.appearance.panel_inset(),
     );
+    let reserved = siblings
+        .iter()
+        .map(|layout| layout.rect().size().width())
+        .sum::<f32>()
+        + 3.0 * panel.owner.appearance.gap();
+    assert!((field.rect().size().width() - (row.rect().size().width() - reserved)).abs() < 0.02);
     assert_eq!(field.rect().size().height(), 36.0);
     for layout in frame.layouts() {
         assert_eq!(
@@ -470,10 +496,12 @@ fn assert_pressure_output(
                 .iter()
                 .find(|node| node.key() == &panel.label)
                 .unwrap();
-            assert_eq!(
-                field.rect().size().width() - before.rect().size().width(),
-                input.environment.logical_size().width()
-                    - baseline.environment().logical_size().width(),
+            let field_delta = field.rect().size().width() - before.rect().size().width();
+            let viewport_delta = input.environment.logical_size().width()
+                - baseline.environment().logical_size().width();
+            assert!(
+                (field_delta - viewport_delta).abs() < 0.001,
+                "field width delta {field_delta} must track viewport width delta {viewport_delta}",
             );
         }
     }

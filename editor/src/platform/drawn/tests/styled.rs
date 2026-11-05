@@ -74,6 +74,7 @@ impl Workflow<'_> {
         }
         self.replace_panel_text(INSPECTOR, &label, "Styled 属性 café")?;
         self.capture_workspace("normal-inspector")?;
+        self.resize_inspector_draft(&label, "Styled 属性 café")?;
         if self.state()? != before {
             return Err(
                 "editing the retained Inspector draft mutated its source before Apply".into(),
@@ -160,6 +161,102 @@ impl Workflow<'_> {
         self.click(SHELL, "Undo")?;
         self.expect_rows(&before_component, before_component.undo, 2)?;
         self.action_menu_dismissal()?;
+        Ok(())
+    }
+
+    fn resize_inspector_draft(&mut self, label: &str, value: &str) -> TestResult {
+        let before = self.state()?;
+        let original_size = self.native.window.inner_size();
+        let original_frame = self.panel_frame(INSPECTOR)?;
+        let original_field = original_frame
+            .semantics()
+            .iter()
+            .find(|node| node.role() == UiSemanticRole::TextInput && node.name() == label)
+            .ok_or("the Inspector field retired before resize")?;
+        let key = original_field.key().clone();
+        let mut widths = Vec::new();
+        for (width, capture) in [(960.0, "narrow-property"), (1360.0, "wide-property")] {
+            self.event(EditorPanelPlatformEvent::Ime(Ime::Preedit(
+                "resize 未提交".into(),
+                Some((0, 6)),
+            )))?;
+            self.paint()?;
+            if !self
+                .panel_frame(INSPECTOR)?
+                .semantics()
+                .iter()
+                .any(|node| node.name() == "Composing...")
+            {
+                return Err(
+                    "resize cancellation requires an actual live Inspector composition".into(),
+                );
+            }
+            let _ = self
+                .native
+                .window
+                .request_inner_size(LogicalSize::new(width, 1100.0));
+            let size = self.native.window.inner_size();
+            self.event(EditorPanelPlatformEvent::Resized([size.width, size.height]))?;
+            for _ in 0..3 {
+                self.paint()?;
+            }
+            self.event(EditorPanelPlatformEvent::Ime(Ime::Commit(
+                "stale resize input".into(),
+            )))?;
+            self.key(Key::Named(NamedKey::Backspace))?;
+            let frame = self.panel_frame(INSPECTOR)?;
+            let field = frame
+                .semantics()
+                .iter()
+                .find(|node| node.key() == &key)
+                .ok_or("native resize replaced the retained field identity")?;
+            if field.value() != Some(value)
+                || self.state()? != before
+                || frame
+                    .semantics()
+                    .iter()
+                    .any(|node| node.name() == "Composing...")
+            {
+                return Err("native resize lost the retained draft or changed its document".into());
+            }
+            widths.push(field.rect().size().width());
+            self.focus_panel_field(INSPECTOR, label)?;
+            self.key(Key::Named(NamedKey::End))?;
+            self.event(EditorPanelPlatformEvent::Ime(Ime::Commit("x".into())))?;
+            self.paint()?;
+            if self.panel_field_value(INSPECTOR, label)? != format!("{value}x") {
+                return Err("the resized field did not map current native text input".into());
+            }
+            self.event(EditorPanelPlatformEvent::ModifiersChanged(
+                ModifiersState::CONTROL,
+            ))?;
+            self.key(Key::Character("z".into()))?;
+            self.event(EditorPanelPlatformEvent::ModifiersChanged(
+                ModifiersState::empty(),
+            ))?;
+            if self.panel_field_value(INSPECTOR, label)? != value || self.state()? != before {
+                return Err(
+                    "resized local Undo failed to preserve draft and document history".into(),
+                );
+            }
+            self.capture_workspace(capture)?;
+        }
+        if (widths[0] - widths[1]).abs() < 1.0 {
+            return Err("native property allocation did not change across window widths".into());
+        }
+        let _ = self.native.window.request_inner_size(original_size);
+        self.event(EditorPanelPlatformEvent::Resized([
+            original_size.width,
+            original_size.height,
+        ]))?;
+        for _ in 0..3 {
+            self.paint()?;
+        }
+        self.focus_panel_field(INSPECTOR, label)?;
+        self.key(Key::Named(NamedKey::End))?;
+        if self.panel_field_value(INSPECTOR, label)? != value || self.state()? != before {
+            return Err("restoring the original window lost the complete Inspector draft".into());
+        }
         Ok(())
     }
 

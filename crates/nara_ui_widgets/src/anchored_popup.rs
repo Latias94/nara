@@ -65,13 +65,7 @@ impl UiLayout for UiAnchoredPopup {
         }
         let minimum_width = children.min_content_width(0)?;
         let popup_width = self.preferred_width.max(minimum_width).min(available_width);
-        let measured = children.measure(
-            0,
-            UiLayoutConstraints {
-                width: UiAvailableSpace::Definite(popup_width),
-                height: UiAvailableSpace::MaxContent,
-            },
-        )?;
+        let measured = children.measure_at_width(0, popup_width)?;
         let popup_height = measured.size().height().min(available_height);
         let x = self.anchor.max().x().min(width - self.margin) - popup_width;
         let below = self.anchor.max().y() + self.gap;

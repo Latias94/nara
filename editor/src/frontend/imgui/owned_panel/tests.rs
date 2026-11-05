@@ -200,6 +200,8 @@ fn same_ordered_font_ids_retain_controls_and_dirty_input() {
 #[test]
 fn reordered_fonts_preserve_queued_apply_and_drafts_after_admission_refusal() {
     let (mut harness, panel) = setup();
+    let candidate = harness.draw_at_size([1800.0, 1800.0]);
+    harness.submit(candidate);
     let (value, value_key, _) = replace(&mut harness.frontend, panel, "value", "25");
     let (label, label_key, old_token) =
         replace(&mut harness.frontend, panel, "label", "unapplied label");
@@ -309,6 +311,8 @@ fn reordered_fonts_preserve_queued_apply_and_drafts_after_admission_refusal() {
 #[test]
 fn font_replacement_preserves_pending_ids_and_routes_exact_application_results() {
     let (mut harness, panel) = setup();
+    let candidate = harness.draw_at_size([1800.0, 1800.0]);
+    harness.submit(candidate);
     let (value, value_key, _) = replace(&mut harness.frontend, panel, "value", "25");
     let (other, other_key, _) = replace(&mut harness.frontend, panel, "other", "7");
     let (_, label_key, _) = replace(&mut harness.frontend, panel, "label", "unapplied label");

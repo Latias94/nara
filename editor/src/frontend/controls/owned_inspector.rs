@@ -13,21 +13,24 @@ use nara::{
     },
 };
 use nara_text::{
-    FontFace, TextEdit, TextEditOutcome, TextEngine, TextEngineCreateError, TextTypography,
+    FontFace, TextEdit, TextEditOutcome, TextEngine, TextEngineCreateError, TextLayoutRequest,
+    TextTypography,
 };
 use nara_ui_kernel::{
     UiActionId, UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiBrush,
-    UiCompileError, UiCompiler, UiDimension, UiDispatchBatch, UiEdges, UiEnvironment,
-    UiFlexDirection, UiFrame, UiKey, UiKeyError, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPoint,
-    UiRect, UiRoot, UiRootKey, UiRootStatus, UiSemanticRole, UiSemantics, UiStyle, UiStyleError,
-    UiText, UiTextOverflow, UiTheme, UiVisual,
+    UiColor, UiCompileError, UiCompiler, UiCustomLayout, UiDimension, UiDispatchBatch, UiEdges,
+    UiEnvironment, UiFrame, UiKey, UiKeyError, UiLayer, UiLayoutError, UiLocalKey, UiMesh,
+    UiMeshError, UiMeshVertex, UiNode, UiOverflow, UiPoint, UiRect, UiRoot, UiRootKey,
+    UiRootStatus, UiSemanticRole, UiSemantics, UiSize, UiStyle, UiStyleError, UiText,
+    UiTextOverflow, UiTheme, UiVisual,
 };
 #[cfg(test)]
 use nara_ui_widgets::UiButtonVisualState;
 use nara_ui_widgets::{
     UiAppearance, UiAppearanceError, UiAppearancePalette, UiButton, UiButtonState, UiButtonVariant,
-    UiControlSize, UiIntentBatch, UiIntentBatchError, UiTextField, UiTextFieldAppearance,
-    UiTextFieldError, UiTextInputToken, UiTextRole, UiWidgetError,
+    UiControlGrid, UiControlSize, UiIconLabel, UiIntentBatch, UiIntentBatchError, UiPropertyRow,
+    UiTextField, UiTextFieldAppearance, UiTextFieldError, UiTextInputToken, UiTextRole,
+    UiWidgetError,
 };
 use thiserror::Error;
 
@@ -285,7 +288,6 @@ struct DisplayedField {
 struct DisplayedInput {
     field: UiKey,
     display_text: String,
-    width: f32,
     typography: TextTypography,
     padding: UiEdges,
 }
@@ -339,6 +341,11 @@ pub(in crate::frontend) struct OwnedInspector {
     read_only: bool,
     recovery_button: ButtonControl,
     components: ComponentControls,
+    property_layout: (UiPropertyRow, UiCustomLayout),
+    property_label_layout: (UiIconLabel, UiCustomLayout),
+    property_icon: (UiColor, UiMesh),
+    property_status_metrics: Option<(TextTypography, UiSize)>,
+    action_layout: (UiControlGrid, UiCustomLayout),
 }
 
 impl OwnedInspector {
@@ -371,6 +378,10 @@ impl OwnedInspector {
             root.clone(),
             UiLocalKey::runtime("nara.inspector.recovery", "discard")?,
         )?;
+        let appearance = UiAppearance::default();
+        let property_row = UiPropertyRow::new(120.0, appearance.gap())?;
+        let property_label = property_label_layout(appearance.gap())?;
+        let action_grid = UiControlGrid::new(76.0, appearance.gap())?;
         Ok(Self {
             work: Default::default(),
             root,
@@ -378,7 +389,7 @@ impl OwnedInspector {
             scroll_pixels: 0.0,
             engine,
             compiler,
-            appearance: UiAppearance::default(),
+            appearance,
             appearance_override: None,
             appearance_dirty: false,
             next_identity: 1,
@@ -391,6 +402,14 @@ impl OwnedInspector {
                 state: UiButtonState::default(),
             },
             components: ComponentControls::default(),
+            property_layout: (property_row, UiCustomLayout::new(property_row)),
+            property_label_layout: (property_label, UiCustomLayout::new(property_label)),
+            property_icon: (
+                appearance.palette().muted_text,
+                property_icon(appearance.palette().muted_text)?,
+            ),
+            property_status_metrics: None,
+            action_layout: (action_grid, UiCustomLayout::new(action_grid)),
         })
     }
 
@@ -400,6 +419,54 @@ impl OwnedInspector {
             self.appearance_override = Some(appearance);
             self.appearance_dirty = true;
         }
+    }
+
+    fn refresh_layouts(&mut self) -> Result<(), OwnedInspectorError> {
+        let scale = self.appearance.text_scale();
+        let gap = self.appearance.gap();
+        let property_row = UiPropertyRow::new(120.0 * scale, gap)?;
+        if self.property_layout.0 != property_row {
+            self.property_layout = (property_row, UiCustomLayout::new(property_row));
+        }
+        let property_label = property_label_layout(gap)?;
+        if self.property_label_layout.0 != property_label {
+            self.property_label_layout = (property_label, UiCustomLayout::new(property_label));
+        }
+        let color = self.appearance.palette().muted_text;
+        if self.property_icon.0 != color {
+            self.property_icon = (color, property_icon(color)?);
+        }
+        let action_grid = UiControlGrid::new(76.0 * scale, gap)?;
+        if self.action_layout.0 != action_grid {
+            self.action_layout = (action_grid, UiCustomLayout::new(action_grid));
+        }
+        let typography = self.appearance.typography(UiTextRole::Caption)?;
+        if self
+            .property_status_metrics
+            .is_none_or(|(previous, _)| previous != typography)
+        {
+            let mut width = 0.0_f32;
+            let mut height = 0.0_f32;
+            for status in [
+                "Submitting...",
+                "Source changed",
+                "Conflict",
+                "Composing...",
+                "Invalid input",
+                "Read-only",
+                "Modified",
+                "Unchanged",
+            ] {
+                let layout = self
+                    .engine
+                    .layout(&TextLayoutRequest::from_typography(status, typography))?;
+                width = width.max(layout.width());
+                height = height.max(layout.height());
+            }
+            let size = UiSize::new(width, height).ok_or(UiLayoutError::InvalidGeometry)?;
+            self.property_status_metrics = Some((typography, size));
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -524,6 +591,7 @@ impl OwnedInspector {
             Some(appearance) => appearance,
             None => inspector_appearance(theme)?,
         };
+        self.refresh_layouts()?;
         self.read_only = read_only;
         let width = environment.logical_size().width() - 2.0 * self.appearance.panel_inset();
         if width <= 16.0 {
@@ -1043,6 +1111,7 @@ impl OwnedInspector {
         let display_text = input.display_text.clone();
         let typography = input.typography;
         let padding = input.padding;
+        let field_rect = self.accepted_input_rect(frame, field)?;
         let control = self
             .controls
             .get_mut(&displayed.key)
@@ -1061,12 +1130,7 @@ impl OwnedInspector {
         if text.editor().is_composing() {
             return Err(OwnedInspectorError::Composing);
         }
-        let field_rect = frame
-            .layouts()
-            .iter()
-            .find(|layout| layout.key() == Some(field))
-            .ok_or(OwnedInspectorError::ChangedProjection)?
-            .rect();
+        text.layout_measurement(field_rect.size().width())?;
         let text_key = frame
             .layouts()
             .iter()
@@ -1134,7 +1198,8 @@ impl OwnedInspector {
         {
             return Err(OwnedInspectorError::ChangedProjection);
         }
-        Ok(text.ime_area(input.width)?)
+        let rect = self.accepted_input_rect(frame, field)?;
+        Ok(text.ime_area(rect.size().width())?)
     }
 
     /// Reduces Host-admitted routing facts. Returned intents still require explicit activation.
@@ -1407,15 +1472,25 @@ impl OwnedInspector {
         input: &UiKey,
     ) -> Result<&DisplayedField, OwnedInspectorError> {
         let field = self.live_field(frame, input)?;
-        if !self.retained(frame)?.inputs.contains_key(input)
-            || !frame
-                .semantics()
-                .iter()
-                .any(|node| node.key() == input && node.role() == UiSemanticRole::TextInput)
-        {
+        self.accepted_input_rect(frame, input)?;
+        Ok(field)
+    }
+
+    fn accepted_input_rect(
+        &self,
+        frame: &Arc<UiFrame>,
+        input: &UiKey,
+    ) -> Result<UiRect, OwnedInspectorError> {
+        if !self.retained(frame)?.inputs.contains_key(input) {
             return Err(OwnedInspectorError::ChangedProjection);
         }
-        Ok(field)
+        frame
+            .semantics()
+            .iter()
+            .find(|node| node.key() == input && node.role() == UiSemanticRole::TextInput)
+            .map(|node| node.rect())
+            .filter(|rect| !rect.size().is_empty())
+            .ok_or(OwnedInspectorError::ChangedProjection)
     }
 
     fn check_input(
@@ -1692,16 +1767,28 @@ impl OwnedInspector {
             .local_key()
             .cloned()
             .ok_or(OwnedInspectorError::UnknownControl)?;
+        let measured_scalar = current.is_some()
+            && control.tool.is_none()
+            && control.text().is_some()
+            && matches!(basis.field.shape, ComponentValueShape::Scalar { .. });
         let text_node = control
             .text()
             .map(|text| {
+                let style = UiStyle::flex()
+                    .with_height(UiDimension::Px(field_height))
+                    .with_flex_shrink(0.0);
                 text.authored_node(
                     &self.root,
-                    UiStyle::flex()
-                        .with_width(UiDimension::Px(width))
-                        .with_height(UiDimension::Px(field_height))
-                        .with_flex_shrink(0.0),
-                    width,
+                    if measured_scalar {
+                        style
+                    } else {
+                        style.with_width(UiDimension::Px(width))
+                    },
+                    if measured_scalar {
+                        240.0 * appearance.text_scale()
+                    } else {
+                        width
+                    },
                 )
             })
             .transpose()?;
@@ -1721,14 +1808,37 @@ impl OwnedInspector {
             .text()
             .and_then(|text| text.appearance().map(|appearance| appearance.padding));
         let states = control.buttons;
-        let mut children = vec![self.caption(
+        let path = self.caption(
             &format!("{identity}.path"),
             &format!(
                 "{}{}",
                 basis.field.path,
                 if basis.field.required { " *" } else { "" }
             ),
-        )?];
+        )?;
+        let mut children = Vec::new();
+        let mut property_children = Vec::new();
+        if measured_scalar {
+            property_children.push(
+                UiNode::new(UiStyle::flex())
+                    .with_key(UiLocalKey::runtime(
+                        "nara.inspector.property-label",
+                        identity.to_string(),
+                    )?)
+                    .with_custom_layout(self.property_label_layout.1.clone())
+                    .with_children([
+                        UiNode::new(UiStyle::flex())
+                            .with_key(UiLocalKey::runtime(
+                                "nara.inspector.property-icon",
+                                identity.to_string(),
+                            )?)
+                            .with_mesh(self.property_icon.1.clone()),
+                        path,
+                    ]),
+            );
+        } else {
+            children.push(path);
+        }
         if let Some(label) = tool_label {
             children.push(self.caption(&format!("{identity}.tool.label"), &label)?);
         }
@@ -1740,12 +1850,15 @@ impl OwnedInspector {
                     display_text: display_text
                         .clone()
                         .ok_or(OwnedInspectorError::ReadOnlyField)?,
-                    width,
                     typography,
                     padding: padding.ok_or(OwnedInspectorError::ChangedProjection)?,
                 },
             );
-            children.push(node);
+            if measured_scalar {
+                property_children.push(node);
+            } else {
+                children.push(node);
+            }
         } else if !boolean {
             children.push(self.label(
                 &format!("{identity}.value"),
@@ -1887,7 +2000,7 @@ impl OwnedInspector {
                     "Retained intent: remove the authored override",
                 )?);
             }
-            if draft.in_flight() {
+            if draft.in_flight() && !measured_scalar {
                 children.push(self.caption(
                     &format!("{identity}.pending"),
                     "Submitting this field edit...",
@@ -1917,24 +2030,20 @@ impl OwnedInspector {
                     }
                     _ => UiButtonVariant::Secondary,
                 };
-                actions.push(
-                    appearance
-                        .button(
-                            &button,
-                            states[operation.index()],
-                            variant,
-                            UiControlSize::Regular,
-                            false,
-                        )?
-                        .authored_node(
-                            &button,
-                            &self.root,
-                            UiStyle::flex()
-                                .with_width(UiDimension::Px((width - 12.0) / 4.0))
-                                .with_height(UiDimension::Px(button_height))
-                                .with_flex_shrink(0.0),
-                        )?,
-                );
+                let node = appearance
+                    .button(
+                        &button,
+                        states[operation.index()],
+                        variant,
+                        UiControlSize::Regular,
+                        false,
+                    )?
+                    .authored_node(&button, &self.root, UiStyle::flex().with_flex_shrink(0.0))?;
+                if measured_scalar && operation == InspectorOperation::Apply {
+                    property_children.push(node);
+                } else {
+                    actions.push(node);
+                }
                 buttons.insert(
                     button_key,
                     DisplayedButton {
@@ -1944,13 +2053,58 @@ impl OwnedInspector {
                     },
                 );
             }
+            if measured_scalar {
+                let status = if draft.in_flight() {
+                    "Submitting..."
+                } else if draft.incompatible {
+                    "Source changed"
+                } else if draft.conflict {
+                    "Conflict"
+                } else if composing {
+                    "Composing..."
+                } else if invalid {
+                    "Invalid input"
+                } else if !enabled {
+                    "Read-only"
+                } else if draft.dirty {
+                    "Modified"
+                } else {
+                    "Unchanged"
+                };
+                let status_key = format!("{identity}.status");
+                let (_, status_size) = self
+                    .property_status_metrics
+                    .ok_or(OwnedInspectorError::ChangedProjection)?;
+                let mut status_text = appearance.text(status, UiTextRole::Caption, true)?;
+                if invalid || draft.conflict {
+                    status_text =
+                        status_text.with_brush(UiBrush::Solid(appearance.palette().danger_text));
+                }
+                property_children.push(
+                    UiNode::new(
+                        UiStyle::flex()
+                            .with_width(UiDimension::Px(status_size.width()))
+                            .with_height(UiDimension::Px(status_size.height()))
+                            .with_flex_shrink(0.0),
+                    )
+                    .with_key(UiLocalKey::runtime("nara.inspector.label", &status_key)?)
+                    .with_text(status_text.with_overflow(UiTextOverflow::Clip)),
+                );
+                children.insert(
+                    0,
+                    UiNode::new(UiStyle::flex().with_flex_shrink(0.0))
+                        .with_key(UiLocalKey::runtime(
+                            "nara.inspector.property",
+                            identity.to_string(),
+                        )?)
+                        .with_custom_layout(self.property_layout.1.clone())
+                        .with_children(property_children),
+                );
+            }
             children.push(
-                UiNode::new(
-                    UiStyle::flex()
-                        .with_flex_direction(UiFlexDirection::Row)
-                        .with_gap(4.0),
-                )
-                .with_children(actions),
+                UiNode::new(UiStyle::flex().with_flex_shrink(0.0))
+                    .with_custom_layout(self.action_layout.1.clone())
+                    .with_children(actions),
             );
             if draft.dirty || draft.incompatible {
                 let button_key = UiKey::scoped(
@@ -2075,6 +2229,33 @@ fn inspector_field_appearance(
     Ok(field)
 }
 
+fn property_label_layout(gap: f32) -> Result<UiIconLabel, UiLayoutError> {
+    UiIconLabel::new(
+        UiSize::new(12.0, 12.0).ok_or(UiLayoutError::InvalidGeometry)?,
+        -10.0,
+        gap,
+    )
+}
+
+fn property_icon(color: UiColor) -> Result<UiMesh, UiMeshError> {
+    let mut vertices = Vec::with_capacity(12);
+    let mut indices = Vec::with_capacity(18);
+    for (right, top) in [(11.0, 1.0), (9.0, 5.0), (7.0, 9.0)] {
+        let first = vertices.len() as u32;
+        vertices.extend(
+            [
+                (1.0, top),
+                (right, top),
+                (right, top + 2.0),
+                (1.0, top + 2.0),
+            ]
+            .map(|(x, y)| UiMeshVertex::new(UiPoint::new(x, y), color)),
+        );
+        indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+    }
+    UiMesh::new(vertices, indices)
+}
+
 fn inspector_control_height(
     appearance: UiAppearance,
     minimum: f32,
@@ -2174,6 +2355,10 @@ pub(in crate::frontend) enum OwnedInspectorError {
     #[error(transparent)]
     Compile(#[from] UiCompileError),
     #[error(transparent)]
+    Layout(#[from] UiLayoutError),
+    #[error(transparent)]
+    Mesh(#[from] UiMeshError),
+    #[error(transparent)]
     Authoring(#[from] UiAuthoringError),
     #[error(transparent)]
     Key(#[from] UiKeyError),
@@ -2183,6 +2368,8 @@ pub(in crate::frontend) enum OwnedInspectorError {
     Appearance(#[from] UiAppearanceError),
     #[error(transparent)]
     TextField(#[from] UiTextFieldError),
+    #[error(transparent)]
+    TextLayout(#[from] nara_text::TextLayoutError),
     #[error(transparent)]
     Button(#[from] UiWidgetError),
     #[error(transparent)]

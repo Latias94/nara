@@ -6,30 +6,41 @@ pub(super) fn repaint(harness: &mut Harness) {
 }
 
 pub(super) fn control(
-    harness: &Harness,
+    harness: &mut Harness,
     panel: EditorPanelInstanceId,
     field: &str,
     role: UiSemanticRole,
     name: &str,
 ) -> (Arc<UiFrame>, UiKey) {
-    let inspector = harness.frontend.presentation.widgets[&panel]
-        .owned_inspector
-        .as_ref()
-        .unwrap();
-    let frame = Arc::clone(inspector.compiled_frame().unwrap());
-    let group = frame
-        .semantics()
-        .iter()
-        .find(|node| node.role() == UiSemanticRole::Group && node.name() == field)
-        .unwrap();
-    let node = frame
-        .semantics()
-        .iter()
-        .find(|node| {
-            node.role() == role && node.name() == name && node.parent() == Some(group.key())
-        })
-        .unwrap_or_else(|| panic!("missing {field}/{name}"));
-    (Arc::clone(&frame), node.key().clone())
+    for direction in [-1.0, 1.0] {
+        loop {
+            let inspector = harness.frontend.presentation.widgets[&panel]
+                .owned_inspector
+                .as_ref()
+                .unwrap();
+            let frame = Arc::clone(inspector.compiled_frame().unwrap());
+            if let Some(group) = frame
+                .semantics()
+                .iter()
+                .find(|node| node.role() == UiSemanticRole::Group && node.name() == field)
+                && let Some(node) = frame.semantics().iter().find(|node| {
+                    node.role() == role && node.name() == name && node.parent() == Some(group.key())
+                })
+            {
+                return (Arc::clone(&frame), node.key().clone());
+            }
+            let delta = direction * frame.environment().logical_size().height() * 0.5;
+            if !harness
+                .frontend
+                .scroll_owned_panel(panel, &frame, delta)
+                .unwrap()
+            {
+                break;
+            }
+            repaint(harness);
+        }
+    }
+    panic!("missing presented {field}/{name}");
 }
 
 pub(super) fn action(harness: &mut Harness, panel: EditorPanelInstanceId, field: &str, name: &str) {
@@ -201,7 +212,7 @@ fn structured_optional_retires_cancelled_input_and_reapplies_the_exact_retained_
     let (old_frame, old_input, old_token) =
         replace_leaf(&mut harness, panel, "optional", "root.new", "1e100");
     let (frame, confirm) = control(
-        &harness,
+        &mut harness,
         panel,
         "optional",
         UiSemanticRole::Button,
@@ -240,7 +251,7 @@ fn structured_optional_retires_cancelled_input_and_reapplies_the_exact_retained_
     );
     action(&mut harness, panel, "optional", "root: Some...");
     let (frame, replacement) = control(
-        &harness,
+        &mut harness,
         panel,
         "optional",
         UiSemanticRole::TextInput,
@@ -337,7 +348,7 @@ fn structured_list_removal_preserves_the_surviving_leaf_identity_and_local_undo(
     let (_, surviving_input, surviving_token) =
         replace_leaf(&mut harness, panel, "list", "root[1]", "8");
     let (frame, _) = control(
-        &harness,
+        &mut harness,
         panel,
         "list",
         UiSemanticRole::TextInput,
@@ -358,7 +369,7 @@ fn structured_list_removal_preserves_the_surviving_leaf_identity_and_local_undo(
         .unwrap();
     repaint(&mut harness);
     let (composing, remove) = control(
-        &harness,
+        &mut harness,
         panel,
         "list",
         UiSemanticRole::Button,
@@ -413,7 +424,7 @@ fn structured_list_removal_preserves_the_surviving_leaf_identity_and_local_undo(
     repaint(&mut harness);
     action(&mut harness, panel, "list", "root[0]: Remove item");
     let (frame, renamed) = control(
-        &harness,
+        &mut harness,
         panel,
         "list",
         UiSemanticRole::TextInput,
@@ -446,7 +457,7 @@ fn structured_list_removal_preserves_the_surviving_leaf_identity_and_local_undo(
         ComponentValue::List(vec![ComponentValue::U64(3)])
     );
     let (frame, renamed) = control(
-        &harness,
+        &mut harness,
         panel,
         "list",
         UiSemanticRole::TextInput,

@@ -1840,6 +1840,12 @@ hierarchy and explicit component-state design into the next complete visual comp
 unsupported tool/preferences before changing defaults. The reference does not expand game scope
 or move document, rendering, input or layout ownership into a design-token file.
 
+The [allocation-driven property unit](2026-11-05-measured-property-composition-plan.md) follows
+this prerequisite with final-width field geometry and measured icon/label/value/action/status
+composition. It compares pinned GPUI layout/prepaint mechanisms, preserves actual displayed-input
+authority and introduces exact-width child measurement through the existing compiler. Its
+qualification remains separate from complete Editor visual acceptance and R11a/e budgets.
+
 **Complete consumer:** extend the independently drawn source workspace with visually coherent
 document tabs, a compact toolbar, selectable source/hierarchy rows, one editable property group,
 inline disabled/read-only/invalid/pending/result feedback and one anchored action menu. Preserve

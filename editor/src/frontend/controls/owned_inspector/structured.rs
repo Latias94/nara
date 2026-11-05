@@ -147,7 +147,6 @@ impl OwnedInspector {
                         DisplayedInput {
                             field: owner.clone(),
                             display_text: text.editor().display_text().to_owned(),
-                            width,
                             typography,
                             padding: text
                                 .appearance()

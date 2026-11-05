@@ -170,8 +170,11 @@ and final raster placement use the same shifted origin. This lets a field includ
 block origins under short line spacing without shifting its clip or reshaping a substring.
 Non-finite offsets are refused at normal style admission.
 
-`UiTextField::authored_node` draws its text, selection and caret within one content clip. Pass the
-caller's resolved logical viewport width to drawing, pointer mapping and `ime_area()` consistently.
+`UiTextField::authored_node` draws its text, selection and caret within one content clip. Its third
+argument is the preferred intrinsic outer width, not a promise about final allocation. Min-content
+reserves padding plus positive content width; exact parent placement recomputes viewport, scroll,
+selection and caret at the allocated width. Read the actual accepted field rectangle and pass its
+logical outer width to pointer mapping, `ime_area()` and `layout_measurement()`.
 The candidate area is local logical geometry; the Host translates it to the actual native window
 and scale. Semantic values contain committed text, including an empty string, while preedit stays
 out of both the field value and its internal text semantics.
@@ -181,10 +184,11 @@ through ordinary `UiLayoutChildren::measure`; a parent must not derive it from f
 padding. Automatic height uses the actual font line blocks plus padding; pixel height retains
 at least that minimum. Exact parent/percentage allocations must accommodate it or explicitly
 own their clipping policy.
-The field retains one immutable custom-layout description keyed by this geometry. Unchanged
-measurement reuses that description across composition; changed measurement replaces it while
-older authored snapshots retain their original description. This preserves exact-frame reuse
-without making layout identity depend on palette, focus or a fresh allocation on every paint.
+The field retains immutable field/viewport layout descriptions keyed by their captured metrics,
+preferred width and selection/caret inputs. Unchanged composition reuses them; changed captured
+inputs replace them while old snapshots retain their original descriptions. Colors alone do not
+change layout identity. Complete prepared text remains part of the child description, so equal
+geometry never hides changed content. Exploratory measurement cannot change the retained editor.
 
 ## Scoped appearance and measured controls
 
@@ -226,7 +230,10 @@ scaling rounded device geometry. The native Host owns the final logical-to-devic
 `UiAppearance` currently scopes palette, density and text scale. Font family/weight/features,
 icon sizing, forced palettes, motion and persisted preferences are not implied by that value.
 Palette admission checks finite channel ranges; it does not certify contrast for arbitrary
-overrides. Document color transfer and alpha/compositing when supplying a palette, and qualify
+overrides. `UiColor` stores linear-sRGB RGB and straight alpha; `rgba` accepts those channels
+directly. Use `from_srgba8` (or opaque `from_srgb8`) for encoded sRGB bytes such as design HEX.
+Only RGB receives the transfer conversion; alpha stays linear and RGB is not premultiplied.
+Image source encoding remains a separate texture declaration. Qualify
 text, focus, selection and error cues against their actual surfaces.
 Other component libraries can own additional typed roles and recipes, compose these controls,
 or provide their own visuals without extending a central widget enum. Metric overrides use
@@ -247,6 +254,36 @@ keeps its explicit overflow policy. `UiAnchoredPopup` grows from its preferred w
 child min-content width before fitting available bounds above/below the captured logical anchor;
 its caller supplies oversized-content scrolling, dismissal, modal scope and focus restoration.
 Neither utility owns a window, input route or domain action.
+
+`UiPropertyRow` measures four arbitrary child subtrees in label/editor/action/status order. Wide
+rows reserve natural label/action/status widths and give the editor the remainder. Narrow rows
+stack label/editor and wrap the footer according to actual min-content width. Measurements use
+actual baselines and remeasure at exact allocated widths before placement. Authored widths inform
+natural sizing; final slots override width while preserving each child's height and overflow policy.
+The row owns no property value, draft or action reducer. Retain its immutable `UiCustomLayout`
+while its minimum editor width/gap stay compatible.
+
+Feedback that changes during a pointer gesture needs an owner-chosen stable size. The Inspector
+measures its finite status labels with the admitted fonts once per typography and reserves their
+maximum envelope, while authoring only the current caption. Canceling preedit therefore cannot
+resize nearby hit geometry before a Copy release. Generic property rows still measure their
+supplied children; they do not own a global status vocabulary or relax input-capture continuity.
+
+For custom containers, `UiLayoutChildren::measure(child, constraints)` preserves the child's
+authored width; definite available space supplies a wrapping hint and percentage basis.
+`measure_at_width(child, outer_width)` overrides that width to obtain the actual height/baseline
+before an exact placement at the same width. Use it when shrinking/growing an allocated column,
+including children with pixel/percentage widths. Authored height and overflow remain child policy.
+It neither selects final placement nor grants a side-effect phase; the same root-local poisoning,
+request accounting and candidate-wide work limit apply. The shared row, icon label, control grid
+and anchored popup use this path for final allocated-height measurement.
+
+`UiIconLabel` accepts an ordinary decorative icon node followed by a text-bearing label. Supply
+the icon's logical size, gap and explicit top offset from the actual label baseline. Captured
+`UiMesh` geometry uses the original compiler/renderer; the recipe neither rescales the mesh nor
+adds an icon font, action or hit target. Its owner controls asset readiness, missing-icon fallback,
+optical inputs and overflow. The independent property consumer uses both recipes without a new
+widget registry or document model.
 
 The compiler retains at most `min(max_nodes, 256)` successful plain-text requests within its
 original immutable font policy, additionally bounded by its source-byte and glyph limits.

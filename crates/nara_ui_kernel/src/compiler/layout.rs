@@ -358,6 +358,51 @@ impl CustomChildren<'_, '_, '_, '_> {
         Ok(index)
     }
 
+    fn measure_child(
+        &mut self,
+        child: usize,
+        constraints: UiLayoutConstraints,
+        known_width: Option<f32>,
+    ) -> Result<UiLayoutMeasurement, UiLayoutError> {
+        self.tree.work_stats.custom_child_measurements = self
+            .tree
+            .work_stats
+            .custom_child_measurements
+            .saturating_add(1);
+        self.tree.charge()?;
+        let index = self.unplaced_child(child)?;
+        constraints
+            .validate()
+            .map_err(|error| self.tree.reject(error))?;
+        let padding = self.tree.flat[index].node.style.padding;
+        if known_width.is_some_and(|width| width < padding.left() + padding.right()) {
+            return Err(self
+                .tree
+                .reject(UiLayoutError::PlacementSizeMismatch { child }));
+        }
+        let output = self.tree.independent_layout(
+            index,
+            Size {
+                width: known_width,
+                height: None,
+            },
+            Size {
+                width: private_space(constraints.width),
+                height: private_space(constraints.height),
+            },
+            Point::ZERO,
+        )?;
+        if known_width.is_some_and(|width| output.size.width != width) {
+            return Err(self
+                .tree
+                .reject(UiLayoutError::PlacementSizeMismatch { child }));
+        }
+        let size = UiSize::new(output.size.width, output.size.height)
+            .ok_or_else(|| self.tree.reject(UiLayoutError::InvalidGeometry))?;
+        UiLayoutMeasurement::new(size, self.tree.nodes[index].first_text_baseline)
+            .map_err(|error| self.tree.reject(error))
+    }
+
     fn place_subtree(&mut self, child: usize, rect: UiRect) -> Result<(), UiLayoutError> {
         let padding = self.tree.flat[self.parent].node.style.padding;
         let location = Point {
@@ -466,29 +511,22 @@ impl UiLayoutBackend for CustomChildren<'_, '_, '_, '_> {
         child: usize,
         constraints: UiLayoutConstraints,
     ) -> Result<UiLayoutMeasurement, UiLayoutError> {
-        self.tree.work_stats.custom_child_measurements = self
-            .tree
-            .work_stats
-            .custom_child_measurements
-            .saturating_add(1);
-        self.tree.charge()?;
-        let index = self.unplaced_child(child)?;
-        constraints
-            .validate()
-            .map_err(|error| self.tree.reject(error))?;
-        let output = self.tree.independent_layout(
-            index,
-            Size::NONE,
-            Size {
-                width: private_space(constraints.width),
-                height: private_space(constraints.height),
+        self.measure_child(child, constraints, None)
+    }
+
+    fn measure_at_width(
+        &mut self,
+        child: usize,
+        width: f32,
+    ) -> Result<UiLayoutMeasurement, UiLayoutError> {
+        self.measure_child(
+            child,
+            UiLayoutConstraints {
+                width: UiAvailableSpace::Definite(width),
+                height: UiAvailableSpace::MaxContent,
             },
-            Point::ZERO,
-        )?;
-        let size = UiSize::new(output.size.width, output.size.height)
-            .ok_or_else(|| self.tree.reject(UiLayoutError::InvalidGeometry))?;
-        UiLayoutMeasurement::new(size, self.tree.nodes[index].first_text_baseline)
-            .map_err(|error| self.tree.reject(error))
+            Some(width),
+        )
     }
 
     fn place(&mut self, child: usize, rect: UiRect) -> Result<(), UiLayoutError> {

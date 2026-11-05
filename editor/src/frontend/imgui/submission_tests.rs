@@ -1432,6 +1432,11 @@ pub(super) struct Harness {
 }
 
 impl Harness {
+    pub(super) fn draw_at_size(&mut self, size: [f32; 2]) -> ImguiEditorSubmission {
+        self.context.io_mut().set_display_size(size);
+        self.draw()
+    }
+
     pub(super) fn new(count: usize) -> Self {
         Self::with_project(super::interaction_tests::InteractionProject::new(), count)
     }

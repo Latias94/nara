@@ -26,6 +26,7 @@ use crate::panels::{
 use crate::{EditorApplication, EditorApplicationActionDispatch, EditorLaunchOptions};
 
 mod components;
+mod measured;
 mod styled;
 mod work_costs;
 
@@ -156,6 +157,16 @@ fn paint_height(
     model: &EditorFrameModel,
     height: f32,
 ) -> Arc<UiFrame> {
+    paint_size(controller, fields, model, 600.0, height)
+}
+
+fn paint_size(
+    controller: &mut OwnedInspector,
+    fields: &mut FieldEditors,
+    model: &EditorFrameModel,
+    width: f32,
+    height: f32,
+) -> Arc<UiFrame> {
     fields.begin_paint(model);
     controller
         .compile(
@@ -163,7 +174,7 @@ fn paint_height(
             fields,
             UiEnvironment::new(
                 UiSurfaceId::new(91).unwrap(),
-                600.0,
+                width,
                 height,
                 1.0,
                 1,
@@ -233,7 +244,7 @@ fn visible_apply_keeps_field_authority_without_hidden_text_ingress() {
     let model = application.current_frame().unwrap();
     let mut controller = new_controller();
     let mut fields = FieldEditors::default();
-    let full = paint(&mut controller, &mut fields, &model);
+    let full = paint_size(&mut controller, &mut fields, &model, 260.0, 1600.0);
     let field = input(&controller, &full, "label");
     replace(
         &mut controller,
@@ -242,7 +253,7 @@ fn visible_apply_keeps_field_authority_without_hidden_text_ingress() {
         &field,
         "visible button draft",
     );
-    let full = paint(&mut controller, &mut fields, &model);
+    let full = paint_size(&mut controller, &mut fields, &model, 260.0, 1600.0);
     let token = controller.input_token(&full, &field).unwrap().unwrap();
     let apply = full.semantics().iter().find(|node| matches!(
         controller.binding(&full, node.key()),
@@ -256,9 +267,9 @@ fn visible_apply_keeps_field_authority_without_hidden_text_ingress() {
         .rect()
         .origin()
         .y();
-    let short = paint_height(&mut controller, &mut fields, &model, 60.0);
+    let short = paint_size(&mut controller, &mut fields, &model, 260.0, 60.0);
     assert!(controller.scroll(&short, apply_y).unwrap());
-    let scrolled = paint_height(&mut controller, &mut fields, &model, 60.0);
+    let scrolled = paint_size(&mut controller, &mut fields, &model, 260.0, 60.0);
     assert!(!scrolled.semantics().iter().any(|node| node.key() == &field));
     assert!(
         scrolled

@@ -194,6 +194,15 @@ Local Hierarchy Enter must retain editing rather than submit an Inspector action
 filter or specialized form field again and deliver more text; then exercise filter Escape and
 same-field refocus without a manual interaction reset. Preserve the exact source and history.
 
+The [measured-property extension](../plans/2026-11-05-measured-property-composition-plan.md)
+resizes the actual hidden native window through 960/1360 logical widths and restores its original
+size while an Inspector draft remains unapplied. Require the same retained field identity/value,
+different actual field allocations, current mapped pointer/IME input and local Undo with unchanged
+document history. Resize follows original mapping cancellation and requires current refocus; this
+does not claim native preedit survives mapping retirement. Compatible appearance adoption keeps
+its existing separate preedit assertions. Capture narrow/wide property states through original
+GPU outputs, and preserve the remainder of the complete trajectory.
+
 The presented-operations extension observes the Inspector through the public native observation
 and read-only semantic inspection ports, then focuses and edits the original field, applies one
 source edit and drives Shell Undo/Redo/Save/Reopen. Match original submission IDs and distinct

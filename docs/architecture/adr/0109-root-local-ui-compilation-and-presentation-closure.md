@@ -136,6 +136,11 @@ child rather than combining two competing intrinsic owners on the same node.
 Child measurement may repeat under different constraints before final placement. Definite space
 is a wrapping/percentage basis, not an exact requested child size. Final placement resolves that
 subtree at its exact allocated outer size; its own padding and descendant rules remain active.
+An exact-width exploratory query overrides the child's authored width, including percentages,
+while height remains authored/intrinsic. It supplies height and baseline for later placement at
+that same width; ordinary available-space queries retain their existing meaning. Insets must fit,
+and this query shares the original child-request poisoning and work accounting. A container must
+not measure at one authored width, then force another width while retaining a stale wrapped height.
 Every direct child must be placed or hidden once per callback; invalid index/geometry, repeated
 placement, measurement after placement or a swallowed child-request failure refuses the root.
 Optional first horizontal baselines are measurements, not fabricated from bounding-box height.

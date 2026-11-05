@@ -1101,3 +1101,100 @@ validation and recovery. Compare fixed-content captures at both densities and in
 text/DPI scales before adopting palette or metric changes. Preserve existing field capacity,
 draft/preedit/history and exact presented-operation results. This review adds no native,
 functional, accessibility or performance certification and does not rerun Cargo or formatting.
+
+## November 5: Allocation And Encoded Design Colors
+
+The next [measured-property unit](../plans/2026-11-05-measured-property-composition-plan.md)
+addresses a concrete consumer gap: the field previously captured viewport/scroll/selection/caret
+geometry before its parent chose the final allocation. A reusable property row must measure its
+actual children and place the original editable owner at the resulting size. Retaining an editing
+buffer does not make an earlier width a valid paint or input dependency. Compare GPUI's
+[`Element` phases](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/element.rs)
+and [text element](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/text.rs):
+layout requests determine size, while prepaint receives final bounds. Nara's existing exact child
+placement resolves the subtree again; immutable field and viewport descriptions can use that
+owning path without introducing a second paint phase, tree or input authority.
+
+The pinned [input example](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/examples/input.rs#L493)
+requests a full-width line, computes text/caret/selection in prepaint, and records layout/bounds
+for later point lookup. It supplies no complete long-field scrolling implementation. The actual
+[Editor prepaint](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/editor/src/element.rs#L8681)
+derives its text viewport after gutter/margin/scrollbar allocation. Its `PositionMap` keeps a
+snapshot and hit geometry; gutter hit testing intentionally differs from the text drawing origin.
+[Editor IME range lookup](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/editor/src/input.rs#L3088)
+instead recomputes from current editor facts and captured element bounds. Those mechanisms do not
+prove exact displayed-snapshot input admission. Nara keeps its original accepted-frame projection,
+paint-origin point mapping and native text-token checks, including focus changes before repaint.
+
+GPUI's line-layout cache keys text, font size/runs, wrap and forced width and resets on font
+generation change. Its view replay also restores dependency/interaction membership, not just paint
+records. Reuse these distinctions in Nara's measured-work qualification; do not collapse shaping,
+placement, description identity, displayed-input authority and GPU output into one cache. The
+previous [phase-validity review](#november-5-phase-validity-and-measurement-retention) retains the
+late-opacity replay caveat. Repeated compatible field composition should preserve its immutable
+layout descriptions while complete changed text remains visible in the authored child snapshot.
+
+The accompanying color review traces the original [`UiColor`](../../crates/nara_ui_kernel/src/style.rs),
+[packet lowering](../../crates/nara_ui_render/src/planner/lowering.rs),
+[quad shader](../../crates/nara_render_wgpu/src/sprite.wgsl),
+[mesh shader](../../crates/nara_render_wgpu/src/ui/mesh.wgsl) and
+[drawn native composition](../../editor/src/platform/drawn/graphics.rs).
+RGB travels unchanged as linear sRGB; source colors carry straight alpha. Glyph coverage changes
+alpha, and an sRGB image texture decodes its own source RGB when sampled. Straight-source
+source-over into a transparent panel produces associated output; the drawn compositor consumes
+that output with premultiplied blending and an sRGB window attachment encodes the result.
+[ADR0092](../architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md) owns this contract.
+An explicit sRGB8-to-linear constructor belongs at color authoring, before packet construction;
+conversion in brushes, shaders or every paint would duplicate it. Existing linear palette values
+keep their meaning, and importing the design JSON is not selected.
+
+Two limits prevent a palette-fidelity claim. The current panel is linear `Rgba8Unorm`: quantization
+can change dark encoded colors appreciably. Formula-only examples are sRGB8 gray 8, decoded to
+about 0.002428 and quantized to linear byte 1, then encoded near 13; gray 32 encodes near 34 after
+its intermediate quantization. These are deductions, not GPU measurements. The Dear reference
+adapter also uses the locked `dear-imgui-wgpu` 0.21.0 `GammaMode::Auto` sampling/blending path,
+which is not the independently drawn compositor's linear associated-image path. Existing opaque
+owned-panel backgrounds do not establish gamma parity or generic transparent embedding.
+
+Before adopting the graphite/teal defaults, qualify actual swatches through both the original
+panel and the final native composite, including attachment quantization, half-transparent layers,
+glyph/rounded coverage, arbitrary mesh and tinted linear/sRGB images. Existing
+[panel readback captures](../verification/native-editor-qualification.md) explicitly exclude final
+swapchain/OS capture. GPUI's
+[`rgb`/`rgba`](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/color.rs)
+divide encoded bytes by 255, and its
+[WGPU format selection](https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui_wgpu/src/wgpu_renderer.rs)
+prefers a non-sRGB surface. That implementation is useful comparative evidence; its constructor
+semantics cannot be copied into Nara's declared linear color type.
+
+An additional local source check pins Bevy `4c344352e063` and Godot `fefec82d74b4`, with no changes
+in the inspected reference files. Bevy separates `Srgba`/`LinearRgba`, preserves alpha through
+conversion, and supplies linear values to PBR and UI extraction. Godot exposes an author-facing
+sRGB `Color` and explicit `srgb_to_linear`; its Canvas renderer chooses conversion according to
+the target's HDR policy. Bevy also exposes a compositing-space choice. These engines therefore
+support explicit pipeline semantics, not a claim that every mature 2D/UI path has one universal
+blend space. Nara keeps ADR0092's selected linear SDR path. Source locations are
+`bevy_color/src/srgba.rs`, `bevy_pbr/src/pbr_material.rs`, `bevy_ui_render/src/lib.rs`,
+`bevy_camera/src/components.rs`, Godot `core/math/color.h` and
+`servers/rendering/renderer_rd/renderer_canvas_render_rd.cpp` under their respective `repo-ref/`
+trees. Normal/data textures retain explicit non-sRGB formats; future HDR output and intermediate
+precision require their own complete render consumer.
+
+### GPUI Reuse Versus A Local Fork
+
+For the current complete consumer, prefer demonstrable reuse of GPUI mechanisms and independently
+portable implementations over a wholesale local copy. The pinned GPUI crate is an integrated
+App/entity/window/dispatch/text/render framework, not a component catalogue that can be copied
+without its execution assumptions. Its `request_layout`/prepaint/paint interfaces, line caches,
+view replay and input handlers carry those dependencies. Copying the complete source creates a
+maintained fork and an upstream reconciliation cost; it does not supply Nara documents, plugin
+activation, docking or graph-domain authoring.
+
+If a complete frontend needs that execution model, compare a direct GPUI dependency as one
+coherent frontend against Nara's own composition through the existing public panel/Host contracts.
+Use complete editing/extension workflows and matched work/memory/native evidence to choose;
+existing investment is not a reason to reject the better total-cost result. Independently portable
+algorithms may be adopted with pinned provenance, applicable notices and focused equivalence
+tests. Do not port Zed's entire editor/domain model merely to acquire its text cache or controls.
+This assessment is comparative design context, not adoption of another native owner or a license
+review of arbitrary Zed files.

@@ -119,20 +119,26 @@ appearance. Color-only changes retain compatible editing-layout provenance. Dens
 insets/gaps/padding; explicit user text scale changes font size and line height. Host/native scale
 remains the original compiler/presenter transform.
 
-`authored_node(outer_width, status, engine)` takes an explicit logical width. It measures label,
-action and status text through public `TextEngine` APIs first because `UiTextField::authored_node`
-requires its viewport before custom child layout runs. The private immutable layout description
-then measures all four actual child subtrees through `UiLayoutChildren` and places their exact
-outer boxes. Inline mode reserves eight body-size units plus input padding for the editable value
+`authored_node(outer_width, status)` takes an explicit logical width. Shared `UiPropertyRow`
+measures all four actual child subtrees through `UiLayoutChildren` and places their exact outer
+boxes. The field uses an intrinsic width preference and derives its viewport from final allocation;
+the consumer no longer premeasures text or duplicates the property layout implementation.
+Inline mode reserves eight body-size units plus input padding for the editable value
 and aligns actual first-line baselines. The field supplies its actual outer measurement and
 baseline through the same public child measurement, including negative line-block origins;
 the component does not reconstruct field metrics from font size or padding.
 When that inline budget does not fit, label and field each take the content width, followed by
-the measured action/status footer. The footer wraps onto separate lines when it cannot reserve
-four caption-size units after the button. Labels/status wrap; the button clips its visual text
+the measured action/status footer. The footer wraps onto separate lines when the status's actual
+min-content width cannot fit after the button. Labels/status wrap; the button clips its visual text
 within its padded box and keeps its full semantic action/name. Widths too small for control
 padding plus one content unit refuse explicitly. Changed captured geometry gets a new layout
 description; compatible compositions share the previous one.
+
+The label combines a caller-designed notched-bookmark `UiMesh` and ordinary text through shared
+`UiIconLabel`. Its logical envelope, gap and top offset from the real label baseline are explicit;
+the mesh contributes no intrinsic text metrics, extra action or hit target. The original mesh
+renderer handles it. Color changes replace only the affected captured mesh and brushes, while
+compatible icon/row layout descriptions retain their identities.
 
 The parent must allocate the requested outer width, use the same ordered fonts for text and
 compilation, and recompose after width or typography changes. The field clips its display at the
@@ -150,8 +156,11 @@ user-text-scale and native-scale geometry; actual wide-row baselines and narrow 
 4,096-byte committed value containing CJK/combining text; updated Point/IME padding; and refusal
 without replacing a retained editor. A real admitted Noto CJK fallback additionally checks exact
 font provenance and baseline alignment through both densities, 1×/2× text scale, full 4,096-byte
-history and active preedit. Existing independent consumer tests and assertions remain unchanged.
-The styled consumer's seven CPU tests pass in the current integration; native presentation is
+history and active preedit. Allocation regressions verify full text, selection/caret/Point/IME at
+actual widths; unchanged composition preserves the authored description, shared mesh storage and
+warm compatible text layouts. Prepared-text containment uses its inherited clip while controls
+retain raw-rectangle containment. The styled consumer's nine CPU tests pass in the current
+integration; native presentation is
 separately qualified. The finite default font policy still reports missing glyphs for other text:
 complete CJK semantics alone does not prove complete CJK glyph coverage.
 There is no text-measurement cache in this component, no virtualized membership, native input or

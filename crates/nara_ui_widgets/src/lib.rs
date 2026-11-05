@@ -7,7 +7,9 @@ mod anchored_popup;
 mod appearance;
 mod button;
 mod control_grid;
+mod icon_label;
 mod intent;
+mod property_row;
 mod state;
 mod state_text;
 mod text_field;
@@ -19,7 +21,9 @@ pub use appearance::{
 };
 pub use button::{UiButton, UiButtonState, UiButtonVisualState, UiWidgetError};
 pub use control_grid::UiControlGrid;
+pub use icon_label::UiIconLabel;
 pub use intent::{UiIntent, UiIntentBatch, UiIntentBatchError};
+pub use property_row::UiPropertyRow;
 pub use state::{
     UiStateBinding, UiStateChanges, UiStateError, UiStateHandle, UiStateKey, UiStatePass,
     UiStateStore,

@@ -1,15 +1,14 @@
 //! An independent styled composite over public text, layout and controlled-widget interfaces.
 
-use nara_text::{TextEngine, TextLayoutRequest, TextTypography};
+use nara_text::TextEngine;
 use nara_ui_kernel::{
-    UiActionId, UiAvailableSpace, UiBorder, UiBrush, UiCornerRadii, UiCustomLayout, UiDimension,
-    UiDispatchBatch, UiEdges, UiKey, UiKeyAtom, UiLayout, UiLayoutChildren, UiLayoutConstraints,
-    UiLayoutError, UiLayoutMeasurement, UiLayoutOutput, UiLocalKey, UiNode, UiOverflow, UiRect,
-    UiRootKey, UiSemanticRole, UiSemantics, UiSize, UiStyle, UiVisual,
+    UiActionId, UiBorder, UiBrush, UiColor, UiCornerRadii, UiCustomLayout, UiDimension,
+    UiDispatchBatch, UiEdges, UiKey, UiKeyAtom, UiLayoutError, UiLocalKey, UiMesh, UiMeshVertex,
+    UiNode, UiOverflow, UiPoint, UiRootKey, UiSemanticRole, UiSemantics, UiSize, UiStyle, UiVisual,
 };
 use nara_ui_widgets::{
     UiAppearance, UiButton, UiButtonState, UiButtonVariant, UiControlMetrics, UiControlSize,
-    UiIntentBatch, UiTextField, UiTextFieldAppearance, UiTextRole,
+    UiIconLabel, UiIntentBatch, UiPropertyRow, UiTextField, UiTextFieldAppearance, UiTextRole,
 };
 
 use crate::StatusLabelError;
@@ -34,13 +33,17 @@ pub struct StyledPropertyRow {
     root: UiRootKey,
     key: UiLocalKey,
     label_key: UiLocalKey,
+    label_text_key: UiLocalKey,
+    icon_key: UiLocalKey,
     status_key: UiLocalKey,
     label: String,
+    icon: UiMesh,
     field: UiTextField,
     button: UiButton,
     button_state: UiButtonState,
     appearance: UiAppearance,
-    layout: Option<(PropertyRowLayout, UiCustomLayout)>,
+    layout: Option<(UiPropertyRow, UiCustomLayout)>,
+    label_layout: Option<(UiIconLabel, UiCustomLayout)>,
 }
 
 impl StyledPropertyRow {
@@ -61,6 +64,8 @@ impl StyledPropertyRow {
         };
         let key = child_key("row")?;
         let label_key = child_key("label")?;
+        let label_text_key = child_key("label-text")?;
+        let icon_key = child_key("icon")?;
         let status_key = child_key("status")?;
         let button_key = UiKey::scoped(root.clone(), child_key("action")?)?;
         let metrics = appearance.control_metrics(UiControlSize::Regular)?;
@@ -76,13 +81,17 @@ impl StyledPropertyRow {
             root,
             key,
             label_key,
+            label_text_key,
+            icon_key,
             status_key,
             label: property.label.to_owned(),
+            icon: property_icon(appearance.palette().accent)?,
             field,
             button: UiButton::new(button_key, property.action_label, property.action)?,
             button_state: UiButtonState::default(),
             appearance,
             layout: None,
+            label_layout: None,
         })
     }
 
@@ -129,25 +138,27 @@ impl StyledPropertyRow {
     ) -> Result<(), StatusLabelError> {
         let metrics = appearance.control_metrics(UiControlSize::Regular)?;
         let field_appearance = field_appearance(appearance, metrics, &self.field)?;
+        let icon = if appearance.palette().accent == self.appearance.palette().accent {
+            self.icon.clone()
+        } else {
+            property_icon(appearance.palette().accent)?
+        };
         self.field.reconfigure(engine, metrics.typography())?;
         self.field.set_appearance(field_appearance);
+        self.icon = icon;
         self.appearance = appearance;
         Ok(())
     }
 
-    /// Composes at an explicit logical outer width with the same fonts as `engine`.
+    /// Composes at an explicit logical outer width, without premeasuring child text.
     ///
-    /// Public text measurement determines the field viewport before authoring it. The custom
-    /// layout then measures all four actual child subtrees and aligns their real baselines.
-    /// Wide rows keep all slots inline; narrow rows stack label/value and wrap the footer.
+    /// The shared property layout measures all four actual child subtrees and aligns their
+    /// real baselines. The field's preferred intrinsic width is independent of its allocation.
+    /// The shared icon/label layout places an ordinary decorative mesh against the text's
+    /// actual baseline. Wide rows stay inline; narrow rows stack label/value and wrap the footer.
     /// The caller must allocate this width, then present the new geometry before point/IME
     /// input. Extremely narrow widths that cannot contain control padding are rejected.
-    pub fn authored_node(
-        &mut self,
-        width: f32,
-        status: &str,
-        engine: &mut TextEngine,
-    ) -> Result<UiNode, StatusLabelError> {
+    pub fn authored_node(&mut self, width: f32, status: &str) -> Result<UiNode, StatusLabelError> {
         let appearance = self.appearance;
         let metrics = appearance.control_metrics(UiControlSize::Regular)?;
         let inset = appearance.panel_inset();
@@ -163,45 +174,13 @@ impl StyledPropertyRow {
         }
         let label = appearance.text(&self.label, UiTextRole::Body, false)?;
         let status = appearance.text(status, UiTextRole::Caption, true)?;
-        let measure = |engine: &mut TextEngine, content: &str, typography: TextTypography| {
-            engine
-                .layout(&TextLayoutRequest::from_typography(content, typography))
-                .map(|layout| layout.width().ceil())
-        };
-        let label_width = measure(engine, label.content(), label.typography())?;
-        let status_width = measure(engine, status.content(), status.typography())?;
-        let action_width = measure(engine, self.button.label(), metrics.typography())?
-            + metrics.padding().left()
-            + metrics.padding().right();
         let gap = appearance.gap();
         let minimum_field = 8.0 * metrics.typography().logical_size() + minimum;
-        let inline =
-            label_width + minimum_field + action_width + status_width + 3.0 * gap <= content_width;
-        let footer_inline = action_width + gap + 4.0 * status.logical_size() <= content_width;
-        let widths = if inline {
-            [
-                label_width,
-                content_width - label_width - action_width - status_width - 3.0 * gap,
-                action_width,
-                status_width,
-            ]
-        } else {
-            [
-                content_width,
-                content_width,
-                action_width.min(content_width),
-                if footer_inline {
-                    content_width - action_width - gap
-                } else {
-                    content_width
-                },
-            ]
-        };
         self.field
             .set_appearance(field_appearance(appearance, metrics, &self.field)?);
         let field = self
             .field
-            .authored_node(&self.root, slot_style(widths[1]), widths[1])?;
+            .authored_node(&self.root, UiStyle::flex(), minimum_field)?;
         let button = appearance
             .button(
                 &self.button,
@@ -210,14 +189,8 @@ impl StyledPropertyRow {
                 UiControlSize::Regular,
                 false,
             )?
-            .authored_node(&self.button, &self.root, slot_style(widths[2]))?;
-        let description = PropertyRowLayout {
-            content_width,
-            widths,
-            gap,
-            inline,
-            footer_inline,
-        };
+            .authored_node(&self.button, &self.root, UiStyle::flex())?;
+        let description = UiPropertyRow::new(minimum_field, gap)?;
         let layout = match &self.layout {
             Some((previous, layout)) if previous == &description => layout.clone(),
             _ => {
@@ -226,9 +199,24 @@ impl StyledPropertyRow {
                 layout
             }
         };
+        let description = UiIconLabel::new(
+            UiSize::new(12.0, 12.0).ok_or(UiLayoutError::InvalidGeometry)?,
+            -10.0,
+            gap,
+        )?;
+        let label_layout = match &self.label_layout {
+            Some((previous, layout)) if previous == &description => layout.clone(),
+            _ => {
+                let layout = UiCustomLayout::new(description);
+                self.label_layout = Some((description, layout.clone()));
+                layout
+            }
+        };
         let palette = appearance.palette();
         Ok(UiNode::new(
-            slot_style(width)
+            UiStyle::flex()
+                .with_width(UiDimension::Px(width))
+                .with_flex_shrink(0.0)
                 .with_padding(UiEdges::all(inset)?)
                 .with_overflow(UiOverflow::Clip),
         )
@@ -244,22 +232,40 @@ impl StyledPropertyRow {
         .with_semantics(UiSemantics::new(UiSemanticRole::Group, &self.label)?)
         .with_custom_layout(layout)
         .with_children([
-            UiNode::new(slot_style(widths[0]))
+            UiNode::new(UiStyle::flex())
                 .with_key(self.label_key.clone())
-                .with_text(label),
+                .with_semantics(UiSemantics::new(UiSemanticRole::Group, &self.label)?)
+                .with_custom_layout(label_layout)
+                .with_children([
+                    UiNode::new(UiStyle::flex())
+                        .with_key(self.icon_key.clone())
+                        .with_mesh(self.icon.clone()),
+                    UiNode::new(UiStyle::flex())
+                        .with_key(self.label_text_key.clone())
+                        .with_text(label),
+                ]),
             field,
             button,
-            UiNode::new(slot_style(widths[3]))
+            UiNode::new(UiStyle::flex())
                 .with_key(self.status_key.clone())
                 .with_text(status),
         ]))
     }
 }
 
-fn slot_style(width: f32) -> UiStyle {
-    UiStyle::flex()
-        .with_width(UiDimension::Px(width))
-        .with_flex_shrink(0.0)
+/// A caller-designed notched bookmark, captured once as ordinary local triangle geometry.
+fn property_icon(color: UiColor) -> Result<UiMesh, StatusLabelError> {
+    let vertices = [
+        (0.0, 0.0),
+        (12.0, 0.0),
+        (12.0, 12.0),
+        (6.0, 8.0),
+        (0.0, 12.0),
+    ]
+    .into_iter()
+    .map(|(x, y)| UiMeshVertex::new(UiPoint::new(x, y), color))
+    .collect();
+    Ok(UiMesh::new(vertices, vec![0, 1, 3, 1, 2, 3, 0, 3, 4])?)
 }
 
 fn field_appearance(
@@ -286,92 +292,4 @@ fn field_appearance(
         selection: UiBrush::Solid(palette.selection),
         caret: UiBrush::Solid(palette.focus),
     })
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct PropertyRowLayout {
-    content_width: f32,
-    widths: [f32; 4],
-    gap: f32,
-    inline: bool,
-    footer_inline: bool,
-}
-
-impl UiLayout for PropertyRowLayout {
-    fn layout(
-        &self,
-        _constraints: UiLayoutConstraints,
-        children: &mut UiLayoutChildren<'_>,
-    ) -> Result<UiLayoutOutput, UiLayoutError> {
-        if children.len() != 4 {
-            return Err(UiLayoutError::Rejected {
-                message: "a property row requires label, field, action and status".to_owned(),
-            });
-        }
-        let mut measured = Vec::with_capacity(4);
-        for (index, width) in self.widths.iter().enumerate() {
-            measured.push(children.measure(
-                index,
-                UiLayoutConstraints {
-                    width: UiAvailableSpace::Definite(*width),
-                    height: UiAvailableSpace::MaxContent,
-                },
-            )?);
-        }
-        let (height, baseline) = if self.inline {
-            self.place_line(children, &measured, &[0, 1, 2, 3], 0.0)?
-        } else {
-            let (label_height, baseline) = self.place_line(children, &measured, &[0], 0.0)?;
-            let field_y = label_height + self.gap;
-            let (field_height, _) = self.place_line(children, &measured, &[1], field_y)?;
-            let footer_y = field_y + field_height + self.gap;
-            let height = if self.footer_inline {
-                footer_y + self.place_line(children, &measured, &[2, 3], footer_y)?.0
-            } else {
-                let (action_height, _) = self.place_line(children, &measured, &[2], footer_y)?;
-                let status_y = footer_y + action_height + self.gap;
-                status_y + self.place_line(children, &measured, &[3], status_y)?.0
-            };
-            (height, baseline)
-        };
-        let output = UiLayoutOutput::new(
-            UiSize::new(self.content_width, height).ok_or(UiLayoutError::InvalidGeometry)?,
-        );
-        match baseline {
-            Some(baseline) => output.with_first_baseline(baseline),
-            None => Ok(output),
-        }
-    }
-}
-
-impl PropertyRowLayout {
-    fn place_line(
-        &self,
-        children: &mut UiLayoutChildren<'_>,
-        measured: &[UiLayoutMeasurement],
-        slots: &[usize],
-        y: f32,
-    ) -> Result<(f32, Option<f32>), UiLayoutError> {
-        let baseline = slots
-            .iter()
-            .filter_map(|index| measured[*index].first_baseline())
-            .reduce(f32::max);
-        let mut x = 0.0;
-        let mut height = 0.0_f32;
-        for &index in slots {
-            let child = measured[index];
-            let offset = match (baseline, child.first_baseline()) {
-                (Some(line), Some(child)) => line - child,
-                _ => 0.0,
-            };
-            children.place(
-                index,
-                UiRect::from_origin_size(x, y + offset, self.widths[index], child.size().height())
-                    .ok_or(UiLayoutError::InvalidGeometry)?,
-            )?;
-            height = height.max(offset + child.size().height());
-            x += self.widths[index] + self.gap;
-        }
-        Ok((height, baseline.map(|baseline| y + baseline)))
-    }
 }

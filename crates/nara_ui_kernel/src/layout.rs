@@ -209,6 +209,21 @@ impl<'a> UiLayoutChildren<'a> {
         self.backend.measure(child, constraints)
     }
 
+    /// Measures a child at an exact outer width before choosing its final placement.
+    ///
+    /// This overrides its authored width, including percentages, while height follows authored
+    /// and intrinsic sizing. The result supplies the height and baseline for a later placement
+    /// at this width. It differs from a definite available-space hint, which preserves authored
+    /// width. Padding must fit. Repeated requests remain exploratory and consume the original
+    /// layout-work budget; measure before placing or hiding the child.
+    pub fn measure_at_width(
+        &mut self,
+        child: usize,
+        width: f32,
+    ) -> Result<UiLayoutMeasurement, UiLayoutError> {
+        self.backend.measure_at_width(child, width)
+    }
+
     /// Observes a child's exact min-content outer width before choosing its allocation.
     ///
     /// Uses the same authored sizes, padding, fonts and typography as regular measurement.
@@ -247,6 +262,11 @@ pub(crate) trait UiLayoutBackend {
         &mut self,
         child: usize,
         constraints: UiLayoutConstraints,
+    ) -> Result<UiLayoutMeasurement, UiLayoutError>;
+    fn measure_at_width(
+        &mut self,
+        child: usize,
+        width: f32,
     ) -> Result<UiLayoutMeasurement, UiLayoutError>;
     fn place(&mut self, child: usize, rect: UiRect) -> Result<(), UiLayoutError>;
     fn hide(&mut self, child: usize) -> Result<(), UiLayoutError>;

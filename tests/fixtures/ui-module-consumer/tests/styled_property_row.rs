@@ -3,12 +3,12 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use nara_text::{TextEdit, TextEngine, TextLimits, bundled_font_face};
+use nara_text::{TextEdit, TextEngine, TextLayout, TextLimits, TextRect, bundled_font_face};
 use nara_ui_kernel::{
     UiActionId, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiColor, UiCompiler,
-    UiCustomLayout, UiEdges, UiEnvironment, UiFrame, UiKey, UiLayer, UiOpaqueId, UiPaintPrimitive,
-    UiPoint, UiResolvedBrush, UiRoot, UiRootKey, UiRootStatus, UiSemanticNode, UiSemanticRole,
-    UiStyle, UiSurfaceId, UiTheme,
+    UiCustomLayout, UiEdges, UiEnvironment, UiFrame, UiKey, UiLayer, UiMesh, UiOpaqueId,
+    UiPaintPrimitive, UiPoint, UiRect, UiResolvedBrush, UiRoot, UiRootKey, UiRootStatus,
+    UiSemanticNode, UiSemanticRole, UiStyle, UiSurfaceId, UiTheme,
 };
 use nara_ui_module_consumer::{
     StatusLabelError,
@@ -25,6 +25,7 @@ struct Consumer {
     state: UiStateStore,
     engine: TextEngine,
     compiler: UiCompiler,
+    layout: UiCustomLayout,
 }
 
 impl Consumer {
@@ -38,6 +39,7 @@ impl Consumer {
             state: UiStateStore::new(root, 16).unwrap(),
             engine: TextEngine::with_fonts(fonts.clone(), Default::default()).unwrap(),
             compiler: UiCompiler::with_fonts(fonts, Default::default()).unwrap(),
+            layout: UiCustomLayout::new(MeasuredColumn { gap: 8.0 }),
         }
     }
 
@@ -93,13 +95,13 @@ impl Consumer {
             UiLayer::Base,
             UiStyle::fill().with_padding(UiEdges::all(8.0).unwrap()),
         )
-        .with_custom_layout(UiCustomLayout::new(MeasuredColumn { gap: 8.0 }));
+        .with_custom_layout(self.layout.clone());
         for row in rows {
             root = root.with_child(
                 self.state
                     .get_mut(row)
                     .unwrap()
-                    .authored_node(width, "Ready", &mut self.engine)
+                    .authored_node(width, "Ready")
                     .unwrap(),
             );
         }
@@ -184,23 +186,49 @@ fn actual_fallback_field_baseline_survives_density_scaling_preedit_and_full_hist
     .into_iter()
     .enumerate()
     {
-        consumer.appearance(
-            &rows[0],
-            base.with_density(density)
-                .with_text_scale(text_scale)
-                .unwrap(),
-        );
+        let appearance = base
+            .with_density(density)
+            .with_text_scale(text_scale)
+            .unwrap();
+        consumer.appearance(&rows[0], appearance);
         let (_, frame) = consumer.compile(&rows, 1300.0, 1.25, index as u64 + 1);
         let parent = semantic(&frame, &key).parent().unwrap();
         let content = text_child(&frame, &key, &value);
         let baseline = text_baseline(&frame, content.key());
         for slot in [
-            text_child(&frame, parent, "Value").key(),
+            label_text(&frame, parent, "Value").key(),
             &button,
             text_child(&frame, parent, "Ready").key(),
         ] {
             close(text_baseline(&frame, slot), baseline);
         }
+        let label = label_text(&frame, parent, "Value");
+        let (icon_key, icon_rect, mesh) = label_icon(&frame, label.parent().unwrap());
+        close(
+            icon_rect.origin().y(),
+            text_baseline(&frame, label.key()) - 10.0,
+        );
+        close(icon_rect.size().width(), 12.0);
+        close(icon_rect.size().height(), 12.0);
+        close(
+            label.rect().origin().x(),
+            icon_rect.max().x() + appearance.gap(),
+        );
+        assert_eq!(mesh.vertices().len(), 5);
+        assert_eq!(mesh.indices(), &[0, 1, 3, 1, 2, 3, 0, 3, 4]);
+        assert!(frame.semantics().iter().all(|node| node.key() != icon_key));
+        assert!(
+            frame
+                .hit_regions()
+                .iter()
+                .all(|node| node.key() != icon_key)
+        );
+        assert!(
+            frame
+                .focus_order()
+                .iter()
+                .all(|node| node.key() != icon_key)
+        );
         let field = consumer.state.get(&rows[0]).unwrap().field();
         assert_eq!(field.input_token(), Some(token));
         assert!(field.editor().is_composing());
@@ -248,6 +276,62 @@ fn text_child<'a>(frame: &'a UiFrame, parent: &UiKey, name: &str) -> &'a UiSeman
         .unwrap()
 }
 
+fn label_text<'a>(frame: &'a UiFrame, row: &UiKey, name: &str) -> &'a UiSemanticNode {
+    let mut groups = frame.semantics().iter().filter(|node| {
+        node.parent() == Some(row) && node.role() == UiSemanticRole::Group && node.name() == name
+    });
+    let label = groups.next().unwrap();
+    assert!(groups.next().is_none(), "the row has one label subtree");
+    assert!(label.actions().is_empty());
+    let text = text_child(frame, label.key(), name);
+    assert_eq!(
+        frame
+            .semantics()
+            .iter()
+            .filter(|node| node.parent() == Some(label.key()))
+            .count(),
+        1,
+        "the decorative icon adds no semantic child"
+    );
+    text
+}
+
+fn painted_text<'a>(frame: &'a UiFrame, key: &UiKey) -> &'a Arc<TextLayout> {
+    frame
+        .paint()
+        .iter()
+        .find_map(|primitive| match primitive {
+            UiPaintPrimitive::Text {
+                key: Some(painted),
+                layout,
+                ..
+            } if painted == key => Some(layout),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn label_icon<'a>(frame: &'a UiFrame, label: &UiKey) -> (&'a UiKey, UiRect, &'a UiMesh) {
+    let mut icons = frame.paint().iter().filter_map(|paint| match paint {
+        UiPaintPrimitive::Mesh {
+            key: Some(key),
+            rect,
+            mesh,
+            ..
+        } if frame
+            .layouts()
+            .iter()
+            .any(|node| node.key() == Some(key) && node.route_parent() == Some(label)) =>
+        {
+            Some((key, *rect, mesh))
+        }
+        _ => None,
+    });
+    let icon = icons.next().unwrap();
+    assert!(icons.next().is_none(), "the label has one decorative mesh");
+    icon
+}
+
 fn text_baseline(frame: &UiFrame, key: &UiKey) -> f32 {
     frame
         .paint()
@@ -266,14 +350,23 @@ fn text_baseline(frame: &UiFrame, key: &UiKey) -> f32 {
         .unwrap()
 }
 
-fn row_paint(frame: &UiFrame, field: &UiKey) -> Vec<UiPaintPrimitive> {
+fn row_keys(frame: &UiFrame, field: &UiKey) -> HashSet<UiKey> {
     let row = semantic(frame, field).parent().unwrap();
     let mut keys = HashSet::from([row.clone()]);
-    for node in frame.semantics() {
-        if node.parent().is_some_and(|parent| keys.contains(parent)) {
-            keys.insert(node.key().clone());
+    for node in frame.layouts() {
+        if node
+            .route_parent()
+            .is_some_and(|parent| keys.contains(parent))
+            && let Some(key) = node.key()
+        {
+            keys.insert(key.clone());
         }
     }
+    keys
+}
+
+fn row_paint(frame: &UiFrame, field: &UiKey) -> Vec<UiPaintPrimitive> {
+    let keys = row_keys(frame, field);
     frame
         .paint()
         .iter()
@@ -299,6 +392,23 @@ fn background(frame: &UiFrame, key: &UiKey) -> UiColor {
 
 fn close(left: f32, right: f32) {
     assert!((left - right).abs() < 0.02, "{left} differs from {right}");
+}
+
+fn same_rect(left: UiRect, right: UiRect) {
+    close(left.origin().x(), right.origin().x());
+    close(left.origin().y(), right.origin().y());
+    close(left.max().x(), right.max().x());
+    close(left.max().y(), right.max().y());
+}
+
+fn translated(rect: TextRect, origin: UiPoint) -> UiRect {
+    UiRect::from_origin_size(
+        origin.x() + rect.x0,
+        origin.y() + rect.y0,
+        rect.x1 - rect.x0,
+        rect.y1 - rect.y0,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -416,6 +526,7 @@ fn nearest_scope_override_and_removal_restore_exact_paint_without_changing_a_sib
     palette.input = UiColor::rgba(0.03, 0.06, 0.12, 1.0);
     palette.text = UiColor::rgba(0.96, 0.82, 0.62, 1.0);
     palette.muted_text = UiColor::rgba(0.70, 0.60, 0.83, 1.0);
+    palette.accent = UiColor::rgba(0.88, 0.48, 0.18, 1.0);
     let resolve_scope = |local: Option<UiAppearance>| local.unwrap_or(base);
     consumer.appearance(
         &rows[0],
@@ -425,6 +536,14 @@ fn nearest_scope_override_and_removal_restore_exact_paint_without_changing_a_sib
     assert_ne!(row_paint(&original, &alpha), row_paint(&overridden, &alpha));
     assert_eq!(row_paint(&original, &beta), row_paint(&overridden, &beta));
     assert_eq!(background(&overridden, &alpha), palette.input);
+    let row = semantic(&overridden, &alpha).parent().unwrap();
+    let label = label_text(&overridden, row, "Value");
+    let (_, _, mesh) = label_icon(&overridden, label.parent().unwrap());
+    assert!(
+        mesh.vertices()
+            .iter()
+            .all(|vertex| vertex.color() == palette.accent)
+    );
     assert!(
         source.same_source(
             &consumer
@@ -506,7 +625,7 @@ fn actual_child_baselines_align_and_narrow_layout_contains_controls_and_clips_fu
     let button = consumer.state.get(&rows[0]).unwrap().button().key().clone();
     let (_, wide) = consumer.compile(&rows, 900.0, 1.25, 1);
     let parent = semantic(&wide, &key).parent().unwrap();
-    let label = text_child(&wide, parent, "Value");
+    let label = label_text(&wide, parent, "Value");
     let status = text_child(&wide, parent, "Ready");
     let content = text_child(&wide, &key, &value);
     let baseline = text_baseline(&wide, content.key());
@@ -522,11 +641,17 @@ fn actual_child_baselines_align_and_narrow_layout_contains_controls_and_clips_fu
         field_rect.origin().y() >= semantic(&narrow, label.key()).rect().max().y() + base.gap()
     );
     assert!(action_rect.origin().y() >= field_rect.max().y() + base.gap());
+    let keys = row_keys(&narrow, &key);
     for node in narrow.semantics() {
-        if node.key() == &key || node.key() == &button || node.parent() == Some(parent) {
-            assert!(node.rect().origin().x() >= row_rect.origin().x());
-            assert!(node.rect().max().x() <= row_rect.max().x() + 0.02);
-            assert!(node.rect().max().y() <= row_rect.max().y() + 0.02);
+        if keys.contains(node.key()) {
+            let visible = if node.key() == content.key() {
+                node.rect().intersect(node.clip_rect().unwrap()).unwrap()
+            } else {
+                node.rect()
+            };
+            assert!(visible.origin().x() >= row_rect.origin().x());
+            assert!(visible.max().x() <= row_rect.max().x() + 0.02);
+            assert!(visible.max().y() <= row_rect.max().y() + 0.02);
         }
     }
     let clip = narrow
@@ -576,6 +701,231 @@ fn actual_child_baselines_align_and_narrow_layout_contains_controls_and_clips_fu
             .iter()
             .any(|focus| focus.key() == &button)
     );
+}
+
+#[test]
+fn actual_allocations_override_preference_for_text_selection_caret_point_and_ime() {
+    let mut consumer = Consumer::new();
+    let base = UiAppearance::default();
+    let value = "0123456789".repeat(48);
+    let rows = consumer.retain(&[("alpha", &value)], base);
+    let key = consumer.key(&rows[0]);
+    let button = consumer.state.get(&rows[0]).unwrap().button().key().clone();
+    let token = consumer
+        .state
+        .get_mut(&rows[0])
+        .unwrap()
+        .field_mut()
+        .focus()
+        .unwrap();
+    let enlarged = base
+        .with_density(UiDensity::Compact)
+        .with_text_scale(1.5)
+        .unwrap();
+    for (style_index, appearance) in [base, enlarged].into_iter().enumerate() {
+        consumer.appearance(&rows[0], appearance);
+        let metrics = appearance.control_metrics(UiControlSize::Regular).unwrap();
+        let padding = metrics.padding();
+        let preferred =
+            8.0 * metrics.typography().logical_size() + padding.left() + padding.right() + 1.0;
+        let mut wide_paint = None;
+        for (index, width) in [900.0, 90.0, 900.0].into_iter().enumerate() {
+            let field = consumer.state.get_mut(&rows[0]).unwrap().field_mut();
+            for edit in [
+                TextEdit::Home { extend: false },
+                TextEdit::End { extend: true },
+            ] {
+                field.edit(token, &edit, &mut consumer.engine).unwrap();
+            }
+            let selection = field.editor().selection();
+            let source = field.editor().paint_snapshot();
+            let (_, frame) =
+                consumer.compile(&rows, width, 1.25, (style_index * 3 + index + 1) as u64);
+            let field_rect = semantic(&frame, &key).rect();
+            let allocated = field_rect.size().width();
+            if index == 1 {
+                assert!(allocated < preferred);
+                close(allocated, width - 2.0 * appearance.panel_inset());
+                let row = semantic(&frame, &key).parent().unwrap();
+                let label = label_text(&frame, row, "Value");
+                assert!(field_rect.origin().y() >= label.rect().max().y() + appearance.gap());
+                let action = semantic(&frame, &button).rect();
+                let status = text_child(&frame, row, "Ready").rect();
+                assert!(action.origin().y() >= field_rect.max().y() + appearance.gap());
+                assert!(status.origin().y() >= action.max().y() + appearance.gap());
+            } else {
+                assert!(allocated > preferred);
+                let paint = row_paint(&frame, &key);
+                if let Some(original) = &wide_paint {
+                    assert_eq!(&paint, original, "a resize restores exact wide paint");
+                } else {
+                    wide_paint = Some(paint);
+                }
+            }
+            let content = text_child(&frame, &key, &value);
+            let (text_rect, clip) = frame
+                .paint()
+                .iter()
+                .find_map(|paint| match paint {
+                    UiPaintPrimitive::Text {
+                        key: Some(painted),
+                        rect,
+                        clip_rect: Some(clip),
+                        ..
+                    } if painted == content.key() => Some((*rect, *clip)),
+                    _ => None,
+                })
+                .unwrap();
+            let field = consumer.state.get(&rows[0]).unwrap().field();
+            let inner = allocated - padding.left() - padding.right();
+            let viewport = UiRect::from_origin_size(
+                field_rect.origin().x() + padding.left(),
+                field_rect.origin().y() + padding.top(),
+                inner,
+                field_rect.size().height() - padding.top() - padding.bottom(),
+            )
+            .unwrap();
+            let caret = field.editor().caret().unwrap();
+            let scroll = (caret.x1 - inner).max(0.0);
+            close(text_rect.origin().x(), viewport.origin().x() - scroll);
+            let text_box = UiRect::from_origin_size(
+                text_rect.origin().x(),
+                viewport.origin().y(),
+                text_rect.size().width(),
+                viewport.size().height(),
+            )
+            .unwrap();
+            same_rect(clip, viewport.intersect(text_box).unwrap());
+            assert_eq!(field.editor().selection(), selection);
+            assert!(source.same_source(&field.editor().paint_snapshot()));
+            assert_eq!(field.editor().text(), value);
+            assert_eq!(field.input_token(), Some(token));
+            assert_eq!(semantic(&frame, &key).value(), Some(value.as_str()));
+            let ime = field.ime_area(allocated).unwrap();
+            let caret_rect = frame
+                .paint()
+                .iter()
+                .find_map(|paint| match paint {
+                    UiPaintPrimitive::Rect {
+                        key: None,
+                        rect,
+                        brush: Some(UiResolvedBrush::Solid(color)),
+                        ..
+                    } if *color == appearance.palette().focus => Some(*rect),
+                    _ => None,
+                })
+                .unwrap();
+            same_rect(
+                caret_rect,
+                translated(caret, text_rect.origin())
+                    .intersect(viewport)
+                    .unwrap(),
+            );
+            same_rect(
+                UiRect::new(
+                    UiPoint::new(
+                        field_rect.origin().x() + ime.origin().x(),
+                        field_rect.origin().y() + ime.origin().y(),
+                    ),
+                    ime.size(),
+                )
+                .unwrap(),
+                translated(field.editor().ime_area(), text_rect.origin())
+                    .intersect(viewport)
+                    .unwrap(),
+            );
+            let selection_rect = frame
+                .paint()
+                .iter()
+                .find_map(|paint| match paint {
+                    UiPaintPrimitive::Rect {
+                        key: None,
+                        rect,
+                        brush: Some(UiResolvedBrush::Solid(color)),
+                        ..
+                    } if *color == appearance.palette().selection => Some(*rect),
+                    _ => None,
+                })
+                .unwrap();
+            close(selection_rect.origin().x(), viewport.origin().x());
+            assert!(selection_rect.max().x() <= viewport.max().x() + 0.02);
+            assert!(selection_rect.max().x() >= caret_rect.origin().x() - 0.02);
+            let field = consumer.state.get_mut(&rows[0]).unwrap().field_mut();
+            field
+                .point(
+                    token,
+                    UiPoint::new(allocated - padding.right() - 0.5, padding.top() + 1.0),
+                    allocated,
+                    false,
+                    &mut consumer.engine,
+                )
+                .unwrap();
+            assert_eq!(field.editor().selection().focus, value.len());
+        }
+    }
+}
+
+#[test]
+fn unchanged_composition_preserves_snapshot_identity_mesh_storage_and_warm_text_layouts() {
+    let mut consumer = Consumer::new();
+    let base = UiAppearance::default();
+    let rows = consumer.retain(&[("alpha", "Alpha"), ("beta", "Beta")], base);
+    let appearances = [
+        base,
+        base.with_density(UiDensity::Compact)
+            .with_text_scale(1.5)
+            .unwrap(),
+    ];
+    for (style_index, appearance) in appearances.into_iter().enumerate() {
+        for row in &rows {
+            consumer.appearance(row, appearance);
+        }
+        for (index, width) in [900.0, 190.0].into_iter().enumerate() {
+            let revision = (style_index * 2 + index + 1) as u64;
+            let engine_work = consumer.engine.work_stats();
+            let (source, first) = consumer.compile(&rows, width, 1.25, revision);
+            let warm = consumer.compiler.work_stats();
+            let (rebuilt, repeated) = consumer.compile(&rows, width, 1.25, revision);
+            let after = consumer.compiler.work_stats();
+            assert_eq!(
+                source, rebuilt,
+                "unchanged row, icon/label and field layouts retain immutable identity"
+            );
+            assert_eq!(first.paint(), repeated.paint());
+            assert_eq!(first.layouts(), repeated.layouts());
+            assert_eq!(first.semantics(), repeated.semantics());
+            assert_eq!(first.hit_regions(), repeated.hit_regions());
+            assert_eq!(first.focus_order(), repeated.focus_order());
+            assert_eq!(consumer.engine.work_stats(), engine_work);
+            assert_eq!(after.text.layout_attempts, warm.text.layout_attempts);
+            assert_eq!(
+                after.text.layout_source_bytes,
+                warm.text.layout_source_bytes
+            );
+            assert_eq!(after.text.shaped_glyphs, warm.text.shaped_glyphs);
+            assert!(after.layout_passes > warm.layout_passes);
+            assert!(after.custom_child_measurements > warm.custom_child_measurements);
+            assert!(after.layout_work_units > warm.layout_work_units);
+            for row in &rows {
+                let key = consumer.key(row);
+                let parent = semantic(&first, &key).parent().unwrap();
+                let label = label_text(&first, parent, "Value");
+                let status = text_child(&first, parent, "Ready");
+                let button = consumer.state.get(row).unwrap().button().key();
+                for slot in [label.key(), button, status.key()] {
+                    assert!(Arc::ptr_eq(
+                        painted_text(&first, slot),
+                        painted_text(&repeated, slot)
+                    ));
+                }
+                let (icon_key, _, original) = label_icon(&first, label.parent().unwrap());
+                let (repeated_key, _, icon) = label_icon(&repeated, label.parent().unwrap());
+                assert_eq!(icon_key, repeated_key);
+                assert!(std::ptr::eq(original.vertices(), icon.vertices()));
+                assert!(std::ptr::eq(original.indices(), icon.indices()));
+            }
+        }
+    }
 }
 
 #[test]
@@ -681,10 +1031,7 @@ fn incompatible_style_adoption_and_impossible_width_preserve_the_retained_editor
     assert!(source.same_source(&row.field().editor().paint_snapshot()));
     assert_eq!(row.field().input_token(), Some(token));
     for width in [0.0, 20.0, f32::NAN, f32::INFINITY] {
-        assert!(
-            row.authored_node(width, "Ready", &mut consumer.engine)
-                .is_err()
-        );
+        assert!(row.authored_node(width, "Ready").is_err());
         assert_eq!(row.field().editor().text(), "Preserved");
         assert_eq!(row.field().input_token(), Some(token));
     }

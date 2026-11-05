@@ -230,6 +230,19 @@ Other libraries may compose controls, add their own roles or draw through the or
 interfaces without inheriting first-party visuals. The original compiler's bounded compatible
 plain-text cache owns no document or input authority and preserves complete candidate admission.
 
+Editable fields retain complete editing state independently from width-dependent placement.
+Composition may supply an intrinsic width preference; the existing exact child allocation
+determines viewport, scroll, selection and caret geometry. Exploratory measurement remains
+effect-free. Point and IME adapters use the accepted field rectangle and preserve the original
+displayed-text origin and input-lifetime checks. Immutable layout-description reuse grants no
+display or document authority.
+
+Measured property and icon/label recipes compose ordinary child subtrees through that same
+layout contract. They use actual text baselines, explicit icon envelopes/optical offsets and
+child overflow policy, without a central widget enum, document-field registry or second painter.
+The [allocation/property unit](../../plans/2026-11-05-measured-property-composition-plan.md)
+records their complete independent-library and first-party qualification scope separately.
+
 Both Editor compositions consume the original complete Inspector/draft controls from the shared
 frontend controls module. Extraction removes the old Dear ownership rather than keeping a second
 property preparation or history path. The independently drawn composition remains selectable and
