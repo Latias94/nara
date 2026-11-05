@@ -48,9 +48,13 @@ flowchart LR
 
 ### Core color semantics
 
-- `nara_core::Color` represents linear-sRGB RGB channels plus straight alpha.
-- `Color::rgb` and `Color::rgba` interpret their numeric RGB arguments as linear values. They do
-  not perform an sRGB transfer-function conversion.
+- `nara_core::Color` and `nara_ui_kernel::UiColor` represent linear-sRGB RGB channels plus straight
+  alpha.
+- `Color::rgb`, `Color::rgba`, and `UiColor::rgba` interpret their numeric RGB arguments as linear
+  values. They do not perform an sRGB transfer-function conversion.
+- `UiColor::from_srgb8` and `UiColor::from_srgba8` explicitly decode sRGB byte RGB channels into
+  linear values. `from_srgba8` normalizes alpha by 255 without applying the transfer function or
+  premultiplying RGB. Resolved brushes and UI paint packets retain these canonical values.
 - Alpha is linear coverage or opacity data. The sRGB transfer function never applies to alpha.
 - Color multiplication, interpolation, lighting, modulation, and blending occur in linear space.
 - Persistent color fields store the canonical linear values. Loaders must not guess an encoding

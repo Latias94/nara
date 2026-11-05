@@ -440,6 +440,10 @@ impl Default for UiStyle {
     }
 }
 
+/// A linear-sRGB color with a linear, unassociated (straight) alpha channel.
+///
+/// [`Self::rgba`] accepts linear RGB values. Use [`Self::from_srgb8`] or
+/// [`Self::from_srgba8`] for encoded sRGB bytes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiColor {
     red: f32,
@@ -449,6 +453,7 @@ pub struct UiColor {
 }
 
 impl UiColor {
+    /// Stores linear-sRGB RGB channels and straight alpha without conversion or premultiplication.
     #[must_use]
     pub const fn rgba(red: f32, green: f32, blue: f32, alpha: f32) -> Self {
         Self {
@@ -459,6 +464,36 @@ impl UiColor {
         }
     }
 
+    /// Decodes 8-bit sRGB RGB channels with fully opaque alpha.
+    #[must_use]
+    pub fn from_srgb8(red: u8, green: u8, blue: u8) -> Self {
+        Self::from_srgba8(red, green, blue, 255)
+    }
+
+    /// Decodes 8-bit sRGB RGB channels and normalizes 8-bit straight alpha.
+    ///
+    /// RGB uses the piecewise sRGB transfer function. Alpha is divided by 255 without applying
+    /// the transfer function or premultiplying RGB.
+    #[must_use]
+    pub fn from_srgba8(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
+        fn decode(channel: u8) -> f32 {
+            let encoded = f32::from(channel) / 255.0;
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
+        }
+
+        Self::rgba(
+            decode(red),
+            decode(green),
+            decode(blue),
+            f32::from(alpha) / 255.0,
+        )
+    }
+
+    /// Returns linear-sRGB red, green, blue and straight alpha without conversion.
     #[must_use]
     pub const fn components(self) -> [f32; 4] {
         [self.red, self.green, self.blue, self.alpha]
