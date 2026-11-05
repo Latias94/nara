@@ -198,6 +198,48 @@ Use `text(role)`, `control_metrics(size)`, `button(...)` and `field(...)` to sha
 padding and state visuals. Body, caption and title use absolute logical size/line-height pairs;
 the original Host applies device scale once. Compact density changes spacing independently of
 text scale. Focus, selection and validation retain separate cues with unchanged hit geometry.
+Pointer capture preserves a held press during drag-out, while the pressed appearance requires
+the pointer to remain over the button. Reentry restores that appearance; release outside emits
+no action. Focus and selected-state cues remain independent of the held press.
+
+The current built-in recipes resolve these values before device scaling. They are the first
+dense desktop defaults, not calibrated physical units or universal game-UI sizes. The
+[implementation](../../crates/nara_ui_widgets/src/appearance.rs) owns their exact values.
+
+| Recipe | Normal | Compact | User text-scale behavior |
+| --- | --- | --- | --- |
+| Body size / line height | 14 / 20 | 14 / 20 | Multiply both values |
+| Caption size / line height | 12 / 18 | 12 / 18 | Multiply both values |
+| Title size / line height | 16 / 24 | 16 / 24 | Multiply both values |
+| Small / Regular / Large minimum control height | 24 / 28 / 34 | 22 / 24 / 30 | Grow to fit scaled body line height plus vertical padding |
+| Small / Regular / Large minimum vertical padding per edge | 2 / 4 / 7 | 0 / 2 / 5 | Remains logical padding; larger minimum height may add extra padding |
+| Control horizontal padding per edge | 10 | 8 | Remains logical padding |
+| Group gap / panel inset | 6 / 12 | 4 / 8 | Remains logical spacing |
+| Control radius / border stroke | 4 / 1 | 4 / 1 | Remains logical geometry |
+
+These heights are recipe minima. Measure the actual child and field baseline through the layout
+interface; do not reconstruct it as a fraction of font size or assume every fallback run fits
+inside the primary face's metrics. A declared short line box controls spacing, not glyph ink
+clipping. Resolve from the original logical recipe on every scale change rather than repeatedly
+scaling rounded device geometry. The native Host owns the final logical-to-device mapping.
+
+`UiAppearance` currently scopes palette, density and text scale. Font family/weight/features,
+icon sizing, forced palettes, motion and persisted preferences are not implied by that value.
+Palette admission checks finite channel ranges; it does not certify contrast for arbitrary
+overrides. Document color transfer and alpha/compositing when supplying a palette, and qualify
+text, focus, selection and error cues against their actual surfaces.
+Other component libraries can own additional typed roles and recipes, compose these controls,
+or provide their own visuals without extending a central widget enum. Metric overrides use
+`UiControlMetrics`; text buffers, input lifetimes and domain history keep their original owners.
+Before adding a recipe, specify its combined states, actual minimum/baseline, overflow, scope
+reset, resource failure and invalidation, then exercise it with a complete consumer. See the
+[design inventory](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness)
+for the remaining capability and qualification requirements.
+
+The [user-supplied Editor reference](../design/editor-reference/README.md) records proposed
+future visual values separately. In particular its 13/20 body, system-font policy, encoded HEX
+colors and 2-unit focus stroke are not the current implemented defaults above.
+
 `UiControlGrid` measures and baseline-aligns children, then wraps them according to available
 width. Its declared minimum cell width is a lower bound: actual child min-content width under
 the admitted typography determines when to wrap. A cell wider than the available allocation

@@ -748,6 +748,57 @@ The resulting targets belong to the [UI design](../architecture/ui-foundation-de
 and [R11b visual prerequisite](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#styled-source-workspace-and-component-library-prerequisite).
 This study is evidence for those targets rather than production code or a qualification receipt.
 
+### November 5 implemented-recipe audit and catalogue follow-up
+
+**Evidence update:** the [styled workspace unit](../plans/2026-11-05-styled-source-workspace-plan.md)
+has since implemented the initial slice. Its qualification and limits supersede the earlier
+"missing"/"proposed" descriptions for that slice; they do not establish a complete catalogue.
+This audit reads the November 5 working tree, including concurrent changes, and existing regression
+definitions; it runs no product/native checks. All four local reference HEADs, origins and clean
+worktrees were rechecked against the full pins above. No new frontend research was needed.
+
+The [implemented recipe](../../crates/nara_ui_widgets/src/appearance.rs#L204-L274) already makes
+concrete numerical choices. These are authored logical units, not physical pixels or a `rem` API:
+
+| Recipe input | Implemented default |
+| --- | --- |
+| Body/control, Caption, Title | Font size/absolute line height: **14/20**, **12/18**, **16/24**; both multiply by `text_scale` in `0.5..=4`. Title changes size, not weight. |
+| Small/Regular/Large control height at 1x text | Normal: **24/28/34**; Compact: **22/24/30**. Every size retains Body typography. Height is `max(minimum, scaled_line_height + 2 * vertical_padding)`; Regular at 2x therefore becomes **48/44** for Normal/Compact. |
+| Spacing, Normal/Compact | Horizontal control padding **10/8**, inter-control gap **6/4**, panel inset **12/8**. Final vertical padding centers the explicit line box within the computed height. |
+| Outline geometry | Radius **4**, stroke **1** in both densities and all recipe states. The plan's **16** icon envelope is not an implemented icon recipe. |
+
+**Assessment and bounded follow-up:** reference comparisons below concern concrete contracts,
+not a requirement to reproduce another framework's entire theme system.
+
+| Boundary | Implemented evidence | Decision or support still needed before catalogue expansion |
+| --- | --- | --- |
+| Typography roles and units | [`UiAppearance`](../../crates/nara_ui_widgets/src/appearance.rs#L139-L144) scopes palette/density/text scale; [`TextTypography`](../../crates/nara_text/src/layout.rs#L13-L66) carries size and optional absolute line height. The native [font policy](../../editor/src/platform/drawn.rs) selects Fira Sans Regular plus an optional explicit CJK face. Zed's actual [text-size mapping][n5a-zed-type] also uses 14/12/16 steps. | Keep these as the selected desktop baseline. Small/Large currently change geometry only, unlike Open-GPUI's [per-size typography scales][n5-open-recipes]; record that choice. Role-specific family/weight/features/letter spacing and locale are not appearance inputs. Introduce one only for a named consumer, with actual admitted-face identity rather than synthetic weight or an implied CSS inheritance contract. |
+| Leading, baseline and hit target | Fields use actual line-block extents, an adjusted text origin and the original baseline for paint/Point/IME ([geometry](../../crates/nara_ui_widgets/src/text_field.rs#L426-L472)); [`UiControlGrid`](../../crates/nara_ui_widgets/src/control_grid.rs) aligns measured child baselines. [Regressions](../../crates/nara_ui_widgets/tests/text_field.rs#L119-L169) cover fallback and a 20-size/6-height line. | `20 - 14` is not measured leading or a baseline. Retain the text owner's geometry; GPUI's [ascent/descent centering][n5r-zed-fonts] is a comparison, not a replacement formula. Recipe height is an allocation target: fields retain their measured minimum, while [buttons](../../crates/nara_ui_widgets/src/appearance.rs#L486-L510) only supply height when Auto and explicitly Clip. Declare overflow for shorter explicit button allocations; do not advertise the line box or icon envelope as the interaction target. |
+| Combined states and behavior | [Button resolution](../../crates/nara_ui_widgets/src/appearance.rs#L310-L375) applies variant, selection, disabled neutralization, then enabled hover/press; selected interaction blends retain a distinct fill and enabled focus owns the border. [Fields](../../crates/nara_ui_widgets/src/appearance.rs#L276-L307) retain invalid tint under focus. Existing [combined-state regressions](../../crates/nara_ui_widgets/tests/appearance.rs#L107-L246) cover these combinations. | Resolve a concrete disagreement: the recipe paints pressed whenever `pressed`, including outside hover, while [`visual_state`](../../crates/nara_ui_widgets/src/button.rs#L121-L135) requires `pressed && hovered`; ImGui's [ButtonEx][n5-imgui-button] likewise uses held-and-hovered. Specify drag-out/reentry and primary/destructive hover emphasis, since unselected variants share interaction fills. Keyboard focus-visible, read-only and loading are not separate recipe inputs; define behavior and stable geometry before exposing them as variants. |
+| Stroke, icons and optical alignment | State changes keep the same radius/stroke; explicit [`with_metrics`/`with_visual`](../../crates/nara_ui_widgets/src/appearance.rs#L462-L477) allow local alternatives. The shared button recipe emits text, not an icon/label composition. Zed separately [measures icon envelope and surrounding padding][n5a-zed-icons]; Godot [draws focus independently of the current state surface][n5a-godot-focus]. | Add one real icon-plus-label consumer before claiming icon support: choose envelope, gap, optical offset, missing-asset label and minimum hit allocation. Declare whether stroke thickness remains logical or uses a device hairline; review 1.25x/1.5x output without rounding text advances or moving the hit box for optical correction. A one-unit focus-colored border is the current cue, not a separately implemented outer focus ring. |
+| Scope, overrides and detached content | Callers pass an effective immutable value; [independent row regressions](../../tests/fixtures/ui-module-consumer/tests/styled_property_row.rs) cover sibling isolation, override removal and retained drafts. Local style builders apply after recipe resolution. The current [Shell](../../editor/src/frontend/drawn/shell.rs) includes appearance in frame reuse and cancels its input/menu when appearance changes. | This is explicit value passing, not an automatic app/window/subtree cascade. Document builder order when overriding metrics and visuals; final local overrides can replace state cues. Shell currently closes the menu on appearance change, unlike Open-GPUI's [captured opening theme][n5-open-overlay]. Keep that concrete policy until a consumer requires live inheritance or captured styling across a change. |
+| Text scale versus DPI | Density changes spacing; user text scale changes typography and required height, leaving horizontal padding/radius/stroke unchanged. [Shared geometry tests](../../crates/nara_ui_widgets/tests/appearance.rs) exercise 1/1.25/1.5/2 native scales; the unit records actual Windows/DX12 at 1.5 with both densities and 1x/2x text. | Preserve independent inputs and derive from original logical values; ImGui explicitly [separates font scales][n5-imgui-fonts] and warns against [repeated rounded style scaling][n5-imgui-scale]. Native monitor transitions, persistent preference adoption and the full admitted text-scale range remain unqualified. Do not infer a UI zoom or calibrated-point contract from these numbers. |
+| Contrast and forced palettes | A [default-role test](../../crates/nara_ui_widgets/tests/appearance.rs#L82-L104) checks six opaque foreground/background pairs at ratio 4.5 using weighted raw RGB channels. [Palette admission](../../crates/nara_ui_widgets/src/appearance.rs#L63-L113) validates finite `0..=1` channels; the kernel warning color remains fixed outside the customizable palette. | Document the channel transfer/compositing assumptions before extending contrast calculations to supplied colors. Current tests do not cover arbitrary palettes, translucent combinations, focus/selection/border contrast or native forced colors. Select tested semantic role pairs and non-color error/selection cues; explicitly defer forced-palette integration rather than equating it with a high-contrast palette. The existing frontend/W3C inventory already supplies that distinction. |
+| Resource readiness and cache effects | Font sets are explicit and immutable; [field reconfiguration](../guides/editable-text.md#local-editing) atomically admits display, preedit origin and bounded history. The [compiler cache](../../crates/nara_ui_kernel/src/compiler/text.rs#L16-L112) bounds successful layout/width observations to at most `min(max_nodes, 256)` plus source/glyph limits. Color-compatible requests reuse shaping; layout and width observations remain distinct. | Live native font-family switching and asynchronous font/icon readiness are not supplied by `UiAppearance`. A future resource consumer must choose retain-old/placeholder/reflow and coordinate text/compiler/planner provenance; GPUI's [completion notification][n5r-zed-assets] shows why readiness may invalidate measurement. Preserve bounded admission on hits. The unit's measured color change still recompiles nodes and measures children: warm shaping reuse establishes neither paint-only updates nor an end-to-end frame budget. |
+
+**Recommended order:** reconcile drag-out/state precedence first; then qualify one mixed-font,
+icon-plus-label row with actual baselines, optical alignment and contrast in the existing workspace.
+Keep the shipped values while recording intentional size/overflow/scope choices. Font preference
+and asynchronous resource policies should follow a concrete consumer under their existing owners;
+they do not justify a universal style registry or another layout/text engine. Performance follow-up
+remains with the unit's owner-local observations and R11a/R11e, not this source audit.
+
+The subsequent correction `04da077` resolves the observed drag-out disagreement: the recipe now
+requires hover for the pressed fill, while the original reducer retains the held press and focus.
+The existing live-journal regression now covers drag-out/reentry, stable geometry/focus and no
+activation during motion. The shared kernel/widgets suite passes 218/218
+(`6ec4e35a-36dc-45c2-8d2b-84de2a7e41ae`). The same correction withholds disabled/inert semantic
+actions without removing their descriptive state. Numeric recipes and unsupported typography/
+icon/preference cells above retain their stated scope; this correction makes no new visual,
+native-platform or performance claim. The [recipe guide](../guides/editable-text.md#scoped-appearance-and-measured-controls)
+records actual values and the [operations unit](../plans/2026-11-05-presented-ui-operations-plan.md)
+owns the affected complete native successor evidence.
+
 ## Primary Source Links
 
 [nara-deps]: ../../Cargo.toml
@@ -916,3 +967,137 @@ This study is evidence for those targets rather than production code or a qualif
 [n5r-zed-assets]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/asset_cache.rs#L14-L66
 [n5r-zed-images]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/gpui/src/elements/img.rs#L302-L431
 [n5r-nara-fonts]: ../architecture/adr/0031-text-and-font-strategy.md
+[n5a-zed-type]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/styles/typography.rs#L132-L160
+[n5a-zed-icons]: https://github.com/zed-industries/zed/blob/dd3437011469d5c2ec8c821a84cc999979625697/crates/ui/src/components/icon.rs#L72-L109
+[n5a-godot-focus]: https://github.com/godotengine/godot/blob/fefec82d74b46f5e6cc31f373071058f80a5cbee/scene/gui/button.cpp#L221-L230
+
+## November 5: Supplied v0.4 Design Kit Assessment
+
+**Evidence and scope:** local source/visual review only, against the November 5 working tree.
+The supplied root is `D:\Frankorz\Downloads\nara-design-kit-v0.4-fixed\nara-design-kit-v0.4`.
+Inspected text sources are `README.txt`; `nara-editor-design-spec-v0.4.md`, chapters 02-13,
+16-17, 21-29, 32, the chapter 36 image-boundary subsection and 37-38;
+`nara-design-tokens.json`, including proposed-contract metadata, appearance, component,
+document/context/docking and task mappings; `design-process/image-index-v0.4.json`; and
+`design-process/image-prompts-v0.4.json`, its provenance notes and the C01/C02/T01 prompts and
+corrections. The latter declares built-in image generation, not an implemented application capture.
+No external-product claims or links in the supplied specification were independently revalidated.
+
+Images actually opened with `view_image`, relative to that root:
+
+- `images/nara-components-properties-v0.4.png` (C01).
+- `images/nara-components-navigation-feedback-v0.4.png` (C02).
+- `images/nara-scene-inspector-v0.4.png` (T01).
+- `images/nara-components-v0.2.png` (inherited component comparison).
+- `images/nara-docking-scene-shader-v0.3.png` (adjacent document Views).
+- `images/nara-docking-scene-game-float-v0.3.png` (multi-view/native-window direction).
+- `images/nara-profiler-console-v0.4.png` (diagnostic context and dense tables).
+
+At the user's subsequent direction, the [complete local reference](../design/editor-reference/README.md)
+preserves **all 32 supplied files, 29,897,315 bytes (28.5 MiB)** before the English adoption README:
+all sixteen UI PNGs, the original Chinese specification, tokens, `README.txt`, assets, figures and
+design-process records. Every supplied file was byte-compared with its local counterpart; none
+was missing or changed, and all six hashes in the adoption README match. Original relative links
+retain their directory structure. The preserved source remains reference material; the English
+README maps current adoption and exceptions. This sidecar edits only this research assessment.
+Visual judgments cover the seven opened images above, not all sixteen merely because they exist.
+
+**Visual assessment / inference:** the continuous work surfaces, narrow separators, compact
+toolbars and aligned property columns suit a dense mouse/keyboard Editor. C01 makes mixed values,
+source overrides, invalid input and read-only/disabled controls legible as different facts; C02
+adds stable selection counts, typed picking and recoverable feedback. T01 provides useful page
+hierarchy. The atlas's surrounding specimen boxes are comparison framing, not a recommendation
+to wrap every production property group in a large card. Generated highlights, gradients, icon
+shapes, tiny text and pixel dimensions are not production recipes. The 3D scene, Mesh/Light
+examples and specialist tools do not expand the current 2D product scope or authorize a rebrand.
+
+### Adoptable Rules And Concrete Differences
+
+This compares existing code with recommendations; the After column does not report implemented
+changes. It complements the [existing visual contract inventory](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness)
+and [actual recipe guide](../guides/editable-text.md#scoped-appearance-and-measured-controls).
+
+| Before: current implementation | After: recommended integration | Why / exact kit chapters |
+| --- | --- | --- |
+| `UiAppearance` uses 14/20 Body, 12/18 Caption and 16/24 Title; the Host explicitly admits Fira Sans Regular and a configured fallback. | Keep these qualified defaults while comparing the proposed 13/20 Body, 12/18 numeric and 600-weight headings on real admitted Latin/CJK faces. Record actual font identity/features; do not synthesize weight or assume system-family discovery. | 04, 11-12, 26: an English raster atlas proves neither CJK metrics, tabular figures, IME nor accessible text enlargement. |
+| Regular controls already resolve to 28/24 Normal/Compact minima, radius 4 and stroke 1; Compact Small can be 22 high. Normal gap is 6, Compact gap 4. | Reuse measured minima and baseline alignment. Treat the kit's 4/8 spacing rhythm, 28/24 rows and 24-unit hit minimum as explicit Editor recipe choices; reconcile the 22-unit case rather than claiming all existing controls meet 24. Reserve units/reset/status slots and wrap narrow rows without reducing text. | 02, 04, 17, 28.1, 29: stable value columns matter more than tracing raster coordinates. Panel widths and the 1600-by-1000 reference canvas are examples. |
+| The library palette has one border role, shared hover/pressed fills and a fixed kernel warning color; it is not the supplied graphite/teal palette. | Map sRGB HEX through the declared render conversion/alpha/output contract. Keep structural dividers distinct from necessary control borders, and error text distinct from destructive fill. Add library-local warning/info or variant interaction roles only when a real consumer needs them. | 03, 12, 16-17: primary/secondary text, on-accent text and state cues need contrast checks on actual composited surfaces. The kit's opaque-pair calculations do not certify Nara output. |
+| `field(focused, enabled, invalid)` keeps invalid tint under a focused border; radius/stroke stay fixed. There is no separate 2-unit outer focus ring with a 1-unit offset, nor complete read-only/loading recipe inputs. | Preserve independent focus, selection, source, validity and availability. Qualify an outer focus cue with clipping and unchanged hit geometry if adopted. Keep read-only focus/copy distinct from disabled submission; retain invalid drafts and expose pending/missing/empty references separately. | 05-11, 28.1-7: these are combined behavior/visual contracts. The atlas shows independent specimens, not several simultaneously focused popups. |
+| Density, user text scale and Host device scale have separate owners; appearance does not supply full UI zoom, icons, motion or persisted preferences. | Keep those inputs independent and derive from original logical values. Use actual line/ink/baseline measurements at fractional DPI and enlarged text. Introduce icon-plus-label composition and optional motion through their existing owners; pressed/focus/input feedback remains immediate. | 04, 12, 26: the kit's generic user UI scale must not silently replace the implemented text-scale contract. OS IME, monitor transitions, reduced motion and accessibility require their own evidence. |
+
+**Ownership and reuse:** chapters 10-13, 21-26 and 28 agree with preserving stable identities,
+local drafts, explicit command targets and owner/version checks. Their names such as
+`DocumentStore`, `ViewInstance` and `ActionContext` are conceptual design vocabulary, not new
+Rust API requirements. Under ADR0107/0118, document/history owners retain mutation, frontends
+retain drafts/control state, the kernel retains measurement and presented geometry, and the
+original Host retains native input, IME, GPU resources and presentation. Automation uses the
+original presented-operation ports; a shared command concept does not require a generic bus.
+Reuse recipes selectively for game UI without importing Editor docking, document state or its
+desktop theme into `nara_ui`. Independent libraries may keep their own roles and controls.
+
+**Plugins and custom drawing:** chapters 13, 25 and 28 support common property containers and
+domain validation with specialized canvases. Extend the existing scoped state, child measurement,
+captured geometry, semantics and original input/render seams through a concrete consumer.
+The pictured curve, gradient, timeline and profiler are design pressure; finite mesh drawing
+does not establish their gestures, keyboard support or plugin lifecycle. The kit does not prove
+arbitrary native-plugin unloading, a complete widget catalogue or a new renderer/toolkit.
+
+**Diagnostics and future docking:** carry task phase, actual target/input revision, durable
+failure details, copy/locate actions and truthful cancellation into existing owner projections
+(25, 28.6-7, 32, 37). A toast must not be the sole failure record; profiler timings are examples.
+For future docking (02, 21-23, 26), keep group-local tabs distinct from local mode switches,
+moving a view distinct from duplicating it, and view closure distinct from document/Runtime
+termination. Preserve personal layout separately from content history, with reachable recovery
+for missing plugins/displays and cancelled migration. Respect the existing explicit close
+protocol rather than implementing the kit's last-primary-view rule from a screenshot. Fit/1:1
+output mapping, capture ownership and native multi-window readiness remain separate capabilities.
+
+### Lifecycle, Save And Input Conflicts To Keep Explicit
+
+The supplied specification is a proposed design, including its behaviors. These differences
+must be reconciled before implementation rather than treated as missing palette tokens:
+
+| Kit rule | Current owning contract / inspected evidence | Adoption boundary |
+| --- | --- | --- |
+| Chapter 21 closes a document when its last primary editing View closes; closing a floating window coordinates those View closures. | [ADR0118 panel lifetime](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md#panels-layouts-and-render-views-are-distinct) says panel close does not close its document. [Document close](../guides/editor-documents.md#save-reopen-and-close) uses explicit `EditorWorkspaceIntent::CloseDocument` and the original Save/Discard/Cancel protocol. | Retain Document/View separation and group-local tabs, but do not silently add last-view document closure or infer semantics from a native close button. A different product policy needs an explicit owning-contract decision. |
+| Chapters 21 and 24 coordinate unfinished buffers during layout replacement, close and Save; Save admits valid inputs and blocks the affected document for invalid/composing/conflicting input. | The [panel lifecycle](../guides/editor-panels.md#instance-target-and-presentation-lifetimes) retires local state on actual hide/close, target/resolved-document change and layout reset/restore. [Inspector editing](../guides/editable-text.md#native-editor-integration) retains unapplied drafts across blur, field filtering/collapse and Inspector-tab changes, but publishes through explicit Apply/non-composing Enter; Save captures accepted document content. | Distinguish hidden controls from a retired panel. Do not claim Save persists local drafts, or that layout reset preserves them. A future cross-panel pending-input census/recovery policy belongs to original frontend/document/close owners, not the token loader or a second draft store. |
+| Chapter 06 validates on blur and describes Escape restoring the edit-start value; chapters 28.1-3 later qualify cancellation after external change. | [Field lifetime](../guides/editable-text.md#field-input-lifetimes) forbids Apply on typing, composition completion or focus loss. Blur revokes the input token and cancels preedit; dirty/conflicting input remains recoverable. | Blur validation may explain a local draft but must not publish it. Escape removes only the current composition/draft/preview; it cannot write an obsolete edit-start snapshot over newer document state. |
+| Chapters 05, 11 and 28.1 require read-only text to be focusable/copyable, while disabled actions skip ordinary navigation; focus/selection/error coexist. | `UiTextField::set_enabled(false)` revokes text input; `UiAppearance::field` has enabled/focused/invalid inputs, not a separate read-only interaction mode. The [current Inspector](../guides/editable-text.md#native-editor-integration) provides `Copy retained input` for complete drafts, including incompatible or unprojected fields, excluding preedit. | Disabling editing is not a selectable read-only implementation. Retained-draft Copy does not establish generic copy/select for every read-only committed value. Add such a consumer through existing text/clipboard/semantic owners; preserve clipboard-failure feedback and exact source identity. |
+| Chapters 21-22 and 26 preserve View identity/binding across moves, with per-window focus, popup and IME state. | Existing panel state survives compatible relocation, but [native input scopes](../guides/editor-panels.md#native-image-panel-attachment) and presented observations retain their original endpoint, mapping and text lifetime; actual retirement invalidates them. | Preserve the View's document binding, not old native capture or event authority. Reconcile focus, release capture and remap popup/IME/input on migration; multiple native windows and monitor transitions still need their own qualification. |
+
+### Complete-Package README Review And Rule Map
+
+The imported README correctly records the 13/20-versus-14/20 difference, sRGB boundary, unchanged
+2D scope, proposed schema and unsupported appearance inputs. Three small documentation additions
+are recommended for its owner; this assessment does not edit that directory:
+
+1. Record generated-image provenance from `design-process/image-prompts-v0.4.json` and license
+   status: no explicit kit license, copyright owner or redistribution terms were found in its
+   file inventory or inspected source metadata. User supply is provenance, not a declaration
+   that the repository's software license covers these references. No public source URL or
+   model/version is provided; do not invent one.
+2. Adjust the implementation-authority sentence: Accepted ADRs own architecture contracts;
+   current source/guides and qualification records establish supported behavior; plans organize
+   work. A design package or plan does not independently approve a capability.
+3. Extend its English mapping with the lifecycle/Save/read-only exceptions above and these
+   precise chapter/subsection references. The complete original Markdown is now retained with
+   its image links; the English map should summarize selected rules without translating all
+   38 chapters or presenting their future scope as implemented.
+
+| English rule to retain or extract | Original specification chapters/subsections |
+| --- | --- |
+| Continuous surfaces, stable columns, nominal density, measured wrapping and narrow-layout recovery | 02 space shortage; 04 metrics; 17 density/alignment and surfaces/boundaries; 28.1 property rows; 29 workspace layout |
+| Semantic colors, non-color cues and explicit sRGB/compositing with actual contrast checks | 03; 12 color/compositing; 16 opaque contrast pairs; 17 color/dynamic states |
+| Invalid/local drafts, mixed-axis scope, source override versus dirty state, read-only/copy, reference states and focus restoration | 05-11; 28.1-5 and 28.7; 29 visible and missing states |
+| Separate DPI/text scale/density, actual fallback metrics, grapheme/IME behavior and original input targets | 04; 11-12; 22 command resolution; 26 keyboard/semantics/localization |
+| Library composition/custom drawing without copied document, task or platform authorities | 13; 25 plugin contracts and reload boundaries; 27 implementation responsibilities; 28.8 reuse |
+| Durable diagnostic context, truthful progress/cancellation, stale-result refusal and clear empty/error states | 25 task/diagnostic model; 28.6-7; 32 capture selection and log/error recovery |
+| Future group-local tabs, explicit binding/close/move/duplicate policies, layout recovery and Game output/input mapping | 21-23; 26 window-level state; 27 T13-T17 |
+| Mockup and acceptance limits, selected-image provenance and remaining capability gaps | Introduction; 37 image/spec coverage and proposed acceptance; 38 versioned image index |
+
+**Recommended integration:** use the complete imported kit to review one existing complete 2D
+workspace and one independently composed property row with icons, long Latin/CJK text, units,
+validation and recovery. Compare fixed-content captures at both densities and independent
+text/DPI scales before adopting palette or metric changes. Preserve existing field capacity,
+draft/preedit/history and exact presented-operation results. This review adds no native,
+functional, accessibility or performance certification and does not rerun Cargo or formatting.

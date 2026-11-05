@@ -1,0 +1,117 @@
+{
+  "product": "nara editor",
+  "version": "0.4.0",
+  "date": "2026-11-05",
+  "image_policy": "Generated PNGs communicate UI appearance and illustrative workflow states; exact data and behavior are defined in the Markdown specification and JSON. Images are not functional software or measured performance.",
+  "new_images": [
+    {
+      "id": "C01",
+      "file": "images/nara-components-properties-v0.4.png",
+      "title": "属性编辑与字段状态",
+      "chapter": 28,
+      "purpose": "数值、向量、混合值、覆盖、引用、颜色与曲线等复合控件"
+    },
+    {
+      "id": "C02",
+      "file": "images/nara-components-navigation-feedback-v0.4.png",
+      "title": "集合、导航与反馈",
+      "chapter": 28,
+      "purpose": "树、表格、搜索、选择器、菜单、任务反馈和对话框"
+    },
+    {
+      "id": "T01",
+      "file": "images/nara-scene-inspector-v0.4.png",
+      "title": "场景与 Inspector",
+      "chapter": 29,
+      "purpose": "层级、场景视口、多对象属性、Prefab 来源与编辑上下文"
+    },
+    {
+      "id": "T02",
+      "file": "images/nara-assets-importer-v0.4.png",
+      "title": "资源浏览与导入",
+      "chapter": 30,
+      "purpose": "资源网格和列表、导入设置、依赖、预览与导入状态"
+    },
+    {
+      "id": "T03",
+      "file": "images/nara-animation-editor-v0.4.png",
+      "title": "动画编辑",
+      "chapter": 31,
+      "purpose": "姿态预览、轨道、关键帧、曲线与精确属性"
+    },
+    {
+      "id": "T04",
+      "file": "images/nara-profiler-console-v0.4.png",
+      "title": "性能分析与诊断",
+      "chapter": 32,
+      "purpose": "采集目标、时间范围、性能轨道、事件详情与日志来源"
+    },
+    {
+      "id": "T05",
+      "file": "images/nara-project-input-settings-v0.4.png",
+      "title": "项目设置与输入映射",
+      "chapter": 33,
+      "purpose": "设置搜索、作用域、动作映射、绑定捕获与冲突"
+    },
+    {
+      "id": "T06",
+      "file": "images/nara-particle-editor-v0.4.png",
+      "title": "粒子效果编辑",
+      "chapter": 34,
+      "purpose": "模块栈、粒子预览、生命周期曲线与颜色渐变"
+    },
+    {
+      "id": "T07",
+      "file": "images/nara-audio-mixer-v0.4.png",
+      "title": "音频混音",
+      "chapter": 35,
+      "purpose": "通道条、推子、电平、路由、效果与独立试听"
+    },
+    {
+      "id": "T08",
+      "file": "images/nara-build-profiles-v0.4.png",
+      "title": "构建配置与任务",
+      "chapter": 36,
+      "purpose": "目标配置、场景清单、构建步骤、取消与结果诊断"
+    }
+  ],
+  "inherited_images": [
+    {
+      "file": "images/nara-docking-scene-shader-v0.3.png",
+      "title": "Scene 与 Shader 并排停靠",
+      "version": "v0.3",
+      "purpose": "停靠关系的延伸示例；组内标签对齐规则继续有效"
+    },
+    {
+      "file": "images/nara-docking-scene-game-float-v0.3.png",
+      "title": "Scene、Game 与浮动 Inspector",
+      "version": "v0.3",
+      "purpose": "运行输出、输入捕获和多窗口关系的补充参考"
+    },
+    {
+      "file": "images/nara-components-v0.2.png",
+      "title": "基础组件细节",
+      "version": "v0.2",
+      "purpose": "基础控件细节参考；扩充状态优先采用第 28 章"
+    },
+    {
+      "file": "images/nara-shader-graph-v0.2.png",
+      "title": "Shader Graph",
+      "version": "v0.2",
+      "purpose": "专业内容参考；旧外层标签不作为停靠依据"
+    },
+    {
+      "file": "images/nara-animation-controller-v0.2.png",
+      "title": "动画控制器",
+      "version": "v0.2",
+      "purpose": "状态与转换细节参考；旧外层标签不作为停靠依据"
+    },
+    {
+      "file": "images/nara-animation-timeline-v0.2.png",
+      "title": "早期动画时间轴",
+      "version": "v0.2",
+      "purpose": "基础关键帧与曲线参考；新版工作区见第 31 章"
+    }
+  ],
+  "unchanged_brand_directory": "assets"
+}

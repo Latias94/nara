@@ -1833,6 +1833,13 @@ pins Zed GPUI/Open-GPUI, upstream `repo-ref/imgui` and `repo-ref/godot`. The
 records targets and current gaps. Reuse existing state/layout/drawing/text/native owners;
 select exact style and component API shapes through this consumer.
 
+The user-supplied [Design Kit v0.4 reference](../design/editor-reference/README.md) supplies a
+complete 32-file design reference, sixteen UI images and an English adoption map. Carry its graphite/teal
+hierarchy and explicit component-state design into the next complete visual comparison. Reconcile
+13/20 versus current 14/20 typography, actual admitted faces, encoded color conversion and
+unsupported tool/preferences before changing defaults. The reference does not expand game scope
+or move document, rendering, input or layout ownership into a design-token file.
+
 **Complete consumer:** extend the independently drawn source workspace with visually coherent
 document tabs, a compact toolbar, selectable source/hierarchy rows, one editable property group,
 inline disabled/read-only/invalid/pending/result feedback and one anchored action menu. Preserve
@@ -1852,6 +1859,12 @@ page, including narrow-window fallback, rather than only in disconnected widget 
 2. Review a small visual specification and actual fixed-content captures: surface hierarchy,
    text emphasis, baseline/alignment, spacing/density, states, focus/error contrast and icon/text
    balance. Record normal/compact metrics independently from DPI and user text scale.
+   Keep an [implemented numeric recipe table](../guides/editable-text.md#scoped-appearance-and-measured-controls)
+   and explicit support gaps alongside the source study. Before expanding the catalogue, qualify
+   a mixed-font icon/label/value row with actual baselines, optical icon placement, stable hit
+   targets and combined focus/selection/error states. Drag-out/reentry appearance must agree
+   with the original button behavior. Broader font/style preferences and asynchronous resources
+   need their own admission/reconstruction consumer rather than implied support from token names.
 3. Define required semantic tokens, typography/metrics, component variants and state precedence;
    scope/default/local overrides have explicit removal/reset. Color/brush changes preserve
    compatible text/layout work; font/fallback, line-height, locale/direction, density and
@@ -2384,9 +2397,13 @@ and the relevant runtime adapter before changing their existing aggregation rule
 join after R11c; the first ordinary field workflow does not wait for a complete graph editor.
 
 **Files:** current `crates/nara_ui_kernel/src/interaction/semantics.rs` and `journal.rs` as reused
-contracts, Editor panel/Host observation and input adapters, planned
-`tests/fixtures/editor-ui-host-consumer/tests/ui_operations.rs` and an appropriate actual native
-trajectory under `editor/src/platform/imgui/`. Reuse rather than publicize test-only receipt issuers.
+contracts, Editor panel/Host observation and input adapters, the existing complete
+`tests/fixtures/editor-ui-host-consumer` native consumers and the independent drawn workspace
+trajectory under `editor/src/platform/drawn/`. Reuse rather than publicize test-only receipt issuers.
+
+The selected [presented UI operations unit](2026-11-05-presented-ui-operations-plan.md) implements
+the first complete ordinary-field consumer through these owners. Its qualification and remaining
+R11d requirements are recorded separately; remote transport is not required for this initial port.
 
 **Approach:** expose structured observation and operation through the same production ports for
 tests and future agent/debug adapters. Identify presented panel/control incarnation, route,

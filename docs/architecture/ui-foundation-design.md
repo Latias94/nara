@@ -497,9 +497,10 @@ engine, complete theme language or catalogue of every platform gesture is select
 
 The initial independent source workspace qualifies authoring and Host workflows with engineering
 controls. It does not establish a polished component library, responsive desktop layout or a
-finished Editor visual design. Its current palette-only `UiTheme`, per-panel visual recipes and
-many absolute control rectangles make those limits concrete. Preserve its qualified commands,
-field capacity, state and input lifetimes while replacing presentation recipes.
+finished Editor visual design. That initial composition used palette-only `UiTheme`, per-panel
+recipes and many absolute control rectangles. The subsequent styled workspace introduces shared
+measured controls and scoped recipes; its qualification is recorded below. Preserve the qualified
+commands, field capacity, state and input lifetimes as the component library grows.
 
 The [November 5 primary-source study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
 compares Zed GPUI and Open-GPUI, upstream C++ ImGui and Godot. GPUI informs composable
@@ -554,7 +555,7 @@ capabilities separately. A list of token names is insufficient.
 | Font policy | Admitted font content/face identity, family/weight/style/features and ordered fallback; missing glyph and unavailable-font outcomes; old layouts retain their original provenance. Optional variable-font axes and dynamic loading need explicit support states. |
 | Text metrics | Logical size, line box/line height, actual baseline and ink overhang, alignment and multi-font runs; distinguish typographic advance from painted bounds. Derive control size from content and padding plus its minimum hit target rather than a universal fixed row height. |
 | Units and scale | Logical/authored versus physical units, native DPI, user text scale, component density and view zoom; identify the single conversion owner and round once at the correct boundary. Text and icons remain aligned at fractional scale. |
-| Visual roles | Semantic surfaces/text/borders, elevation, focus/selection/error and disabled/read-only feedback; specify color/alpha meaning through existing rendering contracts. Library-owned roles and overrides need an extension path rather than editing a central catalogue. |
+| Visual roles | Semantic surfaces/text/borders, elevation, focus/selection/error and disabled/read-only feedback; specify linear versus encoded color inputs, alpha/compositing and target conversion through existing rendering contracts before comparing contrast. Library-owned roles and overrides need an extension path rather than editing a central catalogue. |
 | Component recipes | Named size/emphasis variants, slot/content composition, label/icon/value alignment, icon optical size, padding/gap/radius/stroke and the full combined state matrix. Focus and validation indicators reserve geometry and remain distinguishable from hover/press. |
 | Layout | Intrinsic/min/preferred/max constraints, flex allocation, baseline, padding/border box, overflow/scroll, toolbar collapse and narrow-window policy; declared limits and unsupported requests produce explicit outcomes. |
 | Text presentation | Wrap, clip and measured ellipsis, long paths/numbers, multiline and empty/missing values; full source/semantic values remain available. Language, direction, bidi, CJK, combining and IME behavior participate in the same measurement and input basis. |
@@ -566,6 +567,11 @@ capabilities separately. A list of token names is insufficient.
 | Change and reuse | Effective scoped inputs and state precedence, immutable prior output, exact measurement/paint invalidation, cache bounds/eviction/loss and style restoration. Style changes do not create document edits or a second state/history owner. |
 
 Numeric recipes and visual comparisons belong to the component library's specification.
+The current [recipe table](../guides/editable-text.md#scoped-appearance-and-measured-controls)
+records actual defaults and separates fixed logical spacing from text-scale-dependent minima.
+These values are defaults a library can replace, not constraints imposed on every third-party
+component. Keep the table aligned with its owning implementation; inventory entries without an
+implemented mechanism remain requirements or explicitly deferred capabilities.
 Shared text/kernel/layout/render contracts remain independent of Editor-specific palette,
 density and docking; the game UI adapter can choose its own recipes. Frontend-framework
 references should inform semantic tokens, scoped composition and sizing behavior without
@@ -579,6 +585,13 @@ Font-family resolution is not evidence of complete cluster coverage. Retain actu
 font provenance and shaped-line metrics. Forced palettes, contrast preference and reduced
 motion are distinct policies; platform integration and unsupported font formats remain
 explicit qualification gaps.
+
+The user-supplied [complete Design Kit v0.4](../design/editor-reference/README.md) adds a concrete
+graphite/teal visual direction, component sheets and tool/docking/multiple-View references. Its original
+tokens are reference data, not a runtime schema. The mapping records the proposed 13/20 body
+versus the current 14/20 recipe, sRGB HEX conversion, focus/hit geometry and tool-capability
+differences. Evaluate a complete actual mixed-font row before adopting metrics or expanding the
+catalogue; mockup pixels and pictured 3D/tools do not establish implementation or product scope.
 
 The [styled workspace unit](../plans/2026-11-05-styled-source-workspace-plan.md) now supplies the
 shared CPU prerequisite: validated typography with atomic full-history adoption; a field-owned
@@ -898,6 +911,18 @@ An independent public test driver is the first consumer. A future agent may wrap
 operations; no MCP server, remote-control transport, global string command bus or second mutation
 path is required now. UI semantic snapshots are not proof of native accessibility, and injected
 IME events are not proof of actual OS composition/candidate-window behavior.
+
+The [presented operations unit](../plans/2026-11-05-presented-ui-operations-plan.md) supplies the
+first concrete port through the original semantic/native Hosts. The native observation owns
+no control schema: it retains the accepted original instance/output/snapshot/mapping and text
+scope, while read-only `inspect` preserves pending semantic submissions. `dispatch_observed`
+keeps physical arbitration; explicitly admitted `invoke_observed` captures a provider's typed
+request for its final ordinary callback. Nara projects its existing semantic snapshot and live
+behavior mappings; an independent software frontend retains its own controls and reducer.
+Disabled/inert semantics withhold executable actions. Original submission IDs, provider
+acceptance, source result, persistence attempt and later presentation stay distinct. This
+ordinary-field consumer leaves graph operations, a permanently animating request-wait oracle,
+remote transport and platform accessibility under their remaining R11d owners.
 
 ## Cost and refactor acceptance
 

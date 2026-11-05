@@ -1,0 +1,1615 @@
+{
+  "meta": {
+    "name": "nara editor",
+    "version": "0.4.0",
+    "date": "2026-11-05",
+    "status": "proposed_baseline",
+    "dimension_unit": "logical_px",
+    "color_encoding": "sRGB hex",
+    "note": "Independent JSON format for implementation mapping; not a claim of compatibility with an external token schema.",
+    "scope": "Expanded reusable components and eight practical editor workspaces; the v0.3 docking, document, context, runtime and task contracts are retained.",
+    "image_policy": "The v0.4 raster mockups illustrate layout and workflow states. They do not prove implementation, numerical performance, signal accuracy or complete state coverage."
+  },
+  "color": {
+    "surface": {
+      "canvas": "#171A1F",
+      "panel": "#1D2128",
+      "raised": "#252B34",
+      "input": "#14171B",
+      "hover": "#2A323C",
+      "pressed": "#34404B"
+    },
+    "border": {
+      "subtle": "#303741",
+      "control": "#6B7584",
+      "hover": "#8993A2"
+    },
+    "text": {
+      "primary": "#E6EAF0",
+      "secondary": "#A4ADB9",
+      "disabled": "#697381",
+      "on_accent": "#102522"
+    },
+    "accent": {
+      "primary": "#5EC8BF",
+      "hover": "#75D7CF",
+      "pressed": "#46A89F",
+      "selection": "#264442",
+      "focus": "#78E0D5"
+    },
+    "status": {
+      "error": "#F08F95",
+      "warning": "#E4BF7B",
+      "success": "#91C99A",
+      "info": "#87B5EC"
+    },
+    "axis": {
+      "x": "#E89797",
+      "y": "#A2D09C",
+      "z": "#96BAED"
+    },
+    "brand": {
+      "on_dark": "#5EC8BF",
+      "on_light": "#21675F",
+      "white": "#E6EAF0"
+    }
+  },
+  "space": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "xxl": 32
+  },
+  "radius": {
+    "control": 4,
+    "popover": 6,
+    "app_icon_ratio": 0.225
+  },
+  "stroke": {
+    "divider": 1,
+    "control": 1,
+    "focus": 2,
+    "focus_offset": 1,
+    "icon_16": 1.5
+  },
+  "size": {
+    "control_height": 28,
+    "control_compact_height": 24,
+    "property_row": 28,
+    "panel_tab": 34,
+    "app_bar": 36,
+    "viewport_toolbar": 32,
+    "status_bar": 24,
+    "icon": 16,
+    "icon_large": 20,
+    "min_hit_target": 24,
+    "splitter_visual": 1,
+    "splitter_hit": 6,
+    "tree_indent": 16,
+    "scrollbar_thumb": 6,
+    "scrollbar_hit": 12
+  },
+  "typography": {
+    "body": {
+      "size": 13,
+      "line_height": 20,
+      "weight": 400
+    },
+    "small": {
+      "size": 12,
+      "line_height": 18,
+      "weight": 400
+    },
+    "section": {
+      "size": 13,
+      "line_height": 20,
+      "weight": 600
+    },
+    "panel_title": {
+      "size": 13,
+      "line_height": 20,
+      "weight": 600
+    },
+    "numeric": {
+      "size": 12,
+      "line_height": 18,
+      "tabular": true
+    },
+    "chinese_default": "system_ui_sans",
+    "latin_default": "system_ui_sans",
+    "numeric_fallback": "system_monospace"
+  },
+  "layout": {
+    "reference_width": 1600,
+    "reference_height": 1000,
+    "hierarchy_width": 240,
+    "hierarchy_min": 200,
+    "inspector_width": 352,
+    "inspector_min": 320,
+    "bottom_dock_height": 256,
+    "viewport_target_min_width": 640,
+    "viewport_target_min_height": 360,
+    "meta": {
+      "status": "proposed_default_layout_examples",
+      "dimension_scope": "Reference workspace and default panel sizes, not fixed geometry for every docked view.",
+      "constraint_policy": "Each view type declares its content constraints. The existing minimum examples are not universal group minima.",
+      "narrow_window_policy": "Offer explicit collapse, maximize, restore, or compact-layout choices; do not rewrite the saved DockTree at fixed width breakpoints."
+    }
+  },
+  "motion_ms": {
+    "hover": 80,
+    "focus": 0,
+    "popover": 100,
+    "tooltip_delay": 500,
+    "success_toast": 4000,
+    "reduce_motion": 0
+  },
+  "brand": {
+    "main_viewbox": [
+      0,
+      0,
+      64,
+      64
+    ],
+    "main_stroke": 6,
+    "micro_viewbox": [
+      0,
+      0,
+      16,
+      16
+    ],
+    "micro_stroke": 1.75,
+    "micro_sizes": [
+      16,
+      20
+    ],
+    "main_from": 24,
+    "clear_space_ratio": 0.125
+  },
+  "behavior": {
+    "numeric_drag_undo": "one_gesture_one_transaction",
+    "mixed_axis_edit": "replace_only_edited_axis",
+    "invalid_text": "preserve_buffer_keep_last_valid_model",
+    "focus_and_selection": "independent",
+    "color_preview_encoding": "sRGB",
+    "color_storage_encoding": "explicit_in_property_metadata",
+    "play_edits": "runtime_only_until_explicit_transfer"
+  },
+  "tools": {
+    "meta": {
+      "status": "proposed_tool_mapping",
+      "source_chapters": [
+        17,
+        18,
+        19,
+        20,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37
+      ],
+      "dimension_unit": "logical_px",
+      "scope": "Shared component mappings and specialized editor workspaces; all entries are design targets, not implemented engine behavior.",
+      "value_policy": "Literal values are provided. Existing foundation tokens are reused without changes. Tool-specific mappings remain proposed until implementation review.",
+      "image_policy": "Generated images guide appearance and context; exact values and behavior come from the Markdown specification and these tokens.",
+      "new_palette_value": {
+        "path": "tools.shader_graph.port.type_palette.vector2_uv.color",
+        "value": "#B7A3E3",
+        "status": "proposed_graph_scoped_color",
+        "reason": "The existing foundation palette has no violet; this color identifies UV/Vector2 ports and their data wires only."
+      },
+      "geometry_derivation": {
+        "compact_tool_rows": "size.control_compact_height",
+        "property_and_node_headers": "size.property_row",
+        "port_and_key_visual_size": "space.sm",
+        "port_and_key_min_hit_target": "size.min_hit_target",
+        "thin_strokes": "stroke.control",
+        "emphasis_strokes": "stroke.focus",
+        "node_and_state_corner_radius": "radius.control"
+      },
+      "sample_policy": "Documentation examples describe illustrative snapshots only. They are not resource defaults, measured results, supported product limits or an implementation claim."
+    },
+    "shared": {
+      "density": {
+        "compact_row_height": 24,
+        "property_row_height": 28,
+        "icon_size": 16,
+        "inner_gap": 4,
+        "group_gap": 8
+      },
+      "boundary": {
+        "structural_divider_color": "#303741",
+        "structural_divider_width": 1,
+        "necessary_interactive_boundary_color": "#6B7584",
+        "necessary_interactive_boundary_width": 1,
+        "policy": "Use subtle divisions for structure and clear boundaries where interaction requires them; do not outline every row or panel with the control border."
+      },
+      "state": {
+        "independent_dimensions": [
+          "hover",
+          "selection",
+          "keyboard_focus",
+          "runtime_activity",
+          "validation"
+        ],
+        "hover_surface": "#2A323C",
+        "selection_surface": "#264442",
+        "selection_outline": "#5EC8BF",
+        "focus_outline": "#78E0D5",
+        "focus_width": 2,
+        "focus_offset": 1,
+        "runtime_activity_color": "#91C99A",
+        "runtime_activity_requires": [
+          "play_marker_or_activity_label",
+          "progress_when_available"
+        ],
+        "runtime_activity_policy": "A runtime marker can coexist with another selected object; activity is never communicated by selection fill alone."
+      },
+      "input": {
+        "text_editor_commands_take_priority": true,
+        "commands_must_not_leak_from_text_fields": [
+          "Space",
+          "Delete",
+          "ArrowKeys"
+        ],
+        "continuous_drag_undo": "one_gesture_one_transaction",
+        "escape_during_drag": "restore_gesture_start",
+        "view_navigation_edits_document": false
+      }
+    },
+    "shader_graph": {
+      "canvas": {
+        "surface": "#171A1F",
+        "grid_color": "#303741",
+        "grid_style": "dots_or_fine_lines",
+        "wire_layer": "behind_nodes"
+      },
+      "node": {
+        "surface": "#252B34",
+        "header_surface": "#1D2128",
+        "title_color": "#E6EAF0",
+        "label_color": "#A4ADB9",
+        "outline_color": "#303741",
+        "outline_width": 1,
+        "selected_outline_color": "#5EC8BF",
+        "selected_outline_width": 2,
+        "corner_radius": 4,
+        "padding": 8,
+        "header_height": 28,
+        "port_row_height": 24,
+        "port_label_typography": "typography.small",
+        "selection_updates_inspector": true
+      },
+      "port": {
+        "input_side": "left",
+        "output_side": "right",
+        "visual_diameter": 8,
+        "minimum_hit_target": 24,
+        "type_label_required": true,
+        "color_meaning": "data_type_in_graph_scope",
+        "selection_recolors_type": false,
+        "type_palette": {
+          "float": {
+            "color": "#A4ADB9",
+            "source_token": "color.text.secondary",
+            "applies_to": [
+              "Float",
+              "Fresnel.Out",
+              "Scale"
+            ],
+            "visible_type_label": "Float"
+          },
+          "color_rgb": {
+            "color": "#96BAED",
+            "source_token": "color.axis.z",
+            "scope_note": "Reused blue hue denotes Color/RGB only inside this graph; it does not denote a Z axis here.",
+            "applies_to": [
+              "Color",
+              "RGB",
+              "BaseColor",
+              "GlowColor",
+              "Emission"
+            ],
+            "visible_type_label": "RGB"
+          },
+          "vector2_uv": {
+            "color": "#B7A3E3",
+            "status": "proposed_graph_scoped_color",
+            "applies_to": [
+              "Vector2",
+              "UV0"
+            ],
+            "visible_type_label": "Vector2"
+          },
+          "texture2d": {
+            "color": "#A2D09C",
+            "source_token": "color.axis.y",
+            "scope_note": "Reused green hue denotes a texture resource port only inside this graph.",
+            "applies_to": [
+              "Texture2D"
+            ],
+            "visible_type_label": "Texture2D"
+          }
+        },
+        "swatch_policy": "A color parameter swatch shows its value; its socket and outgoing wire use the Color/RGB type color. An amber GlowColor swatch therefore retains a blue socket.",
+        "conversion_policy": "No implicit type conversion unless the operation explicitly declares it.",
+        "declared_broadcast_example": {
+          "operation": "Multiply",
+          "input_types": [
+            "Float",
+            "RGB"
+          ],
+          "output_type": "RGB",
+          "scope": "Explicitly supported Multiply inputs only; not a global automatic conversion."
+        }
+      },
+      "wire": {
+        "color_source": "resolved_source_port_type",
+        "width": 1,
+        "hover_width": 2,
+        "selected_width": 2,
+        "selection_preserves_type_color": true,
+        "hover_reveals": [
+          "source_port",
+          "target_port"
+        ],
+        "invalid_connection_feedback": [
+          "reason_text",
+          "invalid_target_marker"
+        ],
+        "connection_edits_use_transactions": true
+      },
+      "compile_preview": {
+        "update_mode": "asynchronous",
+        "failure_preview": "keep_last_valid_and_mark_stale",
+        "stale_indicator_color": "#E4BF7B",
+        "error_indicator_color": "#F08F95",
+        "diagnostic_navigation": "node_and_field",
+        "editing_blocked_during_compile": false
+      }
+    },
+    "animation_controller": {
+      "state_node": {
+        "surface": "#252B34",
+        "outline_color": "#303741",
+        "outline_width": 1,
+        "corner_radius": 4,
+        "header_height": 28,
+        "detail_row_height": 24,
+        "selected_surface": "#264442",
+        "selected_outline": "#5EC8BF",
+        "current_activity_color": "#91C99A",
+        "current_activity_marker": "play",
+        "current_progress_visible": true,
+        "selected_and_current_are_independent": true,
+        "selection_changes_playback": false,
+        "entry_shape": "distinct_from_regular_state"
+      },
+      "transition": {
+        "default_color": "#6B7584",
+        "selected_color": "#5EC8BF",
+        "executing_marker_color": "#91C99A",
+        "width": 1,
+        "selected_width": 2,
+        "direction_arrow_required": true,
+        "opposite_directions_individually_selectable": true,
+        "selection_implies_condition_satisfied": false,
+        "selection_implies_executing": false,
+        "condition_logic_labels_visible": [
+          "AND",
+          "OR"
+        ],
+        "duration_modes": {
+          "fixed": {
+            "unit": "s"
+          },
+          "normalized": {
+            "unit": "normalized",
+            "reference_must_be_visible": true
+          }
+        },
+        "exit_time_enable_and_value_separate": true
+      },
+      "preview_parameters": {
+        "storage_scope": "preview_session",
+        "resource_defaults_separate": true,
+        "trigger_behavior": "one_test_request",
+        "movement_speed_and_motion_playback_rate_separate": true,
+        "preview_state_jump_requires_explicit_command": true
+      }
+    },
+    "animation_timeline": {
+      "track": {
+        "row_height": 24,
+        "row_separator": "#303741",
+        "tree_indent": 16,
+        "selected_surface": "#264442",
+        "tree_and_timeline_vertical_scroll": "synchronized",
+        "locked_track_visual": [
+          "lock_icon",
+          "readable_label"
+        ],
+        "locked_track_editable": false
+      },
+      "ruler": {
+        "height": 24,
+        "surface": "#1D2128",
+        "major_tick_color": "#6B7584",
+        "minor_tick_color": "#303741",
+        "label_color": "#A4ADB9",
+        "label_typography": "typography.numeric",
+        "display_units": [
+          "frames",
+          "seconds"
+        ],
+        "conversion": "time_seconds = frame / clip_fps",
+        "display_unit_changes_key_positions": false,
+        "loop_endpoint_policy": "defined_by_resource_format"
+      },
+      "keyframe": {
+        "shape": "diamond",
+        "visual_size": 8,
+        "minimum_hit_target": 24,
+        "default_color_source": "channel_color_or_text_secondary",
+        "selected_outline": "#5EC8BF",
+        "selected_outline_width": 2,
+        "selection_preserves_channel_identity": true,
+        "focus_independent_of_selection": true,
+        "multi_move_preserves_relative_time": true,
+        "collision_policy": "explicit_resource_policy_with_feedback"
+      },
+      "playhead": {
+        "color": "#5EC8BF",
+        "width": 1,
+        "time_marker_required": true,
+        "spans_visible_tracks": true,
+        "scrubbing_scope": "preview_time_only",
+        "selected_key_and_current_time_independent": true
+      },
+      "curve": {
+        "channel_color": {
+          "x": "#E89797",
+          "y": "#A2D09C",
+          "z": "#96BAED"
+        },
+        "default_width": 1,
+        "selected_width": 2,
+        "selection_preserves_channel_color": true,
+        "horizontal_axis": "same_time_basis_as_timeline",
+        "vertical_axis": "property_value_with_unit",
+        "mixed_units_display": "grouped_axes_or_explicit_normalized_mode_or_separate_views",
+        "interpolation_and_tangent_mode_separate": true,
+        "interpolation_examples": [
+          "Cubic",
+          "Linear"
+        ],
+        "tangent_mode_examples": [
+          "Auto",
+          "Free",
+          "Broken"
+        ],
+        "coordinate_space_visible_in_resource_context": true
+      },
+      "editing": {
+        "time_snap_and_value_snap_separate": true,
+        "key_value_and_tangent_drags_use_transactions": true,
+        "recording_indicator_color": "#F08F95",
+        "recording_indicator_requires": [
+          "persistent_record_icon",
+          "recording_label"
+        ],
+        "normal_preview_creates_keys": false,
+        "record_target_and_write_policy_visible": true,
+        "precise_fields_and_drag_share_data_and_undo_path": true
+      }
+    },
+    "documentation_examples": {
+      "scope": "documentation_snapshot_only_not_defaults",
+      "shader_graph": {
+        "asset": "beacon_glow.nshader",
+        "exposed_parameters": [
+          "BaseColor",
+          "Roughness",
+          "Metallic",
+          "GlowColor",
+          "GlowStrength",
+          "GlowPower"
+        ],
+        "Roughness": 0.45,
+        "Metallic": 0.8,
+        "base_color_flow": "UV0 -> SampleTexture2D -> TintMultiply -> PBR.BaseColor",
+        "emission_flow": "Fresnel(GlowPower) * GlowStrength * GlowColor.rgb -> PBR.Emission"
+      },
+      "animation_controller": {
+        "asset": "Scout.controller",
+        "character": "Scout",
+        "character_appearance": "neutral_gray_light_robot",
+        "layer": "Base Layer",
+        "states": [
+          "Idle",
+          "Walk",
+          "Run",
+          "Jump",
+          "Land"
+        ],
+        "current_state": "Walk",
+        "preview_parameters": {
+          "Speed": 1.6,
+          "IsGrounded": true,
+          "Jump": "trigger"
+        },
+        "selected_transition": {
+          "source": "Walk",
+          "target": "Run",
+          "condition": {
+            "parameter": "Speed",
+            "operator": ">",
+            "value": 3.0
+          },
+          "condition_satisfied_in_snapshot": false,
+          "executing_in_snapshot": false,
+          "duration_mode": "fixed",
+          "duration_seconds": 0.15,
+          "has_exit_time": false
+        }
+      },
+      "animation_timeline": {
+        "asset": "Walk.anim",
+        "character": "Scout",
+        "fps": 30,
+        "loop_range_frames": [
+          0,
+          30
+        ],
+        "duration_seconds": 1.0,
+        "playhead_frame": 12,
+        "playhead_seconds": 0.4,
+        "selected_key": {
+          "track": "Hips.Position.Y",
+          "frame": 12,
+          "time_seconds": 0.4,
+          "value": 1.025,
+          "value_unit": "m",
+          "interpolation": "Cubic",
+          "tangent_mode": "Auto"
+        }
+      }
+    },
+    "scene_inspector": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 29,
+      "image": "images/nara-scene-inspector-v0.4.png",
+      "context": [
+        "document",
+        "world",
+        "selection",
+        "prefab_source_or_stage"
+      ],
+      "visible_scope": "Inspector shows selected count, target world and source. Pinning keeps explicit ownership visible.",
+      "multi_select": "Merged fields require compatible types and edit semantics; mixed axes remain independent.",
+      "prefab_actions": [
+        "revert_to_source",
+        "apply_to_explicit_source",
+        "reset_type_default"
+      ],
+      "gizmo": "Per-view tool context, visible coordinate/pivot/snap modes, one transaction per gesture.",
+      "viewport_and_hierarchy_selection_agree": true
+    },
+    "assets_importer": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 30,
+      "image": "images/nara-assets-importer-v0.4.png",
+      "content_layers": [
+        "source_asset_identity",
+        "editable_import_settings",
+        "derived_artifact",
+        "preview_view_state"
+      ],
+      "draft_settings": "Show an edited state and clarify whether the preview uses current settings or the last successful import.",
+      "save_and_reimport": "Validate and save the settings, then schedule a versioned import; a completed settings save does not guarantee import success.",
+      "revert_settings": "Discard the settings draft explicitly; do not imply deleting source data or undoing unrelated generated artifacts.",
+      "dependency_view": "Distinguish used-by references from dependencies and preserve stable navigation targets.",
+      "late_result": "Verify source revision, settings revision, importer version and platform before publication."
+    },
+    "animation_workspace": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 31,
+      "image": "images/nara-animation-editor-v0.4.png",
+      "shared_timeline_rules": "tools.animation_timeline",
+      "context": [
+        "animation_document",
+        "binding_target",
+        "tool_preview"
+      ],
+      "time_basis": "Track rows, ruler, curve editor and key inspector use one explicit clip time basis.",
+      "playhead_and_selected_key_time_are_independent": true,
+      "curve_view": "An independently docked Curve view may share the same animation document. It follows the outer ViewInstance contract rather than a separate nested docking framework.",
+      "preview_binding": "Views share a preview context only through an explicit binding; duplicate views do not implicitly share all playback state just because they share a document.",
+      "preview": "Transport controls change preview time; normal preview does not record keys or start the full game.",
+      "recording": "Persistent record state and target/write policy are visible before recording can create data.",
+      "key_edit": "Preserve relative time offsets for multi-key movement; distinguish interpolation from tangent mode.",
+      "example": {
+        "asset": "Ranger_Run.anim",
+        "fps": 30,
+        "frame": 12,
+        "seconds": 0.4,
+        "track": "Hips.Position.Y",
+        "value": 1.025,
+        "unit": "m",
+        "scope": "illustrative_snapshot_not_default"
+      }
+    },
+    "profiler_console": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 32,
+      "image": "images/nara-profiler-console-v0.4.png",
+      "context": [
+        "capture_id",
+        "runtime_session",
+        "frame_or_time_range",
+        "source_version"
+      ],
+      "capture_state": "Live, capturing, stopped and captured views are explicitly distinguishable.",
+      "timing_domains": "CPU, GPU and thread intervals retain their own source/domain; overlapping work is not blindly added as frame cost.",
+      "illustrated_traces_are_measurements": false,
+      "view_state": [
+        "selected_frame",
+        "time_range",
+        "zoom",
+        "expanded_scopes",
+        "filters"
+      ],
+      "diagnostic_location": [
+        "source_document",
+        "object_identity",
+        "field_or_location",
+        "original_session"
+      ],
+      "console_history": "Filtering and clearing a view do not rewrite source records or silently rebind older diagnostics to the current run."
+    },
+    "project_input_settings": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 33,
+      "image": "images/nara-project-input-settings-v0.4.png",
+      "scope": "Project settings, user preferences and input-asset content are visibly distinct.",
+      "binding_model": [
+        "action_map",
+        "action_type",
+        "binding_path",
+        "control_scheme",
+        "interaction",
+        "processor"
+      ],
+      "capture": "A transient interaction with an explicit input owner, visible cancel action and no accidental command or game-input propagation.",
+      "cancel_capture_creates_binding": false,
+      "conflict": "Report the actions, map, devices and overlapping activation context; do not treat every duplicate key as a universal error.",
+      "missing_device": "Keep authored bindings editable and explain disconnected or unavailable devices.",
+      "edit_during_play": "Saving an input asset does not silently replace the configuration of an active RuntimeSession. Any supported apply-to-run operation is explicit and identifies its target and revision.",
+      "apply_to_running": "End binding capture and release old pressed-key/action states before the runtime bridge applies the selected version. Failure preserves explicit target/version feedback; unsupported hot application takes effect on the next run."
+    },
+    "particle_editor": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 34,
+      "image": "images/nara-particle-editor-v0.4.png",
+      "representation": "emitter_and_module_stack",
+      "authored_data": [
+        "emitters",
+        "modules",
+        "enabled_flags",
+        "parameters",
+        "curves",
+        "gradients",
+        "resource_references"
+      ],
+      "module_order": "Only supported reorder operations are enabled; validate dependencies and preserve stable module identities.",
+      "tool_preview": [
+        "time",
+        "pause_state",
+        "camera",
+        "test_seed",
+        "preview_bounds"
+      ],
+      "seed_scope": "A preview seed is explicitly labeled. If the effect also authors a seed, expose it as separate content.",
+      "restart_preview_changes_document": false,
+      "preview_loop_range_is_emitter_duration": false,
+      "lifetime_controls": "Display normalized lifetime separately from seconds; gradient position, color and alpha are distinct values.",
+      "failed_update": "Retain last valid preview when available and mark its version/staleness with diagnostics."
+    },
+    "audio_mixer": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 35,
+      "image": "images/nara-audio-mixer-v0.4.png",
+      "content_documents": [
+        "mixer_routing_and_effects",
+        "audio_event"
+      ],
+      "selected_bus_and_pinned_inspector_match": true,
+      "gain_unit": "dB",
+      "meter_unit": "Explicit level reference such as dBFS when supported; do not label measured signal level as authored gain.",
+      "fader_undo": "one_gesture_one_transaction",
+      "mute_solo_and_bypass_are_distinct": true,
+      "audition_mute_and_solo": "In Editor Audition mode, M/S are transient audition filters. They do not rewrite saved gains or routing. Persistent bus enablement and effect bypass remain explicit resource fields.",
+      "routing": "Explicit destination with validation; reject unsupported cycles and preserve the current valid route on failure.",
+      "audition": "Explicit Editor Audition owner, event, bus, transport and stop behavior; it is separate from full-game Play.",
+      "meters_and_waveforms_are_authoring_content": false,
+      "cross_document_action": "Use the documented cross-document coordinator or restrict the compound write; do not claim atomic history without support."
+    },
+    "build_profiles": {
+      "status": "proposed_workspace_mapping",
+      "outer_docking_contract": "docking",
+      "common_components": "component_library",
+      "illustration_policy": "The referenced PNG is a conceptual UI snapshot. Exact types, values and lifecycle behavior follow the Markdown and JSON contracts.",
+      "source_chapter": 36,
+      "image": "images/nara-build-profiles-v0.4.png",
+      "authored_profile": [
+        "platform",
+        "configuration",
+        "graphics_policy",
+        "startup_scene",
+        "included_scenes",
+        "output_destination",
+        "options"
+      ],
+      "job_input": "Immutable snapshot of the saved or explicitly supplied validated profile and content revisions.",
+      "profile_edit_changes_running_job": false,
+      "existing_runtime": "An existing RunSession retains its launch snapshot. Build failure does not stop it, and build success does not silently replace it with a new artifact.",
+      "retry": "Create a new attempt with a newly identified input snapshot; explicitly label any reuse of an older resource snapshot. Do not rewrite the previous attempt record.",
+      "failure": "Show stage, target, path or resource location, reason and repair action; preserve the result after the task view closes.",
+      "run_artifact": "Enabled only for a compatible, verified successful artifact; a failed attempt cannot expose a successful result from a different revision as its own.",
+      "cancel": "Stop future work when possible and report actual completed side effects; do not equate cancellation with deleting outputs.",
+      "undo_scope": "Profile content edits are undoable; build execution and filesystem side effects have their own task contract."
+    }
+  },
+  "docking": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "Shared outer docking model for document, viewport, utility and auxiliary views.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "change_note": {
+        "removed_legacy_breakpoints": [
+          {
+            "path": "layout.hierarchy_drawer_below",
+            "previous_value": 1280
+          },
+          {
+            "path": "layout.inspector_overlay_below",
+            "previous_value": 1024
+          }
+        ],
+        "reason": "Window resizing must not silently turn user-docked panels into drawers or overlays, or rewrite the saved DockTree.",
+        "existing_dimensions": "Preserved as default layout examples; content constraints and user docking determine actual geometry."
+      },
+      "visual_reference_policy": "The v0.3 outer docking contract supersedes global document strips and pseudo-docking headers in retained v0.2 detail images.",
+      "source_chapters": [
+        2,
+        6,
+        21,
+        25
+      ]
+    },
+    "model": {
+      "native_window_contains": "DockSurface",
+      "dock_tree_nodes": [
+        "Split",
+        "DockGroup"
+      ],
+      "dock_group_contains": "ViewInstance tabs",
+      "view_identity": "ViewInstanceId",
+      "view_identity_alias": "ViewId",
+      "document_identity": "DocumentId",
+      "document_view_binding": "A ViewInstance may bind a DocumentSession; the ViewInstance does not own or duplicate its content.",
+      "default_panel_positions_are_constraints": false
+    },
+    "tab_strip": {
+      "height": 34,
+      "height_source": "size.panel_tab",
+      "alignment": "start_within_owning_DockGroup",
+      "scope": "owning_DockGroup_only",
+      "global_document_strip": false,
+      "strips_per_group": 1,
+      "visible_with_single_tab": true,
+      "overflow_menu_required": true,
+      "overflow_scroll_supported": true,
+      "wrap_to_multiple_tab_rows": false,
+      "overflow_must_not_change_tab_identity": true,
+      "icon_size": 16,
+      "icon_size_source": "size.icon",
+      "minimum_hit_target": 24,
+      "minimum_hit_target_source": "size.min_hit_target",
+      "close_and_drag_hit_regions_overlap": false,
+      "title_label_source": "view_type_or_bound_document_display_name",
+      "duplicate_titles_disambiguated": true,
+      "identity_derived_from_display_title": false,
+      "document_dirty_marker_source": "DocumentSession",
+      "runtime_activity_marker_source": "RuntimeSession",
+      "active_tab_and_keyboard_focus_independent": true,
+      "app_bar_role": "Project, menus, workspace and run commands; it is not a second resource-tab host."
+    },
+    "splitter": {
+      "visual_width": 1,
+      "visual_source": "size.splitter_visual",
+      "hit_width": 6,
+      "hit_source": "size.splitter_hit",
+      "resize_respects_view_constraints": true
+    },
+    "operations": {
+      "move_view": {
+        "retains_view_id": true,
+        "retains_document_binding": true,
+        "retains_local_view_state": true,
+        "adds_content_undo": false
+      },
+      "split_duplicate_view": {
+        "creates_view_id": true,
+        "binding_by_view_kind": {
+          "document_view": {
+            "shares_document_id": true,
+            "shares_content_history": true,
+            "copies_document_content": false
+          },
+          "game_view": {
+            "shares_runtime_session_id": true,
+            "output_binding": "explicit_output_target_on_the_same_session",
+            "duplicates_runtime_session": false
+          },
+          "tool_view": {
+            "binding": "declared_ContextPolicy",
+            "does_not_infer_document_or_runtime_ownership": true
+          }
+        },
+        "duplicates_persistent_resource": false,
+        "starts_another_runtime_session": false,
+        "navigation_state_after_creation": "independent",
+        "availability": "Requires MultiInstance policy and the declared duplicate/split capability; singleton types do not expose duplicate-view commands."
+      },
+      "float_view": {
+        "retains_view_id": true,
+        "retains_document_binding": true,
+        "updates_window_context": true,
+        "commit_only_after_new_window_ready": true,
+        "failure_preserves_original_view_and_layout": true,
+        "cross_project_session_move_allowed": false
+      },
+      "drop": {
+        "preview_before_commit": true,
+        "commit_on_release": true,
+        "escape_restores_original_layout": true
+      },
+      "close_view": {
+        "silently_discards_document": false,
+        "stops_runtime_session": false,
+        "document_lifetime_policy": "document.lifecycle",
+        "last_primary_editor_view_default": "CloseDocument"
+      },
+      "close_group_or_floating_window": {
+        "behavior": "Coordinate user-requested closure of contained views; it is not implicit docking back.",
+        "each_document_resolved_once": true,
+        "collect_close_decisions_before_destroying_views": true,
+        "cancel_preserves_original_view_layout": true,
+        "successful_saves_need_not_be_reverted_on_later_cancel": true,
+        "layout_preset_application_uses_this_flow": false
+      },
+      "return_to_main_window": {
+        "explicit_command_required": true,
+        "retains_view_id": true,
+        "retains_document_binding": true,
+        "available_for_floating_views": true
+      }
+    },
+    "view_factory_contract": {
+      "instance_policy_separate_from_open_policy": true,
+      "instance_policies": {
+        "SingletonPerProject": {
+          "scope": "ProjectSession and ViewTypeId",
+          "duplicate_view_available": false,
+          "open_existing": "reveal_existing_instance"
+        },
+        "SingletonPerDocument": {
+          "scope": "ProjectSession, ViewTypeId and DocumentId",
+          "duplicate_view_available": false,
+          "open_existing": "reveal_existing_instance"
+        },
+        "MultiInstance": {
+          "duplicate_view_available": "when_declared_capability_allows",
+          "ordinary_open_must_always_create_another_view": false
+        }
+      },
+      "default_resource_open_policy": "reveal_existing_compatible_view_otherwise_create",
+      "explicit_split_or_duplicate_required_for_additional_resource_view": true,
+      "tool_open_policy": "Declared separately by the view factory; additional Inspector or observer views may be created explicitly.",
+      "project_service_singleton_implies_observer_view_singleton": false,
+      "document_roles": [
+        "primary_editor",
+        "auxiliary_observer",
+        "internal_control"
+      ],
+      "primary_editor_role_controls_close_document_participation": true,
+      "capabilities_are_declared_not_inferred_from_screen_position": true
+    },
+    "tool_composition": {
+      "nested_dock_tree_inside_tool_view_by_default": false,
+      "local_splitters_allowed": true,
+      "local_segmented_switches_allowed": true,
+      "local_mode_switch_is_a_dock_tab": false,
+      "local_mode_switch_changes_global_layout": false,
+      "auxiliary_detach": "Use an explicit command to expose the auxiliary content as an ordinary outer ViewInstance with a declared context binding.",
+      "auxiliary_views_use_same_outer_tab_rules": true
+    }
+  },
+  "document": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "Shared document editing state, content history, save state and lifetime.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "source_chapters": [
+        9,
+        10,
+        21,
+        22,
+        24
+      ]
+    },
+    "session": {
+      "owner": "DocumentStore",
+      "identity_scope": "ProjectId and persistent DocumentId",
+      "one_shared_edit_model_per_open_document": true,
+      "shared_between_views": [
+        "content",
+        "revision",
+        "saved_baseline",
+        "dirty_state",
+        "content_undo_history"
+      ],
+      "view_local_state": [
+        "camera",
+        "scroll",
+        "graph_zoom",
+        "navigation",
+        "view_presentation"
+      ],
+      "view_navigation_marks_content_dirty": false,
+      "layout_changes_mark_content_dirty": false
+    },
+    "lifecycle": {
+      "policy_owner": "DocumentStore",
+      "visible_tab_count_is_ownership": false,
+      "reference_count_controls_disposal": false,
+      "closing_last_view_silently_discards_dirty_document": false,
+      "last_primary_editor_view_close_default": "CloseDocument",
+      "other_primary_views_remain": "Close only the requested ViewInstance and retain the shared DocumentSession.",
+      "auxiliary_view_close": "Remove presentation only; a bound observer is not automatically a primary document editor.",
+      "close_document_coordinates": [
+        "pending_edit_buffers",
+        "content_save_or_discard",
+        "related_primary_editor_views"
+      ],
+      "close_document_cancel_preserves_views_and_content": true,
+      "close_document_save_failure_preserves_content_and_error": true,
+      "auxiliary_bindings_after_document_close": "Unbind or show an explained closed/unavailable target with a reopen action; do not block document closure through observer references.",
+      "hidden_dirty_sessions_retained": true,
+      "hidden_edit_sources_include": [
+        "Inspector",
+        "asset_property_editor",
+        "semantic_command"
+      ],
+      "dirty_document_registry_required": true,
+      "save_all_includes_hidden_dirty_sessions": true,
+      "save_all_includes_clean_models_with_pending_edits": true,
+      "project_close_checks_hidden_dirty_sessions": true,
+      "view_document_and_project_close_check_pending_edits_even_if_model_clean": true,
+      "pending_edit_resolution_choices": [
+        "continue_editing",
+        "discard_this_pending_input"
+      ],
+      "discard_pending_input_equals_discard_all_document_changes": false,
+      "changing_inspector_binding_forces_ime_commit": false,
+      "changing_inspector_binding_prompts_to_save_each_previous_target": false,
+      "document_close_dirty_choices": [
+        "save",
+        "discard",
+        "cancel"
+      ],
+      "clean_session_eviction": "Explicit DocumentStore policy after checking pending operations and valid bindings, not implicit view reference counting."
+    },
+    "save": {
+      "scope": "DocumentSession",
+      "target": "Resolved effective editing context, otherwise the window active document when valid.",
+      "dirty_cleared_by_hiding_or_closing_view": false,
+      "failure_clears_dirty": false,
+      "completion_records_the_revision_actually_saved": true,
+      "new_edits_during_save_remain_dirty": true,
+      "external_version_checked_before_overwrite": true,
+      "pending_edit_coordination": {
+        "scope": "All editing buffers bound to the target DocumentSession, including its other views and implicit Inspector editors.",
+        "coordinate_before_write_snapshot": true,
+        "valid_input_path": "Validate baseline revision, commit through the normal content transaction, then include the resulting revision in the write snapshot.",
+        "block_target_document_save_on": [
+          "invalid_input",
+          "stale_edit_baseline",
+          "active_ime_composition",
+          "conflicting_buffers_for_the_same_property"
+        ],
+        "blocked_save_locates_problem": true,
+        "blocked_input_silently_ignored": false,
+        "view_iteration_order_resolves_conflicting_buffers": false,
+        "force_confirm_ime_candidates": false
+      },
+      "save_all": {
+        "candidate_set": "Dirty DocumentSessions UNION DocumentSessions owning pending edits or buffers.",
+        "registry_owner": "DocumentStore_and_its_pending_edit_registry",
+        "visible_document_tab_required": false,
+        "model_clean_excludes_pending_edit_owner": false,
+        "can_save_other_valid_documents": true,
+        "incomplete_summary_required": true,
+        "report_all_saved_when_any_candidate_blocked_or_failed": false
+      }
+    },
+    "undo": {
+      "scope": "DocumentSession",
+      "shared_across_document_views": true,
+      "text_editing_history_has_context_priority": true,
+      "includes_layout_changes": false,
+      "includes_view_navigation": false,
+      "continuous_gesture": "one_gesture_one_transaction",
+      "cross_document_changes": "Require a transaction coordinator and whole-operation validation/undo, or declare the action unsupported.",
+      "partial_cross_document_undo_allowed": false,
+      "layout_recovery": "Separate workspace restore/reset commands, not content Ctrl+Z."
+    }
+  },
+  "context": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "Per-window focus, active view, effective command context and explicit Inspector bindings.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "source_chapters": [
+        9,
+        11,
+        22
+      ]
+    },
+    "per_window_state": [
+      "focused_control",
+      "active_view",
+      "active_document",
+      "effective_command_context"
+    ],
+    "effective_command_context_fields": [
+      "project_id",
+      "window_id",
+      "view_id",
+      "document_id",
+      "world_id",
+      "runtime_session_id",
+      "selection_context_id",
+      "target_ids",
+      "input_revision",
+      "authorization_context"
+    ],
+    "context_fields_may_be_absent_when_not_applicable": true,
+    "active_document": {
+      "every_focused_utility_tab_becomes_active_document": false,
+      "policy": "Track the window document editing context; focusing a utility tab alone does not manufacture or replace a document target.",
+      "global_document_strip_required": false
+    },
+    "routing": {
+      "focused_text_editor_priority": true,
+      "owned_shortcut_consumed_when_action_temporarily_unavailable": true,
+      "menus_and_command_palette_preserve_invocation_context": true,
+      "bound_property_edits_use_binding_context": true,
+      "save_requires_effective_or_active_document": true,
+      "destructive_commands_use_current_explicit_target": true,
+      "delete_falls_through_to_unrelated_panel": false,
+      "missing_target_behavior": "Unavailable with a reason; do not use an unrelated last nonempty selection.",
+      "menus_shortcuts_plugins_and_agent_share_semantic_command_entry": true,
+      "agent_and_batch_target_resolution": "Explicit request context, never incidental keyboard focus or pointer position.",
+      "view_reparent_recomputes_window_context_without_changing_document_binding": true
+    },
+    "selection": {
+      "one_unscoped_global_selection": false,
+      "domains_include": [
+        "scene_objects",
+        "assets",
+        "graph_elements",
+        "animation_elements"
+      ],
+      "sharing_policy": "Declare the selection context or link group for each view family; do not infer sharing from equal labels or adjacent tabs.",
+      "selection_is_keyboard_focus": false,
+      "scene_and_hierarchy_share_selection_for_same_edit_context_by_default": true,
+      "same_window_alone_implies_shared_selection": false
+    },
+    "inspector": {
+      "binding_modes": [
+        "follow_eligible_window_context",
+        "pinned_target"
+      ],
+      "pinned_binding": "Explicit document or world scope plus stable target identity.",
+      "pinned_binding_changes_when_other_tab_activates": false,
+      "pinned_target_missing": "Show an unavailable binding with a recognizable target label and context; do not silently bind another same-named object.",
+      "content_edits_resolve_document_session": true,
+      "edits_without_document_tab_register_hidden_dirty_session": true,
+      "tool_local_inspector_selection_binding": "Tool-local node/key inspection follows its declared owner context; generic pinned Inspectors retain their explicit targets."
+    }
+  },
+  "runtime": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "RuntimeSession and output-view lifetime, run controls and game input ownership.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "source_chapters": [
+        10,
+        23,
+        26
+      ]
+    },
+    "game_view": {
+      "binds": [
+        "runtime_session_id",
+        "output_target"
+      ],
+      "owns_runtime_world": false,
+      "closing_view_stops_runtime_session": false,
+      "hiding_view_stops_runtime_session": false,
+      "adding_another_view_starts_another_runtime_session": false
+    },
+    "output": {
+      "status": "proposed_design_contract",
+      "independent_parameters": [
+        "output_resolution_pixels",
+        "game_view_available_display_rect",
+        "editor_ui_scale"
+      ],
+      "display_mode": {
+        "default": "Fit",
+        "Fit": {
+          "preserves_output_aspect_ratio": true,
+          "letterbox_or_pillarbox_when_needed": true,
+          "implicit_stretch_or_crop": false
+        },
+        "1:1": {
+          "physical_display_pixels_per_output_pixel": 1,
+          "independent_of_editor_logical_ui_scale": true,
+          "larger_than_available_rect": "clip_with_explicit_pan_or_scroll",
+          "automatically_scale_down_to_fit": false
+        },
+        "Fill_or_Stretch": {
+          "separately_named_and_explicitly_selected": true,
+          "implicit_selection_when_panel_aspect_changes": false
+        }
+      },
+      "absolute_pointer_mapping": {
+        "hit_test_rect": "actual_visible_image_rect_intersected_with_the_view_content_clip",
+        "rendered_image_origin": "Unclipped transformed output-image origin, including pan/scroll offset.",
+        "pointer_and_rect_use_same_logical_coordinate_space": true,
+        "display_scale": "Actual rendered logical units per output pixel, derived from the output-to-display transform while preserving the selected physical display policy.",
+        "output_x": "(pointer_x - rendered_image_origin_x) / display_logical_units_per_output_pixel_x",
+        "output_y": "(pointer_y - rendered_image_origin_y) / display_logical_units_per_output_pixel_y",
+        "pan_or_scroll_offset_included": true,
+        "cropped_visible_width_used_as_full_image_scale": false,
+        "delivery_requires_pointer_inside_actual_image_rect": true,
+        "letterbox_clicks_delivered_to_game": false,
+        "apply_platform_dpi_conversion_once": true,
+        "repeat_editor_ui_scale_conversion": false,
+        "invalid_or_zero_image_rect": "Do not map or dispatch an absolute output click."
+      },
+      "recompute_mapping_on": [
+        "image_rect_change",
+        "display_mode_change",
+        "pan_or_scroll_change",
+        "output_resolution_change",
+        "dpi_change",
+        "editor_ui_scale_change",
+        "output_target_change",
+        "remote_stream_geometry_change"
+      ],
+      "documentation_example": {
+        "scope": "illustrated_snapshot_only_not_an_engine_default_or_limit",
+        "width_pixels": 1280,
+        "height_pixels": 720,
+        "aspect_ratio": "16:9"
+      }
+    },
+    "run_controls": {
+      "target_runtime_session_visible": true,
+      "operations": [
+        "play",
+        "pause",
+        "step",
+        "stop"
+      ],
+      "switching_asset_document_stops_play": false,
+      "runtime_activity_is_separate_from_selected_tab": true,
+      "pause_freezes_editor_ui": false,
+      "parallel_session_ui": "May be staged later; identifiers and command targets remain explicit."
+    },
+    "worlds": {
+      "distinct_contexts": [
+        "authoring_world",
+        "runtime_world",
+        "asset_preview_world"
+      ],
+      "debug_edit_default": "runtime_only",
+      "transfer_to_authoring_requires_explicit_operation": true
+    },
+    "input_capture": {
+      "explicit_owner_required": true,
+      "visible_capture_status_required": true,
+      "same_event_consumed_by_game_and_scene_tool": false,
+      "release_game_input": {
+        "status": "proposed_configurable_default",
+        "shortcut": "Shift+Esc",
+        "configurable": true,
+        "scope": "captured_game_input",
+        "hint_visible_while_captured": true,
+        "release_shortcut_reserved_from_game_delivery": true
+      },
+      "release_on": [
+        "window_focus_loss",
+        "runtime_session_stop",
+        "capturing_view_destruction",
+        "target_disconnect",
+        "migration_to_window_not_yet_ready"
+      ],
+      "clear_pressed_state_on_release": true,
+      "game_cannot_swallow_host_stop_command": true
+    }
+  },
+  "workspace": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "Personal layout persistence, schema evolution and accessible multi-window recovery.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "source_chapters": [
+        2,
+        21,
+        24,
+        26
+      ]
+    },
+    "layout_schema_version": 1,
+    "schema_version_independent_of_product_version": true,
+    "persistence_scope": "personal_workspace_separate_from_project_content",
+    "persisted_state": [
+      "dock_tree",
+      "view_ids_and_factories",
+      "view_bindings",
+      "view_local_state",
+      "window_restore_geometry"
+    ],
+    "content_dirty_or_undo_affected_by_layout": false,
+    "apply_or_reset_layout": {
+      "operation_kind": "rearrange_suspend_or_recreate_presentation",
+      "dispatches_user_close_view_or_close_document_flow": false,
+      "saves_or_discards_documents_implicitly": false,
+      "preserves_document_sessions_content_and_undo": true,
+      "preserves_runtime_sessions_and_tasks": true,
+      "pending_edit_buffers_silently_discarded": false,
+      "open_document_reachability": "Remap open documents into reachable groups or the Open/Unsaved Documents registry.",
+      "temporarily_hidden_document_is_closed": false,
+      "changes_project_session": false
+    },
+    "named_preset": {
+      "sharing_requires_explicit_export": true,
+      "temporary_maximize_or_monitor_recovery_overwrites_named_preset": false,
+      "switching_preset_starts_or_stops_runtime": false
+    },
+    "window_restore_geometry": {
+      "monitor_identity": "preferred_monitor_hint_not_a_permanent_requirement",
+      "normal_bounds": "logical_px_relative_to_preferred_monitor_work_area",
+      "maximized_state_stored_separately": true,
+      "missing_monitor_fallback": "Restore to an available monitor, preferring the main window monitor, then constrain bounds to its usable work area.",
+      "titlebar_and_recovery_controls_must_be_reachable": true,
+      "dpi_change_preserves_logical_ui_sizes": true,
+      "raw_physical_screen_coordinates_are_sole_restore_data": false
+    },
+    "restore": {
+      "validate_schema_before_applying": true,
+      "keep_last_valid_layout": true,
+      "corrupt_or_unsupported_layout": "Preserve recoverable data and offer last-valid/default layout without altering content documents.",
+      "missing_plugin_view": "Keep a closable placeholder with saved factory identity, binding and valid restorable state.",
+      "missing_document_binding": "Show the missing target explicitly; do not substitute another same-named resource.",
+      "view_state_version_migration": "View factories version their local state; invalid local state can reset that view without replacing the entire DockTree.",
+      "implicit_runtime_restart": false,
+      "restore_transient_capture_or_unfinished_gesture": false,
+      "process_restart_restores_transient_input": false,
+      "non_restorable_transient_input": [
+        "pointer_capture",
+        "keyboard_capture",
+        "pressed_keys",
+        "pressed_pointer_buttons",
+        "popups",
+        "hover",
+        "active_dock_drag",
+        "active_content_drag",
+        "game_input_capture"
+      ],
+      "content_recovery_is_separate_from_layout_and_transient_input": true,
+      "resize_rewrites_saved_dock_tree": false
+    },
+    "explicit_commands": [
+      "save_layout",
+      "load_layout",
+      "restore_previous_layout",
+      "reset_layout",
+      "return_to_main_window",
+      "recover_unreachable_windows"
+    ]
+  },
+  "async_tasks": {
+    "meta": {
+      "status": "proposed_design_contract",
+      "implementation_status": "not_asserted",
+      "source_spec_version": "0.3",
+      "scope": "Versioned asynchronous inputs, output targets, cancellation and durable task diagnostics.",
+      "format_note": "Declarative design mapping, not an implemented Rust API or an external schema compatibility claim.",
+      "source_chapters": [
+        13,
+        18,
+        24,
+        25
+      ]
+    },
+    "owner": "task_service_not_a_dock_panel",
+    "request_context": [
+      "task_id",
+      "owner_document_or_asset_id",
+      "input_revision",
+      "dependency_revision_or_hash",
+      "target_platform_or_output",
+      "runtime_session_id_when_applicable"
+    ],
+    "result_acceptance": {
+      "input_revision_checked": true,
+      "dependency_revision_checked_when_applicable": true,
+      "target_checked": true,
+      "request_generation_checked": true,
+      "binding_validity_checked": true,
+      "current_tab_must_still_be_visible": false,
+      "context_is_current_global_selection": false,
+      "late_older_result_can_overwrite_newer_result": false,
+      "stale_result_policy": "Discard, retain as clearly historical/stale, or cache without mutating current content; never silently publish it as the latest valid result."
+    },
+    "cancellation": {
+      "request_and_completion_are_distinct": true,
+      "cancel_request_hides_unfinished_task_as_completed": false,
+      "late_callback_may_mutate_closed_or_rebound_view": false
+    },
+    "diagnostics": {
+      "survive_diagnostic_panel_closure": true,
+      "carry_input_and_target_context": true,
+      "navigation_uses_stable_identity": true,
+      "unavailable_or_stale_navigation_target_is_explained": true,
+      "last_valid_preview_on_failure": "retain_and_mark_stale"
+    }
+  },
+  "component_library": {
+    "meta": {
+      "status": "proposed_component_mapping",
+      "source_chapters": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        28,
+        37
+      ],
+      "dimension_unit": "logical_px",
+      "foundation_policy": "Reuse the approved color, size, spacing, typography and state tokens. No additional global palette or density is introduced.",
+      "image_boards": [
+        "images/nara-components-properties-v0.4.png",
+        "images/nara-components-navigation-feedback-v0.4.png"
+      ]
+    },
+    "geometry": {
+      "property_row_height": 28,
+      "compact_row_height": 24,
+      "control_height": 28,
+      "icon_size": 16,
+      "min_hit_target": 24,
+      "tree_indent": 16,
+      "control_radius": 4,
+      "column_policy": "Reserve stable areas for units, validation, origin and reset affordances; state changes must not make the value column jump."
+    },
+    "property_row": {
+      "independent_state_dimensions": [
+        "interaction",
+        "selection",
+        "keyboard_focus",
+        "value_agreement",
+        "value_origin",
+        "validation",
+        "reference_resolution",
+        "editability"
+      ],
+      "mixed_display": "—",
+      "mixed_is_serialized_value": false,
+      "type_default_prefab_override_and_document_dirty_are_distinct": true,
+      "error_and_focus_can_coexist": true,
+      "readonly": {
+        "focusable": true,
+        "copyable": true,
+        "reason_required": true
+      },
+      "disabled": {
+        "commit_enabled": false,
+        "normal_tab_order": false,
+        "reason_available": true
+      },
+      "invalid_buffer": "Retain typed text and the last valid model value. Save coordination must detect uncommitted or invalid edits.",
+      "local_edit_vs_external_update": "Preserve the local buffer and explain the conflict; do not silently overwrite either version."
+    },
+    "numeric_vector_range": {
+      "units_from_property_metadata": true,
+      "display_rounding_writes_unedited_value": false,
+      "continuous_edit_undo": "one_gesture_one_transaction",
+      "escape": "Cancel the local edit or preview and restore each target gesture-start value only while the original binding and baseline remain valid.",
+      "escape_after_external_change": "Do not write a stale start snapshot over a newer value; remove only this interaction preview and expose the conflict.",
+      "multi_target_absolute_input": "replace_only_the_edited_property_or_axis_for_each_eligible_target",
+      "multi_target_relative_drag": "same_delta_from_each_target_initial_value_when_the_property_declares_relative_editing",
+      "linked_axes": "Explicit option with property-defined semantics; never infer linking from adjacency.",
+      "excluded_targets": "Show count and exclusion reason; do not silently create missing components.",
+      "range_handles": "Show both bounds, units and interval semantics. Validate them together; invalid Min greater than Max retains the input and error rather than silently swapping values."
+    },
+    "enum_flags_toggle": {
+      "serialized_identity": "stable_value_id_not_localized_label",
+      "mixed_checkbox_first_activation": "unify_eligible_targets_to_on",
+      "flags_edit": "Change the selected flag while preserving other bits unless an explicit replace-all command is used.",
+      "flags_popover": "Stage checkbox changes in the popover; Apply commits them as one transaction and Cancel discards that local buffer. Unknown bits are preserved.",
+      "unknown_value": "Preserve the original serialized value and expose an unknown-value state; do not silently select the first option.",
+      "long_options": "Searchable, keyboard navigable, and return focus to the opener."
+    },
+    "asset_entity_reference": {
+      "states": [
+        "empty",
+        "assigned",
+        "resolving",
+        "missing",
+        "type_mismatch",
+        "readonly"
+      ],
+      "identity": "stable_asset_or_entity_identity_with_document_and_world_scope_when_applicable",
+      "missing_reference_is_automatically_cleared": false,
+      "locate_changes_reference": false,
+      "drop_commit": "Validate type, target and scope before writing; invalid drop preserves the original value.",
+      "repair": "Explicit replace or reconnect operation through the same command and undo path as ordinary assignment."
+    },
+    "color_curve_gradient": {
+      "color_encoding_and_hdr_semantics_visible": true,
+      "color_and_alpha_controls_separate": true,
+      "curve_axes": "Show domain, units and normalization mode when used.",
+      "gradient_stop_identity": "Stable stop identity independent of sorted position.",
+      "gradient_stop_color_alpha_and_position_distinct": true,
+      "lifetime_domain": "Normalized lifetime must be explicitly labeled; it is not automatically seconds.",
+      "precise_fields_and_handles_share_edit_path": true,
+      "full_editor_undo": "Each drag, insertion, deletion or interpolation change is its own logical transaction.",
+      "compact_staged_popover": "May stage the entire curve or gradient change; Apply commits one transaction and Cancel discards the staged preview.",
+      "editing_mode_is_explicit": true,
+      "nested_ambiguous_apply_layers": false,
+      "escape": "Restore valid local open/gesture-start values or discard staged preview; after an external change, do not overwrite a newer version with a stale snapshot."
+    },
+    "tree_list_table": {
+      "row_identity": "stable_object_or_record_identity_not_index_or_display_name",
+      "selection_focus_and_expansion_are_independent": true,
+      "sorting_filtering_and_virtualization_keep_identity": true,
+      "hidden_selection": "Preserve selection by identity and show total/hidden counts; a batch action states whether it affects the full selection or visible items only.",
+      "view_sort_or_filter_edits_document": false,
+      "semantic_reordering": "An authored ordered list uses a validated content transaction; a view-only sort does not.",
+      "tree_drop": "Distinguish insert-as-sibling from reparent-as-child; validate cycles, ownership and target capability.",
+      "table_columns": "Use stable headers, aligned values, meaningful units, resizable widths and recoverable overflow.",
+      "visibility_column": "Declare whether it changes editor-only visibility, object enablement or an authored render property; these meanings are separate."
+    },
+    "search_filter_picker": {
+      "query_and_selection_are_separate": true,
+      "asynchronous_results": "Accept only matching query generation and owner context; preserve current selection by identity.",
+      "states": [
+        "loading",
+        "results",
+        "empty_source",
+        "no_matching_results",
+        "error"
+      ],
+      "no_results_action": "Retain query and offer clear or adjust filters.",
+      "picker_commit": "Explicitly accept a compatible item; cancel preserves the original assignment."
+    },
+    "menu_palette_popover": {
+      "action_identity": "shared_command_id",
+      "command_context": "Capture an explicit target context and revalidate it before execution.",
+      "text_editor_has_priority": true,
+      "keyboard": "Navigate, confirm, cancel and return focus to the opener.",
+      "placement": "Window-owned popup layer with clipping and screen-edge avoidance.",
+      "disabled_action": "Explain why the command is unavailable.",
+      "local_mode_control_is_dock_tab": false
+    },
+    "binding_capture": {
+      "states": [
+        "idle",
+        "listening",
+        "candidate",
+        "conflict",
+        "canceled"
+      ],
+      "listening_and_accepting_binding_are_separate": true,
+      "visible_context": [
+        "device_or_control_path",
+        "resolved_input",
+        "conflicting_actions",
+        "capture_cancel_action"
+      ],
+      "escape": "Cancel listening. Binding Escape itself requires an explicit selection path.",
+      "conflict_removes_previous_binding_automatically": false,
+      "input_owner": "The capture interaction consumes relevant input so it does not trigger editor commands or full-game actions."
+    },
+    "feedback_dialog": {
+      "task_states": [
+        "queued",
+        "running",
+        "cancel_requested",
+        "canceled",
+        "succeeded",
+        "failed"
+      ],
+      "unknown_progress": "Indeterminate state with truthful current phase; do not fabricate percentages.",
+      "durable_failure": "Persist diagnostic, owner, input revision, target and retry context beyond a toast.",
+      "canceled_means_rolled_back": false,
+      "cancel_race": "Cancel requested is not terminal. If work committed before cancellation took effect, report the actual completed result; confirmed cancellation or stale generation prevents publication.",
+      "dialog": "Explain target, impact and choices; Cancel preserves the user work and restores focus.",
+      "save_dialog_scope": "Include hidden dirty documents and pending edits. If some targets save while others fail, report the per-document result rather than claiming Save All succeeded.",
+      "ordinary_reversible_edit_requires_confirmation": false,
+      "tooltip_contains_only_available_action": false
+    }
+  },
+  "ui_reference_set": {
+    "version": "0.4",
+    "new_images": 10,
+    "new_component_boards": 2,
+    "new_tool_workspaces": 8,
+    "inherited_reference_images": 6,
+    "image_only_archive": "nara-ui-reference-images-v0.4.zip",
+    "image_only_archive_contains": "ten_new_v0_4_pngs_only",
+    "complete_archive": "nara-design-kit-v0.4.zip",
+    "complete_archive_includes_inherited_images": true,
+    "svg_scope": "approved_brand_assets_only",
+    "pdf_docx_policy": "This release does not regenerate PDF or DOCX; previous v0.3 documents retain their version."
+  }
+}
