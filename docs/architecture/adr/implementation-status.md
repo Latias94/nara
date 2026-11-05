@@ -30,9 +30,12 @@ library tests pass. `bce3a902` records the upstream correctness queue. Its subse
 [arena/native-frame unit](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-arena-and-native-frame-maintenance)
 implements separate allocation, nested cleanup, App-bound clear tokens and post-borrow Windows
 maintenance at published Open-GPUI `15cc4a7d85`, with allocator Miri and real dual-HWND evidence.
-Four other upstream units and the specific touchpad timing comparison remain open. Complete
-Editor integration, full native input, costs and game-runtime selection remain unqualified by
-these framework prerequisites.
+The subsequent [TextSystem ownership unit](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-textsystem-lifetime-and-native-reconstruction)
+removes the pool reference cycle and exercises public headless/native reconstruction, including
+the corrected WinRT settings-factory lifetime, at published Open-GPUI `229723e620` after native
+correction `432d079675`. Three other upstream units and the specific touchpad timing comparison
+remain open. Complete Editor integration, full native input, costs and game-runtime selection
+remain unqualified by these framework prerequisites.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

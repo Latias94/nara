@@ -1482,7 +1482,14 @@ implements separate arena allocation, nested cleanup and App-bound clear authori
 Windows HWND and allocator Miri evidence retains the unqualified touchpad timing comparison.
 That successor is Open-GPUI `15cc4a7d85`, published and remote-verified on the same maintenance
 branch after the independent scan-scope fix `a4c5b61548`.
-The other four upstream correctness units, integrated engine View, complete editing, full native
+The following TextSystem lifetime successor removes the wrapper-pool reference cycle while
+preserving character-width reuse and font/size partition. Its
+[ownership evidence](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-textsystem-lifetime-and-native-reconstruction)
+includes complete public headless/native reconstruction and the independently reproduced stale
+WinRT settings factory exposed during repeated platform creation.
+The published, remote-verified successor is Open-GPUI `229723e620`, following its separate
+native-query correction `432d079675` on the same maintenance branch.
+The other three upstream correctness units, integrated engine View, complete editing, full native
 input, numeric cost comparison and game-runtime selection remain open; no frontend/default
 replacement follows.
 

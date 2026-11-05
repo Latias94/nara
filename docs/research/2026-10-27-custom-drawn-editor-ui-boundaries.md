@@ -1621,3 +1621,50 @@ touchpad scroll, inertia, pinch and response latency remain an explicit comparis
 this correction does not establish complete Zed parity, canonical docking cutover, a measured
 Editor cost win or the lasting Editor/game-UI execution boundary. Continue with TextSystem pool
 lifetime, cached dependencies, text correctness and pending-input/blur before broad adaptation.
+
+## November 5: TextSystem Lifetime And Native Reconstruction
+
+The published successor is
+[`229723e620`](https://github.com/Latias94/open-gpui/commit/229723e6205e8fc88da50ffabeb721c482d100e4),
+preceded by the independent native-query correction
+[`432d079675`](https://github.com/Latias94/open-gpui/commit/432d079675056cb559d0681a25298fa7fb24fc6e).
+Remote `maintenance/nara-editor-baseline` was verified at that exact successor. The
+[framework lifetime record](https://github.com/Latias94/open-gpui/blob/229723e6205e8fc88da50ffabeb721c482d100e4/docs/verification.md#textsystem-pool-lifetime)
+owns the reproducible commands, failed reproductions, successful cohorts and limits.
+
+The second upstream correctness unit ports `e4a3732b94` within Open-GPUI's existing TextSystem.
+Its pool previously held complete LineWrapper values which strongly retained that same
+TextSystem. A direct lifecycle regression reproduced the reference cycle before the fix. The
+pool now retains only character-width caches; checked-out handles keep the TextSystem alive,
+and returning the final handle releases it when no external owner remains. Font resolution and
+wrapper construction stay outside the pool mutex. Public text and truncation behavior is
+preserved, with counting-platform tests for ASCII/Unicode reuse, resolved-font/size separation,
+overlapping handles and unwind.
+
+A public headless App renders text controls, closes and releases its TextSystem/backend across
+three reconstructions. The corresponding real Windows consumer opens and paints mixed Unicode
+text, reuses the DirectWrite-backed wrapper, retires the exact HWND registration and drops the
+App/platform before rebuilding three times. This complete consumer exposed another baseline
+failure: the second native window creation accessed an invalid process-cached WinRT UISettings
+factory after the previous OLE apartment had been released. A debugger stack and an independent
+minimal apartment/theme-query loop reproduced it without the text system or GPU. Both appearance
+and scrollbar queries now acquire the activation factory within the current query lifetime,
+preserving balanced OLE ownership. The minimal and complete native regressions pass together.
+
+The focused lifetime/wrapping/truncation cohort passes 20/20. Complete Core coverage passes
+841/841, component integration passes 598/598 across 18 binaries, and the final Windows library
+cohort passes 164/164 with four existing interactive cases skipped. The first combined run had
+one unchanged activation-policy test time out at its 512-message-pump bound; two unchanged
+focused reruns and the complete Windows rerun passed. The framework verification record retains
+all those outcomes without assigning an unproven cause. Independent source consumption passes
+the separately locked all-target/all-feature check, including its actual WGPU renderer.
+Locked workspace all-target compilation, Core/Windows correctness Clippy, formatting and the
+existing import/document/release checks also pass. Independent review reports no outstanding
+P1/P2.
+
+This evidence concerns exact object ownership and retained work. It does not establish process
+memory bounds, a generally leak-free platform, native code hot reload, complete OS composition,
+font-generation invalidation, touchpad latency or an integrated engine View. The remaining
+cached-dependency unit must isolate nested draw read scopes and retain the fork's candidate,
+presentation, geometry and reveal authority; simple upstream source replacement would lose
+those contracts. The full foundation and the Editor/game-UI execution decision remain open.
