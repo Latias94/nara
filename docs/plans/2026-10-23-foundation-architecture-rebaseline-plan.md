@@ -1431,6 +1431,12 @@ The executable comparison must cover:
    recording already-covered or deliberately divergent behavior. Include required compiler and
    dependency changes in the cost comparison. Keep upstream tracking in the framework repository;
    do not introduce a source-analysis or synchronization framework in Nara.
+   Complete this prerequisite against the recorded November 5 Zed revision before expanding the
+   engine adapter or Editor component migration. The five correctness ports begin the refresh;
+   they do not replace the coherent text/input/layout and dependency/API comparison. Record
+   ported, equivalent and intentionally divergent framework behavior, the resulting maintained
+   fork revision and executed platform limits. A later upstream HEAD belongs to a subsequent
+   maintenance cycle, so this comparison has a stable completion target.
 3. **Native engine View:** real changing Scene/Game output beneath overlapping UI, with clipping,
    resize/DPI/color/alpha, exact input geometry and healthy/device-loss retirement. No steady-state
    CPU readback. Count GPU copies/submissions/synchronization and declare one selected native
@@ -1489,6 +1495,10 @@ includes complete public headless/native reconstruction and the independently re
 WinRT settings factory exposed during repeated platform creation.
 The published, remote-verified successor is Open-GPUI `229723e620`, following its separate
 native-query correction `432d079675` on the same maintenance branch.
+The following [diff-based baseline record](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-diff-based-upstream-baseline-and-maintenance-skill)
+is Open-GPUI `2d66e3ff88f`. It fixes this refresh's upstream target, reconstructs initial source
+provenance without inventing an exact checkout SHA, corrects an older equivalence claim and adds
+a repository maintenance skill. It qualifies no additional product behavior.
 The other three upstream correctness units, integrated engine View, complete editing, full native
 input, numeric cost comparison and game-runtime selection remain open; no frontend/default
 replacement follows.

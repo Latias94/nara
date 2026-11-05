@@ -1668,3 +1668,33 @@ font-generation invalidation, touchpad latency or an integrated engine View. The
 cached-dependency unit must isolate nested draw read scopes and retain the fork's candidate,
 presentation, geometry and reveal authority; simple upstream source replacement would lose
 those contracts. The full foundation and the Editor/game-UI execution decision remain open.
+
+## November 5: Diff-Based Upstream Baseline And Maintenance Skill
+
+The published framework record
+[`2d66e3ff88f`](https://github.com/Latias94/open-gpui/commit/2d66e3ff88f3acf6368f150b1f6ade99519c5a72)
+fixes the current target at Zed `635026fabc38440fce5e1767d125026a17b12012`. A later remote HEAD
+observation, `654efae441bc8eb117d0042bb28cd7cf3570bdc9`, remains separate. The
+[framework candidate queue](https://github.com/Latias94/open-gpui/blob/2d66e3ff88f3acf6368f150b1f6ade99519c5a72/docs/imports/zed-gpui-upstream-sync-candidates.md#fixed-revisions-and-provenance)
+owns the exact revisions, source evidence, dispositions and verification requirements. Finish
+this bounded refresh before expanding the engine rendering adapter or Editor component migration;
+the five initial correctness units do not substitute for the coherent text/layout/API and platform
+comparison.
+
+The initial extraction did not record an exact upstream checkout SHA. Zed
+`6e9465a4288c332208643892e23b9d35d7be5c79` is a content-verified reconstruction anchor: the
+331 imported entries have 326 identical blobs and five documented dependency-policy adaptations,
+with license-file mode differences recorded separately. Its parent has identical imported
+contents, so the exact original monorepo SHA remains unknown. July's target was a selected-port
+comparison, not a fully synchronized base. Diff inspection corrected its earlier Middle-truncation
+equivalence claim and identified further font-generation/fallback, Unicode wrapping, text drawing,
+layout measurement, GPU representation/color and external-run-loop work. Those are source findings
+and queued mechanisms, not executed feature qualification.
+
+The repository
+[upstream-sync skill](https://github.com/Latias94/open-gpui/blob/2d66e3ff88f3acf6368f150b1f6ade99519c5a72/.agents/skills/open-gpui-upstream-sync/SKILL.md)
+records a repeatable three-tree comparison, relocation/package mapping, follow-up/revert checks,
+complete prerequisites and fork-contract adaptation. Its schema/references and an independent
+read-only animated-WebP scenario were checked. The changing baseline and task status stay in the
+framework's existing queue and plan. No synchronization engine, Nara-specific scanner or second
+framework copy was added.

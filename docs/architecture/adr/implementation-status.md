@@ -36,6 +36,9 @@ the corrected WinRT settings-factory lifetime, at published Open-GPUI `229723e62
 correction `432d079675`. Three other upstream units and the specific touchpad timing comparison
 remain open. Complete Editor integration, full native input, costs and game-runtime selection
 remain unqualified by these framework prerequisites.
+The [diff-based refresh record](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-diff-based-upstream-baseline-and-maintenance-skill)
+at Open-GPUI `2d66e3ff88f` fixes the comparison target and maintenance workflow; source inventory
+and the repository skill add no implementation qualification or toolkit-default decision.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
