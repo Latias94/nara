@@ -1537,6 +1537,16 @@ and cached/deferred pixel controls pass through debug runtime shaders and embedd
 with exact native/platform release. The latter uses unoptimized Rust with FXC `/O3`, without
 a Rust performance claim. Mac header/Metal, WGPU scene pixels, mixed-DPI/native accessibility,
 broader platform execution and numeric costs remain separately qualified scope.
+The subsequent [font-installation/reporting successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-runtime-font-installation-and-missing-glyphs)
+is verified locally at Open-GPUI `ed2a55383f411fec6eb6a87b410c49fbeb83aadb`, without publication.
+Existing TextSystem, App and Cosmic owners now invalidate descriptor/layout/width generations,
+retain loaded font identities and own bounded missing-grapheme delivery. Public headless/test
+accessors share the App's exact TextSystem. Core/WGPU 999, affected consumers 2,964 and Windows
+189 pass, with four existing interactive cases skipped; locked compilation, correctness Clippy,
+formatting and existing document/import/API checks pass. Deterministic fallback/software raster,
+native new-family installation and exact retirement retain their stated limits. Native
+existing-family reselection is the next queued font consumer; Windows/CoreText missing reporting,
+the later Web Canvas layer, the remaining text/layout/API refresh and measured costs remain open.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

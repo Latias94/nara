@@ -71,6 +71,13 @@ existing interactive cases skipped. Actual Windows pixels, cached/deferred repla
 release pass through both debug runtime shaders and embedded FXC artifacts. These results do
 not qualify macOS header/Metal, WGPU scene pixels, Nara rendering integration, measured costs
 or a new Editor/game default.
+The following [font-installation/reporting successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-runtime-font-installation-and-missing-glyphs)
+is verified locally at Open-GPUI `ed2a55383f411fec6eb6a87b410c49fbeb83aadb`, without publication.
+Descriptor/layout/width generations, bounded App-owned missing-grapheme delivery, stable Cosmic
+face identities and exact public-context TextSystem ownership retain candidate recovery and
+release. Core/WGPU 999, affected consumers 2,964 and Windows 189 pass; four existing interactive
+cases remain skipped. Native existing-family reselection and Windows/CoreText missing reporting
+remain open, as do the remaining framework refresh, Nara integration and measured budgets.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

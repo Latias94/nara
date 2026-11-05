@@ -1928,3 +1928,72 @@ compositor output remain unqualified. The declared Rust 1.92 floor and dependenc
 unchanged; execution uses Rust 1.95.0. Wider font/text/layout/API and platform reconciliation,
 canonical docking U4-U9, Nara rendering integration, numeric cost budgets and full R11/R12
 remain open. This framework prerequisite selects no new Editor or game-runtime default.
+
+## November 6: Runtime Font Installation And Missing Glyphs
+
+The verified local Open-GPUI successor is `ed2a55383f411fec6eb6a87b410c49fbeb83aadb`, following
+`871c012c96c` on `optimize/docking-graph-transaction`. The fixed Zed target remains
+`635026fabc38440fce5e1767d125026a17b12012`, and no publication follows from this continuation.
+The framework's existing queue, plan, migration guide and verification guide own the detailed
+commands, source adaptations and execution limits.
+
+The unit reconciles `9e6e14160c`, `3389d87577`, `b7d50b95e8` and `b68add5b37`. Descriptor
+resolution now retains Direct/Fallback/Missing outcomes. Successful font installation clears
+descriptor selection and advances the generation observed by ordinary, wrapped and hash
+layouts. Current/previous cache state and generation share one private lock; stale range
+markers and delayed wrapped results cannot alter a newer generation. Window entry points
+capture generation before resolving FontRuns. Width pools and borrowed wrappers separately
+track selection and width-cache generations, so a same-ID fallback change or a new cache
+cannot preserve an old selection. Existing loaded font identities remain usable.
+Public headless/test contexts now expose the App's exact TextSystem rather than independent
+cache/generation/reporting wrappers over the same platform backend. Installation through
+their public accessors reaches the actual window owner.
+
+Missing-glyph reporting preserves complete graphemes and proportional/monospace source class
+through a bounded queue and receiver deduplication. One replaceable App callback runs after
+shaping locks are released. Its task belongs to the App; ready batches wait for App borrow
+release and revalidate generation and quitting before delivery. Replacing or dropping
+subscriptions, destructor reentry and App release retain explicit ownership. Slot restoration
+on panic does not promise automatic receiver-task restart.
+
+The source review exposed cache-generation races, delayed wrap publication, width-pool and
+wrapper-construction gaps, hash retry discovery, foreground App reentry and sink destruction
+under a backend lock. These were corrected through existing owners and concrete regressions.
+The original four-case baseline reproduced three failures while its rejected-install control
+passed. The focused font cohort passes 51/51; the public-context correction passes its two
+accessor cases and complete all-feature Core/WGPU passes 999/999,
+including actual WGSL pipeline and atlas-lifetime controls. Real Window candidates cover
+ordinary/wrapped/hash refusal and retry with exact layout Arc and committed revision checks.
+The affected UI/components/docking/Canvas cohort passes 2,964/2,964 across 25 binaries after
+the public-context correction.
+
+Cosmic retains loaded face/configuration identities while refreshing family/fallback lookup.
+The unit explicitly includes `d0f797a38c`'s retained font-source storage and `d6358b2d3c`'s
+fallback-only face preservation. Tracked IBM Plex/Lilex/Noto fixtures preserve licenses and
+fixed source hashes. Noto remains usable as actual fallback after a primary request rejects
+its missing Latin measurement glyph; exact source indices, selected face/glyph and software
+raster at scales 1.0/1.5 are verified. Pointer retention and software raster establish neither
+a measured memory/timing gain nor native screen pixels.
+
+The native Windows public Render/shape/paint trajectory passes 1/1. Installation uses the
+App's actual TextSystem and private DirectWrite collection; explicit text-child notify yields
+a newer accepted/nonempty renderer-Submitted frame with the new direct face. The original
+layout paints again, old glyph metrics remain usable, and exact HWND/platform/OLE/font-owner
+retirement completes. Lilex must initially be absent from the OS font collection. FontId
+changes also change the cache key; same-ID invalidation is proved separately by Core/Cosmic.
+Complete Windows passes 189/189 with four existing interactive cases skipped.
+
+Locked workspace and independently locked consumer compilation, Core/Windows/WGPU correctness
+Clippy, root/consumer formatting and existing import/document/release/public-API checks pass.
+Independent Core/App, Cosmic/native and public-context owner reviews leave no outstanding
+P1/P2 within this unit. Execution used Rust 1.95.0; the declared Rust 1.92 floor and dependency
+versions remain unchanged, without Rust 1.92 execution evidence.
+
+Applications retain font fetching and explicit redraw authority. Windows/CoreText do not gain
+missing-glyph reporting from the optional default hook. Current Web uses Cosmic directly;
+the target's later Canvas fallback layer remains a separate platform migration. Font
+reselection after adding weights/styles to an already matched native family is queued
+separately; the missing-family installation test does not qualify it. Font prewarming/name
+policy, Unicode wrapping, layered text, window-local Rc state, Taffy and other
+API/platform reconciliation, engine View integration, measured budgets and full R11/R12 remain
+open. This prerequisite selects no new Nara Editor or game-runtime execution default.
