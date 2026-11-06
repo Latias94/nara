@@ -1628,6 +1628,28 @@ framework/consumer checks pass. Official mechanisms, required fork adaptations a
 inherited clamp correction retain separate provenance.
 Taffy, platform, measured costs and the broader framework refresh remain open.
 
+The following [Taffy/text/root/grid successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-taffy-text-measurement-and-rootgrid-sizing)
+is verified locally at Open-GPUI `11d9a96033ea8425b07f64fdf2bad6503f1720dc`, without publication.
+It adopts the fixed target's 0.15 leaf/alignment APIs, actual shaped-overflow checking, truncated
+measurement isolation, MaxContent list probes, auto window/prompt roots and row-sizing APIs.
+Stack growth follows the official opt-in policy across layout callbacks and all Div phases.
+The fork separately corrects a reproduced ordinary-wrap cache mismatch: MaxContent must not
+reuse a finite-width multiline result. One existing portal expectation now includes the
+absolute root's authored inset, as required by the backend, while retaining original transform/
+presentation/linkage assertions. Corrected Core/WGPU/Windows plus five public consumers pass
+1,312/1,312, with four existing interactive Windows cases skipped. Explicit native font/kerning
+preconditions, exact grid/root geometry, notified Submitted successors and reconstruction
+keep their source/backend limits. The stacker-disabled owner/portal cohort passes 33/33;
+affected components/docking/Canvas pass 2,964/2,964 and independently locked public text/grid
+tests pass 9/9 without skips. Existing portal/Sidebar fixtures retain physical input, identity,
+linkage and transform assertions with explicit current layout geometry.
+Locked compilation, affected correctness Clippy, formatting and actual Windows Rust 1.92.0
+framework/independent-consumer checks pass. Official migration and the reproduced inherited
+cache correction retain separate provenance.
+The official target still supplies no general word-based
+MinContent text algorithm. Remaining framework/platform work, measured costs, canonical docking
+and complete engine acceptance remain open.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

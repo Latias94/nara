@@ -147,6 +147,21 @@ Affected components/docking/Canvas pass 2,964/2,964 and independently locked pub
 pass 7/7 without skips. Locked compilation, affected correctness Clippy, formatting and actual
 Windows Rust 1.92.0 framework/consumer checks pass. This changes no execution/default ADR.
 
+The following [Taffy/text/root/grid successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-taffy-text-measurement-and-rootgrid-sizing)
+is verified locally at Open-GPUI `11d9a96033ea8425b07f64fdf2bad6503f1720dc`, without publication.
+It adopts official leaf/alignment APIs, shaped-overflow and truncation measurement corrections,
+MaxContent list probes, auto window/prompt roots, row sizing and opt-in stack growth.
+The fork's additional ordinary-wrap cache correction has a reproduced finite-to-MaxContent
+regression; an old portal expectation now preserves the root's authored inset without changing
+portal/transform production. Corrected Core/WGPU/Windows plus five public consumers pass
+1,312/1,312 with four existing interactive Windows cases skipped. Native kerning/Submitted,
+headless paint and direct API evidence keep separate scope. Stacker-disabled owner/portal
+cases pass 33/33, affected components/docking/Canvas pass 2,964/2,964 and independently locked
+public text/grid tests pass 9/9 without skips. This selects no new layout owner,
+numeric cost result, broader platform qualification or Editor/game default. Locked compilation,
+affected correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/independent
+checks pass; official mechanisms and the fork inherited-cache correction remain distinct.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

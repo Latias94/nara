@@ -2349,3 +2349,64 @@ evidence. These ownership changes do not measure CPU, allocation, frame-tail or
 process-retention improvement. Taffy/intrinsic/root/grid/stack and remaining platform work,
 canonical docking, Nara engine View integration and complete R11/R12 remain open; no Editor/game
 default changes.
+
+## November 6: Taffy, Text Measurement And Root/Grid Sizing
+
+The verified local layout successor is Open-GPUI `11d9a96033ea8425b07f64fdf2bad6503f1720dc`,
+following `1f01e811c101e5a81e52e955942f6a24a8974902`, without publication. It uses the same
+fixed Zed target `635026fabc38440fce5e1767d125026a17b12012`. Official sources are
+`91fdd55889`, `b05f40c554`, `31ceaf7908`, `cdf33ac25e`, `b488c4e814`, `b0da438545`,
+`5ccbbbd88f` and `41d72f6c1d`. Taffy 0.15.0 is selected in both qualification lockfiles,
+with compatible patches allowed by the library and an explicit independently locked
+application pin. Its original direct Taffy value supplies preview dimensions rather than
+a Taffy-to-GPUI conversion API; this unit does not claim that interoperability or a distinct
+Taffy patch-version comparison. WGPU retains the independent consumer's existing patch choice.
+
+The leaf adapter adopts the official result callback and alignment types, retaining explicit
+relative positioning and existing logical/device conversion, stroke rounding and bounds caches.
+Measured Elements receive pass-dependent optional known dimensions and content available-space;
+Taffy 0.15 final layout supplies None for known dimensions. The callback returns content size,
+while Taffy applies padding, border, authored dimensions and box constraints. Tests use
+scale 1/1.5/2 through the existing test-platform geometry/resize route.
+
+Official text changes retain prior truncation width before serving unconstrained queries and
+check actual shaped width before nonwrapped truncation. Unknown list widths use MaxContent.
+The official final target still lacks a general word-based MinContent text algorithm; adopting
+these corrections does not establish one. An additional review exposes an ordinary wrapped
+cache result reused for a later MaxContent probe in both the starting fork and official target.
+The regression reproduces 60x384 instead of a fresh 672x24. Exact wrap-width equality now
+guards that same cache, retaining both official truncation checks. This is an explicit fork
+correction, separate from the official migration.
+
+Window and prompt roots fill only auto axes. Explicit/percentage sizes and min/max constraints
+retain their authored behavior; independent measured roots retain shrink-wrap sizing. Row
+min/max-content APIs use the renamed GridTemplateMinSize without an alias. Official stacker
+is opt-in across Taffy callbacks and all three Div phases. Default call-stack execution and
+stack-growth wrappers retain separate qualification and do not promise arbitrary tree depth.
+No new layout, cache, renderer or engine document owner is introduced.
+
+The corrected initial owner/style/root suite passes 18/18 after fixture corrections for actual
+width constraints, leaf callback semantics and valid draw phases. The first selected real-Cosmic/
+Windows suite passes 11/11 before the inherited ordinary-wrap correction. The native kerning
+fixture is then strengthened to install the bundled font with explicit kerning and require the
+per-character wrapper to alter all three exact-fit strings before actual StyledText may prove
+full-source paint. Public/native consumers observe notified successors before any compensating
+refresh, keep actual grid/root/text geometry and require original reconstruction/retirement.
+The corrected complete Core/WGPU/Windows libraries plus five public text/layout consumers
+pass 1,312/1,312 with four existing interactive Windows cases skipped. The stacker-disabled
+owner/portal selection passes 33/33; affected UI core/components/docking/Canvas pass 2,964/2,964
+and independently locked public text/grid tests pass 9/9 without skips. A root-positioning
+portal expectation now includes its authored inset, and a four-Sidebar identity fixture uses
+an explicit visible grid instead of stacking full-height sidebars outside the viewport.
+Original transform/presentation/linkage and physical-input/identity assertions remain, with
+added layout/viewport geometry assertions. Both fixture adjustments have bounded independent
+review; no corresponding portal/Sidebar production changes occur. The framework verification
+record retains earlier failures, corrected oracles and exact reruns. Locked workspace and
+independent-consumer compilation, affected correctness Clippy, both formatting checks and
+existing import/document/release/API scans pass on Windows 11/Rust 1.95.0 with serial one-job
+builds and the shared target. Actual Rust 1.92.0 affected Core/WGPU/Windows and independently
+locked consumer all-target/all-feature checks also pass on Windows. Nonblocking warnings
+remain; these results do not qualify other platform targets.
+Numeric CPU/allocation/P99/process retention, other platforms,
+remaining framework differences, canonical docking, Nara View integration and full R11/R12
+remain open. No Editor/game execution default changes.
