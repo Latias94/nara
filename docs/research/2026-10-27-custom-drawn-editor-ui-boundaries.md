@@ -2119,3 +2119,64 @@ TestPlatform accepted paint and actual paint-raster calls plus Swash raster do n
 GPU/native submission, backend resize acknowledgement, compositor output or engine View integration.
 Unicode wrapping, full script/caret support, fallback-policy reconciliation, measured budgets,
 remaining platform execution and complete R11/R12 retain their separate scope.
+
+## November 6: Unicode Wrapping, Indentation And Truncation
+
+The verified local Open-GPUI successor is `b466037e87e17f11e7acce70706b7866edda3ca1`, following
+the separate compiler-compatibility correction `09fe9d2ec46f013030852683e1adfe8d00b56ccd` and
+TypeId correction `8d35827da9a0bd335c3e85201ee82dbd77135224`, without publication. It
+continues the same fixed Zed target `635026fabc38440fce5e1767d125026a17b12012`,
+reconciling `f0210f1621c6be9df4510a4356fa5049680e1c01`,
+`4f70d91bda7ec5f5600a000a0dc34391d9f1e96f` and inherited omission
+`03a8544040ff95ec2e7921ca71c83799ad7f17cd`. The earlier Middle-truncation equivalence claim
+was incorrect. This confirms why the content-verified import anchor remains necessary alongside
+the July-to-target diff: the earlier selected ports did not establish complete source parity.
+
+The existing wrapper replaces its script/punctuation heuristic with the target's non-complex-scripts
+ICU line opportunities across fragments and atomic inline elements. Explicit `IndentAdjustment`
+is a breaking third `wrap_line` argument. Middle truncation flows through public TextOverflow,
+fluent style and element measurement with redistributed source TextRuns. Emergency wrapping and
+all truncation directions preserve complete source graphemes. Shaped wrapping groups actual
+adjacent visual glyphs by their original source grapheme, retaining its first actual visual glyph
+as the boundary, including an RTL mark preceding its base across font runs.
+
+Consumer and independent-review regressions expose additional defects beyond the upstream port:
+carried End content, Start's real row budget and zero-deletion candidate, one-row explicit
+paragraphs, retained CR in public shaping, and trimming a Prepend/ASCII-punctuation grapheme.
+Start and End now share exact wrapper/paragraph probes and require source deletion before adding
+an affix. Empty trailing paragraphs may be omitted without an affix. Wrapped Middle keeps complete
+first/last paragraph ends together. This consolidates one wrapping authority while retaining font
+resolution/width generations, independent width pools, admitted/aborted cache epochs and exact
+TextSystem lifetime. Overflowing multiline probes perform bounded logarithmic source searches;
+this correctness tradeoff has no measured speedup or allocation/retention claim.
+
+Root ICU segmenter/data resolves to 2.3 with the required zero-copy closure; the independent
+consumer keeps compatible ICU 2.4 and its existing Taffy/WGPU pins. Unrelated resolution churn was
+removed. Actual Rust 1.92.0 execution exposes existing unsupported TypeId slice, profiler hint and
+Windows match-guard constructs. Stable replacements preserve hash bytes, profiler state and the
+same eight mouse-button decoder/handler paths. Framework Core/WGPU/Windows and independently
+locked consumer all-target/all-feature checks pass on that compiler. The target's Rust 1.98.1
+workspace pin does not define the extracted framework's floor. This is Windows source-compatibility
+evidence; the new narrow minimum-compiler CI job remains locally prepared and unexecuted remotely.
+
+Final all-feature Core/WGPU/Windows libraries plus both public text consumers pass 1,250/1,250:
+Core 985, WGPU 66, Windows 197 and public consumers 2, with four existing interactive Windows
+cases skipped. Affected UI core/components/docking/Canvas pass 2,964/2,964 across 25 binaries
+without skips. The independently locked public API consumer passes 3/3; existing dependency-policy
+tests pass 2/2. Locked workspace and independent-consumer compilation, correctness Clippy and
+explicitly rerun root/consumer formatting pass on Windows 11/Rust 1.95.0 with one build job.
+The framework verification record retains the reproduced source/review failures and disk-space
+recoveries, including an initial MSVC PDB link failure and a later compile-only space failure.
+Independent text and compiler/native-dispatch review leave no outstanding P1/P2 in this unit.
+
+The real-Cosmic public trajectory uses actual fonts and style-driven measurement/paint, notified
+reflow, narrower allocation, reconstruction and final TextSystem release. It checks unclamped
+public shaping as an independent row-count oracle and retains headless/software scope. The
+expanded DirectWrite trajectory paints full finite-width Unicode and multistyle Middle text in
+actual accepted, nonempty Submitted frames; a notified narrower width increases rows and shortens
+the retained Middle output while preserving original source, tab, separator and teardown checks.
+Submission is not compositor glyph-pixel evidence. These scopes do not qualify general RTL caret,
+full complex-script segmentation, fallback priority, other platforms, measured costs, Nara engine
+View integration or the complete framework refresh. Font prewarm/name/raster reuse, layered text,
+window-local ownership and Taffy/API work remain in the fixed-target queue. Complete R11/R12 and
+the Editor/game execution choice remain open.

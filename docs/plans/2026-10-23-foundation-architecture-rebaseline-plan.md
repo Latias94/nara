@@ -1570,6 +1570,20 @@ compilation, correctness Clippy, formatting and existing document/import/API che
 glyph/raster and public accepted paint/reconstruction retain headless/software scope; prior
 native Windows tests qualify their own backend. General fallback priority, full RTL caret,
 Unicode wrapping, remaining API/platform work and numeric budgets remain open.
+The subsequent [Unicode wrapping/indentation/truncation successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-unicode-wrapping-indentation-and-truncation)
+is verified locally at Open-GPUI `b466037e87e17f11e7acce70706b7866edda3ca1`, following separate
+compiler corrections `8d35827da9a` and `09fe9d2ec46`, without publication. It reconciles the
+fixed target's UAX opportunities, explicit indentation and inherited Middle omission through
+existing wrapper/layout/style owners. Source/visual graphemes, real paragraph row budgets,
+complete TextRuns, font generations and candidate recovery retain the expanded regressions.
+Final Core/WGPU/Windows plus public text consumers pass 1,250/1,250 with four existing
+interactive Windows cases skipped; affected components/docking/Canvas pass 2,964/2,964 and the
+independently locked public API consumer passes 3/3. Locked compilation, correctness Clippy,
+dependency-policy tests and formatting pass. Actual Rust 1.92.0 framework/independent checks
+qualify the selected Windows compiler floor; the target's newer workspace compiler is not copied.
+Public Cosmic paint remains headless/software evidence; actual Windows Submitted frames qualify
+their own backend. Font work reuse, layered text, window-local ownership, Taffy/API, remaining
+platforms, complete script/caret support and measured budgets retain their separate scope.
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

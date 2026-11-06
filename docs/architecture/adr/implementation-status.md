@@ -97,6 +97,17 @@ docking and Canvas pass 2,964/2,964 with no skips. Actual Cosmic Hebrew raster a
 paint/reconstruction retain headless/software scope. Full RTL caret, configured
 fallback priority, Unicode wrapping, remaining platforms, Nara integration and measured budgets
 remain open.
+The subsequent [Unicode wrapping/indentation/truncation successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-unicode-wrapping-indentation-and-truncation)
+is verified locally at Open-GPUI `b466037e87e17f11e7acce70706b7866edda3ca1`, following separate
+compiler corrections `8d35827da9a` and `09fe9d2ec46`, without publication. Existing wrapper,
+layout/style and TextRun owners now handle UAX opportunities, explicit indentation, Middle and
+whole-grapheme cuts, with real paragraph budgets and candidate recovery. Core/WGPU/Windows plus
+public text consumers pass 1,250/1,250 with four existing interactive Windows cases skipped;
+affected UI/component/docking/Canvas consumers pass 2,964/2,964 and the independent public API
+tests pass 3/3. Selected Windows framework/independent checks pass on actual Rust 1.92.0.
+Cosmic headless/software paint and actual Windows Submitted frames keep their own scope.
+Remaining fixed-target text/layout/API/platform work, full script/caret support, numeric budgets,
+Nara rendering integration and complete R11/R12 remain open; no production default changes.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
