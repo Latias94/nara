@@ -1750,8 +1750,23 @@ framework/Canvas/consumer checks pass. Production wasm compilation, foreign-back
 review and synthetic power messages do not establish browser, foreign native or physical-power
 qualification. Numeric costs remain unmeasured; no publication or default change follows.
 
-Continue at official foreground journal/hang detection/monitor, frame-signal provenance,
-refresh-aware measurement and power/cadence.
+The [foreground journal/monitor successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-foreground-journal-and-hang-monitor)
+is qualified locally at Open-GPUI `8493e9eb1cad7c3336fa99b4b8749c5be1d6c7c5`, with record
+`84407f27ffacac0f2f5945c61220eb7567e7ac54`. The complete official checkpoint through
+`d284cbbc87` preserves bounded publication, independent collectors, explicit boundaries,
+short-poll aggregation, lifecycle/suspend filtering and the opt-in monitor. Fork scoped unwind,
+exact Submitted/failed work, canceled demand, task count custody and native/Web refusal
+corrections retain separate source and reproduced-regression evidence. Complete runtime/public/
+gallery/native 1,531, components/docking/Canvas 2,966, disabled Core/public 1,114 and independent
+enabled/disabled 32/26 pass. Four existing interactive Windows cases remain skipped in the
+runtime cohort. Locked checks, correctness Clippy, formatting and actual Windows Rust 1.92.0
+framework/Canvas/consumer checks pass. Stable wasm profiling on/off and the existing nightly
+shared-memory production configuration compile. Native Submitted, two collector cursors,
+reconstruction and monitor Flush/callback release execute; browser/native foreign-platform,
+physical-power and numerical-cost qualification stay separate. Publisher-tail drain and accepted
+backlog retirement remain explicit gaps, not inferred guarantees from Flush or admission.
+
+Continue at official frame-signal/completed-skip, refresh-aware v3 and power/cadence.
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

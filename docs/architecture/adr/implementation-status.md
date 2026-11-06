@@ -249,6 +249,23 @@ Synthetic power messages do not qualify physical suspend. Numeric costs, later j
 signal/cadence owners, full fixed-target refresh, docking and Nara GPU/View integration remain
 open; this prerequisite changes no default and does not close R11/R12.
 
+The following [foreground journal/monitor successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-foreground-journal-and-hang-monitor)
+is qualified locally at Open-GPUI `8493e9eb1cad7c3336fa99b4b8749c5be1d6c7c5`, with record
+`84407f27ffacac0f2f5945c61220eb7567e7ac54`, without publication. The official measurement-v2
+checkpoint through `d284cbbc87` supplies bounded publication, independent collectors,
+lifecycle/suspend-aware boundaries and the opt-in background monitor. Fork candidate/unwind,
+demand, task-count and native/Web admission corrections retain source distinctions and real
+red/green controls. Complete runtime/public/gallery/native 1,531, components/docking/Canvas
+2,966, disabled Core/public 1,114 and independent enabled/disabled 32/26 pass, with four
+preexisting interactive Windows skips in the runtime cohort. Native exact Submitted, journal
+cursors, reconstruction and monitor Flush/callback release execute. Locked checks, correctness
+Clippy, formatting and actual Windows Rust 1.92.0 framework/Canvas/consumer checks pass. Stable
+wasm on/off and optional existing nightly shared-memory compilation retain separate scope from
+browser and native foreign-platform execution. Publisher-tail drain, accepted-backlog retirement,
+physical suspend, numeric costs, final-target frame-signal/refresh-v3/cadence and complete
+benchmark/report/debug-overlay comparison remain open. Full refresh, docking, hot reload, Nara
+GPU/View and R11/R12 remain incomplete; no default changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

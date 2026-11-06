@@ -2754,3 +2754,68 @@ numeric costs, complete benchmark/report/debug-overlay reconciliation, hot reloa
 fixed-target differences, canonical docking U4-U9 and Nara GPU/View adoption remain open.
 This prerequisite preserves official mechanisms and modular public use; it selects no Editor/game
 default and does not complete R11/R12.
+
+## November 7: Foreground Journal And Hang Monitor
+
+The qualified local Open-GPUI implementation is
+`8493e9eb1cad7c3336fa99b4b8749c5be1d6c7c5`, with qualification and the advanced queue at
+`84407f27ffacac0f2f5945c61220eb7567e7ac54`. Neither is published. The fixed cycle target
+remains Zed `635026fabc38440fce5e1767d125026a17b12012`. This unit adopts the complete
+official journal/detector/monitor checkpoint `d284cbbc87b55d659303106ced627c8612369827`,
+including introduction `1861e58f98`, journal consumer support `7316cf7745`, trigger rules
+`97b1e64a17`, lifecycle filtering `f0fb48c71a`, unnotified suspend `7232ba04ef`, monitor
+`0f9c923e67` and both monitor/test corrections. Its complete measurement-v2 mechanism precedes
+the final target's queued frame-signal/completed-skip and refresh-aware measurement-v3 work.
+
+Official ownership remains intact: the foreground thread writes a bounded ring with bounded
+pending publication, independent collector cursors and discontinuity reporting. Short polls
+aggregate without losing count or total duration. Presentation, idle and power transitions are
+explicit interval boundaries; demand deadlines, visibility and suspend clocks control valid
+measurement. The detector reports completed intervals. App optionally owns a dedicated monitor
+thread and joins its final poll/callback with existing bounded shutdown work. Public consumers
+use the same APIs without Nara documents, ECS, history or private Host types.
+
+Fork integration distinguishes actual work from successful presentation. Accepted/refused and
+unwinding candidates retain their existing authority; only the exact valid Submitted frame can
+complete its covered input and presented interval. Failed submission work is retained without
+claiming success. Demand cancellation and old-scene retry preserve the real pending work.
+Task/action scopes balance nested work and unwind, restoring enclosing timing state. Official
+foreground-idle APIs and Web callbacks are restored through existing executor/dispatcher owners.
+Queued foreground polls and unqueued background/timer work executed on that thread have distinct
+count custody. Existing dispatcher admission now reports refusal so late closed-queue wakes do
+not strand a shared counter; Windows/Linux keep their native !Send rejection policy. Web later
+registration rejection settles its admitted count on the originating foreground thread.
+
+Independent review reproduces canceled-focus demand, failed-retry deadline renewal and both
+ordinary/idle late-wake defects before their owning corrections. Original regressions, public
+consumers and counter-controls remain; all 45 official module scenarios are retained. Monitor
+admission also rejects zero or unrepresentable intervals without consuming its App slot. Public
+controls execute observer panic/reentry, final callback completion and bounded waiting when that
+callback blocks. These are concrete fork/library corrections, distinct from official adoption.
+
+Complete framework/public/gallery/native passes 1,531/1,531, with four preexisting interactive
+Windows cases skipped. UI core/components/docking/Canvas passes 2,966/2,966; disabled
+Core/public passes 1,114/1,114. Independently locked enabled/disabled consumers pass 32/32 and
+26/26, without skips. The native trajectory correlates two journal collectors, exact input kinds,
+paint timestamps and actual Submitted receipts, then visible reconstructed redraw, off-thread
+monitor Flush and callback/resource release. Its hidden initial reconstruction still has an exact
+Submitted receipt; visibility filtering intentionally excludes that initial dirty timestamp, and
+the extra visible redraw retains the original complete dirty/draw/present oracle.
+
+Locked workspace/consumer checks, affected correctness Clippy, both formatting checks, existing
+import/doc/release/API scans and actual Windows Rust 1.92.0 framework/Canvas/consumer checks
+pass. Stable production wasm compiles with profiling off and on. Optional multithreaded wasm
+requires the existing nightly/shared-memory configuration; its stable attempt stops in unchanged
+wasm_thread 0.3.3, while the installed 1.98.0-nightly production check passes with that configuration.
+This compiles the mailbox branch, not browser callback execution or the unchanged Web test-support
+dependency gap. Both lockfiles retain every package version/source/checksum and add only the
+existing Core libc and Web helper dependency edges. All ten implementation/review threads close.
+
+Flush completes a poll of finalized entries and its callback; a reader-contended publisher tail
+can wait for the next foreground publication. Dispatcher admission does not guarantee execution
+of accepted-but-never-polled backlog. These boundaries remain explicit, with complete publisher
+drain and platform queue retirement still unqualified. Continue with official frame signals,
+completed skips, refresh-aware v3 and power/cadence. Complete benchmark/report/debug-overlay
+comparison, hot reload, native macOS/Linux, browser execution, physical suspend, numerical costs,
+remaining fixed-target differences, canonical docking U4-U9 and Nara GPU/View adoption stay open.
+This unit changes no Editor/game default and does not complete the refresh or R11/R12.
