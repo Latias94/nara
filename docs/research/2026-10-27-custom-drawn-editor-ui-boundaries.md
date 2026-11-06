@@ -2642,3 +2642,65 @@ Refresh-aware telemetry `4f6d97b9de7d9f167da8b7832eeecea22c5a9efa` remains a sep
 queued owner. Physical hotplug/refresh-mode changes, non-Windows native execution, numeric costs,
 remaining fixed-target differences, conditional hot reload, canonical docking and Nara GPU/View
 adoption remain open. This source work does not complete R11/R12.
+
+## November 6: Unified Profiler Foundation And Accepted Frame Measurements
+
+The qualified local implementation is Open-GPUI
+`3e5a907775e9f22d0a092a0f9f27c6f1696ade0e`, with qualification and prerequisite records at
+`a536b1d93380cc9247a7cc9576ac6b81cdb65489`. Both are local commits without publication.
+The fixed Zed target remains `635026fabc38440fce5e1767d125026a17b12012`. Source inspection
+after the display successor identifies missing inherited mechanisms beneath refresh-aware
+telemetry. This unit adopts official profiler feature gating `48511e0b9c`, safe last-reference
+thread collection `c16d19c94d` and the common WindowProfiler
+`a21007b7a948e46afbe719150f5e9968bfcd1078`, plus scheduler-clock, draw-duration-return and
+dirty-to-present follow-ups. Official mechanisms remain the baseline; later journal, hang,
+visibility, signal and refresh-aware work stays queued.
+
+The official `profiler` feature now governs task/action/window measurement. Runtime trace
+settings and overlapping scopes control detailed retention while aggregates remain available
+with the feature enabled. Collection releases the global registry lock before locking, copying
+or dropping upgraded thread owners. Fork integration removes InputLatencyTracker and the old
+`input-latency-histogram` feature, retaining actual submission outcomes, pending input and exact
+refresh-callsite diagnostics through the single WindowProfiler. Ordinary consumers use public
+interfaces without Nara document, ECS, history or private Host types.
+
+Fork adaptations preserve accepted-candidate and exact-submission authority. Only Submitted
+completes input covered by that accepted draw; late input remains pending during old-scene
+retry. Keyboard dispatch can draw synchronously, so the owning profiler associates input with
+that draw only when it covers its invalidations and later handler work has not invalidated
+again. Reset remains authoritative through draw rollback. Existing Window rejection handles
+Render/prepaint/paint unwind while preserving the last scene and rebuilding consumed by-value
+element state. Accepted publication failures finish subsequent accepted outputs and Window
+completion before propagating the first panic. Executed regressions retain these recovery
+paths with profiling enabled and disabled.
+
+Separate source-confirmed corrections serialize final trace cleanup against re-enable and fix
+inherited action/task slow-history ranking. Actual red baselines establish reset, Window and
+partial-action-history defects; the trace race has deterministic green coverage and source
+evidence, without a claimed executed red result. These corrections are distinguished from
+official adoption in Open-GPUI's existing verification record.
+
+The corrected framework/public/gallery suite passes 1,426/1,426 with four preexisting interactive
+Windows cases skipped. The all-feature UI core/components/docking/Canvas suite passes
+2,966/2,966 without skips. Disabled Core passes 1,095/1,095; independent enabled/disabled
+consumers pass 20/20 and 18/18, with final scoped 6/6, 2/2 and 1/1 checks after the last
+feature-boundary changes. The native trajectory checks synthetic input through production
+callbacks, exact nonempty Submitted receipt correlation, actual paint/input batches, a settled
+no-input redraw, retirement, reconstruction and HWND/App/backend/OLE release. It does not
+qualify OS input injection or scanout.
+
+The actual 20,000-node/19,900-edge labeled Canvas Criterion smoke passes with profiling on and
+off. Its inherited quadratic setup is replaced with complete public snapshot construction
+outside the measured loop; data scale, records, labels and rendering remain intact. This is
+neither a runtime mutation optimization nor numeric performance evidence. Locked workspace/
+independent checks, correctness Clippy, formatting, existing import/doc/release/API scans and
+actual Windows Rust 1.92.0 framework/Canvas/consumer checks pass. Production Core/WGPU/Web
+libraries compile for wasm with profiling on and off. Browser execution and the unchanged Web
+test-support dependency gap remain separate. All ten implementation/review subthreads are closed.
+
+Continue with official multi-subscriber wake and sleep/window visibility before foreground
+journal/hang detection, the GPUI-owned monitor, first frame-signal provenance and refresh-aware
+measurement. Power/cadence, complete upstream benchmark/report/debug-overlay disposition,
+conditional hot reload and remaining framework/platform differences are still open. This unit
+does not select the Nara renderer/View adapter, complete canonical docking U4-U9, establish
+numeric budgets or finish R11/R12, and it changes no Editor/game default.

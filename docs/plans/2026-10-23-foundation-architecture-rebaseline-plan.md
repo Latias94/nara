@@ -1722,6 +1722,27 @@ browser execution and numeric costs retain separate unqualified scope. Refresh-a
 conditional hot reload, remaining platform/API/renderer differences, canonical docking and Nara
 GPU/View adoption remain open; this prerequisite does not select an Editor/game default.
 
+The [unified-profiler foundation](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-unified-profiler-foundation-and-accepted-frame-measurements)
+is qualified locally at Open-GPUI `3e5a907775e9f22d0a092a0f9f27c6f1696ade0e`, with the
+qualification record at `a536b1d93380cc9247a7cc9576ac6b81cdb65489`. Official feature gating,
+safe thread-owner collection and one WindowProfiler replace the separate fork input tracker.
+The record distinguishes accepted-frame/input/reset/unwind adaptations and inherited trace/
+slow-history corrections from the official mechanism. Complete runtime/public/gallery and
+UI/component/docking/Canvas suites pass 1,426/1,426 and 2,966/2,966; four preexisting
+interactive Windows cases remain skipped. Disabled Core 1,095, independent enabled/disabled
+20/18, final scoped feature checks and the actual native Submitted/reconstruction trajectory
+retain their recorded scope. Both full-size labeled Canvas Criterion smoke configurations pass.
+Locked checks, correctness Clippy, formatting, existing scans and actual Windows Rust 1.92.0
+framework/Canvas/consumer checks pass. Production wasm compiles with profiling on and off;
+numeric overhead, browser execution and the Web test-support gap remain unqualified.
+
+Continue at official multi-subscriber wake and sleep/window visibility, followed by journal/
+hang detection/monitor, frame-signal provenance, refresh-aware measurement and power/cadence.
+The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
+Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
+ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
+refresh, conditional hot reload, canonical docking and Nara GPU/View selection stay open.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

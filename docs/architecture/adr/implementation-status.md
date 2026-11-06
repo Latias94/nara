@@ -217,6 +217,23 @@ Web test-support compilation. Native foreign platforms, browser/physical display
 numeric costs, telemetry/hot reload, remaining closure differences, canonical docking and Nara
 GPU/View integration stay open. This does not complete R11/R12 or change the execution default.
 
+The following [unified-profiler foundation](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-unified-profiler-foundation-and-accepted-frame-measurements)
+is verified locally at Open-GPUI `3e5a907775e9f22d0a092a0f9f27c6f1696ade0e`, with qualification
+record `a536b1d93380cc9247a7cc9576ac6b81cdb65489`, without publication. Official profiler
+feature gating, safe thread-owner collection and WindowProfiler replace the fork's separate
+input tracker. Candidate/input/reset/unwind integration and inherited trace/action/task ranking
+corrections retain distinct source and regression evidence. Full runtime/public/gallery and
+UI/component/docking/Canvas suites pass 1,426/1,426 and 2,966/2,966, with four preexisting
+interactive Windows skips in the former. Disabled Core 1,095 and independent enabled/disabled
+20/18 retain their scope, with final targeted feature checks. Actual native Submitted/release/
+reconstruction and full-size Canvas benchmark smoke execute; no numeric overhead claim follows.
+Locked checks, correctness Clippy, formatting, existing scans and actual Windows Rust 1.92.0
+framework/Canvas/consumer checks pass. Production wasm compiles with profiling on and off;
+browser/test-support and foreign native-platform qualification remain open. Native wake/sleep/
+visibility, journal/hang/monitor, frame-signal, refresh-aware measurement, power/cadence and
+upstream benchmark/debug-overlay consumers remain queued. Fixed-target parity, numeric costs,
+hot reload, canonical docking, Nara GPU/View and R11/R12 stay open; no default changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
