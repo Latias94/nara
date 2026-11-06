@@ -174,6 +174,19 @@ correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/consumer
 This changes no execution/default ADR. Remaining image features, API/platform/external-loop/
 renderer lifetime, numerical costs, canonical docking, Nara View and full R11/R12 remain open.
 
+The following [externally driven App successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-externally-driven-application-lifetime)
+is verified locally at Open-GPUI `e4364085634906472d23dab0efe0b9305fab7a04`, without publication.
+Official strong ApplicationHandle/run_embedded use existing launch ownership; fork updates use
+the qualified App transaction, with explicit weak/delayed-launch/reentry/shutdown behavior.
+The Windows visual-test host qualifies actual stateful Submitted/readback and observed native/App
+release, not production Windows external-loop support, all renderer resources or OS-input/timing.
+Complete affected framework/public, component and independent suites pass 1,339/1,339,
+2,964/2,964 and 14/14; four existing interactive Windows cases remain skipped. Locked checks,
+correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/consumer checks pass.
+Owning asset loads, display observation, conditional hot reload, other closure differences,
+numeric costs, canonical docking, Nara integration and full R11/R12 remain open. No default ADR
+changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

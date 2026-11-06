@@ -2465,3 +2465,61 @@ checks also pass. The framework verification record retains red results and fixt
 Other platforms, numerical CPU/allocation/P99/process retention, remaining image-feature/API/
 external-loop/renderer-lifetime reconciliation, canonical docking, Nara View integration and
 complete R11/R12 remain open. This changes no Editor/game execution default.
+
+## November 6: Externally Driven Application Lifetime
+
+The verified local application successor is Open-GPUI
+`e4364085634906472d23dab0efe0b9305fab7a04`, following
+`995ac8576362e43f36364616b33cc45c9560fab7`, against the same fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Official source
+`74798c68d5c63d31e2ccca5c8f5ec0a02c90679c` supplies Application::run_embedded and a
+strong ApplicationHandle with update/to_async. The final target leaves the handle methods
+unchanged; later launch additions initialize App-owned display observation and conditional
+Subsecond hot reload. Those remain separate closure differences, rather than implicit features
+of the handle. The fork reuses its existing shared launch path, direct display/snapshot queries,
+AppCell and shutdown owner. It adds no renderer, engine attachment or universal Host.
+
+The explicit fork adaptation wraps handle updates in the existing App transaction, matching
+AsyncApp::update. Copying the official direct callback body reproduces defer-only effects
+stranded after return and nested entity work escaping the outer host generation/batch. The
+corrected entry flushes effects before return and retains borrow-release native convergence.
+Reentrant same-App entry still panics; unwind restores bookkeeping without rolling back queued
+work or user state. AsyncApp remains weak and does not automatically cancel every future.
+Delayed platform launch can retain its own callback/App after handle drop, so returning a
+handle is neither a ready signal nor a cancellation protocol. Public nonterminal shutdown
+retains its existing preparation barrier and completed-window lifecycle.
+
+TestPlatform and VisualTestPlatform invoke launch and return through their existing scheduler/
+window owners. A host using VisualTestPlatform drives both deterministic tasks and real native
+messages. Stock Windows Platform::run still blocks and owns process exit: the new API does not
+provide production Windows externally driven-loop support or shared GPU ownership. Ordinary
+Wasm run keeps its existing permanent retention; run_embedded supplies the separate explicit
+owner. Wasm execution is not established by the native qualification.
+
+Corrected core lifetime tests pass 10/10, covering ordinary/embedded ownership, delayed launch,
+update batching, defer-only effects, reentry/unwind recovery, wake-after-borrow delivery, async
+timers and shutdown/release. The selected owner/native consumer passes 11/11. The latter uses
+public ApplicationHandle/AsyncApp for four stateful text/quad stages over real Windows windows,
+requiring matching accepted/nonempty Submitted/rendered/diagnostic/capture generations. Effects
+settle before polling; background await and a visual timer drive actual successors. Exact native
+retirement, observed App/model/root/asset/global-text/platform release and one OLE uninitialization
+complete the trajectory. Input includes direct callback and synthetic SendMessageW ingress;
+offscreen capture and text-backend weak references do not prove OS input fidelity, compositor
+display, every GPU allocation or native vsync-thread termination. Text pixels establish visible
+text, with source correctness checked separately from pixel OCR.
+
+Complete Core/WGPU/Windows plus six existing public text/layout/image consumers pass
+1,339/1,339, with four existing interactive Windows cases skipped. Affected UI core/components/
+docking/Canvas pass 2,964/2,964 and independently locked public consumers pass 14/14 without
+skips. Two independent embedded consumers type-check the public API without starting an App
+or enabling test-support. Bounded production/consumer review finds no confirmed P1/P2. Locked
+workspace/consumer checks, affected correctness Clippy, both formatting checks and existing
+import/document/release/API scans pass on Windows 11/Rust 1.95.0 with serial one-job builds and
+the shared target. Actual Windows Rust 1.92.0 affected-framework and independently locked
+consumer all-target/all-feature checks pass. Dependencies and both lockfiles remain unchanged.
+
+The queue now separately records official owning asset loads (`5896274168`), display observation
+and conditional hot reload alongside the remaining platform/API/renderer/image-feature closure.
+These require complete consumers and their own dispositions. Numeric costs, production platform
+embedding, canonical docking, Nara View/render integration and complete R11/R12 remain open.
+No Editor/game execution default changes.

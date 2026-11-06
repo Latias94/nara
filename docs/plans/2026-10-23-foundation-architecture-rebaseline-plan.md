@@ -1667,6 +1667,23 @@ image dependency-feature, public API, platform, external-loop and renderer-lifet
 Numeric costs, canonical docking and complete engine acceptance remain open; this closes the
 selected decoder unit rather than the fixed-target refresh.
 
+The following [externally driven App successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-externally-driven-application-lifetime)
+is verified locally at Open-GPUI `e4364085634906472d23dab0efe0b9305fab7a04`, without publication.
+It adopts official run_embedded/ApplicationHandle through existing launch/AppCell ownership;
+a reproduced direct-callback defect justifies the fork's complete update transaction. Strong/
+weak lifetime, delayed launch, reentry/unwind, native callback convergence and public shutdown
+retain explicit contracts. Actual Windows visual-host consumers bind four stateful text/quad
+stages and readbacks to exact Submitted generations and observed native/App owner release.
+Stock Windows startup remains blocking/process-owning; no production external Windows loop,
+shared GPU, all-resource release, OS-input/timing or numeric performance result follows.
+Complete affected runtime/public, component and independent suites pass 1,339/1,339,
+2,964/2,964 and 14/14; four existing interactive Windows cases remain skipped. Locked checks,
+correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/consumer checks pass.
+The queue now explicitly separates owning asset loads, display observation and conditional hot
+reload from this entry point. Continue those and remaining platform/API/renderer/image-feature
+differences before broader engine adaptation. Canonical docking, numeric costs and complete
+R11/R12 remain open.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
