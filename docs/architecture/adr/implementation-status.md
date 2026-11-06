@@ -187,6 +187,23 @@ Owning asset loads, display observation, conditional hot reload, other closure d
 numeric costs, canonical docking, Nara integration and full R11/R12 remain open. No default ADR
 changes.
 
+The owner's [official-baseline clarification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-official-framework-baseline-and-reusable-additions)
+defaults to retaining official mechanisms, refactoring fork-owned changes around them and
+keeping additions usable through ordinary public modules. Local Open-GPUI `bf3e0d2f7c6`
+records the maintenance rule; it adds no runtime qualification. The following
+[owning asset-load successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-owning-asset-loads-and-view-completion)
+is verified locally at `1855a94c5eeb7e0a97e69479232211827efc3942`, without publication.
+Official CachedLoad/Option/opaque-entry ownership serves App, Window, retain-all and the actual
+gallery LRU; fork publication waits on existing AppCell releases and uses the complete update
+transaction. Focused owner/image/LRU/candidate/native cases pass 22/22. Final affected runtime/
+public/gallery, components and independently locked consumers pass 1,361/1,361, 2,964/2,964
+and 16/16, with four existing interactive Windows cases skipped. Native automatic two-window
+submission, passive no-redraw, explicit refused-candidate retry and image/native retirement
+retain their distinct scopes. Locked checks, correctness Clippy, formatting, existing scans and
+actual Windows Rust 1.92.0 framework/consumer all-target/all-feature checks pass. Dependency
+versions and the independent lockfile remain unchanged. Remaining fixed-target reconciliation,
+numeric budgets, canonical docking, Nara GPU/View and full R11/R12 stay open; no default changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

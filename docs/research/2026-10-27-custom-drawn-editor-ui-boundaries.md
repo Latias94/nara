@@ -2523,3 +2523,70 @@ and conditional hot reload alongside the remaining platform/API/renderer/image-f
 These require complete consumers and their own dispositions. Numeric costs, production platform
 embedding, canonical docking, Nara View/render integration and complete R11/R12 remain open.
 No Editor/game execution default changes.
+
+## November 6: Official Framework Baseline And Reusable Additions
+
+The owner's clarification makes the fixed target's official framework mechanisms the default
+maintenance baseline. Preserve their supported behavior and regression scenarios, then build
+features and refactor reusable modules on that foundation. First adjust or replace fork-owned
+mechanisms when reconciliation needs a change. A retained difference needs a concrete consumer
+or Accepted contract, source evidence and an owning verification path. An unfinished official
+mechanism remains queued rather than being silently treated as rejected. Ordinary public
+consumers must remain usable without Nara-private dependencies.
+
+Open-GPUI's repository maintenance skill records this rule at local commit `bf3e0d2f7c6`;
+the existing plan and candidate queue reference that one source. This changes maintenance
+disposition, not execution evidence, the fixed Zed comparison target or the Nara Editor/game
+default. The current asset successor adopts official owning CachedLoad and public API evolution;
+its borrowed-App publication adjustment belongs to the fork's existing transaction contract.
+
+## November 6: Owning Asset Loads And View Completion
+
+The verified local asset successor is Open-GPUI
+`1855a94c5eeb7e0a97e69479232211827efc3942`, following the maintenance-rule clarification
+`bf3e0d2f7c6` and App successor `e4364085634906472d23dab0efe0b9305fab7a04`. Official
+`5896274168e06663568f42b5bae142162936e0a6` and final target
+`635026fabc38440fce5e1767d125026a17b12012` supply owning CachedLoad entries, one background
+load and one foreground publisher, deduplicated interested views and cached results. App fetch
+now returns Option output without subscribing; Window use registers each interested view.
+Opaque ImageCacheItem new/get/use_image replaces shared task handles and public loading/loaded
+variants. App, Window, retain-all and the actual gallery LRU use that same mechanism.
+
+The direct official publisher reproduces a fork-specific active-App-borrow panic. The local
+adaptation waits through existing AppCell release notifications, then publishes and notifies
+inside the complete App transaction. It retains only weak App/entry identities while waiting.
+Entry eviction cancels pending publication, including a ready result waiting for a borrow;
+old completion cannot update a replacement. Owner cases include repeated borrow waits,
+unwind recovery, terminal shutdown, observer-driven replacement and exact App/result release.
+This is a concrete fork integration adjustment, not a reason to replace official cache ownership.
+
+Focused owner/image/LRU/candidate/native cases pass 22/22. Actual two-window consumers share
+one load and receive one notification each, then automatically produce exact accepted/nonempty
+Submitted image frames with matching diagnostics and GPU readback. Passive fetch/get cause
+neither notifications nor extra render/paint work after initialized native frame opportunities.
+The record retains its initial no-redraw failure and correction: isolate pointer/activation
+changes and establish an explicit initial submitted frame while results are still held. No
+compensating refresh/draw is added after completion. Atlas-key removal retains accepted scene
+leases, and the image releases after native windows retire while App remains alive.
+
+The previously dormant gallery now has an explicit platform-package example, preserving core
+dependency direction. Its actual capacity-one/two LRU tests cover pending cancellation,
+replacement and two-window animated-frame disposal. A cached view's refused candidate retains
+the exact old scene/generation/dependencies; an explicit notified retry accepts the same result
+identity. That retry is distinct from the native automatic completion trajectory.
+
+Complete affected runtime/public/gallery passes 1,361/1,361, with four existing interactive
+Windows cases skipped; components/docking/Canvas pass 2,964/2,964 and independently locked
+public consumers pass 16/16 without skips. The latter type-check the new public asset APIs
+without launching an App or enabling test-support. Locked workspace/consumer checks, affected
+correctness Clippy, root/consumer formatting and existing import/document/release/API scans
+pass on Windows 11/Rust 1.95.0. Actual Windows Rust 1.92.0 affected-framework and independent
+consumer all-target/all-feature checks also pass. The root lockfile only declares existing
+gallery dev dependencies; no dependency versions or independent lockfile change. Bounded
+production/consumer review closes confirmed findings, and all six subthreads are closed.
+
+Offscreen native capture is not compositor or OS-input qualification. Native replacement uses
+a passive key; subscribed replacement and candidate refusal have their separate owner cases.
+Browser contention, numeric CPU/allocation/P99/process retention, non-Windows execution,
+production external Windows loops, remaining fixed-target differences, canonical docking and
+Nara GPU/View adoption remain open. No Editor/game execution default or complete R11/R12 changes.

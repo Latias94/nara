@@ -1418,6 +1418,13 @@ example compilation, behavioral framework tests, complete Nara integration and m
 costs. Use serial Cargo and the checkout's shared target; changes that belong to Open-GPUI stay
 in that repository rather than appearing as a second vendored copy in Nara.
 
+The November 6 [official-baseline clarification](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-official-framework-baseline-and-reusable-additions)
+defaults to retaining official framework mechanisms and adjusting fork-owned changes around
+them. Reusable additions must remain available through ordinary public modules. Record a
+concrete consumer, source and verification basis for retained differences; unimplemented
+official mechanisms stay queued. Open-GPUI's maintenance skill records this rule at local
+commit `bf3e0d2f7c6` without selecting a Nara toolkit default.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the
@@ -1683,6 +1690,23 @@ The queue now explicitly separates owning asset loads, display observation and c
 reload from this entry point. Continue those and remaining platform/API/renderer/image-feature
 differences before broader engine adaptation. Canonical docking, numeric costs and complete
 R11/R12 remain open.
+
+The following [owning asset-load successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-owning-asset-loads-and-view-completion)
+is verified locally at Open-GPUI `1855a94c5eeb7e0a97e69479232211827efc3942`, without publication.
+Official CachedLoad and Option/opaque-entry APIs replace shared task handles across App, Window,
+retain-all and the actual gallery LRU. The fork waits for its existing App borrow to end before
+publishing through the complete update transaction; cancellation and replacement retain entry
+identity. Focused owner/image/LRU/candidate/native cases pass 22/22. Two actual native windows
+automatically submit the shared result, while passive fetch/get retain zero-notification and
+no-render/no-paint assertions. Candidate refusal has exact old-scene/dependency preservation
+and an explicit notified retry; gallery capacity/disposal and pre-App-drop image release have
+their own controls. Complete affected runtime/public/gallery, component and independent suites
+pass 1,361/1,361, 2,964/2,964 and 16/16; four existing interactive Windows cases remain skipped.
+Locked checks, correctness Clippy, formatting, existing scans and actual Windows Rust 1.92.0
+framework/consumer all-target/all-feature checks pass. Dependency versions and the independent
+lockfile remain unchanged. Continue official display, hot-reload, image-feature, platform/API
+and renderer-lifetime dispositions before broader engine adaptation. Numeric budgets, canonical
+docking, Nara GPU/View and complete R11/R12 remain open.
 
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
