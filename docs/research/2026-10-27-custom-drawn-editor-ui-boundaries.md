@@ -2180,3 +2180,62 @@ full complex-script segmentation, fallback priority, other platforms, measured c
 View integration or the complete framework refresh. Font prewarm/name/raster reuse, layered text,
 window-local ownership and Taffy/API work remain in the fixed-target queue. Complete R11/R12 and
 the Editor/game execution choice remain open.
+
+## November 6: Font Preparation, Inventory And Raster Reuse
+
+The verified local Open-GPUI successor is `1d148d66dfdf89115046e08d6e01923b4b2e2165`, following
+Unicode revision `b466037e87e17f11e7acce70706b7866edda3ca1` and separate DirectWrite alias correction
+`19a4ed3434a19e0cedbaadff5bbd63bac00e7441`, without publication. It continues fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`, reconciling
+`f1d27d545e79f98ffde7ebf3229f8eb8bad791aa`,
+`5b4a2153a087055a7f9cb3464f188f1cab9fd678` and
+`1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8`.
+
+Public `TextSystem::prewarm_fonts(&[Font])` resolves complete descriptors through the existing
+generation-aware cache, deduplicates resolved IDs and invokes an optional platform hook.
+Cosmic primes the same primary/fallback match attributes used by normal shaping. Callers choose
+when and where to prepare; the framework adds no thread, task or redraw owner. Successful font
+installation retains existing invalidation, and failed installation preserves the prior cache.
+Available-family inventory now contains only sorted unique backend-reported names, including
+registered fonts; aliases continue to resolve independently of suggestions.
+
+Cosmic retains a measured glyph image for the subsequent raster request under its complete
+RenderGlyphParams key. The fork bounds this temporary handoff to 256 images and 8 MiB of retained
+image-buffer capacity. Pressure discards pending images and normal rasterization regenerates
+them, including oversized images; it introduces no glyph rejection or text-capacity reduction.
+This bound covers the new pending pixels, not the bounds cache, atlas, complete font memory or
+process retention. Independent cold raster oracles check size, placement and bytes at scales
+1.0/1.5, including grayscale, subpixel and actual Windows color emoji. Actual Swash attempt
+counts distinguish the removed second generation from existing atlas reuse. They do not establish
+frame-time, allocation-distribution or retained-process improvements.
+
+Preparing another alias in the complete native installation consumer exposes an existing
+DirectWrite defect: the native callback cache overwrites the first physical face's output FontId.
+The owning correction preserves that first mapping while retaining separate descriptor IDs,
+features, fallbacks, simulations and COM leases. A deterministic alias regression reproduces the
+failure independently. The original installation consumer keeps the added preparation and its
+full source/metrics/outlines, retained old glyph repaint, newer accepted nonempty Submitted frame
+and exact HWND/platform/OLE retirement assertions. DirectWrite uses the optional default prewarm
+hook; this proves identity/lifecycle correctness rather than a new native raster benefit.
+
+The final all-feature Core/WGPU/Windows libraries and both public text trajectories pass
+1,268/1,268 with four existing interactive Windows cases skipped. Affected UI core/components,
+docking and Canvas pass 2,964/2,964 across 25 binaries with no skips. Public Cosmic paint retains
+headless/software scope; actual Windows submission qualifies its own backend. The independently
+locked public fonts/wrapping consumer passes 5/5 without skips, preserving actual Cosmic aliases,
+mixed source, installation, old glyph bytes and exact release. Locked workspace/independent
+compilation, affected correctness Clippy, both formatting checks and existing import/document/
+release/API scans pass on Windows 11/Rust 1.95.0 with one build job and the shared target.
+Actual Rust 1.92.0 also passes affected Core/WGPU/Windows and independently locked consumer
+all-target/all-feature checks. Existing nonblocking warnings remain. Independent implementation
+and native-identity reviews leave no outstanding P1/P2 in this unit. The framework verification
+record retains the original inventory/alias failures, initial Bounds annotation correction and
+final reruns. Build-cache cleanup causes native dependency reconstruction during compilation;
+these cold build results are separate from runtime performance.
+
+Text split/layered paint/underlines, window-local text ownership, Taffy/intrinsic/root/grid/stack
+policy and remaining platform differences stay in the fixed-target queue. Source comparison for
+the next text unit adds independent visual-RTL split and transformed-underline exclusion oracles;
+it adds no runtime qualification. Other native platforms, complete script/caret support, measured
+budgets, Nara engine View integration, complete docking and R11/R12 remain open. This framework
+prerequisite does not select an Editor/game execution default.

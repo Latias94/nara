@@ -1584,6 +1584,21 @@ qualify the selected Windows compiler floor; the target's newer workspace compil
 Public Cosmic paint remains headless/software evidence; actual Windows Submitted frames qualify
 their own backend. Font work reuse, layered text, window-local ownership, Taffy/API, remaining
 platforms, complete script/caret support and measured budgets retain their separate scope.
+
+The subsequent [font preparation/inventory/raster successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-font-preparation-inventory-and-raster-reuse)
+is verified locally at Open-GPUI `1d148d66dfdf89115046e08d6e01923b4b2e2165`, following separate
+native alias-identity correction `19a4ed3434a`, without publication. Public prewarming uses the
+existing descriptor/platform owners; Cosmic shares normal matching attributes and reuses measured
+glyph images with a 256-entry/8-MiB temporary buffer-capacity bound. Pressure recomputes normally.
+Backend-only inventory, stable native callback identity and complete paint/install/release
+consumers retain the original regressions. Final Core/WGPU/Windows plus public text passes
+1,268/1,268 with four existing interactive Windows cases skipped; affected components/docking/
+Canvas pass 2,964/2,964 and independent public tests pass 5/5. Locked compilation, correctness
+Clippy, formatting and actual Windows Rust 1.92.0 affected-framework/consumer checks pass.
+The next text split/layer/underline unit now requires independent visual-RTL split and transformed
+exclusion oracles; it remains queued source work. Complete fallback/script support, other
+platforms, window-local ownership, Taffy/API and measured frame/process costs remain open.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

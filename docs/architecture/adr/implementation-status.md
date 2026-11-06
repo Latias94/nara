@@ -109,6 +109,19 @@ Cosmic headless/software paint and actual Windows Submitted frames keep their ow
 Remaining fixed-target text/layout/API/platform work, full script/caret support, numeric budgets,
 Nara rendering integration and complete R11/R12 remain open; no production default changes.
 
+The subsequent [font preparation/inventory/raster successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-font-preparation-inventory-and-raster-reuse)
+is verified locally at Open-GPUI `1d148d66dfdf89115046e08d6e01923b4b2e2165`, following separate
+native alias-identity correction `19a4ed3434a`, without publication. Explicit prewarming shares
+existing resolution/match owners; backend-only family inventory and bounded Cosmic measured-image
+handoff preserve source, old glyphs and exact release. Final Core/WGPU/Windows plus public text
+passes 1,268/1,268 with four existing interactive Windows cases skipped; affected components/
+docking/Canvas pass 2,964/2,964 and independent public API tests pass 5/5. Locked compilation,
+correctness Clippy, formatting and actual Windows Rust 1.92.0 affected-framework/consumer checks
+pass. Native Submitted and Cosmic software/cold pixel scopes remain distinct. The next text
+split/layer/underline unit has source-grounded acceptance, not executed qualification. Remaining
+framework/platform work, complete fallback/script support, numeric costs, canonical docking,
+Nara View integration and R11/R12 remain open; no production default changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
