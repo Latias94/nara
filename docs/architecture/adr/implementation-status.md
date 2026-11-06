@@ -134,6 +134,19 @@ Submitted evidence keep distinct scope. General bidi reflow/caret, existing ink 
 numeric costs, remaining framework/platform work, canonical docking, Nara View and R11/R12
 remain open; no production default changes.
 
+The following [window-text ownership successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-window-local-text-ownership-and-source-cache)
+is verified locally at Open-GPUI `1f01e811c101e5a81e52e955942f6a24a8974902`, without publication.
+It adopts official Rc/RefCell/Cell window storage and removal of unused hash APIs. Generation-coherent
+cache invalidation, candidate recovery and backend reentry remain explicit fork adaptations.
+A reproduced clamp-key defect shared by the starting fork and official target now has an owning
+content-key correction. Corrected Core/WGPU/Windows plus four public text consumers pass
+1,292/1,292, with four existing interactive Windows cases skipped; notify-only redraw and actual
+native Submitted/reconstruction retain their complete source and lifetime checks. Remaining
+framework/platform work, numeric costs, Nara integration and complete R11/R12 stay open.
+Affected components/docking/Canvas pass 2,964/2,964 and independently locked public text tests
+pass 7/7 without skips. Locked compilation, affected correctness Clippy, formatting and actual
+Windows Rust 1.92.0 framework/consumer checks pass. This changes no execution/default ADR.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

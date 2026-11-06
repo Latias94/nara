@@ -2294,3 +2294,58 @@ the new tests establish no compositor glyph/exclusion pixels, general RTL caret/
 script/fallback support, full existing ink-overhang coverage, other native platforms or numeric
 costs. Window-local ownership, Taffy/API/platform work, canonical docking, Nara View integration
 and R11/R12 remain open.
+
+## November 6: Window-Local Text Ownership And Source Cache
+
+The verified local Open-GPUI successor is `1f01e811c101e5a81e52e955942f6a24a8974902`, following
+`55ddbcde39527629a28555b5eadb678cddfccd71`, without publication. It uses the same fixed
+Zed target `635026fabc38440fce5e1767d125026a17b12012`. Provenance has three distinct
+parts. Official `772a8a91006db1c44171545cb7ba2d4c23d3e4cb` supplies Rc window-text ownership,
+RefCell layout state and per-window font-run scratch. Official follow-up
+`dde76a1dca5305607a940309ada0568350d1aac6` uses Cell take/set for that scratch in the final
+target. Official `2a74c8dff6902b7d02038050f5672a0989b18f94` deletes the unused hash-only layout
+APIs and cache. The fork adopts those final owners and removes its parallel hash keys,
+maps, range indices and source-empty ShapedLine path without compatibility wrappers.
+
+The fork separately retains generation-coherent current/previous caches and rejected-candidate
+recovery, required by its existing runtime font installation and atlas-lease admission consumers.
+Backend shaping now runs without a local cache borrow; publication revalidates font generation
+and reuses a canonical result published by reentry. This reentry behavior is a fork adaptation:
+the fixed official ordinary shaping path still holds RefMut across its backend call. Shared
+global TextSystem and immutable LineLayout results retain Arc ownership. Window/cache access
+stays on the window thread; actual shared font prewarming/installation can run on a worker.
+
+Independent review also finds a defect in both the starting fork and official target: wrapped
+layout keys omit max_lines. A new fresh-owner oracle reproduces unlimited wrap boundaries being
+reused for a one-line request. The existing owned/borrowed content key now includes the actual
+wrapping limit; plain layouts use None. Tests cover both request orders, exact source,
+same-clamp identity and committed/aborted frame reuse. This correction is explicitly fork-owned,
+separate from the official migration. Another review correction removes forced refresh from
+notified width/font observations so those checks require the automatically accepted successor.
+
+The public Cosmic trajectory uses two actual headless windows with distinct Rc caches over
+one exact global TextSystem. It retains complete source, cross-frame plain/wrapped reuse,
+notified narrower layout, font identity/cache invalidation, old glyph paint and reconstruction.
+The independent lockfile directly consumes two Noop WindowTextSystem owners and the public
+getter signature; it does not launch an App/Window. The native three-cycle reconstruction
+trajectory preserves original wrapper/HWND/platform/OLE release assertions and adds actual
+nonempty Submitted frames, rebuilt cache identity and retained Rc lifetimes. Immutable layouts
+remain readable after all text-system owners drop; painting still requires the original live
+font namespace.
+
+Corrected all-feature Core/WGPU/Windows libraries plus the four public text trajectories pass
+1,292/1,292, with four existing interactive Windows cases skipped. This includes the clamp
+regression and notify-only observations. Both bounded independent reviews close their confirmed
+P2 findings. Affected UI core/components/docking/Canvas libraries and integrations pass
+2,964/2,964 across 25 binaries without skips; independently locked fonts/wrapping/layer/window
+text tests pass 7/7. Locked workspace/independent compilation, affected correctness Clippy,
+both formatting checks and existing import/document/release/API scans pass on Windows 11/
+Rust 1.95.0 with one build job and the shared target. Actual Rust 1.92.0 affected-framework
+and independently locked consumer all-target/all-feature checks also pass on Windows.
+Existing warnings remain. The framework verification record retains the original 29/29 and
+5/5 checkpoints, reproduced clamp failure, corrected notify consumer and exact final runs.
+Native submission, headless accepted paint and direct Noop API execution remain separate
+evidence. These ownership changes do not measure CPU, allocation, frame-tail or
+process-retention improvement. Taffy/intrinsic/root/grid/stack and remaining platform work,
+canonical docking, Nara engine View integration and complete R11/R12 remain open; no Editor/game
+default changes.

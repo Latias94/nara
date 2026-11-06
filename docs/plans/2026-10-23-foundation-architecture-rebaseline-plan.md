@@ -1611,6 +1611,23 @@ existing interactive Windows cases skipped, affected components/docking/Canvas p
 and actual Windows Rust 1.92.0 affected-framework/consumer checks pass. General bidi reflow/caret,
 existing ink overhang, other platforms, numeric costs and the remaining refresh stay open.
 
+The following [window-text ownership successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-window-local-text-ownership-and-source-cache)
+is verified locally at Open-GPUI `1f01e811c101e5a81e52e955942f6a24a8974902`, without publication.
+It adopts the final official Rc window owner, RefCell layout cache, Cell scratch buffer and
+removal of unused hash-only APIs. The fork's font generations, rejected-candidate recovery
+and borrow-free backend reentry remain separately justified adaptations. Review reproduces
+a clamp-key defect in both the starting fork and official target; the existing content key
+now distinguishes max_lines. Public notified observations require automatic accepted frames
+without a compensating refresh. Corrected Core/WGPU/Windows and four public text consumers
+pass 1,292/1,292, with four existing interactive Windows cases skipped. Distinct window caches
+over one global TextSystem, full source, old glyphs and actual native reconstruction/retirement
+retain their separate headless/native scope. Affected components/docking/Canvas pass
+2,964/2,964 and independently locked public text tests pass 7/7 without skips.
+Locked compilation, affected correctness Clippy, formatting and actual Windows Rust 1.92.0
+framework/consumer checks pass. Official mechanisms, required fork adaptations and the
+inherited clamp correction retain separate provenance.
+Taffy, platform, measured costs and the broader framework refresh remain open.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
