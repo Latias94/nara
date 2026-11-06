@@ -2410,3 +2410,58 @@ remain; these results do not qualify other platform targets.
 Numeric CPU/allocation/P99/process retention, other platforms,
 remaining framework differences, canonical docking, Nara View integration and full R11/R12
 remain open. No Editor/game execution default changes.
+
+## November 6: Shared Image Decoding And Animation
+
+The verified local image successor is Open-GPUI `995ac8576362e43f36364616b33cc45c9560fab7`,
+following `11d9a96033ea8425b07f64fdf2bad6503f1720dc`, against the same fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Official sources are EXIF correction
+`9552acc2bc242d45342fa9b5a987d43868aee1ec` and that final target's shared GIF/WebP
+decoders. Both retired decode blocks are inherited official code, unchanged from the content
+import anchor; their duplication is not a fork-specific contract to preserve. The existing
+platform owner now performs static orientation before BGRA conversion and shared animation
+decoding. ImageAssetLoader keeps resource acquisition. Successful frames retain their delays,
+WebP has a transparent canvas, bad frames follow the official skip/empty-output error policy,
+and SVG keeps its existing renderer. Animated EXIF is outside that official mechanism.
+
+Official behavior and local adaptations remain distinct:
+
+- Shared helpers return contextual errors, so loader raster decoder failures now enter
+  ImageCacheError::Other rather than ImageCacheError::Image. This observable upstream change
+  is recorded in migration notes; no public decode signature changes.
+- The fork declares image 0.25.4 after inspecting that exact archive's orientation/background
+  APIs. The official EXIF message states that intent but its actual manifest and final target
+  still say 0.25.1. Both qualification locks remain on 0.25.10. Source inspection does not
+  establish an executed full-workspace 0.25.4 matrix, and the separate target AVIF feature
+  policy remains queued.
+- Img elapsed time now uses the existing App executor clock, matching its loading timer.
+  A public 199/200 ms regression reproduces the strict loading deadline: notification at
+  exactly 200 ms previously failed to paint and scheduled no successor. The fork includes
+  that deadline with `>=`; it adds no new clock, image cache or renderer owner.
+
+The official EXIF and one-frame WebP failures are reproduced before adoption. Added controls
+cover asymmetric pixel-exact transforms with eight distinct outputs, static/animated channel
+and alpha preservation, GIF delays, transparent pixels outside WebP frame bounds, contextual
+errors and malformed/truncated input. Isolated Image-only and path-only headless roots each
+notify and paint without another loader, clock advancement or a compensating draw. Real Img
+timelines distinguish 99/100 ms and loop twice; static images have no animation callback or
+idle revision change. These headless image tests use NoopTextSystem and qualify no real-font
+or GPU behavior. Atlas hits remain separate from existing view-cache/refused-candidate gates.
+
+Actual Windows encoded/embedded Img instances complete 0/1/0 through native frame requests.
+Every observation binds nonempty Submitted, accepted/rendered/submitted-diagnostic generation
+and GPU readback, then checks source replacement, EXIF geometry, atlas reuse and exact native
+retirement/reconstruction. No injected frame indices, forced native draw or fabricated receipt
+drives that trajectory. Offscreen framework capture does not prove compositor display.
+
+Final Core/WGPU/Windows plus six public consumer binaries pass 1,328/1,328, with four existing
+interactive Windows cases skipped. Affected UI core/components/docking/Canvas pass
+2,964/2,964 and independently locked public consumers pass 12/12 without skips. Both bounded
+independent rereviews close confirmed findings. Locked workspace/consumer checks, affected
+correctness Clippy, root/consumer formatting and existing import/document/release/API scans
+pass on Windows 11/Rust 1.95.0, with serial one-job builds and the shared target. Actual
+Windows Rust 1.92.0 affected-framework and independently locked consumer all-target/all-feature
+checks also pass. The framework verification record retains red results and fixture corrections.
+Other platforms, numerical CPU/allocation/P99/process retention, remaining image-feature/API/
+external-loop/renderer-lifetime reconciliation, canonical docking, Nara View integration and
+complete R11/R12 remain open. This changes no Editor/game execution default.

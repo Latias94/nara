@@ -1650,6 +1650,23 @@ The official target still supplies no general word-based
 MinContent text algorithm. Remaining framework/platform work, measured costs, canonical docking
 and complete engine acceptance remain open.
 
+The following [shared image successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-shared-image-decoding-and-animation)
+is verified locally at Open-GPUI `995ac8576362e43f36364616b33cc45c9560fab7`, without publication.
+It adopts official static EXIF and shared GIF/WebP decoding while retiring inherited duplicate
+paths. Official contextual loader errors, the fork's explicit image API minimum and its existing
+executor-clock/deadline adaptations retain separate provenance. Both entry points have isolated
+completion-notification controls; actual Img timelines, static idle behavior and Windows
+0/1/0 Submitted/GPU-readback/replacement/retirement are qualified. Complete Core/WGPU/Windows
+plus six public consumer binaries pass 1,328/1,328 with four existing interactive Windows cases
+skipped. Affected components/docking/Canvas pass 2,964/2,964 and independently locked public
+consumers pass 12/12 without skips. Locked checks, correctness Clippy, formatting and actual
+Windows Rust 1.92.0 framework/consumer all-target/all-feature checks pass. Both bounded
+independent rereviews close their findings. Source-confirmed image 0.25.4 availability is not
+an executed minimum-image-version matrix; both locks remain on 0.25.10. Continue the separate
+image dependency-feature, public API, platform, external-loop and renderer-lifetime differences.
+Numeric costs, canonical docking and complete engine acceptance remain open; this closes the
+selected decoder unit rather than the fixed-target refresh.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

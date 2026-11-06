@@ -162,6 +162,18 @@ numeric cost result, broader platform qualification or Editor/game default. Lock
 affected correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/independent
 checks pass; official mechanisms and the fork inherited-cache correction remain distinct.
 
+The following [shared image successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-shared-image-decoding-and-animation)
+is verified locally at Open-GPUI `995ac8576362e43f36364616b33cc45c9560fab7`, without publication.
+Official EXIF/GIF/WebP helpers replace inherited duplicate decoding; contextual error behavior
+and the fork's explicit dependency minimum/executor-clock/deadline adaptations retain separate
+provenance. Isolated loading notifications, deterministic animation/static idle and actual Windows
+Submitted/GPU-readback/replacement/retirement keep distinct public/native scope. Complete affected
+framework/public, component/docking/Canvas and independent suites pass 1,328/1,328,
+2,964/2,964 and 12/12; four existing interactive Windows cases remain skipped. Locked checks,
+correctness Clippy, formatting and actual Windows Rust 1.92.0 framework/consumer checks pass.
+This changes no execution/default ADR. Remaining image features, API/platform/external-loop/
+renderer lifetime, numerical costs, canonical docking, Nara View and full R11/R12 remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
