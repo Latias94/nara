@@ -1708,6 +1708,20 @@ lockfile remain unchanged. Continue official display, hot-reload, image-feature,
 and renderer-lifetime dispositions before broader engine adaptation. Numeric budgets, canonical
 docking, Nara GPU/View and complete R11/R12 remain open.
 
+The [connected-display successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-connected-displays-and-window-association)
+is verified locally at Open-GPUI `e5ad73a24a69274378264f792f4efb4d6d892ac6`.
+Official App/Window observation, refresh intervals and launch initialization now use the fork's
+existing topology/facts/native ingress owners. The record separates the official Hz boundary
+correction, fork deferred-close reentry fix and required Core bitflags dependency. Complete
+runtime/public/gallery, components and independently locked consumers pass 1,388/1,388,
+2,964/2,964 and 18/18, with four existing interactive Windows skips. Locked checks, correctness
+Clippy, formatting, existing scans and actual Windows Rust 1.92.0 framework/consumer checks pass.
+Production Core/WGPU/Web compile on wasm32-unknown-unknown; Web test-support stops in unchanged
+wait-timeout dependency and remains queued. Physical display mode/hotplug, native macOS/Linux,
+browser execution and numeric costs retain separate unqualified scope. Refresh-aware telemetry,
+conditional hot reload, remaining platform/API/renderer differences, canonical docking and Nara
+GPU/View adoption remain open; this prerequisite does not select an Editor/game default.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

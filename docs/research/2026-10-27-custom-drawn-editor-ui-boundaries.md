@@ -2590,3 +2590,55 @@ a passive key; subscribed replacement and candidate refusal have their separate 
 Browser contention, numeric CPU/allocation/P99/process retention, non-Windows execution,
 production external Windows loops, remaining fixed-target differences, canonical docking and
 Nara GPU/View adoption remain open. No Editor/game execution default or complete R11/R12 changes.
+
+## November 6: Connected Displays And Window Association
+
+The verified local display successor is Open-GPUI
+`e5ad73a24a69274378264f792f4efb4d6d892ac6`, without remote publication. It follows
+owning-assets `1855a94c5eeb7e0a97e69479232211827efc3942`
+and adopts official `f495dd0f77b69e287ed72c1168dc02965f08be7d` as retained by fixed target
+`635026fabc38440fce5e1767d125026a17b12012`. App owns connected-display bounds and refresh
+interval observation; Window owns its association. Public App/Window/Context subscriptions read
+ready cached state, deduplicate spurious hints and initialize after platform connection in both
+launch paths. Ordinary consumers require no Nara-private types.
+
+Fork integration reuses immutable display topology, coherent committed window facts and ordered
+native ingress. Earlier bounds facts cannot swallow a later association event. Windows uses a
+hidden top-level platform HWND to receive broadcasts without app windows. Refresh intervals
+participate in the existing publication generation. macOS and Wayland source map the complete
+mechanism to existing owners; X11/Web retain unknown refresh intervals, and Linux headless no
+longer fabricates a monitor. Non-Windows source adaptation is separate from native execution.
+
+The official Hz helper's tiny-positive reciprocal overflow reproduces before a checked Duration
+conversion corrects it. Full consumers also expose a fork deferred-close reentry loop: an async
+native close had returned its platform callback before the user handler sent a nested WM_CLOSE.
+The existing Window close-handler slot now protects both paths, preserving later close requests
+and unwind cleanup. The geometry-wake fixture settles actual startup messages before its
+unchanged exact-wake/coalescing/committed-geometry assertions. These corrections preserve official
+display ownership while repairing fork integration.
+
+The corrected focused owner/native selection passes 22/22. Complete affected runtime/public/
+gallery passes 1,388/1,388, with four existing interactive Windows cases skipped. The native
+display trajectory proves zero-window WM ingress, current-monitor rereads, an actual nonempty
+Submitted frame, busy-App ordering and exact HWND/window/App/backend/OLE release. Detached Rust
+association and deterministic property fixtures retain their distinct scopes. No physical monitor
+mode or topology was changed.
+
+Components/docking/Canvas pass 2,964/2,964 and independently locked public consumers pass
+18/18 without skips. The independent build catches bitflags still being optional under Wayland
+in the fork. The required Core dependency now follows the official public display types;
+ordinary consumers need no extra feature activation. Versions and both lockfiles stay unchanged.
+Locked workspace/consumer checks, affected correctness Clippy and root/consumer formatting pass
+on Rust 1.95.0. Actual Windows Rust 1.92.0 framework/consumer all-target/all-feature checks pass.
+Bounded production/acceptance reviews leave no confirmed P1/P2; all eight subthreads are closed.
+
+An additional wasm32-unknown-unknown production-library check passes through Core/WGPU/Web.
+Web test-target compilation stops in unchanged wait-timeout 0.2.1 test-support dependency before
+the backend; source comparison retains the fork's proptest 1.10.0 pin versus target 1.12.0 for
+the remaining dependency audit. No version is changed, and neither that comparison nor the
+successful production compile establishes browser/test-support qualification.
+
+Refresh-aware telemetry `4f6d97b9de7d9f167da8b7832eeecea22c5a9efa` remains a separate
+queued owner. Physical hotplug/refresh-mode changes, non-Windows native execution, numeric costs,
+remaining fixed-target differences, conditional hot reload, canonical docking and Nara GPU/View
+adoption remain open. This source work does not complete R11/R12.
