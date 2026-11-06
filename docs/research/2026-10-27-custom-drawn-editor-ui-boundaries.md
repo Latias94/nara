@@ -2239,3 +2239,58 @@ the next text unit adds independent visual-RTL split and transformed-underline e
 it adds no runtime qualification. Other native platforms, complete script/caret support, measured
 budgets, Nara engine View integration, complete docking and R11/R12 remain open. This framework
 prerequisite does not select an Editor/game execution default.
+
+## November 6: Source Fragments, Text Layers And Underline Exclusions
+
+The verified local Open-GPUI successor is `55ddbcde39527629a28555b5eadb678cddfccd71`, following
+`1d148d66dfdf89115046e08d6e01923b4b2e2165`, without publication. It reconciles
+`2936989f1b`, `f792c2d72d`, `bda9c0bd43` and `0dea8c63d9` against the same fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`.
+
+LineLayout now owns raw source-index partition and foreground/background painting. ShapedLine
+delegates split and adds a forward cursor: ordered input advances glyphs/decorations once,
+while visually reordered input scans the remaining glyphs per split. Exact original glyphs,
+source indices and coordinates survive; painting fragments at the previous recorded advance
+reconstructs original geometry. This fixes a reproduced RTL index-underflow failure without
+pretending fragments are independently reshaped bidi layouts, caret positions or reflow results.
+Adjusted source lengths and invalid UTF-8 boundaries are refused under documented contracts.
+
+Public TextLayout background/foreground passes let a custom Element reuse StyledText measurement
+and prepaint, insert its own highlights and paint glyphs/decorations. Local Rc line snapshots
+release the internal borrow before backend reentry. Explicit passes propagate errors; ordinary
+drawing finishes backgrounds before foregrounds while retaining its logging behavior. Shared
+aligned/wrapped footprints and actual continuation/final-row origins keep backgrounds and
+decorations together. Zero-advance background widths include the existing half-cell adjustment.
+
+Independent review reproduces an additional fragment paint-order defect: a retained glyph beyond
+the fragment advance is absent from the batch's registered footprint, so a later opaque cover
+can draw underneath it. Actual sprite/quad ordering tests fail before correction. Reordered,
+non-increasing-position and outlying glyphs now use primitive bounds for ordering; normal
+contained byte-ordered text retains batching. This is a correctness policy, not a measured
+batching, allocation or frame-time improvement.
+
+Underline callbacks expose byte ranges, resolved styles and logical geometry. Window bounds and
+painting share the existing snapped/projected primitive. Absolute device-space exclusions add
+exact visible-span clips without shortening full wave geometry, preserving phase, opacity,
+transformed/rounded ancestor clips and replay. Deterministic primitive tests cover fractional
+origins, scales 1/1.25/1.5/2/3, nested transforms, interval normalization and invalid-scope recovery.
+
+The corrected focused suite passes 19/19, including real Cosmic mixed-direction fragments,
+custom layered paint and the complete native Unicode/notification/Submitted/retirement flow.
+Final Core/WGPU/Windows plus three public text trajectories pass 1,281/1,281 with four existing
+interactive Windows cases skipped. Affected UI core/components/docking/Canvas pass 2,964/2,964
+and independent fonts/wrapping/layer API tests pass 6/6, both without skips. The independent
+layer test type-checks the custom Element and method signatures; actual drawing comes from the
+separate complete consumers. The framework record retains both reproduced owner defects,
+the half-open Bounds test correction and native floating-intersection containment correction.
+Locked workspace/independent compilation, correctness Clippy, both formatting checks and existing
+import/document/release/API scans pass on Windows 11/Rust 1.95.0 with one build job and the shared
+target. Actual Rust 1.92.0 also passes affected Core/WGPU/Windows and independently locked
+consumer all-target/all-feature checks. Nonblocking warnings remain. Independent split/cursor
+review closes the ordering P2; the separate Window/TextLayout review finds no additional
+confirmed P1/P2. Reviews and executed main-thread qualification retain their own scope.
+Actual primitive order, software glyph raster and native submission remain separate evidence;
+the new tests establish no compositor glyph/exclusion pixels, general RTL caret/reflow, complete
+script/fallback support, full existing ink-overhang coverage, other native platforms or numeric
+costs. Window-local ownership, Taffy/API/platform work, canonical docking, Nara View integration
+and R11/R12 remain open.

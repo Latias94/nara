@@ -1595,9 +1595,21 @@ consumers retain the original regressions. Final Core/WGPU/Windows plus public t
 1,268/1,268 with four existing interactive Windows cases skipped; affected components/docking/
 Canvas pass 2,964/2,964 and independent public tests pass 5/5. Locked compilation, correctness
 Clippy, formatting and actual Windows Rust 1.92.0 affected-framework/consumer checks pass.
-The next text split/layer/underline unit now requires independent visual-RTL split and transformed
-exclusion oracles; it remains queued source work. Complete fallback/script support, other
-platforms, window-local ownership, Taffy/API and measured frame/process costs remain open.
+At that checkpoint, the next text split/layer/underline unit required independent visual-RTL split
+and transformed exclusion oracles and retained queued source scope. Complete fallback/script
+support, other platforms, window-local ownership, Taffy/API and measured frame/process costs remain open.
+
+The subsequent [source-fragment/layer/underline successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-source-fragments-text-layers-and-underline-exclusions)
+is verified locally at Open-GPUI `55ddbcde39527629a28555b5eadb678cddfccd71`, without publication.
+Raw layouts and shaped cursors retain original source/glyph geometry; custom Elements can reuse
+text measurement and paint backgrounds, highlights and foregrounds separately. Window underline
+ranges/exclusions use the existing snapped projection and exact clip owner. Reproduced RTL
+underflow and fragment/opaque-cover ordering failures have owning corrections. Focused public/
+native passes 19/19; complete Core/WGPU/Windows plus public text passes 1,281/1,281 with four
+existing interactive Windows cases skipped, affected components/docking/Canvas passes
+2,964/2,964 and independent API tests pass 6/6. Locked compilation, correctness Clippy, formatting
+and actual Windows Rust 1.92.0 affected-framework/consumer checks pass. General bidi reflow/caret,
+existing ink overhang, other platforms, numeric costs and the remaining refresh stay open.
 
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default

@@ -117,10 +117,22 @@ handoff preserve source, old glyphs and exact release. Final Core/WGPU/Windows p
 passes 1,268/1,268 with four existing interactive Windows cases skipped; affected components/
 docking/Canvas pass 2,964/2,964 and independent public API tests pass 5/5. Locked compilation,
 correctness Clippy, formatting and actual Windows Rust 1.92.0 affected-framework/consumer checks
-pass. Native Submitted and Cosmic software/cold pixel scopes remain distinct. The next text
-split/layer/underline unit has source-grounded acceptance, not executed qualification. Remaining
-framework/platform work, complete fallback/script support, numeric costs, canonical docking,
+pass. Native Submitted and Cosmic software/cold pixel scopes remain distinct. At that checkpoint,
+the next text split/layer/underline unit had source-grounded acceptance rather than execution.
+Remaining framework/platform work, complete fallback/script support, numeric costs, canonical docking,
 Nara View integration and R11/R12 remain open; no production default changes.
+
+The subsequent [source-fragment/layer/underline successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-source-fragments-text-layers-and-underline-exclusions)
+is verified locally at Open-GPUI `55ddbcde39527629a28555b5eadb678cddfccd71`, without publication.
+Shared raw/shaped source partition, explicit text layers and projected underline exclusions use
+existing layout/Window/clip owners; corrected underflow and actual fragment/cover ordering retain
+their reproduced regressions. Final Core/WGPU/Windows plus public text passes 1,281/1,281 with
+four existing interactive Windows cases skipped; affected components/docking/Canvas passes
+2,964/2,964 and independent API tests pass 6/6. Compilation, correctness Clippy, formatting and
+actual Windows Rust 1.92.0 checks pass. Actual primitive order, software raster and native
+Submitted evidence keep distinct scope. General bidi reflow/caret, existing ink overhang,
+numeric costs, remaining framework/platform work, canonical docking, Nara View and R11/R12
+remain open; no production default changes.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
