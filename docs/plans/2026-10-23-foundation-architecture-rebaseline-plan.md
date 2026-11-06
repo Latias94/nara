@@ -1736,8 +1736,22 @@ Locked checks, correctness Clippy, formatting, existing scans and actual Windows
 framework/Canvas/consumer checks pass. Production wasm compiles with profiling on and off;
 numeric overhead, browser execution and the Web test-support gap remain unqualified.
 
-Continue at official multi-subscriber wake and sleep/window visibility, followed by journal/
-hang detection/monitor, frame-signal provenance, refresh-aware measurement and power/cadence.
+The following [lifecycle observation successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-system-power-and-presentation-visibility)
+is qualified locally at Open-GPUI `8b283cb151b070d7d5851a531a86e6d6d67196cb`, with
+qualification record `8554f9e765b4fe3369480fcba2d0580ec008bd18`. Official multi-subscriber
+power and Window/Context visibility mechanisms replace the singleton wake path; all backend
+sources and public test-context controls migrate. Fork native ingress, post-borrow ordering and
+SetWindowPos sampling retain distinct rationale and tests. Complete runtime/public/gallery/native
+1,446, components/docking/Canvas 2,966, disabled Core/public 1,113 and independent enabled/
+disabled 28/26 pass; four existing interactive Windows cases remain skipped in the runtime
+cohort. Native hide/show/minimize/restore requires a newer nonempty Submitted receipt and exact
+retirement. Locked checks, correctness Clippy, formatting and actual Windows Rust 1.92.0
+framework/Canvas/consumer checks pass. Production wasm compilation, foreign-backend source
+review and synthetic power messages do not establish browser, foreign native or physical-power
+qualification. Numeric costs remain unmeasured; no publication or default change follows.
+
+Continue at official foreground journal/hang detection/monitor, frame-signal provenance,
+refresh-aware measurement and power/cadence.
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

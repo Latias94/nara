@@ -229,10 +229,25 @@ interactive Windows skips in the former. Disabled Core 1,095 and independent ena
 reconstruction and full-size Canvas benchmark smoke execute; no numeric overhead claim follows.
 Locked checks, correctness Clippy, formatting, existing scans and actual Windows Rust 1.92.0
 framework/Canvas/consumer checks pass. Production wasm compiles with profiling on and off;
-browser/test-support and foreign native-platform qualification remain open. Native wake/sleep/
-visibility, journal/hang/monitor, frame-signal, refresh-aware measurement, power/cadence and
-upstream benchmark/debug-overlay consumers remain queued. Fixed-target parity, numeric costs,
+browser/test-support and foreign native-platform qualification remain open. Journal/hang/monitor,
+frame-signal, refresh-aware measurement, power/cadence and upstream benchmark/debug-overlay
+consumers remain queued. Fixed-target parity, numeric costs,
 hot reload, canonical docking, Nara GPU/View and R11/R12 stay open; no default changes.
+
+The following [lifecycle observation successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-6-system-power-and-presentation-visibility)
+is qualified locally at Open-GPUI `8b283cb151b070d7d5851a531a86e6d6d67196cb`, with record
+`8554f9e765b4fe3369480fcba2d0580ec008bd18`, without publication. Official App subscriptions
+and Window/Context presentation visibility replace the singleton wake path. Mandatory backend
+methods and public test-context controls preserve ordinary framework use without Nara-private
+dependencies. Fork ingress/SetWindowPos adaptations retain exact ordering, retirement and native
+Submitted evidence. Runtime/public/gallery/native 1,446, components/docking/Canvas 2,966,
+disabled Core/public 1,113 and independent enabled/disabled 28/26 pass; four existing interactive
+Windows cases are skipped in the runtime cohort. Locked checks, correctness Clippy, formatting
+and actual Windows Rust 1.92.0 framework/Canvas/consumer checks pass. Production wasm and
+foreign-backend source review remain distinct from browser/native foreign-platform execution.
+Synthetic power messages do not qualify physical suspend. Numeric costs, later journal/monitor/
+signal/cadence owners, full fixed-target refresh, docking and Nara GPU/View integration remain
+open; this prerequisite changes no default and does not close R11/R12.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

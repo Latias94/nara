@@ -2704,3 +2704,53 @@ measurement. Power/cadence, complete upstream benchmark/report/debug-overlay dis
 conditional hot reload and remaining framework/platform differences are still open. This unit
 does not select the Nara renderer/View adapter, complete canonical docking U4-U9, establish
 numeric budgets or finish R11/R12, and it changes no Editor/game default.
+
+## November 6: System Power And Presentation Visibility
+
+The qualified local Open-GPUI implementation is
+`8b283cb151b070d7d5851a531a86e6d6d67196cb`, with the qualification and queue record at
+`8554f9e765b4fe3369480fcba2d0580ec008bd18`. Neither commit is published. The fixed Zed
+target remains `635026fabc38440fce5e1767d125026a17b12012`. This unit adopts official
+multi-subscriber wake `7a7c3e1d2f03195c5fa19bc890da330ad7f3abef` and sleep/window
+visibility `3db02c2c77659ad29810594e6249287ea1e791f7`, using their final-target mechanisms
+across the framework and backend closure.
+
+App owns independent sleep/wake subscriptions; the former Application singleton wake setter
+and slot are removed. Window caches presentation visibility before delivering distinct changes,
+with Window and weak entity-bound Context observers. Native shown/mapped state remains a
+separate query. Public TestAppContext and VisualTestContext methods let extension tests drive
+the same supported visibility and subscription path. Ordinary consumers need no Nara document,
+ECS, history or private Host types.
+
+Fork adaptations preserve the existing thread-safe native ingress, ordered post-borrow delivery
+and shutdown discard. Already emitted sleep/wake and visibility boundaries are not coalesced;
+native deferred sampling can still collapse native-message bursts as the official mechanism
+does. Windows additionally samples SetWindowPos show/hide commits because the fork's actual
+initial/provisional reveal need not emit separate show/size messages. Exact callback retirement
+and a strictly newer Submitted restore receipt remain part of the existing native owner.
+Visibility observation adds no implicit frame wake, renderer submission or hide/reveal authority.
+
+The complete enabled framework/public/gallery/native cohort passes 1,446/1,446, including both
+public lifecycle integrations and 209 Windows cases. Four preexisting interactive Windows cases
+remain skipped. UI core/components/docking/Canvas passes 2,966/2,966; disabled Core/public
+passes 1,113/1,113. Independently locked enabled/disabled consumers pass 28/28 and 26/26.
+Their lifecycle tests distinguish ordinary API compilation and standalone subscription controls
+from the separate actual App/Window delivery tests. Native execution covers real initial reveal,
+SetWindowPos hide/show, minimize/restore, busy-App ordering, unsubscribe, reconstruction and
+exact HWND/platform release. Synthetic power messages enter the actual hidden platform HWND
+without suspending the machine.
+
+Locked workspace/consumer checks, affected correctness Clippy, both formatting checks, existing
+import/doc/release/API scans and actual Windows Rust 1.92.0 framework/Canvas/consumer checks
+pass. Production Core/WGPU/Web compile for wasm with profiling off and on; browser execution
+and the existing Web test-support dependency gap remain separate. Foreign backend sources are
+migrated and independently reviewed; native macOS/Linux execution remains unqualified. The
+record retains early compile/fixture corrections and the corrected headless Hidden instruction.
+All nine implementation/review subthreads are closed.
+
+Continue at official foreground journal/hang detection, the GPUI monitor, frame-signal provenance,
+refresh-aware measurement and power/cadence. Physical suspend, general Windows occlusion,
+numeric costs, complete benchmark/report/debug-overlay reconciliation, hot reload, remaining
+fixed-target differences, canonical docking U4-U9 and Nara GPU/View adoption remain open.
+This prerequisite preserves official mechanisms and modular public use; it selects no Editor/game
+default and does not complete R11/R12.
