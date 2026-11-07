@@ -266,6 +266,22 @@ physical suspend, numeric costs, final-target frame-signal/refresh-v3/cadence an
 benchmark/report/debug-overlay comparison remain open. Full refresh, docking, hot reload, Nara
 GPU/View and R11/R12 remain incomplete; no default changes.
 
+The following [platform-signal/completed-skip successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-platform-frame-signals-and-completed-skips)
+is qualified locally at Open-GPUI `5811543bebe10657b9f99b42bfadb214e7dad999`, with record
+`c7fb5ccd8a81ee8221fb90711b02649516b4c4fa`, without publication. Official captured source/time,
+raw diagnostics and nonempty completed skips retain pending-demand semantics; fork ingress and
+exact native registration/retirement remain explicit. Final Core/Windows library/public 1,482,
+components/docking/Canvas 2,966, disabled Core/public 1,122 and independent enabled/disabled
+38/29 pass. Four existing native interactive skips and an earlier gallery fixture skip retain their
+scope. Earlier WGPU/gallery contributes 228 passes; initial clipboard failure, unchanged rerun,
+interrupted final run and later complete Windows success remain recorded. Locked checks,
+correctness Clippy, formatting, actual Windows Rust 1.92.0 and stable/nightly production wasm
+configurations pass; native foreign-platform, browser and numeric-cost scope remain unqualified.
+The inherited official demand-driven platform-loop prerequisite `eb354c8d50` and X11 Expose/
+recovery are now queued before refresh-aware v3 and power/cadence. They are not rejected fork
+differences. No default or execution ADR changes; full refresh, docking, hot reload, Nara GPU/View
+and R11/R12 remain incomplete.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

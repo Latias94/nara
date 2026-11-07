@@ -2819,3 +2819,67 @@ completed skips, refresh-aware v3 and power/cadence. Complete benchmark/report/d
 comparison, hot reload, native macOS/Linux, browser execution, physical suspend, numerical costs,
 remaining fixed-target differences, canonical docking U4-U9 and Nara GPU/View adoption stay open.
 This unit changes no Editor/game default and does not complete the refresh or R11/R12.
+
+## November 7: Platform Frame Signals And Completed Skips
+
+The local Open-GPUI implementation is `5811543bebe10657b9f99b42bfadb214e7dad999`, with
+qualification and the advanced queue at `c7fb5ccd8a81ee8221fb90711b02649516b4c4fa`.
+Neither is published. The fixed cycle target remains Zed
+`635026fabc38440fce5e1767d125026a17b12012`. This unit adopts official frame-signal provenance
+`cd4fc8de4ca8548cca2567352b87bcaaec13328f` and nonempty completed-skip correction
+`36b6d0951fdee409f0957294a69360ba2e8e980e` through existing platform, Window and journal owners.
+
+Official `RequestFrameOptions`, `FrameRequestSource` and `PlatformFrameSignal` preserve one
+captured timestamp/source pair across coalescing. Profiling-disabled capture does not evaluate its
+closure and the accumulator has no timestamp storage or atomic work. The atomic retains official
+offset saturation and equal-time native-source preference; it is not a lossless arbitrary-clock
+ordering promise. Raw callback arrivals and reentrant deferrals are diagnostics, not foreground
+work or completion. Completed no-render/inactive/thermal skips seal only retained work, leave
+pending demand intact and do not flush folded polls on every idle refresh. Refresh-aware
+measurement v3 and later power/cadence are separate mechanisms.
+
+Fork adaptations retain concrete existing contracts. Arrival is recorded before App access,
+while the native ingress queues reentrant requests, merges force/presentation requirements and
+preserves the earliest known signal pair. Active arena scope identifies draw-time arrival without
+another draw-state owner. Delayed delivery does not duplicate the raw marker; refused/unwound
+draws are not completed skips. The throttle helper regains official required-presentation bypass
+and high-rate-input exemption from inactive throttling, while retaining thermal limits and exact
+recovery/Submitted authority. Known signal pairs survive local backend adapters intact.
+
+Windows binds each signal to its exact HWND/WindowId/generation, captures after actual VSync
+wait or fallback sleep and drains stale signals on hide/minimize/retirement. Native workflows
+exercise real Submitted frames, reconstruction, visibility recovery, delayed retirement, final
+signal release, stale registrations and an actual background VSync signal before delivery.
+macOS source adopts the per-display registry prerequisite `96ce8f2a05`, host-clock conversion
+and stop cleanup while retaining structured startup and callback retirement. Wayland's wrapping
+millisecond conversion and plausibility fallback are source-preserved. X11's current Expose path
+still joins its local timer. Web RAF keeps official unavailable captured time/native provenance;
+explicit local requests capture before post-borrow delivery. Native foreign-platform and browser
+execution are not qualified by that source comparison or portable compilation.
+
+Final Core/Windows library/public tests pass 1,482/1,482 with four existing interactive skips.
+The earlier WGPU/gallery selection contributes 228 passing cases and one fixture-regeneration
+skip. Its unchanged clipboard test failed once, passed an unchanged isolated rerun and passed
+the final complete Windows run; the cause of the first failure remains undiagnosed. An interrupted
+first final run has no completion claim. UI core/components/docking/Canvas pass 2,966/2,966;
+disabled Core/public pass 1,122/1,122 and independently locked enabled/disabled consumers pass
+38/38 and 29/29 without skips. Public test-platform flows retain exact accepted/submitted
+generations, pending callbacks, inactive presentation bypass, Deferred demand and close/release.
+Typed but unexecuted independent closures remain signature evidence, distinct from runtime tests.
+
+Locked workspace/consumer checks, correctness Clippy, formatting and existing import/doc/release/
+API scans pass. Actual Windows Rust 1.92.0 framework/Canvas/consumer checks pass. Stable wasm
+production compiles with profiling off/on, and the existing nightly shared-memory configuration
+compiles its multithreaded branch. These establish neither browser execution nor numerical
+costs. All eight implementation/review threads are closed. No engine default or compiler-floor
+change follows.
+
+The source audit identifies an inherited official prerequisite that must be completed next:
+`eb354c8d504071bdb79110a7a5c9d374c2864113` owns Wayland's complete demand-driven
+FrameLoop/ping/retry/deadline contract, related Core scheduling and Web completion-hook removal.
+X11's direct Expose/recovery mechanisms `ae99a867d7` and `f25434f3c5` need the same owner
+reconciliation. Current timestamp support does not approve permanent divergence or close those
+loops. Continue through that complete platform prerequisite before cross-platform refresh-aware
+v3, power/cadence and later macOS MetalFrameSource. Full fixed-target refresh, numeric budgets,
+publisher-tail/backlog lifetime gaps, benchmark/report/debug-overlay comparison, hot reload,
+canonical docking U4-U9 and Nara GPU/View adoption remain open. This unit does not complete R11/R12.

@@ -1766,7 +1766,25 @@ reconstruction and monitor Flush/callback release execute; browser/native foreig
 physical-power and numerical-cost qualification stay separate. Publisher-tail drain and accepted
 backlog retirement remain explicit gaps, not inferred guarantees from Flush or admission.
 
-Continue at official frame-signal/completed-skip, refresh-aware v3 and power/cadence.
+The [platform-signal/completed-skip successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-platform-frame-signals-and-completed-skips)
+is qualified locally at Open-GPUI `5811543bebe10657b9f99b42bfadb214e7dad999`, with record
+`c7fb5ccd8a81ee8221fb90711b02649516b4c4fa`. Official atomic source/time capture and raw versus
+completed-skip boundaries use existing owners; fork ingress, native generation/retirement and
+mandatory-presentation adaptations remain explicit. Final Core/Windows library/public passes
+1,482/1,482 with four existing interactive skips. Earlier WGPU/gallery contributes 228 passing
+cases and one fixture skip; the record preserves an initial clipboard failure, unchanged isolated
+pass, interrupted final run and complete Windows success. Components/docking/Canvas 2,966,
+disabled Core/public 1,122 and independent enabled/disabled 38/29 pass without skips. Locked
+checks, correctness Clippy, formatting, actual Windows Rust 1.92.0 and stable wasm on/off plus
+existing nightly shared-memory production compilation pass. Foreign native/browser and numeric
+cost evidence remain separate; no Editor/game default changes.
+
+The audit exposes inherited official demand-driven prerequisite `eb354c8d50`, including Wayland
+FrameLoop/ping/retry/deadline, Core scheduling and Web completion-hook removal. Complete that
+mechanism and X11 direct Expose/recovery `ae99a867d7`/`f25434f3c5` through their existing
+owners before claiming cross-platform refresh-aware v3. Current timestamp support is not a
+permanent fork disposition against those official mechanisms. Continue there, then power/cadence
+and later macOS MetalFrameSource; complete fixed-target parity remains open.
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
