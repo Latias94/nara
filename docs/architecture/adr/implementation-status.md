@@ -390,6 +390,22 @@ Remaining property/configuration/initial-tree mechanisms, benchmark/report, hot 
 docking, numerical budgets and
 Nara GPU/View remain open. No Nara execution ADR/default or R11/R12 status changes.
 
+The [property/configuration/initial-tree successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-accessibility-properties-configuration-and-initial-trees)
+is implemented locally at Open-GPUI `d9608b1a3174f17df270d6b92894539ec32654a8`, after
+`37ceac021fec7efb5091334bc60877ba36ab75d6`, with qualification
+`1670c373e34751ac520237b7d04a480b06ab7b4a`. Official property/configuration and synchronous
+initial-root mechanisms reuse existing owners. The actual early-admission-revocation regression
+is corrected while retaining exact queued WindowClosed settlement. Complete Core/public/WGPU/
+Windows 1,787, components/docking/Canvas 2,966, disabled affected 182, independent type-only
+6/6 per mode and Gallery 13 pass. Four existing interactive skips and an earlier undiagnosed
+extra mouse transition retain their recorded scope. Locked checks, affected Clippy, actual
+Windows Rust 1.92, stable production wasm, formatting and static gates pass. Seven threads close;
+no remote publication follows. Initial reply, accepted tree, native Submitted and real AT remain
+distinct evidence. Next comes the complete benchmark harness/report owner through existing
+queue, dispatcher, text, platform, context and measurement modules, with actual public consumers.
+That source mapping does not qualify execution. Full refresh, hot reload, numerical budgets,
+canonical docking and Nara GPU/View remain open; no Nara execution ADR/default or R11/R12 changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

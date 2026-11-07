@@ -3305,3 +3305,76 @@ properties, enabled-versus-active configuration and initial activation-tree beha
 existing modules. Complete benchmark/report, hot reload, foreign native/browser execution,
 numerical budgets, canonical docking U4-U9 and Nara GPU/View adoption remain open. No
 Editor/game-runtime default or full R11/R12 status changes.
+
+## November 8: Accessibility Properties, Configuration And Initial Trees
+
+The next complete framework unit starts at Open-GPUI
+`37ceac021fec7efb5091334bc60877ba36ab75d6`, against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Official sources are `83d4847462`
+(numeric step and initial root), `2268045a11` (shortcuts),
+`9183ba4c5579c083b005d7f4c248d90c914fb46f` (enabled/active queries and test configuration),
+and `cc053a4a6fa2fd0e8793201ed9099466af1be0b1` (author identifiers). Implementation and
+qualification use the existing property, A11y, Window and ordered native ingress owners.
+Local implementation is `d9608b1a3174f17df270d6b92894539ec32654a8`; its qualification record
+is `1670c373e34751ac520237b7d04a480b06ab7b4a`.
+
+The official `aria_keyshortcuts`, `aria_numeric_value_step` and `accessibility_id` builders
+extend the existing grouped property module. Its writer preserves the official composition
+rule: absent properties leave a custom node's existing values intact; normal fresh-node
+reconstruction removes omitted source properties. Author IDs remain distinct from framework
+element and action identity. The fork additionally includes the published author ID in explicit
+raw tree inspection, with an actual inspection consumer. Automatic diagnostic exports retain
+their existing redaction contract.
+
+Official `Window::is_a11y_enabled` describes configuration independently of attachment, while
+`Window::is_a11y_active` describes current-frame activation. The fork's old active-query name
+is removed without an alias. The TestApp disabling switch affects subsequent windows.
+Public source-driven controls install accessibility-only subscriptions before attachment;
+passive queries neither activate nor redraw. Ordinary external dependencies retain these APIs
+without Nara or test-support dependencies.
+
+Activation synchronously returns the official immutable one-node Window root with creation-time
+title and root focus. Full trees continue through ordered ingress after App borrows release;
+repeated bootstrap replies retain the creation title while later complete trees use the live
+title. The Send callback captures the existing admission and native-close facts through atomic
+bits, without retaining the Window or borrowing App. Exact unregistration, construction rollback,
+quiescence and the existing shutdown fence in the shared sequencer refuse obsolete activation.
+An initial reply grants no accepted component/action/inspection or Submitted-frame authority.
+Calls overlapping revocation retain their actual admission point; no new atomic transaction
+covers native teardown and the reply.
+
+Complete Core/public/WGPU/Windows passes 1,787/1,787 with four existing interactive skips;
+UI core/components/docking/Canvas passes 2,966/2,966 without skips. The original Windows
+trajectory executes the installed Send callback on a real OS worker while App/Window are
+borrowed, then observes complete live-title publication, property updates/removal, nonempty
+Submitted frames and exact native/root/App/TextSystem/OLE release. CPU TestPlatform execution
+retains its deterministic scheduler contract. Initial roots, accepted full trees, native
+submission and real AT consumption remain distinct evidence scopes.
+
+Executed failures precede their corrections. An early generic admission revocation at native
+close changes a queued command's exact terminal; sharing the existing native-close fact restores
+WindowClosed settlement without weakening the original assertion. Old tree-history fixtures
+are corrected to account for bootstrap replies while retaining accepted empty-root reconstruction.
+One unchanged mouse-leave test receives an extra input/hover pair in an earlier complete run;
+its isolated and complete reruns pass, but the cause remains undiagnosed. No assertion or source
+change suppresses that failure.
+
+The profiler-disabled affected Core/public selection passes 182/182, including all configuration,
+tree and composite public targets. Independently locked ordinary type-only controls pass 6/6 in
+each feature mode without test-support, while the actual Gallery selection passes 13/13.
+Locked workspace/consumer all-target checks, affected correctness Clippy, actual Windows
+Rust 1.92 and stable production wasm with profiling off/on pass. Root/independent formatting,
+existing import/API/document/release scans and changed-workflow YAML parsing pass. No dependency,
+lockfile or compiler-floor change follows. All six implementation/test/review threads and one
+read-only benchmark audit are closed. No remote publication occurs; Nara changes are documentary.
+
+That audit maps the next complete official benchmark harness/report owner: independent
+`bench-support`, queue/timer closure, concrete `ThreadedDispatcher`, native text-system reuse
+with separate routine platforms, context/foreground teardown, scheduled frames and complete
+measurement/parameter/seed interfaces. Existing virtual contexts and Noop text do not establish
+equivalence. The follow-up uses `297c4a4d78`, `1722fe63bc`, `8886dcb0d4`, `3135cdf8dc`,
+`1f7eae7fb7` and `2440236055` against the same target, through current owners and actual public
+Canvas/independent consumers. These findings are source evidence only. Complete benchmark/report,
+conditional hot reload, numerical budgets, canonical docking U4-U9, real AT and foreign native/
+browser execution, and Nara GPU/View adoption remain open. No Editor/game-runtime default or
+full R11/R12 status changes.

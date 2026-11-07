@@ -1912,6 +1912,24 @@ Complete remaining property/configuration/initial-tree mechanisms before the ben
 hot-reload owners. No engine default or full R11/R12
 status changes.
 
+The [property/configuration/initial-tree successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-accessibility-properties-configuration-and-initial-trees)
+is implemented locally at Open-GPUI `d9608b1a3174f17df270d6b92894539ec32654a8`, after
+`37ceac021fec7efb5091334bc60877ba36ab75d6`, with qualification
+`1670c373e34751ac520237b7d04a480b06ab7b4a`. Official property builders, enabled/active queries
+and synchronous creation-title roots reuse existing owners. Shared original admission,
+native-close facts and the sequencer shutdown fence preserve exact lifecycle and command
+settlement; the actual early-revocation regression is fixed without weakening the original
+terminal assertion. Complete Core/public/WGPU/Windows 1,787, components/docking/Canvas 2,966,
+disabled affected 182, ordinary type-only 6/6 in each mode and Gallery 13 pass. Four existing
+interactive skips and an earlier undiagnosed extra native mouse event remain recorded.
+Locked checks, affected Clippy, actual Windows Rust 1.92, production wasm, formatting and existing
+static gates pass. Initial reply, accepted full tree, native Submitted and real AT remain
+separate scopes. Seven threads close. The next complete official benchmark harness/report owner
+includes queue/timer closure, ThreadedDispatcher, real text-system injection with isolated
+platforms, teardown, scheduled frames and measurement/parameter/seed interfaces; this source
+mapping is not runtime qualification. Full refresh, hot reload, costs, docking and Nara GPU/View
+remain open. No engine default or full R11/R12 status changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
