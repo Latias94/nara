@@ -2945,3 +2945,72 @@ existing framework owners and ordinary public consumers. Later power/cadence and
 benchmark/report/debug-overlay comparison, publisher-tail/backlog retirement, conditional hot reload,
 canonical docking U4-U9, numeric costs and Nara GPU/View adoption remain open. This prerequisite
 changes no Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.
+
+## November 7: Refresh-Aware Frame And Hang Measurement V3
+
+The qualified local Open-GPUI implementation is
+`411895475e9e51a9f06954d5d676333d597b991f`, with qualification and the advanced queue at
+`110f9c88084227eb526515167c204af3555f22a8`. Neither is published. The fixed cycle target
+remains Zed `635026fabc38440fce5e1767d125026a17b12012`. This unit adopts complete official
+measurement v3 `4f6d97b9de7d9f167da8b7832eeecea22c5a9efa` and relevant final cleanup through
+the existing profiler, Window, view, journal, detector and monitor owners. Zed application-only
+telemetry/report consumers remain comparison inputs rather than framework dependencies.
+
+Frame work starts at the later of its captured signal and first invalidation and ends at platform
+submission start. A missing signal leaves it unmeasured; unknown refresh retains the official
+fallback budget and no invented missed-refresh count. Public snapshots group accepted draws and
+successful submissions by the refresh interval captured for each draw, including on-time, late,
+unmeasured, missed-refresh and input-response statistics. Draw request-layout, prepaint and paint
+durations retain their actual work. View contributions name the underlying type through erased,
+weak and failed-downcast paths and exclude nested view work from parent self-time. The v3 detector
+retains threshold, late-frame and blocking-work triggers, contributor serialization, active-use
+attribution and background-monitor active-time results.
+
+Fork integration preserves exact accepted-frame/input custody. A callback signal cannot overwrite
+an older scene awaiting submission or leak from a no-render callback into a later direct draw.
+Each draw owns its signal, refresh and phases; refusal, reset, unwind and old-scene retry retain
+their existing rules. Only actual Submitted completes the covered frame/input measurement.
+View phase scopes balance during unwind, and valid draw work survives visibility filtering while
+unproven signal/dirty latency remains unmeasured. Ordinary public consumers acquire no Nara types.
+
+Independent review and executed red controls reproduce four defects inherited from the official
+mechanism: poll-only input-history growth, time consumption erasing evidence for a long-open
+incident, completion-order clipping of enclosing work, and interpolation across inactive input
+gaps. The sealer now retains its prior-boundary floor until sealing and considers the earliest
+retained work. Active attribution uses bounded state and boundary-order observation. Existing
+input dispatch supplies chronological raw activity controls and an exact-journal weak guard,
+including nested/unwinding dispatch, so active time measures the covered interval union rather
+than interpolating first/last input. These controls add neither work nor a completion boundary.
+The explicit example with inputs at seconds 1 and 200, consumed at second 201, retains its
+61-second expected union; the baseline returns 200 seconds. The original ten-millisecond outer
+work assertion also remains. Independent reference/property controls retain caps, discontinuities,
+loss/suspend, initial/capped/repeated consumption, guard retirement and dispatch coverage.
+
+The final focused Core/public cohort passes 208/208 and expanded Windows profiler/signal
+trajectories pass 2/2. The corrected complete framework/public/Gallery/production-state/native
+cohort passes 1,809/1,809 with five preexisting skips: four interactive Windows cases and the
+Gallery fixture-regeneration command. Its full native image-animation trajectory passes without
+an isolated retry. UI core/components/docking/Canvas pass 2,966/2,966, disabled Core/public passes
+1,134/1,134 and independently locked enabled/disabled consumers pass 46/46 and 32/32 without
+skips. Signature-only closures remain separate from actual TestPlatform and native execution.
+Native evidence correlates captured signal/source, display interval, emitted view work, dual
+collectors, actual Submitted, reconstruction and exact callback/resource retirement. Short
+controlled delays make attribution observable and establish no numerical overhead or speed claim.
+
+Locked workspace/consumer checks, correctness Clippy, formatting and existing import/document/
+release/API scans pass. Actual Windows Rust 1.92.0 affected-framework/Canvas/consumer all-target/
+all-feature checks pass. Stable wasm production compiles with profiling off/on, and the existing
+nightly shared-memory configuration compiles its multithreaded branch. No manifest or lockfile
+changes are required. All eight implementation/review subthreads close. The existing qualification
+record retains the initial 184/187 run, owner red cases, native fixture correction, deliberately
+interrupted first broad build and final results; foreign native/browser execution remains separate.
+
+The interface audit also identifies inherited missing official generic View/ViewElement
+`74b5207744ef95505fd75c56bf2c9d4736e931ee`. Current measurement covers the fork's actual
+Entity/AnyView/PresentedAnyView path; that does not establish stateless/generic interface parity.
+The complete interface, macro and reusable-component owner is explicitly queued before hot reload
+and full-refresh closure. Continue next with complete official power/cadence and MetalFrameSource,
+then remaining interface/report differences. Publisher-tail/backlog retirement, complete benchmark/
+report/debug-overlay comparison, conditional hot reload, canonical docking U4-U9, numerical costs
+and Nara GPU/View adoption remain open. This unit changes no Editor/game-runtime default and does
+not complete the fixed-target refresh or R11/R12.

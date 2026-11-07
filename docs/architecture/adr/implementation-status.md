@@ -296,6 +296,21 @@ browser execution and numerical costs remain unqualified. Complete refresh-aware
 next, then power/cadence and later MetalFrameSource. No default or execution ADR changes; full
 refresh, docking, hot reload, Nara GPU/View and R11/R12 remain incomplete.
 
+The following [refresh-aware measurement-v3 successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-refresh-aware-frame-and-hang-measurement-v3)
+is qualified locally at Open-GPUI `411895475e9e51a9f06954d5d676333d597b991f`, with record
+`110f9c88084227eb526515167c204af3555f22a8`, without publication. Official per-refresh frame
+work, view self-time and v3 detection/monitor rules use existing owners. Exact candidate/Submitted
+custody and four reproduced inherited sealer/active-use fixes retain public, property and native
+evidence; chronological input controls add no work or boundary owner. Focused Core/public 208,
+native two and complete framework/public/Gallery/state/native 1,809 pass, with five preexisting
+skips in the complete cohort. Components/docking/Canvas 2,966, disabled Core/public 1,134 and
+independent enabled/disabled 46/32 pass without skips. Locked checks, correctness Clippy,
+formatting, actual Windows Rust 1.92.0 and stable/nightly production wasm configurations pass.
+Native foreign-platform/browser execution and numeric costs remain separate. Generic View/
+ViewElement is a named queued official-interface gap, not an intentional entity-only design.
+Power/cadence and MetalFrameSource follow next. No default or execution ADR changes; complete
+refresh, publisher-tail/backlog retirement, docking, hot reload, Nara GPU/View and R11/R12 remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

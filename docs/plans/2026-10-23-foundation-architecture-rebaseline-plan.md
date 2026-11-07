@@ -1801,6 +1801,24 @@ pass. Host state tests do not qualify native Linux or browser execution; numeric
 unmeasured. Continue at the complete official refresh-aware v3 owner, then power/cadence and
 later MetalFrameSource. Full fixed-target parity remains open; no engine default changes.
 
+The [refresh-aware measurement-v3 successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-refresh-aware-frame-and-hang-measurement-v3)
+is qualified locally at Open-GPUI `411895475e9e51a9f06954d5d676333d597b991f`, with record
+`110f9c88084227eb526515167c204af3555f22a8`. Complete official signal/dirty-to-submission work,
+per-refresh reports, view self-time and v3 hang/active-use rules use existing owners. Fork exact
+accepted/Submitted adaptation and four reproduced inherited sealer/active-use corrections retain
+red/green, property, public and native evidence. Chronological input-activity controls measure
+nested dispatch and disjoint active windows without history growth or invented completion.
+Final focused Core/public 208 and native two pass; complete framework/public/Gallery/state/native
+1,809 passes with five preexisting skips. Components/docking/Canvas 2,966, disabled Core/public
+1,134 and independent enabled/disabled 46/32 pass without skips. Locked checks, correctness
+Clippy, formatting, actual Windows Rust 1.92.0 and stable/nightly production wasm configurations
+pass. Native foreign-platform/browser execution and numerical costs remain unqualified. The
+official generic View/ViewElement interface is explicitly queued, including stateless/macro and
+reusable-component consumers; current entity-view measurement is not full interface parity.
+Continue next at complete power/cadence and MetalFrameSource, then remaining interface/report/
+hot-reload differences. Publisher-tail/backlog retirement, canonical docking and engine GPU/View
+adoption remain open. No engine default or R11/R12 completion changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
