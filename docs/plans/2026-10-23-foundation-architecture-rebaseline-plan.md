@@ -1780,11 +1780,27 @@ existing nightly shared-memory production compilation pass. Foreign native/brows
 cost evidence remain separate; no Editor/game default changes.
 
 The audit exposes inherited official demand-driven prerequisite `eb354c8d50`, including Wayland
-FrameLoop/ping/retry/deadline, Core scheduling and Web completion-hook removal. Complete that
-mechanism and X11 direct Expose/recovery `ae99a867d7`/`f25434f3c5` through their existing
-owners before claiming cross-platform refresh-aware v3. Current timestamp support is not a
-permanent fork disposition against those official mechanisms. Continue there, then power/cadence
-and later macOS MetalFrameSource; complete fixed-target parity remains open.
+FrameLoop/ping/retry/deadline, Core scheduling and Web completion-hook removal. Its complete
+mechanism and X11 direct Expose/recovery `ae99a867d7`/`f25434f3c5` now have the following scoped
+qualification; current timestamp support was not a permanent fork disposition against those
+official mechanisms.
+
+The [demand-driven platform-loop successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-demand-driven-platform-frame-loops)
+is qualified locally at Open-GPUI `b6506b48efca022c13256ef17d5ecfa26787b2ae`, with record
+`9901ed0bcc6272a647bccfb73016f3f22206a013`. Official weak wakeups, Core scheduling, complete
+Wayland retries, Web RAF parking and X11 Expose/recovery use existing owners; the obsolete
+completion-driven hook is removed. Fork native maintenance remains post-borrow and distinct
+from scheduling. Actual accepted-publication unwind, candidate refusal and exact Submitted/
+retirement retain their coverage. Focused Core/public 62, actual production-state 27 and affected
+native five pass. Full runtime/public/gallery/state/native passes 1,748 of 1,749, with one
+unchanged image-animation timeout passing its unchanged isolated rerun; the cause is undiagnosed.
+Five preexisting skips remain explicit. Components/docking/Canvas 2,966, disabled Core/public
+1,134 and independent enabled/disabled 40/31 pass without skips. Locked checks, correctness
+Clippy, formatting, actual Windows Rust 1.92.0 and stable/nightly production wasm configurations
+pass. Host state tests do not qualify native Linux or browser execution; numeric costs remain
+unmeasured. Continue at the complete official refresh-aware v3 owner, then power/cadence and
+later MetalFrameSource. Full fixed-target parity remains open; no engine default changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

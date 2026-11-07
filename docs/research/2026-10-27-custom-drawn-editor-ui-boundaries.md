@@ -2883,3 +2883,65 @@ loops. Continue through that complete platform prerequisite before cross-platfor
 v3, power/cadence and later macOS MetalFrameSource. Full fixed-target refresh, numeric budgets,
 publisher-tail/backlog lifetime gaps, benchmark/report/debug-overlay comparison, hot reload,
 canonical docking U4-U9 and Nara GPU/View adoption remain open. This unit does not complete R11/R12.
+
+## November 7: Demand-Driven Platform Frame Loops
+
+The local Open-GPUI implementation is `b6506b48efca022c13256ef17d5ecfa26787b2ae`, with
+qualification and the next complete measurement owner at
+`9901ed0bcc6272a647bccfb73016f3f22206a013`. Neither is published. The fixed cycle target
+remains Zed `635026fabc38440fce5e1767d125026a17b12012`. This unit adopts official weak
+invalidator wakeups and Web RAF parking `417d03305ac194470f5d85a4b584c34dcec8cf57`, complete
+Wayland FrameLoop/ping/retry and Core scheduling `eb354c8d504071bdb79110a7a5c9d374c2864113`,
+their captured signal custody, and X11 direct Expose/recovery `ae99a867d7`/`f25434f3c5`.
+
+The official scheduling model is the baseline. `PlatformWindow::schedule_frame` and its optional
+weak `frame_waker` connect existing invalidation, App effect flushing and next-frame callbacks
+to the backend source. The completion-driven `completed_frame` hook is removed. Dirty work,
+accepted scenes awaiting presentation and callbacks each retain demand; a callback queued during
+a frame requests a successor. `AsyncApp::refresh` completes its update/effect flush so parked
+sources wake. Wakeups release the invalidator borrow before delivery and must not retain App or
+Window. Wayland retains the complete configure/ping/compositor/retry/park loop, Web coalesces RAF
+demand and parks after delivery, and X11 dispatches Expose outside the client borrow after native
+event draining while retaining forced recovery reconstruction.
+
+Fork adaptations preserve named contracts rather than a parallel scheduler. Wayland completes
+its frame through the existing native command after App borrow release; Windows keeps the same
+post-borrow maintenance owner and continuous VSync. Exact candidate acceptance, unsuccessful
+presentation, mandatory recovery and terminal retirement retain their authority. Independent
+review finds an accepted-publication unwind gap: an accepted clean scene can still need
+presentation after a publication callback panics. The callback owner now rearms pending work,
+restores rejected dirty/force demand where necessary, attempts native completion and resumes the
+original panic. Real scheduled-callback tests require the accepted generation to submit without
+another draw and a rejected render to retry without replacing its old accepted scene.
+
+Corrected focused Core/public tests pass 62/62; actual private Web/Wayland/pointer production-state
+modules pass 27/27 on the host. The affected native selection passes 5/5. Its extended VSync
+trajectory uses public AsyncApp refresh, callbacks queued mid-frame and actual newer nonempty
+Submitted generations, then proves pending callback capture release during retirement. It keeps
+the original profiler, journal, monitor and reconstruction assertions. Windows execution does
+not qualify Wayland or browser parking. X11's six callback regressions remain source-only here.
+
+The full framework/public/gallery/state/native run passes 1,748 of 1,749 cases; one unchanged
+native image decode/animation trajectory times out waiting for Submitted plus RGBA capture. Its
+unchanged isolated rerun passes 1/1. The cause remains undiagnosed, and the record does not claim
+a clean single-run 1,749/1,749 result. Five preexisting skips remain four interactive Windows
+cases and the gallery fixture-regeneration command. Profiling-enabled components/docking/Canvas
+pass 2,966/2,966, disabled Core/public passes 1,134/1,134 and independently locked enabled/
+disabled consumers pass 40/40 and 31/31 without skips. Their two new scheduling tests establish
+public signature compilation; five separate crate-external TestPlatform workflows execute the
+actual parking, refresh, mid-frame callback, refusal/retry and held-terminal-close behavior.
+
+Locked workspace/consumer checks, correctness Clippy, formatting and existing import/document/
+release/API scans pass. Actual Windows Rust 1.92.0 framework/Canvas/consumer all-target/all-feature
+checks pass. Stable wasm production compiles with profiling off/on, and the existing nightly
+shared-memory configuration compiles the multithreaded branch. These are separate from browser,
+native foreign-platform and physical timing execution. No manifest or lockfile changes are needed.
+All nine implementation/review subthreads close; initial fixture failures, interrupted compilation,
+the image timeout/rerun and source-only scope remain recorded in the existing qualification guide.
+
+Continue at complete official refresh-aware measurement v3 `4f6d97b9de`, including real signal/
+dirty-to-submission work, per-refresh reports, view self-time and hang/active-use rules, through
+existing framework owners and ordinary public consumers. Later power/cadence and MetalFrameSource,
+benchmark/report/debug-overlay comparison, publisher-tail/backlog retirement, conditional hot reload,
+canonical docking U4-U9, numeric costs and Nara GPU/View adoption remain open. This prerequisite
+changes no Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.

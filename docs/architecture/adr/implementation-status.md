@@ -278,9 +278,23 @@ interrupted final run and later complete Windows success remain recorded. Locked
 correctness Clippy, formatting, actual Windows Rust 1.92.0 and stable/nightly production wasm
 configurations pass; native foreign-platform, browser and numeric-cost scope remain unqualified.
 The inherited official demand-driven platform-loop prerequisite `eb354c8d50` and X11 Expose/
-recovery are now queued before refresh-aware v3 and power/cadence. They are not rejected fork
-differences. No default or execution ADR changes; full refresh, docking, hot reload, Nara GPU/View
-and R11/R12 remain incomplete.
+recovery have the following scoped qualification before refresh-aware v3 and power/cadence;
+they are not rejected fork differences.
+
+The following [demand-driven platform-loop successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-demand-driven-platform-frame-loops)
+is qualified locally at Open-GPUI `b6506b48efca022c13256ef17d5ecfa26787b2ae`, with record
+`9901ed0bcc6272a647bccfb73016f3f22206a013`, without publication. Official weak wakeups and
+schedule/wake/park use existing framework/platform owners; the old completion-driven hook is
+removed. Fork post-borrow maintenance, exact candidate/Submitted authority, unwind recovery and
+retirement have real consumers. Focused Core/public 62, actual production-state 27 and affected
+native five pass. The full runtime cohort passes 1,748 of 1,749, with one unchanged native image
+timeout passing its unchanged isolated rerun; its cause remains undiagnosed and five preexisting
+skips remain explicit. Components/docking/Canvas 2,966, disabled Core/public 1,134 and independent
+enabled/disabled 40/31 pass without skips. Locked checks, correctness Clippy, formatting, actual
+Windows Rust 1.92.0 and stable/nightly production wasm configurations pass. Native foreign-platform,
+browser execution and numerical costs remain unqualified. Complete refresh-aware v3 is planned
+next, then power/cadence and later MetalFrameSource. No default or execution ADR changes; full
+refresh, docking, hot reload, Nara GPU/View and R11/R12 remain incomplete.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
