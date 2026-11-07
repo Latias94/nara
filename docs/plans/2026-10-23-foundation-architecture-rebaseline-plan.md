@@ -1877,6 +1877,25 @@ static scans pass. Native five remains an affected regression selection, separat
 query execution. All seven threads close. The complete benchmark,
 accessibility, hot-reload, platform, canonical docking and Nara GPU/View owners remain open.
 
+The following [synthetic-accessibility/explicit-inspection unit](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-synthetic-accessibility-and-explicit-published-tree-inspection)
+is implemented locally at Open-GPUI `751e563eb89eeb373dac41cf734bfe372b81d0e4`, starting at
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235`, with qualification record
+`156d0b8c1835108223bcf9fdd1f7d7c39a396013`. Complete official Element/
+Div/builder and raw JSON inspection mechanisms use the existing accepted A11y publication;
+the actual Gallery copy consumer keeps automatic DevTools artifacts redacted. Concrete red
+controls precede rollback, clip-validity, irreversible-quiescence and reserved-root corrections.
+Final Core/public 1,412, components/docking/Canvas 2,966, WGPU/affected native 96, disabled
+Core/public 1,203 and focused/Gallery 88/13 pass. The independent consumer compiles both
+feature modes and its new type-only checks pass 2/2 in each. The non-debug serializer slice
+passes six; this does not establish a release-profile whole App/native run. Locked checks,
+correctness Clippy, actual Windows Rust 1.92, production wasm, formatting and static scans pass.
+Seven selected native trajectories retain exact Submitted/release scope, without closing the
+full Windows/AT gate. Eight threads close and no remote publication follows.
+Keep official active-descendant focus, keyboard continuity, tab-group ordering, diagnostics,
+missing properties/configuration and initial-tree behavior in explicit follow-up units. Existing
+fork modules may be reused when responsibility-equivalent; official mechanisms are not rejected
+because the fork has a similarly named API. No engine default or full R11/R12 status changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

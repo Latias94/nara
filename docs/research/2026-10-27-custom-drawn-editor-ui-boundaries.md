@@ -3191,3 +3191,66 @@ Accessibility synthetic children
 and published diagnostics, benchmark/report/hot reload, platform gaps, numerical budgets,
 canonical docking U4-U9 and Nara GPU/View adoption remain open. This successor changes no
 Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.
+
+## November 7: Synthetic Accessibility And Explicit Published-Tree Inspection
+
+The next maintained-framework unit starts at Open-GPUI
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235` against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Implementation
+`751e563eb89eeb373dac41cf734bfe372b81d0e4` and qualification record
+`156d0b8c1835108223bcf9fdd1f7d7c39a396013` are committed locally; qualification finishes on
+November 8. It adopts the complete synthetic-child mechanism
+from `83d4847462` and raw tree inspection/provenance from `2268045a11`. Element hooks, stateful
+Div callbacks and the public subtree builder let custom controls expose semantic children and
+mutate their parent after prepaint without constructing corresponding visual elements. The
+official complete JSON schema and content-bearing Window reader remain available; the source-built
+Foundation Gallery provides an actual explicit copy action through the existing clipboard owner.
+
+Fork adaptation uses the existing accepted accessibility publication, subtree validity, modal
+filtering, reference repair and prepaint rollback. Capture records accepted frame and activation
+generations separately from the official capture counter, without claiming native or assistive-
+technology consumption. Complete parent snapshots restore arbitrary callback mutations; exact
+deferred-child rollback, early/late clip invalidation, atlas rejection and irreversible shutdown
+have concrete controls. Shared entity-backed View attribution covers typed/erased/manual backing
+identities beyond the target's AnyView writer. No second semantic, focus or renderer owner follows.
+
+Accepted Open-GPUI ADR0023 now distinguishes explicit raw inspection from automatic diagnostic
+artifacts. Raw labels, values, window titles and published announcements remain available to the
+developer reader/copy action. Automatic DevTools histories/exports and announcement diagnostics
+retain redacted metadata. Password content absent from the published tree remains absent.
+Reading is passive; activation replacement, deactivation, close and interaction quiescence clear
+the snapshot, and later inert publication cannot recreate it.
+
+The reader requires an active, published accessibility tree; reading alone is not semantic
+observation demand. A future Nara agent adapter still needs explicit observation demand and
+window/presentation-bound operations through the existing admission owners. The debug capture's
+accepted generation alone does not qualify the complete presented-control automation contract.
+
+Three concrete regressions fail before the owner corrections: deferred-parent mutation rollback,
+own-clip synthetic content and post-quiescence recapture. Focused owner/public checks pass 88/88;
+Gallery actual clicks and existing privacy/field/live controls pass 13/13. A later reserved-root-ID
+control fails before its duplicate-set correction. Final Core/public passes 1,412/1,412 without
+skips. Components/docking/Canvas passes 2,966/2,966, WGPU/affected native passes 96/96 and
+profiler-disabled Core/public passes 1,203/1,203. The 96-case selection includes 89 complete
+WGPU cases and seven actual native synthetic activation, exact Submitted generation,
+notification/cache/View/text/color and owner retirement trajectories. It does not close the full
+Windows or real assistive-technology gate. An executed non-debug serializer slice passes six
+tests, without claiming a release-profile whole App/native result.
+
+The independently locked ordinary consumer compiles all targets with all features and without
+default features; the two new type-only checks pass in each mode. No test-support or direct
+AccessKit dependency is added to that consumer. Locked workspace checks, correctness Clippy,
+actual Windows Rust 1.92 framework/consumer checks, stable/nightly production wasm, formatting
+and existing static scans pass. Only enumn 0.1.14 and its AccessKit edge are added to the two
+lockfiles; existing package versions and compiler floor remain. All eight implementation/test/
+source-audit/review threads close, with no remaining confirmed correctness finding. No remote
+publication follows. Nara changes here remain documentation-only.
+
+A separate source audit keeps the two official commits split by mechanism. Active-descendant
+focus with real ancestor gating, keyboard press/release continuity across focus generations,
+tab-group container ordering, missing-node diagnostics, shortcut/numeric-step properties,
+initial activation-tree delivery, enabled/active configuration and author identifiers remain
+explicit successors. The fork's existing grouped property owner is equivalent in responsibility;
+similarly named focus APIs do not establish official focus equivalence. Complete benchmark/report,
+hot reload, platform/browser execution, numerical budgets, canonical docking and Nara GPU/View
+adoption remain open. No Editor/game-runtime default or R11/R12 status changes.

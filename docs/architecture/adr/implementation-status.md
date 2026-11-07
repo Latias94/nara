@@ -361,6 +361,20 @@ no complete Windows/foreign-native/browser claim follows. Seven threads close. N
 ADR changes; complete refresh, benchmark/accessibility/hot reload, canonical docking, numeric
 budgets, Nara GPU/View and full R11/R12 remain open.
 
+The [synthetic-accessibility/explicit-inspection successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-synthetic-accessibility-and-explicit-published-tree-inspection)
+is implemented locally at Open-GPUI `751e563eb89eeb373dac41cf734bfe372b81d0e4`, starting at
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235`, with record
+`156d0b8c1835108223bcf9fdd1f7d7c39a396013`. Official custom-element/
+Div synthetic children and complete raw inspection retain the existing publication, geometry,
+rollback and lifecycle owners. ADR0023 separates explicit developer copy from automatic redacted
+artifacts. Final Core/public 1,412, components/docking/Canvas 2,966, WGPU/affected native 96,
+disabled Core/public 1,203 and Gallery 13 pass. Independently locked both-mode compilation and
+new type-only 2/2 checks pass. The six-case non-debug serializer and seven native synthetic
+activation/Submitted/release trajectories retain separate scope. Locked checks, Clippy, actual
+Windows Rust 1.92, production wasm, formatting and static scans pass. Eight threads close.
+Other official focus/keyboard/tab-group/property/configuration mechanisms remain queued; matching
+API names are not equivalence. No Nara execution ADR/default or R11/R12 status changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
