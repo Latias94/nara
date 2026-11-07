@@ -1837,6 +1837,27 @@ numerical power/timing costs, generic View/interface/report/hot-reload work, can
 engine GPU/View adoption remain open. Official mechanisms stay the baseline while fork changes
 are reconciled through reusable owners. No UI default or R11/R12 completion changes.
 
+The [generic View/component successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-generic-views-and-reusable-component-interfaces)
+is implemented locally at Open-GPUI `652122a4e118ff2d213ae0d9392c71f49c44553b`, starting at
+`a89a7200c80fc40eb073dbad37789f17153ec7b8`, with qualification record
+`18e5f46e87f919049628cd9fd1be782c0fbaf49a`. Official View/ViewElement,
+typed/erased/weak conversion, stateless scopes, derive macros and entity-cache return types replace
+the inherited Component/direct AnyView Element paths together. Shared phases preserve existing
+candidate/resource/geometry admission and subscriptions. Actual props/local-state/input/custom
+Canvas/cache/notify/release consumers remain independent of Nara. Initial owner 117, public five,
+native four and independent enabled/disabled 53/38 pass. The complete framework/public/Gallery/
+native cohort passes 1,856/1,856 with five existing skips; components/docking/Canvas passes
+2,966/2,966; profiler-disabled Core/public passes 1,167/1,167; whole-workspace all-target,
+correctness Clippy, formatting, static scans and affected Rust 1.92 checks pass. Source-mapped
+synthetic accessibility children and published diagnostic capture require their own publication
+and redaction reconciliation. The final diagnostic caller/macro-entry correction has
+separate enabled/disabled public 5/5, native 1/1 and affected Rust 1.92/Clippy/fmt results; the earlier
+complete cohorts retain their pre-correction scope. A bounded audit corrects product-wide
+rejections for surviving framework slices;
+those List/text/geometry/utility/benchmark items are queued rather than claimed implemented.
+Conditional hot reload, complete refresh, measured costs, docking, Nara GPU/View and full R11/R12
+remain open. This unit changes no engine default.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

@@ -3072,3 +3072,64 @@ power changes, compositor timing and numerical energy/CPU costs require separate
 Generic View/ViewElement, complete benchmark/report/debug-overlay comparison, conditional hot
 reload, canonical docking U4-U9 and Nara GPU/View adoption remain open. This successor changes no
 Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.
+
+## November 7: Generic Views And Reusable Component Interfaces
+
+The maintained-framework successor starts at Open-GPUI
+`a89a7200c80fc40eb073dbad37789f17153ec7b8` and is implemented locally at
+`652122a4e118ff2d213ae0d9392c71f49c44553b`, against the unchanged fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Qualification and candidate corrections are recorded
+at `18e5f46e87f919049628cd9fd1be782c0fbaf49a`. Official generic View/ViewElement
+`74b5207744ef95505fd75c56bf2c9d4736e931ee` and final-target follow-ups replace the fork's
+inherited Component and direct AnyView Element paths. Render and RenderOnce remain public.
+Typed entities, erased/weak handles, stateless type scopes, the derive macro and both entity
+cache routes migrate as one interface owner; no compatibility owner remains alongside it.
+
+An ordinary manual View can combine parent props with an existing non-Render entity's identity.
+The public consumers execute props replacement, sibling reorder, pointer/keyboard input, custom
+Canvas painting, local state, removal/reconstruction and exact release. Entity-backed cached
+embedding keeps explicit definite-size style and existing invalidation rules. Shared non-inlined
+phase helpers retain fork clip/transform/presentation/resource admission, accessed dependencies,
+candidate recovery, accessibility/inspector bypass and scoped profiler unwind. Stateless/manual
+Views gain no independent frozen-cache authority. These interfaces remain usable without Nara
+or Zed product types and do not introduce a second UI/render/state owner.
+
+The first focused owner selection passes 117/117 and new public consumers pass 5/5. After an
+exact diagnostic-result type correction in the new fixture, Windows native composition/cache/
+profiler/signal trajectories pass 4/4, including actual newer nonempty Submitted generations,
+notification/refresh, retirement and reconstruction. Inputs enter production callbacks outside
+App borrows; this does not qualify OS injection or compositor scanout. The locked whole-workspace
+all-target check passes. Independently locked ordinary consumers pass 53/53 with profiling and
+38/38 without default features, without skips. Their explicitly unexecuted composition/root
+closures establish signatures only. The complete framework/public/Gallery/native cohort passes
+1,856/1,856 with five existing skips, including all 222 Windows cases without an isolated retry.
+This later passing observation retains the preceding power unit's recorded failures and does not
+establish their cause. Components/docking/Canvas pass 2,966/2,966, profiler-disabled Core/public
+passes 1,167/1,167, and locked checks, correctness Clippy, formatting, existing static scans,
+actual Windows Rust 1.92.0 and stable/nightly production wasm compilation pass.
+
+Final independent review also reproduces framework-internal caller metadata in explicit entity
+conversions. A bounded fork diagnostic adaptation propagates source file/line through typed,
+erased, cached and upgraded-weak conversions. The public props workflow directly invokes the
+derive's erased conversion, correcting an earlier coverage overstatement. This changes diagnostic
+metadata/test coverage, not the official render/cache owner. The five public workflows pass
+again with profiling enabled and disabled, including exact file/line controls; the exact native
+composition also passes 1/1. These affected checks follow separately from the earlier complete
+cohorts and preserve their original scope. Actual Rust 1.92 affected-framework/Canvas checks,
+Core correctness Clippy and root/independent formatting pass again after the correction. All seven
+implementation/source-audit/review agents close. No remote publication follows.
+
+Source reconciliation also corrects product-wide candidate rejections. Official `83d4847462`
+contains a framework synthetic-child callback/builder/Div path, and `2268045a11` contains
+accessibility provenance, tree capture, Window JSON and dump/copy consumers. Only provenance
+is debug-only; capture/JSON also exist in release builds. The fork's accepted-publication,
+rollback and ADR 0023 diagnostic-redaction contracts require a separate complete successor with
+actual public consumers. An unused view-name map would not close it. A bounded audit identifies
+further surviving framework slices for List autoscroll, measured TextLayout queries, Rems,
+os-release parsing, existing shell/path/key regressions and the complete benchmark harness.
+Those source findings are queued, not implemented or runtime-qualified by this View unit.
+
+Conditional hot reload, benchmark/report/debug-overlay comparison, complete fixed-target refresh,
+canonical docking U4-U9 and Nara GPU/View adoption remain open. Native foreign-platform/browser
+execution and numerical cost limits remain separate. This successor changes no Editor/game-runtime
+default or R11/R12 completion status.

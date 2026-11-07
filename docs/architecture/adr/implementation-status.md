@@ -328,6 +328,22 @@ Rust 1.92.0 and stable/nightly production wasm pass. Foreign native execution, p
 energy costs and a clean complete Windows gate remain open. No default or execution ADR changes;
 complete refresh, generic View, report/hot reload, docking, Nara GPU/View and R11/R12 stay open.
 
+The [generic View/component successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-generic-views-and-reusable-component-interfaces)
+is implemented locally at Open-GPUI `652122a4e118ff2d213ae0d9392c71f49c44553b`, starting at
+`a89a7200c80fc40eb073dbad37789f17153ec7b8`, with qualification record
+`18e5f46e87f919049628cd9fd1be782c0fbaf49a`. Complete official embedding,
+typed/erased/weak conversion, stateless scopes, macro and entity-cache interfaces replace the
+inherited Component/direct AnyView Element owners. Shared phases preserve fork admission,
+subscriptions and unwind. Initial owners 117, public five, actual native four and independently
+locked enabled/disabled 53/38 pass. The complete framework/public/Gallery/native cohort passes
+1,856/1,856 with five existing skips; components/docking/Canvas 2,966/2,966; profiler-disabled
+Core/public 1,167/1,167; whole-workspace all-target, correctness Clippy, formatting, static scans
+and affected Rust 1.92 checks pass. A final diagnostic caller/macro-entry correction has separate
+enabled/disabled public 5/5, native 1/1 and affected Rust 1.92/Clippy/fmt evidence; earlier complete
+cohorts keep their pre-correction scope. Synthetic accessibility/diagnostic publication, source-mapped
+framework slices in product commits, report/benchmark/hot reload, canonical docking, numerical
+costs and Nara GPU/View remain queued. No execution ADR/default or R11/R12 status changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
