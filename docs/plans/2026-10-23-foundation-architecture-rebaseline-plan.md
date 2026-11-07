@@ -1858,6 +1858,25 @@ those List/text/geometry/utility/benchmark items are queued rather than claimed 
 Conditional hot reload, complete refresh, measured costs, docking, Nara GPU/View and full R11/R12
 remain open. This unit changes no engine default.
 
+The following [measured-query/List successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-measured-layout-queries-and-list-scrolling)
+is implemented locally at Open-GPUI `e58b8b7687aadc91408657b4e550a1b7d723c0a9`, after utility
+`787ab55a8f68daab1dc48e2c80d12f4109028bdb`, starting at
+`18e5f46e87f919049628cd9fd1be782c0fbaf49a`, with record
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235`. It implements complete official
+upward List normalization, source-order measured TextLayout queries, Rems helpers, os-release
+parsing and shell/path/key regressions from product-labeled framework slices. Fork adaptation
+retains source-validity/admitted autoscroll, exact private revision and public G+1/G+2/G+3
+submission facts. Actual software text and current Window rem-size/layout consumers remain
+independent of Nara. Three List red controls precede the correction; focused 54, utility four,
+complete Core/public 1,390, complete utility 115, complete WGPU 89 and affected native five pass.
+The public text cache observer records unchanged/reflow shaping 0/3 for its finite scenario while
+preserving official cache policy; this is no numeric-budget or speedup claim. Complete components/
+docking/Canvas 2,966, disabled Core/public 1,181 and independent enabled/disabled 56/41 pass without
+skips. Locked checks, correctness Clippy, actual Rust 1.92, production wasm, formatting and existing
+static scans pass. Native five remains an affected regression selection, separate from software
+query execution. All seven threads close. The complete benchmark,
+accessibility, hot-reload, platform, canonical docking and Nara GPU/View owners remain open.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

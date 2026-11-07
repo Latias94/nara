@@ -344,6 +344,23 @@ cohorts keep their pre-correction scope. Synthetic accessibility/diagnostic publ
 framework slices in product commits, report/benchmark/hot reload, canonical docking, numerical
 costs and Nara GPU/View remain queued. No execution ADR/default or R11/R12 status changes.
 
+The [measured-query/List successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-measured-layout-queries-and-list-scrolling)
+is implemented locally at Open-GPUI `e58b8b7687aadc91408657b4e550a1b7d723c0a9`, after utility
+`787ab55a8f68daab1dc48e2c80d12f4109028bdb`, starting at
+`18e5f46e87f919049628cd9fd1be782c0fbaf49a`, with record
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235`. Complete official List,
+TextLayout, Rems, os-release and shell/path/key framework slices use existing owners. Admitted
+autoscroll and private revisions retain actual atlas/source rejection and exact recovery evidence.
+Three List red controls precede focused 54, complete Core/public 1,390, utility 115, WGPU 89 and
+affected native five passing results. Public software query/paint and Window rem-size/layout
+consumers remain independent of Nara; ordinary typed closures have signature-only scope.
+Complete components/docking/Canvas 2,966, disabled Core/public 1,181 and independent enabled/
+disabled 56/41 pass without skips. Locked checks, correctness Clippy, actual Rust 1.92, production
+wasm, formatting and existing static scans pass. Native five retains affected-regression scope;
+no complete Windows/foreign-native/browser claim follows. Seven threads close. No default or execution
+ADR changes; complete refresh, benchmark/accessibility/hot reload, canonical docking, numeric
+budgets, Nara GPU/View and full R11/R12 remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

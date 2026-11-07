@@ -3133,3 +3133,61 @@ Conditional hot reload, benchmark/report/debug-overlay comparison, complete fixe
 canonical docking U4-U9 and Nara GPU/View adoption remain open. Native foreign-platform/browser
 execution and numerical cost limits remain separate. This successor changes no Editor/game-runtime
 default or R11/R12 completion status.
+
+## November 7: Measured Layout Queries And List Scrolling
+
+The maintained-framework successor starts at Open-GPUI
+`18e5f46e87f919049628cd9fd1be782c0fbaf49a`, against the unchanged fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Utility prerequisite
+`787ab55a8f68daab1dc48e2c80d12f4109028bdb` and UI implementation
+`e58b8b7687aadc91408657b4e550a1b7d723c0a9` are committed locally, with qualification record
+`aef505a3ba9c1d2e6b4fcf079f2298aa1e239235`. It implements six surviving framework slices
+from product-labeled commits: List normalization `10628c3d2c`, measured TextLayout queries
+`c7ad65e468`, Rems/key regressions `ccf4058b7a`, public os-release parsing `479bce0995` and
+shell/path regressions `a923597341`/`362035d52a`. Their product search, picker, telemetry,
+terminal and file-existence consumers remain outside the extracted framework closure. The
+parameterized benchmark/context/dispatcher owner keeps its separate complete prerequisite chain.
+
+Official List normalization walks preceding rows, measures uncached rows and clamps at the start.
+Three executed red controls first expose the old negative offsets, including -500px. The fork
+keeps PendingAutoscroll and admitted-frame publication through existing source/resource validity;
+it does not restore immediate prepaint mutation. Actual atlas rejection preserves offset, exact
+private revision and accepted scene. Retry advances only the vertical revision once. The public
+consumer distinguishes exact accepted G+2 from Submitted G+1, presents G+2 on the following
+callback and observes normalized row bounds at -10/10/30px. Zero-height and variable-height
+preceding rows are covered without a second scroll or history owner.
+
+TextLayout returns shared immutable logical-line layouts in source order and allows indexed
+queries after measurement, before prepaint. Public software consumers then prepaint/paint the
+same StyledText, notify, change width/source, refresh and reconstruct the window. Geometry still
+requires prepaint. Rems conversion uses the current owning Window rem size; numeric values and
+two-window/layout consumers retain ordinary module use without Nara types. Utility behavior and
+all imported regressions remain official. Independently locked closures establish signatures
+only and are separate from executed public consumers.
+
+Focused Core/public qualification passes 54/54, utility owner/public passes 4/4 and the measured
+text trajectory passes 1/1 using real Cosmic/Swash rasterization. A new fixture's one-frame
+recovery premise is corrected after an actual 51/52 run. The text trajectory's cross-frame raw
+Arc premise is also corrected against the target's cache policy: retained snapshots preserve
+complete shaping values, but a later width change need not reuse that allocation. Actual backend
+observations record zero new shaping for unchanged redraw and three calls for this reflow.
+Same-width wrapped identity and same-frame query/paint identity remain asserted. No cache policy
+or library capacity is reduced, and no general performance-budget improvement is inferred.
+
+Complete Core/public tests pass 1,390/1,390, utility 115/115, WGPU 89/89, components/docking/
+Canvas 2,966/2,966, profiler-disabled Core/public 1,181/1,181 and independently locked enabled/
+disabled consumers 56/56 and 41/41, without skips. The affected Windows native selection passes
+5/5, filtering 221 unrelated cases. This preserves existing Unicode text/redraw, cached dependency,
+signal/profiler and generic View exact-submission/retirement controls; it is no new native-query
+or complete Windows-suite claim. Native scope stays separate from the new software query workflow.
+Locked workspace/consumer all-target checks, correctness Clippy, actual Windows Rust 1.92.0,
+stable/nightly production wasm, root/independent formatting and existing static scans pass. A first
+public text link fails during low disk space; only that failed invocation's PDB is removed and the
+original command later links unchanged. The failure and cache-oracle correction remain recorded.
+No dependency/lockfile or compiler-floor change follows; all seven implementation/review agents
+close, and no remote publication occurs. Nara changes here are documentation-only.
+
+Accessibility synthetic children
+and published diagnostics, benchmark/report/hot reload, platform gaps, numerical budgets,
+canonical docking U4-U9 and Nara GPU/View adoption remain open. This successor changes no
+Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.
