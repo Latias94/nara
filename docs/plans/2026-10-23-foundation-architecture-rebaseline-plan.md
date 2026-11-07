@@ -1930,6 +1930,23 @@ platforms, teardown, scheduled frames and measurement/parameter/seed interfaces;
 mapping is not runtime qualification. Full refresh, hot reload, costs, docking and Nara GPU/View
 remain open. No engine default or full R11/R12 status changes.
 
+The [threaded-execution and queue-closure prerequisite](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-threaded-execution-and-queue-closure)
+is implemented locally at Open-GPUI `018fbdc5f708d91f0ae16a7fb43ac04280ebb680`, after
+`1670c373e34751ac520237b7d04a480b06ab7b4a`, with qualification
+`916c7cb2d2fffcaa95199598655b5cef97fb9bda`. Complete official worker/main/timer mechanisms
+against the same fixed target reuse PlatformDispatcher and existing
+executors. Final-sender wake/receiver recheck and Linux timer-loop shutdown preserve queued
+values and source priority. The original blocked-receiver regression fails before the fix;
+reviewed queue/dispatcher/executor/profiler and real public consumers pass 182/182. The fork
+retains admission results, scoped timing and thread-affine refusal without another scheduler.
+Complete Core/public/WGPU/Windows 1,810, components/docking/Canvas 2,966, disabled affected
+35 and independently locked enabled/disabled 62/47 pass; four existing interactive skips remain.
+Locked checks, correctness Clippy, actual Windows Rust 1.92, stable/nightly production wasm,
+formatting and static gates pass. All five implementation/review threads are closed. Linux
+active compilation/runtime remains unqualified. Benchmark-feature separation, context replacement,
+real text/render injection and complete measurement/report consumers remain in the existing successor; no
+numerical-budget, full-refresh, engine-default or R11/R12 completion follows.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

@@ -406,6 +406,21 @@ queue, dispatcher, text, platform, context and measurement modules, with actual 
 That source mapping does not qualify execution. Full refresh, hot reload, numerical budgets,
 canonical docking and Nara GPU/View remain open; no Nara execution ADR/default or R11/R12 changes.
 
+The [threaded-execution/queue-closure prerequisite](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-threaded-execution-and-queue-closure)
+is implemented locally at Open-GPUI `018fbdc5f708d91f0ae16a7fb43ac04280ebb680`, after
+`1670c373e34751ac520237b7d04a480b06ab7b4a`, with qualification
+`916c7cb2d2fffcaa95199598655b5cef97fb9bda`. Official concrete
+worker/main/timer and closure mechanisms reuse existing platform, queue, executor and profiler
+owners. An executed blocked-receiver failure precedes its correction; reviewed focused and
+public runtime controls pass 182/182. Existing fork admission, timing and refusal contracts
+remain intact. Complete Core/public/WGPU/Windows 1,810, components/docking/Canvas 2,966,
+disabled affected 35 and independent enabled/disabled 62/47 pass; four interactive skips remain.
+Locked checks, affected Clippy, actual Windows Rust 1.92, stable/nightly production wasm,
+formatting and static gates pass, with five threads closed. Linux active compilation/runtime
+remains unqualified. This is the benchmark/report owner's prerequisite, without qualifying its
+feature split, context, text/render injection, reports or numerical budgets. Full refresh, hot reload,
+canonical docking and Nara GPU/View remain open; no Nara execution ADR/default or R11/R12 changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

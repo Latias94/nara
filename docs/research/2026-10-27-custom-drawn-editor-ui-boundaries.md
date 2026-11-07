@@ -3378,3 +3378,64 @@ Canvas/independent consumers. These findings are source evidence only. Complete 
 conditional hot reload, numerical budgets, canonical docking U4-U9, real AT and foreign native/
 browser execution, and Nara GPU/View adoption remain open. No Editor/game-runtime default or
 full R11/R12 status changes.
+
+## November 8: Threaded Execution And Queue Closure
+
+The complete benchmark harness/report successor begins with its concrete dispatcher and
+queue-closure prerequisite at Open-GPUI `1670c373e34751ac520237b7d04a480b06ab7b4a`, against
+unchanged fixed Zed `635026fabc38440fce5e1767d125026a17b12012`. Official `3135cdf8dc` supplies
+final-sender wake/receiver recheck and Linux timer-loop shutdown. The dispatcher uses
+`8886dcb0d4` and the target's timer cancellation, readiness and frame-service follow-ups,
+including `1722fe63bc`, `38df25d54c`, `82878540b5` and `1a89a92e7e`.
+Local implementation is `018fbdc5f708d91f0ae16a7fb43ac04280ebb680`; its qualification record
+is `916c7cb2d2fffcaa95199598655b5cef97fb9bda`.
+
+The original blocked-receiver regression fails on the old queue: after final-sender release,
+waiting receivers do not exit within its five-second timeout. The fix uses the official queue
+lock synchronization before notifying all waiters and rechecks closure after waking. Queued
+values and priority policy remain available through the existing owner. The Linux timer event
+loop stops when its channel closes; a platform-specific regression is added for pending capture
+release and worker/timer exit. Linux active-source compilation and execution remain unqualified.
+
+`ThreadedDispatcher` implements the existing PlatformDispatcher boundary with real worker
+concurrency, real-time timers and explicit main-thread pumping. It retains full official
+ready-count bounds, completion checks between runnable polls, lock ordering, cancellation
+outside the timer lock and process-lifetime timer-thread policy. The fork adaptation returns
+the existing admission result, preserves thread-affine refusal handling and uses existing
+scoped profiler guards. Background/timer polls do not consume foreground queue counts.
+No second scheduler or engine-specific execution owner is introduced.
+
+Current exposure uses test-support, with actual crate-external executor consumers for handoff,
+idle/external submission, timers, cancellation and Rc/Task release on the creating thread.
+The old virtual benchmark context is not advertised as equivalent to this concrete dispatcher.
+The independent benchmark-feature split, real font/render injection, per-routine platform
+isolation, complete context teardown, parameter/seed measurement and report consumers remain
+in the complete successor.
+
+Independent review corrects a cancellation-fixture race before execution: the timer thread can
+legitimately acquire the lock before a destructor's one-shot probe. The corrected fixture uses
+bounded acquisition, reports failure outside the destructor and retains rearm behavior. Panic
+coverage proves the runnable was polled; a queued sentinel detects premature foreground Idle
+after nested unwind. The first test build's untyped-channel error is corrected without production
+changes. All three implementation and two review threads are closed.
+
+Corrected focused owners/public pass 182/182. Complete all-feature Core/public/WGPU/Windows
+passes 1,810/1,810, with four existing interactive skips and no isolated runtime retry.
+UI core/components/docking/Canvas passes 2,966/2,966. The disabled affected cohort passes
+35/35, including real public handoff/timer/cancellation/state-release consumers and zero-sized,
+unregistered instrumentation controls. Independently locked ordinary dependencies pass 62/62
+enabled and 47/47 disabled without test-support; their value/layout and explicitly type-only
+checks retain separate scope from the actual new threaded consumers.
+
+Locked workspace/consumer all-target checks, affected correctness Clippy, actual Windows
+Rust 1.92 and stable production wasm with profiling off/on pass. The existing nightly
+shared-memory configuration passes using Rust 1.98.0-nightly (`57d06900f`, May 27),
+build-std and existing atomics/imported-memory flags. Root/independent formatting, existing
+import/API/document/release scans and workflow YAML parsing pass. No dependency, lockfile,
+compiler-floor or remote-publication change follows. Nara changes are documentary.
+
+These gates qualify the scoped queue/dispatcher prerequisite. Linux/macOS native and browser/
+test-support execution retain their own evidence requirements. Full benchmark/context/report,
+real text/render injection, numerical budgets, full fixed-target refresh, conditional hot reload,
+canonical docking U4-U9 and Nara GPU/View adoption remain open. No Editor/game-runtime default
+or full R11/R12 status changes.
