@@ -311,6 +311,23 @@ ViewElement is a named queued official-interface gap, not an intentional entity-
 Power/cadence and MetalFrameSource follow next. No default or execution ADR changes; complete
 refresh, publisher-tail/backlog retirement, docking, hot reload, Nara GPU/View and R11/R12 remain open.
 
+The following [power/cadence successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-power-modes-and-stable-frame-cadence)
+is implemented locally at Open-GPUI `2ceb09aa4590388b8e2d73ac1406caddc5b6c470`, with
+diagnostic successor `1a6d90bdaac5256c36064be9824459de74ea91bf` and record
+`a89a7200c80fc40eb073dbad37789f17153ec7b8`, without publication. Official power
+observations, longest configurable limits, stable cadence and macOS
+Metal/CV sources use existing owners. Public consumers remain independent of Nara. Focused
+Core/public 76, Windows native 14 and portable production-state three pass. Native execution
+reproduces and corrects an inherited fork retirement-retry Rc leak, retaining exact weak-owner
+release. The complete framework run passes 1,849/1,850 before an IME fixture correction; final
+Windows selection passes 220/221 and the final image/activation recheck passes 3/3. Recorded
+capture/activation failures remain unattributed; diagnostic changes retain all original submission,
+pixel and terminal conditions. Components/docking/Canvas 2,966, independent enabled/disabled 51/36
+and disabled Core/public 1,162 pass. Locked checks, correctness Clippy, formatting, actual Windows
+Rust 1.92.0 and stable/nightly production wasm pass. Foreign native execution, physical timing/
+energy costs and a clean complete Windows gate remain open. No default or execution ADR changes;
+complete refresh, generic View, report/hot reload, docking, Nara GPU/View and R11/R12 stay open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

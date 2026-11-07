@@ -1819,6 +1819,24 @@ Continue next at complete power/cadence and MetalFrameSource, then remaining int
 hot-reload differences. Publisher-tail/backlog retirement, canonical docking and engine GPU/View
 adoption remain open. No engine default or R11/R12 completion changes.
 
+The implemented [power/cadence successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-7-power-modes-and-stable-frame-cadence)
+is Open-GPUI `2ceb09aa4590388b8e2d73ac1406caddc5b6c470`, with diagnostic successor
+`1a6d90bdaac5256c36064be9824459de74ea91bf` and record
+`a89a7200c80fc40eb073dbad37789f17153ec7b8`. Complete official power
+observations, configurable longest limits, stable cadence and macOS Metal/CV sources use existing
+Platform/App, Window and backend modules. Ordinary public consumers remain independent of Nara.
+Focused Core/public 76, actual Windows native 14 and portable production-state three pass.
+Native execution exposes and corrects an inherited fork retirement-retry Rc leak without relaxing
+exact HWND/OLE/callback release. Components/docking/Canvas 2,966, independent enabled/disabled
+51/36 and disabled Core/public 1,162 pass. Locked checks, correctness Clippy, formatting, actual
+Windows Rust 1.92.0 and stable/nightly production wasm pass. The complete framework run passes
+1,849/1,850 before an IME fixture correction; final Windows selection passes 220/221, followed
+by a passing three-case image/activation recheck. Earlier capture/activation failures remain
+unattributed; the complete native Windows gate stays open. Foreign native execution,
+numerical power/timing costs, generic View/interface/report/hot-reload work, canonical docking and
+engine GPU/View adoption remain open. Official mechanisms stay the baseline while fork changes
+are reconciled through reusable owners. No UI default or R11/R12 completion changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

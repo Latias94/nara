@@ -3014,3 +3014,61 @@ then remaining interface/report differences. Publisher-tail/backlog retirement, 
 report/debug-overlay comparison, conditional hot reload, canonical docking U4-U9, numerical costs
 and Nara GPU/View adoption remain open. This unit changes no Editor/game-runtime default and does
 not complete the fixed-target refresh or R11/R12.
+
+## November 7: Power Modes And Stable Frame Cadence
+
+The next maintained-framework successor starts at Open-GPUI
+`110f9c88084227eb526515167c204af3555f22a8` and is implemented locally as
+`2ceb09aa4590388b8e2d73ac1406caddc5b6c470`, with the fixed Zed target unchanged at
+`635026fabc38440fce5e1767d125026a17b12012`. It adopts complete official power observation
+`fdcb198110`, stable cadence `2580a00264`, configurable limits `7c8dbadcb5` and macOS
+MetalFrameSource `0373366f43`, including the later offscreen screenshot correction `f816e1f926`.
+The owner's clarification keeps official mechanisms as the baseline, refactors fork adaptations
+first and requires ordinary public modules to remain usable without Nara types.
+Failure diagnostics are committed at `1a6d90bdaac5256c36064be9824459de74ea91bf`; qualification
+record `a89a7200c80fc40eb073dbad37789f17153ec7b8` preserves commands, failures and limits.
+
+Platform/App own power queries and independent observations. Window owns the longest enabled
+inactive/low-power/thermal interval and stable cadence. Dirty work, pending scenes, callbacks
+and sustained high-rate input share that decision; mandatory presentation and existing recovery
+still bypass limits. Idle callbacks consume no cadence slot. Windows native messages, Linux
+modern/legacy providers and macOS process-info/Metal/CV sources stay in their existing backend
+owners. Unknown native state remains Unknown. No second render or scheduler owner is introduced.
+
+Fork adaptations retain ordered native ingress, immutable reader snapshots, exact candidate/
+Submitted authority and weak native-generation retirement. Native qualification exposes an
+inherited fork defect: a detached retirement retry retains the platform after another maintenance
+drain destroys its HWND transport. The correction uses HWND-bound retry tokens in the existing
+coordinator, rejects cancelled/previous-platform delivery, cancels before final destruction and
+uses the existing validated message as timer-admission fallback. Exact platform and callback weak
+owners release before another timer turn. This defect and correction belong to the fork, not Zed.
+
+Corrected focused Core/public qualification passes 76/76, native Windows passes 14/14 and actual
+production Linux profile/Metal state passes 3/3 on the Windows host. Public two-window workflows
+exercise independent options, observer cancellation, retained force/callback/input demand,
+mode-change recovery and exact Submitted generations. The independently locked fixture separates
+value/signature controls from actual App/window execution. Components/docking/Canvas pass
+2,966/2,966, independent enabled/disabled consumers pass 51/51 and 36/36, and disabled Core/public
+passes 1,162/1,162 without skips. The complete framework run executes 1,850 cases: 1,849 pass and
+an IME fixture fails before its explicit unlimited-window correction. Subsequent Windows runs
+retain the recorded capture/activation failures. The final Windows selection passes 220/221,
+with four existing interactive skips and one unchanged foreground-preparation failure. All new
+power/retirement and both diagnostic consumers pass. Its final three-case image/activation recheck
+passes 3/3. Prior capture timeout and activation failures remain unattributed; no clean complete
+Windows gate is inferred from separate passes or relaxed assertions.
+
+Locked workspace/independent all-target checks, final correctness Clippy, formatting and existing
+import/API/document/release scans pass. Actual Windows Rust 1.92.0 all-target/all-feature checks
+pass for the affected framework/Canvas and independent consumer. Stable production wasm compiles
+with profiling off/on; the existing nightly shared-memory/build-std configuration also compiles.
+No package versions or lockfiles change; Linux adds only a test edge to its existing Core
+dependency. All fourteen implementation/review threads close. Source and scoped verification
+can advance without converting the remaining native qualification gaps into completion claims.
+
+Linux D-Bus and macOS Foundation/Metal native compilation and execution remain unqualified by
+Windows portable tests. Service-owner recovery follows official Linux behavior; full system-bus
+reconnection is not claimed. Nonempty Apple/Intel screenshot pixels, display migration, physical
+power changes, compositor timing and numerical energy/CPU costs require separate evidence.
+Generic View/ViewElement, complete benchmark/report/debug-overlay comparison, conditional hot
+reload, canonical docking U4-U9 and Nara GPU/View adoption remain open. This successor changes no
+Editor/game-runtime default and does not complete the fixed-target refresh or R11/R12.
