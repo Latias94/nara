@@ -375,6 +375,21 @@ Windows Rust 1.92, production wasm, formatting and static scans pass. Eight thre
 Other official focus/keyboard/tab-group/property/configuration mechanisms remain queued; matching
 API names are not equivalence. No Nara execution ADR/default or R11/R12 status changes.
 
+The [composite-focus/keyboard successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-composite-focus-and-keyboard-continuity)
+is implemented locally at Open-GPUI `53decdc64a2d182fad1fbf00ababcd2b55a906e7`, after
+`156d0b8c1835108223bcf9fdd1f7d7c39a396013`, with qualification record
+`37ceac021fec7efb5091334bc60877ba36ab75d6`. Official active-descendant, keyboard continuity,
+Tab-group and missing-node mechanisms reuse existing final-tree, actual-focus and accepted
+publication owners. Concrete rollback/refused-arm failures precede their corrections. Focused
+104, disabled affected 111, complete Core/public/WGPU/Windows 1,770 and components/docking/Canvas
+2,966 pass; four interactive Windows cases remain skipped. Native production callback/Submitted/
+release evidence remains distinct from OS/AT consumption. Independent type-only targets pass
+4/4 in each mode; Gallery 13, locked checks, affected Clippy, actual Windows Rust 1.92 and stable
+production wasm, formatting and existing static scans pass. Seven threads close.
+Remaining property/configuration/initial-tree mechanisms, benchmark/report, hot reload, canonical
+docking, numerical budgets and
+Nara GPU/View remain open. No Nara execution ADR/default or R11/R12 status changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

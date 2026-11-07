@@ -1896,6 +1896,22 @@ missing properties/configuration and initial-tree behavior in explicit follow-up
 fork modules may be reused when responsibility-equivalent; official mechanisms are not rejected
 because the fork has a similarly named API. No engine default or full R11/R12 status changes.
 
+The following [composite-focus/keyboard unit](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-composite-focus-and-keyboard-continuity)
+is implemented locally at Open-GPUI `53decdc64a2d182fad1fbf00ababcd2b55a906e7`, starting
+at `156d0b8c1835108223bcf9fdd1f7d7c39a396013` against the same fixed target, with record
+`37ceac021fec7efb5091334bc60877ba36ab75d6`. Official
+active descendants, focus-generation keyboard activation, Tab-group ordering and missing-node
+diagnostics use existing final-tree/focus/publication owners. Actual red controls precede the
+local rollback and refused-arm corrections. Focused owner/public 104, disabled affected 111,
+complete Core/public/WGPU/Windows 1,770 and UI core/components/docking/Canvas 2,966 pass;
+four existing interactive Windows cases remain skipped. The actual native composite trajectory
+retains callback/Submitted/release scope. Independent type-only targets pass 4/4 in both modes;
+Gallery 13, locked workspace/consumer checks, affected Clippy, actual Windows Rust 1.92 and stable
+production wasm, formatting and existing static scans pass. Seven threads close.
+Complete remaining property/configuration/initial-tree mechanisms before the benchmark/report and
+hot-reload owners. No engine default or full R11/R12
+status changes.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

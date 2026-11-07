@@ -3254,3 +3254,54 @@ explicit successors. The fork's existing grouped property owner is equivalent in
 similarly named focus APIs do not establish official focus equivalence. Complete benchmark/report,
 hot reload, platform/browser execution, numerical budgets, canonical docking and Nara GPU/View
 adoption remain open. No Editor/game-runtime default or R11/R12 status changes.
+
+## November 8: Composite Focus And Keyboard Continuity
+
+The next complete maintained-framework unit starts at Open-GPUI
+`156d0b8c1835108223bcf9fdd1f7d7c39a396013`, against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Local implementation
+`53decdc64a2d182fad1fbf00ababcd2b55a906e7` adopts the framework composite-focus, keyboard
+activation, Tab-group and missing-focus-node mechanisms from `83d4847462` and `2268045a11`.
+Qualification is committed locally at `37ceac021fec7efb5091334bc60877ba36ab75d6`.
+Official mechanisms remain the default baseline; fork changes adapt them through existing
+owners instead of silently rejecting behavior. No dependency or compiler-floor change follows.
+
+Composite menus and listboxes retain actual keyboard focus on a container while the selected
+descendant receives accessibility focus. The fork resolves strict ancestry from the final
+surviving semantic tree, after deferred parentage, modal filtering and source/geometry validity.
+Its explicit accessibility-only focus override remains a different capability and cannot grant
+keyboard ancestry; a different explicit display focus retains priority. Accepted inspection
+keeps the base focus separate from the selected active descendant.
+
+Official Enter/Space keyboard activation uses a shared one-shot marker. Actual focus movement,
+including departure and return between draws, invalidates it; same-focus reassertion does not.
+The fork also checks its existing key-dispatch revision and retires the arm through accepted
+prepaint publication. Rejected candidates preserve the arm owned by the visible frame.
+Window-local generation metadata counts actual focus separately from provisional intent,
+including App-deferred quiescence, without moving the established post-borrow cleanup schedule.
+Missing-ID/role diagnostics deduplicate at accepted publication and cannot revive after
+irreversible interaction retirement. No additional focus or semantic owner is introduced.
+
+Two concrete tests fail before the owning fixes: local prepaint rollback resurrects quiesced
+focus, and an atlas-refused Inert candidate prematurely clears the accepted arm. Corrected
+focused owner/public workflows pass 104/104; the profiler-disabled affected cohort passes
+111/111. Complete all-feature Core/public/WGPU/Windows passes 1,770/1,770, with four existing
+interactive Windows cases skipped. Core/public contributes 1,457, WGPU 89 and Windows 224.
+Complete UI core/components/docking/Canvas passes 2,966/2,966 without skips. The actual
+Windows composite trajectory also passes separately, retaining production callback delivery,
+nonempty Submitted generations, passive inspection and exact native/root/App/TextSystem/OLE
+release. Synthetic keys/activation do not establish OS-generated input, real AT consumption
+or compositor scanout.
+
+Independent bounded review closes the accepted-arm and direct/deferred quiescence findings;
+all seven implementation/test/audit/review threads are closed. Ordinary independently locked
+type-only accessibility/composite targets pass 4/4 in each feature mode without test-support;
+the actual Gallery selection passes 13/13. Locked workspace/consumer all-target checks,
+affected correctness Clippy, actual Windows Rust 1.92 and stable production wasm in both
+profiling modes pass. Root/independent formatting and existing static scans pass. No dependency,
+lockfile, compiler-floor or remote publication changes follow. Nara changes here are
+documentation-only. The next coherent framework owner completes shortcut/numeric-step/author-ID
+properties, enabled-versus-active configuration and initial activation-tree behavior through
+existing modules. Complete benchmark/report, hot reload, foreign native/browser execution,
+numerical budgets, canonical docking U4-U9 and Nara GPU/View adoption remain open. No
+Editor/game-runtime default or full R11/R12 status changes.
