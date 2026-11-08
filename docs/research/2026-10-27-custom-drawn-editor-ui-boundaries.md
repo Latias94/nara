@@ -3777,3 +3777,78 @@ unqualified. Upstream build measurements are not fork performance results. Conti
 renderer feature-policy, API and platform reconciliation before engine adaptation. Complete
 fixed-target refresh, canonical docking, Nara GPU/View adoption and full R11/R12/R11f remain
 open; no Nara execution ADR or UI default changes.
+
+## November 9: WGPU Dependency, Shaders And WebGL
+
+The complete renderer successor is implemented in Open-GPUI at
+`38d3041acab90cc01cbc9984a8b738a8b2c3a194`, with qualification at
+`7cd732eda7f8c5c80e0d08b737504f720f6fa6f5`. It follows official WebGL `4601ead416`,
+dependency-feature cleanup `d544470d1d`, WGPU correction `402675e805`, reconfiguration
+follow-up `24a2823456` and native configure-once `e20d19d32f`, against the unchanged fixed
+Zed target `635026fabc38440fce5e1767d125026a17b12012`.
+
+WGPU and matching Naga use exact upstream gfx-rs revision
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`. This contains Vulkan acquired-texture teardown
+`3b3506ea31154edc04de64debda0e780cba2639c` and the wasm wait-timeout correction. The dependency
+declares Rust 1.93; maintained framework/consumer manifests, CI and migration guidance now
+state that floor. Actual locked Rust 1.93.0 Windows checks pass for selected framework/native
+packages and the ordinary, test-support and hot-reload consumers, including the separate
+reload panel. Earlier Rust 1.92 qualification retains its original revisions. Nara already
+declares Rust 1.95, while its registry WGPU 30.0.1 and the maintained Git revision remain
+distinct source/type identities for the eventual shared-device consumer.
+
+The complete official storage/WebGL shader split and packed `Rgba32Uint` transport preserve
+the fork's exact clip ancestry, primitive transforms, atlas leases and whole-frame refusal.
+Auto initialization tries WebGPU, discards a failed detached canvas and prepares a fresh GL
+canvas. Forced backend selection tries only that backend; software-adapter policy is also
+forwarded exactly. Ordinary GL success cases explicitly permit a normal adapter, with a
+separate software-only refusal control. Public constructors expose matching prepared
+graphics/surface resources, and native context selection configures through the existing
+surface owner. No second engine GPU, scheduler or window owner is introduced.
+
+Actual browser qualification exposes a fork integration defect that native packed rendering
+alone did not reveal. The official 32-byte surface uniform became 40 bytes when the fork added
+its 24-byte exact clip envelope, violating GL's complete 16-byte binding requirement. The
+private surface parameter record now reserves 48 bytes and WGSL reserves 32 bytes for that
+nested clip member. Shared clip and primitive storage strides remain intact. Matching-Naga
+reflection/validation, cross-row decoding and actual browser pixels qualify the correction.
+The Open-GPUI `docs/verification.md#wgpu-dependency-shaders-and-webgl` record preserves the
+failed trailing-padding attempt, nested-uniform correction and exact runtime scopes.
+
+The independently locked ordinary Vulkan controls reproduce both old registry 30.0.1
+semaphore assertion/cleanup aborts, then pass unchanged on the restored exact source. A third
+ordinary `WgpuRenderer` trajectory initializes a real HWND surface with zero requested
+drawable size, resumes to a nonempty submitted Quad, shares its exact device/queue with a
+second surface and quiesces both shutdown tickets before HWND destruction. The HWND client
+area remains nonzero; this qualifies the renderer request's deferred state. All three pass
+on RTX 4090/Vulkan, driver 621.14, with bounded polls and error observation.
+
+Final affected qualification passes:
+
+- Complete WGPU library and all public integrations: 123/123.
+- UI core/components/docking/Canvas: 2,966/2,966.
+- Ordinary independently locked optional features enabled/disabled: 65/65 and 48/48; the
+  three explicitly ignored Vulkan cases run separately above.
+- Rebuilt browser policy/coordinate/reference controls: 14/14, followed by complete actual
+  Edge 157.0.4341.42 WebGPU, GL and Auto-fallback trajectories.
+
+Each of four browser rendering cases passes 22 fixed PNG samples at 800x600 and 960x720,
+including the last of 16,384 Quads, nested asymmetric clips, nonuniform transforms, alpha,
+image and path, plus visible text coverage. Input/focus/capture, docking, activation and
+resize assertions remain intact. Forced WebGPU unavailability uses an explicit
+`navigator.gpu` test control; forced rejection excludes other-backend attempts and verifies
+candidate removal. Application callback counters remain distinct from GPU submission or
+native presentation receipts. This browser scope is Windows/Edge at DPR 1.
+
+Locked Rust 1.95 workspace/ordinary-consumer checks, native and production wasm correctness
+Clippy, stable wasm profiling off/on, existing nightly shared-memory compilation, formatting,
+workflow YAML and existing static gates pass. Resolved four-target graphs retain official
+backend features, one WGPU source and the optional direct image edge. They establish no
+foreign native execution; shared-memory compilation establishes no multithreaded browser
+execution. Bounded independent reviews close their findings and all six threads close.
+
+Continue remaining framework/API/platform reconciliation before engine adoption. Physical
+device/context loss, general DPI, numeric cost distributions, existing native foreground
+restoration and canonical docking remain open. Nara's actual shared-GPU/View consumer must
+resolve dependency identity and existing Host/error/submission ownership. Complete Editor
+and game-runtime selection and full R11/R12/R11f remain open.

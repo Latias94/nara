@@ -2035,6 +2035,22 @@ foreground restoration, foreign execution and numerical costs retain their disti
 Remaining renderer/API/platform closure, canonical docking, Nara GPU/View and full R11/R12/R11f
 stay open; no engine UI default follows.
 
+The [WGPU dependency/shader/WebGL successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-wgpu-dependency-shaders-and-webgl)
+is implemented at Open-GPUI `38d3041acab90cc01cbc9984a8b738a8b2c3a194`, with qualification
+`7cd732eda7f8c5c80e0d08b737504f720f6fa6f5`. Complete official shader/backend mechanisms use
+matching pinned WGPU/Naga, while fork clipping, transforms, atlas leases and full-frame
+refusal remain qualified. Real Vulkan registry red/restored-source green and the fork-only
+surface uniform correction retain distinct provenance. Complete WGPU/public 123, actual
+native Vulkan/renderer 3, components/docking/Canvas 2,966 and independent enabled/disabled
+65/48 pass. Final actual Edge WebGPU/GL/Auto fallback passes two PNG sizes, dense high-index
+data, text and original interaction controls, including explicit backend/policy refusals.
+Locked checks, correctness Clippy, actual Windows Rust 1.93 framework/three-consumer checks,
+production/shared-memory wasm compilation, four-target graphs, formatting and static gates
+pass. Nara's registry WGPU and maintained Git WGPU remain distinct source/type identities;
+the actual shared-GPU/View consumer must resolve that and existing Host/error/submission
+custody. Foreign execution, physical loss, DPI/performance, remaining framework closure,
+canonical docking and full R11/R12/R11f remain open.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

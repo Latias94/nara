@@ -501,6 +501,18 @@ Decoder/guessing limits, existing native foreground restoration, foreign executi
 costs remain explicit. Remaining renderer/API/platform closure, canonical docking, engine
 adoption and full R11/R12/R11f stay open; no Nara runtime/default ADR changes.
 
+The [WGPU dependency/shader/WebGL successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-wgpu-dependency-shaders-and-webgl)
+is implemented at Open-GPUI `38d3041acab90cc01cbc9984a8b738a8b2c3a194`, with qualification
+`7cd732eda7f8c5c80e0d08b737504f720f6fa6f5`. Official pinned dependency/shader/backend
+mechanisms and the fork's exact clip/transform/lease/refusal adaptations pass complete
+WGPU/public 123, native Vulkan/renderer 3, components 2,966 and independent enabled/disabled
+65/48. Actual Edge WebGPU/GL/fallback passes PNG/text/resize and original interaction controls;
+forced failures remain explicit. Locked checks, native/wasm correctness Clippy, actual Windows
+Rust 1.93 framework/three-consumer checks, production/shared-memory wasm compilation,
+four-target graphs, formatting and static gates pass. Nara GPU source identity, actual
+Host/View adoption, remaining framework/platform qualification, physical loss, DPI/numeric
+costs, canonical docking and full R11/R12/R11f remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
