@@ -421,6 +421,24 @@ remains unqualified. This is the benchmark/report owner's prerequisite, without 
 feature split, context, text/render injection, reports or numerical budgets. Full refresh, hot reload,
 canonical docking and Nara GPU/View remain open; no Nara execution ADR/default or R11/R12 changes.
 
+The [complete benchmark/context/measurement successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-complete-benchmark-context-and-measurements)
+is implemented locally at Open-GPUI `5f3a99fad9284c17a8eaac508ab8b4f47018be44`, against
+the unchanged fixed target, with qualification `7c7a1411009a07afbcbd70340256adf55161491b`.
+Complete official threaded contexts, independent measurements, native text reuse,
+seeded/parameterized macros and optional fallible no-readback rendering
+replace inherited virtual/forwarding paths. Actual focused consumers pass 60/60, independent
+benchmark execution completes nine cases, Canvas completes five smoke cases, and complete
+runtime/public/Gallery/native/metrics/macros passes 2,040/2,040 with five documented skips.
+Components pass 2,964 plus two separately gated Docking controls, preserving the prior 2,966-case
+set; disabled affected 112 and independent enabled/disabled 62/47 pass. Locked checks,
+correctness Clippy, actual Windows Rust 1.92, stable/nightly production wasm, formatting and
+existing static gates pass. Inherited corrections and fork ingress/candidate/terminal-quit
+adaptations are separately evidenced. All ten threads are closed;
+no remote publication or Nara runtime change follows. Dev-profile functional execution is not
+an optimized numerical budget or foreign platform/device-loss qualification. Official additive
+test support and actual stateful hot reload remain complete successors. Full refresh, canonical
+docking and Nara GPU/View stay open; no execution ADR/default or R11/R12/R11f changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

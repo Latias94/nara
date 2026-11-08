@@ -1947,6 +1947,25 @@ active compilation/runtime remains unqualified. Benchmark-feature separation, co
 real text/render injection and complete measurement/report consumers remain in the existing successor; no
 numerical-budget, full-refresh, engine-default or R11/R12 completion follows.
 
+The [complete benchmark/context/measurement successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-complete-benchmark-context-and-measurements)
+is implemented locally at Open-GPUI `5f3a99fad9284c17a8eaac508ab8b4f47018be44`, against
+the same fixed target, with qualification `7c7a1411009a07afbcbd70340256adf55161491b`.
+Complete official threaded contexts, independent measurements, native text reuse,
+parameterized/seeded macros and fallible optional no-readback rendering replace the
+old virtual/forwarding paths. Reproduced inherited corrections remain distinct from fork
+ingress/candidate/terminal-quit adaptations. Focused actual consumers pass 60/60, independent
+benchmark execution completes nine cases, maintained Canvas completes five smoke cases, and
+complete runtime/public/Gallery/native/metrics/macros passes 2,040/2,040 with five documented
+skips. Components pass 2,964 plus two separately gated Docking controls, preserving the prior
+2,966-case set; disabled affected 112 and independent enabled/disabled 62/47 pass. Locked checks,
+correctness Clippy, actual Windows Rust 1.92, stable/nightly production wasm, formatting and
+existing static gates pass. Dev-profile functional execution does not establish optimized
+numerical budgets or foreign native/counter/device-loss qualification. All ten threads are closed.
+Continue complete official
+additive test-support/leak-selection reconciliation before conditional hot reload and its real
+stateful edit/build/apply/output consumer. Full refresh, canonical docking and Nara GPU/View
+adoption remain open; no engine default or R11/R12/R11f completion follows.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

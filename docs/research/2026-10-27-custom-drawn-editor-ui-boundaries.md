@@ -3439,3 +3439,68 @@ test-support execution retain their own evidence requirements. Full benchmark/co
 real text/render injection, numerical budgets, full fixed-target refresh, conditional hot reload,
 canonical docking U4-U9 and Nara GPU/View adoption remain open. No Editor/game-runtime default
 or full R11/R12 status changes.
+
+## November 8: Complete Benchmark Context And Measurements
+
+Open-GPUI implementation `5f3a99fad9284c17a8eaac508ab8b4f47018be44` continues from
+`916c7cb2d2fffcaa95199598655b5cef97fb9bda` against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Qualification is recorded at
+`7c7a1411009a07afbcbd70340256adf55161491b`. It completes the benchmark owner mapped by
+`297c4a4d78`, `1722fe63bc`, `1f7eae7fb7`, `2440236055` and their final-target follow-ups.
+The independent Apache-2.0 measurement package comes from exact source blob
+`1ec628b0e943e34ca6c0f87e5def8f86a63e967f`, with its license and attribution retained.
+
+The virtual context and Criterion-forwarding macros are replaced by the complete official
+real-time threaded context, separate routine platforms, native text-system reuse, scheduled
+frames, explicit teardown, parameterized/seeded macros and primary/secondary reports. The
+measurement crate has no GPUI dependency. Independent `bench-support` excludes deterministic
+test support and entity leak tracking; both executable consumer graphs prove that exclusion.
+Criterion 0.8.2 and the necessary `perf-event2` 0.7.4 closure are retained. Ordinary consumers
+do not gain a benchmark dependency or an engine-specific document, history or ECS owner.
+
+Headless factories are fallible and optional. Rendering without CPU readback is separate from
+screenshots, through existing renderer/context/atlas owners. Windows keeps the official default
+unavailable factory. An independently injected WGPU renderer executes actual source-driven
+pixels, target reuse, refusal/recovery, reconstruction and exact renderer/atlas release; simulated
+benchmark-platform Submitted counts alone are not GPU evidence. Metal adopts official fallible
+intermediate allocations and caller propagation, with source-only regression scope on this host.
+
+Independent review reproduces five inherited official edge defects before their corrections:
+maximum-seed overflow, lost macro-wrapper visibility, undrained App-destructor tasks, a false
+failure on the 100th successful timer cancellation, and input destruction before trace closure
+during unwind. The fork separately adapts scheduled-frame delivery to ordered post-borrow ingress,
+preserves accepted versus submitted candidates, and completes existing terminal-quit custody
+without another fence. Actual regressions retain original output/lifetime assertions. These are
+identified corrections to complete official mechanisms, rather than substitutions for them.
+
+Focused context/public/renderer execution passes 60/60. The independently locked executable runs
+nine actual benchmark cases, including native shaping, parameterized rendering, seeded tasks and
+cross-module public registration. The maintained Canvas benchmark passes five smoke cases with
+the original 200-by-100 grid and 39,900 indexed records. Complete all-feature runtime/public/
+Gallery/native/metrics/macros passes 2,040/2,040. Five tests are skipped: four pre-existing
+interactive Windows cases and the Gallery fixture-regeneration maintenance case. The complete
+native trajectory requires no isolated retry. UI core/components/docking/Canvas passes 2,964/2,964
+plus both separately gated Docking controls, preserving the previous 2,966-test set. Disabled
+affected Core/public passes 112/112. Independently locked ordinary-dependency controls pass
+62/62 with all features and 47/47 with defaults disabled, both without skips. Their value/layout
+and explicitly type-only scope remains separate from the executed consumers above.
+
+Locked workspace/independent all-target checks, affected correctness Clippy and actual Windows
+Rust 1.92 all-target/all-feature compilation pass. No compiler-floor increase follows. Stable
+production wasm passes with instrumentation off/on; the existing nightly shared-memory
+configuration passes with build-std and checked-in atomics/imported-memory flags. Root/independent
+formatting, import/API/document/release scans, workflow YAML/manifest parsing and whitespace
+checks pass. Browser/test-support and foreign-native execution remain unqualified.
+
+These dev-profile executions qualify functional measurement and lifecycle behavior. They do not
+establish optimized numeric budgets, real device-loss behavior, Linux/macOS counters or foreign
+native/browser execution. All ten implementation/test/review threads are closed, and no remote
+publication occurs. Nara changes are documentary; no new engine runtime acceptance follows.
+
+The remaining official `95cd535a5fad96d649513f96c5784ceefd379e47` mechanism separates test
+support from leak tracking and identifies deterministic execution at runtime. It is now an
+explicit complete successor before conditional hot reload; benchmark feature isolation does
+not implement it. The hot-reload successor must include actual independent stateful
+edit/build/apply/accepted-and-submitted output, beyond official websocket filtering and refresh
+tests. Numerical budgets, full fixed-target refresh, canonical docking U4-U9 and Nara GPU/View
+adoption remain open. No Editor/game-runtime default or full R11/R12/R11f status changes.
