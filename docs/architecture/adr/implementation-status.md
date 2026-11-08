@@ -439,6 +439,22 @@ an optimized numerical budget or foreign platform/device-loss qualification. Off
 test support and actual stateful hot reload remain complete successors. Full refresh, canonical
 docking and Nara GPU/View stay open; no execution ADR/default or R11/R12/R11f changes.
 
+The [additive test-support/leak-tracking successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-additive-test-support-and-explicit-leak-tracking)
+is implemented at Open-GPUI `c6ffb32bd1499c9e8fb46783a3d1a4de626707a0`, from
+`7c7a1411009a07afbcbd70340256adf55161491b`, with qualification
+`da1b1fdecbd5bb57a17e8898650cf5592958085b`, preserving official
+test facilities, per-executor runtime identity and independently selected handle instrumentation
+through existing owners. Actual inherited home-directory and release-diagnostic failures are
+corrected with original lifetime requirements retained. Util 116, focused Core/scheduler/public
+130, the complete independent feature/environment matrix and full native View with tracking
+off/on pass. The framework 1,918-case union, complete Windows 224, components 2,966 and ordinary
+enabled/disabled 62/47 pass. The initial native extra-event source remains unproven; separately
+committed fixture convergence preserves the exact assertions. Locked checks, correctness Clippy,
+actual Windows Rust 1.92, production native/wasm, feature graphs, formatting and static gates pass.
+All seven implementation/review threads are closed. No engine execution owner, performance
+result or Nara runtime/default change follows. Conditional hot reload remains a complete successor; full
+refresh, canonical docking, Nara GPU/View and R11/R12/R11f remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

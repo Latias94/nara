@@ -1966,6 +1966,25 @@ additive test-support/leak-selection reconciliation before conditional hot reloa
 stateful edit/build/apply/output consumer. Full refresh, canonical docking and Nara GPU/View
 adoption remain open; no engine default or R11/R12/R11f completion follows.
 
+The [additive test-support and leak-tracking successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-additive-test-support-and-explicit-leak-tracking)
+is implemented at Open-GPUI `c6ffb32bd1499c9e8fb46783a3d1a4de626707a0`, from
+`7c7a1411009a07afbcbd70340256adf55161491b`, with qualification
+`da1b1fdecbd5bb57a17e8898650cf5592958085b`, following complete
+official `95cd535a5fad96d649513f96c5784ceefd379e47` through existing owners. Test facilities,
+per-executor deterministic identity and explicit handle tracking now have separate contracts.
+Actual util, owner-gone and consuming-diagnostic failures precede corrections. Complete util
+116, focused Core/scheduler/public 130, the independently locked feature/environment matrix
+and the full native View trajectory with tracking off/on pass. The ordinary consumer remains
+separate from the new test-support consumer. The framework 1,918-case union, complete Windows
+224, components 2,966 and ordinary enabled/disabled 62/47 pass within their recorded scopes.
+The original native extra-pair cause stays unproven; the fixture convergence correction is
+separately committed at `2daf8412170540f7e2e586687bc25d5eadf4f2fa`. Locked checks, correctness
+Clippy, actual Windows Rust 1.92, production native/wasm, feature graphs, formatting and static
+gates pass. Runtime identity does not select an engine scheduler, and these functional gates
+do not establish numerical savings. Conditional
+hot reload remains the next complete official mechanism, requiring actual stateful
+edit/build/apply/output evidence. Nara GPU/View, docking and R11/R12/R11f stay open.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

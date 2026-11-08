@@ -3504,3 +3504,76 @@ not implement it. The hot-reload successor must include actual independent state
 edit/build/apply/accepted-and-submitted output, beyond official websocket filtering and refresh
 tests. Numerical budgets, full fixed-target refresh, canonical docking U4-U9 and Nara GPU/View
 adoption remain open. No Editor/game-runtime default or full R11/R12/R11f status changes.
+
+## November 8: Additive Test Support And Explicit Leak Tracking
+
+The next Open-GPUI successor continues from `7c7a1411009a07afbcbd70340256adf55161491b`
+against unchanged fixed Zed `635026fabc38440fce5e1767d125026a17b12012`. Local implementation
+is `c6ffb32bd1499c9e8fb46783a3d1a4de626707a0`, with qualification
+`da1b1fdecbd5bb57a17e8898650cf5592958085b`. Official
+`95cd535a5fad96d649513f96c5784ceefd379e47` supplies the complete separation of compiled
+test facilities, deterministic runtime identity and entity-handle instrumentation. Existing
+App/entity-map, scheduler/executor, util and native renderer owners implement that separation;
+no new engine scheduler, test framework or lifetime owner is introduced.
+
+`test-support` no longer implies per-handle tracking. Explicit `leak-detection` or nonempty
+build-time `GPUI_LEAK_DETECTION` selects it; nonempty `0` follows the official enabling rule.
+Core's own unit tests remain tracked. Public snapshots are empty/no-op when tracking is absent,
+while weak release assertions still refuse live strong handles and resources awaiting effect
+cleanup. App, AsyncApp and executor `is_test` queries use their actual scheduler. A process-wide
+test-scheduler hint cannot change a real-time benchmark or native App into a deterministic one.
+Util's own tests keep a fixed home path; downstream programs retain the real home directory.
+Metal screenshot access follows the official debug-only policy, source-reviewed on Windows.
+
+Actual regression evidence precedes corrections. The old util feature changes a downstream home
+directory and fails its new external test; complete corrected util passes 116/116. Two inherited
+release-diagnostic edges are separately reproduced: a fully released weak handle panics after
+the last owner disappears, and a caught release assertion consumes metadata, hiding still-live
+handles from snapshot checks. The owning fixes retain the existing count/slot authority, borrow
+diagnostics without consuming evidence, and preserve panic-safe destructor behavior. Focused
+Core/scheduler/public execution passes 130/130 with all original entity tests retained.
+
+A new independently locked test-support consumer executes public Test windows and asynchronous
+entity updates, a returning Application and real Bench routines. The existing ordinary consumer
+keeps its own no-test-support contract. The complete feature/environment matrix passes:
+ordinary 2/2, benchmark-only 3/3, untracked Test/Bench 4/4, environment-selected Test 3/3,
+nonempty-zero Test 3/3, explicit-feature Test 3/3 and all features 4/4. The corresponding root
+public workflows pass in tracked and untracked modes. Real-time consumers assert actual worker
+threads, timers and foreground work; these Noop text cases do not qualify native text or GPU.
+
+The original full native View trajectory retains input, notified source updates, caches,
+reconstruction, stale-callback refusal and exact entity/HWND/platform/OLE retirement. It adds
+mixed Test/native runtime identity and exact-generation DX11 scene pixels. A reproduced default
+backend capture failure is corrected by enabling its existing readback helpers for its own
+unit tests, without enabling production capture. The complete trajectory passes with tracking
+both off and on. Submitted receipts and same-scene readback remain distinct from compositor
+scanout or actual OS input injection.
+
+The initial complete framework/public/renderer/native/scheduler run passes 1,917/1,918 and
+exposes the previously recorded native mouse-leave extra-event symptom. A bounded fixture
+correction separates its exact three deliberately sent transitions from later OS messages and
+finishes Core ingress before reading diagnostics. The first attempted snapshot move reproduces
+five rather than six events; the completed correction retains the exact six-event, position,
+physical-frame and teardown assertions. Both selected native scenarios pass, followed by the
+complete Windows cohort at 224/224 with four original interactive skips. Combined with the
+unchanged 1,694 non-Windows cases, this qualifies the selected 1,918-case union; it is not a
+single all-green 1,918-test run. The initial extra pair's source remains unproven.
+
+Three independent reviews close without remaining P1/P2 in their scope; all seven implementation
+and review threads are closed. Complete components/docking/Canvas passes 2,966/2,966 without
+skips, with explicit handle tracking and both consumer test-support features. The mouse-leave
+fixture correction is separately committed at `2daf8412170540f7e2e586687bc25d5eadf4f2fa`.
+The ordinary independently locked consumer passes 62/62 enabled and 47/47 disabled. Its lockfile
+adds only the required unconditional backtrace dependency edge, with no version updates.
+Default test commands without an explicit expectation variable pass public 6, independent
+untracked 4 and environment-tracked 3 controls.
+
+Locked workspace/both-consumer all-target checks, correctness Clippy, actual Windows Rust 1.92
+all-target/all-feature checks, and environment-only tracking production compilation pass.
+Stable production wasm with profiling off/on and the existing nightly shared-memory configuration
+pass; browser/test-support execution remains unqualified. All three workspace formatting checks,
+existing import/API/document/release scans, workflow/manifests and whitespace checks pass. Feature
+trees confirm ordinary and benchmark-only graphs exclude Core test support and leak detection,
+with build-time tracking explicitly disabled. No Nara runtime or Editor default changes.
+Measured build-time/per-frame savings, foreign native/browser execution, conditional hot reload,
+canonical docking U4-U9 and Nara GPU/View adoption remain open. Full R11/R12/R11f is unchanged.
