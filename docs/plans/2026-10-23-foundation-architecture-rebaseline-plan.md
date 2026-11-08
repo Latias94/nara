@@ -2021,6 +2021,20 @@ failure and four interactive skips, before that correction. Metal source and thi
 unexecuted tests do not qualify macOS. Remaining image-feature/API/platform work, foreign
 execution, numerical budgets, canonical docking and Nara GPU/View remain open.
 
+The [image dependency-policy successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-image-dependency-feature-policy)
+is implemented at Open-GPUI `b4355a36824f0709f1b73f7480ec88a884a489bc`, with qualification
+`aeeef7bcd377bd99cc527fcb718d7a3298b4633e`. It adopts the complete official default
+feature policy without AVIF encoding, retaining fourteen formats, Rayon and the existing image API
+minimum. Three-platform resolved graphs and actual ordinary application-owned encoder opt-in
+qualify the dependency boundary. Final Core/public/native image consumers pass 25/25;
+independent encoding off/on passes 3/3 and 4/4. Locked compilation, correctness Clippy, actual
+Windows Rust 1.92 framework/ordinary-consumer checks and production wasm pass. A separately
+refreshed inherited smoke lock passes its own locked production wasm check. Review, formatting
+and existing static gates pass. AVIF native decoding, TGA resource guessing, existing native
+foreground restoration, foreign execution and numerical costs retain their distinct limits.
+Remaining renderer/API/platform closure, canonical docking, Nara GPU/View and full R11/R12/R11f
+stay open; no engine UI default follows.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

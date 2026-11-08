@@ -3723,3 +3723,57 @@ Foreign compilation/native execution, fractional/dynamic DPI, subpixel dual-sour
 WGPU replacement-Device recovery and numeric cost distributions need their owning evidence.
 Continue the separate image-feature policy and remaining API/platform reconciliation. Full refresh,
 canonical docking and Nara GPU/View adoption remain open. No runtime/default ADR changes.
+
+## November 9: Image Dependency Feature Policy
+
+Official `8e06c323ae063f3d245ea5c283d4bf373ad51db2`, retained by fixed target
+`635026fabc38440fce5e1767d125026a17b12012`, is implemented in Open-GPUI at
+`b4355a36824f0709f1b73f7480ec88a884a489bc`. Qualification is recorded at
+`aeeef7bcd377bd99cc527fcb718d7a3298b4633e`. The complete official dependency policy
+disables image defaults while explicitly retaining fourteen formats and Rayon. The fork
+preserves its existing 0.25.4 API minimum and resolved image 0.25.10.
+
+The excluded `avif` feature supplies an encoder and ravif/rav1e. AVIF decoding separately
+requires `avif-native` and dav1d, absent before and after this change. The official extension
+inventory remains intact; TGA resource-format guessing retains its inherited limitation.
+An ordinary independently locked application restores encoding through its own optional
+image dependency and `avif-encoding = ["dep:image"]`. No GPUI codec-selection feature,
+wrapper or engine owner is introduced. Source review confirms this official/fork boundary.
+
+Actual Windows x64, Linux x64 and macOS arm64 dependency graphs remove exactly `avif`,
+`default` and `default-formats`, adding no other image feature. The after graph includes the
+entire workspace with all features; normal/build graphs omit ravif, rav1e and dav1d. The
+ordinary consumer's default graph excludes encoding, while explicit opt-in and all-feature
+graphs include it on all three targets. These are resolved graphs on Windows, without foreign
+compilation or execution claims. Optional packages may remain locked without active build edges.
+
+Final affected Core/public/native image consumers pass 25/25: twenty Core cases, four actual
+public headless resource/animation/loading consumers and the complete native encoded/embedded
+image trajectory. The latter preserves nonempty Submitted frames, framework pixel readback,
+animation/replacement/reconstruction, atlas reuse and exact owner release. New resource controls
+decode DDS, OpenEXR, Farbfeld, HDR and QOI through the awaited resource loader and compare all
+BGRA pixels. A distinctly named header-only AVIF control checks the missing-decoder error
+branch, without claiming valid AVIF content or decoding.
+
+Independent ordinary image consumers pass 3/3 with encoding disabled and 4/4 with the
+application-owned opt-in. The additional case actually encodes public GPUI-decoded WebP pixels
+using one encoder thread and checks nonempty AVIF output. It does not establish an AVIF decode
+round trip. Independent review closes without P1/P2 findings; both workers and the reviewer close.
+
+Locked Windows Rust 1.95 workspace/ordinary-consumer all-target compilation, affected
+Core/WGPU/Windows correctness Clippy and actual Rust 1.92.0 framework/ordinary-consumer
+all-target/all-feature checks pass. Stable production Core/WGPU/Web wasm compilation also
+passes. The independently locked smoke_web fixture exposes inherited stale layout,
+segmentation, accessibility and runtime dependencies. Its separate lock refresh
+`015863c085dbcd845658cfb97c289c3ac4433aad` preserves unrelated compatible selections and
+passes its own locked Rust 1.95 production wasm check. That fixture is not qualified on
+Rust 1.92 or in a browser. Formatting, workflow YAML, whitespace and existing import/API/
+document/release scans pass.
+
+The earlier complete suites are not repeated for this dependency-only policy. Their existing
+foreground-restoration failure remains open; this scoped image success does not resolve it.
+AVIF native decoding, foreign/browser execution and numerical cost distributions remain
+unqualified. Upstream build measurements are not fork performance results. Continue remaining
+renderer feature-policy, API and platform reconciliation before engine adaptation. Complete
+fixed-target refresh, canonical docking, Nara GPU/View adoption and full R11/R12/R11f remain
+open; no Nara execution ADR or UI default changes.

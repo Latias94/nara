@@ -489,6 +489,18 @@ and four interactive skips. Metal's thirteen new tests remain unexecuted on macO
 no Nara runtime/default ADR. Remaining native/platform qualification, measured costs,
 engine adoption and full R11/R12/R11f remain open.
 
+The [image dependency-policy successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-image-dependency-feature-policy)
+is implemented at Open-GPUI `b4355a36824f0709f1b73f7480ec88a884a489bc`, with qualification
+`aeeef7bcd377bd99cc527fcb718d7a3298b4633e`. The complete official retained-format policy
+excludes default AVIF encoding; ordinary applications restore it through their own dependency.
+Resolved three-platform graphs, final Core/public/native image 25/25 and independent
+encoding off/on 3/3 and 4/4 pass. Locked compilation, correctness Clippy, actual Windows Rust
+1.92 framework/ordinary-consumer checks, production wasm, formatting and existing static gates
+pass. The separately refreshed smoke lock passes its own locked production wasm check.
+Decoder/guessing limits, existing native foreground restoration, foreign execution and numeric
+costs remain explicit. Remaining renderer/API/platform closure, canonical docking, engine
+adoption and full R11/R12/R11f stay open; no Nara runtime/default ADR changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
