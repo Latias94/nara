@@ -452,8 +452,26 @@ enabled/disabled 62/47 pass. The initial native extra-event source remains unpro
 committed fixture convergence preserves the exact assertions. Locked checks, correctness Clippy,
 actual Windows Rust 1.92, production native/wasm, feature graphs, formatting and static gates pass.
 All seven implementation/review threads are closed. No engine execution owner, performance
-result or Nara runtime/default change follows. Conditional hot reload remains a complete successor; full
-refresh, canonical docking, Nara GPU/View and R11/R12/R11f remain open.
+result or Nara runtime/default change follows. Conditional hot reload follows in the separately
+qualified successor below; full refresh, canonical docking, Nara GPU/View and R11/R12/R11f remain open.
+
+The [conditional native hot-reload successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-conditional-native-hot-reload-and-exact-terminal-settlement)
+is implemented at Open-GPUI `ad70ac9230892ca4e4d47840b93215596b8c60e0`, after
+`da1b1fdecbd5bb57a17e8898650cf5592958085b`, with qualification
+`480430f02aecc3bdcf78bed8126ef6b871974770`. The complete official conditional native
+transport and App/View patch boundaries retain existing owners. A real independently locked
+panel edit/build/apply preserves mutated typed/erased/component state, identities and actual
+DX11 replacement pixels, followed by retirement/shutdown/quit/exit zero. Its single 3,419.7 ms
+observation is not a latency budget. The external upstream dx x64 backport and fork terminal
+correction `28eebf0e8dcd0c8a71f1064bf9f66052b5d3a55c` retain separate provenance. Five
+native failure controls pass an unchanged final rerun; the prior extra-refresh source remains
+unproven. Affected lifecycle/Windows 310/313 and selected rerun 2/3 leave foreground restoration
+unqualified while an external game owns foreground. Disabled owner/public 68, independent
+enabled/disabled 62/47, locked checks, correctness Clippy, actual Windows Rust 1.92, non-debug
+exclusion, production wasm, four formatting and existing static gates pass. All thirteen threads
+close. This is framework body-patch evidence; arbitrary state-layout migration and the full
+Nara Editor reload/recovery workflow remain unqualified. Full refresh, canonical docking,
+numerical budgets, Nara GPU/View and R11/R12/R11f stay open; no execution ADR/default changes.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

@@ -1982,13 +1982,31 @@ separately committed at `2daf8412170540f7e2e586687bc25d5eadf4f2fa`. Locked check
 Clippy, actual Windows Rust 1.92, production native/wasm, feature graphs, formatting and static
 gates pass. Runtime identity does not select an engine scheduler, and these functional gates
 do not establish numerical savings. Conditional
-hot reload remains the next complete official mechanism, requiring actual stateful
-edit/build/apply/output evidence. Nara GPU/View, docking and R11/R12/R11f stay open.
+hot reload follows in the separately qualified successor below. Nara GPU/View, docking and
+R11/R12/R11f stay open.
+
+The [conditional native hot-reload successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-conditional-native-hot-reload-and-exact-terminal-settlement)
+is implemented at Open-GPUI `ad70ac9230892ca4e4d47840b93215596b8c60e0`, from
+`da1b1fdecbd5bb57a17e8898650cf5592958085b`, with qualification
+`480430f02aecc3bdcf78bed8126ef6b871974770`. Complete official optional native debug
+transport/App/View boundaries reuse existing owners. An independently locked real panel edit/
+build/apply consumer retains mutated typed/erased/component state, identities and initialization
+while actual DX11 generation 3-to-4 pixels change; normal retirement/shutdown/quit/exit pass.
+One observed result is 3,419.7 ms, not a latency budget. Five native rejection/disconnect controls
+pass unchanged final rerun; an earlier unexplained extra-refresh failure is preserved. GPUI
+provenance, the identified upstream dx x64 tool backport and separate fork terminal correction
+`28eebf0e8dcd0c8a71f1064bf9f66052b5d3a55c` stay distinct. Final lifecycle/Windows 310/313
+and selected rerun 2/3 leave one foreground-restoration gate open under the observed external
+game foreground. No final complete all-green native run is claimed. Disabled owners/public 68,
+independent enabled/disabled 62/47, locked checks, correctness Clippy, actual Windows Rust 1.92,
+non-debug exclusion, production wasm, four formatting and existing static gates pass. Full
+Editor recovery/state-layout migration, numeric costs and foreign execution remain separate.
+All thirteen threads close; no Nara runtime, execution ADR or default changes.
 
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
-refresh, conditional hot reload, canonical docking and Nara GPU/View selection stay open.
+refresh, the remaining native focus gate, canonical docking and Nara GPU/View selection stay open.
 
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default

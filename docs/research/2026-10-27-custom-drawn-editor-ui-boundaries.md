@@ -3577,3 +3577,84 @@ trees confirm ordinary and benchmark-only graphs exclude Core test support and l
 with build-time tracking explicitly disabled. No Nara runtime or Editor default changes.
 Measured build-time/per-frame savings, foreign native/browser execution, conditional hot reload,
 canonical docking U4-U9 and Nara GPU/View adoption remain open. Full R11/R12/R11f is unchanged.
+
+## November 8: Conditional Native Hot Reload And Exact Terminal Settlement
+
+The next maintained-framework unit starts from Open-GPUI
+`da1b1fdecbd5bb57a17e8898650cf5592958085b` against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Local hot-reload implementation is
+`ad70ac9230892ca4e4d47840b93215596b8c60e0`, with qualification record
+`480430f02aecc3bdcf78bed8126ef6b871974770`. Official
+`670a779a5ed9e7161c97aa4f998d395c207d5631` supplies optional native debug build selection,
+per-App foreground/background task custody, bounded transport, build/process filtering,
+foreground executable patching, window refresh and stored AnyView/common View HotFn boundaries.
+The fork waits through its existing AsyncApp update owner while native callbacks hold an App
+borrow, and refuses application after quitting. No engine reload manager or second render
+scheduler is introduced. Ordinary builds keep direct render calls; non-debug and WebAssembly
+builds exclude the runtime hot-reload cfg.
+
+The independently locked native consumer uses public GPUI/Windows APIs, a separate panel
+workspace member, a cached typed Entity, an AnyView constructed and stored at startup, and a
+RenderOnce component with keyed state. Before editing, actual owner operations change constructor
+counters from 37 to root 41 and children 43/47/53. A copied panel's compatible render-body edit
+changes recipe values, labels and colors. At scale 1.5, actual accepted/nonempty/rendered/Submitted
+generation 3 advances to generation 4 with the changed DX11 scene pixels while retaining process
+nonce, window/entity identities, mutated counters and one initialization each. Normal retirement,
+entity release, public shutdown, quit callback and process exit zero precede success. The final
+single edit-to-observed result is 3,419.7 ms, including compilation, transport, redraw and sampling;
+it is not a latency distribution, budget or OS compositor scanout result.
+
+Three distinct source owners matter. GPUI's render/transport mechanism follows official Zed.
+The published Windows x64 dx 0.7.10 executable has a separately reproduced code-generation defect:
+its unresolved-function stub overwrites RAX before calling `__chkstk`. Actual stack/disassembly
+evidence matches Dioxus issue 5966 and upstream fix
+`14b4b767c8b661dffabe648bd07994e88ef57000`. The fixture carries only that register-transparent
+jump backport against published CLI source, retaining the original failed attempt. Successful
+execution uses an isolated identified tool with SHA-256
+`4fcb34ce830ffbb0c79556b846d873448664f260e56d8b01bd553d39172c2ae1`; the installed developer
+tool is unchanged. This is not an unchanged released dx success or a reason to remove GPUI's
+official patch boundaries.
+
+The third owner is the fork's existing native retirement protocol. A repeated terminal report
+from a successful destruction result followed by queued Closed previously produced a false
+missing-authority diagnostic, including without a hot patch. A separate red/green unit and
+commit `28eebf0e8dcd0c8a71f1064bf9f66052b5d3a55c` distinguish Observed from Settled in
+existing AppCell bookkeeping. Only successful exact-ticket acknowledgement marks Settled;
+unknown and pre-quiescence reports still diagnose violations. Capture release, dependency
+retirement and shutdown progression keep their existing owners. Three regressions and ordinary
+parallel libtest pass after independent review. This defect is fork-owned, not official GPUI.
+
+Ten focused transport/owner/render regressions pass. The same actual native executable passes
+wrong-build, wrong-PID, invalid-DLL, full-restart and disconnect controls, retaining its original
+pixels, state and exact generation through live checkpoints. The invalid DLL reports failure;
+restart/disconnect remain explicit. All five controls, retirement/quit and exit zero pass the
+final unchanged rerun without the false terminal diagnostic. The preceding attempt observed an
+unexpected generation 3-to-5 refresh with unchanged state/pixels; its cause remains unproven.
+The passing rerun does not explain it or establish immunity to arbitrary desktop events.
+
+The enabled framework/public/Gallery run passes 1,823/1,823 with four original interactive skips,
+and components/docking/Canvas passes 2,966/2,966 before the small terminal correction. After that
+correction, affected lifecycle/Windows runs 313 cases with 310 passing. Two of its three native
+failures pass an unchanged selected rerun. Foreground-restoration still fails while read-only
+inspection identifies the user's Steam game as foreground. That observation supports a desktop
+constraint without proving the source correct; the test and activation semantics are unchanged,
+and its qualification remains open. These results are not one final all-green complete native
+run. Final hot-reload-disabled View/cache/lifecycle passes 68/68 and the ordinary independent
+consumer passes 62/62 enabled and 47/47 disabled.
+
+Locked workspace all-target checks, affected correctness Clippy, actual Windows Rust 1.92
+framework all-target/all-feature and native-consumer all-target checks pass. The root lock adds
+seventeen required packages with every existing package version retained; the native consumer
+resolves its own compatible dependency choices. Actual non-debug compiler/profile/build-script
+evidence confirms hot-reload cfg exclusion. Stable production Core/WGPU/Web checks pass with
+the feature requested and profiling off/on; those are compiler gates, not browser execution.
+Four workspace formatting checks, existing import/API/document/release scans, YAML/Python syntax
+and whitespace gates pass. All thirteen implementation/review threads are closed. No remote
+publication or Nara runtime/default switch is performed.
+
+Compatible panel render bodies now have an actual framework-level edit/build/apply proof.
+Arbitrary type-layout migration, custom Element phase patching, framework crates outside the
+consumer workspace, foreign native/browser execution and Nara's full Editor reconstruction/
+versioned-state workflow still need independent evidence. Continue atlas/renderer lifetime,
+remaining API/image-feature/platform reconciliation, numerical budgets, canonical docking U4-U9
+and Nara GPU/View adoption. The full fixed-target refresh and R11/R12/R11f remain open.
