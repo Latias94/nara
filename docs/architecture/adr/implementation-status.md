@@ -473,6 +473,22 @@ close. This is framework body-patch evidence; arbitrary state-layout migration a
 Nara Editor reload/recovery workflow remain unqualified. Full refresh, canonical docking,
 numerical budgets, Nara GPU/View and R11/R12/R11f stay open; no execution ADR/default changes.
 
+The [shared atlas/renderer successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-shared-atlas-ownership-and-retained-renderer-bindings)
+is implemented locally at Open-GPUI `67e1360709ca48be74bf986f116b9c004ff5bd59`, from
+`480430f02aecc3bdcf78bed8126ef6b871974770`, with November 9 qualification
+`c3d31566ffd6cc55c6f2b98e5e33810812e27262`.
+Official shared key ownership, shared headless state and WGPU preupload/separate binding/cache/
+render-core mechanisms retain concrete fork leases and complete-frame refusal. Scene recording
+is separately committed at `186deca5a46f9e5ed48614b3e631a051b305e96a`. A reproduced local
+prepared-receipt region overwrite has an owning lease correction; focused 20 and complete WGPU
+library/public 110 pass; strengthened Drop/Queue controls pass 21, components pass 2,966 and
+independent enabled/disabled consumers pass 63/48. Locked compilation, correctness Clippy,
+actual Windows Rust 1.92, stable/nightly production wasm, formatting and static gates pass.
+The preceding full framework/public/Gallery 1,934/1,935 retains the existing foreground failure
+and four interactive skips. Metal's thirteen new tests remain unexecuted on macOS. This changes
+no Nara runtime/default ADR. Remaining native/platform qualification, measured costs,
+engine adoption and full R11/R12/R11f remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

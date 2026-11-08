@@ -2003,6 +2003,24 @@ non-debug exclusion, production wasm, four formatting and existing static gates 
 Editor recovery/state-layout migration, numeric costs and foreign execution remain separate.
 All thirteen threads close; no Nara runtime, execution ADR or default changes.
 
+The [shared atlas/renderer successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-8-shared-atlas-ownership-and-retained-renderer-bindings)
+is implemented locally at Open-GPUI `67e1360709ca48be74bf986f116b9c004ff5bd59`, from
+`480430f02aecc3bdcf78bed8126ef6b871974770` against the fixed target, with November 9
+qualification `c3d31566ffd6cc55c6f2b98e5e33810812e27262`.
+Official shared key ownership, HeadlessAtlas, WGPU preupload/separate bindings/cache and shared
+rendering core replace inherited duplication. Fork exact leases and complete-frame refusal
+remain explicit adaptations. Complete Scene recording is separately committed at
+`186deca5a46f9e5ed48614b3e631a051b305e96a`. A real red-pixel regression exposes and corrects
+the local prepared-receipt/region-recycling integration gap through existing leases. Focused
+20 and complete WGPU library/public 110 pass after the production correction; strengthened
+Drop/Queue controls pass the final 21-case selection, components pass 2,966 and independent
+enabled/disabled consumers pass 63/48. Locked compilation, correctness Clippy, actual Windows
+Rust 1.92, stable/nightly production wasm, four formatting and existing static gates pass. The resumed
+framework/public/Gallery selection passes 1,934/1,935 with the same foreground-restoration
+failure and four interactive skips, before that correction. Metal source and thirteen
+unexecuted tests do not qualify macOS. Remaining image-feature/API/platform work, foreign
+execution, numerical budgets, canonical docking and Nara GPU/View remain open.
+
 The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
 Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
 ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target

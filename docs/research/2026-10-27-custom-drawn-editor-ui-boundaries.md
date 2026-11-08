@@ -3658,3 +3658,68 @@ consumer workspace, foreign native/browser execution and Nara's full Editor reco
 versioned-state workflow still need independent evidence. Continue atlas/renderer lifetime,
 remaining API/image-feature/platform reconciliation, numerical budgets, canonical docking U4-U9
 and Nara GPU/View adoption. The full fixed-target refresh and R11/R12/R11f remain open.
+
+## November 8: Shared Atlas Ownership And Retained Renderer Bindings
+
+The next maintained-framework unit starts from Open-GPUI
+`480430f02aecc3bdcf78bed8126ef6b871974770` against unchanged fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Local implementation is
+`67e1360709ca48be74bf986f116b9c004ff5bd59`, with November 9 qualification record
+`c3d31566ffd6cc55c6f2b98e5e33810812e27262`. Official
+`0ef92145ff87aab5f19f6b44c9c55a486f4f064f` supplies owned AtlasKey insertion, one
+Entry-based key/publication owner and the shared HeadlessAtlas. DirectX, Metal, WGPU,
+TestWindow and Linux headless adopt that ownership. Official WGPU
+`be8c6f9fb356dcd40a7ff06149568753e64ee171`,
+`a434bb7ee275cefa348a2bfaf27dc30280bf38f7`,
+`96e95edac45b0e0696179b8139aa521cf48db392` and
+`e91b82c106817f2419207ebf81f1da766698ac95` supply instance preupload, separate texture
+bindings, generation-aware caching, non-panicking resource lookup and shared window/headless
+rendering core. These mechanisms replace duplicated ownership and per-batch combined bindings.
+
+The fork's exact texture-instance leases, diagnostic facts and complete-frame submission rule
+remain concrete adaptations. Missing resources require fresh paint or refusal; a renderer
+cannot skip unavailable batches and publish a successful partial frame. DirectX and Metal
+preflight the complete set and draw from retained native handles. WGPU consumes frozen views
+and the existing exact instance as cache identity, with no second generation clock. Published
+regions remain protected while leased. An inherited WGPU source-admission gap, also present
+at the official target, now rejects malformed uploads before allocation and publication.
+
+Complete Scene recording is separately committed at
+`186deca5a46f9e5ed48614b3e631a051b305e96a`. Copies include clip arenas and paint journals;
+the spatial tree clears its pointer scratch. They retain the original geometry-validity scope
+without acquiring atlas leases or transferring accepted-frame/submission authority. Fourteen
+owning regressions, actual Windows Rust 1.92 Core compilation and bounded independent source
+review qualify this seam. It is drawing data, not a new Nara render-packet or GPU owner.
+
+Actual GPU regression exposes a local integration defect before closure: a prepared view-only
+receipt survives key removal but permits the official allocator to reuse its old pixel region.
+The submitted red scene reads back blue after reinsertion. The receipt now holds the existing
+complete-set texture lease alongside frozen views. Same-Queue submission orders later uploads;
+the cache retains handles without becoming region-lease authority. Focused owner/renderer
+20/20 and complete WGPU library/public 110/110 pass after the production correction. Additional
+atomic/unsubmitted-Drop and submit-before-reuse controls pass in the final focused 21/21.
+Complete components/docking/Canvas passes 2,966/2,966, and independently locked ordinary
+consumers pass 63/63 with all features and 48/48 without optional features.
+
+Earlier complete Core/public passes 1,516/1,516; ordinary independently locked disabled
+consumption passes 48/48; DirectX upload/admission passes 14/14 and the corrected native asset
+trajectory plus three WARP controls pass 4/4. The resumed complete framework/public/Gallery
+selection runs 1,935 cases with 1,934 passing and four original interactive skips. Its sole
+failure remains the previously recorded foreground-restoration test. That run precedes the
+receipt correction and cannot qualify its final source. It also does not establish the current
+desktop cause or one complete all-green native result. The initial final build stops before
+execution with disk/PDB failure; the user frees disk space before the resumed run.
+
+Final locked workspace and ordinary/test-support independent compilation, affected correctness
+Clippy, actual Windows Rust 1.92 framework/ordinary-consumer checks, stable production wasm
+profiling off/on, and the existing nightly shared-memory wasm configuration pass. Four formatting
+checks and existing import/API/document/release gates pass. The ordinary fixture's final edits
+are three formatting-only wraps; runtime code stays unchanged after the recorded acceptance.
+The review threads are closed, and publication remains local.
+
+Metal's thirteen new native tests remain unexecuted on macOS. Source review, Window-generated
+WGPU scale-two clips, actual DX/WGPU readback and CPU/backend consumers have distinct scopes.
+Foreign compilation/native execution, fractional/dynamic DPI, subpixel dual-source blending,
+WGPU replacement-Device recovery and numeric cost distributions need their owning evidence.
+Continue the separate image-feature policy and remaining API/platform reconciliation. Full refresh,
+canonical docking and Nara GPU/View adoption remain open. No runtime/default ADR changes.
