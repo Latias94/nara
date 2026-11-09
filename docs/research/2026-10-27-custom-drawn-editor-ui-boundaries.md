@@ -4241,3 +4241,88 @@ existing owners retain exact runs, source/fork differences and the next complete
 platform-tree workload. Full fixed-target closure and the real Nara GPU/Host/View consumer still
 precede the separate framework-maintenance session. Nara runtime/defaults and full R11/R12/R11f
 status remain unchanged.
+
+## November 10: Randomized Tree And Standalone Workload Qualification
+
+The implementation is Open-GPUI `b42295d0e535e4105470e80873a6ad7832e81863`, with final
+qualification at `770463485ac9aaf4150475fa84fe90c33fbd4507`. Both are local commits; no remote
+publication or CI execution occurs in this unit.
+
+The successor starts from maintained Open-GPUI
+`f6f3d98d156cd2ada88253ff4e4606a0ee50664d` against unchanged Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Official randomized-tree introduction
+`3135cdf8dc8e6800d2b7ad89d62ea4994d892fb6` and complete cached/hover/animation successor
+`26abd1c9590827ffc5cca3058ff2a94ea9a34715` supply all sixteen mutations, stable identities,
+nearest-entity notification, weak ownership, six original regressions, seventeen platform
+tree workload groups and five families. The missing official BoxShadow builders are restored.
+The model's two visibility declarations bind to the existing Accepted SubtreePresentation
+contract, retaining layout and cross-channel suppression instead of restoring the retired
+late-paint-only API. This is an explicit fork adaptation with regression evidence.
+
+Complete cached-mixed execution reproduces a fork scheduling feedback loop: synchronous App
+borrow release has already drained frame ingress, but its obsolete foreground wake triggers
+another benchmark frame and another wake. The independently reviewed correction is committed
+separately at `1756e8f79aa298900acac5c9f4b67ce915e90a85`. Successful tracked App borrows and
+active post-borrow convergence retain ordinary wake custody; dedicated unwind and bounded
+continuation paths retain their owners. A finite eight-frame animation control fails before
+the correction and passes afterward, without limiting polls or removing workload animation.
+
+The corrected focused Core/benchmark/ingress/presentation cohort passes 181/181
+(`3bad5b99-e03a-4112-9294-283ce6c1624b`). Complete Core/scheduler/WGPU/platform/Gallery library
+and public consumers pass 2,014/2,014, with one declared skip
+(`854d63ce-cea0-4231-b967-888e22b38ce6`). Dev-profile platform smoke with the existing stacker
+feature passes 115/115 cases; the independently locked ordinary benchmark passes 64/64,
+including both declared seeds, every ordinary/cached mutation, strict accepted-generation
+advancement, complete Scene equality against plain/entity-preserving fresh references, restored
+visibility and exact release. Reference windows must return activation to the persistent
+consumer so legitimate inactive throttling does not leave its restoration pending.
+
+The new rejection regression also reproduces shared mouse-state loss during a refused Hidden
+candidate. Div interaction membership now uses the existing accepted-frame publication/discard
+owner, preserving the previously presented press until an admitted frame withdraws it.
+Independent public property tests exercise the official proptest 1.12 reexport and corrected
+path expression; the prior 1.10 pin does not support that argument. Detailed initial failures,
+fixture corrections and source differences remain in Open-GPUI's existing verification record.
+
+The unchanged optimized release/non-stacker platform smoke also passes 115/115, including the
+same seed-0 tall family that overflows dev without stacker. This qualifies those sampled inputs,
+not arbitrary-depth capacity or a numerical budget. The final original eight-node/Wide native
+tree and generic-animation trajectories pass 2/2 (`ed6710a1-5507-4b18-b5af-88c4ccb7d2ca`). The
+root pixel point is selected from actual Scene geometry before readback, accounting for the
+transparent root border and native raster snapping. Accepted/Submitted/nonempty/capture
+generation, draw-time cache allowance, replay versus RootColor invalidation, public-tree-only
+RootVisibility, sibling-button clicks and complete entity/native/App/platform retirement execute.
+These are submitted-generation Scene GPU pixels, not physical input or swapchain scanout.
+
+The first complete Windows cohort passes 241/242 with nine declared skips; an unchanged focused
+rerun reproduces the Composite Focus passive-check failure. Refresh-callsite diagnostics identify
+incidental native MouseMove changing input modality after synthetic keys. The keyboard-only
+fixture now uses existing `accepts_pointer_input: false`, preserving all idle/semantic/key/focus/
+lifetime assertions, and passes 1/1. That isolated correction is committed at `515e4d77c16`;
+the failed aggregate retains its original result. A subsequent profiler aggregate exposes its
+unisolated input-free redraw phase. After the existing input/trace assertions, public pointer
+withdrawal now waits for exact observed facts before taking that baseline; this separate fixture
+correction is `36e2567b16c`. The final complete Windows cohort passes 242/242 with nine declared
+skips (`35169956-88b5-4dd5-8e9f-db02626e93b2`), retaining both original failed aggregates.
+Components/docking/Canvas pass 2,974/2,974. Ordinary independently locked enabled/disabled
+consumers pass 91/67, additive property/API consumers 6 and disabled Core/public 1,383 pass.
+
+Locked Rust 1.95 workspace and ordinary independent all-target checks, expanded correctness
+Clippy and actual Windows Rust 1.93 framework/ordinary/test-support/hot-reload checks pass.
+The final independent benchmark also observes the exact Activated ticket after reference close,
+passes all 64 cases again and passes the corresponding Rust 1.93 check. Production wasm
+profiling off/on and existing profiler-enabled nightly/shared-memory compilation pass. The first
+profiling-on command selects a nonexistent Web feature and is rejected before compilation;
+the corrected command selects Core's profiler feature. This requires no source or lock change.
+Bench-only feature graphs enable neither Core test-support nor leak-detection; only explicit
+dev smoke enables stacker. Formatting, workflow YAML, whitespace and existing rebuilt xtask
+import/API/document/release gates pass. All eighteen implementation/review/next-unit analysis
+threads close, with no remaining scoped P1/P2 or owned helper process.
+
+The next source-mapped unit is complete official asynchronous clipboard/Web paste, including
+error classification, current input-handler admission and actual browser/Windows consumers.
+Windows embedded-NUL handling and macOS pasteboard ownership retain separate missing
+dispositions. This source map adds no implementation qualification. The full fixed-target refresh, remaining platform
+workloads, canonical docking, numeric budgets and real Nara GPU/Host/View consumer remain open.
+The separate maintenance session still follows qualified framework and engine-seam evidence;
+Nara runtime/defaults and full R11/R12/R11f status do not change.

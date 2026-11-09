@@ -594,6 +594,19 @@ memory wasm and final static/format gates pass after recorded resource interrupt
 threads and owned fixture processes close. Full fixed-target refresh, actual Nara integration,
 maintenance handoff and R11/R12/R11f remain open; no runtime/default ADR changes follow.
 
+The [randomized-tree successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-randomized-tree-and-standalone-workload-qualification)
+is implemented at `b42295d0e535e4105470e80873a6ad7832e81863`, with qualification
+`770463485ac9aaf4150475fa84fe90c33fbd4507`, after `f6f3d98d156`. The complete official model, sixteen
+mutations, six regressions and seventeen platform tree groups expose a fork wake feedback loop;
+its reviewed custody correction is independently committed at `1756e8f79aa`. Corrected focused
+181, complete framework/public/Gallery 2,014, components 2,974, dev/stacker and release/non-stacker
+platform 115 each, independently locked benchmark 64, final native tree/animation 2, complete
+Windows 242, ordinary consumers 91/67, additive consumers 6 and disabled Core/public 1,383 pass.
+Locked checks, Clippy, actual Windows Rust 1.93, production wasm, feature graphs and static/format
+gates pass. Original failed runs remain recorded. All eighteen lanes close; async clipboard/Web
+paste and remaining fixed-target dispositions still precede the real engine seam. This changes no Nara
+runtime/default, engine-integration selection or full R11/R12/R11f status.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

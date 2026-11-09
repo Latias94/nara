@@ -2156,6 +2156,19 @@ Integrated engine View, complete editing, full native input, numeric cost compar
 game-runtime selection remain open; no frontend/default
 replacement follows.
 
+The November 10 [randomized-tree successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-randomized-tree-and-standalone-workload-qualification)
+preserves the complete official model, six regressions, all sixteen mutations and seventeen
+platform tree groups at Open-GPUI `b42295d0e535e4105470e80873a6ad7832e81863`, with qualification
+`770463485ac9aaf4150475fa84fe90c33fbd4507`. The separately committed fork wake correction
+`1756e8f79aa` preserves the unchanged cached-mixed workload. Focused 181, complete framework/
+public/Gallery 2,014, components 2,974, dev/stacker and release/non-stacker platform 115 each,
+independent benchmark 64, final native tree/animation 2, complete Windows 242, ordinary
+consumers 91/67, additive consumers 6 and disabled Core/public 1,383 pass. Actual Windows Rust
+1.93, locked checks, Clippy, production wasm, feature graphs and static/format gates pass;
+failures and fixture corrections retain their own records. All eighteen lanes close. Continue
+complete async clipboard/Web paste and remaining fixed-target dispositions before engine handoff.
+Nara adopts no new runtime/default or parallel lifecycle, mutation or rendering owner.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
