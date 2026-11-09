@@ -581,6 +581,19 @@ mechanisms, complete refresh, numeric budgets, canonical docking and actual Nara
 remain open before maintenance handoff. This updates evidence only, with no Nara runtime/default
 ADR change or R11/R12/R11f completion.
 
+The subsequent [Send/Fetch/queue qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-send-foreground-streaming-fetch-and-browser-queue-ownership)
+records Open-GPUI implementation `ff4b3f4b95d48410c7c1d3820e2b2a98444aacab`, qualification
+`f6f3d98d156cd2ada88253ff4e4606a0ee50664d` and separate queue prerequisite `72676731163`.
+Complete official mechanisms retain existing dispatch/admission/lifetime owners. Actual HTTP,
+8/16-worker queue and stable WebGL/WebGPU/Auto smoke pass. The original runtime/public aggregate
+remains 2,233/2,235 with two topology-related creation failures and nine skips; unchanged failed
+cases and both native Send workflows pass 4/4. Complete ordinary enabled/disabled consumers
+pass 83/67, disabled Core/public 1,351 and components/docking/Canvas 2,974 pass. Locked checks,
+correctness Clippy, actual Windows Rust 1.93 framework/three-consumer checks, production/shared-
+memory wasm and final static/format gates pass after recorded resource interruptions. All ten
+threads and owned fixture processes close. Full fixed-target refresh, actual Nara integration,
+maintenance handoff and R11/R12/R11f remain open; no runtime/default ADR changes follow.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

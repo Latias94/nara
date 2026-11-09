@@ -4159,3 +4159,85 @@ native/browser regressions; signatures or wasm compilation do not qualify those 
 Notification qualification does not complete Nara engine adoption, numeric budgets, fixed-target
 refresh or the framework-maintenance handoff. Those still precede the later separate Open-GPUI
 maintenance session; no Nara runtime/default or full R11/R12/R11f selection changes.
+
+## November 9: Send Foreground, Streaming Fetch And Browser Queue Ownership
+
+The successor starts from maintained Open-GPUI `7d2c071b9550b93654a7ac2cc19a76f49a5b7a31`
+against fixed Zed `635026fabc38440fce5e1767d125026a17b12012`. Implementation
+`ff4b3f4b95d48410c7c1d3820e2b2a98444aacab` and qualification
+`f6f3d98d156cd2ada88253ff4e4606a0ee50664d` close this scoped unit. The separate official
+std queue prerequisite is `72676731163c1da1534f7b30b984444924a3353e`. Official
+`2c2f737ab2f3db793b7a313bc8e5307f1708d2e8` supplies SendLocalExecutor,
+SendForegroundExecutor and the complete worker-to-main Fetch consumer. Handles retain the
+original scheduler/dispatch destination and accept Send futures and Send outputs, including
+Cell without a Sync requirement. The fork preserves originating counter/admission ownership
+and unchanged !Send local-task checks. Scheduler retention neither retains App/window nor
+promises that a stopped event loop resumes. Refused erased native runnables may leave their
+Task unsettled under the existing contract; no synthetic completion is introduced.
+
+The complete Fetch chain includes `b2131e9df8`, `45ae0572c4` and `b0048cde74`: main-thread
+browser calls, response streaming, bounded eight-chunk backpressure and body-drop cancellation.
+Request bodies remain buffered. Explicit credentials and client installation use the same
+originating executor. Obsolete AssertSend and full-response buffering are removed. Dispatcher
+lookup no longer stores a JS Window behind unsafe Send/Sync, and waitAsync capability is checked
+before starting workers. Ordinary standalone and existing image consumers retain public APIs.
+
+Actual browser execution exposes a missing official prerequisite,
+`5c9efb75cf73fc56f6316455983e4f04e9330860`. Two unchanged 120-second Fetch runs time out in
+the eight-worker stream after successful capability fallback. Spinning on acquisition does not
+prevent parking_lot mutex unlock/notification from waiting on the browser main thread. The
+complete official std Mutex/Condvar path replaces those primitives in existing queue/mailbox
+owners, preserving priority selection, FIFO, fork last-sender closure and queued-count custody.
+The same full HTTP workflow then passes. This is a concrete owning correction, not a new task
+queue, reduced test volume or increased timeout.
+
+Core/scheduler/macOS share exact async-task `015845a19fc31752c02367567d3b8900a406f9da`
+directly, so downstreams do not depend on a root-only Cargo patch. Its fix uses the task header's
+stored waker vtable; Zed `67b41bf97607f2dd86319b385040a1310cf24f45` selects that dependency.
+The old registry debug identity test passes locally, so it supplies no local red reproduction.
+The final worker source `0cf96c7708dfb97ccf3da50347e25edcf75d6937` has the same Rust code
+as wasm_thread 0.3.3 and current object-form JS initialization. That separate source alignment
+is not credited for the earlier timeout correction. Both dependencies retain Apache-2.0 OR MIT.
+
+The final-source actual Edge HTTP workflow passes eight requests with 32,768 ordered chunks
+each, worker and configured single-threaded control modes, six actual stream-cancel cases and
+missing-waitAsync fallback tasks. The official queue stress separately passes eight and sixteen
+workers, 524,288 items and 128 rounds each, exact-once delivery, idle/busy switching, forbidden
+main-thread wait and asynchronous joins of every worker. A reviewed driver-cleanup defect is
+corrected with owned-process-tree termination and awaited exit; Windows cleanup executes,
+while POSIX cleanup has source/in-memory-control evidence only. Separate single-MAIN Trunk
+entries avoid concurrent Cargo pipelines and preserve the original example.
+
+Before the shared queue correction, the complete scheduler suite passes 31, focused Core
+executor/profiler 162, public TestApp workflows 3 and actual Windows Send workflows 2. The
+native fixture preserves real App effects, two exact new Submitted pixel generations,
+cancellation, retirement and reconstructed refusal/Idle accounting. Two wrong fixture API
+queries are corrected before passing, without widening production APIs.
+
+| Final-source qualification | Actual result and limits |
+| --- | --- |
+| Complete scheduler/Core/WGPU/Windows/Gallery library and public cohort | 2,233/2,235 pass, with nine declared skips. Both failures refuse native window creation during pending/changed display topology, before their target interaction. |
+| Unchanged failed cases and both native Send workflows | 4/4, explicitly including the ignored GPU trajectory and exact Submitted pixels. This does not erase the original aggregate failure or establish that native topology/focus variability is repaired. |
+| Complete ordinary independently locked consumers | 83/83 with profiler and 67/67 without; the six actual Send consumers pass in both selections without GPUI test-support. |
+| Complete disabled Core/public Send and affected UI core/components/docking/Canvas | 1,351/1,351 and 2,974/2,974. |
+| Existing dependency-checker tests | 2/2 after separate `3de0388762d` matches its constant to the already declared Rust 1.93 floor. |
+| Locked compilation and lint | Rust 1.95 workspace all-target and ordinary independent all-target/all-feature checks, expanded correctness Clippy, and actual Windows Rust 1.93 framework plus ordinary/test-support/hot-reload consumer checks pass. Hot-reload checks establish no new runtime qualification. |
+| Production wasm | Stable profiling off/on, wasm correctness Clippy, independently locked stable smoke compilation and profiler-enabled nightly/shared-memory production compilation pass. |
+| Actual stable Edge smoke | WebGL, WebGPU and Auto execute input/capture/docking/activation, all 22 fixed PNG samples, high-index quads, alpha and text at 800x600 and 960x720, DPR 1. Explicit software-adapter refusal and controlled Auto fallback pass. App counters are not submission receipts. |
+
+An initial independent compilation stops with disk-full error 112 before execution. After capacity
+recovers the complete consumer/compiler matrix above passes. Later cache-path loss interrupts
+Trunk packaging with Windows error 3 before stable-browser execution; rebuilding the existing
+tool and rerunning the unchanged smoke passes. Existing lock packages keep their versions and
+metadata; only the recorded task/worker sources and Web channel edge change. Root, independent
+and Web-fixture formatting, both Node syntax checks, workflow YAML and existing import/API/doc/
+release checks pass. No remote publication or CI execution occurs.
+
+All ten implementation/review/analysis threads, both HTTP/queue fixture servers and the stable
+smoke browser/server close. The HTTP single-threaded controls explicitly disable workers within
+the shared-memory fixture, distinct from the stable smoke build. Foreign-native/POSIX execution,
+physical input/scanout, actual device loss and numerical costs remain unqualified. Open-GPUI's
+existing owners retain exact runs, source/fork differences and the next complete randomized-tree/
+platform-tree workload. Full fixed-target closure and the real Nara GPU/Host/View consumer still
+precede the separate framework-maintenance session. Nara runtime/defaults and full R11/R12/R11f
+status remain unchanged.
