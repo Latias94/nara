@@ -2190,6 +2190,22 @@ the actual foreign-host attempt fails earlier in media binding generation. Conti
 credential successor and remaining fixed-target differences; source preparation does not close
 the native gates, engine seam or R11/R12/R11f.
 
+The subsequent [credential-contract successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-credential-contracts-and-maintenance-boundary)
+implements the complete official Mac add-only/typed-error source, Windows background/native
+copying and exact Linux oo7 patch at `3f943ea373f4da87a4c8b0f7d5a84e7101874824`, with qualification
+`6613f6b0075c7df818518687f06128c7b19b1619`. The fork clipboard fixture correction remains
+separate at `510cfc5613d`. Focused Windows 10, final complete Windows 255, public enabled/
+disabled 2 each and ordinary independent 2 pass. Actual storage, exact status/Submitted/GPU
+readback and task/window/text/platform retirement execute. Locked checks, correctness Clippy,
+actual Windows Rust 1.93, independent smoke wasm and final format/static gates pass. Original
+clipboard failures and the admission-only fixture wait retain their record. Apple compilation/
+Keychain execution and Linux Secret Service termination remain open; no universal credential
+service follows. The bounded audit adds five residual public-platform mechanisms, beginning
+with runtime identity and secondary keybindings. The owner reaffirms that this continuation
+finishes the fixed refresh and first real modular Nara consumer before the separate Open-GPUI
+maintenance session; each later engine adoption qualifies an immutable framework revision.
+No runtime/default or complete R11/R12/R11f claim follows.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

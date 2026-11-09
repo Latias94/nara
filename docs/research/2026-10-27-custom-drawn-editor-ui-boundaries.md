@@ -4420,3 +4420,67 @@ The next credential source map distinguishes macOS system add-only insertion fro
 framework platforms and the separate application-provider fallback. It does not add a universal
 credential service. Full fixed-target closure, actual engine GPU/Host/View integration, numeric
 budgets, canonical docking and R11/R12/R11f remain open before maintenance handoff.
+
+## November 10: Credential Contracts And Maintenance Boundary
+
+Credential implementation is Open-GPUI `3f943ea373f4da87a4c8b0f7d5a84e7101874824`, with
+qualification and remaining-platform mapping at `6613f6b0075c7df818518687f06128c7b19b1619`.
+The fork's clipboard fixture correction is separately committed at
+`510cfc5613dd02d38d30f2497587cf6abb2995d9`. These are local commits; no remote publication or
+CI execution occurs. Fixed Zed target remains `635026fabc38440fce5e1767d125026a17b12012`.
+
+Official Apple extraction `95d35c6efddfa6dc34f99bb1873620bd74af806a`, cancellation
+`abd9b3cbd2b11292358d740b9c6ab3eae7d1ab36` and add-only
+`79fe6a645f68f8c9230578f154bf99852d9f716f` form the complete Keychain source owner. The public
+Mac package exposes independently nameable operation/status errors and validated retained
+responses. Only the macOS framework API offers add-only insertion: one SecItemAdd returns true
+on creation or false for an existing server/account without replacing its secret. Other Mac
+Platform implementations inherit an unsupported error. Cancellation is not absence, and the
+application-level read-then-write fallback remains outside the extracted framework.
+
+Windows follows `8720fd1d093963be0aeb36954c15fd1aca1b94d2` and the credential portion of
+`a0f8fa7bdbbf0269aaf5d5ebfac3ad9adfb576dd`: existing background execution, optional native fields
+and freeing native storage before error propagation. Fork namespaces, missing-item HRESULT
+handling and secret-free size validation remain. Linux selects the exact MIT oo7 Git revision
+`731c1215edb6905876c6137ab300428c7b8d7c13`, whose sole source correction maps a prompt stream
+ending before Completed to UnexpectedEof instead of a panic. The three maintained lock graphs
+change only this credential dependency closure; no unrelated package or compiler upgrade follows.
+
+The safe native thread regression fails 0/1 before the Windows fix. Corrected focused tests
+pass 10/10, final complete Windows passes 255/255 with nine existing skips, public enabled/
+disabled credentials pass 2/2 each and the independently locked ordinary consumer passes 2/2.
+Actual native storage, updates, missing reads/deletes and background thread IDs execute. Six
+status publications reach exact accepted nonempty Submitted generations with GPU text readback,
+followed by suspended-task cancellation and exact HWND/root/TextSystem/platform retirement.
+Ready stub consumers qualify owned parameters and App lifetime, not native storage.
+
+Two earlier complete runs fail in existing clipboard assertions after 252/253 passes. The
+fixture correction retains the complete normalization matrix and every public/native value,
+snapshot, restoration and Submitted assertion. A cfg(test)-only observer permits a bounded
+wait only for actual OpenClipboard acquisition failure; successful-open data failures return
+immediately to the assertions. Final focused clipboard passes 5/5, including real hidden-HWND
+contention and an observed native acquisition refusal. The failed initial NULL-window control
+and unknown external holder remain in Open-GPUI's existing verification record. Production
+clipboard admission is unchanged.
+
+Locked Rust 1.95 workspace/ordinary checks, correctness Clippy, actual Windows Rust 1.93
+backend/ordinary checks, independently locked smoke-consumer wasm, formatting/YAML and existing
+import/API/document/release gates pass. Eight research/implementation/review threads close.
+Apple compilation, the eight Keychain tests, actual storage/cancellation/competing insertion
+and Linux Secret Service termination remain unexecuted platform gates. Windows host checks
+cannot qualify their excluded code; the prior foreign-host media-binding failure still applies.
+
+The bounded public-platform audit adds five explicit missing dispositions: runtime OS identity/
+secondary keybindings, live windowing-mode switching, scoped idle-sleep prevention, restart
+arguments and App-wide native appearance override. Runtime identity is next because Web host
+detection currently does not reach Core's compile-target-based secondary parsing. Port its
+complete parsing/mapping/display/context/dispatch and fork command/component consumers; adding
+an enum alone would preserve the broken path. This list is not an exhaustive backend audit.
+
+The owner's November 10 clarification reaffirms the existing handoff order: this continuation
+finishes the fixed refresh and qualifies the first real modular Nara GPU/Host/View consumer;
+only then does a separate Codex session maintain Open-GPUI against concrete engine feedback.
+Each engine adoption records an immutable framework revision and resolved dependency graph.
+Reusable framework corrections need Open-GPUI regressions, while Nara owns its adapter,
+documents, ECS, history and Editor/game-runtime choices. This evidence update selects no new
+Nara runtime/default or second rendering/service owner. Full R11/R12/R11f remains open.

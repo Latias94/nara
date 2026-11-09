@@ -624,6 +624,20 @@ Windows compiler-floor/static checks. Actual Mac compilation and twelve tests re
 the foreign-host media build failure. The credential successor, remaining fixed-target closure
 and real Nara seam still precede maintenance handoff; no runtime/default or R11 completion follows.
 
+The [credential-contract successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-credential-contracts-and-maintenance-boundary)
+is implemented at `3f943ea373f4da87a4c8b0f7d5a84e7101874824`, qualified at
+`6613f6b0075c7df818518687f06128c7b19b1619`, after separate clipboard fixture correction
+`510cfc5613d`. Official Mac add-only/typed errors, Windows background/native copying and the
+exact Linux dependency patch retain their existing owners. Focused Windows 10, complete Windows
+255, public enabled/disabled 2 each and ordinary independent 2 pass, with actual storage,
+Submitted status/readback and exact task/window/text/platform retirement. Locked/compiler/
+Clippy/wasm/static checks pass; earlier clipboard failures remain recorded. Apple native and
+Linux Secret Service gates remain open. Eight lanes close. The bounded public audit adds five
+explicit residual mechanisms, beginning with runtime identity/secondary keybindings. Fixed
+refresh and the first real Nara integration still precede a separate maintenance session;
+Nara adopts each later framework revision through its own affected consumer qualification.
+No runtime/default, extra credential/GPU owner or R11/R12/R11f completion follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
