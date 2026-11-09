@@ -566,6 +566,21 @@ remain queued. Full refresh, numeric budgets, foreign execution, canonical docki
 GPU/Host/View and complete Editor/game-runtime choice remain open. This changes no Nara
 runtime/default ADR and does not close R11/R12/R11f or framework-maintenance handoff.
 
+The [system-notification qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-system-notifications-and-framework-response-ownership)
+records Open-GPUI implementation `26639a9715aff09ffbc61b92af45014728f02f94` and evidence
+`7d2c071b9550b93654a7ac2cc19a76f49a5b7a31`. Complete official Core/native/example behavior
+uses existing ordered App updates, lazy registration and Windows native retirement. Corrected
+Core/public 12, actual Windows notification controls 11 including Submitted pixels/retirement,
+complete framework/public/Gallery 2,194 with eight existing skips, ordinary enabled 77 and
+disabled notification 3, and disabled Core/public notification 12 pass. Locked checks, expanded
+correctness Clippy, actual Windows Rust 1.93 framework/consumer checks, production/shared-memory/
+independent-smoke wasm, formatting and existing static gates pass. All eight current lanes close
+without remaining scoped P1/P2. Synthetic activation does not qualify actual OS delivery;
+foreign native bodies remain source-only. Sendable foreground/Web Fetch and other queued
+mechanisms, complete refresh, numeric budgets, canonical docking and actual Nara GPU/Host/View
+remain open before maintenance handoff. This updates evidence only, with no Nara runtime/default
+ADR change or R11/R12/R11f completion.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

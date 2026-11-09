@@ -4097,3 +4097,65 @@ The scoped Spring unit is complete. Full refresh, notifications and the recorded
 inventory, measured costs and actual engine integration remain open. Open-GPUI maintenance
 handoff still requires the qualified fixed-target baseline and a real Nara GPU/Host/View
 consumer; no Nara runtime/default selection or full R11/R12/R11f completion follows.
+
+## November 9: System Notifications And Framework Response Ownership
+
+The successor to maintained Open-GPUI `b14967342f2665c1c23d1c6a41d24108cf0fc62d` imports
+the complete notification mechanism from fixed Zed `635026fabc38440fce5e1767d125026a17b12012`,
+introduced by `de827bce2ff1cbb40040bea0ef57c8ac56afd726`. Core values, App/Platform identity,
+show/dismiss/response APIs, TestPlatform observations and the ordinary example accompany all
+three native transports. The native modules are unchanged between introduction and fixed
+target; final wiring and test gating use the target source.
+The implementation is local Open-GPUI `26639a9715aff09ffbc61b92af45014728f02f94`, with
+qualification `7d2c071b9550b93654a7ac2cc19a76f49a5b7a31`. Open-GPUI's existing
+`docs/verification.md#system-notifications-and-ordered-app-responses` owns the detailed record.
+
+Responses use the fork's existing non-coalescing ordered native App ingress, complete update
+transaction and generation-aware handler checkout. Weak platform wrappers install only when a
+user registers a handler, preserving lazy macOS initialization and authorization. Windows
+response tasks, queued messages and WinRT resources retire through existing native finalization.
+No Nara document/history/ECS owner, notification broker or second scheduler enters the framework.
+
+The initial focused cohort passes 18/19; its terminal test incorrectly uses recoverable shutdown
+instead of native quit. Correcting that fixture preserves the production lifecycle contract.
+Independent review reproduces a new simulation-helper borrow failure before correction: running
+the whole foreground queue inside an active App update can execute another App-borrowing task.
+The helper now queues without pumping while App is borrowed. Corrected Core/public workflows
+pass 12/12, retaining all four official cases and exact order, effects, reconstruction and release.
+
+All eleven Windows notification controls pass. An actual Application/WindowsWindow consumer
+routes synthetic body/action responses through the App wrapper and weak entity, observes notify
+and deferred effects, and requires newer matching nonempty Submitted generations and exact GPU
+pixels. Retirement and weak App/callback/native resource release remain exact. This is native
+UI integration evidence; the notification activation itself is synthetic and proves neither
+actual OS delivery nor a physical click. Backend and consumer reviews find no remaining scoped
+P1/P2. All seven implementation/review lanes and the additional next-unit analysis lane are closed.
+
+Linux retains caller/transport action-ID separation, no same-tag replacement and no-op dismiss.
+macOS requires a real bundle and authorization; Web inherits unsupported best-effort no-op
+behavior. Those foreign native execution and actual OS notification scopes remain unqualified.
+Required notification dependencies add ten packages per root/ordinary/smoke lock graph without
+changing existing versions. The complete affected Core/WGPU/Windows/Gallery library and public
+integrations pass 2,194/2,194 with eight existing declared skips. Ordinary independently locked
+consumers pass 77/77 with profiler enabled; the notification target passes 3/3 without optional
+features. Core/public notification workflows also pass 12/12 without profiler. These focused
+disabled-feature results do not establish a full disabled-framework run. This unit does not
+rerun the earlier 2,974 component/docking/Canvas cohort because their production code is unchanged.
+
+Locked Rust 1.95 workspace all-target and independent all-target/all-feature checks pass.
+Expanded correctness Clippy and actual Windows Rust 1.93 framework/consumer checks pass.
+Stable production wasm profiler off/on, the existing nightly shared-memory configuration and
+the independently locked wasm smoke example compile successfully. Compilation does not supply
+browser notification support, and Windows-hosted checks do not compile the target-specific
+Linux/macOS bodies. Root and independent formatting pass after one assertion's formatting
+correction; existing import/API/document/release checks and workflow YAML parsing pass.
+The historical foreground case passes unchanged without establishing a repair of its earlier
+variability. No remote publication or CI execution occurs.
+
+The next selected complete official unit is sendable foreground submission with its Web Fetch
+consumer, retaining existing scheduler/admission/profiler ownership. The framework's existing
+plan records worker-to-main routing, streaming/backpressure/cancellation and their required
+native/browser regressions; signatures or wasm compilation do not qualify those workflows.
+Notification qualification does not complete Nara engine adoption, numeric budgets, fixed-target
+refresh or the framework-maintenance handoff. Those still precede the later separate Open-GPUI
+maintenance session; no Nara runtime/default or full R11/R12/R11f selection changes.

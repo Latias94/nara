@@ -2119,6 +2119,23 @@ source-confirmed gesture, randomized-tree, sendable-executor, async-clipboard an
 successors in the maintained framework's existing queue. This does not close full fixed-target
 refresh or the separately qualified GPU/Host/View consumer required before maintenance handoff.
 
+The November 9 [system-notification successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-system-notifications-and-framework-response-ownership)
+is implemented at Open-GPUI `26639a9715aff09ffbc61b92af45014728f02f94`, with qualification
+`7d2c071b9550b93654a7ac2cc19a76f49a5b7a31`. Complete official values, App/Platform APIs,
+TestPlatform observations, native transports and the ordinary example retain platform limits.
+Responses reuse ordered App updates and handler replacement; native Windows retirement and
+lazy initialization keep their existing owners. A reproduced helper borrow failure is corrected
+without changing recoverable shutdown. Corrected Core/public 12, Windows 11 including actual
+Submitted pixels and retirement, complete framework/public/Gallery 2,194 with eight existing
+skips, ordinary independent enabled 77 and disabled notification 3, and disabled Core/public
+notification 12 pass. Locked checks, expanded correctness Clippy, actual Windows Rust 1.93,
+production/shared-memory/independent-smoke wasm, formatting and static gates pass; all eight
+current lanes close. Actual notification activation is synthetic; OS delivery and foreign native
+execution remain unqualified. The next complete unit is sendable foreground submission with
+the official Web Fetch consumer and streaming/backpressure/cancellation prerequisites. Full
+fixed-target refresh and the real engine seam still precede the later maintenance-session
+handoff; no Nara runtime/default, numeric-budget or R11/R12/R11f completion follows.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
