@@ -550,6 +550,22 @@ encoding/submission, native renderer and retained-image gaps await the real Nara
 consumer. This changes no Nara runtime/default ADR and does not close R11/R12/R11f or the later
 framework-maintenance handoff.
 
+The [Spring/motion qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-stateful-spring-and-shared-domain-sampling)
+records Open-GPUI `ecbbfa361ae4489b2de4121c5f0ca8b2a1d7aebb` and qualification
+`b14967342f2665c1c23d1c6a41d24108cf0fc62d`. Complete official typed targets,
+playback and Element-ID state share one pure solver with existing domain motion; duplicate
+physics is removed. App reduced motion is an adapter floor, with source preferences unchanged.
+Reproduced numeric/translated-position and refused-candidate failures justify bounded fork
+corrections. Complete framework/components pass 2,171/2,974 at their earlier checkpoint;
+final motion 94, affected public/domain 43, actual native Spring 1, disabled Core/public 1,340
+and independently locked Spring 6/6 in each profiler selection pass. Broader ordinary consumers
+pass 74/58 at their recorded checkpoint. Locked checks, expanded correctness Clippy, actual
+Windows Rust 1.93, production/shared-memory wasm, doctests, formatting and static gates pass;
+all thirteen lanes close. Source-confirmed notifications and five further Core successors
+remain queued. Full refresh, numeric budgets, foreign execution, canonical docking, actual Nara
+GPU/Host/View and complete Editor/game-runtime choice remain open. This changes no Nara
+runtime/default ADR and does not close R11/R12/R11f or framework-maintenance handoff.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

@@ -4007,3 +4007,93 @@ official reset-on-cancel and domain overshoot clamps require explicit migration;
 metadata is not measured physics. Existing component retarget paths do not universally preserve
 velocity. App reduced motion is an adapter policy floor. This is source-backed successor design,
 not an implemented Spring API or a game-simulation time/determinism contract.
+
+## November 9: Stateful Spring And Shared Domain Sampling
+
+The successor to maintained Open-GPUI `af682e37f36f8fc5de575ef485c1d247509a9d22` implements
+the complete Spring mechanism at fixed Zed `635026fabc38440fce5e1767d125026a17b12012`.
+Official introduction `8b1497dbd22fb06f5838a7c0b84a1e54fafa71bc` and executor correction
+`99e70ee4a02d8dcf1b72f487f81aaf0d3be74f76` retain typed/custom targets, interpolation,
+playback, first-mount defaults and Element-ID continuity. The local implementation is
+`ecbbfa361ae4489b2de4121c5f0ca8b2a1d7aebb`, with qualification record
+`b14967342f2665c1c23d1c6a41d24108cf0fc62d`. The maintained framework's
+`docs/verification.md#official-spring-and-shared-domain-sampling` owns exact red runs, corrected
+source checkpoints and final qualification.
+
+Open-GPUI ADR0018 now refines ADR0016/0017: the existing renderer-neutral motion crate owns one
+pure solver, and GPUI reexports the exact same configuration/state types while owning the full
+element API. The duplicate domain damping formulas and independent rest-speed threshold are
+removed. `MotionSpringOptions` separates the official configuration and positional epsilon from
+policy hints. Domain cancellation freezing a sample and normalized progress clipping remain
+distinct from official Cancelled restoring the initial value and raw overshooting phases.
+
+Executed regressions justify concrete fork adaptations:
+
+- Common scaling of finite valid physical parameters underflows/overflows the official f32
+  canonical intermediate. Three red tests expose infinity, Duration::MAX and NaN. Canonical
+  conversion now uses f64 intermediates without clamping parameters or changing the remaining
+  official formulas. The corrected motion suite passes 92/92, including all eight official math
+  cases. That checkpoint retains f32 subsequent arithmetic; the later position correction is
+  recorded separately below. Arbitrary-range safety and bitwise parity are not claimed.
+- The fork's rejected candidate could retain a newly requested target or playback in mutable
+  element state. Four red owner cases expose retarget, Completed, Cancelled and paint-unwind
+  trajectory pollution. A Spring-local candidate sample now publishes through the existing
+  accepted-frame transaction; the accepted retry uses elapsed time under the last accepted
+  state. Frame demand commits with the sample. A static direct-draw regression preserves use
+  outside a rendered view without requiring an animation callback.
+- The independently locked consumer exposes a conservative settling-time boundary at a
+  translated target: a nominal tolerance of 0.001 at -4 rounds the sampled position outside
+  that tolerance. An owning red regression precedes an inward representable-endpoint envelope
+  correction. Independent rereview reproduces a second cancellation boundary: target translation
+  rounds before two opposing position contributions cancel. Fixed-target position accumulation
+  now uses f64 before final f32 conversion. Propagator, decay formulas, velocity, ramp and
+  `is_settled` retain their official paths. The complete final motion cohort passes 94/94;
+  subsequent public/domain/native verification records the final arithmetic separately from
+  earlier complete cohorts. Very small tolerances relative to target spacing may conservatively
+  wait for a zero envelope; no arbitrary-range numerical or performance guarantee follows.
+
+The focused Core/public cohort passes 50/50, preserving all six official element cases plus
+typed targets, cache/identity/playback/reconstruction and exact CPU Scene/resource release.
+The corrected domain-focused cohort passes 31/31. New fixture corrections account for Dock
+content borders, constrained Splitter fractions/device-scale rounding and real prepaint
+scheduling; production geometry and frame admission remain unchanged. App reduced motion is
+an adapter floor for Splitter/list/docking/bring-into-view and finishes active motion without
+rewriting domain preferences. Their existing wall-clock implementation has not become a shared
+deterministic component clock.
+
+The final actual Windows Spring trajectory passes 1/1 with newer nonempty Submitted generations,
+matching source/paint observations and exact-generation GPU pixels. It covers velocity carry
+and reversal, paused versus stopped state, playback endpoints, reduced-motion/restoration,
+logical focus and native input callbacks, and active-close exact retirement/release. Bounded
+fresh-epoch retries apply only to missed transient phases; failed source/generation/pixel or
+lifecycle assertions never count as a successful retry. This is native correctness evidence,
+not physical foreground, display latency or numeric cost qualification.
+
+| Qualification | Actual result and source scope |
+| --- | --- |
+| Motion solver/domain contract and doctests | Final 94/94 and 3/3, preserving all eight official pure-math cases and both translated/cancelling-position regressions. |
+| Complete framework/public/Gallery and UI core/components/docking/Canvas | 2,171/2,171 with eight declared skips, and 2,974/2,974 without skips, before the final duration/position arithmetic corrections. |
+| Final affected public/element/candidate/domain paths | 43/43 after both numeric corrections, preserving all six official element cases and actual rejected/unwinding candidates. |
+| Final actual Windows Spring | 1/1 after numeric corrections, retaining source/generation/pixel/input/playback and exact retirement/release assertions. |
+| Ordinary independently locked consumers | Broader enabled/disabled selections pass 74/58 before the final position correction; final affected Spring selections pass 6/6 each with profiler on/off. Actual value/builder tests remain distinct from explicitly unexecuted signature closures. |
+| Final profiling-disabled complete Core library and public Spring | 1,340/1,340 without skips, including the final arithmetic, generic-animation owners and CPU Scene/lifetime workflows. |
+
+Locked Rust 1.95 workspace all-target and independently locked all-target/all-feature checks
+pass. Expanded correctness Clippy includes motion, UI core, components and docking; one
+preexisting reversed-range test literal is made explicit without changing its data or assertion,
+then its owning test passes. Actual Windows Rust 1.93 framework/consumer checks, stable
+production wasm profiling off/on, existing nightly shared-memory production compilation,
+formatting, doctests and existing static/YAML gates pass. All thirteen implementation/review/
+inventory lanes close without remaining scoped P1/P2. This introduces no dependency or
+compiler-floor change and performs no remote publication or CI execution.
+
+A separate bounded fixed-target source pass confirms notifications as the next complete unit
+and records five additional successors in Open-GPUI's existing owner plan: gesture recognition
+and axis locking, randomized element-tree/full-render equivalence, sendable foreground
+submission, asynchronous clipboard/errors, and atomic credential insertion/Apple error
+semantics. They remain source-confirmed queued work, not completed API parity. UI animation
+samples do not change Nara simulation, document/history, input admission or GPU Host ownership.
+The scoped Spring unit is complete. Full refresh, notifications and the recorded residual
+inventory, measured costs and actual engine integration remain open. Open-GPUI maintenance
+handoff still requires the qualified fixed-target baseline and a real Nara GPU/Host/View
+consumer; no Nara runtime/default selection or full R11/R12/R11f completion follows.

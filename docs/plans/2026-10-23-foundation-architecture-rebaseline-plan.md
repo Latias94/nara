@@ -2101,6 +2101,24 @@ record-versus-submit, concrete Windows renderer attachment and retained GPU-imag
 actual integration work. No complete-refresh, numerical-cost or Nara GPU/View/default claim
 follows; the maintenance handoff requires its separately qualified engine consumer.
 
+The November 9 [Spring/motion successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-stateful-spring-and-shared-domain-sampling)
+is implemented at Open-GPUI `ecbbfa361ae4489b2de4121c5f0ca8b2a1d7aebb`, with qualification
+`b14967342f2665c1c23d1c6a41d24108cf0fc62d`. Complete official
+targets/playback/Element-ID lifecycle use one pure solver in the existing motion crate;
+duplicate domain physics is removed and App reduced motion finishes active domain transitions
+without rewriting preferences. Executed fork numeric/candidate defects justify explicit local
+adaptations, preserving official decay/velocity/ramp paths and existing accepted-frame custody.
+Complete framework/components pass 2,171/2,974 at the recorded earlier checkpoint; final motion
+94, affected public/domain 43, actual native Spring 1, disabled Core/public 1,340 and independent
+Spring 6/6 in each profiler selection pass after final arithmetic corrections. Broader ordinary
+consumer selections pass 74/58 at their recorded checkpoint. Locked checks, expanded correctness
+Clippy, actual Windows Rust 1.93, production/shared-memory wasm, doctests, formatting and static
+gates pass; all thirteen lanes close. No numeric cost, arbitrary-range accuracy, foreign Spring
+execution or engine-default claim follows. System notifications remain next, followed by the
+source-confirmed gesture, randomized-tree, sendable-executor, async-clipboard and atomic-credential
+successors in the maintained framework's existing queue. This does not close full fixed-target
+refresh or the separately qualified GPU/Host/View consumer required before maintenance handoff.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.
