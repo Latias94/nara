@@ -1425,6 +1425,21 @@ concrete consumer, source and verification basis for retained differences; unimp
 official mechanisms stay queued. Open-GPUI's maintenance skill records this rule at local
 commit `bf3e0d2f7c6` without selecting a Nara toolkit default.
 
+The November 9 owner clarification keeps this continuation responsible for completing the fixed
+upstream refresh and assessing a concrete modular engine-integration seam before a separate
+Codex session maintains Open-GPUI. Framework provenance, retained differences, dependency/compiler
+requirements and repeatable qualification stay in Open-GPUI's existing owners; Nara records the
+consumed revision, its adapter and complete product evidence. The later maintenance session
+receives actual engine feedback and adds reusable fixes with framework regressions. Engine
+document/ECS/history and GPU authority stay in Nara. Handoff requires the qualified revision,
+remaining dispositions, reproducible standalone-consumer commands and the engine seam's actual
+results and limits. Each integration checkpoint records the immutable consumed framework revision
+and dependency graph; later framework maintenance requires affected consumer qualification before
+Nara adopts it. Source review and passing framework tests do not supply the real engine
+View, Editor replacement or game-runtime selection required below.
+After fixed-target closure and the first qualified engine-seam consumer, framework maintenance
+moves to its dedicated session while the remaining Nara Editor/game-runtime work continues here.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the

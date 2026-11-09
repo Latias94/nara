@@ -528,6 +528,15 @@ explicit. Source-confirmed animation/clock, spring and notification successors a
 this is not complete residual parity or engine adoption. Nara runtime/default ADRs are unchanged;
 canonical docking, actual GPU/Host/View, Editor/game-runtime selection and R11/R12/R11f remain open.
 
+The November 9 [maintenance-boundary clarification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-generic-animation-and-framework-maintenance-boundary)
+keeps the current continuation responsible for fixed-target refresh and modular engine-integration
+assessment before an independent Codex session maintains Open-GPUI from actual Nara feedback.
+Immutable consumed revisions, framework regressions and complete engine-consumer qualification
+connect the repositories; product document/ECS/history and GPU authority stay in Nara.
+This records delivery ownership, not a new runtime/default decision or completed handoff.
+The Spring successor's shared-solver direction is source analysis awaiting its owning Open-GPUI
+ADR reconciliation and implementation.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

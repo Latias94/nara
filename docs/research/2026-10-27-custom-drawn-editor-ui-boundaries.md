@@ -3921,3 +3921,69 @@ inventory. Continue animation scheduling before spring, with notifications as an
 unit. Draw-duration readouts establish neither compositor latency nor numerical overhead/budgets.
 Full fixed-target refresh, remaining platform/API closure, canonical docking, actual Nara
 GPU/Host/View adoption and complete Editor/game-runtime selection keep R11/R12/R11f open.
+
+## November 9: Generic Animation And Framework Maintenance Boundary
+
+The successor to Open-GPUI `968f836f48a097ef49e692c62f5d1734c657bb75` reconciles the complete
+official non-Spring animation mechanism against fixed Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Official `d06ebb7c03`, `4ed3738c40`,
+`dd04a229dd` and `99e70ee4a0` supply App reduced motion, shared-phase repeats, per-animation
+frame limits and executor time. ParentElement composition, chained static endpoints, image
+policy and long-uptime modulo semantics remain part of that mechanism. Final qualification is
+in progress in Open-GPUI's existing `docs/verification.md#generic-animation-controls-and-clock`.
+
+The retained fork adaptations have concrete owners. Timer notifications wait through App borrows
+and clear their pending flag inside the admitted closure before notifying. Invalid or
+unrepresentable FPS intervals fall back to normal frame scheduling. A reproduced first-mount
+refusal exposes a detached timer retaining rejected state and notifying an accepted replacement;
+the timer now holds only a weak reference to its exact animation state. This preserves accepted
+state and its original deadline through refusal without adding another scheduler.
+
+The owner's maintenance clarification keeps this continuation responsible for the fixed-target
+refresh and modular engine-integration assessment before a separate Codex session maintains
+Open-GPUI from concrete engine feedback. The existing
+[R11a comparison](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#maintained-open-gpui-comparison)
+owns the product acceptance. Each integration checkpoint records an immutable framework revision
+and dependency graph; later framework changes require affected Nara consumer qualification.
+
+| Owner | Maintained responsibility and evidence boundary |
+| --- | --- |
+| Open-GPUI | Complete official UI behavior, reusable fork additions, platform/render seams, ordinary standalone consumers, upstream/fork provenance and focused regressions for reusable engine-driven fixes. |
+| Nara | Engine adapter and existing GPU/Host custody, document/ECS/history, complete editing and native View workflows, and the actual Editor/game-runtime choice. |
+| Integration checkpoint | Matched dependency source/type identity, changing engine output beneath clipped/overlapping UI, exact input/presentation, resize/refusal and resource retirement, plus recorded measured costs and limits. |
+
+The existing standalone/WGPU tests do not qualify a Nara engine View. Nara still selects registry
+WGPU while the maintained renderer selects the fixed upstream Git source; matching version numbers
+do not make their Device/Queue types identical. Evaluate the real shared-device/render-service
+adapter through the existing owners, without steady-state CPU readback or a second GPU authority.
+An actual consumer in Nara and an isolated reusable regression in Open-GPUI form the feedback
+boundary; no cross-repository synchronization framework is required.
+
+A bounded November 9 source check at the unchanged Open-GPUI renderer revision
+`968f836f48a097ef49e692c62f5d1734c657bb75` makes that assessment concrete:
+
+| Inspected owner | Current source fact | Required integration experiment |
+| --- | --- | --- |
+| `crates/gpui_wgpu/src/wgpu_context.rs` | Public Arc Device/Queue fields do not supply external-device construction. `from_adapter_and_device` is private, wraps owned values and installs device-wide loss/error callbacks. | Admit the engine's captured device requirements and error/loss observation without creating another device or replacing its owner's callbacks. Public fields alone do not establish this contract. |
+| `crates/gpui_wgpu/src/wgpu_renderer.rs` | Private `record_frame` creates an encoder and calls Queue submit; ordinary draw also owns surface/presentation work. | Separate reusable scene recording from native acquire/submit/present so the engine's existing Host can account for the complete native prefix and physical retirement. Keep standalone GPUI drawing usable. |
+| `crates/gpui_windows/src/window.rs` | WindowsWindowInner owns a concrete `RefCell<DirectXRenderer>` and constructs it from DirectXDevices. | Qualify a reusable renderer attachment/factory boundary through the same window/input/retirement owner; selecting the WGPU package does not currently replace this native renderer. |
+| [Nara native composition](../guides/render-image-outputs.md#native-window-composition) | `with_device` exposes the original borrowed device scope without independent submission; `present_window` owns acquisition, submission and receipts. Nara already installs its original device-loss callback. | Reuse those authorities and exact retained-image displays. A shared Rust WGPU source is necessary but does not by itself integrate encoding, loss, input geometry or completion. |
+
+These are source-confirmed adapter gaps and proposed experiments, not a new universal renderer
+interface or executed engine integration. The existing renderer skips Surface primitives on its
+WGPU path; the real engine-View consumer must also prove retained GPU-image sampling through its
+selected concrete seam, with clipping, alpha/color and exact image/resource custody.
+
+The bounded Spring successor analysis preserves the complete official typed targets, playback
+and Element-ID lifecycle in GPUI. The existing dependency on renderer-neutral motion permits one
+official pure Spring solver in that crate, with the same types exposed through GPUI, replacing
+the fork's duplicate formulas. Splitter, keyed list-indicator, docking projection and
+bring-into-view retain their own domain state while sampling the common mathematics. One
+property has one live animation owner and all UI frame demand enters the existing Window.
+
+This direction requires reconciling Open-GPUI ADR0018 and the applicable ADR0016/0017 decisions
+before implementation. Constructor parameter order, settling thresholds, freeze-at-cancel versus
+official reset-on-cancel and domain overshoot clamps require explicit migration; fork review
+metadata is not measured physics. Existing component retarget paths do not universally preserve
+velocity. App reduced motion is an adapter policy floor. This is source-backed successor design,
+not an implemented Spring API or a game-simulation time/determinism contract.
