@@ -2051,10 +2051,25 @@ the actual shared-GPU/View consumer must resolve that and existing Host/error/su
 custody. Foreign execution, physical loss, DPI/performance, remaining framework closure,
 canonical docking and full R11/R12/R11f remain open.
 
-The complete upstream benchmark/report/debug-overlay consumer comparison remains explicit.
-Preserve official supported mechanisms and refactor fork adaptations through reusable owners;
-ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
-refresh, the remaining native focus gate, canonical docking and Nara GPU/View selection stay open.
+The [frame-time debug-overlay successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-frame-time-debug-overlay-and-remaining-core-apis)
+is implemented at Open-GPUI `73472ca230bac117f8cb417d0cd6b0c1364c980e`, with qualification
+`968f836f48a097ef49e692c62f5d1734c657bb75`. Complete official mode/history/bitmap recipes
+and six original tests reuse existing candidate/clip and accepted-draw owners. Separate fork
+resource correction `d928c5459a8ed174d1a6835abd096b3e7a996b5a` releases retained headless
+resources before exact quiescence acknowledgement, with public shutdown reentry. Final owner
+20, complete framework/public 1,970, actual native 5, components 2,966, disabled Core/public
+1,350, ordinary enabled/disabled 67/48 and additive consumers 4 pass. Native mode/reset pixels,
+typed resize, input, focus and retirement retain their original assertions after correcting
+fresh-frame observation. Locked checks, correctness Clippy, actual Windows Rust 1.93, stable/
+nightly production wasm, formatting and static gates pass. The historical foreground case
+passes unchanged this run; its variability remains unexplained. All six threads close.
+
+The bounded source pass queues official animation control/time, stateful spring integration
+and system notifications; it does not establish complete residual parity. Preserve official
+supported mechanisms and reconcile fork motion/other adaptations through reusable owners.
+Ordinary public consumers must not acquire Nara-private dependencies. Complete fixed-target
+refresh, numerical budgets, foreign execution, canonical docking, actual Nara GPU/Host/View
+and complete Editor/game-runtime selection keep R11/R12/R11f open.
 
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default

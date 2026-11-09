@@ -3852,3 +3852,72 @@ device/context loss, general DPI, numeric cost distributions, existing native fo
 restoration and canonical docking remain open. Nara's actual shared-GPU/View consumer must
 resolve dependency identity and existing Host/error/submission ownership. Complete Editor
 and game-runtime selection and full R11/R12/R11f remain open.
+
+## November 9: Frame-Time Debug Overlay And Remaining Core APIs
+
+The maintained fork continues from `7cd732eda7f8c5c80e0d08b737504f720f6fa6f5` against
+unchanged Zed `635026fabc38440fce5e1767d125026a17b12012`. Implementation
+`73472ca230bac117f8cb417d0cd6b0c1364c980e` and qualification
+`968f836f48a097ef49e692c62f5d1734c657bb75` complete the official frame-time overlay introduced
+by `07a0bd1220`. The maintained fork's `docs/verification.md#frame-time-debug-overlay` owns
+the actual runs, initial failures, corrections and scope.
+
+All final-target Hidden/Minimal/Full recipes, 1,000-sample history, current/P99/P90/max readouts,
+lifetime count, reset behavior, bitmap glyphs and six original official regressions are
+preserved. Direct Scene painting uses the existing exact viewport clips and candidate owner,
+outside cached view ranges. Completed accepted draws supply the existing profiler duration;
+refusal, unwind, idle callbacks and old-scene presentation do not create samples. Hidden mode
+retains official history. Explicit mode/reset controls refresh, while overlay painting and
+recording introduce no font, layout dependency or self-scheduling loop.
+
+The ordinary close/reconstruct consumer exposes a fork retirement-adapter gap: historical
+TestWindow diagnostic state retains configured renderer/atlas resources after exact retirement.
+Separate correction `d928c5459a8ed174d1a6835abd096b3e7a996b5a` releases them outside the
+state lock and before exact-ticket acknowledgement, preserving blocked retries. The owning
+regression reenters public App shutdown from renderer destruction before quiescence completes.
+Official shared TestWindow ownership predates the fork; the missing release belongs to the
+fork's added retirement boundary.
+
+Final affected qualification passes:
+
+| Consumer | Actual result and scope |
+| --- | --- |
+| Official and owning controls | 20/20, including all six original regressions, exact clips, full history, cached replay, refusal, unwind, idle and resource reentry. |
+| Core/WGPU/Windows library and public integrations | 1,970/1,970; four original interactive skips and the separately executed new ignored overlay case. |
+| Native overlay/profiler/frame signals/power/visibility | 5/5, including actual nonempty Submitted generations, both public GPU readbacks, mode/reset pixels, typed resize, input, focus and retirement. |
+| UI core/components/docking/Canvas | 2,966/2,966 with existing interaction and retained-state assertions. |
+| Ordinary independently locked optional features on/off | 67/67 and 48/48; three existing explicitly ignored Vulkan controls remain separate. Overlay values execute; Window signature checks are explicitly unexecuted type consumers. |
+| Profiling-disabled Core/public integrations | 1,350/1,350; no overlay module/API/per-window state. |
+| Independently locked additive test-support consumer | 4/4, including actual App/window cleanup and real benchmark contexts in this feature selection. |
+
+The new native trajectory's failed Minimal pixel rerun exposes a fixture observation gap:
+settling can advance beyond its last captured generation. Each control/reset/placement now
+snapshots the current accepted generation and requires a newer actual Submitted frame.
+All pixel and lifecycle assertions remain. Strict generation/readback assertions can still
+expose extra intervening draws as failures. The earlier foreground-restoration case passes
+unchanged in the complete run, without proving its historical variability resolved.
+
+Locked Rust 1.95 workspace and both independent-consumer checks, affected correctness Clippy,
+actual Windows Rust 1.93 framework/both-consumer all-target/all-feature checks, formatting and
+existing static/YAML gates pass. Stable production wasm passes with profiling off/on; the
+existing nightly shared-memory production configuration also compiles. This unit does not
+execute overlay pixels in a browser or on foreign native platforms. All six implementation,
+review and bounded-inventory threads close.
+
+The bounded source inventory identifies three further official Core mechanisms:
+
+- Animation controls/time: `d06ebb7c03`, `4ed3738c40`, `dd04a229dd` and `99e70ee4a0` supply
+  reduced motion, synchronized repeats, per-animation FPS limits and executor time. The fork's
+  wall-clock animation and qualified global power/cadence are not equivalent to this path.
+- Stateful spring integration: `8b1497dbd22fb06f5838a7c0b84a1e54fafa71bc` supplies typed
+  targets/playback and Element-ID state through `with_spring`. Existing fork
+  `MotionSpringPhysics`/`MotionScalarRun` need reconciliation through reusable owners.
+- System notifications: `de827bce2ff1cbb40040bea0ef57c8ac56afd726` supplies Core values,
+  App/Platform identity/show/withdraw/response and TestPlatform observation/simulation.
+  Native system-event observers are a different consumer; actual OS delivery needs its own gates.
+
+These are explicit queued source findings, not implemented behavior or an exhaustive residual
+inventory. Continue animation scheduling before spring, with notifications as an independent
+unit. Draw-duration readouts establish neither compositor latency nor numerical overhead/budgets.
+Full fixed-target refresh, remaining platform/API closure, canonical docking, actual Nara
+GPU/Host/View adoption and complete Editor/game-runtime selection keep R11/R12/R11f open.

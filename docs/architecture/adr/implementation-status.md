@@ -513,6 +513,21 @@ four-target graphs, formatting and static gates pass. Nara GPU source identity, 
 Host/View adoption, remaining framework/platform qualification, physical loss, DPI/numeric
 costs, canonical docking and full R11/R12/R11f remain open.
 
+The [frame-time debug-overlay successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-frame-time-debug-overlay-and-remaining-core-apis)
+is implemented at Open-GPUI `73472ca230bac117f8cb417d0cd6b0c1364c980e`, with qualification
+`968f836f48a097ef49e692c62f5d1734c657bb75`. Complete official bitmap/mode/history recipes
+and all six original regressions reuse existing candidate/clip and accepted-draw owners.
+Separate fork resource correction `d928c5459a8ed174d1a6835abd096b3e7a996b5a` qualifies exact
+headless quiescence and public shutdown reentry. Final focused 20, framework/public 1,970,
+actual native 5, components 2,966, disabled Core/public 1,350, ordinary enabled/disabled 67/48
+and additive consumers 4 pass. Recorded native pixel failure precedes strengthened fresh-frame
+observation without weakened assertions. Locked checks, correctness Clippy, actual Windows
+Rust 1.93, production/shared-memory wasm, formatting and static gates pass. All six threads
+close. Historical foreground variability, foreign overlay execution and numeric costs remain
+explicit. Source-confirmed animation/clock, spring and notification successors are queued;
+this is not complete residual parity or engine adoption. Nara runtime/default ADRs are unchanged;
+canonical docking, actual GPU/Host/View, Editor/game-runtime selection and R11/R12/R11f remain open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
