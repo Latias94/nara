@@ -4379,3 +4379,44 @@ remain separate source-mapped successors. Neither this prerequisite nor browser 
 selects Nara's Editor/game UI, resolves shared-device source identity or qualifies the real
 engine GPU/Host/View seam. The fixed-target closure and engine consumer still precede the
 separate framework maintenance session; full R11/R12/R11f remains open.
+
+## November 10: Desktop Clipboard Ownership And Platform Scope
+
+Windows implementation is `a7e47b311aa6a721c5dd0991c36893694db13043`, Mac source preparation is
+`fe5bb458f2ef23c0def7f8e19aa2327e404504b4`, and the Open-GPUI scope/verification record is
+`41bb30ab4f915dc996b93ecb13a6a9cb1553ec68`. All three are local commits.
+
+This successor starts from Open-GPUI `7c6b74021cdebec7e03dd558240789797bfad344`, against unchanged
+Zed `635026fabc38440fce5e1767d125026a17b12012`. Windows
+`decbf641b18f1982b3475c037e7c5c554471574f` normalizes embedded NULs before both UTF-16 encoding
+and metadata hashing. macOS `e83f1c949512bab023f2f82446ffb4b0e4173fef` includes the earlier
+`914e1c9873b6b85bfeedc5b58e8270885bdd532e` retention fix and supplies typed Retained pasteboard,
+NSString/UTType custody, Rust-owned NSData bytes and validated property-list types. The current
+Rust ClipboardItem boundary supports that complete backend migration independently of the
+window/rendering adapter. Only pasteboard-exclusive raw compatibility APIs are removed; window
+drag/drop retains its existing owner. Fork private format namespaces remain explicit.
+
+The original Windows NUL/metadata case fails 0/1 before the fix: the text truncates and metadata
+is lost. Corrected focused/native tests pass 3/3; complete Windows passes 244/244 with nine
+existing skips, public clipboard 7/7 and the independently locked ordinary consumer 5/5 pass.
+The actual Windows trajectory retains original and normalized items separately, then checks
+async snapshot, registered text delivery, accepted nonempty Submitted generations, reconstruction
+and exact retirement. External text replacement retains old private formats while stale metadata
+is refused. No common text-model normalization or new engine clipboard service is introduced.
+
+Mac source preserves all six official tests and adds six ownership/content controls, including
+creation/read autorelease-pool exit, retained Rust bytes, embedded NUL/Unicode, all UTTypes and
+invalid metadata/property lists. Independent source review finds no confirmed defect. Actual
+Windows-to-aarch64-Darwin compilation stops before this module at the existing media backend's
+missing generated bindings. Native Mac compilation and all twelve tests remain unexecuted;
+Windows host checks do not qualify cfg-excluded code. Three maintained locks add only the
+required existing bitflags edge, without dependency-version changes. Locked workspace/ordinary
+consumer checks, Windows-host correctness Clippy, actual Windows Rust 1.93 backend/consumer,
+independent browser-consumer wasm, formatting and existing import/API/doc/release checks pass.
+These host results do not qualify Mac code. All three implementation/review/mapping threads close;
+no owned Cargo/native helper remains. Nara changes only these evidence documents.
+
+The next credential source map distinguishes macOS system add-only insertion from unsupported
+framework platforms and the separate application-provider fallback. It does not add a universal
+credential service. Full fixed-target closure, actual engine GPU/Host/View integration, numeric
+budgets, canonical docking and R11/R12/R11f remain open before maintenance handoff.

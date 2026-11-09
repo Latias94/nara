@@ -614,8 +614,15 @@ qualification `7c6b74021cdebec7e03dd558240789797bfad344`. Focused 34, Windows cl
 and complete browser gates pass. Complete cohorts pass framework/public/Gallery 2,028, components 2,985,
 Windows 243, ordinary consumers 96/69 and disabled Core/public clipboard 1,379. Locked checks,
 Clippy, actual Windows Rust 1.93, production wasm and final static/format gates pass. Nine lanes close.
-Separate desktop normalization/pasteboard gaps and the real Nara integration remain open.
+The desktop successor below separates its native scopes; the real Nara integration remains open.
 No runtime/default or R11/R12/R11f completion follows.
+
+The [desktop clipboard successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-desktop-clipboard-ownership-and-platform-scope)
+separates qualified Windows `a7e47b311aa` from source-prepared Mac `fe5bb458f2e`, recorded at
+`41bb30ab4f9`. Windows 244, public clipboard 7 and independent clipboard 5 pass, together with
+Windows compiler-floor/static checks. Actual Mac compilation and twelve tests remain open after
+the foreign-host media build failure. The credential successor, remaining fixed-target closure
+and real Nara seam still precede maintenance handoff; no runtime/default or R11 completion follows.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

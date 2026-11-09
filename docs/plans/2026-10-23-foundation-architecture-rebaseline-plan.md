@@ -2181,6 +2181,15 @@ close. Windows NUL normalization and macOS typed pasteboard ownership retain the
 separate successor. This remains framework evidence before the real Nara seam and maintenance
 handoff, without a new engine service or Editor/game UI choice.
 
+The [desktop clipboard successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-desktop-clipboard-ownership-and-platform-scope)
+qualifies Windows NUL/hash normalization at `a7e47b311aa` and prepares complete typed Mac source
+at `fe5bb458f2e`, with scope record `41bb30ab4f9`. Complete Windows 244, public clipboard 7 and
+ordinary independent clipboard 5 pass; locked checks, Windows Clippy/Rust 1.93, independent wasm
+and final format/static checks pass. Mac compilation and twelve native tests remain open after
+the actual foreign-host attempt fails earlier in media binding generation. Continue the complete
+credential successor and remaining fixed-target differences; source preparation does not close
+the native gates, engine seam or R11/R12/R11f.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
