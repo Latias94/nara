@@ -607,6 +607,16 @@ gates pass. Original failed runs remain recorded. All eighteen lanes close; asyn
 paste and remaining fixed-target dispositions still precede the real engine seam. This changes no Nara
 runtime/default, engine-integration selection or full R11/R12/R11f status.
 
+The [asynchronous clipboard successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-asynchronous-clipboard-and-live-input-delivery)
+implements the official Task/error/full-item hooks and actual browser text/image paste through
+existing frame/input/lifetime owners at `5209f4e82c7cef3c095807fcf13cd16fe860b5c6`, with
+qualification `7c6b74021cdebec7e03dd558240789797bfad344`. Focused 34, Windows clipboard/pending-input 2
+and complete browser gates pass. Complete cohorts pass framework/public/Gallery 2,028, components 2,985,
+Windows 243, ordinary consumers 96/69 and disabled Core/public clipboard 1,379. Locked checks,
+Clippy, actual Windows Rust 1.93, production wasm and final static/format gates pass. Nine lanes close.
+Separate desktop normalization/pasteboard gaps and the real Nara integration remain open.
+No runtime/default or R11/R12/R11f completion follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

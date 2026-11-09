@@ -2169,6 +2169,18 @@ failures and fixture corrections retain their own records. All eighteen lanes cl
 complete async clipboard/Web paste and remaining fixed-target dispositions before engine handoff.
 Nara adopts no new runtime/default or parallel lifecycle, mutation or rendering owner.
 
+The subsequent [asynchronous clipboard successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-asynchronous-clipboard-and-live-input-delivery)
+implements official owned reads, complete-item input hooks and Web text/image paste through
+existing framework input and lifetime owners at `5209f4e82c7cef3c095807fcf13cd16fe860b5c6`,
+with qualification `7c6b74021cdebec7e03dd558240789797bfad344`. Focused Core/public/component 34,
+actual Windows clipboard/pending-input 2 and the complete browser gate pass; full runtime/consumer qualification
+also passes framework/public/Gallery 2,028, components 2,985, complete Windows 243, ordinary
+consumers 96/69 and disabled Core/public clipboard 1,379. Locked checks, correctness Clippy,
+actual Windows Rust 1.93, production wasm, formatting and existing static gates pass; nine lanes
+close. Windows NUL normalization and macOS typed pasteboard ownership retain their
+separate successor. This remains framework evidence before the real Nara seam and maintenance
+handoff, without a new engine service or Editor/game UI choice.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

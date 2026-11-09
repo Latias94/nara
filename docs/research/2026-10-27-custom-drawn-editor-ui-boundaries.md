@@ -4326,3 +4326,56 @@ dispositions. This source map adds no implementation qualification. The full fix
 workloads, canonical docking, numeric budgets and real Nara GPU/Host/View consumer remain open.
 The separate maintenance session still follows qualified framework and engine-seam evidence;
 Nara runtime/defaults and full R11/R12/R11f status do not change.
+
+## November 10: Asynchronous Clipboard And Live Input Delivery
+
+Implementation is Open-GPUI `5209f4e82c7cef3c095807fcf13cd16fe860b5c6`, with final
+qualification at `7c6b74021cdebec7e03dd558240789797bfad344`. Both are local commits; no remote
+publication or CI execution occurs.
+
+This successor starts from maintained Open-GPUI
+`770463485ac9aaf4150475fa84fe90c33fbd4507`, against unchanged Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Official
+`d70c45e5bb1d8b7b3926fba5a6d1c69c23bbc405` supplies owned asynchronous reads, distinct errors
+and complete-item paste. `084b5d21f67cdbe06edd2822ce34e58b3cd774f7` and
+`5d447d4223f8455db4811ed332c4ad744bb13e40` supply browser text writing, DOM paste and
+consumed-only key-default suppression. Existing listener retirement already has the required
+callback-removal owner.
+
+The official mechanism keeps synchronous Platform/App operations and adds an owned Task with a
+ready desktop snapshot. AsyncApp obtains that Task through its existing update boundary, then
+releases the App borrow before awaiting. The existing text input hooks receive the full
+ClipboardItem; default handlers project its text, while custom handlers retain images, metadata
+and entry order. No engine clipboard service, UI-specific document authority or additional
+task scheduler is introduced.
+
+Fork adaptation binds these hooks to the existing admitted handler slot, exact generation,
+native input transaction and accepted-candidate lifecycle. Browser reads start synchronously in
+the triggering stack. DOM text paste remains synchronous; image Files are captured before the
+event returns, read asynchronously and delivered through the currently focused live handler.
+Real component actions recheck editing, focus and rendered membership at completion. Default
+Web paste bindings yield to the browser DOM event, keeping explicit menu actions available.
+
+The focused Core/public/component cohort passes 34/34, and actual Windows clipboard plus
+pending-input workflows pass 2/2. The native consumer checks a Unicode/metadata snapshot against
+a later write, registered text delivery, accepted nonempty Submitted generations, reconstruction
+and exact HWND/entity/TextSystem release. The complete browser gate passes real text/PNG reads,
+trusted Ctrl-V, actual read-permission denial, text writing, cancellation and delivery-time
+replacement/retirement. Fixed handler identities, accepted-frame fences and independently checked
+PNG byte digests prevent stale or empty deliveries from passing. Explicit Promise/Blob controls
+retain their narrower scope; GPUI task cancellation is not browser-request abortion.
+
+Complete framework/public/Gallery passes 2,028/2,028 with one existing skip, affected
+components/docking/Canvas 2,985/2,985, and complete Windows 243/243 with nine existing skips.
+Ordinary independently locked enabled/disabled consumers pass 96/69; disabled Core/public
+clipboard passes 1,379/1,379. Locked Rust 1.95 workspace/independent checks, correctness Clippy,
+actual Windows Rust 1.93 framework/consumer checks, production wasm profiler off/on and existing
+nightly shared-memory compilation pass. Root/ordinary/browser formatting and existing import,
+API, document, release and YAML gates pass. All nine threads and owned helper processes close.
+Open-GPUI's existing `docs/verification.md` section
+`Asynchronous Clipboard And Web Paste` retains the actual fixture failures and corrections.
+Windows embedded-NUL normalization and macOS typed Retained/owned-NSData pasteboard migration
+remain separate source-mapped successors. Neither this prerequisite nor browser rendering
+selects Nara's Editor/game UI, resolves shared-device source identity or qualifies the real
+engine GPU/Host/View seam. The fixed-target closure and engine consumer still precede the
+separate framework maintenance session; full R11/R12/R11f remains open.
