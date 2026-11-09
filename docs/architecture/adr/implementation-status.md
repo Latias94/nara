@@ -537,6 +537,19 @@ This records delivery ownership, not a new runtime/default decision or completed
 The Spring successor's shared-solver direction is source analysis awaiting its owning Open-GPUI
 ADR reconciliation and implementation.
 
+The [generic-animation qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-generic-animation-and-framework-maintenance-boundary)
+records Open-GPUI implementation `4ed461f2b591d6e44d84abc742094740fbd607af` and evidence
+`af682e37f36f8fc5de575ef485c1d247509a9d22`. Official non-Spring scheduling/image controls
+preserve existing owners with a reproduced fork candidate-timer correction. Focused 26, final
+image 3, framework/public/Gallery 2,138 with seven declared skips, actual native 1, components
+2,966, disabled Core/public animation 1,310 and independent enabled/disabled 68/52 pass. Locked
+checks, correctness Clippy, actual Windows Rust 1.93, production/shared-memory wasm, formatting
+and static gates pass; all six lanes close. Complete Spring, notifications, final residual
+reconciliation, native foreign execution and numeric budgets remain open. Concrete device/error,
+encoding/submission, native renderer and retained-image gaps await the real Nara integration
+consumer. This changes no Nara runtime/default ADR and does not close R11/R12/R11f or the later
+framework-maintenance handoff.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

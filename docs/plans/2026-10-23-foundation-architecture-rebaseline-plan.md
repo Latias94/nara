@@ -2086,6 +2086,21 @@ Ordinary public consumers must not acquire Nara-private dependencies. Complete f
 refresh, numerical budgets, foreign execution, canonical docking, actual Nara GPU/Host/View
 and complete Editor/game-runtime selection keep R11/R12/R11f open.
 
+The [generic-animation successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-9-generic-animation-and-framework-maintenance-boundary)
+is implemented at Open-GPUI `4ed461f2b591d6e44d84abc742094740fbd607af`, with qualification
+`af682e37f36f8fc5de575ef485c1d247509a9d22`. Complete official reduced motion, shared-phase
+repeats, per-animation limits, executor clocks and parent composition retain existing owners.
+A reproduced rejected-first-mount timer uses a weak exact-state reference; original accepted
+timers and retry deadlines remain live. Final focused 26, strengthened image 3, framework/public/
+Gallery 2,138, actual native 1, components 2,966, disabled Core/public animation 1,310 and
+independent enabled/disabled 68/52 pass. Seven aggregate skips retain separate scope. Locked
+checks, correctness Clippy, actual Windows Rust 1.93, stable/nightly production wasm, formatting
+and static gates pass; all six lanes close. Spring/motion reconciliation and system notifications
+remain queued. The source-backed engine assessment identifies captured-device/error authority,
+record-versus-submit, concrete Windows renderer attachment and retained GPU-image sampling as
+actual integration work. No complete-refresh, numerical-cost or Nara GPU/View/default claim
+follows; the maintenance handoff requires its separately qualified engine consumer.
+
 Integrated engine View, complete editing, full native input, numeric cost comparison and
 game-runtime selection remain open; no frontend/default
 replacement follows.

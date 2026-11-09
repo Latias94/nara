@@ -3929,8 +3929,11 @@ official non-Spring animation mechanism against fixed Zed
 `635026fabc38440fce5e1767d125026a17b12012`. Official `d06ebb7c03`, `4ed3738c40`,
 `dd04a229dd` and `99e70ee4a0` supply App reduced motion, shared-phase repeats, per-animation
 frame limits and executor time. ParentElement composition, chained static endpoints, image
-policy and long-uptime modulo semantics remain part of that mechanism. Final qualification is
-in progress in Open-GPUI's existing `docs/verification.md#generic-animation-controls-and-clock`.
+policy and long-uptime modulo semantics remain part of that mechanism. Implementation
+`4ed461f2b591d6e44d84abc742094740fbd607af` and qualification
+`af682e37f36f8fc5de575ef485c1d247509a9d22` are local commits in the maintained development
+branch. Open-GPUI's existing `docs/verification.md#generic-animation-controls-and-clock` owns
+the full commands, red runs and source provenance.
 
 The retained fork adaptations have concrete owners. Timer notifications wait through App borrows
 and clear their pending flag inside the admitted closure before notifying. Invalid or
@@ -3938,6 +3941,23 @@ unrepresentable FPS intervals fall back to normal frame scheduling. A reproduced
 refusal exposes a detached timer retaining rejected state and notifying an accepted replacement;
 the timer now holds only a weak reference to its exact animation state. This preserves accepted
 state and its original deadline through refusal without adding another scheduler.
+
+| Qualification | Actual result and scope |
+| --- | --- |
+| Official/focused animation, image and candidate owners plus public workflows | 26/26, including all five official non-Spring tests. A first-mount refusal regression fails before the weak-state correction. |
+| Strengthened final image observers | 3/3; HTTP completion must independently redraw the Img before passive observation can see its loaded Arc. |
+| Core/WGPU/Windows/Gallery library and public integration cohort | 2,138/2,138 with seven declared skips. The historical foreground case passes unchanged without resolving its earlier variability. |
+| UI core/components/docking/Canvas | 2,966/2,966 without skips, preserving the current domain-motion consumers. |
+| Actual Windows animation trajectory | 1/1; real nonempty Submitted generations and exact-generation GPU pixels, input/focus, reduced-motion endpoints/restoration and pending-close retirement. |
+| Ordinary independently locked profiler enabled/disabled | 68/68 and 52/52 without skips. Builder/value/parent tests execute; App/Window signature closures explicitly remain unexecuted. |
+| Profiling-disabled Core library and public animation | 1,310/1,310 without skips, including final strengthened image and refusal controls. |
+
+Locked Rust 1.95 workspace all-target and independent all-target/all-feature checks, affected
+correctness Clippy and actual Windows Rust 1.93 framework/consumer checks pass. Stable production
+wasm profiling off/on and the existing nightly shared-memory production configuration compile.
+Formatting, import/API/document/release scans and workflow YAML parsing pass. All six current
+implementation/review/analysis lanes close without remaining scoped P1/P2. No remote publication,
+foreign-platform runtime, numerical FPS/overhead budget or complete refresh is qualified.
 
 The owner's maintenance clarification keeps this continuation responsible for the fixed-target
 refresh and modular engine-integration assessment before a separate Codex session maintains
