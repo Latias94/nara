@@ -651,6 +651,29 @@ close. Restart arguments and other remaining fixed-target dispositions precede t
 GPU/Host/View consumer and separate maintenance handoff. Foreign-native execution, numeric
 budgets and full R11/R12/R11f remain open; no Nara runtime/default or additional owner follows.
 
+The [restart successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-restart-arguments-and-terminal-native-exit)
+records Open-GPUI implementation `175a82b47f10b0bc2bb4b5920d54e1be5d70f977` and qualification
+`0b7024f86af0beed8fde92887eb1c1387997085c`. Complete official native argument forwarding
+uses existing platform owners; the inherited environment bug and fork queued-quit completion
+have separate corrections and actual worker/recorder evidence. Core/public 1,765, utility 127,
+ordinary all/off 105/75, disabled selected 59 and native follow-up 10 pass. Original aggregate
+failures 2,160/2,161 and 268/269 on unchanged clipboard/keyboard controls remain unresolved;
+follow-ups do not make either aggregate green. Locked Windows compiler, Clippy, wasm, fmt and
+static gates pass; nine lanes close. Remaining fixed-target mechanisms and the real Nara
+GPU/Host/View consumer still precede separate maintenance. This is scoped framework evidence,
+with no new engine dependency, default or R11/R12/R11f completion.
+
+The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
+identifies existing Nara device scopes, immutable output leases, actual composite receipts and
+producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
+lacks public external-target recording and skips its surface primitive on WGPU; its normal
+Windows text/renderer path is coupled to DirectX devices. The two WGPU sources also have distinct
+Rust identities. The plan now names these actual prerequisites and compares reusable framework
+recording with a Nara Platform adapter, retaining one GPU/submission/loop arrangement. No source
+map, embedded App lifetime, atlas test or CPU Host control qualifies a real engine View. Both
+framework closure and that consumer remain required before maintenance handoff. No new Accepted
+decision, dependency change, toolkit default or R11/R12/R11f completion follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

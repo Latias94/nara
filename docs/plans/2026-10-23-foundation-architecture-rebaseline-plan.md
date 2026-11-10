@@ -1469,6 +1469,15 @@ The executable comparison must cover:
    replaceable. Keep UI execution independent of Nara's document/World types and avoid a parallel
    device/submission/resource-lifetime authority. Evaluate the actual adapter seam before freezing
    renderer-facing public types.
+   The November 10 [source map](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
+   confirms existing WgpuRenderHost device scopes, immutable outputs, composite receipts and
+   producer-local retirement. GPUI still needs external-device/target recording without its own
+   submission or callback replacement, and ordered clipped texture leases. Its native Windows
+   renderer is fixed to DirectX; run_embedded does not supply an external loop. Nara registry
+   WGPU 30.0.1 and GPUI's fixed Git source are distinct types. Compare the reusable GPUI renderer
+   extension plus Nara adapter with a Nara-owned Platform/PlatformWindow path, resolving one
+   window/loop arrangement through the real consumer. Existing atlas and CPU Host controls do
+   not qualify this seam. The study changes no dependency graph or public runtime/default.
 4. **Complete source editing:** Hierarchy and Inspector selection, local drafts, 4096-byte text,
    composition/focus, exact command refusal/result, Undo/Redo and Save/Reopen. Existing Session
    owners remain authoritative. A parallel framework form, document or history owner cannot
@@ -2220,6 +2229,18 @@ re-render accepted scenes and retain a separate Submitted association. Foreign-n
 numeric budgets, remaining fixed-target dispositions and the actual Nara engine seam remain
 open. Continue the source-prepared restart-arguments successor before handing framework
 maintenance to its separate session; no engine default or R11/R12/R11f completion follows.
+
+The [restart successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-restart-arguments-and-terminal-native-exit)
+is implemented at Open-GPUI `175a82b47f10b0bc2bb4b5920d54e1be5d70f977`, qualified at
+`0b7024f86af0beed8fde92887eb1c1387997085c`. Official native argv/launchers retain existing
+owners; the inherited PowerShell environment defect and fork queued-Quit gap have distinct
+corrections. Core/public 1,765, utility 127, ordinary all/off 105/75, disabled selected 59 and
+native follow-up 10 pass. Keep original full failures 2,160/2,161 and Windows 268/269 on unchanged
+clipboard/keyboard controls visible despite their scoped follow-ups. Locked/compiler/Clippy/
+wasm/fmt/static gates pass. Nine lanes close. Continue the prepared scoped idle-sleep successor,
+native appearance, live windowing and native-quit/Restart Manager reconciliation before the
+real engine consumer identified in the source map. This records scoped evidence without an
+engine dependency change, UI default, complete-refresh or maintenance-handoff claim.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;

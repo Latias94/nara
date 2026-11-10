@@ -4559,3 +4559,121 @@ GPU/Host/View consumer remains required before handing ongoing Open-GPUI mainten
 separate session. Nara keeps its document/ECS/history/GPU and Editor/game-runtime choices;
 each later adoption qualifies an immutable framework revision through affected engine workflows.
 No Nara runtime/default switch or full R11/R12/R11f completion follows.
+
+## November 10: Modular GPU And Host Source Map
+
+This bounded source map uses Nara `35badad64539ab4220b2a29d83c3b501e0e2f0b3` and Open-GPUI
+`7ead5105e56b29255ece592e62fd5f2250542131`; the separately qualified restart successor leaves
+the examined WGPU renderer owners unchanged. It identifies prerequisites for the first real engine
+consumer after fixed-target closure. It is not an implementation, renderer choice or performance
+qualification.
+
+Nara already owns the required physical authority. In
+[WgpuRenderHost](../../crates/nara_render_wgpu/src/host.rs), request_device_requirements runs
+before device acquisition; with_device exposes an observed device scope without transferring
+submission ownership. create_producer, reserve/activate targets and submit produce an immutable
+[WgpuImageOutput](../../crates/nara_render_wgpu/src/output.rs). Retaining an output preserves
+that exact submission's pixels across later renders, resize and producer retirement.
+with_image borrows its actual native texture; submit_image_use keeps the output until the
+original submission prefix completes. begin_window_frame/display_image/present_window and
+WgpuWindowFrame::encode provide the existing window encoder/target and final submission owner.
+Only actual unclipped sampling permits record_image_sample and a matching composite receipt.
+retire_producer returns its frozen
+[WgpuSubmissionPrefix](../../crates/nara_render_wgpu/src/submission.rs), allowing other producers
+to continue. A generic device-drain helper does not replace that producer-local retirement.
+
+The first consumer should use the real content and observations already demonstrated by
+[content_window](../../tests/fixtures/render-composition-consumer/examples/content_window.rs),
+[editor_scene](../../tests/fixtures/stock-composition-consumer/examples/editor_scene.rs) and
+[streams_window](../../tests/fixtures/render-composition-consumer/examples/streams_window.rs).
+The [output consumer](../../tests/fixtures/render-output-consumer/tests/offscreen.rs) covers
+retained old pixels, resize, producer-local retirement and refusal/retry. Editor Scene preview
+uses take_scene_preview_candidate and
+[EditorPreviewPresentation::accept/finish](../../src/project_host/runtime/editor/presentation.rs),
+binding actual presentation and DisplayMapping2d before picking. Game View retains its candidate
+and one-shot UI sidecar through submit_for_display and the exact composite occurrence before
+completing input/presentation. The underlying EditorProjectSession input method is public, but
+EditorApplication's convenience wrapper remains pub(crate). An external frontend must use or
+correct the owning public seam rather than acquire private Editor authority.
+
+Current GPUI boundaries leave these gaps:
+
+| Owner in Open-GPUI | Confirmed capability and missing engine seam |
+| --- | --- |
+| gpui_wgpu/src/wgpu_context.rs | Native constructors select/request their own device. from_adapter_and_device is private and installs device-wide loss/error callbacks; a shared-device constructor must respect Nara's existing callback owner and actual enabled features/limits. Public Arc fields alone do not supply that contract. |
+| gpui_wgpu/src/wgpu_renderer.rs | Native WgpuRenderer owns its Surface. The private core's record_frame creates an encoder and submits it, while draw presents; the main pass fixes Clear. There is no public external-target/encoder, recording-only entry point. |
+| gpui_wgpu/src/wgpu_atlas.rs | WgpuAtlas::new already accepts application-owned Arc Device/Queue. Presentation leases and view collections remain internal; this does not import an immutable Nara output or bind its retirement prefix. |
+| gpui/src/elements/surface.rs and WGPU primitive dispatch | SurfaceSource currently carries Mac PixelBuffer, and the WGPU renderer skips PrimitiveBatch::Surfaces. A canvas or a same-named surface element does not supply ordered, clipped Nara texture sampling. |
+| gpui/src/platform.rs and gpui_windows/src/window.rs | Public Platform/PlatformWindow::draw receives the actual accepted Scene. The Windows implementation fixes DirectXRenderer/DirectXDevices, with DirectWrite coupled to those devices; no native renderer factory avoids the second GPU today. |
+
+Prefer a reusable GPUI renderer extension that records the accepted Scene against an external
+device/target while Nara retains its adapter, texture leases, submission and presentation.
+Ordinary GPUI platform ownership can remain available. An alternative Nara Platform/PlatformWindow
+adapter would retain the existing Winit loop and panel attachment, but must implement the larger
+native input/IME/scheduling/close boundary. run_embedded retains App lifetime; it does not turn
+the blocking Windows loop into an externally driven host or inject a shared renderer.
+The existing EditorPanelImageHost constructor takes Arc<winit::Window>, so it is not already
+a toolkit-neutral GPUI native-window attachment. Resolve the actual window/loop arrangement
+through the consumer before freezing a new public API.
+
+Nara still selects registry WGPU 30.0.1, while this GPUI revision selects Git
+`cddb2f5d80dc0009b2ef6767635140cacf90a007` with package version 30.0.0. Device, Queue and
+TextureView have different Rust type identities. Source/version alignment or a concrete renderer
+adapter is prerequisite work; this study changes neither lock nor graph. Both consumer paths
+must preserve Scene order/clip, color/alpha, actual input geometry, resize, refusal and device-loss
+retirement, and count copies/submissions/synchronization without steady-state CPU readback.
+Headless test renderer injection, an application-owned atlas and CPU-painted Host conformance
+remain useful controls, not the required engine View. Fixed-target closure and that real
+consumer still precede the separate maintenance session; no second GPU, document/history/ECS
+owner, engine UI default or R11/R12/R11f completion follows.
+
+## November 10: Restart Arguments And Terminal Native Exit
+
+Open-GPUI implements the scoped successor at `175a82b47f10b0bc2bb4b5920d54e1be5d70f977`,
+qualified in `0b7024f86af0beed8fde92887eb1c1387997085c`, under unchanged fixed Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. Official provenance is
+`715076597926d566d560b30b806749e1a2166080`, with Windows PowerShell corrections
+`4c6c4750d3f87f0b93c937c9bda7b50639c0d07d` and
+`bcf6582ce3500df93a8a39366640173e6786cea6`. Application configures native OsString arguments;
+restart observers precede one-shot executable/argument delivery through the existing Platform.
+Windows uses official UTF-16 quoting and static child-scoped environment transport; Mac/Linux
+use positional forwarding. Generic command-shell fallback stays separate from restart's explicit
+PowerShell requirement. The void API still distinguishes helper spawn from final-target success.
+
+Actual workers reproduce two different defects. The inherited official script leaves empty
+transport variables on PowerShell 7.6.9/.NET 10.0.14; deleting three exact Env entries after local
+capture preserves native argv and strict absence. The fork's Windows loop calls ExitProcess
+before queued App Quit delivery. Keep its loop alive until the existing terminal shutdown fence
+acknowledges completion, retaining ordered ingress, asynchronous observers, retryable HWND
+retirement and panic behavior. Remove the obsolete native-quit helper; tests that need terminal
+fencing without a platform exit use their existing precise test entry. Direct platform callback
+owners acknowledge terminal completion, with no new shutdown authority or App strong-reference
+cycle. Official Restart Manager's synchronous return contract and foreign queued-quit lifecycle
+remain separate successors.
+
+The ordinary worker starts from its build output and restarts a distinct special-character
+recorder, preserving empty/complex/unpaired-UTF-16 arguments. Exact selected-executable identity,
+transport absence, completed asynchronous quit, old-worker termination and bounded Job cleanup
+are asserted. Omitting only the fixture's selected target fails its exact identity oracle, then
+the restored final source passes. Complete Core/public 1,765 and utility 127 pass; ordinary
+all/off consumers pass 105/75, selected profiler-disabled cases 59 and final native follow-up
+10 pass. These are distinct scopes, including actual process relaunches without a deterministic
+executor. Prepared Mac/Linux command tests do not inherit Windows execution evidence.
+
+The first full aggregate remains 2,160/2,161 with ten skips because unchanged clipboard metadata
+is absent. Its unchanged clipboard follow-up passes 5/5. Complete Windows remains 268/269 with
+ten skips because the unchanged activation oracle observes keyboard messages with unknown
+physical-versus-injected origin. The unchanged activation/clipboard/returning follow-up passes
+10/10. Preserve both failed aggregates and unknown causes; subsequent passes do not explain or
+resolve them. No data assertion is weakened and no clipboard/input production policy changes.
+
+Locked Rust 1.95 workspace/ordinary all-target checks, correctness Clippy, actual Windows Rust
+1.93 affected-owner/ordinary all-feature/all-target checks, production wasm profiler off/on,
+root/consumer formatting, workflow YAML and existing import/API/document/release scans pass.
+No lock, framework production dependency or compiler-floor change follows. All nine lanes close
+and no dedicated restart helper remains. Continue scoped idle-sleep guards, native appearance,
+live windowing, native-quit completion and remaining fixed-target reconciliation. The source map
+above supplies concrete engine-seam prerequisites, not external-target recording or a real engine
+View. Framework closure and that qualified Nara GPU/Host/View consumer still precede maintenance
+handoff. Nara keeps its document/ECS/history/GPU and UI choices; no runtime/default or full
+R11/R12/R11f completion follows.
