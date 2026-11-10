@@ -2440,6 +2440,20 @@ P1/P2. Live modal focus/overwrite/timer cancellation and numeric costs remain un
 Continue remaining framework owners before the actual engine consumer and maintenance handoff;
 no Nara dependency/default, full fixed-target or R11/R12/R11f gate changes.
 
+The [native state/attention successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-native-window-state-and-attention)
+records Open-GPUI `9b671ed5148`, qualified at `62b51cf0e48`: complete official restoration,
+attention and urgency mechanisms use the current post-borrow command and native lifetime
+owners. Owned archive bytes, non-Copy commands, live noninteractive admission and native
+teardown refusal add no portable layout, placement or persistence authority. Corrected
+Core/public 25/25, actual Windows lifetime/no-op 5/5 and independent default/runtime 1/1 and
+2/2 pass. Affected host/consumer checks, host correctness Clippy, Mac all-target foreign
+correctness Clippy, Linux X11/Wayland and Web production compilation pass. Four lanes close
+without remaining P1/P2; binding/toolchain and original test failures remain recorded.
+Actual native archive/Space/attention behavior, the earlier WSLg exit failure and numeric
+costs remain open. Continue remaining framework owners before the real Nara GPU/Host/View
+consumer and maintenance handoff. No dependency/default or full fixed-target/R11/R12/R11f
+gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

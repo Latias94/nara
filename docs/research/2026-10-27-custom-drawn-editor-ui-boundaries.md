@@ -5295,3 +5295,42 @@ Actual file-picker focus/Alt+Tab, nested overwrite and automatic timer cancellat
 manual gates. Numerical costs, remaining backend/render owners and logging disposition, then
 the real Nara GPU/Host/View consumer, still precede separate framework maintenance. Nara changes
 only evidence documents; no dependency/default or full fixed-target/R11/R12/R11f gate changes.
+
+## November 11: Native Window State And Attention
+
+Open-GPUI `9b671ed5148ec8de27aab4ffa0f55971142c621d`, qualified at
+`62b51cf0e48f529fa8e378bc33b16e19fdb545df`, adopts complete official
+`33c6212b055fa8a97b17c8653311c9ccab7fb3b6`,
+`905e955a702707cd81a2e5bae9b381a7a9c7f614`,
+`50e399332c120cc67a616fd637888bffc70e7906` and
+`4d1935b8d00320841da476ec38c7b7747abf6f09`, including fixed-target follow-ups. The target
+remains Zed `635026fabc38440fce5e1767d125026a17b12012`. Mac archives retain the official
+workspace/fullscreen restrictions and version-specific restoration options. Windows requests
+one flash, Mac requests informational attention, and X11 preserves unrelated urgency hints
+and clears urgency on activation. Wayland attention and unsupported state backends keep their
+official no-op behavior.
+
+The concrete fork adaptation uses its existing post-borrow native command queue. An Arc byte
+slice owns the caller's archive, the closed command enum becomes Clone rather than Copy, and
+exact target/FIFO/close custody remains in its current owner. Live noninteractive windows may
+restore; irreversible native teardown rejects restoration, including after callback reentry.
+Queued attention uses weak native owners and validates terminal state before resolving a
+possibly reused HWND. Typed retained AppKit objects outlive native calls while state locks are
+released. Native archives remain optional OS metadata; portable layout persistence retains its
+own owner. No second restoration, placement, scheduler or document authority is introduced.
+
+Corrected Core/public controls pass 25/25, actual Windows lifetime/no-op controls 5/5, and
+independently locked default/runtime consumers 1/1 and 2/2. Existing input, activation, panic,
+first-presentation and retirement assertions remain intact. Affected host/consumer compilation,
+host correctness Clippy, selected all-target Mac foreign correctness Clippy, Linux X11/Wayland
+and Web production compilation pass. The record preserves two reviewed lifecycle defects,
+test signature/terminal corrections and Mac binding failures before their fixes. Verified Zig
+0.16.0 Darwin headers plus existing LLVM 22.1.6 provide the cross-C compression prerequisite
+without dependency or global toolchain changes. All three implementation lanes and the bounded
+independent review lane close without remaining P1/P2.
+
+Actual AppKit archive round trips, Space changes, native attention indicators and numerical
+costs remain unqualified. The earlier default WSLg exit failure is still unresolved. Remaining
+platform/render/logging reconciliation and the real Nara GPU/Host/View consumer precede
+separate framework maintenance. Nara changes only existing evidence documents; no dependency,
+UI default or full fixed-target/R11/R12/R11f gate changes follow.

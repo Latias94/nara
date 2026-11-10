@@ -819,6 +819,19 @@ focus/overwrite/timer cancellation, numeric costs, remaining framework owners an
 Nara GPU/Host/View consumer stay open before maintenance handoff. No dependency/default or
 full fixed-target/R11/R12/R11f gate changes follow.
 
+The [native state/attention successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-native-window-state-and-attention)
+records Open-GPUI `9b671ed5148`, qualified at `62b51cf0e48`: complete official restoration,
+attention and urgency use existing post-borrow and exact native lifetime owners. Owned
+archives and teardown refusal add no separate placement, portable layout or persistence
+authority. Corrected Core/public 25/25, actual Windows lifetime/no-op 5/5, independent
+default/runtime 1/1 and 2/2, affected host/consumer compilation, host correctness Clippy,
+Mac all-target foreign correctness Clippy, Linux X11/Wayland and Web production compilation
+pass. Four scoped lanes close without remaining P1/P2; original test/binding/toolchain
+failures and their corrections remain recorded. Actual native archive/Space/attention,
+the earlier WSLg exit failure, numerical costs, remaining framework owners and the real
+Nara GPU/Host/View consumer stay open before maintenance handoff. No dependency/default or
+full fixed-target/R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
