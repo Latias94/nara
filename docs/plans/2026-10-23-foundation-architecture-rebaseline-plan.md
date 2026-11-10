@@ -2344,6 +2344,18 @@ padding/hover/gesture, dependency/utility and backend/render units, then the act
 before maintenance handoff. Targeted upstream-trust verification remains in force; no full refresh,
 numeric-cost, foreign execution, engine/default or R11/R12/R11f completion follows.
 
+The [official gestures and targeted-verification successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-gestures-and-targeted-fork-verification)
+records Open-GPUI `1b0aee8b4006acc23a13294646d809297cd3b2ab`, qualified at `d1de3e380078`:
+complete official gestures/scroll/padding/hover use existing fork input and committed geometry
+owners. Final focused Core 33, portable Web 4, independent API 6 and one actual WebGL trajectory
+pass, with affected all-target compilation/correctness Clippy, locked wasm and format/static
+gates. The record distinguishes DOM observation, actual Core consumers and physical-device
+limits. Six lanes close without reviewed P1/P2. Trust unchanged official implementations and
+coverage; compile affected consumers and verify fork seams rather than repeating unrelated
+matrices. Continue remaining cursor/external-drag, utility/dependency and backend/render units,
+then the actual engine consumer before separate maintenance. This prerequisite changes no
+engine/default or full R11/R12/R11f gate.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

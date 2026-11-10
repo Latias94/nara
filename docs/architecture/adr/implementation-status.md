@@ -736,6 +736,16 @@ Scoped reviews leave no P1/P2 and all five lanes close. Remaining framework unit
 engine consumer still precede maintenance handoff. Nara has only evidence updates; no dependency,
 UI default, full refresh, numerical-cost or R11/R12/R11f gate changes.
 
+The [official gestures and targeted-verification successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-gestures-and-targeted-fork-verification)
+records Open-GPUI `1b0aee8b400`, qualified at `d1de3e380078`: official gestures/scroll/padding/
+hover retain current fork clock, terminal input and committed geometry owners. Focused Core 33,
+portable Web 4, independent API 6 and one actual WebGL trajectory pass, alongside affected
+compilation/correctness Clippy, locked wasm and format/static gates. Six lanes close without
+reviewed P1/P2. Verification trusts unchanged official coverage and targets fork seams; browser
+DOM observations, Core output and physical-device limits remain distinct. Remaining framework
+units and the real Nara GPU/Host/View consumer precede separate maintenance. Nara has only
+evidence updates; no dependency/default, full refresh or R11/R12/R11f gate changes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

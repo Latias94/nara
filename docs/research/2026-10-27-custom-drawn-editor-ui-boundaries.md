@@ -5016,3 +5016,42 @@ supporting dependencies/utilities and backend/render units stay queued before th
 GPU/Host/View consumer and separate maintenance handoff. Nara changes only evidence documents;
 no dependency, renderer, loop, UI default or whole R11/R12/R11f gate changes. Numerical costs,
 foreign execution and full fixed-target closure remain unqualified.
+
+## November 10: Official Gestures And Targeted Fork Verification
+
+Open-GPUI `1b0aee8b4006acc23a13294646d809297cd3b2ab`, qualified by
+`d1de3e3800784b28bbab2ae8dcf0e1192ec2f3ff`, adopts complete official portable touch recognition,
+scroll sources, long-press/drag listeners, prediction/momentum, snapped padding and hover-listener
+policy from fixed Zed target `635026fabc38440fce5e1767d125026a17b12012`. Canonical ScrollEvent
+and PlatformInput::Scroll retain the exact official deprecated ScrollWheelEvent alias. Selected
+backend producers and ordinary component/Canvas/Gallery consumers use the canonical event types.
+
+The fork adapts these mechanisms through its existing executor clock, input transactions,
+persistent interceptors, admitted listeners and committed geometry. Keyboard quiescence now
+settles pending touch cancellation; direct cancellation cannot reenter ordinary input. Window
+deactivation completes mouse cleanup even if a touch observer panics. Reentrant native touch
+cancellation retains the original callback generation and Window ingress order without acquiring
+unrelated mouse-capture authority. The official handler element-bounds query uses the current
+committed transform and existing handler lease. No new input, lifecycle, renderer or IME owner
+is introduced.
+
+Final focused Core passes 33/33, portable Web state/interaction passes 4/4 and the independently
+locked ordinary API consumer passes 6/6. One actual WebGL browser trajectory passes after a
+production wasm build: tap, pan/cancellation, pointer-capture loss, dual-contact cancellation,
+tap-only keyboard activation and Pointer-versus-Touch scrolling reach the real consumer. DOM
+phases/IDs/trust are observed separately from Core recognized output and ScrollHandle movement;
+Core TouchId identity is exercised by portable/ingress tests. Chromium CDP injection does not
+prove physical-device touch, soft-keyboard appearance, complete IME or device feel.
+
+Affected all-target compilation/correctness Clippy, locked smoke wasm, formatting and existing
+import/API/document/release gates pass. The smoke lock catches up with the prior shared Apple/
+retired-media boundary without upgrading retained external packages. Fixture errors and actual
+fork defects/corrections remain in the framework qualification. Bounded review/rereview leaves
+no P1/P2 and all six lanes close. Unchanged official algorithms and coverage are trusted; the
+already-passing official cases and unrelated runtime/component/platform/compiler matrices are
+not repeated.
+
+Continue cursor/external-drag, supporting utility/dependency and remaining backend/render units,
+then the real Nara GPU/Host/View consumer before separate framework maintenance. Nara changes
+only evidence documents. Full fixed-target closure, numerical budgets, foreign execution,
+engine/default selection and R11/R12/R11f remain open.
