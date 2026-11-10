@@ -793,7 +793,8 @@ assets and lightweight helpers replace duplicate owners through real public cons
 Focused 47/47, ordinary dev/embedded 4/4 each, release 1/1 and Windows restart 11/11 pass.
 Concrete dependency-interface/advisory corrections pass root health and five independent
 audits without ignores; affected compilation/Clippy, core-util wasm and format/static gates
-pass. Four lanes close without P1/P2. Higher-utility wasm stops at missing clang; foreign
+pass. Four lanes close without P1/P2. Installed LLVM 22.1.6 resolves the initial higher-util
+missing-clang failure, and the complete patched utility/compression wasm check passes; foreign
 shell/file-limit execution, numeric costs, remaining framework owners and the real Nara
 consumer stay open before maintenance handoff. No dependency/default or full R11/R12/R11f
 gate changes follow.
@@ -806,6 +807,17 @@ gates pass; one bounded reviewer closes without P1/P2. Desktop child/WebView, in
 translucent-destination alpha, real device-loss visual proof, numerical costs and the real
 Nara GPU/Host/View consumer remain unqualified. Continue remaining framework owners before
 maintenance handoff. No dependency/default or full R11/R12/R11f gate changes follow.
+
+The [Windows dialog/host safety successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-windows-dialog-threads-and-native-host-safety)
+records Open-GPUI `34e6b6a963d`, qualified at `c32e1ae9498`: complete official native dialog,
+registered accelerator, stationary-input and optional composition mechanisms preserve existing
+retirement/pointer/panic owners. Affected 66/67 plus corrected recovery 1/1, actual HWND/STA
+worker seams, affected compilation/Clippy, corrected independent all-feature compilation and
+format/static gates pass. The consumer allocator edge matches root/official Windows 0.62.2
+without package/source changes. Four scoped lanes close without unresolved P1/P2. Live modal
+focus/overwrite/timer cancellation, numeric costs, remaining framework owners and the actual
+Nara GPU/Host/View consumer stay open before maintenance handoff. No dependency/default or
+full fixed-target/R11/R12/R11f gate changes follow.
 
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and

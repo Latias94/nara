@@ -5221,8 +5221,12 @@ concrete integration corrections, not reasons to retain the superseded utility i
 Final focused checks pass 47/47, ordinary dev/embedded consumers 4/4 each, release assets 1/1
 and existing Windows restart controls 11/11. Affected compilation/correctness Clippy,
 core-util wasm, formatting and existing static/document gates pass. Four scoped lanes close
-without P1/P2. The higher-utility wasm check stops in zstd-sys because clang is absent; it does
-not qualify that package's wasm source or browser runtime. Foreign shell/descriptor/file-limit
+without P1/P2. The initial higher-utility wasm check stops in zstd-sys because clang is absent
+from that process. The November 10 owner-supplied installed LLVM 22.1.6 resolves that build
+prerequisite: process-local target-specific clang/llvm-ar and PATH produce a successful locked
+Rust 1.95 wasm check of the complete patched utility/compression source. No extra installation,
+global environment change or compression removal is needed. Browser runtime remains distinct.
+Foreign shell/descriptor/file-limit
 execution and numeric costs remain unqualified. Continue remaining backend/render owners and
 logging disposition, then the real Nara GPU/Host/View consumer before separate maintenance.
 Nara changes only evidence documents; no dependency/default or full R11/R12/R11f gate changes.
@@ -5253,3 +5257,41 @@ alpha oracle, desktop child-HWND/WebView visibility, real GPU-timeout visual rec
 Apple/browser execution. Numerical costs and actual Nara GPU/Host/View qualification remain
 open with the remaining backend/render owners and logging disposition. Nara changes only
 evidence documents; no dependency/default or full R11/R12/R11f gate changes.
+
+## November 11: Windows Dialog Threads And Native Host Safety
+
+Open-GPUI `34e6b6a963df3b775661dbf13bdd374cd4be509e`, qualified at
+`c32e1ae94989f4e2a7b252cfa7836874f214bb0a`, adopts complete official
+`a0f8fa7bdbbf0269aaf5d5ebfac3ad9adfb576dd`,
+`9cb5f90e3c493fb273230b14b95047fb41c5eab6`,
+`e462f873c622f6265736bf8468e7a017f4ba99de` and
+`23c0080d1dd5e8e550ede91c0d573658e5aabe76` from the same fixed Zed target. Native file/message
+prompts use dedicated STA threads, per-owner serialization, caller/owner cancellation and the
+official timer/error/button policy. Credentials already use background execution. Accelerator
+routing resolves registered GPUI windows directly, and optional composition lookup checks its
+system symbol before conversion.
+
+The fork's concrete adaptations preserve existing owners. Native destruction closes the dialog
+owner and waits through the existing presentation-ticket retirement path while its same mutex
+is busy; there is no second destruction queue. Keyboard input retains provisional/quiesced,
+generation and panic custody. Private messages carry both validation token and native generation.
+Stationary-input suppression retains hover reentry, held/captured buttons and changed physical
+geometry at an unchanged logical point through the current last-position owner. Test message
+pumps hold weak platform references so routing does not prolong native teardown.
+
+Affected checks pass 66/67, followed by the corrected complete device-recovery round trip 1/1.
+The records distinguish those runs from a single aggregate pass. Actual HWND/STA worker seams
+cover foreground progress, active/queued cancellation, exact retirement and foreign/registered/
+quiesced/panicking keyboard routing. Test observations are corrected for Core-owned retirement
+and the new private-message field pairing without weakening the original assertions. The
+independent all-feature build exposes an allocator/Windows binding mismatch; its lock edge now
+selects the already present 0.62.2 package, matching root/official resolution, with no package
+version or source changes. Affected compilation/correctness Clippy, independently locked
+all-target/all-feature compilation, formatting and existing static/document gates pass. Four
+scoped implementation/migration/review lanes close without unresolved P1/P2.
+
+The worker seams use bounded native closures rather than live Shell/TaskDialog modal loops.
+Actual file-picker focus/Alt+Tab, nested overwrite and automatic timer cancellation remain
+manual gates. Numerical costs, remaining backend/render owners and logging disposition, then
+the real Nara GPU/Host/View consumer, still precede separate framework maintenance. Nara changes
+only evidence documents; no dependency/default or full fixed-target/R11/R12/R11f gate changes.

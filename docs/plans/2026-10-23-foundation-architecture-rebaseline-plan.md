@@ -2411,9 +2411,10 @@ discovery implementations are removed. Final focused 47/47, ordinary dev/embedde
 release 1/1 and Windows restart 11/11 pass. Actual rust-embed 8.13 and compression advisories
 receive bounded dependency/interface corrections, passing root health and five independent
 audits without ignores. Affected compilation/Clippy, core-util wasm and format/static gates
-pass; higher-utility wasm stops at missing clang. Four lanes close without P1/P2. Continue
-remaining backend/render owners and logging disposition before the real engine consumer and
-maintenance handoff. Foreign shell/file-limit execution and costs remain unqualified. No Nara
+pass; the initial higher-utility missing-clang failure is resolved using process-local installed
+LLVM 22.1.6, and the locked complete compression/utility wasm check passes. Four lanes close
+without P1/P2. Continue remaining backend/render owners and logging disposition before the real
+engine consumer and maintenance handoff. Foreign shell/file-limit execution and costs remain unqualified. No Nara
 dependency/default, full fixed-target or R11/R12/R11f gate changes.
 
 The [source-over/native child composition successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-source-over-alpha-and-native-child-composition)
@@ -2426,6 +2427,18 @@ independent translucent-destination alpha, real device-loss visual proof and num
 remain unqualified. Continue remaining backend/render owners and logging disposition before
 the real Nara GPU/Host/View consumer and maintenance handoff. No dependency/default, full
 fixed-target or R11/R12/R11f gate changes.
+
+The [Windows dialog/host safety successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-windows-dialog-threads-and-native-host-safety)
+records Open-GPUI `34e6b6a963d`, qualified at `c32e1ae9498`: complete official STA/per-owner
+dialogs, cancellation/error policy, registered accelerator routing, stationary-input correction
+and nullable composition lookup retain current native/pointer/panic owners. Affected cases
+pass 66/67, followed by the corrected complete recovery workflow 1/1; actual worker/foreground/
+retirement and input seams pass. Affected compilation/Clippy, corrected independently locked
+all-feature compilation and format/static gates pass. The allocator binding edge matches
+root/official Windows 0.62.2 without package/source changes. Four lanes close without unresolved
+P1/P2. Live modal focus/overwrite/timer cancellation and numeric costs remain unqualified.
+Continue remaining framework owners before the actual engine consumer and maintenance handoff;
+no Nara dependency/default, full fixed-target or R11/R12/R11f gate changes.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
