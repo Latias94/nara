@@ -2454,6 +2454,22 @@ costs remain open. Continue remaining framework owners before the real Nara GPU/
 consumer and maintenance handoff. No dependency/default or full fixed-target/R11/R12/R11f
 gate changes follow.
 
+The [native control/popup successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-native-window-controls-and-popup-retirement)
+records Open-GPUI `77b56a6af1b`, qualified at `038688f1810`: complete official regions,
+layer-shell controls, simple fullscreen and parent-anchored native popup roles preserve current
+command, creation and presentation/native retirement owners. A reproduced premature-terminal
+retention defect and two reviewed order defects are corrected through existing admission/FIFO
+boundaries. Final Core/public 124/124, disabled close 6/6, Linux focused 26/26, Windows native
+3/3, independent default/runtime 2/2 and 4/4, expanded actual nested-Wayland popup 1/1 and
+existing X11/Wayland windowing 2/2 pass. Affected host/Linux correctness Clippy, independent
+all-feature compilation, headless compilation and format/static gates pass; earlier Mac/Web
+compile checkpoints keep their stated scope. Nine lanes close without P1/P2, and the exact
+owned compositor is stopped. Actual grabs, compositor dismissal, layer/input-region input,
+Apple fullscreen/Space effects and numerical costs remain unqualified. Remaining input,
+render/font/logging and final public-method/dispatch dispositions still precede the real
+Nara GPU/Host/View consumer and maintenance handoff. No dependency/default or full fixed-target/
+R11/R12/R11f gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

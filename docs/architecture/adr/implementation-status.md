@@ -832,6 +832,20 @@ the earlier WSLg exit failure, numerical costs, remaining framework owners and t
 Nara GPU/Host/View consumer stay open before maintenance handoff. No dependency/default or
 full fixed-target/R11/R12/R11f gate changes follow.
 
+The [native control/popup successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-native-window-controls-and-popup-retirement)
+records Open-GPUI `77b56a6af1b`, qualified at `038688f1810`: complete official regions,
+layer-shell controls, simple fullscreen and native popup roles retain current command,
+creation and presentation/native retirement owners. Reproduced premature-terminal retention,
+reserved creation and quiesced dismissal defects are corrected through existing admission/FIFO
+boundaries. Final Core/public 124/124, disabled close 6/6, Linux focused 26/26, Windows native
+3/3, independent default/runtime 2/2 and 4/4, actual expanded nested-Wayland popup 1/1 and
+existing X11/Wayland windowing 2/2 pass. Host/Linux correctness Clippy, independent all-feature
+compilation, headless compilation and format/static gates pass; earlier Mac/Web compile
+checkpoints retain their separate scope. Nine lanes close without P1/P2 and the exact owned
+compositor is stopped. Native Apple effects, grabs, actual compositor dismissal, input-region/
+layer behavior, numerical costs, remaining framework owners and the real Nara GPU/Host/View
+consumer remain open. No dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

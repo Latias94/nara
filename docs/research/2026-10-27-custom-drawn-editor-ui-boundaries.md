@@ -5334,3 +5334,54 @@ costs remain unqualified. The earlier default WSLg exit failure is still unresol
 platform/render/logging reconciliation and the real Nara GPU/Host/View consumer precede
 separate framework maintenance. Nara changes only existing evidence documents; no dependency,
 UI default or full fixed-target/R11/R12/R11f gate changes follow.
+
+## November 11: Native Window Controls And Popup Retirement
+
+Open-GPUI `77b56a6af1b2a80ab05c11c42def3522077fd8da`, qualified at
+`038688f181004f36ee774ddf56f73c1bd7a12ff8`, adopts complete official input regions
+(`a29c0d41f4787d7cd268d4f8ad1a706af86042c7`), runtime layer-shell controls
+(`166f044fd046e0de73cd64a027505db90f523b97`), Mac simple fullscreen
+(`2893b86b048a6e5877eb2f61dac97c172460ba07`, `242fe31a399f695103dd0cfe7dcef33a59fbf596`)
+and native parent-anchored popups (`546a16d64fa589c737a9e33dff02a129a673b21d`), with the
+fixed-target follow-ups. The cycle target remains Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Official popup positioning and protocol behavior
+remain the baseline; fork-specific command, creation and retirement adaptations stay explicit.
+
+Wayland None/empty/rectangle input regions compose with its irreversible interaction gate.
+Layer-shell zone/edge requests retain their protocol/version restrictions. Popup roles support
+XDG, layer and nested parents, exact configure/reposition observations and child-before-parent
+destruction. Unsupported backends return the downcastable typed error before allocation or root
+publication. Passive popups normalize generic focus-on-appearance to the role's actual false
+policy. Mac simple fullscreen retains native frame/style, restore bounds, shared application
+presentation options and close cleanup through the existing post-borrow command owner; it adds
+no portable placement ticket or second native command queue.
+
+A real nested-Wayland trajectory exposes a concrete fork mismatch: its close callback reports
+native terminal before child renderer shutdown, retaining three surfaces and preventing headless
+detach. Required closure now revokes logical admission synchronously and enters the existing
+shutdown-critical FIFO. Each window keeps its original presentation/native retirement owner;
+only actual destruction emits the terminal callback. Two further reviewed regressions reproduce
+creation during parent closure and quiesced popup dismissal, then pass after the owning fixes.
+The official positioner does not change. No extra GPU, scheduler or retirement authority is added.
+
+Final Core/public checks pass 124/124 and profiler-disabled required-close controls 6/6. Linux
+focused controls pass 26/26, actual Windows native controls 3/3 and independent default/runtime
+consumers 2/2 and 4/4. The final real nested-Weston/lavapipe popup trajectory passes 1/1: actual
+parent/two-popup Submitted frames, region requests followed by Submitted output, two exact resize
+generations and matching sizes, parent closure during a new child's builder, full native tree
+retirement, headless detach and retained App/model/TextSystem through normal exit. One additional
+actually Submitted popup receives a simulated PopupDone after quiescence; this qualifies backend
+delivery/retirement, not compositor-generated dismissal. Existing hidden/presented X11/Wayland
+windowing trajectories pass 2/2, including real X11 keyboard-driven Submitted output. The earlier
+default-WSLg exit failure retains its separate environment and result.
+
+Final host/Linux correctness Clippy, independent all-target/all-feature compilation, Linux
+headless production compilation and format/static gates pass. Earlier selected Mac foreign
+and Web production compilation retain their recorded checkpoint scope. All nine scoped lanes
+close without remaining P1/P2, and the exact owned compositor is stopped. Actual Apple
+fullscreen/Space effects, explicit popup grabs, compositor-generated dismissal, layer-shell and
+input-region input behavior, physical GPU costs and Nara integration remain unqualified.
+Continue Web input/viewport, Wayland IME/effects/XKB, Mac native input/AppKit, batching,
+selected-face/logging and final public-method/dispatch dispositions, then the real Nara
+GPU/Host/View consumer before separate framework maintenance. Nara changes only evidence
+documents; no dependency, UI default or full fixed-target/R11/R12/R11f gate changes follow.
