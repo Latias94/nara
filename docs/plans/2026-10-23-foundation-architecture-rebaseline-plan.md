@@ -2264,6 +2264,19 @@ compiler-floor/Clippy, production wasm, format/static gates pass. Shared Apple t
 native execution, remaining fixed-target mechanisms and the real Nara consumer stay separate.
 This prerequisite changes no Nara dependency or runtime/default.
 
+The [native appearance successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-native-appearance-and-remaining-windowing-lifecycle)
+implements official optional override/non-Mac no-op at Open-GPUI `0b0ea5416656c2c43c242c01e2a665e21d3814ba`,
+with qualification `07851e88984e8091ce9a79357d44ea5aafe5020d`. Exact forwarding and existing
+busy-App notification ownership retain separate public controls. Windows focused/disabled 4
+each, callbacks 23, corrected App-owner 43, independent all/off 3/2 and actual Linux 4 pass,
+along with locked/compiler-floor/host Clippy/wasm/fmt/static gates. The foreign Apple check
+still stops before the new owner at inherited media bindings; native compilation, GUI probe,
+titlebar pixels and actual system-theme tracking remain open. All four lanes close. The next
+complete live-windowing lifecycle is source-prepared, including Windows GPU/session and Linux
+connection/environment custody. It does not supply external pumping or a shared Nara renderer.
+Remaining fixed-target closure and the real engine consumer still precede maintenance handoff;
+no engine dependency, UI default or full R11/R12/R11f completion follows.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

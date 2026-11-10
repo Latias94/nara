@@ -4749,3 +4749,62 @@ Open-GPUI against engine feedback; Nara continues complete Editor/game-runtime a
 Remaining native appearance, live windowing, quit/Restart Manager, Apple topology and gesture
 dispositions still precede closure. No UI default, new engine owner or full R11/R12/R11f
 completion follows from this prerequisite.
+
+## November 10: Native Appearance And Remaining Windowing Lifecycle
+
+Open-GPUI implements native appearance at `0b0ea5416656c2c43c242c01e2a665e21d3814ba`, with
+qualification `07851e88984e8091ce9a79357d44ea5aafe5020d`, following scoped activity. Official
+source is `8e4e5a39eed932d943cb7a3e7078885b75d1ea54`, typed setter successor
+`d86aa6e6b9f52046fb299ab57ec884b300190813` and appearance conversion successor
+`10cfb459449a65c8fee7d390794d6f3d5098e9f7`, under unchanged fixed target
+`635026fabc38440fce5e1767d125026a17b12012`. The complete App/Platform setter forwards an
+optional appearance; Mac maps all four variants to NSApplication appearance, while None
+restores system following. Other platforms keep the official no-op. No shared theme state,
+Nara token policy or engine runtime/default is added.
+
+The fork bridges its existing raw Cocoa owners to typed retained NSAppearance values. The
+Window getter retains that same native window under its state lock, then queries it unlocked;
+this preserves object custody without holding native state across Objective-C callbacks.
+Existing application class, ordered ingress and native leases remain their owners. A private
+cfg(test) recorder qualifies exact App forwarding without creating public fake-platform policy.
+The busy-App case queues actual appearance ingress, coalesces it after borrow release and lets
+the observer issue another setter request. Public no-op controls preserve getters, observers
+and rendered revision.
+
+Windows focused and profiler-disabled pass 4/4 each, affected callbacks/query snapshots 23/23,
+corrected App registry/lifecycle selection 43/43, and independently locked all/off consumers
+3/3 and 2/2. The initial plural App test filter selected three unrelated basics; its recorded
+pass does not substitute for the corrected anchored 43-case gate. Actual Linux Core/public
+passes 4/4 under locked/offline Rust 1.95 with default features plus test-support/profiler.
+Locked Windows workspace/consumer compilation, host correctness Clippy, actual Windows Rust
+1.93 affected-owner/consumer checks, production wasm profiler off/on, formatting/YAML and
+existing import/API/document/release scans pass. No package, lock or compiler-floor upgrade
+follows; the existing AppKit feature closure enables NSAppearance.
+
+The actual foreign Apple check still stops at inherited media binding generation before the
+Mac owner compiles. Native conversion tests and a dedicated real-main-thread GUI/Metal probe
+are source-prepared; ordinary libtest workers cannot establish AppKit main-thread admission.
+The probe observes native override/clear, existing/new window inheritance, explicit window
+override, callback reentry, close cleanup and original global appearance restoration. It does
+not enter Core App admission or qualify normal GPUIApplication launch/delegate installation,
+titlebar pixels or an actual system-theme change after clear. Its non-Mac entry fails with
+exit 1, observed by actual Rust 1.93 Windows execution. Independent source review and the
+initialization-order follow-up find no confirmed P1/P2; all four lanes close. Apple compilation
+and execution retain their separate gates.
+
+The next complete startup/live-windowing unit is source-prepared from
+`f37989fbdf840b308892af66516c2b9c3ef3853a` and fixed-target display/activation follow-ups.
+Linux must keep one App/runtime/executor/text-system owner while replacing the display
+connection, validating allowed modes, preserving the old connection on failure and settling
+requests. Environment/token/socket custody, clipboard connections and source/listener teardown
+belong to that same lifecycle. Windows requires delayed GPU/session attach, DirectWrite state
+and stale-recovery fencing; Mac requires application activation policy distinct from per-window
+activation. The fork must revalidate retained native retirement/capture/presentation custody
+beyond an empty App.windows collection and preserve ordered callbacks and terminal quit.
+Existing fixtures that open before Platform::run need owning initialization rather than
+weakened native rendering assertions. These are prepared requirements, not implemented switching.
+
+Live windowing still does not supply external event pumping or shared-device/target recording.
+The real Nara GPU/Host/View consumer, final fixed-target dispositions and framework maintenance
+handoff remain open. Nara keeps its adapter/document/ECS/history/GPU responsibilities and full
+Editor/game-runtime acceptance; no R11/R12/R11f completion follows.

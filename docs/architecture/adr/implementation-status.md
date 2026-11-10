@@ -675,6 +675,16 @@ Disabled Core/public 24, Windows compiler-floor/Clippy, production wasm and form
 pass; shared Apple topology, Mac native execution and actual power-policy effects are not
 implied. No Nara owner, dependency, default or R11/R12/R11f completion follows.
 
+The [native appearance successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-native-appearance-and-remaining-windowing-lifecycle)
+records implementation `0b0ea541665` and qualification `07851e88984`. Official optional Mac
+override/non-Mac no-op and the retained native getter use existing owners. Windows focused/
+disabled 4 each, callback/query 23, corrected App-owner 43, independent all/off 3/2 and actual
+Linux 4 pass; locked/compiler-floor/host Clippy/wasm/fmt/static gates pass. Apple compilation
+still stops earlier at inherited media bindings, with GUI probe/titlebar/system-following
+gates open. Complete live windowing is prepared, not implemented or shared-renderer support.
+Four lanes close; fixed-target closure and the real Nara consumer still precede maintenance
+handoff, without a new Nara owner, dependency, UI default or R11/R12/R11f completion.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
