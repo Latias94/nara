@@ -2379,6 +2379,19 @@ fork seams. Continue HTTP/download/archive and remaining utility/backend/render 
 the real engine consumer and separate maintenance. Nara has only evidence changes; no
 dependency/default, full fixed-target or R11/R12/R11f gate changes.
 
+The [official HTTP/download/archive successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-http-and-release-download-owners)
+records Open-GPUI `8223d68d89bd2a012dee3f279297266dc97b2d0e`, qualified at `0eb736ea91b`:
+complete official source selection replaces the historical registry redirect cache; portable
+HTTP and separate staged release Tasks have the official dependency direction. Release 10/10,
+final native transport 9/9 and ordinary public 4/4 pass. Actual dependency-health findings
+receive targeted fixed selections without new ignores; affected Clippy/wasm and format/static
+gates pass. Five unit lanes close without P1/P2; the sixth only prepares the next path owner.
+Historical exclusions may be superseded by exact license/behavior evidence. Continue the real
+path/utility migration and remaining backend/render owners before the actual engine consumer
+and separate maintenance. TLS fallback/foreign execution, download Task-drop cancellation and
+numeric budgets remain unqualified. Nara has only evidence changes; no dependency/default,
+whole fixed-target or R11/R12/R11f gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

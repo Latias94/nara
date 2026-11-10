@@ -5121,3 +5121,41 @@ unqualified. Continue HTTP/download/archive, remaining supporting utilities and 
 owners, then the actual Nara GPU/Host/View consumer before separate framework maintenance.
 Nara changes only these evidence documents; no dependency/default, full fixed-target closure or
 R11/R12/R11f gate changes.
+
+## November 10: Official HTTP And Release Download Owners
+
+Open-GPUI `8223d68d89bd2a012dee3f279297266dc97b2d0e`, qualified at
+`0eb736ea91bc618ff6f7820afacba9d861aaaae7`, adopts the complete fixed-target request/read
+deadlines, platform verifier fallback, separate release-download owner and PAX archive parser.
+The Zed target stays `635026fabc38440fce5e1767d125026a17b12012`; sources include
+`992c7d469c`, `865318723e`, `c595091b0a`, `ead2d9eac0`, `02d47bf64f` and `87324045be`.
+The selected reqwest `33bc764aa15ff7b200bf7c93bd96e24878d53e14` is MIT OR Apache-2.0;
+async-tar `bd3ad6f89df9a9da7a8535958756d6bf465936a0` is MIT/Apache-2.0. Historical exclusions
+are evaluated against exact current sources and required behavior rather than retained as
+permanent constraints.
+
+The official request-local redirect interface preserves an imported client's proxy, User-Agent,
+TLS and read timeout. The fork's registry-client reconstruction cache and refusal workaround
+are removed. The independent Apache open-gpui-github-releases package owns executor-bound
+Task downloads, digest normalization, status validation and same-volume staging. Lower HTTP
+no longer pulls Core/utilities/native downloads into Core-only or browser consumers. Explicit
+Windows async-std/unstable support is carried by the actual download package. Only two bounded
+production adaptations remain in this unit: response-body polls enter their original Tokio
+runtime, and raw files close/drop before publication or error-driven staging cleanup.
+
+Release checks pass 10/10, including actual verified TarGz extraction with an embedded-newline
+PAX value, and interrupted raw transfer preserving the old destination. Final native transport
+passes 9/9; the independently locked ordinary public consumer passes 4/4, including a real
+loopback redirect/read with an imported official client. The existing dependency-health gate
+finds actual retained advisories; targeted patched dependency selections and allowlist cleanup
+then pass without new advisory ignores. Affected correctness Clippy, stable wasm production
+compilation, formatting and static/document gates pass. Five unit lanes close without reviewed
+P1/P2. The separate sixth lane only prepares an unregistered portable-path source draft; its
+utility/public-consumer migration and qualification remain open.
+
+Trust unchanged official implementations and coverage. No unrelated Editor/component/platform/
+compiler matrix repeats. Active download Task-drop cancellation, actual TLS failure/fallback,
+foreign runtime behavior and numerical budgets remain unqualified. Continue the complete
+portable path/utility and backend/render owners, then the real Nara GPU/Host/View consumer
+before separate maintenance. Nara changes only evidence documents, with no dependency/default,
+whole fixed-target closure or R11/R12/R11f gate changes.

@@ -766,6 +766,17 @@ numerical budgets, remaining framework owners and the real Nara consumer remain 
 separate maintenance. Nara has only evidence updates, with no dependency/default or full
 R11/R12/R11f gate change. Trust unchanged official coverage and verify actual fork seams.
 
+The [official HTTP/download/archive successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-http-and-release-download-owners)
+records Open-GPUI `8223d68d89b`, qualified at `0eb736ea91b`: official reqwest request-local
+redirects replace the fork cache, while portable HTTP and independent release Tasks retain
+the official dependency direction. Release 10/10, final native transport 9/9 and ordinary
+public 4/4 pass; targeted fixes resolve actual dependency-health findings without new ignores.
+Affected correctness Clippy, wasm production and format/static gates pass. Five unit lanes
+close without reviewed P1/P2; a sixth only prepares unqualified path sources. Continue actual
+path/utility migration and remaining target owners before the real Nara consumer and separate
+maintenance. TLS fallback/foreign execution, download Task-drop cancellation and numeric
+budgets remain unqualified. No Nara dependency/default or full R11/R12/R11f gate changes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
