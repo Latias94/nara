@@ -872,6 +872,12 @@ Core observes effective background without granting live alpha writes. X11 readb
 Wayland fallback/retirement and separate backend builds are qualified. Real compositor effects,
 KWin/Fcitx, remaining fixed-target units and the actual Nara consumer stay open.
 
+The [Mac AppKit and capture successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-macos-native-input-appkit-and-screen-capture)
+records Open-GPUI `0c1118e2f1a`, qualified at `60b7e61d9b5`. The official typed Mac mechanisms
+remove the Cocoa shim and Media package while preserving input, display and retirement owners.
+Apple-target checks and ordinary capture-to-surface compilation pass. Actual Apple execution,
+renderer/logging/API dispositions and the real Nara GPU/Host/View consumer stay open.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

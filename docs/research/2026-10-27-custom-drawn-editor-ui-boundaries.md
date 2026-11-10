@@ -5485,3 +5485,30 @@ fallback do not qualify compositor visuals or KWin/Fcitx feedback.
 Continue Mac native input/AppKit, renderer batching, logging and the final API/dispatch
 dispositions before the actual Nara GPU/Host/View consumer and separate maintenance. This
 evidence changes no Nara dependency, toolkit default or full fixed-target/R11/R12/R11f gate.
+
+## November 11: macOS Native Input, AppKit And Screen Capture
+
+Open-GPUI `0c1118e2f1a63f0a91e5e7c2ebf33fb884707953`, qualified at
+`60b7e61d9b52baab0846e31457b05f4898eed485`, adopts the official typed keyboard/event,
+application/menu, window/display and ScreenCaptureKit mechanisms against the unchanged Zed
+`635026fabc38440fce5e1767d125026a17b12012` target. Delete/Backspace shortcuts, Spanish-ISO,
+mouse tracking and release, blur, native dialog and window follow-ups use the existing Mac owners.
+The obsolete Cocoa shim and Media/bindgen package are removed. Capture remains optional and
+hands the existing retained CoreVideo buffer to the public surface path.
+
+The fork preserves exact window/callback and display generations, input leases and presentation
+retirement. Typed AppKit calls handle nullable child arrays and content views without relying on
+the old nil-message behavior. Blur reuses only an effect attached to the current content and
+releases its retained view during the two existing close paths. Display collection retains
+native screen objects only for the current operation; committed topology stays detached.
+
+Final Apple-target all-target correctness Clippy passes with capture enabled, including the
+native example and keyboard test targets. Capture-disabled production, independently locked
+ordinary capture-to-surface compilation, the Windows selector build and format/static checks
+also pass. The independent application mirrors Zed's weak framework linker argument for
+macOS 12.0–12.2; screen capture requires 12.3. Actual AppKit execution, weak-linked startup,
+recording permission/frame delivery, blur visuals and numerical costs remain unqualified.
+
+Continue renderer batching and overdraw, logging and final API/dispatch dispositions before
+the actual Nara GPU/Host/View consumer and separate maintenance. This evidence changes no Nara
+dependency, toolkit default or full fixed-target/R11/R12/R11f gate.

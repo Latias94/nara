@@ -2501,6 +2501,14 @@ static checks pass. Actual compositor blur, KWin/Fcitx and numeric costs stay op
 Mac native input/AppKit, batching, logging and final API/dispatch dispositions before the real
 Nara GPU/Host/View consumer. No toolkit default or full foundation gate changes follow.
 
+The [Mac AppKit and capture successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-macos-native-input-appkit-and-screen-capture)
+records Open-GPUI `0c1118e2f1a`, qualified at `60b7e61d9b5`: official typed input/menu/window/
+display/capture replace the old Cocoa and Media paths through existing ownership. Apple-target
+all-target correctness Clippy, ordinary no-capture and independently locked capture-to-surface
+compilation pass. Native AppKit, capture and older-system weak-linked startup need an Apple host.
+Continue renderer batching, logging and final API/dispatch dispositions before the actual Nara
+GPU/Host/View consumer. No dependency, toolkit default or full foundation gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
