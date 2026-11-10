@@ -2333,6 +2333,17 @@ supporting dependency and backend/render units queued. Finish them before the re
 consumer and separate maintenance handoff. No full-refresh, numerical-cost, native-execution,
 engine/default or R11/R12/R11f completion follows from this prerequisite.
 
+The [official element layout/drawing successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-element-layout-and-drawing-successor)
+records Open-GPUI `ae10ff73c3e6cb5d12ab1d607c17df8934746278`: complete image crop/aspect, SVG
+parse/raster, ContainerQuery, attached Anchored and List readiness/anchor mechanisms retain fork
+clip/transform/lease/admitted-scroll owners. Final Core/public 90, WGPU 3, native Windows 1 and
+ordinary independent 1 pass, alongside affected all-target compilation/correctness Clippy and
+format/static gates. The record retains three new fixture failures/corrections and exact execution
+limits; no P1/P2 remains in scoped image/List reviews and all five lanes close. Continue remaining
+padding/hover/gesture, dependency/utility and backend/render units, then the actual engine consumer
+before maintenance handoff. Targeted upstream-trust verification remains in force; no full refresh,
+numeric-cost, foreign execution, engine/default or R11/R12/R11f completion follows.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

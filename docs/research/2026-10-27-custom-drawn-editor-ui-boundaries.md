@@ -4977,3 +4977,42 @@ Finish those coherent official units, then qualify the real Nara GPU/Host/View c
 separate framework maintenance. Nara changes only evidence documents; no engine dependency,
 document/history/ECS/render/loop owner or UI default changes. Full fixed-target closure,
 numerical budgets and R11/R12/R11f remain open.
+
+## November 10: Official Element Layout And Drawing Successor
+
+Open-GPUI `ae10ff73c3e6cb5d12ab1d607c17df8934746278` adopts complete official image geometry
+(`59b2ebf103`, `58df5a14ce`), SVG bytes/parse reuse/exact raster/cap (`ff9f114cd3`, `00cba838ad`,
+`03c9c4e707`, `fbd911ed3e`), ContainerQuery (`49ad06c1b4`), attached Anchored (`ce6c5413f1`) and
+provisional List measurements/anchors (`f41ac64812`, `d9e35975c2`, `00cba838ad`) from the same
+fixed target `635026fabc38440fce5e1767d125026a17b12012`.
+
+Window image painting now receives separate element/image boxes and applies official visible
+cropping/corner limits. Fork primitive transforms, exact clips, complete tile identity/texture
+generations, leases and admitted diagnostics remain in their existing owners. SVG rasterization
+and ContainerQuery match the official production source after import/format normalization.
+Parsed reuse, ExactSize and the 8192px cap retain bundled-font/emoji behavior; ADR 0021 still
+excludes SVG-only arbitrary rotation. ContainerQuery builds from the actual same-frame allocation;
+attached positioning flips target/element corners and offsets through existing portal geometry.
+
+List readiness, provisional/pending-end state, height hints/reset and pause-following-tail replace
+the old independent pending-scroll state. The fork retains admitted delayed autoscroll, candidate
+refusal and direct-scroll revisions. Official indexed positioning is exposed as scroll_to_item
+under ADR 0025; tracked final nested reveal stays Window-owned. No second layout, scroll or
+publication authority is introduced.
+
+Final focused Core/public tests pass 90/90, actual WGPU readback/lifetime passes 3/3, the affected
+existing Windows native Scene consumer passes 1/1 and the ordinary independently locked public
+consumer passes 1/1. Cropped GPU pixels retain fractional/nonuniform transform, exact rounded clip
+and removed-region lease behavior. The native control validates migrated uncropped callers,
+submission/readback, notification and retirement; it adds no distinct native DirectX Cover pixel
+scenario. Independent SVG rasterization executes while its constructed layout/paint closures are
+only type-checked. Two query fixture semantics and one GPU fixture error-conversion compile issue
+are corrected without changing official production code. Affected all-target compilation and
+correctness Clippy, formatting, YAML and existing static/document gates pass. Scoped image/List
+reviews leave no P1/P2 and all five lanes close.
+
+Verification remains targeted under the upstream-trust rule. Remaining padding/hover, gestures,
+supporting dependencies/utilities and backend/render units stay queued before the actual Nara
+GPU/Host/View consumer and separate maintenance handoff. Nara changes only evidence documents;
+no dependency, renderer, loop, UI default or whole R11/R12/R11f gate changes. Numerical costs,
+foreign execution and full fixed-target closure remain unqualified.

@@ -726,6 +726,16 @@ utility/dependency and backend/render successors before the real engine consumer
 handoff. Nara has only evidence updates; no dependency/default, full refresh or R11/R12/R11f
 gate closes, and no new native execution or measured speedup is claimed.
 
+The [official element layout/drawing successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-official-element-layout-and-drawing-successor)
+records Open-GPUI `ae10ff73c3e`: complete image geometry, SVG data/parsed/exact raster,
+ContainerQuery, attached Anchored and provisional List anchors retain current fork clip/transform/
+atlas/admitted-scroll custody. Final focused Core/public 90, actual WGPU 3, existing native Windows
+1 and ordinary independent 1 pass; affected all-target compilation/correctness Clippy and format/
+static gates pass. Three fixture failures/corrections and native/consumer limits stay explicit.
+Scoped reviews leave no P1/P2 and all five lanes close. Remaining framework units and the real
+engine consumer still precede maintenance handoff. Nara has only evidence updates; no dependency,
+UI default, full refresh, numerical-cost or R11/R12/R11f gate changes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
