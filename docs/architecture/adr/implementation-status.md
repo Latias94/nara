@@ -707,6 +707,15 @@ coverage and qualifies affected fork seams. Foreign termination, shared Apple to
 fixed-target closure and the real Nara GPU/Host/View consumer remain separate. Nara has only
 evidence updates; no dependency, owner, UI default or R11/R12/R11f completion changes.
 
+The [shared Apple successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-shared-apple-framework-and-actual-native-type-checking)
+records Open-GPUI `8bd39cef78d`: official shared rendering/dispatch/text/services have one Apple
+owner; Mac retains native lifecycle/input. Old compatibility and duplicate owners are removed
+while exact fork frame/atlas/font contracts remain. Affected host/public compilation, portable
+2/2, actual Apple/Mac production/all-target foreign correctness Clippy and the independent Apple
+Keychain API pass, with failures/corrections and unexecuted native/iOS scope retained. All three
+lanes close without reviewed P1/P2. Final fixed-target dispositions and the real Nara consumer
+still precede maintenance handoff; no engine ownership/default or R11/R12/R11f gate closes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

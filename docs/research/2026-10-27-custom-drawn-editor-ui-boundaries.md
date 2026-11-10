@@ -4908,3 +4908,40 @@ Shared Apple topology and final fixed-target dispositions still precede the real
 GPU/Host/View consumer and separate framework-maintenance handoff. Nara changes only these
 evidence documents; its dependencies, document/ECS/history, renderer, loop and UI default retain
 their existing owners. Full R11/R12/R11f and Editor/game-runtime acceptance remain open.
+
+## November 10: Shared Apple Framework And Actual Native Type Checking
+
+Open-GPUI `8bd39cef78dbb7c477df08f8fc2e1ee386f22851` adopts the shared Apple owner topology
+from official `40180d9c40e2d20eb63d388bff920818f2910b53` and
+`95d35c6efddfa6dc34f99bb1873620bd74af806a`, with fixed-target typed-binding, font-size,
+main-thread, color-space, shader and screenshot follow-ups. The cycle target remains
+`635026fabc38440fce5e1767d125026a17b12012`.
+
+The new open-gpui-apple package owns shared Metal/atlas/shaders, dispatcher/activity, Metal
+display links, CoreText/OpenType, Keychain and process information. Mac retains AppKit
+application/window/input and its CoreVideo display registry. The old Metal compatibility
+layer and duplicate Mac owners are removed. Exact fork clip/transform preflight, texture
+leases, accepted/refused presentation, shutdown tickets, complete font selection and dispatch
+admission remain concrete adaptations around the official baseline. Native renderer creation
+is fallible before AppKit allocation. CoreVideo surface types cover Mac/iOS, and WindowOptions
+forwards official opt-in Display P3; this shared substrate adds no iOS application backend.
+
+Affected Windows host and ordinary independent consumers compile, and relocated portable
+frame-state tests pass 2/2. The first Apple test/benchmark attempt still encounters inherited
+alloca C-toolchain refusal. Removing the unneeded benchmark dependency from production
+qualification reaches the actual shared Apple/Mac owners, exposes and corrects seven fork
+type-integration errors, and passes production compilation. A test-support selection then
+type-checks the moved tests and main-thread examples; explicit NSString references and a
+worker-local notification name correct latent fixture typing while retaining their assertions.
+Final aarch64-apple-darwin all-target correctness Clippy passes. The separately locked Apple
+Keychain consumer also compiles with its own Core Foundation 0.10.1, while the root keeps
+0.10.0. These are actual target-specific type checks, extending the earlier scope that stopped
+before Apple code, without claiming native execution.
+
+Formatting, YAML, import/API/document/release checks, exact shader-body and attribution checks
+pass. Independent bounded review leaves no outstanding P1/P2 and all three lanes close.
+Verification stays focused on the changed owners and fork seams; unrelated suites and compiler
+matrices are not repeated. Actual Metal/MSL/CoreText/AppKit execution, iOS, numerical costs,
+final fixed-target residual dispositions and the real Nara GPU/Host/View consumer remain open.
+Nara changes only evidence documents; no dependency graph, engine owner, UI default or full
+R11/R12/R11f completion follows. The real engine seam still precedes maintenance handoff.

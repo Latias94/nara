@@ -2311,6 +2311,17 @@ rule above replaces unrelated repeated acceptance matrices with affected compila
 seam regressions. Foreign termination execution, shared Apple topology, final residual closure
 and the real Nara consumer remain separate; no engine/default or whole-foundation gate closes.
 
+The [shared Apple successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-shared-apple-framework-and-actual-native-type-checking)
+implements the official owner topology at Open-GPUI `8bd39cef78dbb7c477df08f8fc2e1ee386f22851`.
+Shared renderer/atlas/shaders, dispatch, text and system services leave Mac with AppKit/native
+window/input ownership. Exact fork frame/texture/font/dispatch contracts remain; old duplicate
+and compatibility implementations are removed. Affected host/public compilation, portable 2/2,
+actual Apple/Mac production and all-target foreign correctness Clippy, plus independently locked
+Apple Keychain API compilation pass. Initial toolchain/type failures and corrections retain their
+scope; native execution and iOS remain unqualified. All three lanes close with no reviewed P1/P2.
+Continue final fixed-target residual dispositions and then the real Nara GPU/Host/View consumer
+before separate framework maintenance. No engine dependency, owner or UI default changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
