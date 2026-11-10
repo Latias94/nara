@@ -5459,3 +5459,29 @@ and native foreign execution remain unqualified. Continue remaining Wayland/X11/
 logging and final API/dispatch dispositions, then the actual Nara GPU/Host/View consumer before
 separate maintenance. Nara changes only evidence documents; no dependency/default or complete
 fixed-target/R11/R12/R11f gate changes follow.
+
+## November 11: Linux IME, Background Effects And XKB
+
+Open-GPUI `cf4bd2c6db1fb97ce5d77a201212f988052b17d2`, qualified at
+`4ca8269dd55d5152c7b040cad78637c8cb59421f`, adopts the official cursor-rectangle deduplication,
+ext/KDE background effects, shared XKB context and X11 class metadata against the unchanged
+Zed `635026fabc38440fce5e1767d125026a17b12012` target. The existing input and surface owners
+retain exact focus, leases and retirement. Client corner metadata has a maintained public
+example; input regions retain their separate owner.
+
+Fork review separates an advertised compositor Blur capability from a bound manager. Existing
+window state retains the requested and effective appearances. The existing Core observation
+path publishes effective changes while Wayland alpha writes remain CreationOnly. The corrected
+wayland-protocols 0.32.10 floor leaves the selected lock unchanged. Open-GPUI's verification
+records the review findings and corrected scope.
+
+Affected Linux passes 48/48 and final observation/native passes 4/4. The actual WSLg X11 and
+Wayland round trips preserve native retirement; X11 reads back both terminated class fields
+and submits the keyboard-driven frame. Core/public 5/5, independent 1/1 and 2/2, single-backend
+builds and feature graphs, the maintained example check, affected correctness Clippy and
+format/static gates pass. WSLg advertises neither blur protocol, so the observed facts and
+fallback do not qualify compositor visuals or KWin/Fcitx feedback.
+
+Continue Mac native input/AppKit, renderer batching, logging and the final API/dispatch
+dispositions before the actual Nara GPU/Host/View consumer and separate maintenance. This
+evidence changes no Nara dependency, toolkit default or full fixed-target/R11/R12/R11f gate.

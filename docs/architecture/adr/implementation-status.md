@@ -865,6 +865,13 @@ Five lanes close without reviewed P1/P2. OS IME/mobile/coverage elsewhere, conte
 numeric costs, remaining framework owners and the actual Nara GPU/Host/View consumer remain
 open. No engine dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
 
+The [Linux IME and background-effects successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-linux-ime-background-effects-and-xkb)
+records Open-GPUI `cf4bd2c6db1`, qualified at `4ca8269dd55`. The official Wayland/XKB/X11
+mechanisms retain existing input and surface owners. Affected 48/48 and final 4/4 pass;
+Core observes effective background without granting live alpha writes. X11 readback/submission,
+Wayland fallback/retirement and separate backend builds are qualified. Real compositor effects,
+KWin/Fcitx, remaining fixed-target units and the actual Nara consumer stay open.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

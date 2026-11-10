@@ -2492,6 +2492,15 @@ coverage elsewhere, contextual CJK and numeric costs keep separate scope. Finish
 platform/render/logging and final API dispositions before the actual Nara GPU/Host/View
 consumer and separate maintenance. No engine/default or whole R11/R12/R11f gate changes follow.
 
+The [Linux IME and background-effects successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-linux-ime-background-effects-and-xkb)
+records Open-GPUI `cf4bd2c6db1`, qualified at `4ca8269dd55`: official Wayland IME/effects, XKB
+and X11 metadata reuse existing input, surface and observation owners. Affected Linux 48/48
+and final observation/native 4/4 pass, with actual X11 property readback, Submitted output and
+Wayland fallback/retirement. Single-backend builds/graphs, ordinary consumers and focused
+static checks pass. Actual compositor blur, KWin/Fcitx and numeric costs stay open. Continue
+Mac native input/AppKit, batching, logging and final API/dispatch dispositions before the real
+Nara GPU/Host/View consumer. No toolkit default or full foundation gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
