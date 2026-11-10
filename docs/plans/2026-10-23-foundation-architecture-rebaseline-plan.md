@@ -1425,6 +1425,13 @@ concrete consumer, source and verification basis for retained differences; unimp
 official mechanisms stay queued. Open-GPUI's maintenance skill records this rule at local
 commit `bf3e0d2f7c6` without selecting a Nara toolkit default.
 
+The November 10 verification clarification trusts unchanged official implementations and their
+upstream coverage. For each sync unit, compile affected owners and public consumers and focus
+regressions/review on fork adaptations and integration seams. Broader suites, compiler floors and
+platform matrices need a changed contract, an observed failure or a release claim; existing full
+qualification records do not make those runs mandatory for every port. The real Nara consumer
+still needs its own affected product acceptance.
+
 The November 9 owner clarification keeps this continuation responsible for completing the fixed
 upstream refresh and assessing a concrete modular engine-integration seam before a separate
 Codex session maintains Open-GPUI. Framework provenance, retained differences, dependency/compiler
@@ -2288,11 +2295,21 @@ enabled/disabled 126 each, final Windows 283, Linux library 162, final configure
 4, components/docking/Canvas 2,990 and independent all/off 115/83 pass. Locked/compiler-floor/
 Clippy/wasm/fmt/static gates pass. Preserve the failed original aggregate, default WSLg native
 thread-exit SIGSEGV and uncompiled Apple native scope separately. Sixteen lanes close.
-Continue official native quit/Restart Manager, shared Apple topology and final fixed-target
+Continue shared Apple topology and final fixed-target
 reconciliation, then the real source-aligned GPU/Host/View consumer. Only after those gates
 does a separate Codex session maintain Open-GPUI from the existing skill/queue/plan and executed
 consumers; subsequent engine feedback requires public framework and affected Nara regressions.
 No engine dependency, rendering/default choice or R11/R12/R11f completion follows.
+
+The [native-quit and verification successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-targeted-upstream-verification-and-native-quit-completion)
+implements official synchronous completion and Windows Restart Manager at Open-GPUI
+`10f14f08be8572eaa802e4fb1cfcaf2d05e268c3`. The existing ordered shutdown, exact native
+retirement and process-exit owners retain custody. Core 7, corrected native Windows 6 and
+independent all-target compilation pass; the initial Windows 4/6 and corrections remain
+recorded. Bounded review finds no outstanding P1/P2 and all three lanes close. The upstream-trust
+rule above replaces unrelated repeated acceptance matrices with affected compilation and fork
+seam regressions. Foreign termination execution, shared Apple topology, final residual closure
+and the real Nara consumer remain separate; no engine/default or whole-foundation gate closes.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;

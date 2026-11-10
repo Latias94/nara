@@ -4874,3 +4874,37 @@ GPU types, external target/encoder recording, clipped retained textures, one sub
 authority and exact input/retirement custody. Live windowing does not provide those seams.
 Native quit/Restart Manager, shared Apple topology and final residual reconciliation remain
 ahead of that adapter. No toolkit default or R11/R12/R11f completion follows.
+
+## November 10: Targeted Upstream Verification And Native Quit Completion
+
+The user clarified the maintenance cost model: trust unchanged official implementations and
+their upstream coverage. Compile affected framework owners and public consumers; concentrate
+regressions and independent review on fork changes and integration seams. A changed contract,
+observed failure or release claim can justify broader coverage. Previous full-suite results
+remain historical evidence rather than a mandatory cycle for every port. Open-GPUI records
+this rule in its existing upstream-sync skill, plan and verification guide.
+
+Open-GPUI implementation `10f14f08be8572eaa802e4fb1cfcaf2d05e268c3` ports official
+`7f2a2c3c3ee2f23f28772dee7661fb98d3910990` at the unchanged fixed target
+`635026fabc38440fce5e1767d125026a17b12012`. Platform::on_quit now returns synchronous
+completion. Windows application-window session messages reach the validated platform owner;
+completed shutdown flushes logs and uses its existing process-exit policy, while pending
+shutdown posts the official best-effort quit request. Fork readiness reuses the ordered Quit
+event, bounded post-borrow convergence and exact native-retirement predicate. Queuing a
+request cannot acknowledge completion. The ordinary Windows loop retains observer-panic
+containment and terminal progress; no second lifecycle owner is introduced.
+
+Focused Core passes 7/7 and corrected Windows native passes 6/6, including busy App completion,
+retained native terminal, actual HWND forwarding, asynchronous observers/retryable destruction
+and isolated production exit/log flushing. The initial Windows 4/6 exposed a callback-unwind
+regression and a new fixture's filtered-message assumption; the final corrections preserve the
+original observer-panic assertions. The separately locked ordinary consumer passes all-target
+compilation, root formatting and existing import/API/document/release checks pass, and bounded
+review finds no outstanding P1/P2. All three lanes close. No unrelated component, docking,
+font/render or compiler/platform matrix is repeated.
+
+Linux/Mac/Web signature migration adds no foreign termination wait policy or execution claim.
+Shared Apple topology and final fixed-target dispositions still precede the real Nara
+GPU/Host/View consumer and separate framework-maintenance handoff. Nara changes only these
+evidence documents; its dependencies, document/ECS/history, renderer, loop and UI default retain
+their existing owners. Full R11/R12/R11f and Editor/game-runtime acceptance remain open.

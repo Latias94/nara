@@ -698,6 +698,15 @@ precede the separate framework-maintenance session. Later engine feedback must k
 public regressions and affected Nara acceptance together. Live windowing adds no shared renderer,
 external pump, new Nara owner, dependency, default or R11/R12/R11f completion.
 
+The [native-quit and verification successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-targeted-upstream-verification-and-native-quit-completion)
+records Open-GPUI `10f14f08be8`: official bool completion/Windows Restart Manager uses existing
+ordered shutdown and exact native retirement. Core 7, corrected Windows 6 and independent
+all-target compilation pass; initial Windows 4/6 and corrections remain recorded. Bounded review
+finds no outstanding P1/P2 and all three lanes close. Remaining sync trusts unchanged official
+coverage and qualifies affected fork seams. Foreign termination, shared Apple topology, final
+fixed-target closure and the real Nara GPU/Host/View consumer remain separate. Nara has only
+evidence updates; no dependency, owner, UI default or R11/R12/R11f completion changes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
