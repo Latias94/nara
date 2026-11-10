@@ -856,6 +856,15 @@ failures remain recorded. OS IME/mobile/safe-area hardware, Apple execution, num
 remaining framework owners and the real Nara GPU/Host/View consumer remain open. No engine
 dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
 
+The [official Canvas fallback successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-official-canvas-font-fallback)
+records Open-GPUI `f2526df594a`, qualified at `6ac5ffddb98`: complete official font fallback
+and selected-face APIs reuse TextSystem/atlas. Reproduced family/import defects are corrected;
+old tests follow official browser activity. Cosmic 52/52, final Web 47/47, independent 1/1,
+complete real WebGL/WebGPU/Auto smoke and affected Clippy/wasm/format/static gates pass.
+Five lanes close without reviewed P1/P2. OS IME/mobile/coverage elsewhere, contextual CJK,
+numeric costs, remaining framework owners and the actual Nara GPU/Host/View consumer remain
+open. No engine dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

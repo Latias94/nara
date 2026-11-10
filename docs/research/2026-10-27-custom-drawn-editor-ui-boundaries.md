@@ -5419,3 +5419,43 @@ numeric costs remain unqualified. Continue Canvas fallback/selected-face, remain
 render/logging and final API/dispatch dispositions, then the actual Nara GPU/Host/View consumer
 before separate maintenance. This evidence changes no engine dependency/default or complete
 fixed-target/R11/R12/R11f status.
+
+## November 11: Official Canvas Font Fallback
+
+Open-GPUI `f2526df594ae975bf8e234cc2e8ed0e36a871dfd`, qualified at
+`6ac5ffddb98a3a45a05b761bed271b49ebb26633`, adopts complete official
+`7960b2a7c9568e90fbe0727332149e5b2a5fd57a` and `87f65de697` against unchanged target
+`635026fabc38440fce5e1767d125026a17b12012`. Public immutable Emoji/Disabled/EmojiAndCjk
+policy, whole-grapheme eligibility, Canvas measurement/raster, glyph cache and run replacement
+reuse the existing Cosmic TextSystem and atlas. Selected-face weight/style and post-fallback
+missing reporting have their canonical owners. All 19 original portable regressions remain.
+Stock font registration and existing App/input lifetime owners stay distinct from the official
+wrapper; no separate document, shaper, atlas or browser lifetime manager is introduced.
+
+Actual browser qualification exposes two owning defects. The fork requests Inter while its
+packaged face is Inter Variable, silently falling back to mono; bootstrap and public consumers
+now use the actual family. The inherited UTF-16 import diff can split a surrogate and omit
+unchanged text inside a replaced selection. One private import helper now preserves scalar
+boundaries and contains the original selection, retaining fresh handler-owned document
+coordinates. Trusted emoji replacement and family-grapheme deletion pass after the fix.
+
+Official browser activity remains authoritative: textarea blur alone does not deactivate a
+visible page. Older driver expectations are updated to verify that retention, then use actual
+external DOM focus for deactivation and unchanged terminal/capture counts. Real native glyph
+rasters prove Regular/Italic/Bold face changes; advance geometry is not used as an ink oracle.
+The browser also verifies default/disabled/CJK policy, complete glyph identity, warm reuse,
+36px measurement/position agreement, font installation and residual reporting.
+
+Cosmic tests pass 52/52, final Web tests 47/47 and the ordinary independent consumer 1/1.
+Complete real Edge WebGL/WebGPU/Auto smoke passes original renderer/resize PNG controls and
+input/capture/docking/activation, identity/clipboard/text/Canvas/touch workflows. The existing
+22/22 fixed pixel samples pass at both viewport sizes; Canvas fallback's bitmap readback and
+accepted atlas paint retain separate evidence scope. Affected host/wasm correctness Clippy,
+optional shared-memory wasm compilation and format/static gates pass. All five lanes close
+without reviewed P1/P2; Open-GPUI retains original failures and corrections.
+
+OS IME, mobile/browser font coverage elsewhere, general contextual CJK shaping, numerical costs
+and native foreign execution remain unqualified. Continue remaining Wayland/X11/Mac, renderer/
+logging and final API/dispatch dispositions, then the actual Nara GPU/Host/View consumer before
+separate maintenance. Nara changes only evidence documents; no dependency/default or complete
+fixed-target/R11/R12/R11f gate changes follow.

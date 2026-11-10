@@ -2481,6 +2481,17 @@ Apple execution and numeric costs retain separate scope. Continue font/platform/
 and final API dispositions before the real Nara GPU/Host/View consumer and maintenance handoff.
 No engine/default or whole fixed-target/R11/R12/R11f gate changes follow.
 
+The [official Canvas fallback successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-official-canvas-font-fallback)
+records Open-GPUI `f2526df594a`, qualified at `6ac5ffddb98`: complete official policy,
+measurement/raster/cache/replacement and selected-face reporting reuse TextSystem/atlas.
+Concrete stock-family and UTF-16 import defects receive owning fixes; old blur controls follow
+official browser activity. Cosmic 52/52, final Web 47/47 and ordinary independent 1/1 pass,
+alongside complete actual WebGL/WebGPU/Auto smoke and affected Clippy/wasm/format/static gates.
+Five lanes close without reviewed P1/P2; original failures remain explicit. OS IME/mobile,
+coverage elsewhere, contextual CJK and numeric costs keep separate scope. Finish remaining
+platform/render/logging and final API dispositions before the actual Nara GPU/Host/View
+consumer and separate maintenance. No engine/default or whole R11/R12/R11f gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
