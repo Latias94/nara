@@ -798,6 +798,15 @@ shell/file-limit execution, numeric costs, remaining framework owners and the re
 consumer stay open before maintenance handoff. No dependency/default or full R11/R12/R11f
 gate changes follow.
 
+The [source-over/native child composition successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-source-over-alpha-and-native-child-composition)
+records Open-GPUI `37d211ea030`, qualified at `0b3582e5acc`: complete official DirectX/WGPU
+alpha settings and below-child DirectComposition startup/recreation retain fork rendering
+owners. Affected compilation, existing actual native/WGPU consumers 2/2 and format/static
+gates pass; one bounded reviewer closes without P1/P2. Desktop child/WebView, independent
+translucent-destination alpha, real device-loss visual proof, numerical costs and the real
+Nara GPU/Host/View consumer remain unqualified. Continue remaining framework owners before
+maintenance handoff. No dependency/default or full R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

@@ -2416,6 +2416,17 @@ remaining backend/render owners and logging disposition before the real engine c
 maintenance handoff. Foreign shell/file-limit execution and costs remain unqualified. No Nara
 dependency/default, full fixed-target or R11/R12/R11f gate changes.
 
+The [source-over/native child composition successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-source-over-alpha-and-native-child-composition)
+records Open-GPUI `37d211ea030`, qualified at `0b3582e5acc`: complete official DirectX/WGPU
+alpha configuration and DirectComposition below-child startup/recreation replace old settings.
+Apple settings were already adopted; fork clip/lease/candidate/submission owners are preserved.
+Affected all-target/all-feature compilation, existing actual native/WGPU consumers 2/2 and
+format/static gates pass; one bounded review closes without P1/P2. Desktop child/WebView,
+independent translucent-destination alpha, real device-loss visual proof and numeric costs
+remain unqualified. Continue remaining backend/render owners and logging disposition before
+the real Nara GPU/Host/View consumer and maintenance handoff. No dependency/default, full
+fixed-target or R11/R12/R11f gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

@@ -5226,3 +5226,30 @@ not qualify that package's wasm source or browser runtime. Foreign shell/descrip
 execution and numeric costs remain unqualified. Continue remaining backend/render owners and
 logging disposition, then the real Nara GPU/Host/View consumer before separate maintenance.
 Nara changes only evidence documents; no dependency/default or full R11/R12/R11f gate changes.
+
+## November 10: Source-Over Alpha And Native Child Composition
+
+Open-GPUI `37d211ea030388e2c413bcb7301cb8588d779919`, qualified at
+`0b3582e5acccb79964a2e2b8cf95b99883e09b99`, adopts official
+`e18de65b75901f8720ff9c9320bb013395de54e5` and
+`bc6fc117403dd6dc872072626fbc8269c0c06cf1` from the same fixed Zed target. DirectX ordinary/
+path-sprite alpha and WGPU path-sprite alpha use source-over; the Apple settings were already
+adopted. The original residual inventory's DirectX row omitted the remaining WGPU setting;
+the complete official cross-renderer change is now applied. No fork-specific production
+adaptation or new render owner is needed.
+
+DirectComposition startup and ordinary renderer reconstruction use the same below-child
+target setting. Native child HWNDs remain above GPUI content, including its drawn overlays;
+this follows native composition rather than defining arbitrary interleaved UI layers. The
+change preserves existing exact clipping, atlas/resource leases, candidate acceptance,
+submission receipts and native generation/retirement.
+
+Affected Windows/WGPU all-target/all-feature compilation passes. Existing actual native scene
+pixels against the independent gamma oracle and WGPU packed/storage mixed-scene pixel equality
+pass 2/2. Formatting and existing static/document gates pass, and one bounded independent
+review closes without P1/P2. Trust unchanged official configuration and avoid tests that only
+repeat blend constants. These regressions do not supply an independent translucent-destination
+alpha oracle, desktop child-HWND/WebView visibility, real GPU-timeout visual recovery or new
+Apple/browser execution. Numerical costs and actual Nara GPU/Host/View qualification remain
+open with the remaining backend/render owners and logging disposition. Nara changes only
+evidence documents; no dependency/default or full R11/R12/R11f gate changes.
