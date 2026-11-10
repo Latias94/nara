@@ -685,6 +685,19 @@ gates open. Complete live windowing is prepared, not implemented or shared-rende
 Four lanes close; fixed-target closure and the real Nara consumer still precede maintenance
 handoff, without a new Nara owner, dependency, UI default or R11/R12/R11f completion.
 
+The [startup/live-windowing qualification](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-live-windowing-and-framework-maintenance-handoff)
+records implementation `c1d8204f2da` and evidence `e7b2d848f55`, following separate fixture
+correction `1c33677716c`. Official persistent-runtime/mode/environment and platform policy paths
+retain exact native retirement, recovery generations and public independent-executor custody.
+Core/public all/off 126 each, final Windows 283, Linux library 162, configured software-native
+4, components/Canvas/docking 2,990 and independent all/off 115/83 pass. Locked/compiler-floor/
+Clippy/wasm/fmt/static checks pass. The failed aggregate's original clipboard trigger, default
+WSLg pthread-exit SIGSEGV and actual Mac compilation/execution remain separate limits. Sixteen
+lanes close. Complete fixed-target reconciliation and a real Nara GPU/Host/View consumer still
+precede the separate framework-maintenance session. Later engine feedback must keep framework
+public regressions and affected Nara acceptance together. Live windowing adds no shared renderer,
+external pump, new Nara owner, dependency, default or R11/R12/R11f completion.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

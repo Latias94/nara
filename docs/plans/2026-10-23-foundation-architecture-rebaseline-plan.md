@@ -2277,6 +2277,23 @@ connection/environment custody. It does not supply external pumping or a shared 
 Remaining fixed-target closure and the real engine consumer still precede maintenance handoff;
 no engine dependency, UI default or full R11/R12/R11f completion follows.
 
+The [startup/live-windowing successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-live-windowing-and-framework-maintenance-handoff)
+implements the complete official lifecycle at Open-GPUI `c1d8204f2da7069f40ea8e0420a37a5c0f210474`,
+with qualification `e7b2d848f555ef13d5ff4c9d4b5141ae7710f8b9` and separate clipboard-fixture
+correction `1c33677716c`. Persistent Linux runtime/replaceable connections, delayed Windows
+GPU/session acquisition and typed Mac policy retain exact AppCell/native retirement custody.
+Preparation panic retains the native owner; stale drag reads, run-boundary cleanup, explicit
+socket custody and independently retained executor timers have owning regressions. Core/public
+enabled/disabled 126 each, final Windows 283, Linux library 162, final configured llvmpipe native
+4, components/docking/Canvas 2,990 and independent all/off 115/83 pass. Locked/compiler-floor/
+Clippy/wasm/fmt/static gates pass. Preserve the failed original aggregate, default WSLg native
+thread-exit SIGSEGV and uncompiled Apple native scope separately. Sixteen lanes close.
+Continue official native quit/Restart Manager, shared Apple topology and final fixed-target
+reconciliation, then the real source-aligned GPU/Host/View consumer. Only after those gates
+does a separate Codex session maintain Open-GPUI from the existing skill/queue/plan and executed
+consumers; subsequent engine feedback requires public framework and affected Nara regressions.
+No engine dependency, rendering/default choice or R11/R12/R11f completion follows.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

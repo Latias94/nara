@@ -4808,3 +4808,69 @@ Live windowing still does not supply external event pumping or shared-device/tar
 The real Nara GPU/Host/View consumer, final fixed-target dispositions and framework maintenance
 handoff remain open. Nara keeps its adapter/document/ECS/history/GPU responsibilities and full
 Editor/game-runtime acceptance; no R11/R12/R11f completion follows.
+
+## November 10: Live Windowing And Framework Maintenance Handoff
+
+Open-GPUI implements the startup/live-windowing lifecycle at
+`c1d8204f2da7069f40ea8e0420a37a5c0f210474`, with qualification
+`e7b2d848f555ef13d5ff4c9d4b5141ae7710f8b9` and separate clipboard-fixture correction
+`1c33677716c`. Official provenance is `f37989fbdf840b308892af66516c2b9c3ef3853a`, display
+refresh `f495dd0f77b69e287ed72c1168dc02965f08be7d`, Mac activation
+`d86aa6e6b9f52046fb299ab57ec884b300190813`, Wayland activation
+`4d847859f5506471bd80ca78ee6ced161b19a4e8` and stale URI-read correction `87a1ea30e8`.
+The fixed target stays `635026fabc38440fce5e1767d125026a17b12012`.
+
+Official WindowingRequest, GraphicalEnvironment, application ActivationPolicy and Linux
+WindowingModes use one persistent App/runtime/executor/text-system owner with replaceable native
+connections. Windows defers GPU acquisition until admitted startup/live attach, fences old device
+recovery generations and releases/reacquires optional DirectWrite GPU state. Mac stores typed
+application policy, distinct from per-window activation. The obsolete Linux generic per-client
+platform and headless-client owner are removed. The ordinary toggle_headless consumer uses the
+public platform factory without test support.
+
+Fork adaptations retain the existing exact native owners. AppCell validation stays attached
+through deferred physical apply, rather than treating an empty logical window map as readiness.
+Retirement takes ownership before presentation preparation, preserving the native box across
+cleanup panic and retry, observer fanout, dependent retirement and both shutdown modes. Explicit
+owned Wayland sockets avoid adopting a running Host's descriptor from an environment string or
+mutating its process environment. The official calloop idle pin is retained with explicit owned
+timer shutdown and run-boundary foreground cleanup. A reproduced premature timer cancellation
+is corrected so the public standalone background executor remains usable after its temporary,
+never-launched platform drops. These are framework/Host custody corrections, not Nara services.
+
+Core/public controls pass 126/126 with profiler enabled and disabled. Final Windows library
+passes 283/283 with ten explicit skips; same-App native controls include three attachments,
+four real recoveries on already Submitted HWNDs, actual mouse/model updates, text and isolated
+color-emoji readback. The original 2,221-case aggregate retains its sole clipboard restoration
+failure; the bounded fixture correction and later owner pass do not establish the original
+failure's trigger. Complete UI core/components/docking/Canvas passes 2,990/2,990. Independently
+locked consumers pass 115/115 with all features and three skips, and 83/83 without optional
+features or skips.
+
+Actual Linux complete library passes 162/162 with four native cases separately qualified.
+The final configured native selection passes 4/4 on WSLg using Mesa llvmpipe software Vulkan:
+same-App X11/headless/Wayland, actual X11 F8/model/paint/Submitted alignment, initial-only owned
+socket with unreachable address and actual exec isolation, and two private Xvfb clipboard
+managers with selection partition and handover cleanup. Default WSLg rendering reaches the
+completion markers but SIGSEGVs during pthread-specific-data destruction at thread exit; GDB
+does not identify the responsible library. Keep that default profile unqualified. The configured
+pass establishes neither Linux hardware performance nor compositor scanout/pixel-readback.
+
+Linux headless/X11/Wayland/combined feature checks and the ordinary example compile. Locked
+Windows workspace/consumer checks, host/Linux correctness Clippy, actual Windows Rust 1.93
+framework/ordinary/test-support/hot-reload checks, production wasm profiler off/on and independent
+smoke compilation, formatting/YAML and static import/API/document/release gates pass. The Apple
+foreign check stops before the new owner when host cc rejects Apple target flags in alloca;
+actual Mac compilation and GUI/Metal execution remain open. All sixteen work/review lanes close.
+
+The agreed maintenance boundary is dependency ordered: finish the fixed-target framework
+reconciliation, qualify the real Nara GPU/Host/View consumer, then hand framework maintenance
+to a separate Codex session. That session starts from the existing sync skill, candidate queue,
+plan, current-state and executed public/native gates. Later engine feedback becomes a bounded
+framework change with an ordinary public regression and an affected Nara consumer check.
+Open-GPUI owns general UI behavior; Nara owns document/ECS/history, GPU submission, Host/View
+policy and final Editor/game-runtime acceptance. The actual adapter still needs source-aligned
+GPU types, external target/encoder recording, clipped retained textures, one submission/loop
+authority and exact input/retirement custody. Live windowing does not provide those seams.
+Native quit/Restart Manager, shared Apple topology and final residual reconciliation remain
+ahead of that adapter. No toolkit default or R11/R12/R11f completion follows.
