@@ -5191,3 +5191,38 @@ Foreign native filesystem/browser execution and numerical costs remain unqualifi
 remaining utility/backend/render owners, then the real Nara GPU/Host/View consumer before
 separate framework maintenance. Nara changes only evidence documents; no dependency/default,
 full fixed-target closure or R11/R12/R11f gate changes.
+
+## November 10: Utility Composition And Development Assets
+
+Open-GPUI `8e0517f56506706f1c40a76fd8ed84f6643deb55`, qualified at
+`ba4f699d828a1c0352d2aa9d1b268b5a3ac55f88`, adopts the complete fixed-target shell/capture,
+JSON replacement/separate union, development assets, Markdown fragment/environment-name and
+explicit Unix file-limit APIs. The Zed target remains `635026fabc38440fce5e1767d125026a17b12012`.
+Native command construction, Windows discovery and portable UTF-8/bounded-sort helpers move
+to the canonical core utility owner; duplicate implementations are removed. Windows restart
+consumes its official Option<String> shell API through a native-path conversion. Existing
+restart arguments, process/Job/RAII/hash/log behavior retain their qualified owners.
+
+The complete shell builder, Markdown and redaction sources match the target. Runtime asset
+lookup keeps official executable-first repository selection and matching get/iter/trait
+filters. A copied ordinary consumer launches inside a temporary `.git`-file checkout with a
+different checkout as cwd, proving actual live file changes without modifying the lookup to
+fit Nara's external shared target. Embedded modes use the same public facade with compiled
+contents even when runtime assets are absent or change. Canonical path reexports forward the
+same types; no old unchecked path behavior or compatibility implementation returns.
+
+A real independently locked macro consumer exposes rust-embed 8.13's required compressed
+method. The supported dependency floor becomes 8.13, with a bounded facade/trait adaptation
+matching that dependency's own dynamic behavior. The existing health gate then finds four
+compression advisories. All six locks select patched zstd 0.14.3, zstd-safe 8.2.0 and zstd-sys
+2.1.2; root dependency-health and five independent audits pass without new ignores. These are
+concrete integration corrections, not reasons to retain the superseded utility implementation.
+
+Final focused checks pass 47/47, ordinary dev/embedded consumers 4/4 each, release assets 1/1
+and existing Windows restart controls 11/11. Affected compilation/correctness Clippy,
+core-util wasm, formatting and existing static/document gates pass. Four scoped lanes close
+without P1/P2. The higher-utility wasm check stops in zstd-sys because clang is absent; it does
+not qualify that package's wasm source or browser runtime. Foreign shell/descriptor/file-limit
+execution and numeric costs remain unqualified. Continue remaining backend/render owners and
+logging disposition, then the real Nara GPU/Host/View consumer before separate maintenance.
+Nara changes only evidence documents; no dependency/default or full R11/R12/R11f gate changes.

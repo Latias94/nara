@@ -787,6 +787,17 @@ No external package version/source changes follow. Remaining framework owners an
 Nara consumer precede separate maintenance; foreign filesystem/browser execution and numeric
 costs remain unqualified. No Nara dependency/default or full R11/R12/R11f gate changes.
 
+The [utility composition/development-asset successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-utility-composition-and-development-assets)
+records Open-GPUI `8e0517f5650`, qualified at `ba4f699d828`: complete official shell, JSON,
+assets and lightweight helpers replace duplicate owners through real public consumers.
+Focused 47/47, ordinary dev/embedded 4/4 each, release 1/1 and Windows restart 11/11 pass.
+Concrete dependency-interface/advisory corrections pass root health and five independent
+audits without ignores; affected compilation/Clippy, core-util wasm and format/static gates
+pass. Four lanes close without P1/P2. Higher-utility wasm stops at missing clang; foreign
+shell/file-limit execution, numeric costs, remaining framework owners and the real Nara
+consumer stay open before maintenance handoff. No dependency/default or full R11/R12/R11f
+gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

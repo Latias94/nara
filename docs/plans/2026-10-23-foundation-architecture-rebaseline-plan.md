@@ -2404,6 +2404,18 @@ the real engine consumer before separate maintenance. Foreign filesystem/browser
 and numeric costs remain unqualified. Nara has only evidence changes; no dependency/default,
 full fixed-target or R11/R12/R11f gate changes.
 
+The [utility composition/development-asset successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-utility-composition-and-development-assets)
+records Open-GPUI `8e0517f5650`, qualified at `ba4f699d828`: complete official shell, JSON,
+development assets and lightweight helpers share canonical owners; duplicate helper/Windows
+discovery implementations are removed. Final focused 47/47, ordinary dev/embedded 4/4 each,
+release 1/1 and Windows restart 11/11 pass. Actual rust-embed 8.13 and compression advisories
+receive bounded dependency/interface corrections, passing root health and five independent
+audits without ignores. Affected compilation/Clippy, core-util wasm and format/static gates
+pass; higher-utility wasm stops at missing clang. Four lanes close without P1/P2. Continue
+remaining backend/render owners and logging disposition before the real engine consumer and
+maintenance handoff. Foreign shell/file-limit execution and costs remain unqualified. No Nara
+dependency/default, full fixed-target or R11/R12/R11f gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
