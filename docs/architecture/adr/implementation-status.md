@@ -663,6 +663,18 @@ static gates pass; nine lanes close. Remaining fixed-target mechanisms and the r
 GPU/Host/View consumer still precede separate maintenance. This is scoped framework evidence,
 with no new engine dependency, default or R11/R12/R11f completion.
 
+The [scoped activity successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-scoped-activity-and-native-resource-ownership)
+records implementation `2459aebecc9`, qualification `633b3fced1f` and separate inherited Linux
+input migration `467dc18a169`, after Open-GPUI `0b7024f86af`. Official
+guard/idle-sleep/App Nap semantics use existing task/platform owners, with distinct Windows
+native request/reason and ordinary-process evidence. Complete ordinary all/off 108/78 and
+focused 31 pass; the failed full aggregate retains its unchanged topology refusal. Linux
+protocol/activity 11, final headless 1, Core/input 22 and public 9 pass, and both windowing
+features compile. The missing PipeWire screen-capture prerequisite remains separately failed.
+Disabled Core/public 24, Windows compiler-floor/Clippy, production wasm and format/static gates
+pass; shared Apple topology, Mac native execution and actual power-policy effects are not
+implied. No Nara owner, dependency, default or R11/R12/R11f completion follows.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

@@ -1478,6 +1478,12 @@ The executable comparison must cover:
    extension plus Nara adapter with a Nara-owned Platform/PlatformWindow path, resolving one
    window/loop arrangement through the real consumer. Existing atlas and CPU Host controls do
    not qualify this seam. The study changes no dependency graph or public runtime/default.
+   Maintenance handoff requires this consumer's actual source/processed content, overlapping UI,
+   clip/DPI/resize/color and exact View input, plus independent producer retirement and refused,
+   panicking, close and device-loss controls. Record copies, submissions, synchronization and
+   retained-resource costs without steady-state CPU readback, along with the immutable framework
+   revision, resolved graph and rerunnable commands. Complete source editing and the later
+   Editor/game-runtime acceptance remain Nara work after that framework-maintenance handoff.
 4. **Complete source editing:** Hierarchy and Inspector selection, local drafts, 4096-byte text,
    composition/focus, exact command refusal/result, Undo/Redo and Save/Reopen. Existing Session
    owners remain authoritative. A parallel framework form, document or history owner cannot
@@ -2241,6 +2247,22 @@ wasm/fmt/static gates pass. Nine lanes close. Continue the prepared scoped idle-
 native appearance, live windowing and native-quit/Restart Manager reconciliation before the
 real engine consumer identified in the source map. This records scoped evidence without an
 engine dependency change, UI default, complete-refresh or maintenance-handoff claim.
+
+The [scoped activity successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-scoped-activity-and-native-resource-ownership)
+is implemented at Open-GPUI `2459aebecc90fb2bd2d5fefd04b7b4548f3652bc`, with qualification
+`633b3fced1f442d021eec7591df6f20dca403ece` and separate Linux input migration `467dc18a169`.
+Official guard acquisition/release and separate App Nap semantics use existing owners.
+Windows verifies actual native handle/reason lifetime and refused-close storage; ordinary
+all/off consumers pass 108/78, focused Core/public/Windows 31 and native follow-up 8 pass.
+The original 2,064/2,065 aggregate retains an unchanged display-topology refusal. Linux's actual
+protocol gate uses private D-Bus sessions and locked Rust 1.95 under WSL; its first compilation
+exposes stale X11/Wayland input-handler API uses, now migrated to the existing Core contract.
+Actual Linux protocol 11, final headless 1, Core/input 22 and public 9 pass; both windowing
+features compile. The initial all-feature Core screen-capture attempt lacks PipeWire and is
+recorded separately from the scoped passing selection. Disabled Core/public 24, Windows
+compiler-floor/Clippy, production wasm, format/static gates pass. Shared Apple topology, Mac
+native execution, remaining fixed-target mechanisms and the real Nara consumer stay separate.
+This prerequisite changes no Nara dependency or runtime/default.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;

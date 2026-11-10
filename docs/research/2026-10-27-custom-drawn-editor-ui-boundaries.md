@@ -4677,3 +4677,75 @@ above supplies concrete engine-seam prerequisites, not external-target recording
 View. Framework closure and that qualified Nara GPU/Host/View consumer still precede maintenance
 handoff. Nara keeps its document/ECS/history/GPU and UI choices; no runtime/default or full
 R11/R12/R11f completion follows.
+
+## November 10: Scoped Activity And Native Resource Ownership
+
+Open-GPUI implements this successor at `2459aebecc90fb2bd2d5fefd04b7b4548f3652bc`, qualified
+in `633b3fced1f442d021eec7591df6f20dca403ece`, after
+`0b7024f86af0beed8fde92887eb1c1387997085c`. It adopts official
+`450775244fade36db70af2447be24e74edb43368` and Windows reason-lifetime correction
+`d2074f4e15d289345a9583ef973470b8bdfad74a` under unchanged fixed target
+`635026fabc38440fce5e1767d125026a17b12012`. The separate Linux input migration is committed as
+`467dc18a169`. These are local framework commits, changing no Nara runtime or dependency.
+
+ActivityGuard retains the official Send once-release closure. App/Platform sleep acquisition
+uses existing tasks, while BackgroundExecutor/PlatformDispatcher App Nap remains separate:
+Apple can avoid throttling without inhibiting idle system sleep; other dispatchers inherit
+no-op guards. Web/VisualTest and headless Linux reject unsupported sleep acquisition explicitly.
+TestPlatform preserves the official delay/error/count controls. Actual guard ownership can
+outlive an App or platform; it does not create another application shutdown or scheduler owner.
+
+Windows owns a real power-request handle and its exact UTF-16 reason allocation. Pre-execution
+review removes an invalid duplicated-handle test observer that would extend the native object
+beyond its buffer. Normal and partial-acquisition close paths now share one private storage
+owner; a true close refusal retains that allocation before logging. Controlled tests use real
+HANDLE_FLAG_PROTECT_FROM_CLOSE, then restore and close only their own handle. The independent
+release observation holds no native object or reason allocation. This bounded fork correction
+retains the official kernel-request mechanism, without a manager or retry queue.
+
+Linux ports complete portal acquisition, response/error, timeout and asynchronous Request::close.
+Its typed private headless capability replaces display-string checks in acquisition and prior
+power-listener setup. Private-session protocol tests exercise normal/late-cancel/late-timeout
+release and guard-after-platform-drop through production helpers. Exact child completion and
+bounded process cleanup are explicit; a 200ms no-duplicate window has finite scope. The only
+new dependency edge is an already-locked zbus version for Linux tests. Mac owns the complete
+typed activity in its current module; upstream's larger shared gpui_apple/Metal extraction
+remains a separate queued topology unit. The local helper does not qualify that extraction or
+Apple native execution.
+
+Focused Core/public/Windows passes 31, ordinary activity 3 and complete ordinary all/off
+consumers 108/78. Complete Core/public passes 1,789 within the 2,064/2,065 aggregate: an unchanged
+generic-view test refuses its second window creation after display topology changes. Its
+unchanged follow-up and all seven activity native controls pass 8/8, retaining the original
+failure and unknown trigger. The ordinary Windows child observes eight real request handles,
+independent group release, worker-thread release and actual quit/normal exit. Those resource
+observations do not measure energy or prove OS sleep-policy enforcement.
+
+Actual Linux qualification uses Ubuntu 26.04 WSL2, Rust 1.95, one Cargo job and Nara's target.
+The first backend compilation exposes inherited X11/Wayland calls to the removed native input
+outcome wrapper. Migrate those calls to the existing Core Option/value contract, preserving
+quiescence and callback checkout. Both windowing features then pass all-target compilation.
+Actual isolated portal/activity passes 11/11, final no-windowing unsupported 1/1, Core activity
+and existing input regressions 22/22, and separate public consumers 9/9. An inherited
+unconditional click-distance test receives its function's existing windowing cfg. The initial
+all-feature Core attempt stops at missing PipeWire for screen capture; the executed scoped
+Core selection uses default features plus test-support/profiler and does not qualify that
+unrelated capture feature or live desktop IME. Download/environment details remain in the
+framework's existing verification record.
+
+Profiler-disabled Windows Core/public activity passes 24/24. Locked Windows Rust 1.95 workspace
+and ordinary-consumer checks, host correctness Clippy, actual Windows Rust 1.93 affected-owner/
+ordinary-consumer checks, production wasm profiler off/on, formatting/YAML and existing static
+gates pass. The new Linux test dependency edge reuses an already-locked package; no package
+version or compiler-floor change follows. All eight implementation/review lanes and the
+additional bounded handoff review close. Mac compilation/native activity, desktop power-policy
+effects and numeric costs remain open, separate from the executed resource/protocol evidence.
+
+The handoff conditions now name the real engine consumer's device/submission/loop arrangement,
+overlapping UI and clipped texture sampling, exact View input, producer retirement, refusal/
+panic/close/device-loss controls and recorded copies/submissions/synchronization/resource costs.
+After fixed-target closure and that qualified consumer, a dedicated Codex session maintains
+Open-GPUI against engine feedback; Nara continues complete Editor/game-runtime acceptance.
+Remaining native appearance, live windowing, quit/Restart Manager, Apple topology and gesture
+dispositions still precede closure. No UI default, new engine owner or full R11/R12/R11f
+completion follows from this prerequisite.
