@@ -2366,6 +2366,19 @@ cross-application input and numeric costs remain unqualified. Continue supportin
 dependencies and remaining backend/render owners, including popup, before the actual Nara
 consumer and separate maintenance. No engine/default or whole foundation gate changes.
 
+The [process/dedicated/string successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-process-reaping-and-dedicated-execution)
+records Open-GPUI `5b1810abbcc867486c21cba530f2bfec63de6414`, qualified at `b04321bac86`:
+complete official shared reaping, dedicated execution/nonblocking delivery, native/wasm gates
+and SharedString helpers retain existing fork admission, scoped cancellation and shutdown.
+One reproduced official queued-sender cycle has a bounded weak-dispatch correction. Focused
+35/35, overlapping dedicated follow-up 12/12 and independent public 3/3 pass, with one actual
+process source across six roots, affected Darwin/wasm compilation, correctness Clippy and
+format/static gates. Five lanes close without reviewed P1/P2; actual Darwin/browser execution
+and numeric costs remain unqualified. Trust unchanged official coverage and qualify affected
+fork seams. Continue HTTP/download/archive and remaining utility/backend/render owners before
+the real engine consumer and separate maintenance. Nara has only evidence changes; no
+dependency/default, full fixed-target or R11/R12/R11f gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

@@ -5086,3 +5086,38 @@ Native Mac/Wayland cross-application drag, physical input and numerical costs re
 Continue supporting utilities/dependencies and remaining backend/render owners, including native
 popup, then the real Nara GPU/Host/View consumer before separate maintenance. Nara changes only
 evidence documents; no engine dependency, UI default, full refresh or R11/R12/R11f gate closes.
+
+## November 10: Process Reaping And Dedicated Execution
+
+Open-GPUI `5b1810abbcc867486c21cba530f2bfec63de6414`, qualified at
+`b04321bac869e50fc80f6c0e2b70f85901587fa2`, adopts the fixed target's complete Darwin shared
+process reaper, DedicatedExecutor/nonblocking task delivery, native/wasm execution gates and
+SharedString helpers. Official sources are `e1bfcf85db`, `60ed56b372`, `d4cc8d2409`,
+`2040e0de59`, `98c6c1403b`, `47825fe00a`, `9dd6993e2e` and their fixed-target follow-ups.
+The target remains `635026fabc38440fce5e1767d125026a17b12012`. Existing fork dispatcher
+admission, foreground accounting, borrowed-future destruction and native shutdown retain their
+current owners. No second engine scheduler or process service is introduced.
+
+The actual direct/smol graph selects one official async-process revision
+`0b6d6713570af61806e1e5cb40e0f757cb93fd9d` across the workspace and five independent roots.
+Cargo does not inherit library root patches; an eventual engine consumer must declare this
+source selection too. Darwin pipes use Async<File> and adopted PIDs, replacing the old custom
+wait/status implementation. SharedString and scheduler runtime initially match the official
+target after newline normalization. One concretely reproduced queued-task sender retention
+cycle receives a bounded WeakSender dispatch correction. The framework record distinguishes
+that production divergence from new fixture API/race errors and missing-xcrun configuration.
+
+Focused Core/scheduler/SharedString/process checks pass 35/35. The dedicated follow-up passes
+12/12, with eleven overlapping cases and one added detached Pending/external-wake lifetime
+control. Ordinary and deterministic public consumers pass 3/3 in total. Their runtime and
+uninvoked type-check scopes remain distinct. Darwin utility/public-consumer source compilation,
+stable and configured shared-memory wasm production compilation, affected correctness Clippy,
+formatting and existing static/document gates pass. Five lanes close without reviewed P1/P2.
+Trust unchanged official mechanisms and coverage; test actual fork seams and reproduced defects
+rather than repeating unrelated framework/component/platform/compiler matrices.
+
+Actual Darwin process execution, browser worker/shutdown lifecycle and numerical costs remain
+unqualified. Continue HTTP/download/archive, remaining supporting utilities and backend/render
+owners, then the actual Nara GPU/Host/View consumer before separate framework maintenance.
+Nara changes only these evidence documents; no dependency/default, full fixed-target closure or
+R11/R12/R11f gate changes.

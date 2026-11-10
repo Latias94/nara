@@ -755,6 +755,17 @@ reviewed P1/P2. Native cross-application execution, physical input and numerical
 unqualified. Remaining framework units and the real Nara consumer precede separate maintenance;
 Nara has only evidence updates, with no dependency/default or R11/R12/R11f gate change.
 
+The [process/dedicated/string successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-process-reaping-and-dedicated-execution)
+records Open-GPUI `5b1810abbcc`, qualified at `b04321bac86`: official shared process reaping,
+DedicatedExecutor/nonblocking delivery, native/wasm API gates and SharedString helpers retain
+current fork owners. One reproduced official queued-sender cycle receives bounded weak dispatch.
+Focused 35/35, overlapping dedicated follow-up 12/12 and independent public 3/3 pass; actual
+dependency identity, affected Darwin/wasm source compilation, correctness Clippy and format/
+static gates pass. Five lanes close without reviewed P1/P2. Actual Darwin/browser execution,
+numerical budgets, remaining framework owners and the real Nara consumer remain open before
+separate maintenance. Nara has only evidence updates, with no dependency/default or full
+R11/R12/R11f gate change. Trust unchanged official coverage and verify actual fork seams.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,
