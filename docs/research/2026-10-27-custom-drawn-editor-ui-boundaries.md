@@ -5055,3 +5055,34 @@ Continue cursor/external-drag, supporting utility/dependency and remaining backe
 then the real Nara GPU/Host/View consumer before separate framework maintenance. Nara changes
 only evidence documents. Full fixed-target closure, numerical budgets, foreign execution,
 engine/default selection and R11/R12/R11f remain open.
+
+## November 10: Native File Drag And Source Session Custody
+
+Open-GPUI `fc6c9dc4403a8839b84528236075ca4ae70ab8ec`, qualified by
+`e314339a3adbc3d4f52b3596990ebf1fbf27eeaa`, adopts official cursor timing, mouse/file-exit
+listeners, lazy file payloads, source restoration and complete Mac/Wayland outbound mechanisms
+from fixed Zed target `635026fabc38440fce5e1767d125026a17b12012`, including its UTType icon
+path. The fork retains per-window cursors, targeted committed geometry and candidate listeners.
+Native callbacks capture an opaque session with the original WindowId and existing drag
+generation, forwarding through current ingress rather than a second queue or lifecycle owner.
+
+The original typed drag survives a visit to another application window and return to its source.
+Temporary destination wrappers do not replace source authority. Exact cancellation retires the
+platform marker while preserving reserved cancellation/release facts; stale native completion
+cannot clear a replacement drag. Both reviewed fork defects are corrected, with the restoration
+failure reproduced before its fix. Fixture errors remain in the framework qualification.
+
+Final Core passes 18/18, Linux URI controls 5/5 and the ordinary independent API consumer 3/3.
+Affected Core/Windows all-target compilation/correctness Clippy, Mac all-target foreign Clippy,
+actual Wayland-only Linux production compilation, formatting and static/document gates pass.
+Mac source controls and native examples are type-checked, not executed. Linux tests exercise
+URI conversion rather than a compositor. The independent consumer executes metadata/event
+conversions while listener/session closures only type-check. Five lanes close without reviewed
+P1/P2. Only the official UTI 0.3.2 package and required edges enter root/consumer locks; retained
+external versions do not change. No unrelated runtime/component/platform/compiler matrix is
+repeated.
+
+Native Mac/Wayland cross-application drag, physical input and numerical costs remain unqualified.
+Continue supporting utilities/dependencies and remaining backend/render owners, including native
+popup, then the real Nara GPU/Host/View consumer before separate maintenance. Nara changes only
+evidence documents; no engine dependency, UI default, full refresh or R11/R12/R11f gate closes.

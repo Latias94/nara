@@ -746,6 +746,15 @@ DOM observations, Core output and physical-device limits remain distinct. Remain
 units and the real Nara GPU/Host/View consumer precede separate maintenance. Nara has only
 evidence updates; no dependency/default, full refresh or R11/R12/R11f gate changes.
 
+The [native file-drag/source-session successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-native-file-drag-and-source-session-custody)
+records Open-GPUI `fc6c9dc4403`, qualified at `e314339a3ad`: official cursor, exit/lazy payload
+and Mac/Wayland source mechanisms retain existing fork geometry, candidate and exact ingress
+owners. Core 18, Linux URI 5 and ordinary API 3 pass; affected host/Mac compilation/correctness
+Clippy, Wayland production compilation and format/static gates pass. Five lanes close without
+reviewed P1/P2. Native cross-application execution, physical input and numerical budgets remain
+unqualified. Remaining framework units and the real Nara consumer precede separate maintenance;
+Nara has only evidence updates, with no dependency/default or R11/R12/R11f gate change.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

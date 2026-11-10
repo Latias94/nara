@@ -2356,6 +2356,16 @@ matrices. Continue remaining cursor/external-drag, utility/dependency and backen
 then the actual engine consumer before separate maintenance. This prerequisite changes no
 engine/default or full R11/R12/R11f gate.
 
+The [native file-drag/source-session successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-native-file-drag-and-source-session-custody)
+records Open-GPUI `fc6c9dc4403a8839b84528236075ca4ae70ab8ec`, qualified at `e314339a3ad`:
+complete official cursor/exit/file payload and Mac/Wayland mechanisms preserve current geometry,
+candidate listeners and exact native source generations. Core 18, Linux URI 5 and ordinary API
+3 pass, as do affected host/Mac all-target compilation/correctness Clippy, Wayland production
+compilation and format/static gates. Five lanes close without reviewed P1/P2. Real native
+cross-application input and numeric costs remain unqualified. Continue supporting utilities/
+dependencies and remaining backend/render owners, including popup, before the actual Nara
+consumer and separate maintenance. No engine/default or whole foundation gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
