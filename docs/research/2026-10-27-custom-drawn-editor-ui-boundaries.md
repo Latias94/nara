@@ -4484,3 +4484,78 @@ Each engine adoption records an immutable framework revision and resolved depend
 Reusable framework corrections need Open-GPUI regressions, while Nara owns its adapter,
 documents, ECS, history and Editor/game-runtime choices. This evidence update selects no new
 Nara runtime/default or second rendering/service owner. Full R11/R12/R11f remains open.
+
+## November 10: Runtime Host Identity And Keybinding Consumers
+
+Open-GPUI implementation is `70b993c9660772b157546f46c4a65c0ebd4375e6`, with qualification
+at `7ead5105e56b29255ece592e62fd5f2250542131`, following credential checkpoint
+`6613f6b0075c7df818518687f06128c7b19b1619`. The complete official mechanism comes from
+[`389c22e1c747d1a433c3b51c176936166c9cc1cf`](https://github.com/zed-industries/zed/commit/389c22e1c747d1a433c3b51c176936166c9cc1cf)
+under unchanged fixed target `635026fabc38440fce5e1767d125026a17b12012`. These are local
+framework commits; no remote publication or hosted CI execution occurs.
+
+PlatformInfo separates the host OperatingSystem from Native/Web delivery. Backend reports,
+App access, default contexts, modifier interpretation, shortcut labels and actual binding
+dispatch use those facts. Static Keystroke::parse and KeyBinding::new require explicit
+modifiers; dynamic secondary input uses parse_with_os or KeyBinding::load with the owning
+App and real keyboard mapper. Display/unparse take an explicit OS. Only Mac resolves
+secondary to Command; Mac/iOS Option-input detection retains its distinct rule. WebPlatform
+captures its host report once rather than changing conventions on each navigator query.
+
+Fork command installation, patch preview, palette preflight, capture and tooltip consumers
+migrate around that official mechanism. Binding-syntax string preflight uses the installation
+App's mapper; already-normalized backend event buffers are not mapped again. DevTools prepares
+binding projections on the App thread and publishes owned snapshot DTOs through its existing
+thread-safe sampler. The same registered probe and long-lived Gallery workbench read updated
+facts. Diagnostic samples explicitly distinguish projected bindings from installed keymaps.
+No engine-private identity, command router, input queue or sampler owner is introduced.
+
+Three inherited debug-source interaction problems retain separate fork provenance: callbacks
+previously required secondary at paint time, modifier invalidation followed the focused path,
+and movement across text bounds inside one hitbox left stale underline state. Actual failing
+input/Scene oracles precede corrections through existing Window input normalization and View
+invalidation. Exact incoming modifiers, projected label bounds and accepted hitbox admission
+still control clicks. Initial invalid hitbox/scale oracles, ordinary asynchronous activation,
+retired input-slot observation, stale DTO fixtures and a wrong CDP Meta modifier bit are
+recorded as fixture/driver corrections rather than production-framework regressions.
+
+Final focused Core/public passes 92/92. Complete Core/WGPU/Windows libraries and public
+integrations pass 2,130/2,130 with ten declared aggregate skips; the new native trajectory
+passes separately. Command/components/DevTools/Gallery pass 1,230/1,230 with only fixture
+regeneration skipped, and UI core/docking/Canvas pass 2,077/2,077. Ordinary all-feature,
+profiler-only and feature-free consumers pass 102/88/72, with three skips only in the
+all-feature selection; the actual host App/activation/mapper selection passes 4/4. Disabled
+profiler Core/public passes 1,393/1,393. Original failures and final run identities remain
+in Open-GPUI's existing verification record.
+
+The actual Windows workflow checks registered native input, WM_CHAR, shaped source and exact
+window/handler/platform retirement. A real prefix timeout dispatches once; another timer
+starts before retirement and cannot affect a successor beyond its deadline. The accepted scene
+has a matching nonempty Submitted record. capture_frame re-renders that scene for GPU readback;
+it does not sample an earlier swapchain buffer. Row ink and marker checks do not establish exact
+glyph images, physical keyboard translation, live IME or compositor scanout.
+
+The complete Edge browser matrix executes original Windows and ten controlled navigator
+samples, trusted single/chord/explicit modifier input for original/Mac/Windows/Linux cases,
+iPhone/iPad and five throwing-getter controls. Every sample forces a fresh App read after
+navigator mutation and retains cached identity. Init scripts and descriptors restore before
+existing clipboard permission/text/image/focus/retirement cases pass. Existing WebGL/auto/
+WebGPU renderer/input/docking/activation/resize checks pass, including 22/22 screenshot samples
+at both viewport sizes, explicit software refusal and controlled auto fallback. Injected browser
+host reports do not qualify corresponding native OS backends.
+
+Locked Rust 1.95 workspace/ordinary checks, expanded correctness Clippy, actual Windows Rust
+1.93 framework and three independent-consumer checks, production wasm profiler off/on,
+formatting/YAML and existing static gates pass. No production dependency or compiler requirement
+changes; the ordinary consumer adds only the existing Windows command dev-dependency edge.
+All thirteen implementation/review/successor-research threads close.
+
+Continue official restart arguments with exact native argv and dedicated worker/recorder proof,
+scoped idle-sleep guards, native appearance, live windowing and the remaining fixed-target
+dispositions. Mac/Linux/FreeBSD native execution, numeric budgets and canonical-docking U4-U9
+retain their own gates. This unit supplies no captured-device constructor, Host-owned renderer
+submission, native renderer replacement or clipped engine texture View. The real Nara
+GPU/Host/View consumer remains required before handing ongoing Open-GPUI maintenance to its
+separate session. Nara keeps its document/ECS/history/GPU and Editor/game-runtime choices;
+each later adoption qualifies an immutable framework revision through affected engine workflows.
+No Nara runtime/default switch or full R11/R12/R11f completion follows.

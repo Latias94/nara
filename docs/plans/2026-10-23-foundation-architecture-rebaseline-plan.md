@@ -2206,6 +2206,21 @@ finishes the fixed refresh and first real modular Nara consumer before the separ
 maintenance session; each later engine adoption qualifies an immutable framework revision.
 No runtime/default or complete R11/R12/R11f claim follows.
 
+The [runtime-host/keybinding successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-runtime-host-identity-and-keybinding-consumers)
+is implemented at Open-GPUI `70b993c9660772b157546f46c4a65c0ebd4375e6`, qualified at
+`7ead5105e56b29255ece592e62fd5f2250542131`, from official `389c22e1c747` under the unchanged
+fixed target. Platform/App identity, static/dynamic parsing, actual mapper loading, host labels
+and fork command/component/DevTools consumers migrate together. Inherited debug-label fixes
+retain distinct provenance. Final focused 92, framework/public/Windows 2,130, command/components/
+DevTools/Gallery 1,230, other UI consumers 2,077, ordinary all/profiler/off 102/88/72 and disabled
+Core/public 1,393 pass. Actual Windows timed-prefix retirement and complete browser host/input/
+cache/restoration workflows execute. Locked checks, correctness Clippy, actual Windows Rust
+1.93, production wasm and final format/static gates pass; thirteen lanes close. Native captures
+re-render accepted scenes and retain a separate Submitted association. Foreign-native execution,
+numeric budgets, remaining fixed-target dispositions and the actual Nara engine seam remain
+open. Continue the source-prepared restart-arguments successor before handing framework
+maintenance to its separate session; no engine default or R11/R12/R11f completion follows.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

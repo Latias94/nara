@@ -638,6 +638,19 @@ refresh and the first real Nara integration still precede a separate maintenance
 Nara adopts each later framework revision through its own affected consumer qualification.
 No runtime/default, extra credential/GPU owner or R11/R12/R11f completion follows.
 
+The [runtime-host/keybinding successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-runtime-host-identity-and-keybinding-consumers)
+adopts official `389c22e1c747` at `70b993c9660772b157546f46c4a65c0ebd4375e6`, qualified at
+`7ead5105e56b29255ece592e62fd5f2250542131`. Actual host identity reaches parsing, real mapper
+loading, labels, dispatch and command/component/DevTools consumers; owned sampler facts and
+inherited debug-label corrections retain distinct responsibilities. Final framework/public/
+Windows 2,130, command/components/DevTools/Gallery 1,230, other UI consumers 2,077, ordinary
+all/profiler/off 102/88/72 and disabled Core/public 1,393 pass. Actual native timed-prefix
+retirement and complete browser identity/cache/input/restoration execute. Windows compiler-floor,
+Clippy/wasm/static checks pass, with exact skips and pixel limits in the record. Thirteen lanes
+close. Restart arguments and other remaining fixed-target dispositions precede the real engine
+GPU/Host/View consumer and separate maintenance handoff. Foreign-native execution, numeric
+budgets and full R11/R12/R11f remain open; no Nara runtime/default or additional owner follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
