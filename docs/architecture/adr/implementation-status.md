@@ -716,6 +716,16 @@ Keychain API pass, with failures/corrections and unexecuted native/iOS scope ret
 lanes close without reviewed P1/P2. Final fixed-target dispositions and the real Nara consumer
 still precede maintenance handoff; no engine ownership/default or R11/R12/R11f gate closes.
 
+The [cached-identity and residual successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-cached-identity-and-targeted-residual-reconciliation)
+records Open-GPUI `1a14b2076ed`: official prefix-hashed IDs, borrow/log diagnostics and list
+precision retain existing fork candidate/deferred/borrow/scroll custody. Final Core/public 32,
+logging 1, independent all-target compilation, affected correctness Clippy and format/static
+gates pass. All six lanes close without outstanding reviewed P1/P2. Verification trusts unchanged
+official coverage and targets fork seams. The expanded source inventory retains complete layout,
+utility/dependency and backend/render successors before the real engine consumer and maintenance
+handoff. Nara has only evidence updates; no dependency/default, full refresh or R11/R12/R11f
+gate closes, and no new native execution or measured speedup is claimed.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

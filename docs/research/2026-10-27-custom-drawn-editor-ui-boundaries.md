@@ -4945,3 +4945,35 @@ matrices are not repeated. Actual Metal/MSL/CoreText/AppKit execution, iOS, nume
 final fixed-target residual dispositions and the real Nara GPU/Host/View consumer remain open.
 Nara changes only evidence documents; no dependency graph, engine owner, UI default or full
 R11/R12/R11f completion follows. The real engine seam still precedes maintenance handoff.
+
+## November 10: Cached Identity And Targeted Residual Reconciliation
+
+Open-GPUI `1a14b2076edce2dbbf097cbc8ed84a961c0f9826` adopts complete official cached/prefix
+GlobalElementId (`1dd9bbfd71`), borrow/window diagnostics (`d94887e08e`, `c408f8efc4`), logging
+diagnostics (`fc952d52da`, `20fa2fa809`, `dc682ef120`) and uniform-list precision (`679ad7c304`)
+from the unchanged fixed target `635026fabc38440fce5e1767d125026a17b12012`. Immutable ID paths
+retain full equality; live/deferred/candidate stacks preserve the same prefix hashes. The list
+uses the official f64 visible-range and local-position calculation. Fork-specific borrow origins
+reuse public borrow-depth and existing post-borrow convergence, including overlapping internal
+raw shared access. Caller diagnostics cannot alter admission or scheduling.
+
+Final focused Core/public tests pass 32/32 and the official synchronous/async logging regression
+passes 1/1. Independently locked ordinary all-target compilation, affected Core/utility correctness
+Clippy, formatting and existing import/API/document/release gates pass. Earlier semantic 74
+retains its checkpoint scope; final raw-shared borrowing is covered by the focused selection.
+Bounded review/rereview finds no outstanding P1/P2 and all six lanes close. Verification follows
+the user's upstream-trust direction: reuse official coverage and qualify actual fork seams,
+without repeating unrelated component, docking, native-input, browser or compiler matrices.
+No new native execution or measured performance improvement is claimed.
+
+The post-Apple source audit at predecessor `b7eb45c0762b70d080af5a09f64536fe1bf22809` expands
+the recorded residual inventory beyond public Platform methods and gestures. Complete image/SVG/
+layout/List, supporting dependency/process/HTTP/path/executor and backend/render units remain
+queued with source provenance. The exact target also confirms official `ac5af8b9e1` relicensing
+zlog/ztracing/ztracing_macro to Apache-2.0. Open-GPUI corrects its historical license wording,
+retaining its ordinary tracing graph pending complete owner comparison.
+
+Finish those coherent official units, then qualify the real Nara GPU/Host/View consumer before
+separate framework maintenance. Nara changes only evidence documents; no engine dependency,
+document/history/ECS/render/loop owner or UI default changes. Full fixed-target closure,
+numerical budgets and R11/R12/R11f remain open.

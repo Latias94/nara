@@ -2322,6 +2322,17 @@ scope; native execution and iOS remain unqualified. All three lanes close with n
 Continue final fixed-target residual dispositions and then the real Nara GPU/Host/View consumer
 before separate framework maintenance. No engine dependency, owner or UI default changes.
 
+The [cached-identity and residual successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-cached-identity-and-targeted-residual-reconciliation)
+records Open-GPUI `1a14b2076edce2dbbf097cbc8ed84a961c0f9826`: complete official prefix-hashed
+IDs, borrow/log diagnostics and uniform-list precision retain fork deferred/candidate/borrow/
+scroll owners. Final focused Core/public 32, logging 1, independent all-target compilation,
+affected correctness Clippy, formatting and static/document gates pass. All six lanes close
+without outstanding reviewed P1/P2. Upstream coverage remains trusted; unrelated acceptance
+matrices are not repeated. The expanded source inventory keeps complete layout/List/gesture,
+supporting dependency and backend/render units queued. Finish them before the real engine
+consumer and separate maintenance handoff. No full-refresh, numerical-cost, native-execution,
+engine/default or R11/R12/R11f completion follows from this prerequisite.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
