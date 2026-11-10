@@ -777,6 +777,16 @@ path/utility migration and remaining target owners before the real Nara consumer
 maintenance. TLS fallback/foreign execution, download Task-drop cancellation and numeric
 budgets remain unqualified. No Nara dependency/default or full R11/R12/R11f gate changes.
 
+The [canonical path/utility successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-canonical-portable-paths-and-utility-migration)
+records Open-GPUI `a4e6fd03642`, qualified at `e7b541398ec`: official Apache path types replace
+duplicate utility implementations through actual utility/native-dialog/public consumers. UNC/
+position parsing, lenient globs and extension sorting follow the complete target. Focused
+89/89, independent public 5/5 and downstream real-home 1/1 pass; affected compilation/Clippy,
+actual package Rust 1.93/wasm and format/static gates pass. Three lanes close without P1/P2.
+No external package version/source changes follow. Remaining framework owners and the real
+Nara consumer precede separate maintenance; foreign filesystem/browser execution and numeric
+costs remain unqualified. No Nara dependency/default or full R11/R12/R11f gate changes.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

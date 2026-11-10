@@ -2392,6 +2392,18 @@ and separate maintenance. TLS fallback/foreign execution, download Task-drop can
 numeric budgets remain unqualified. Nara has only evidence changes; no dependency/default,
 whole fixed-target or R11/R12/R11f gate changes.
 
+The [canonical path/utility successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-canonical-portable-paths-and-utility-migration)
+records Open-GPUI `a4e6fd03642`, qualified at `e7b541398ec`: the complete official Apache path
+owner replaces duplicate utility types through real utility/native-dialog and ordinary public
+consumers. Complete UNC/position parsing, lenient globs and extension sorting follow the target;
+no compatibility owner remains. Focused 89/89, independent public 5/5 and downstream real-home
+1/1 pass, along with affected compilation/correctness Clippy, actual package Rust 1.93/wasm and
+format/static gates. Three lanes close without P1/P2; no external package version/source
+changes or unrelated matrices follow. Continue remaining utility/backend/render owners and
+the real engine consumer before separate maintenance. Foreign filesystem/browser execution
+and numeric costs remain unqualified. Nara has only evidence changes; no dependency/default,
+full fixed-target or R11/R12/R11f gate changes.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates

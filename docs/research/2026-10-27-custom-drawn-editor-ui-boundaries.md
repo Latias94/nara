@@ -5159,3 +5159,35 @@ foreign runtime behavior and numerical budgets remain unqualified. Continue the 
 portable path/utility and backend/render owners, then the real Nara GPU/Host/View consumer
 before separate maintenance. Nara changes only evidence documents, with no dependency/default,
 whole fixed-target closure or R11/R12/R11f gate changes.
+
+## November 10: Canonical Portable Paths And Utility Migration
+
+Open-GPUI `a4e6fd03642fdcdc25b507271682a6d1dbfeb26c`, qualified at
+`e7b541398ec3bc66dd353e3b29bffba234ed07f3`, adopts the complete official Apache-2.0 singular
+path package from fixed Zed `635026fabc38440fce5e1767d125026a17b12012`. This is distinct from
+the GPL product paths package. Its PathStyle, checked relative paths, local absolute paths,
+component/prefix parsing and native byte/WTF-8 conversion replace the duplicate utility types.
+The path source differs only in qualified Rustdoc links and one stable empty-Path equivalent
+for the declared Rust 1.93 floor. Historical license exclusions do not justify retaining a
+parallel implementation when exact current source permits the required owner.
+
+The complete utility paths source also adopts official UNC/position parsing, lenient glob
+error handling and extension sorting. Existing matching, navigation, SanitizedPath and native
+dialog consumers use the canonical path package. Distinct local/portable normalization
+policies follow the official APIs. The old util::rel_path module and util-root normalize_path
+export are removed without compatibility aliases; ordinary consumers migrate directly.
+
+Focused path/utility/integration checks pass 89/89. The independently locked ordinary consumer
+passes 5/5, executing remote Unix/drive/UNC/verbatim paths, serde/local resolution, invalid
+component refusal, matching/order/navigation composition and Windows isolated-surrogate
+WTF-8 round trips. The actual downstream-home control passes 1/1 with test-support enabled.
+Affected path/util/Windows all-target compilation and correctness Clippy, actual package Rust
+1.93/wasm compilation, formatting and existing static/document gates pass. Tracked locks add
+only the local path package identity; no external package version/source changes follow.
+Three scoped implementation/review lanes close without P1/P2. Trust unchanged official
+mechanisms and coverage; no unrelated runtime/component/platform matrix repeats.
+
+Foreign native filesystem/browser execution and numerical costs remain unqualified. Continue
+remaining utility/backend/render owners, then the real Nara GPU/Host/View consumer before
+separate framework maintenance. Nara changes only evidence documents; no dependency/default,
+full fixed-target closure or R11/R12/R11f gate changes.
