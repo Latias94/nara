@@ -846,6 +846,16 @@ compositor is stopped. Native Apple effects, grabs, actual compositor dismissal,
 layer behavior, numerical costs, remaining framework owners and the real Nara GPU/Host/View
 consumer remain open. No dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
 
+The [Web text/viewport successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-web-text-sessions-and-viewport)
+records Open-GPUI `7a79a113733`, qualified at `37b409123d6`: complete official text and
+viewport owners preserve accepted sessions, input leases and post-borrow command ordering.
+Final focused 16/16, affected Core/public/Windows 53/53, independent default/runtime 1/1 and
+2/2 and actual text/clipboard/identity/touch browser workflows pass, alongside affected
+compilation/Clippy and format/static gates. Nine lanes close without reviewed P1/P2; original
+failures remain recorded. OS IME/mobile/safe-area hardware, Apple execution, numeric costs,
+remaining framework owners and the real Nara GPU/Host/View consumer remain open. No engine
+dependency/default or full fixed-target/R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

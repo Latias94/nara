@@ -5385,3 +5385,37 @@ Continue Web input/viewport, Wayland IME/effects/XKB, Mac native input/AppKit, b
 selected-face/logging and final public-method/dispatch dispositions, then the real Nara
 GPU/Host/View consumer before separate framework maintenance. Nara changes only evidence
 documents; no dependency, UI default or full fixed-target/R11/R12/R11f gate changes follow.
+
+## November 11: Web Text Sessions And Viewport
+
+Open-GPUI `7a79a113733e8f4aad1fb6ed2232e66ec171c26a`, qualified at
+`37b409123d6d386e378d95b872be545f243204fb`, adopts complete official `224373ab888`,
+`8fc1a8a0c6f`, `d84e5d4992b` and `6ad3c7f278e`, including the final `e773a56d6c` and
+`5a773a406e` follow-ups. The fixed target remains Zed
+`635026fabc38440fce5e1767d125026a17b12012`. Official textarea mirroring, bounded editable
+UTF-16 context, selection/composition, configuration, keyboard and viewport/inset mechanisms
+retain their canonical owners; Canvas font fallback remains a separate queued unit.
+
+Fork adaptations preserve accepted-frame publication and the existing input lease/post-borrow
+command FIFO. Queries revalidate focus, claim revision and accepted generation. Acceptance-local
+effects survive nested refusal, reject stale queries and yield to newer committed keyboard
+requests. Candidate handler capture preserves an outstanding native checkout through refusal;
+explicit replacement and termination still invalidate it. The browser mirror remains context
+for the handler-owned document, without another document, history or dispatch authority.
+
+Final focused Core passes 16/16; affected Core/public/Windows passes 53/53, including two real
+Windows reentrant-paint/IME and text-handler routing trajectories. Independently locked ordinary
+default/runtime consumers pass 1/1 and 2/2 without test-support. Complete real Edge/WebGL text,
+clipboard, platform-identity and touch workflows pass. Trusted editing/selection, accepted Rust
+model/textarea agreement, independent fields, configuration deduplication, viewport resize,
+active programmatic-only keyboard requests and irreversible DOM retirement have actual browser
+evidence. Composition and synchronous blur controls remain explicitly synthetic. Original
+compiler/runtime/fixture failures and their corrections are retained in Open-GPUI's qualification.
+
+Affected correctness Clippy, actual Linux X11/Wayland production and independent all-target
+compilation, formatting and existing static gates pass. All nine lanes close without remaining
+reviewed P1/P2. Actual OS IME/mobile keyboards/nonzero device safe areas, Apple execution and
+numeric costs remain unqualified. Continue Canvas fallback/selected-face, remaining platform,
+render/logging and final API/dispatch dispositions, then the actual Nara GPU/Host/View consumer
+before separate maintenance. This evidence changes no engine dependency/default or complete
+fixed-target/R11/R12/R11f status.

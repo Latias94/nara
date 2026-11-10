@@ -2470,6 +2470,17 @@ render/font/logging and final public-method/dispatch dispositions still precede 
 Nara GPU/Host/View consumer and maintenance handoff. No dependency/default or full fixed-target/
 R11/R12/R11f gate changes follow.
 
+The [Web text/viewport successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-web-text-sessions-and-viewport)
+records Open-GPUI `7a79a113733`, qualified at `37b409123d6`: complete official textarea,
+configuration, editable UTF-16 context, keyboard and viewport/inset owners preserve accepted
+sessions, native handler leases and the existing post-borrow FIFO. Final focused 16/16,
+affected Core/public/Windows 53/53, independent default/runtime 1/1 and 2/2 and actual text,
+clipboard, identity and touch browser workflows pass. Affected compilation/Clippy and format/
+static gates pass; nine lanes close without reviewed P1/P2. Actual OS IME/mobile/safe areas,
+Apple execution and numeric costs retain separate scope. Continue font/platform/render/logging
+and final API dispositions before the real Nara GPU/Host/View consumer and maintenance handoff.
+No engine/default or whole fixed-target/R11/R12/R11f gate changes follow.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
