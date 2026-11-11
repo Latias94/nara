@@ -52,6 +52,14 @@ const DRIVE_PHASES: &[&str] = &[
     "scene_bind_revalidate",
     "scene_publish",
     "scene_final_validate",
+    "scene_decode",
+    "scene_predecessor",
+    "scene_retirement_hierarchy",
+    "scene_identity_adopt",
+    "scene_identity_prepare",
+    "scene_identity_bind",
+    "scene_hierarchy_publish",
+    "scene_epoch_publish",
 ];
 
 #[derive(Clone, Copy, Default)]
@@ -274,9 +282,14 @@ impl UiWork {
         sample.drive_phases = *self.drive_work.lock().unwrap();
         if matches!(self.case, 2 | 4) {
             for (name, phase) in DRIVE_PHASES.iter().zip(&sample.drive_phases) {
+                let expected = match *name {
+                    "scene_predecessor" | "scene_identity_prepare" => 2,
+                    "scene_retirement_hierarchy" => 4,
+                    _ => 1,
+                };
                 ensure!(
-                    phase.calls == 1,
-                    "the original source drive reached {name} {} times instead of once",
+                    phase.calls == expected,
+                    "the original source drive reached {name} {} times instead of {expected}",
                     phase.calls
                 );
             }

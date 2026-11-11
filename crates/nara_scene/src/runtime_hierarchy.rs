@@ -72,6 +72,9 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
     world: &World,
     retirements: &[Entity],
 ) -> Result<PreparedSceneHierarchyRetirement, SceneHierarchyRetirementError> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_retirement_hierarchy").entered();
     let roots = world.get_resource::<HierarchyRoots>();
     let structural_retirements = retirements
         .iter()

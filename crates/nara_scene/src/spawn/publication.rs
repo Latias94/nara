@@ -326,59 +326,70 @@ impl PreparedScenePublication {
                 provenance: source.clone(),
             });
         }
-        finalization.hierarchy.commit(world);
+        {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_hierarchy_publish")
+                    .entered();
+            finalization.hierarchy.commit(world);
+        }
         world.flush();
-        let instance = match (prepared_identity, finalization.identity) {
-            (
-                PreparedSceneIdentityCommit::Register { domain, .. },
-                FinalSceneIdentityCommit::Register(registration),
-            ) => match domain {
-                Some(mut domain) => {
+        let instance = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_epoch_publish").entered();
+            match (prepared_identity, finalization.identity) {
+                (
+                    PreparedSceneIdentityCommit::Register { domain, .. },
+                    FinalSceneIdentityCommit::Register(registration),
+                ) => match domain {
+                    Some(mut domain) => {
+                        let instance = registration.commit(&mut domain);
+                        world.insert_resource(domain);
+                        instance
+                    }
+                    None => registration.commit(&mut world.resource_mut::<WorldIdentityDomain>()),
+                },
+                (
+                    PreparedSceneIdentityCommit::Replace { .. },
+                    FinalSceneIdentityCommit::Replace(replacement),
+                ) => {
+                    let mut domain = world
+                        .remove_resource::<WorldIdentityDomain>()
+                        .expect("prepared Scene replacement retains its identity domain");
+                    let (instance, retired_scene_entities) = replacement.commit(&mut domain);
+                    debug_assert_eq!(retired_scene_entities, scene_retirements);
+                    finalization
+                        .retirement
+                        .expect("replacement prepared exact retirement")
+                        .commit(world);
+                    world.insert_resource(domain);
+                    instance
+                }
+                (
+                    PreparedSceneIdentityCommit::Projection { mut domain, .. },
+                    FinalSceneIdentityCommit::Projection {
+                        registration,
+                        retirement,
+                    },
+                ) => {
+                    if let Some(retirement) = retirement {
+                        let mut predecessor = world
+                            .remove_resource::<WorldIdentityDomain>()
+                            .expect("projection retains its predecessor until exact retirement");
+                        let retired = retirement.commit(&mut predecessor);
+                        debug_assert_eq!(retired, scene_retirements);
+                        finalization
+                            .retirement
+                            .expect("projection prepared exact retirement")
+                            .commit(world);
+                    }
                     let instance = registration.commit(&mut domain);
                     world.insert_resource(domain);
                     instance
                 }
-                None => registration.commit(&mut world.resource_mut::<WorldIdentityDomain>()),
-            },
-            (
-                PreparedSceneIdentityCommit::Replace { .. },
-                FinalSceneIdentityCommit::Replace(replacement),
-            ) => {
-                let mut domain = world
-                    .remove_resource::<WorldIdentityDomain>()
-                    .expect("prepared Scene replacement retains its identity domain");
-                let (instance, retired_scene_entities) = replacement.commit(&mut domain);
-                debug_assert_eq!(retired_scene_entities, scene_retirements);
-                finalization
-                    .retirement
-                    .expect("replacement prepared exact retirement")
-                    .commit(world);
-                world.insert_resource(domain);
-                instance
+                _ => unreachable!("final identity admission matches the prepared publication mode"),
             }
-            (
-                PreparedSceneIdentityCommit::Projection { mut domain, .. },
-                FinalSceneIdentityCommit::Projection {
-                    registration,
-                    retirement,
-                },
-            ) => {
-                if let Some(retirement) = retirement {
-                    let mut predecessor = world
-                        .remove_resource::<WorldIdentityDomain>()
-                        .expect("projection retains its predecessor until exact retirement");
-                    let retired = retirement.commit(&mut predecessor);
-                    debug_assert_eq!(retired, scene_retirements);
-                    finalization
-                        .retirement
-                        .expect("projection prepared exact retirement")
-                        .commit(world);
-                }
-                let instance = registration.commit(&mut domain);
-                world.insert_resource(domain);
-                instance
-            }
-            _ => unreachable!("final identity admission matches the prepared publication mode"),
         };
         occurrence.commit(world, &instance);
         if let Some(resources) = product_resources {

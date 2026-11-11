@@ -609,6 +609,8 @@ pub(crate) fn preflight_compiled_scene_with_context(
     context: &mut ComponentDecodeContext<'_>,
     exact_definitions_admitted: bool,
 ) -> PreparedScene {
+    #[cfg(feature = "work-observation")]
+    let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_decode").entered();
     let authority = bindings.map_or(SchemaAuthority::Native(registry), SchemaAuthority::Mixed);
     let mut diagnostics = DiagnosticReport::default();
     if bindings.is_some_and(|bindings| !registry.ptr_eq(bindings.native_snapshot())) {

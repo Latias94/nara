@@ -167,15 +167,20 @@ and optional allocation records are subdivisions of `mutation`; do not add them 
 or add their percentiles together.
 The same optional mode forwards Nara's `editor-work-observation` feature and installs a standard
 thread-scoped `tracing-subscriber` Registry layer filtered to `nara::editor::work` and
-`nara::scene::work`. Seventeen original owner spans distinguish preview compilation, preview
+`nara::scene::work`. Twenty-five original owner spans distinguish preview compilation, preview
 drive/Runtime/materialization, Editor model publication, Scene expansion/structural closure,
 values/provenance output, Authoring completion, Native restriction/flat admission, unbound
-preparation, binding/revalidation and final validation/publication. The engine installs no
-subscriber and the feature is disabled by default.
+preparation, binding/revalidation and final validation/publication. Further materialization
+subdivisions observe value admission/decoding, predecessor admission, retirement hierarchy,
+identity preparation/adoption/registration, final hierarchy and identity-epoch publication.
+The engine installs no subscriber and the feature is disabled by default.
 These elapsed spans are inclusive/nested, with subscriber overhead; their per-sample call
 checks do not establish worker-thread work or exclusive CPU time. The probe requires one reached
-span of each kind in both original property-edit cases. Allocation requests remain observed
-at the four outer source steps, without invented per-span allocation attribution.
+span of each kind per original property edit, except two predecessor/identity-preparation
+calls and four retirement-hierarchy calls. Repeated intervals are summed within each sample;
+their reported percentiles describe that sum, not individual invocation latency.
+Allocation requests remain observed at the four outer source steps, without invented per-span
+allocation attribution.
 These call expectations apply to this flat source without Prefab instances; a structural
 closure invocation can perform multiple internal layouts, and other sources can require retries.
 

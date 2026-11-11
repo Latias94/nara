@@ -118,9 +118,22 @@ fn measure_hosted_gpui_work() {
                 "scene_bind_revalidate",
                 "scene_publish",
                 "scene_final_validate",
+                "scene_decode",
+                "scene_predecessor",
+                "scene_retirement_hierarchy",
+                "scene_identity_adopt",
+                "scene_identity_prepare",
+                "scene_identity_bind",
+                "scene_hierarchy_publish",
+                "scene_epoch_publish",
             ] {
+                let calls = match phase {
+                    "scene_predecessor" | "scene_identity_prepare" => 128,
+                    "scene_retirement_hierarchy" => 256,
+                    _ => 64,
+                };
                 let marker = format!(
-                    "NARA_GPUI_WORK_SPANS case={case} phase={phase} calls=64 scope=current_thread_nested_in_mutation"
+                    "NARA_GPUI_WORK_SPANS case={case} phase={phase} calls={calls} scope=current_thread_nested_in_mutation"
                 );
                 assert!(
                     output.lines().any(|line| line == marker),

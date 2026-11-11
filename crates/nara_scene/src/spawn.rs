@@ -892,6 +892,9 @@ fn validate_scene_predecessor(
     claims: &SceneNativeRetirementClaims,
     mut diagnostics: DiagnosticReport,
 ) -> Result<DiagnosticReport, SceneSpawnReport> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_predecessor").entered();
     // Admission for retiring the old membership precedes scratch entity allocation. A global
     // despawn observer could also run while abandoning an otherwise empty candidate.
     if let SceneIdentityCommit::Replace(current) | SceneIdentityCommit::Projection(Some(current)) =
@@ -1409,6 +1412,9 @@ fn prepare_scene_identity_tokens(
     spawned_by_id: &BTreeMap<SceneEntityId, Entity>,
     new_domain: Option<&WorldIdentityDomain>,
 ) -> Result<BTreeMap<SceneEntityId, WorldEntityToken>, IdentityDomainError> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_identity_adopt").entered();
     if let Some(domain) = new_domain {
         return adopt_scene_identity_tokens(domain, world, spawned_by_id);
     }
@@ -1443,6 +1449,9 @@ fn prepare_scene_identity(
     entity_count: usize,
     commit: SceneIdentityCommit<'_>,
 ) -> Result<Option<WorldIdentityDomain>, IdentityDomainError> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_identity_prepare").entered();
     if let SceneIdentityCommit::Projection(current) = commit {
         prepare_registered_scene_projection_epoch_retirement(world, current)?;
         let settings = world.get_resource::<WorldIdentityDomain>().map_or_else(
@@ -1487,6 +1496,9 @@ fn prepare_scene_identity_commit(
     commit: SceneIdentityCommit<'_>,
     new_domain: Option<WorldIdentityDomain>,
 ) -> Result<PreparedSceneIdentityCommit, IdentityDomainError> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_identity_bind").entered();
     let entries = identity_tokens
         .iter()
         .map(|(entity_id, token)| (entity_id.clone(), *token))
