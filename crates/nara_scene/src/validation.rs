@@ -176,7 +176,7 @@ fn validate_effective_values<E>(
     });
     validate_effective_component_values(
         records,
-        &namespace,
+        |entity| namespace.contains(entity),
         authority,
         context,
         EffectiveValueRole::Draft,
@@ -187,7 +187,7 @@ fn validate_effective_values<E>(
 
 fn validate_effective_component_values<'a, E>(
     records: impl IntoIterator<Item = FlatSceneComponentRef<'a>>,
-    namespace: &BTreeSet<&SceneEntityId>,
+    contains_entity: impl Fn(&SceneEntityId) -> bool,
     authority: SchemaAuthority<'_>,
     context: &mut ComponentDecodeContext<'_>,
     role: EffectiveValueRole,
@@ -408,8 +408,7 @@ fn validate_effective_component_values<'a, E>(
             >(schema, &effective, traversal, &mut admit_validation_work);
         let local_references = match local_references {
             Ok(plan) => plan.visit(&effective, |_, reference| match reference {
-                EntityReference::SceneLocal { entity } => namespace
-                    .contains(entity)
+                EntityReference::SceneLocal { entity } => contains_entity(entity)
                     .then_some(())
                     .ok_or(SceneLocalTargetMissing),
                 EntityReference::Persistent { .. } | EntityReference::Authored { .. } => Ok(()),
@@ -515,7 +514,7 @@ pub(crate) fn validate_flat_claims_with_admission<E>(
     });
     validate_effective_component_values(
         records,
-        &namespace,
+        |entity| namespace.contains(entity),
         authority,
         context,
         if require_runtime_products {
@@ -535,32 +534,8 @@ fn validate_compiled_values_with_admission<E>(
     admit: impl FnMut(usize, usize, usize) -> Result<(), E>,
 ) -> Result<EffectiveSceneValidation, E> {
     let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(
-        document.roots(),
-        document
-            .entities()
-            .iter()
-            .map(|entity| (entity.id(), entity.children())),
-        &mut diagnostics,
-        None,
-    );
     if let Some(registry) = authority.native_snapshot()
-        && let Some(entity) = placement.as_ref().and_then(|placement| {
-            first_unavailable_flat_projection(
-                placement,
-                document.entities().iter().map(|entity| entity.id()),
-                document.entities().iter().filter_map(|entity| {
-                    entity
-                        .components()
-                        .keys()
-                        .any(|component| {
-                            component.as_str() == "nara.scene.Visibility"
-                                && registry.schema(component).is_some()
-                        })
-                        .then_some(entity.id())
-                }),
-            )
-        })
+        && let Some(entity) = first_unavailable_compiled_projection(document, registry)
     {
         diagnostics.push(with_public_locator(
             diagnostic_error(
@@ -571,11 +546,6 @@ fn validate_compiled_values_with_admission<E>(
             entity.as_str(),
         ));
     }
-    let namespace = document
-        .entities()
-        .iter()
-        .map(|entity| entity.id())
-        .collect::<BTreeSet<_>>();
     let records = document.entities().iter().flat_map(|entity| {
         entity
             .components()
@@ -591,7 +561,12 @@ fn validate_compiled_values_with_admission<E>(
     });
     validate_effective_component_values(
         records,
-        &namespace,
+        |entity| {
+            document
+                .entities()
+                .binary_search_by(|record| record.id().cmp(entity))
+                .is_ok()
+        },
         authority,
         context,
         EffectiveValueRole::Compiled,
@@ -1656,6 +1631,40 @@ fn first_unavailable_flat_projection<'a>(
             .parent_of(entity)
             .is_some_and(|parent| visibility.contains(entity) || visibility.contains(parent))
     })
+}
+
+fn first_unavailable_compiled_projection<'a>(
+    document: &'a crate::CompiledSceneDocument,
+    registry: &ComponentRegistrySnapshot,
+) -> Option<&'a SceneEntityId> {
+    let visibility = document
+        .entities()
+        .iter()
+        .filter_map(|entity| {
+            entity
+                .components()
+                .keys()
+                .any(|component| {
+                    component.as_str() == "nara.scene.Visibility"
+                        && registry.schema(component).is_some()
+                })
+                .then_some(entity.id())
+        })
+        .collect::<BTreeSet<_>>();
+    if visibility.is_empty() {
+        return None;
+    }
+    let visibility = &visibility;
+    document
+        .entities()
+        .iter()
+        .flat_map(|parent| {
+            parent
+                .children()
+                .iter()
+                .filter(move |child| visibility.contains(parent.id()) || visibility.contains(child))
+        })
+        .min()
 }
 
 pub(crate) fn component_migration_diagnostic(

@@ -377,3 +377,276 @@ fn receiving_version_requires_source_recompilation_without_activation_migration(
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(migrations.load(Ordering::SeqCst), source_migrations);
 }
+
+#[cfg(feature = "serde")]
+#[test]
+fn authoring_sealed_visibility_forest_requires_native_projection_before_any_codec() {
+    use crate::{
+        __private::{AuthoringAdapterReceipt, try_compile_authoring_scene_with_loader},
+        AuthoringSchemaBasis, PrefabEntityTarget, SceneEntityPlacement, ScenePlacement,
+        ScenePlacementParent,
+    };
+    use nara_diagnostic::DiagnosticValueRef;
+    use nara_reflect::{__private::resolve_schema_provider, AuthoringSchemaBundle};
+
+    let provider = crate::SCENE_COMPONENTS_SCHEMA_PROVIDER;
+    let resolved = resolve_schema_provider(provider).unwrap();
+    let bundle = AuthoringSchemaBundle::from_trusted_provider_definitions([provider]).unwrap();
+    let adapter = AuthoringAdapterReceipt::from_trusted_provider(
+        resolved.contribution_receipt(),
+        "test.compiled-receiver-native",
+        1,
+        1,
+        resolved
+            .current()
+            .catalog()
+            .components()
+            .iter()
+            .map(|schema| schema.id().clone()),
+    )
+    .unwrap();
+    let basis = AuthoringSchemaBasis::admit(&bundle, &[adapter]).unwrap();
+    let visibility = ComponentTypeId::new("nara.scene.Visibility");
+    let (receiving, calls) = registry(
+        basis.schema(&visibility).unwrap().clone(),
+        Some(crate::SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str()),
+    );
+    let visible = |name| {
+        SceneEntityRecord::new(id(name)).with_component(
+            visibility.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("visible".into()),
+            ),
+        )
+    };
+    let initial = compile(
+        &SceneDocument::from_ordered_roots([visible("isolated")]),
+        &receiving,
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let seal = |document: &SceneDocument| {
+        let report = try_compile_authoring_scene_with_loader(
+            document,
+            &basis,
+            Default::default(),
+            None,
+            |_, _| Ok::<_, std::convert::Infallible>(None),
+        )
+        .unwrap();
+        assert!(
+            !report.diagnostics().has_errors(),
+            "{:?}",
+            report.diagnostics()
+        );
+        let preview = report.into_native_preview().unwrap();
+        assert!(preview.omissions.is_empty());
+        assert!(
+            !preview.diagnostics.has_errors(),
+            "{:?}",
+            preview.diagnostics
+        );
+        preview.candidate.bind_source(initial.source_key().clone())
+    };
+    let child = |name, parent| {
+        SceneEntityPlacement::new(
+            PrefabEntityTarget::source(id(name)),
+            ScenePlacement::last(ScenePlacementParent::Entity(PrefabEntityTarget::source(
+                id(parent),
+            ))),
+        )
+    };
+    let forest = SceneDocument::new(
+        [
+            SceneEntityPlacement::root(id("a-parent")),
+            SceneEntityPlacement::root(id("z-parent")),
+            SceneEntityPlacement::root(id("isolated")),
+            child("y-child", "a-parent"),
+            child("b-child", "z-parent"),
+        ],
+        [
+            visible("a-parent"),
+            SceneEntityRecord::new(id("z-parent")),
+            visible("b-child"),
+            SceneEntityRecord::new(id("y-child")),
+            visible("isolated"),
+        ],
+    );
+    let candidate = seal(&forest);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(candidate.document().entities()[1].id(), &id("b-child"));
+    assert!(
+        candidate.document().entities()[1]
+            .components()
+            .contains_key(&visibility)
+    );
+    let candidate_before = format!("{candidate:?}");
+    let mut world = World::new();
+    world.insert_resource(AssetServer::new());
+    let report = spawn_scene(&mut world, &receiving, &initial, &occurrence(), None);
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let current = report.instance.unwrap();
+    let EntityLookup::Resolved(old) = current.resolve(&world, &id("isolated")) else {
+        panic!("isolated Visibility must be supported");
+    };
+    assert_eq!(calls.swap(0, Ordering::SeqCst), 1);
+    let old_source = world.get::<SceneEntitySource>(old).unwrap().clone();
+    let stats = world.resource::<WorldIdentityDomain>().stats();
+    let assets = world.resource::<AssetServer>().clone();
+    let population = world.entities().len();
+
+    let rejected = prepare_scene_replacement(&mut world, &receiving, &candidate, &current, None)
+        .expect_err("Authoring sealing cannot authorize an unavailable Native projection");
+    let diagnostic = rejected
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code().as_str() == "scene.hierarchy-projection-unavailable")
+        .expect("Native receiving must reject the unsupported projection");
+    assert_eq!(
+        diagnostic
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == "entity-id")
+            .unwrap()
+            .value(),
+        DiagnosticValueRef::Identifier("b-child"),
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(format!("{candidate:?}"), candidate_before);
+    assert_eq!(world.entities().len(), population);
+    assert_eq!(world.resource::<WorldIdentityDomain>().stats(), stats);
+    assert_eq!(world.resource::<AssetServer>(), &assets);
+    assert_eq!(
+        current.resolve(&world, &id("isolated")),
+        EntityLookup::Resolved(old)
+    );
+    assert_eq!(world.get::<SceneEntitySource>(old), Some(&old_source));
+    assert_eq!(
+        world.get::<ReceivedValue>(old).unwrap().0,
+        ComponentValue::String("visible".into())
+    );
+
+    let mut without_visibility = forest;
+    for entity in &mut without_visibility.entities {
+        entity.components.clear();
+    }
+    let supported = seal(&without_visibility);
+    let prepared = prepare_scene_replacement(&mut world, &receiving, &supported, &current, None)
+        .expect("the same forest without Visibility must remain supported");
+    let report = prepared.commit(&mut world);
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    assert_eq!(report.instance.unwrap().len(), 5);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn receiving_local_references_include_empty_entities_after_source_sorting_and_limit_rejection() {
+    use crate::SceneEntityPlacement;
+    use nara_reflect::EntityReference;
+
+    let mut reference_schema = schema(ComponentValueShape::list(ComponentValueShape::EntityRef));
+    reference_schema.fields[0] = reference_schema.fields[0]
+        .clone()
+        .with_capability(ComponentCapability::EntityRef);
+    let (source, source_calls) = registry(reference_schema.clone(), None);
+    let (receiving, calls) = registry(reference_schema, None);
+    let bindings = SceneComponentBindings::new(receiving, []).unwrap();
+    let references = ComponentValue::List(vec![
+        ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: id("a-empty"),
+        }),
+        ComponentValue::EntityReference(EntityReference::SceneLocal {
+            entity: id("z-empty"),
+        }),
+    ]);
+    let document = SceneDocument {
+        placements: ["z-empty", "m-reader", "a-empty"]
+            .map(|name| SceneEntityPlacement::root(id(name)))
+            .into(),
+        entities: vec![
+            SceneEntityRecord::new(id("z-empty")),
+            entity("m-reader", references.clone()),
+            SceneEntityRecord::new(id("a-empty")),
+        ],
+    };
+    let before = document.clone();
+    let candidate = compile(&document, &source);
+    assert_eq!(document, before);
+    assert_eq!(source_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        candidate
+            .document()
+            .entities()
+            .iter()
+            .map(|entity| entity.id().as_str())
+            .collect::<Vec<_>>(),
+        ["a-empty", "m-reader", "z-empty"]
+    );
+    let mut world = World::new();
+    let sentinel = world.spawn_empty().id();
+    let population = world
+        .iter_entities()
+        .map(|entity| entity.id())
+        .collect::<std::collections::BTreeSet<_>>();
+    let limits = ComponentValueMaterializationLimits::default();
+    let rejected = bindings
+        .prepare_scene_with_limits(
+            &mut world,
+            &candidate,
+            &occurrence(),
+            None,
+            ComponentValueMaterializationLimits::new(
+                ItemLimit::ONE,
+                limits.bytes(),
+                limits.depth(),
+            ),
+        )
+        .expect_err("source sealing cannot waive the receiving value allowance");
+    assert!(rejected.diagnostics.has_errors());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        world
+            .iter_entities()
+            .map(|entity| entity.id())
+            .collect::<std::collections::BTreeSet<_>>(),
+        population,
+    );
+    assert!(world.get_entity(sentinel).is_ok());
+    assert!(!world.contains_resource::<WorldIdentityDomain>());
+
+    let prepared = bindings
+        .prepare_scene(&mut world, &candidate, &occurrence(), None)
+        .expect("empty-component entities belong to the complete receiving namespace");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let report = prepared.commit(&mut world);
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let current = report.instance.unwrap();
+    assert_eq!(
+        current.entity_ids(),
+        [id("a-empty"), id("m-reader"), id("z-empty")]
+    );
+    for entity_id in current.entity_ids() {
+        let EntityLookup::Resolved(entity) = current.resolve(&world, entity_id) else {
+            panic!("every entity, including empty reference targets, must resolve");
+        };
+        let source = world.get::<SceneEntitySource>(entity).unwrap();
+        assert_eq!(source.instance_id, current.instance_id());
+        assert_eq!(&source.entity_id, entity_id);
+        assert_eq!(source.containing_source(), candidate.source_key());
+        assert_eq!(source.occurrence(), &occurrence());
+        assert_eq!(
+            source.provenance(),
+            &candidate.canonical_provenance()[entity_id]
+        );
+        if entity_id == &id("m-reader") {
+            assert_eq!(
+                world.get::<ReceivedValue>(entity).unwrap().0,
+                ComponentValue::map([("value", references.clone())])
+            );
+        } else {
+            assert!(world.get::<ReceivedValue>(entity).is_none());
+        }
+    }
+    assert_eq!(source_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}

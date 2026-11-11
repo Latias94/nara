@@ -108,6 +108,9 @@ impl CompiledSceneEntity {
 ///
 /// Only the concrete Scene sealer creates this move-only storage. It carries neither source
 /// declaration correspondence nor an exact receiving-definition or World admission witness.
+/// Entity records have unique IDs in sorted order; roots and ordered children form a complete
+/// rooted forest. Shared access preserves these admitted structural facts independently of
+/// receiving value, definition, asset and World checks.
 ///
 /// Callers cannot turn source records into compiled data by wrapping them:
 ///
