@@ -5512,3 +5512,31 @@ recording permission/frame delivery, blur visuals and numerical costs remain unq
 Continue renderer batching and overdraw, logging and final API/dispatch dispositions before
 the actual Nara GPU/Host/View consumer and separate maintenance. This evidence changes no Nara
 dependency, toolkit default or full fixed-target/R11/R12/R11f gate.
+
+## November 11: Renderer Batching And Hollow Borders
+
+Open-GPUI `36362708133c300cd7a04f35c7ac36ee1a0f1791`, qualified at
+`be215e2d4fdc6cc90b7138e8da44a9b49ffbe4e2`, reconciles official `be8c6f9fb35`,
+`b4ecc454225` and `0c51c7fd248` against the unchanged Zed
+`635026fabc38440fce5e1767d125026a17b12012` target. DirectX uses whole-buffer instance views and
+explicit batch offsets. Metal preuploads CoreVideo surface bounds while retaining the admitted
+planes through submission. The shared sprite records place the atlas tile at byte 8 with unchanged
+strides, and same-order groups retain their former order when overlap cannot be ruled out.
+The hollow border optimization shares the existing exact clip range and uses the original shape
+and dash geometry. WGPU also uses the acquired texture extent (`e91b82c106`) and skips path
+composites without a rasterized batch. Configure-once (`e20d19d32f`) was already present.
+
+The focused Core/WGPU/Windows checkpoint passes 99/99. Final WGPU changes address a reproduced
+square-corner phase difference and pass the affected 25/25 suite, including storage and packed
+pixel comparisons. Windows WARP proves nonzero batch offsets, growth and smaller-frame recovery,
+rounded/dashed border pixels and atlas receipt refusal/recovery. Independent consumers pass 2/2
+for application-owned atlas use and actual two-HWND Vulkan/WGPU device sharing and retirement.
+The final Edge WebGL/WebGPU/Auto smoke passes actual PNG and resize checks. Apple target checks
+compile the renderer, generated sprite layout and multi-surface fixture; native Metal execution
+remains unqualified. Rendering costs were not measured.
+
+Continue the official logging dependency and residual API/dispatch dispositions, then run the
+[real Nara GPU/Host/View consumer](#november-10-modular-gpu-and-host-source-map) before handing
+off framework maintenance. The independently locked renderer consumer does not bridge the
+two WGPU package identities or prove Nara-owned target encoding, exact View compositing or
+input mapping. This record changes no Nara dependency, UI default or R11/R12/R11f status.

@@ -878,6 +878,12 @@ remove the Cocoa shim and Media package while preserving input, display and reti
 Apple-target checks and ordinary capture-to-surface compilation pass. Actual Apple execution,
 renderer/logging/API dispositions and the real Nara GPU/Host/View consumer stay open.
 
+The [renderer batching successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-renderer-batching-and-hollow-borders)
+records Open-GPUI `36362708133`. Windows WARP and WGPU pixel evidence and ordinary renderer
+consumer checks qualify this import. Metal remains compile-only. Logging, remaining API/dispatch
+dispositions, numerical costs and actual Nara GPU/Host/View acceptance stay open; there is no new
+Nara dependency or default decision.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

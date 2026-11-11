@@ -2509,6 +2509,13 @@ compilation pass. Native AppKit, capture and older-system weak-linked startup ne
 Continue renderer batching, logging and final API/dispatch dispositions before the actual Nara
 GPU/Host/View consumer. No dependency, toolkit default or full foundation gate changes follow.
 
+The [renderer batching successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-renderer-batching-and-hollow-borders)
+records Open-GPUI `36362708133`: official DirectX batch offsets, Metal video bounds, texture
+grouping and hollow border raster coverage preserve fork clip and atlas custody. Core/WGPU/Windows
+passes 99/99 at the shared checkpoint, final WGPU 25/25 and independent consumers 2/2.
+Native Metal execution and rendering costs stay open. Continue logging and final API/dispatch
+dispositions before the actual Nara GPU/Host/View consumer; no toolkit default changes here.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
