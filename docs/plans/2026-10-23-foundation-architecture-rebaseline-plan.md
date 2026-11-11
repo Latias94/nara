@@ -1519,6 +1519,25 @@ an extra native window. Keep that runtime consumer distinct from the two-skin pu
 behavior proof; extract packages only when either consumer demonstrates a dependency/lifecycle
 need. No current frontend, GPU dependency or game-runtime default changes.
 
+The subsequent [deferred Scene checkpoint](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-deferred-scene-submission)
+at Open-GPUI `797372013ab` and `69d0992f2a0` retains one original prepared candidate without replacing submitted input/text/accessibility
+publications. Exact attempt completion uses App's existing ingress after actual host submission;
+hidden initial reveal, failure/unwind, resize invalidation and close retain their original owners.
+Focused Core/public 57/57, affected shared controls 626/626 and native regressions 22/22 pass.
+The ordinary host-controlled WGPU application proves frozen A/B producer pixels, stale-attempt
+refusal and original-prefix retirement; both synchronous controls pass. This supersedes the
+missing desktop delayed-submission prerequisite. Logical roots without native windows and the
+real Nara GPU/Host/View, component-skin, authored HUD and numerical-cost consumers remain open.
+
+The next comparison follows the [Editor/game reuse decision](../research/2026-11-11-open-gpui-engine-integration-layers.md#reuse-decision-for-editor-and-game-ui):
+first make production engine-driven logical-root execution usable without constructing an extra
+native window, preserving one coherent layout/text/input/publication owner. Then qualify the actual
+Nara Host/View and device/source combination. Separately, prove one complete public control behavior under Editor
+and HUD skins before extracting a Base-style package. Compare the authored HUD against the
+current executor, including pause/time, player focus, resources, lifetime and measured costs.
+Native-window services, component appearance and Editor domain tools are optional compositions;
+splitting more algorithm crates is not a substitute for these consumers.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the

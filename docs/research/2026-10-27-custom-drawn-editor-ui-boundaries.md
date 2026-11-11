@@ -5718,3 +5718,27 @@ costs and actual Nara Host/View remain separate work. Editor/game reuse should s
 mechanisms and control behavior through separate product adapters; the pinned Base comparison
 does not justify an extra crate per algorithm or claim game-runtime support. The authored HUD
 and custom-skin consumers determine further extraction. No Nara dependency or default switches.
+
+## November 11: Deferred External Scene Submission
+
+Open-GPUI `797372013abf6da74b301972515dc02a9e596801` separates one prepared candidate
+from the original Window commit/publication path; native/application
+`69d0992f2a083f7d3ad7161700d3e2735cc8fc41` returns actual host submission through the
+original attempt and ordered App ingress. Qualification is recorded at
+`c9fc89bd5fc0f0b438c396be067fd2a1356de74d`. The
+[implemented successor](2026-11-11-open-gpui-engine-integration-layers.md#implemented-deferred-scene-submission)
+supersedes the missing desktop delayed-submission prerequisite while preserving original
+submitted input/text/accessibility during the wait, hidden initial reveal and shutdown custody.
+
+Final focused Core/public 57/57, affected shared controls 626/626, native regressions 22/22 and
+ordinary independent interfaces 1/1 pass. The actual deferred WGPU application verifies original
+A/B producer pixels from the retained command buffers, native input, target ABA, refusal/recovery
+and close with an unsubmitted candidate, then quiesces original prefix 13 and continues host
+messages/quit. Both synchronous smoke controls pass. Correctness Clippy, production wasm,
+formatting and existing static/document checks pass. The framework record retains failed
+fixtures, reviewed corrections and actual completion/retention limits.
+
+These are fork-owned general hosting changes after the fixed Zed source audit. Production
+logical roots without native windows, actual Nara GPU-source/Host/View integration, two-skin
+control behavior, authored HUD and numerical costs remain next consumer work. No frontend,
+dependency or game-runtime default changes, full R11/R12/R11f completion or maintenance handoff.

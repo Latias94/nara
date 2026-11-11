@@ -1,7 +1,8 @@
 # Open-GPUI Engine Integration Layers
 
 Status: research synthesis and selected development direction; implementation remains partial.
-This is not evidence of a complete external-host adapter or Nara integration.
+The implemented checkpoints qualify scoped Windows hosting and deferred submission; production
+no-native-window roots and Nara integration remain open.
 Date: 2026-11-11. Scope: independent framework hosting, rendering, component layers and engine use.
 
 ## Summary
@@ -17,6 +18,13 @@ an engine produces viewport images. That arrangement still needs a real texture-
 Recording GPUI into a host encoder is another option; translating its Scene into engine-specific
 draw commands is a third. These are separate choices, rather than successive required stages.
 Open-GPUI is an independent general UI library; Nara is an optional consumer, not its owner.
+
+The initial comparison uses the fixed official baseline. Later fork-owned work has implemented
+[external Windows hosting](#implemented-synchronous-external-win32-host) and
+[deferred Scene submission](#implemented-deferred-scene-submission). Those checkpoints qualify
+their named consumers; they do not establish a standalone game UI runtime. The
+[Editor/game reuse boundary](#editor-and-game-reuse-boundary) distinguishes shared execution,
+unstyled control behavior, appearance and product adapters.
 
 ## Version Information and Evidence Boundaries
 
@@ -569,6 +577,47 @@ performance budgets or Nara Host/View acceptance. A game HUD or world-plane text
 an extra native window merely to obtain controls. Keep those runtime requirements separate from
 the Base-style public behavior/skin consumer and subsequent crate-extraction decisions. [W4]
 
+## Implemented Deferred Scene Submission
+
+Core `797372013abf6da74b301972515dc02a9e596801` and native/application
+`69d0992f2a083f7d3ad7161700d3e2735cc8fc41` implement deferred submission through the original Window,
+not a parallel UI executor. One prepared candidate retains its Scene, text/cache resources,
+authority overlay and unpublished effects. The last-submitted frame keeps pointer/key handlers,
+focus, native text and accessibility dispatch while the host waits. A non-reusable token carries
+the original full WindowId, frame generation and attempt; actual submit/present returns that
+same token through ordered App ingress. Renderer/resource and native target invalidation prevent
+later submission of stale work. A clone of a Scene or a mutable latest-generation slot is not
+this authority. [W5]
+
+Initial open may return a still-hidden pending window. The existing creation transaction retains
+its native reveal command until the original nonempty submission. Rejection, empty-frame retry,
+callback unwind and close retain the same lifecycle. Ordinary synchronous platforms preserve
+their default mode and share the prepared/commit implementation. Profiling freezes CPU draw
+completion before the host wait and uses the original completion report timestamp; it does not
+infer GPU duration or scanout. [W5]
+
+Final focused Core/public tests pass 57/57; affected Window/input/accessibility/profiler controls
+626/626; native regression controls 22/22. The ordinary external deferred WGPU trajectory submits
+actual retained commands, reads original A/B producer pixels as `[217,89,38,255]` and
+`[38,140,217,255]`, and preserves submitted controls/text through pending replacements. It covers
+hidden initial reveal, resize/same-size ABA, rejection, minimized/hidden recovery and close with
+an unsubmitted candidate, then quiesces original prefix 13 and leaves the host alive. Both original
+synchronous smoke modes pass. Close's completion observation is already at prefix 13: the result
+proves exact recording custody through the wait, without claiming hardware remained busy then.
+The framework record retains actual failed fixtures, review corrections and precise scope. [W5]
+
+Independently locked feature-free interfaces pass 1/1. Affected correctness Clippy, production
+Core/WGPU/Web wasm compilation, root/consumer formatting and existing static/document gates pass.
+The framework qualification checkpoint is `c9fc89bd5fc0f0b438c396be067fd2a1356de74d`.
+Standalone Win32 raw-handle feature correction is `ec576a20dc177616b1ba6b70d66181251c8def92`;
+no dependency version, WGPU source or compiler floor changes. These results qualify Windows-owned
+desktop delivery and shared compilation, without browser deferred-host execution. [W5]
+
+This closes the selected desktop delayed-delivery prerequisite. Production logical roots without
+native windows, other host/platform combinations, physical IME/DPI, numerical budgets and actual
+Nara GPU/Host/View consumption remain open. Preserve the authored HUD comparison and the public
+two-skin control-behavior consumer as distinct next steps. No Nara dependency or UI default changes.
+
 ## References
 
 Line numbers below refer to the pinned source or the inspected candidate snapshot. `O` paths are
@@ -593,6 +642,7 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [W2] Same recording commit, `crates/gpui_wgpu/tests/external_scene.rs:1`: explicit simulated scene production and separate actual GPU submission/readback; Open-GPUI `docs/verification.md#application-owned-wgpu-scene-recording` owns executed results and limits.
 - [W3] Local Open-GPUI image commit `a5d7dea101ca643a9fd462f1c0476499967c9276`, native/application commit `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01`, and browser custody correction `7c5c0cd810f15c3e4c3591c400e42aa72f25a2b4`, qualified at `12f9bb50e8e`; `crates/gpui/src/{image_texture.rs,window/imported_image.rs}`, `crates/gpui_wgpu/src/wgpu_atlas/imported_image.rs`, `crates/gpui_windows/src/renderer.rs`, `examples/wgpu-native/` and the public/native consumers. Open-GPUI `docs/external-wgpu.md` and `docs/verification.md#retained-gpu-images-and-supplied-win32-renderers` own public usage, actual results and failures. These local revisions are not remotely published.
 - [W4] Local Open-GPUI App factory/detachment commit `6ad133d36622851025eee882d63bb8a47787d524` and Win32/application commit `911e628c0e9cd66cf63f5c04e7d46c0d87c67fdd`, qualified at `af68cbad1133d40c59f8f0cd342156a12ad475e8`; `crates/gpui/src/{app.rs,platform.rs,app/cell.rs}`, `crates/gpui_windows/src/{platform.rs,window.rs,direct_manipulation.rs,native_attachment_tests.rs}`, `examples/wgpu-native/` and the two public `platform_window_factory` consumers. Open-GPUI `docs/external-wgpu.md#drive-an-application-owned-win32-window` and `docs/verification.md#supplied-platform-windows-and-external-win32-driving` own usage, actual results/failures and current limits. Local commits only.
+- [W5] Local Open-GPUI Core `797372013abf6da74b301972515dc02a9e596801`, native/application `69d0992f2a083f7d3ad7161700d3e2735cc8fc41` and standalone feature correction `ec576a20dc177616b1ba6b70d66181251c8def92`, qualified at `c9fc89bd5fc0f0b438c396be067fd2a1356de74d`; `crates/gpui/src/{window.rs,window/deferred_frame.rs,window/candidate_transfers.rs,platform/frame_delivery.rs,profiler.rs}`, existing App native ingress, Windows renderer/Window forwarding and `examples/wgpu-native/`. Framework `docs/verification.md#deferred-scene-submission-and-submitted-publications` owns exact results, failures and limits; `docs/external-wgpu.md#defer-an-original-candidate` owns public usage. This is fork-owned hosting work after the fixed-source audit.
 - [I1] ImGui pin above, [`docs/BACKENDS.md:25–67,129–172`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L25-L67): platform/renderer split and custom-engine guidance.
 - [I2] Same pin, [`examples/example_win32_directx11/main.cpp:74–75,101–109,134–136,176–183,267`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/examples/example_win32_directx11/main.cpp#L74-L183): existing HWND/device, application loop, draw and present.
 - [I3] Same pin, [`docs/BACKENDS.md:214–287`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L214-L287): texture updates, indexed triangles, clip offset and framebuffer scale.
@@ -619,3 +669,69 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [ERB5] Same local Open-GPUI pin and inspection date, Accepted `docs/adr/0008-open-gpui-ui-component-productization-roadmap.md:23` and `docs/adr/0018-open-gpui-motion-crate-boundary.md:22`: existing component product boundary and neutral motion ownership respectively.
 - [ERB6] GPUI Kit pin/date from ERB1, [`gpui-kit` manifest](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/kit/Cargo.toml#L18-L27) and [mandatory dependencies](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/kit/Cargo.toml#L78-L92). Open-GPUI local pin/date from ERB4, `Cargo.toml:68`, `crates/gpui/Cargo.toml:21`, `crates/gpui_platform/Cargo.toml:42`, and `crates/gpui_wgpu/Cargo.toml:20`; required component/domain GPUI edges are recorded in ERB4. These source declarations do not prove a production no-window host or the complete resolved feature union of an embedding application.
 - [ERB7] Same local Open-GPUI source pin/date as ERB4, `crates/ui_components/src/public_api/common.rs:20,36`, `crates/ui_components/src/activation.rs:139,328`, and `crates/ui_components/src/button.rs:268`: public resolved state/activation handle versus private concrete activation binding and the current styled adapter.
+
+## Reuse Decision For Editor And Game UI
+
+Source check: local Open-GPUI `c9fc89bd5fc0f0b438c396be067fd2a1356de74d`, clean when inspected
+on 2026-11-11. The source citations below use paths relative to that repository at this revision.
+This is a bounded source review; it adds no executed qualification or dependency/default decision.
+
+Prefer shared framework mechanisms with separate Editor and game adapters when the authored-game
+comparison succeeds. Game controls must be usable without Editor documents, workspaces, docking
+or Editor visual recipes; applications may explicitly choose optional shared controls and skins.
+Keep the current executor as a control; retain independent execution for demonstrated lifecycle,
+platform or cost requirements.
+
+| Reuse unit | Current boundary and consequence |
+| --- | --- |
+| Runtime-neutral models | `ui-core` depends only on dependency-free `motion`; controlled values, focus policies, virtualizer models and motion samples can already be consumed without GPUI. They do not supply complete widgets, text editing or layout execution. [RD1] |
+| Complete unstyled widget behavior | Pointer/keyboard activation, focus, accessibility, accepted-publication binding and control lifetimes require GPUI execution. These can be reusable with different skins while remaining dependent on `App`/`Window`. Public state alone is insufficient. [RD2] |
+| Execution | Entities, layout/text caches, input and submitted-frame authority remain coherent App/Window responsibilities; platform and rendering adapters supply services. Neither a Base-style split nor removing a theme creates another execution host. [RD3] [RD5] |
+
+The useful Base-like improvement is a supported behavior/composition API, not more neutral structs.
+Today `ButtonState` and `ActivationHandle` are public, but `ActivationBinding` and its pointer,
+keyboard and publication installation are crate-private. Prove one complete control under distinct
+Editor and HUD skins before choosing its public module boundary; include disabled/cancellation,
+focus and semantic activation, not just appearance overrides. The pinned Base examples above
+demonstrate this behavior/skin distinction while retaining GPUI execution. [RD2] [ERB2] [ERB3]
+
+Start with module/API extraction. Extract a crate when a named independent consumer uses the complete
+contract with a smaller mandatory dependency closure and preserved lifecycle, without copying a second
+interaction executor. Measure build/runtime benefits. `ui-components`, `canvas` and `docking` still
+require GPUI even with defaults disabled; pure internal modules do not make their packages neutral.
+An unstyled crate can avoid styled dependencies without removing App/Window needs. Revisit ADR0008
+explicitly if consumer evidence justifies extraction; motion already proves a separate owner. [RD1] [RD7]
+
+Distinguish a GPUI `Window` from an OS window. The supplied App factory creates a `PlatformWindow`;
+the implemented Win32 attachment requires a real HWND and native services. Ordinary Linux headless
+mode already opens `HeadlessWindow` without compositor surface/native handles and runs layout/text
+shaping. Its draw discards Scenes, its atlas uploads nothing and its frame callback is a no-op.
+This refutes a universal native-window requirement, without qualifying portable engine-driven roots,
+offscreen GPU/player input. Test-gated `HeadlessAppContext` is separate. [RD3] [RD4]
+
+The external WGPU seam accepts the host's device/queue/encoder/target, imports retained GPU images,
+and provides recording leases the host retains through GPU completion. Deferred delivery preserves
+the original Window's submitted interaction while a candidate waits, then admits its exact token
+after actual submission, separately from GPU completion. Reuse these owners; the Win32 trajectory
+does not qualify game surfaces or Nara's exact WGPU/source and Host integration. [RD5] [W5]
+
+| Game requirement | Remaining consumer proof and owner |
+| --- | --- |
+| No native window | Engine-driven logical roots must run layout/semantics without an extra OS window; separately prove offscreen GPU output and no-render execution with truthful frame admission, cancellation and close. Reuse the existing Window authority rather than fake native submission. [RD3] [RD4] [G3] |
+| Time and pause | `MotionClockSample` accepts caller elapsed time, but element animation uses the background executor clock. Define game/real-time policies per relevant root or animation; paused gameplay must preserve responsive menus, text/IME and host work. Playback pause alone is not a game clock. [RD6] |
+| Player and input | Current activation binds a Window and focus publication; key events carry keystrokes, not player identity. The engine must define seat/player routing, gamepad navigation, modal precedence and capture cancellation, with one live interaction executor per selected root. [RD2] [RD6] |
+| Shipped resources | Adapt fonts/images through actual Player content providers or declared executable resources; preserve original version/device identity, producer ordering and retirement. `AssetSource`, font injection and imported-image leases are useful seams, not cooked-content integration. [RD5] [RD8] |
+| World space | A recorded 2D UI texture can be placed on an engine-owned plane; the engine still owns projection, pixel density, depth/occlusion and ray-to-UV input. The recorder accepts a 2D color target, with no depth attachment contract or arbitrary per-control material API. Require a named workflow before extending it. [RD5] [G2] |
+
+Use the existing authored HUD/modal/Retry workflow for this comparison before selecting execution
+reuse. Godot and Unity supply bounded precedents for sharing mechanisms; neither those precedents
+nor `gpui-base` settle these game requirements or require every Editor control to ship. [G3] [P1] [P2]
+
+- [RD1] `crates/motion/Cargo.toml`; `crates/{ui_core,ui_components,canvas,gpui_docking}/Cargo.toml:[dependencies]`; `crates/ui_core/src/controllable_state.rs:ControllableState`; `crates/ui_core/src/virtualizer.rs:VirtualizerState`.
+- [RD2] `crates/ui_components/src/public_api/common.rs:COMMON_PUBLIC_EXPORTS`; `crates/ui_components/src/button.rs:ButtonState,Button`; `crates/ui_components/src/activation.rs:ActivationHandle::request,ActivationBinding::{new,bind,publish_accepted_runtime}`.
+- [RD3] `crates/gpui/src/app.rs:App::open_window_with_platform_window,headless_app_context`; `crates/gpui/src/window.rs:Window::new,Window::platform_window`; `crates/gpui/src/platform.rs:PlatformWindow`; `crates/gpui_windows/src/platform.rs:WindowsPlatform::attach_window`.
+- [RD4] `crates/gpui_platform/src/gpui_platform.rs:headless,current_platform`; `crates/gpui_linux/src/linux/headless.rs:HeadlessConnection`; `crates/gpui_linux/src/linux/headless/window.rs:HeadlessWindow` and its `HasWindowHandle`, `draw`, `sprite_atlas`, `on_request_frame` implementations.
+- [RD5] `crates/gpui_wgpu/src/wgpu_renderer/scene_renderer.rs:WgpuSceneRenderer::{new,record},WgpuSceneRecording`; `crates/gpui_wgpu/src/wgpu_atlas/imported_image.rs:WgpuAtlas::import_image`; `crates/gpui/src/platform/frame_delivery.rs:PlatformFrameSubmission::{is_pending,complete}`; `crates/gpui/src/window/deferred_frame.rs:Window::defer_candidate_frame`.
+- [RD6] `crates/motion/src/controller.rs:MotionClockSample::from_elapsed`; `crates/motion/src/frame_host.rs:MotionFrameHost::sample_elapsed`; `crates/gpui/src/elements/animation.rs:AnimationElement::request_layout`; `crates/gpui/src/interactive.rs:KeyDownEvent`; `crates/gpui/src/window/focus.rs:FocusId::is_focused`.
+- [RD7] Accepted `docs/adr/0008-open-gpui-ui-component-productization-roadmap.md:Decision`; `docs/adr/0018-open-gpui-motion-crate-boundary.md:Decision`.
+- [RD8] `crates/gpui/src/assets.rs:AssetSource`; `crates/gpui/src/app.rs:Application::with_assets`; `crates/gpui/src/text_system.rs:TextSystem::add_fonts`; `crates/gpui/src/image_texture.rs:ImageTexture`.

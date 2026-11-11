@@ -962,6 +962,16 @@ comparison remain open. Base-style skin/behavior reuse and neutral `ui-core`/`mo
 independently qualify those runtime requirements. No dependency/frontend default or full
 R11/R12/R11f/maintenance handoff changes.
 
+The [deferred Scene successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-deferred-scene-submission)
+at Open-GPUI `797372013ab` and `69d0992f2a0` implements one pending candidate and submitted interaction/publication custody
+through Window, App ingress and native renderer owners. Hidden initial submission uses the same
+creation/reveal transaction. Focused Core/public 57, affected shared controls 626 and native
+regressions 22 pass; the ordinary real-GPU deferred host verifies original A/B producer pixels,
+input, target invalidation, refusal/recovery and close, while both synchronous host controls pass.
+This is a framework prerequisite, not actual Nara Host/View or game UI acceptance. Production
+logical roots, dependency reconciliation, two-skin control behavior, authored HUD and measured
+costs remain open; full R11/R12/R11f and maintenance handoff are not complete.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
