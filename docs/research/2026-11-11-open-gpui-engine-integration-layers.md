@@ -1055,3 +1055,271 @@ Exact final revisions/build/static evidence belong in the foundation plan. This 
 selected Source/Cooked midtone/alpha prerequisite; device-loss/reconstruction, forced second-content
 admission failure, continuous busy-producer retirement, physical input/DPI, broader color/HDR
 and numerical budgets, full frontend/game adoption and maintenance handoff remain open.
+
+## Compositor And Cache Research Direction
+
+The user supplied `open-gpui-nara-compositor.md`, v1.0 dated November 12, SHA-256
+`cb231c7649ec464e0a3b519b0bfb81ec7d264900c66bb2a19fba08b29424a3d6`.
+It explicitly describes design suggestions without inspecting the current repositories. This
+comparison uses Nara `7040fe5c25d45b3eaefed134923f7b2b7e316cf3` and local Open-GPUI
+`909f510d18bd0d1e537faf73eb57947cee47f927`. The supplied document is background research,
+not an Accepted ADR, evidence of implemented features or a replacement execution plan.
+
+Its distinction between dependency/layout reuse, paint/display-list reuse, retained GPU geometry,
+raster textures, final composition and a render thread is useful. These reduce different work
+and have different validity and lifetime boundaries. An unchanged CPU description can still
+produce repeated uploads or GPU rasterization. Retained geometry can avoid upload while still
+executing shaders. A raster cache adds texture allocation, rebuild and sampling costs; its final
+composition can still touch the whole attachment. Partial texture repaint does not establish
+partial swapchain presentation. Neither a separate thread nor fewer draw calls establishes a win.
+
+### Current Source Disposition
+
+Paths in the framework column are relative to the pinned Open-GPUI checkout above.
+
+| Suggested mechanism | Actual source and disposition |
+|---|---|
+| Dirty/read tracking and cached subtrees | `app.rs::{detect_accessed_entities, record_entities_accessed, notify}`, `window/invalidator.rs` and `view/element.rs::{request_layout_view, prepaint_view, paint_view}` already implement bounded notification and cached View islands. Hits skip internal render/layout and reuse prepaint/paint. This is not a universal field-to-subtree reactive graph. `AnyView::cached` documents the remaining non-View dependency limitation; the owner still explicitly invalidates when required. |
+| Cross-frame Taffy nodes | `TaffyLayoutEngine::clear` runs during original candidate commit/refusal. Cached View hits can avoid rebuilding their internal layout while retaining an outer placeholder. Persistent nodes are a possible new optimization, not a prerequisite inferred from the fact that the frame layout arena is cleared. |
+| CPU paint/Scene replay | `Window::{reuse_prepaint, reuse_paint}` and `Scene::{replay, finish}` already retain/replay original input structures, primitives and resource leases. Replay/remapping/sorting still cost work; these are not cached pixels. |
+| Static GPU upload reuse | `wgpu_renderer.rs::{write_instances, write_instance_binding, prepare_path_draw, encode_frame}` retain buffer capacity/atlas bindings but process and upload primitive data on recording. External recordings stage uploads in the original host encoder. Capacity reuse is not unchanged-content upload reuse. Measure this seam before adding a new GPU Scene owner. |
+| Raster layers, damage and scroll tiles | `paint_layer`/`Scene::push_layer_for_render` manage drawing order; `CommittedVisual` retains a CPU Scene, and Path intermediates clear/redraw. They do not establish a general cross-frame subtree raster cache. Glyph/image atlas tiles are distinct from scroll-content tiles. |
+| Engine texture/hosting bridge | The actual Nara consumer already shares device/queue/target/encoder, exact immutable output displays, deferred original attempts and submitted input. The supplied P2 bridge is therefore partly completed; full multiple-View/device-loss/cost acceptance remains open. |
+| Threaded compositor | Deferred Scene delivery exists, but Scene geometry validity and original submission tokens contain UI-thread `Rc`/`Cell` custody. A clone is neither a Send transport nor submission authority. Threading requires a concrete frozen-data/resource/completion protocol through the original owners if measured owner occupancy justifies it. |
+
+The supplied G1/P1 consequently mixes existing mechanisms with possible new work. Preserve the
+official implementation and current fork contracts as the baseline. Consider three bounded
+successors according to measured cost, without freezing the proposed module tree or cache enum:
+
+1. **Static upload reuse in the existing WGPU recorder.** An ordinary public application paints
+   two cached large panels and an independent spinner, then edits/reorders one item. Compare
+   staging allocation, upload bytes and encoding cost; preserve exact pixels and refusal/resource
+   recovery. Original GPU rasterization may remain unchanged.
+2. **Persistent layout nodes only if layout dominates.** A variable-height list and editable
+   panel exercise insertion/deletion, text measurement, sibling notification and continuous
+   resize. Keep nodes in the original layout/Window lifecycle, preserve original hit/focus and
+   candidate refusal, and measure warm work plus bounded retained-node occupancy.
+3. **One explicit raster boundary if GPU work justifies it.** Use an expensive static text/vector
+   panel, dynamic content and a popup/input control. Compare direct versus raster behavior,
+   total GPU work, rebuild/sampling and payload pressure. Include eviction, scale/font/image
+   changes and original submission refusal. Tile scrolling and an independent thread follow only
+   if these consumers expose a remaining bottleneck.
+
+Current `with_element_opacity` distributes opacity to primitives. Raster grouping must preserve
+that meaning; compositing an isolated group with one final opacity is a distinct explicit
+semantic. The same rule applies to complex masks/effects: cache-off must already implement the
+same semantics before cache-on can be its optimization. Rounded clips require full clip/transform
+facts rather than their AABB. Raster bounds include ink/shadow/filter support, not only layout
+bounds. Background-dependent LCD glyph pixels cannot be assumed reusable on a transparent layer.
+
+Use validity facts appropriate to each retained representation. CPU Scene/geometry replay needs
+its original atlas leases; a completed independent raster may no longer depend on glyph-slot
+residency. Font content/metrics, source Image content, physical scale, working-domain/transfer/
+alpha and original device/configuration remain relevant when they change that raster. The
+document's large key tuple is a conservative checklist, not a new global generation authority
+or a requirement to hash every field for every cache level.
+
+### Engine Composition And Lifetime Constraints
+
+The same pinned Nara source already supplies a finite render program, typed Image ports,
+Features and exact resource/display observations. Reuse those owners when an actual offscreen
+UI contribution needs graph participation. The UI runtime decides whether semantic content is
+reusable; the engine decides physical dependencies, execution and GPU retirement. A proposed
+texture-plus-generation handle alone cannot replace source/Host/epoch identity or their leases.
+See [program imports](../../crates/nara_render_wgpu/src/program/mod.rs),
+[native admission](../../crates/nara_render_wgpu/src/program/native.rs) and
+[Feature execution](../../crates/nara_render_wgpu/src/program/feature.rs).
+
+An immutable [output](../../crates/nara_render_wgpu/src/output.rs), its
+[display occurrences](../../crates/nara_render_wgpu/src/presented.rs), a composite receipt and a
+[submission prefix](../../crates/nara_render_wgpu/src/submission.rs) represent different facts.
+Cache, display and in-flight leases may share one allocation without duplicating allocation or
+accounting. Eviction ends reuse, while the last original lease and GPU use decide release.
+Producer retirement cannot release another submitted sample. Normal prefix completion can be
+independent of another producer; abandoned-callback recovery may require `QueueEmpty` on the
+original device. Do not promise universal independent completion for exceptional recovery.
+
+Transform/scroll-only reuse also needs common visual and interaction admission. If A/M0 is
+displayed while B/M1 is pending, pointer/drag/text/IME/accessibility still use A/M0 until the
+original B transaction is admitted. Extend that transaction rather than adding a second hit
+tree or changing only inverse pointer coordinates. Existing
+[preview redisplay](../../src/project_host/runtime/editor/presentation.rs) requires a distinct
+display occurrence when mapping changes and returns a replacement presentation token after
+actual redisplay is confirmed. The WGPU Host issues display occurrences.
+Current [DisplayMapping2d](../../crates/nara_render/src/presentation.rs)
+is rectangular fit/UV mapping, not arbitrary affine or world-space support.
+
+Engine Image-to-UI sampling is qualified above. A UI-layer-to-engine-effect-to-window graph is
+a subsequent consumer: intermediate raster completion cannot publish final display authority.
+The final receipt must describe the effect output actually sampled and preserve the UI content's
+lineage/interaction policy. Existing `record_image_sample` in the
+[Host](../../crates/nara_render_wgpu/src/host.rs) observes actual non-fully-clipped sampled use;
+it does not prove shader coordinates or invent the final transform. Two interactive Views,
+pending transform cancellation/ABA and device-loss reconstruction supply further bounded
+consumers when those capabilities are selected.
+
+Thread transport is a separate unimplemented seam. Current framework submission tokens use
+`Rc<Cell<_>>`, and recordings retain a non-Send atlas interface; the engine Feature path has
+Send requirements. Do not pass these objects through it by asserting Send. A future frozen GPU
+packet must retain encoded/upload/in-flight resources and return exact completion to the
+original UI owner. Latest-wins replacement may cancel unsubmitted work, not discard already
+encoded or submitted custody. No transport API or compositor thread is selected here.
+
+### Measurement And Admission
+
+Start from one current-source native workload with a real changing engine View beside static
+UI, plus a change-dense control. Compare the existing direct path, retained geometry if profiling
+justifies it, and one explicitly selected expensive raster boundary. Fix hardware, source,
+device/format/working domain, physical extent/scale, fonts, accessibility, build mode and warmup.
+Keep cache hits, misses, cold/rebuild, eviction pressure and source/geometry changes in the sample
+population. Predeclare acceptable CPU/GPU/retained-byte and regression thresholds before the
+optimization; the document's reuse break-even equation is a model, not measured acceptance.
+
+- Measure update/description, layout, prepaint and paint separately from Scene finishing,
+  staging/upload, GPU raster and final composition. Keep reached work after refusals rather
+  than counting only accepted frames as all attempted work.
+- Existing Nara Host native-work counters exclude arbitrary encoding callbacks and third-party
+  renderer commands, including GPUI recording. Zero in that counter is not zero GPUI upload.
+  Attribute work at the actual recorder boundary before adding or trusting a counter.
+- A queue-completion interval includes scheduling/backlog and is not GPU duration or scanout.
+  Use actual supported timestamps for the measured pass scope; distinguish unsupported or
+  unmeasured cells from zero. Estimated rectangle coverage is not actual shaded-pixel work.
+- The earlier Dear/Nara kernel benchmark remains its original control. Its timing, warm reuse
+  counts and memory cannot be transferred to the current GPUI consumer. Diagnostic offscreen
+  replay/readback proves correctness and must stay outside the normal measured path.
+- Qualify CPU isolation independently of GPU isolation. A direct/geometry-only renderer may
+  legitimately redraw static primitives at every presentation. Require reduced original raster
+  work only for the selected raster-cache path, accounting for its composite work and memory.
+- Compare cache-off/on pixels with the same group-opacity/effect semantics, original input,
+  IME/focus/accessibility and exact accepted publications. A performance fallback must preserve
+  those semantics; missing capabilities are explicit rather than silently changed visuals.
+
+The current [work baseline](../benchmarks/2026-11-04-ui-work-baseline.md) and
+[output guide](../guides/render-image-outputs.md) own those observation exclusions. No new
+performance numbers, cache implementation, public layer API or thread transport are qualified
+by this research update.
+
+## GPUI Critique And State Invalidation Research
+
+Reviewed November 12, 2026 against local Open-GPUI
+`909f510d18bd0d1e537faf73eb57947cee47f927` and Nara
+`7040fe5c25d45b3eaefed134923f7b2b7e316cf3`. The supplied article, **A Critique of GPUI**,
+is dated November 8 and was retrieved November 12 with HTTP 200; the downloaded HTML SHA-256 is
+`2f7fde2be0925183965271170ee24abd5ba0bc20e43a7a09c8a2fc113c26810e`. This is a source review,
+not a new benchmark, runtime qualification or Nara domain-model recommendation. [GCR1]
+
+The article identifies a real cost: ordinary mutable state and entity-wide notification do not
+express which field changed or which displayed projection needs rebuilding. Its preferred
+run-once Signal architecture is a design position; the supplied experiments do not establish it
+as the best choice for Nara. The distinction between Entity granularity, dependency tracking,
+retained trees, layout and rendering is necessary: improving one does not automatically improve
+the others.
+
+### What The Current Fork Tracks
+
+1. **Writes remain explicit.** `Entity::update` supplies `&mut T`; `Context::notify` sends an
+   `EntityId`, without a field identifier or value comparison. Pending notification effects
+   coalesce by entity, which does not eliminate equal-value writes. An equality guard can avoid
+   notification work, but its semantics belong to the writer or a suitable state API. [GCR2]
+2. **Entity access tracking already exists.** Reads and leases record entity identities.
+   `detect_accessed_entities` captures scoped accesses; `record_entities_accessed` associates
+   them with windows. `App::notify` filters invalidation to currently tracking windows, while
+   cached views restore their recorded accesses on reuse, including paint dependencies.
+   Calling this entirely untracked or indiscriminate application-wide invalidation would be
+   inaccurate. It is not field-to-element dependency tracking. [GCR3] [GCR4]
+3. **Window invalidation is weaker than projection invalidation.** A notified View identity
+   dirties its rendered ancestor path. A non-View model read can subscribe a window without
+   making that model's notification dirty the cached View that read it. The existing
+   `cached_canvas_nested_window_reads_remain_window_local_on_replay` regression explicitly
+   expects the correct window to redraw while its cached content stays unchanged until refresh.
+   Notify the owning View, connect an observer/event to that notification, or refresh when
+   rebuilding is required. Read collection alone does not close this edge. [GCR3] [GCR4]
+
+The `notify`/zone.js analogy therefore describes uncertainty below the notified entity; it should
+not erase GPUI's entity identity, live-window routing and explicit observation mechanisms.
+Conversely, those mechanisms do not establish automatic selective invalidation for arbitrary
+reads from a shared model. Missing notifications can produce stale cached output; a later unrelated
+redraw is not a correctness contract. [GCR1] [GCR2] [GCR4]
+
+### Retention, Layout And Presentation Are Separate
+
+| Concern | Current-source distinction and consequence |
+|---|---|
+| Retained tree | Entities, scoped element state, dispatch structures and cached prepaint/paint records survive appropriate frames; ordinary declarative Element objects are rebuilt. This is different from retaining every layout/Element node and updating individual bindings. `RenderOnce` consumes a component recipe each invocation; its name does not promise one execution per mount. [GCR4] [GCR5] |
+| Cached View | Caching is explicit through `.cached(style)` and requires a definite outer size independent of contents. Active accessibility or inspector picking bypasses it. Reuse also depends on bounds, inherited text/style, clips, opacity, presentation, transforms, resource validity and refresh state. This explains real layout/behavior restrictions; it does not establish how frequently applications use caching. [GCR4] |
+| Incremental layout | The wrapper creates Taffy nodes and clears its tree on candidate completion/refusal. A cached View requests an outer placeholder; a hit skips its internal render/layout and replays prepaint/paint, while a miss lays out the internal subtree as a root. Clearing this arena does not prove every cached subtree is relaid out. It also says nothing universal about Taffy's own incremental capabilities or another framework's integration. [GCR4] [GCR6] |
+| Render caching | CPU Scene replay still copies/remaps primitives and finishes ordering. The WGPU recorder writes instance/path data and encodes drawing for the supplied Scene. A View cache hit therefore does not prove unchanged upload or raster work was skipped. The preceding [compositor study](#compositor-and-cache-research-direction) owns the fuller distinction; no general subtree raster or scroll-tile cache follows from these mechanisms. [GCR7] |
+| Custom nodes | `Element` exposes layout, prepaint, paint and accessibility participation; `canvas` requests an outer layout and invokes custom callbacks. A specialized editor/canvas can replace thousands of generic descendants with its own layout/drawing. It still participates in framework execution and invalidation. This is a supported escape hatch with author-owned responsibilities, not evidence that all GPUI semantics are bypassed or that arbitrary rich controls become cheap. [GCR8] |
+| Docking and multiple views | Docking retains stable panel handles/lazy factories and selects visible panel content; it also explicitly observes controller/surface-owner notifications. This proves composition and lifetime mechanisms, not field-level dependencies or isolated rendering cost. Entity tracking can route to multiple current windows; independent occurrences still require suitable scoped identities and window-local interaction/geometry. Multiple views of shared data neither require one giant invalidation boundary nor automatically acquire precise projection tracking. [GCR3] [GCR5] [GCR9] |
+
+### Ergonomics And The Run-Once Alternative
+
+The article's badge example is a plausible way to filter a broad model notification: retain a
+projection, compare it, and notify a smaller View only when that projection changes. The stored
+scalar, guard and subscription demonstrate the burden of selective projection management. They
+are not mandatory boilerplate for every label: a View can read an Entity directly, own local
+state, or observe typed events. Direct reading still needs correct invalidation, and typed events
+require correct publication; neither infers field dependencies from ordinary Rust. [GCR1] [GCR2]
+
+Two current-fork interfaces narrow the article's API generalizations. `View` supports a consumed
+wrapper combining parent-supplied props with an existing backing entity; parents need not always
+mutate child entities merely to pass render arguments. `Window::use_keyed_state` can retain keyed
+state across consecutive rendered frames, so a handwritten entity map is not the only local-state
+tool. Its observer notifies the containing View, and disappearance ends that continuity; it is not
+a general persistent keyed collection or a finer binding boundary. `RenderOnce` remains without
+an independent entity identity. None of these interfaces supplies automatic prop equality or
+field-level selective recomputation. [GCR5]
+
+Run-once signals make another contract explicit: reactive labels, conditionals and collections
+must be expressed through tracked closures/dynamic containers rather than ordinary one-time reads
+and top-level `if`/`for`. Dependency setup, retained nodes, disposal, captures and effect ordering
+have costs and failure modes. The author acknowledges creation/memory/effect costs and that coarse
+signals still perform poorly. Adding signals that merely notify existing GPUI Views can improve
+state authoring, but cannot by itself turn ephemeral Elements into persistent per-binding sinks.
+That stronger behavior needs an explicit execution/Element contract and lifecycle. [GCR1] [GCR5]
+
+### What The Benchmarks Establish
+
+The Method names GPUI `ddc9eda925`, Longbridge gpui-fast `86a8228229` and the author's zgui
+`082337db`; none is this Open-GPUI revision. It reports medians of apply/settle, selecting the best
+of three passes on one i9-13900K/RTX 3080 Ti Linux/Vulkan machine, excluding compositor and input
+costs and supplying no Windows execution evidence. The harness is unpublished and maintainers
+have not reviewed the adapters. The author discloses that zgui was tuned on this harness. These are useful sparse
+update observations under the author's adapters, not Nara measurements or native latency. [GCR1]
+
+The marked correctness failures are Floem label/keystroke and Slint font-size cells; they cannot
+serve as equivalent correct-output wins. Other cells passed the author's oracle, without an
+independent reproduction here. The 60-panel experiment uses gpui-fast's modified `retained_bench`
+in test mode with no GPU work, and retention-off is still gpui-fast. Quoted Zed retention results
+come from experimental branches/plans, separately from the article's default-GPUI measurements.
+Neither experiment establishes that those retained engines are present in this fork. [GCR1]
+
+A reproducible fork comparison still needs the harness/adapters, complete source/dependency and
+toolchain/build pins, sampling/warmup protocol, phase boundaries, and matched layout, font,
+accessibility and virtualization settings. The article does not establish those controls for
+this consumer. Its own discussion of expensive layout/engine walks under fine tracking supports
+separating notification precision from downstream execution, rather than selecting signals from
+charts alone. [GCR1]
+
+For follow-up evidence, keep three questions distinct: **correctness**, whether every relevant
+change invalidates stale output; **efficacy**, which description/layout/replay/upload/raster work
+actually disappears; and **authoring cost**, how much identity, subscription and lifetime code
+the application must maintain. Explicit broad refresh can satisfy correctness while failing the
+efficacy goal. A precise signal graph can still leave expensive layout or rendering. Sparse,
+equal-value and shared-model changes plus structural/change-dense controls are useful cases for
+testing those claims; this research supplies no new performance acceptance result.
+
+### Sources For This Section
+
+All framework paths below refer to Open-GPUI `909f510d18bd0d1e537faf73eb57947cee47f927`.
+Test references describe inspected expectations, not tests rerun for this documentation update.
+
+- [GCR1] [A Critique of GPUI](https://blog.zortax.de/posts/a-critique-of-gpui), especially [GPUI](https://blog.zortax.de/posts/a-critique-of-gpui#gpui-notify-is-zonejs), [precision](https://blog.zortax.de/posts/a-critique-of-gpui#making-gpui-precise-defeats-gpui), [signal limits](https://blog.zortax.de/posts/a-critique-of-gpui#signals-do-not-automatically-make-your-app-fast) and [Method](https://blog.zortax.de/posts/a-critique-of-gpui#method). Its references identify experimental Zed `312a04c83`/`c15d4b8e4b`; their timing claims are attributed, not independently reproduced here.
+- [GCR2] `crates/gpui/src/app/context.rs:62-118,229-232`; `app.rs:2503-2518,2664-2670,3815-3849,3943-3962`: observation/events, explicit notification, effect coalescing and mutable updates.
+- [GCR3] `crates/gpui/src/app/entity_map.rs:230-264,279-335`; `app.rs:1508-1545,3815-3849`; `window.rs:4044-4055,8479-8496`: access scopes, current-window subscriptions and View ancestor invalidation.
+- [GCR4] `crates/gpui/src/view.rs:17-33,54-66,255-263`; `view/element.rs:217-365`; `window/cache_dependency_tests.rs:273-335,550-658`: cache admission/replay, retained accesses and non-View notification limits.
+- [GCR5] `crates/gpui/src/element.rs:8-17,168-191`; `view.rs:216-263`; `window.rs:11068-11125`; `crates/gpui_macros/src/derive_into_element.rs:10-25`: transient descriptions, RenderOnce, props with identity, keyed state and embedding.
+- [GCR6] `crates/gpui/src/taffy.rs:31-107,183-249`; `window.rs:7724-7744,8119-8120`: node creation/computation and candidate-lifetime clearing; compare GCR4's cached-layout bypass.
+- [GCR7] `crates/gpui/src/scene.rs:531-594`; `window.rs:9485-9528,9723-9783`; `crates/gpui_wgpu/src/wgpu_renderer.rs:1918-1950,2044-2080,2464-2508`: CPU reuse versus per-recording instance preparation/upload.
+- [GCR8] `crates/gpui/src/element.rs:19-32,50-149`; `elements/canvas.rs:8-90`: custom layout, drawing, semantics and the canvas outer-layout contract.
+- [GCR9] `crates/gpui_docking/src/panel_view.rs:8-126`; `host.rs:923-935`; `host_render_session.rs:166-205`; `render_tabs.rs:397-442`: panel identity/lazy lifetime, explicit observers and selected-content composition.

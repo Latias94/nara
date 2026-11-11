@@ -8,6 +8,29 @@ remaining matched workloads and numeric budgets before measured reuse.
 
 ## Observation Contract
 
+The later [maintained-framework compositor study](../research/2026-11-11-open-gpui-engine-integration-layers.md#compositor-and-cache-research-direction)
+defines a new comparison, not a continuation of these measurements. Its GPUI consumer must
+separately observe description/layout/prepaint/paint, actual recorder staging/upload, GPU raster,
+final composition and retained payload. Existing Host native-work counters exclude third-party
+renderer callbacks; zero there cannot establish zero GPUI upload. Queue-completion spans remain
+distinct from GPU timestamps. The correctness-only same-Scene diagnostic replay is outside the
+normal measured workload. No current GPUI numeric baseline or cache win is recorded here.
+
+CPU reuse and GPU raster reuse have separate acceptance. Direct or retained-geometry rendering
+can legitimately redraw unchanged primitives at each presentation. A raster-cache experiment
+must establish reduced original raster work together with composite/rebuild/memory cost, using
+cache-off/on controls with identical group-opacity, clipping and interaction semantics. Apply
+only supported feature controls to the selected experiment; the supplied broad matrix does not
+make all platforms, HDR or future thread transport prerequisites of an SDR cache comparison.
+
+The [state-locality comparison](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md#state-locality-and-compositor-comparison)
+also needs separate dependency/projection work, notifications, rebuilt Views and reached layout
+nodes. A leaf-only reactive effect count does not establish leaf-only total UI work. Report
+subscription and retained-state occupancy through close/recreate and mounted-key churn. Separate
+fully materialized rows from virtualization and equal writes from real edits; keep correctness
+and authoring effort alongside time/memory. Article charts and upstream experiments do not
+supply any of these current Nara measurements.
+
 Each existing owner exposes a detached cumulative snapshot. Counters saturate, do not reset on
 resource retirement and do not authorize more work, publication, input or presentation. They do
 not change admission limits, revision allocation, last-good fallback or exact backend outcomes.

@@ -1393,6 +1393,43 @@ layout tree is cleared between draws; its retained state and cached views do not
 retain a whole Taffy arena. Open-GPUI's `virtualizer` is a workspace core module, not a selected
 third-party dependency. Borrow the mechanisms under existing owners and measured pressure.
 
+#### State-locality and compositor comparison
+
+The November 12 [state/invalidation review](../research/2026-11-11-open-gpui-engine-integration-layers.md#gpui-critique-and-state-invalidation-research)
+and [compositor comparison](../research/2026-11-11-open-gpui-engine-integration-layers.md#compositor-and-cache-research-direction)
+refine this baseline. Dependency tracking, retained interaction, incremental layout, CPU Scene
+replay, GPU upload reuse and raster caching are independently measurable capabilities. An
+engine-owned renderer does not select their implementations. Existing cached View islands can
+skip internal construction/layout; clearing the frame layout arena does not establish that every
+control is rebuilt. These source observations do not establish the current consumer's costs.
+
+Before a new reactive runtime or cache interface, extend one complete current-framework Editor
+consumer through public interfaces. Use Inspector/Hierarchy and a live engine View, including a
+shared model and a dependency read outside the owning View's render body. Compare idiomatic
+Entity/cached-View composition with a narrower, equality-aware UI projection only where the
+baseline exposes excessive invalidation. Keep one domain command/history path; local drafts,
+preedit, focus and continuous gestures retain their frontend incarnation. A Signal that only
+calls the same broad `notify` is not evidence of finer layout or paint updates. Visual equality
+does not suppress exact operation-basis revalidation. Intrinsic-size changes may correctly
+invalidate ancestor/sibling layout even when reactive updates are local.
+
+Observe notifications, projection/index work, rebuilt Views, reached layout/text/prepaint/paint,
+recorder uploads and retained subscriptions separately. Include equal writes, one local edit,
+selection/source replacement, row insertion/reorder, a constraint-changing edit and change-dense
+work. Close one of two panel instances, replace mounted keys, and complete a late async result;
+old consumer subscriptions cannot update a replacement, and retained frontend state must obey a
+declared bound. Shared domain/query tasks retain their existing owner and remaining consumers.
+Use the same presented operations and exact results for automation. Keep virtualized and fully
+materialized controls distinct, including filter/height-index cost and author effort.
+
+The [work observation contract](../benchmarks/2026-11-04-ui-work-baseline.md#observation-contract)
+keeps CPU isolation, upload reuse and raster isolation separate. If measurements justify a
+successor, change the original owner: static upload reuse in the existing recorder, persistent
+layout storage when layout dominates, or one explicit raster boundary when GPU raster dominates.
+An offscreen UI/effect consumer must also preserve final occurrence/input admission and original
+GPU resource retirement. Thread transport and scroll tiles require their own demonstrated need.
+No article benchmark, new Signal model, crate split or compositor is selected by this amendment.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

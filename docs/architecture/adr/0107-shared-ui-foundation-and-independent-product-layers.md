@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-11 (independent framework and Nara-owned rendering adaptation)
+**Last Revised**: 2026-11-12 (derived UI state and independent invalidation mechanisms)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -174,6 +174,23 @@ the affected structure, layout, text, paint or semantics rather than requiring a
 for every Host frame. This selects an execution contract, not a public retained-node graph,
 reactive language or universal cross-toolkit Widget trait. Cache algorithms and layout storage
 remain replaceable behind that contract under ADR 0109.
+
+UI state projections derive from the authoritative document/game/query owners. A reactive
+projection may narrow observations and suppress equal visual updates; it does not introduce
+another writable document, history or command executor. Display equality does not replace exact
+revision/capability revalidation for an operation. Drafts and preedit remain local frontend state.
+Frontend subscriptions and panel/root-local derived work follow their original consuming
+incarnation, with explicit retirement and stale-result handling when its binding changes. Shared
+domain/query work retains its existing owner and may serve multiple consumers; shared source
+data does not merge their live frontend state or consumer subscriptions.
+
+Dependency tracking, description reuse, incremental layout, paint replay, GPU upload reuse and
+raster caching may evolve independently behind their owning interfaces. Selecting Nara-owned
+rendering does not select a state model or establish any of those cost reductions. A smaller
+reactive effect still may require ancestor/sibling layout when constraints or intrinsic sizes
+change. Neither a Signal runtime nor a persistent node representation is required by this ADR;
+choose a changed mechanism through complete consumers and phase-specific observations under
+R11a/e. Renderer/cache optimizations preserve original presented interaction and resource custody.
 
 An optional panel frontend may use retained, immediate or hybrid internals. ADR 0118 owns its
 Host attachment. Providing that attachment is a Nara responsibility; shipping an official ImGui,

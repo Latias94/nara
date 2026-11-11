@@ -1018,6 +1018,16 @@ Undo, paint failures, geometry and close controls. ADR0092 owns the SDR/accumula
 refinement. The plan records exact runs and limits; this does not close device-loss/busy-producer,
 physical input, HDR/display management, numerical budgets, frontend/game adoption or handoff.
 
+The November 12 [state/invalidation critique](../../research/2026-11-11-open-gpui-engine-integration-layers.md#gpui-critique-and-state-invalidation-research)
+and [compositor comparison](../../research/2026-11-11-open-gpui-engine-integration-layers.md#compositor-and-cache-research-direction)
+are source-grounded research, not a new numeric baseline. They distinguish existing Entity/cached
+View reuse from incremental layout, upload reuse, raster caching and thread transport. R11a adds
+one complete shared/local-state consumer and separate work/lifetime observations before choosing
+a new reactive or cache mechanism. Nara-owned rendering does not qualify local UI invalidation;
+the old Dear/kernel measurements do not qualify GPUI. Current rendering/input/resource owners
+remain authoritative. No Signal runtime, raster cache, persistent layout or thread is implemented
+by this documentation update; broader R11a/e budgets and framework/engine adoption stay open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
