@@ -40,6 +40,22 @@ to an offscreen target in the original window submission; it is not a swapchain 
 proof or steady-state performance path. Physical IME, physical DPI migration, full frontend/game
 adoption, device loss and numeric costs retain separate acceptance requirements.
 
+The same composition also paints actual Source and Cooked PNG content. A public recipe plugin
+observes sealed stock captures during two managed headless runs. The Source imports a real sRGB
+PNG; the Processed run consumes an admitted two-member Scene/Image catalog and explicit producer
+expectation after the temporary source/cooked backing has been destroyed. Both Runtime owners
+retire before those original inputs render through the same native Host. Extra public prepared
+Image observations are dropped before returning the captures; the consumer uses no private Sprite
+batch representation. Rendering the escaped inputs after retirement is the replay evidence.
+
+The adapter obtains transfer/alpha from each exact retained output's `descriptor()`. It selects
+`WgpuSceneColorSpace::LinearSrgb` explicitly and records directly to the Nara sRGB attachment;
+the framework's default numeric-sRGB composition remains unchanged. The smoke verifies all four
+alpha bands, a translucent UI overlay, clipping and fractional-root scaling for both content
+modes. [ADR0092](../../../docs/architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md)
+owns the linear working-space and associated-output contract. These SDR controls do not select
+HDR display output, gamut mapping or a tone mapper.
+
 The manifests share one fixed official WGPU Git revision containing the qualified surface-drop
 and wasm-timeout corrections. Registry `30.0.1` does not contain those later fixes. An application
 combining the reference Dear renderer must also patch its registry WGPU edge at its own root,

@@ -1630,6 +1630,100 @@ failure from recursively formatting both workspaces. Added local Markdown links/
 affected manifests/locks validate. No new aggregate framework scan, compiler-floor, foreign
 native/browser execution or unrelated complete component matrix is claimed by this unit.
 
+The next engine gate extends that same independently assembled consumer with actual Image content
+and explicit output color meaning. Preserve its complete Editor source/selection/edit/Undo,
+text/input, failure/resize and retirement trajectory. Use ordinary public source import, cook,
+Runtime acquisition and stock capture owners for source and processed Image outputs; no second
+native render Host, fake capture identity or raw replacement pixel publication is admitted.
+Retain escaped captures/outputs after their Runtime and backing retire, then display them through
+the original hosted root and exact engine window submission.
+
+The adapter must derive transfer and alpha from the exact output's admitted program descriptor,
+preserving its original nominal semantic, rather than assume opacity or infer all meaning from
+the texture format. Qualify nontrivial RGB, alpha-zero and partial-alpha source/processed samples,
+clipping/overlap and retained original versions on actual DX12 and Vulkan. State the framework's
+existing working-space composition separately from the engine's linear-light rendering; do not
+silently redefine either policy to match expected pixels. The normal path retains no CPU readback
+or intermediate UI copy; diagnostic replay remains scoped to the original window submission.
+The explicit linear-sRGB GPUI recorder mode preserves the official default while making Nara's
+sRGB target encode once. ADR0092 owns the stock accumulated-alpha and external-UI refinement;
+HDR/gamut/scene-to-display policy stays separate from storage encoding. Complete device-loss,
+busy-producer retirement and numerical-cost gates remain subsequent work.
+
+The November 12 [content/color successor](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-source-and-cooked-image-color-composition)
+implements that selected gate in the same consumer. A real PNG with non-endpoint RGB and four
+alpha bands is imported from Source, cooked with its actual Runtime Scene, published in a verified
+two-member catalog and consumed from Processed after the temporary backing has been removed.
+Both managed headless Runtimes retire before their original captures render through the existing
+native Host. Public Image snapshots are observed and dropped before return; no hidden Sprite
+batch interface or replacement packet is needed. The two exact retained outputs join the original
+Editor/View workflow and its single Host window submission.
+The framework's generic explicit recorder is local Open-GPUI
+`909f510d18bd0d1e537faf73eb57947cee47f927`, separately qualified from the fixed-source audit.
+Its Nara stock-alpha/descriptor prerequisite is local
+`08e65be65540942668d140f43b1ca902aee76438`.
+
+The old GPUI default actually fails the native expected-color control: background `#404040` reads
+137 instead of 64 after the sRGB attachment encodes numeric sRGB again. The adapter explicitly
+selects the new fork-owned `LinearSrgb` recording mode and maps imports from each exact descriptor.
+The original expected pixels stay unchanged. A separate framework review finds dark Path loss
+from a forced 8-bit linear intermediate; the added `#060606` Quad/Path comparison actually fails
+with Path zero versus expected six, then passes after restoring target-matched storage and its
+hardware sRGB encoding/decoding. Official/default GPUI behavior remains the baseline.
+
+| Executed scope | Result and run identity |
+|---|---|
+| Stock accumulated-alpha and exact publication, DX12 | 7/7, `08a34b43-af79-494a-89b6-267bac4e8dd6` |
+| Same stock/publication selection, Vulkan | 7/7, `5d50e40b-c6f1-46b1-912b-01c405e1521e` |
+| Broader renderer library | 405/405, 60 ignored native controls separate, `d16523d4-0c65-4f1c-aa0e-0ced4e9b4cc2` |
+| Final affected Canvas/UI/legacy-oracle/View selection, DX12 | 14/14, `e39ad089-7786-4dd2-9f51-24d610b488c1` |
+| Canvas/program UI selection, Vulkan | 7/7, `c0dc9f7a-67d5-4391-a104-f912069a6204` |
+| GPUI new color and existing external-Scene selection under DX12 environment | 3/3, `ff0831c1-f443-4463-9ce8-e6379f110ad1` |
+| Same selection under Vulkan environment | 3/3, `63796982-3e8f-45bd-a1cd-99a49a0ad7af` |
+| Affected all-feature GPUI WGPU library | 123/123, `a53f99e6-7cd9-44a6-9f97-a8571ccb8b0e` |
+| Complete native engine consumer, DX12 | 1/1, `1f803269-dba8-4abc-b268-51fb8427f285` |
+| Complete native engine consumer, Vulkan | 1/1, `c591aaef-55b2-4adb-b043-8c91b22c2eef` |
+| Unchanged independent translucent Scene/blur/grade, DX12 | 1/1, `be219276-ef42-4040-a8a0-cbc4740dbd3d` |
+| Same independent composition, Vulkan | 1/1, `35ca781b-cac7-45aa-9b10-ed2ed946c231` |
+
+The new framework color fixture explicitly reports each requested backend/RTX 4090 adapter;
+its existing two external-Scene controls retain automatic adapter selection. Do not infer their
+per-backend identity from the environment alone. Both native engine children explicitly report
+their selected DX12/Vulkan backend, original device epoch one and `Bgra8UnormSrgb` target.
+Source and Processed agree on `[64,64,64,255]`, `[86,63,115,255]`, `[103,65,146,255]` and
+`[128,64,192,255]`; overlay, clip and fractional-root assertions pass. Existing source edit/Undo,
+selection, 4096-byte draft/input, refused/panicking paint recovery, resize/ABA/zero extent and
+pending close remain intact: nine successful UI submissions, seven discarded candidates,
+two intentional failures and five diagnostic replays per backend. Diagnostic readback retains
+its same-Scene offscreen/original-window-submission scope, outside the normal path.
+
+The initial stock selection passes 3/4 (`1df31968-0b97-47c7-9bfe-c3986f6a0c49`) because a raw
+clear oracle picks a half-byte boundary: DX12 rounds 0.5 to byte 127. Byte-aligned raw inputs
+preserve exact assertions and establish that finite-program clears are not globally premultiplied.
+Independent review corrects the startup `RefCell` borrow and removes internal batch observation.
+The first fixture build catches its explicit nested-module paths. Enabling logical Window capture
+adds only `nara_winit` and its edge to the independent lock; unrelated generated upgrades are
+removed before the locked build. The old private comparison oracle's stock clear is aligned with
+the new accumulated contract, while arbitrary public program clear remains raw.
+
+Correctness Clippy passes for all targets/features of the renderer, independent engine consumer
+and GPUI WGPU package. The no-default renderer library and production Core/WGPU/Web wasm compile
+pass. Root/framework formatting and the isolated consumer's package formatting succeed, keeping
+cross-workspace traversal out of that fixture invocation. Added local Markdown links/fragments,
+changed manifests/lock and the framework workflow YAML validate. Remote CI and a compiler-floor
+rerun are not claimed. The old xtask executable is absent after disk cleanup; this unit does not
+rebuild unrelated component/DevTools dependencies just for unchanged aggregate static scans.
+
+This is selected SDR content/color acceptance. Forced second-content admission failure, complete
+device loss/reconstruction and busy-producer latency, physical input/DPI, broader color/HDR/display
+policies, full Editor/game selection, numeric budgets and maintenance handoff remain open. The
+full foundation Goal, R11/R12 and R11f stay active under their existing complete criteria.
+The next color-quality gate must explicitly compare dark/gradient/alpha output through the
+current linear RGBA8 non-Canvas Scene path, target-matched sRGB SDR storage and float intermediates.
+The current midtone oracle accounts for existing RGBA8 quantization; it is not a full precision
+palette proof. Preserve authored semantics and original Host ownership while measuring quality,
+bandwidth and retained bytes before choosing the lasting Scene/effect/display precision policy.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the

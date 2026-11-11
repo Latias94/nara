@@ -938,3 +938,120 @@ Final affected qualification and exact commits are recorded in the foundation pl
 consumer does not select the full Editor frontend/game executor, close the processed-image and
 translucent-color matrix, prove physical IME/DPI migration, device-loss/reconstruction, numeric
 budgets or continuous busy-producer retirement, or complete R11/R12/R11f and maintenance handoff.
+
+## Color Composition And Future Display Boundaries
+
+The user requested an early color-space decision for larger games. Accepted
+[ADR0092](../architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md) already selects
+linear sRGB/Rec.709 working primaries, straight authored `Color` and explicit sRGB Image decode.
+Its November 12 refinement separates reusable accumulated-alpha targets from authored sources
+and makes the external UI composition domain explicit. This is an SDR contract, not an HDR
+selection or a declaration that every mature engine blends every UI layer in linear light.
+
+The inspected upstream sources demonstrate why these boundaries matter:
+
+| Source | Observed implementation | Consequence for Nara |
+|---|---|---|
+| Godot `7a37606a433c0e7735525037cdf774f043146a21`, `servers/rendering/renderer_rd/renderer_canvas_render_rd.cpp` | Canvas enables attribute-to-linear conversion according to whether its render target uses HDR. Ordinary 2D and HDR 2D therefore have distinct working-domain policies. | Preserve an explicit adapter choice; importing a framework does not silently select the engine's composition domain. |
+| Same Godot pin, `servers/rendering/renderer_rd/shaders/blit.glsl` | Final blit distinguishes source sRGB from target Rec.709 linear/nonlinear, adjusts SDR reference luminance for linear output and clamps to the declared output range. | Storage transfer, final display encoding, range and reference luminance are separate decisions. A texture-format suffix is not a complete output policy. |
+| Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`, `crates/bevy_render/src/view/composition.rs` | Absent or explicit Linear compositing resolves to one linear policy; other requested spaces participate in camera-stack resolution and pipeline keys. | A future composition policy belongs to the actual target/pass owner, including cameras sharing that target. It must not be guessed from an individual control. |
+| Same Bevy pin, `crates/bevy_window/src/display_target.rs` | Camera HDR intermediates are distinct from requested surface gamut/transfer and luminance. Requested and supported display output can differ. | A float Scene texture alone does not establish HDR display support. Future capability negotiation must report the selected display policy explicitly. |
+| Same Bevy pin, `crates/bevy_ui_render/src/lib.rs` | UI is scheduled after PostProcess and before upscaling in the inspected Core2d/Core3d paths. | UI placement relative to tone mapping/upscaling is a product rendering decision, separate from reusable control/layout mechanisms. |
+
+These are pinned source observations; no Godot/Bevy native execution or complete HDR-output
+qualification is claimed. The relevant sources were inspected locally through read-only
+`repo-ref/` trees on November 11.
+
+For the current Nara consumer, ordinary PNG RGB is sRGB encoded and alpha is linear. Stock
+rendering samples decoded linear RGB and accumulates associated RGB in its transparent output.
+The exact retained output descriptor carries that transfer/alpha meaning into the GPUI adapter.
+The framework's existing numeric-sRGB working domain remains its default. The Nara adapter
+selects a fork-owned linear-sRGB Scene recorder so UI authored colors decode before blending
+and the final sRGB attachment encodes once. Imported Scene pixels retain their original declared
+meaning throughout; relabeling an Image is not a color conversion.
+
+Future HDR/wide-gamut work must distinguish source/working primaries, transfer, alpha association,
+precision/range, scene- versus display-referred stage, tone mapping and display capabilities.
+Neither a generic `Hdr` Image flag nor a default ACES pipeline is introduced before a complete
+authoring/output workflow supplies acceptance evidence.
+
+Intermediate precision is a separate remaining gate. Non-Canvas stock image rendering currently
+uses a linear `Rgba8Unorm` target, while the Canvas world raster uses sRGB storage. Eight-bit
+linear storage has coarse dark-color steps even when its transfer/alpha contract is correct.
+The current PNG oracle explicitly includes that intermediate quantization; its midtone result
+does not qualify a complete dark-gradient palette. Before a high-fidelity Scene/postprocessing
+claim, compare target-matched sRGB SDR storage and floating-point linear intermediates through
+the actual stock policy, effects and output path, with declared dark/gradient/alpha quality and
+bandwidth/retained-byte budgets. Resource descriptors and exact import meanings keep this choice
+in rendering rather than changing authored Image, persistent `Color` or control semantics.
+
+## Implemented Source And Cooked Image Color Composition
+
+The explicit generic recorder is local Open-GPUI
+`909f510d18bd0d1e537faf73eb57947cee47f927`, extending the previously qualified hosting baseline.
+It is fork-owned composition support after the fixed official-source audit, not a new upstream
+adoption or a framework-default switch.
+The Nara stock-alpha/descriptor prerequisite is local
+`08e65be65540942668d140f43b1ca902aee76438`.
+
+This successor extends the same independently assembled engine consumer with a real 12x4 sRGB
+PNG: RGB `[128,64,192]` and four vertical alpha bands `[0,64,128,255]`. A Source loader imports
+the PNG and metadata, and the actual Image and Runtime Scene cook produce a two-member catalog
+with member digests, schema/plugin/codec fingerprints and a separate producer expectation.
+Two managed headless runs execute the ordinary stock capture workflow. The Processed base is
+admitted before both temporary backings are destroyed; its Runtime then consumes that immutable
+base. Both Runtime owners retire before rendering. Public prepared Image observations verify
+original allocation/retention, identity and content, then are dropped before only the original
+`WgpuRenderInput`s escape. The consumer does not inspect the hidden Sprite batch representation.
+
+Those inputs render into two image outputs through the original native `WgpuRenderHost`, without
+a second GPU Host or replacement captures. The adapter obtains stored transfer and sampled-alpha
+meaning from each exact output descriptor, preserving the nominal resource meaning. Candidates
+retain the actual sampled displays and atlas instances through their original window prefix.
+Source and Cooked panels join the existing complete Editor/View/text/failure/close trajectory.
+
+The old GPUI recording mode actually fails the new native midtone oracle: the `#404040` background
+reads `[137,137,137,255]` instead of `[64,64,64,255]` when encoded again by Nara's sRGB target.
+Selecting the framework's explicit `LinearSrgb` recorder fixes that mismatch without relabeling
+imports or changing expected pixels. A separate reviewed dark-Path regression fails with an
+8-bit linear intermediate (`#060606` becomes black). Restoring target-matched Path storage
+retains the original MSAA/format policy: sRGB hardware storage/sampling preserves SDR precision,
+and the final Path shader forwards already decoded associated RGB. The strengthened framework
+GPU controls pass on both selected backends.
+
+The unchanged complete Nara child passes on **DX12**
+(`1f803269-dba8-4abc-b268-51fb8427f285`) and **Vulkan**
+(`c591aaef-55b2-4adb-b043-8c91b22c2eef`). Source and Processed both read the same band pixels:
+`[64,64,64,255]`, `[86,63,115,255]`, `[103,65,146,255]`, `[128,64,192,255]`.
+Translucent overlay and clipping checks pass at the original and fractional-root scales. Each
+backend still completes nine UI submissions, seven discarded candidates, two intentional paint
+failures and five diagnostic replays, while another engine producer remains usable after UI
+close. Diagnostic scope remains a same-Scene offscreen replay in the original window submission,
+not swapchain readback/scanout or the normal rendering path.
+
+The stock owning alpha/publication controls pass **7/7 per backend**, covering nonblack and
+alpha-zero camera/Canvas clears, Blend, Opaque partial/zero-alpha source/tint/custom materials,
+raw finite-program clear semantics, retained old pixels and detached exact descriptors. A raw
+clear test initially chooses a half-byte boundary and observes 127 instead of 128 on DX12;
+byte-aligned input retains exact assertions without imposing a device rounding convention.
+The renderer's broader library selection passes **405/405**, with 60 ignored native controls
+kept separate. The first fixture compile catches explicit submodule path resolution; the normal
+locked graph needs only the new `nara_winit` package/edge for logical Window capture, preserving
+all previously locked external package versions. Independent review corrects startup's nested
+`RefCell` import borrow and removes private batch observation before actual native acceptance.
+
+The final affected Canvas/UI/View/legacy-oracle selection passes **14/14 on DX12**
+(`e39ad089-7786-4dd2-9f51-24d610b488c1`); its Canvas/program-UI subset passes **7/7 on Vulkan**
+(`c0dc9f7a-67d5-4391-a104-f912069a6204`). The unchanged independent translucent Scene/blur/grade
+consumer also passes **1/1 per backend** (`be219276-ef42-4040-a8a0-cbc4740dbd3d` DX12;
+`35ca781b-cac7-45aa-9b10-ed2ed946c231` Vulkan). These overlapping selections do not form a new
+aggregate framework/engine total. Renderer, framework WGPU and independent engine-consumer
+all-target/all-feature correctness Clippy pass. The no-default renderer library and production
+Core/WGPU/Web wasm compile pass; root/framework and isolated consumer formatting succeed.
+Added local links/fragments, changed manifests/lock and workflow YAML validate. Remote CI,
+compiler-floor reruns and unchanged aggregate xtask gates are not claimed by this unit.
+
+Exact final revisions/build/static evidence belong in the foundation plan. This closes the
+selected Source/Cooked midtone/alpha prerequisite; device-loss/reconstruction, forced second-content
+admission failure, continuous busy-producer retirement, physical input/DPI, broader color/HDR
+and numerical budgets, full frontend/game adoption and maintenance handoff remain open.

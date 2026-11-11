@@ -1,14 +1,19 @@
 use super::engine::{Engine, Preview};
 use anyhow::{Context as _, Result, ensure};
 use nara_render::DisplayMapping2d;
-use nara_render_wgpu::{WgpuImageCompositeReceipt, WgpuRenderHostError, WgpuSubmissionPrefix};
+use nara_render_wgpu::{
+    TextureAlpha, TextureTransfer, WgpuImageCompositeReceipt, WgpuImageDisplay,
+    WgpuRenderHostError, WgpuSubmissionPrefix,
+};
 use open_gpui::{
     AtlasTextureLease, Bounds, DevicePixels, HostedSurfaceGeometry, HostedSurfaceRenderer,
     ImageTexture, ImageTextureAlpha, ImageTextureSampling, ImageTextureTransfer, PlatformAtlas,
     PlatformFrameSubmission, PlatformPresentationShutdownOutcome, PlatformWindowPresentOutcome,
     PreparedPlatformPresentationShutdown, Scene, WindowPresentationShutdownTicket, point, size,
 };
-use open_gpui_wgpu::{WgpuImportedImageDescriptor, WgpuSceneRecording, WgpuSceneRenderer};
+use open_gpui_wgpu::{
+    WgpuImportedImageDescriptor, WgpuSceneColorSpace, WgpuSceneRecording, WgpuSceneRenderer,
+};
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
@@ -33,6 +38,7 @@ struct Candidate {
     geometry: HostedSurfaceGeometry,
     submission: PlatformFrameSubmission,
     snapshot: Option<Rc<Snapshot>>,
+    content: Vec<WgpuImageDisplay>,
 }
 
 struct InFlight {
@@ -96,6 +102,7 @@ pub(super) struct Renderer {
     delivery: Rc<RefCell<Delivery>>,
     wake: Rc<dyn Fn()>,
     pub candidate_snapshot: Rc<RefCell<Option<Rc<Snapshot>>>>,
+    pub candidate_content: Rc<RefCell<Vec<WgpuImageDisplay>>>,
     pub publications: Rc<RefCell<VecDeque<Publication>>>,
     pub presented: RefCell<Option<Rc<Snapshot>>>,
     pub paused: Cell<bool>,
@@ -117,11 +124,12 @@ impl Renderer {
                 let info = scope.adapter().get_info();
                 println!("NARA_GPUI_GPU backend={:?} name={} driver={} driver_info={} target={:?} device_epoch={}",
                     info.backend, info.name, info.driver, info.driver_info, scope.surface_format(), scope.device_epoch());
-                WgpuSceneRenderer::new(
+                WgpuSceneRenderer::new_with_color_space(
                     scope.adapter(),
                     Arc::new(scope.device().clone()),
                     Arc::new(scope.queue().clone()),
                     scope.surface_format(),
+                    WgpuSceneColorSpace::LinearSrgb,
                 )
                 .map(|renderer| (renderer, scope.device().clone()))
             })??
@@ -133,6 +141,7 @@ impl Renderer {
             delivery: Rc::new(RefCell::new(Delivery::default())),
             wake,
             candidate_snapshot: Rc::default(),
+            candidate_content: Rc::default(),
             publications: Rc::default(),
             presented: RefCell::new(None),
             paused: Cell::new(false),
@@ -147,23 +156,30 @@ impl Renderer {
     }
 
     pub fn import(&self, preview: &Preview) -> Result<ImageTexture> {
+        self.import_display(&preview.display)
+    }
+
+    pub fn import_display(&self, display: &WgpuImageDisplay) -> Result<ImageTexture> {
+        let descriptor = display.output().descriptor();
         let texture = self
             .engine
             .borrow_mut()
             .host
-            .with_image(preview.display.output(), |_, _, view| {
-                view.texture().clone()
-            })?;
-        let extent = preview.display.output().extent();
+            .with_image(display.output(), |_, _, view| view.texture().clone())?;
+        ensure!(
+            texture.format() == descriptor.native.format
+                && texture.size() == descriptor.native.size,
+            "the imported image differs from its original output descriptor"
+        );
+        let extent = display.output().extent();
         Ok(self
             .recorder
             .borrow()
             .sprite_atlas()
             .import_image(WgpuImportedImageDescriptor {
-                transfer: if texture.format().has_srgb_suffix() {
-                    ImageTextureTransfer::Srgb
-                } else {
-                    ImageTextureTransfer::Linear
+                transfer: match descriptor.transfer {
+                    TextureTransfer::Srgb => ImageTextureTransfer::Srgb,
+                    TextureTransfer::Linear => ImageTextureTransfer::Linear,
                 },
                 texture,
                 mip_level: 0,
@@ -175,9 +191,13 @@ impl Renderer {
                         DevicePixels(extent.height as i32),
                     ),
                 ),
-                alpha: ImageTextureAlpha::Opaque,
+                alpha: match descriptor.alpha {
+                    TextureAlpha::Opaque => ImageTextureAlpha::Opaque,
+                    TextureAlpha::Straight => ImageTextureAlpha::Straight,
+                    TextureAlpha::Premultiplied => ImageTextureAlpha::Premultiplied,
+                },
                 sampling: ImageTextureSampling::Linear,
-                owner: Some(Arc::new(preview.display.clone())),
+                owner: Some(Arc::new(display.clone())),
             })?)
     }
 
@@ -234,6 +254,7 @@ impl Renderer {
             .snapshot
             .iter()
             .map(|snapshot| snapshot.preview.display.clone())
+            .chain(candidate.content.iter().cloned())
             .collect::<Vec<_>>();
         let failure = self.failure.take();
         let mut prefix = None;
@@ -514,6 +535,7 @@ impl HostedSurfaceRenderer for Renderer {
                 geometry,
                 submission: submission.clone(),
                 snapshot: self.candidate_snapshot.borrow().clone(),
+                content: self.candidate_content.borrow().clone(),
             });
             Ok(())
         })();

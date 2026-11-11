@@ -52,6 +52,12 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const SPRITE: &str = "nara.sprite.Sprite";
 
+struct ContentImage {
+    _input: nara_render_wgpu::WgpuRenderInput,
+    producer: WgpuRenderProducer,
+    display: WgpuImageDisplay,
+}
+
 pub(super) struct Preview {
     pub accepted: RefCell<Option<EditorAcceptedPreview>>,
     pub display: WgpuImageDisplay,
@@ -94,6 +100,7 @@ pub(super) struct Engine {
     closing: bool,
     closed: bool,
     cleanup_failed: bool,
+    content: Vec<ContentImage>,
     _project: TempDir,
 }
 
@@ -157,7 +164,7 @@ impl Engine {
         session.configure_editor_preview(Some(
             Extent2d::new(640, 360).context("the Scene extent must be nonempty")?,
         ));
-        Ok(Self {
+        let mut engine = Self {
             host,
             window,
             captures: 0,
@@ -183,8 +190,54 @@ impl Engine {
             closing: false,
             closed: false,
             cleanup_failed: false,
+            content: Vec::new(),
             _project: project,
-        })
+        };
+        if let Err(error) = engine.load_content() {
+            engine
+                .close()
+                .context("retire after content capture failure")?;
+            return Err(error);
+        }
+        Ok(engine)
+    }
+
+    fn load_content(&mut self) -> Result<()> {
+        let captures = super::content::capture()?;
+        for input in [captures.source, captures.processed] {
+            let target = RenderImagePacket::new(
+                RenderImage2d::allocate_handle()?,
+                Extent2d::new(super::content::TARGET_WIDTH, super::content::TARGET_HEIGHT)
+                    .context("content render extent must be nonempty")?,
+            )?;
+            let input = input.with_image_target(target)?;
+            let producer = self.host.create_producer()?;
+            self.host_frame = self
+                .host_frame
+                .checked_add(1)
+                .context("Host transaction identities are exhausted")?;
+            self.host.begin_frame(self.host_frame)?;
+            let reservation = self.host.reserve_image_target(
+                &producer,
+                input.packet().source_generation(),
+                target,
+            )?;
+            self.host.activate_image_target(&producer, reservation)?;
+            let output = self.host.submit(&producer, &input)?;
+            self.content.push(ContentImage {
+                _input: input,
+                producer,
+                display: self.host.display_image(output)?,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn content_displays(&self) -> Vec<WgpuImageDisplay> {
+        self.content
+            .iter()
+            .map(|content| content.display.clone())
+            .collect()
     }
 
     pub fn begin_window(&mut self) -> Result<(RenderWindowPacket, u64)> {
@@ -460,6 +513,11 @@ impl Engine {
             self.invalidate();
             for producer in [&self.scene_producer, &self.other_producer] {
                 if let Some(prefix) = self.host.retire_producer(producer) {
+                    self.retiring.push(prefix);
+                }
+            }
+            for content in &self.content {
+                if let Some(prefix) = self.host.retire_producer(&content.producer) {
                     self.retiring.push(prefix);
                 }
             }

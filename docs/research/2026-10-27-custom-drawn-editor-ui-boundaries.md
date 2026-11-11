@@ -5794,3 +5794,31 @@ the [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-pla
 This is a qualified integration prerequisite rather than the whole engine adoption gate.
 Processed image/color-alpha breadth, physical input/DPI/accessibility, device loss, numeric
 costs, complete frontend workflows, control-skin reuse and authored-game execution remain open.
+
+## November 12: Explicit Linear Composition And Source/Cooked Images
+
+The [selected color successor](2026-11-11-open-gpui-engine-integration-layers.md#implemented-source-and-cooked-image-color-composition)
+extends the original Nara-owned Host/Scene consumer with a real Source PNG and its admitted
+two-member cooked Scene/Image delivery. Both managed Runtime owners and temporary content
+backings retire before their original stock captures render. Public prepared Image observations
+are dropped before returning those inputs; no internal Sprite batch representation is consumed.
+The exact output descriptor supplies stored transfer and sampled-alpha meaning to the adapter.
+The Nara prerequisite is local `08e65be65540942668d140f43b1ca902aee76438`.
+
+Local Open-GPUI `909f510d18bd0d1e537faf73eb57947cee47f927` adds application-selected linear-sRGB
+recording while retaining the official numeric-sRGB default. The actual old-mode engine run
+reads byte 137 for an expected `#404040` background; selecting the mode fixes the unchanged
+oracle. A reviewed dark-Path regression independently demonstrates 8-bit linear intermediate
+loss, then passes after restoring target-matched storage and hardware sRGB encode/decode.
+The actual Nara Source/Cooked/Editor trajectory passes on DX12 and Vulkan with matching four-band
+alpha pixels, translucent overlay/clip, original text/edit/Undo, failure recovery and pending
+close. Framework public recording controls, all 123 affected WGPU library tests and owning stock
+alpha/publication tests retain their exact scopes in the existing records.
+
+[ADR0092](../architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md) owns the refined
+straight-authoring/associated-output and external-UI contract. Linear working values, sRGB storage
+and final display encoding are distinct. Current non-Canvas linear RGBA8 Scene precision still
+requires a dark/gradient/alpha comparison with sRGB SDR storage and float intermediates before a
+high-fidelity claim. HDR/gamut/reference luminance/tone mapping, physical input/DPI, device loss,
+busy-producer and numeric budgets, full frontend/game adoption and maintenance handoff remain
+separate. This is fork-owned integration evidence after the fixed upstream-source audit.

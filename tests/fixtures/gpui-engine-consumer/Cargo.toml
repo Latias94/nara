@@ -12,7 +12,7 @@ resolver = "3"
 [dependencies]
 anyhow = "1"
 log = "0.4"
-nara_engine = { package = "nara", path = "../../..", default-features = false, features = ["project-workflow", "tooling", "presentation-2d", "render-wgpu"] }
+nara_engine = { package = "nara", path = "../../..", default-features = false, features = ["project-workflow", "tooling", "presentation-2d", "desktop-winit", "render-wgpu"] }
 nara_core = { path = "../../../crates/nara_core", default-features = false }
 nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }
 nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }

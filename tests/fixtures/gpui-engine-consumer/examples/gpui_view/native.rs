@@ -1,3 +1,5 @@
+#[path = "content.rs"]
+mod content;
 #[path = "engine.rs"]
 mod engine;
 #[path = "renderer.rs"]
@@ -10,12 +12,13 @@ mod text_input;
 use anyhow::{Context as _, Result, ensure};
 use engine::{Engine, Preview};
 use nara_render::{DisplayMapping2d, DisplayRect, DisplayScale};
+use nara_render_wgpu::WgpuImageDisplay;
 use open_gpui::{
     Application, ApplicationHandle, Bounds, Context, Corners, DevicePixels, Entity, Focusable,
     HostedSurface, HostedSurfaceGeometry, HostedSurfaceOptions, ImageTexture, KeyDownEvent,
     KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, WindowHandle,
-    canvas, div, point, prelude::*, px, rgb, size,
+    canvas, div, point, prelude::*, px, rgb, rgba, size,
 };
 use open_gpui_wgpu::CosmicTextSystem;
 use open_gpui_windows::{
@@ -57,11 +60,14 @@ struct Root {
     publications: Rc<RefCell<VecDeque<Publication>>>,
     publication: PrepaintPublicationId,
     clicks: Rc<Cell<u64>>,
+    content_images: Vec<(WgpuImageDisplay, ImageTexture)>,
+    candidate_content: Rc<RefCell<Vec<WgpuImageDisplay>>>,
 }
 
 impl Render for Root {
     fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
         self.candidate.borrow_mut().take();
+        self.candidate_content.borrow_mut().clear();
         let commands = self.commands.clone();
         let buttons = [
             ("Move sprite", Command::Move),
@@ -102,6 +108,44 @@ impl Render for Root {
         let image = self.image.clone();
         let clicks = self.clicks.clone();
         let pick_commands = self.commands.clone();
+        let content_images =
+            self.content_images
+                .iter()
+                .enumerate()
+                .map(|(index, (display, image))| {
+                    let display = display.clone();
+                    let image = image.clone();
+                    let samples = self.candidate_content.clone();
+                    let top = 150. + index as f32 * 140.;
+                    div()
+                .absolute()
+                .left(px(700.))
+                .top(px(top - 28.))
+                .child(if index == 0 { "Source PNG" } else { "Cooked PNG" })
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(28.))
+                        .w(px(176.))
+                        .h(px(64.))
+                        .rounded_lg()
+                        .overflow_hidden()
+                        .bg(rgb(0x404040))
+                        .child(canvas(
+                            |_, _, _| {},
+                            move |bounds, _, window, _| {
+                                if bounds.intersects(&window.clip_bounds()) {
+                                    window.paint_image_texture(bounds, Corners::all(px(0.)), &image)
+                                        .expect("retained content stays in its original atlas");
+                                    samples.borrow_mut().push(display.clone());
+                                }
+                            },
+                        ).size_full())
+                        .child(div().absolute().left(px(44.)).top(px(8.)).w(px(88.)).h(px(16.))
+                            .bg(rgba(0x2080c080))),
+                )
+                })
+                .collect::<Vec<_>>();
         div()
             .size_full()
             .relative()
@@ -218,6 +262,7 @@ impl Render for Root {
             .child(div().absolute().left(px(24.)).top(px(550.)).child(
                 "Edit the original Scene, Undo/Redo, select its sprite, or type a local UI draft.",
             ))
+            .children(content_images)
     }
 }
 
@@ -265,7 +310,7 @@ impl Viewer {
             event_loop.create_window(
                 Window::default_attributes()
                     .with_title("Nara · GPUI Scene View")
-                    .with_inner_size(LogicalSize::new(900., 640.))
+                    .with_inner_size(LogicalSize::new(1120., 640.))
                     .with_visible(self.smoke.is_none()),
             )?,
         );
@@ -278,6 +323,15 @@ impl Viewer {
         renderer.diagnostic_next.set(self.smoke.is_some());
         let preview = engine.borrow_mut().capture()?;
         let image = renderer.import(&preview)?;
+        let content_displays = engine.borrow().content_displays();
+        let content_images = content_displays
+            .into_iter()
+            .map(|display| {
+                renderer
+                    .import_display(&display)
+                    .map(|image| (display, image))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let physical = window.inner_size();
         let scale = window.scale_factor() as f32;
         let geometry = HostedSurfaceGeometry::from_physical_size(
@@ -319,6 +373,8 @@ impl Viewer {
                         publications: render.publications.clone(),
                         publication: PrepaintPublicationId::new(),
                         clicks,
+                        content_images,
+                        candidate_content: render.candidate_content.clone(),
                     })
                 });
                 *output.borrow_mut() = Some(root.map(|root| (root, draft.unwrap())));

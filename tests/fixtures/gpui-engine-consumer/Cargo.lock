@@ -2726,6 +2726,7 @@ dependencies = [
  "nara_transform",
  "nara_ui",
  "nara_window",
+ "nara_winit",
  "rustix 1.1.6",
  "serde",
  "serde_json",
@@ -3178,6 +3179,18 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "nara_winit"
+version = "0.1.0"
+dependencies = [
+ "nara_app",
+ "nara_core",
+ "nara_ecs",
+ "nara_input",
+ "nara_window",
+ "winit",
 ]
 
 [[package]]

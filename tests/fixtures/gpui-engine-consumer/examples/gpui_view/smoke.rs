@@ -93,6 +93,7 @@ impl Smoke {
                     return Ok(false);
                 };
                 initial_pixels(&diagnostic)?;
+                content_pixels(&diagnostic)?;
                 ensure!(
                     renderer.submissions.get() > 0,
                     "diagnostic did not accompany a real Nara window submission"
@@ -384,7 +385,7 @@ impl Smoke {
                     .unwrap()
                     .borrow()
                     .window
-                    .request_inner_size(LogicalSize::new(900., 640.));
+                    .request_inner_size(LogicalSize::new(1120., 640.));
                 self.phase = Phase::ResizeBack;
             }
             Phase::ResizeBack => {
@@ -405,7 +406,7 @@ impl Smoke {
                             .scale_factor(),
                     )
                     .width
-                    != 900
+                    != 1120
                 {
                     return Ok(false);
                 }
@@ -447,6 +448,7 @@ impl Smoke {
                     "scaled root changed the actual Nara attachment"
                 );
                 let snapshot = renderer.presented.borrow().clone().unwrap();
+                content_pixels(&diagnostic)?;
                 ensure!(
                     viewer
                         .engine
@@ -476,7 +478,7 @@ impl Smoke {
             }
             Phase::Close => {
                 println!(
-                    "NARA_GPUI_VIEW_WORKFLOW pixels=true overlay=true selection=true ime=true deferred_input=true source_edit=true undo=true stale_pick_refused=true paint_error_panic_recovered=true resize_aba_zero=true fractional_root_scale=true close_pending=true diagnostic_scope=same_scene_offscreen_in_original_submission"
+                    "NARA_GPUI_VIEW_WORKFLOW pixels=true overlay=true selection=true ime=true deferred_input=true source_edit=true undo=true stale_pick_refused=true paint_error_panic_recovered=true resize_aba_zero=true fractional_root_scale=true close_pending=true source_cooked_content=true linear_srgb_composition=true diagnostic_scope=same_scene_offscreen_in_original_submission"
                 );
                 self.phase = Phase::Done;
                 return Ok(true);
@@ -526,6 +528,90 @@ fn initial_pixels(image: &Diagnostic) -> Result<()> {
     println!(
         "NARA_GPUI_VIEW_PIXELS center={:?} glyph_pixels={glyph_pixels}",
         image.logical_pixel(344., 286.)
+    );
+    Ok(())
+}
+
+fn content_pixels(image: &Diagnostic) -> Result<()> {
+    let background = [64_u8; 3];
+    for index in 0..2 {
+        let y = 182. + index as f32 * 140.;
+        let mut observed = Vec::new();
+        for (band, alpha) in super::content::ALPHAS.into_iter().enumerate() {
+            let x = 722. + band as f32 * 44.;
+            let expected = content_composite(alpha, background);
+            let actual = image.logical_pixel(x, y);
+            near_pixel(
+                actual,
+                expected,
+                "source/cooked content over linear background",
+            )?;
+            observed.push(actual);
+        }
+        let base = content_composite(super::content::ALPHAS[2], background);
+        let alpha = 128. / 255.;
+        let overlay = [32_u8, 128, 192];
+        let mut expected = [255; 4];
+        for channel in 0..3 {
+            expected[channel] = encode_srgb(
+                decode_srgb(f64::from(overlay[channel]) / 255.) * alpha
+                    + decode_srgb(f64::from(base[channel]) / 255.) * (1. - alpha),
+            );
+        }
+        near_pixel(
+            image.logical_pixel(810., y - 16.),
+            expected,
+            "translucent UI overlay",
+        )?;
+        ensure!(
+            image.logical_pixel(698., y) == image.logical_pixel(880., y),
+            "content escaped its original rounded clip"
+        );
+        println!(
+            "NARA_GPUI_CONTENT_PIXELS mode={} bands={observed:?} composition=linear_srgb",
+            if index == 0 { "source" } else { "processed" }
+        );
+    }
+    Ok(())
+}
+
+fn content_composite(alpha: u8, background: [u8; 3]) -> [u8; 4] {
+    let coverage = f64::from(alpha) / 255.;
+    let mut output = [255; 4];
+    for channel in 0..3 {
+        let color = decode_srgb(f64::from(super::content::RGB[channel]) / 255.);
+        let accumulated = (color * coverage * 255.).round() / 255.;
+        output[channel] = encode_srgb(
+            accumulated + decode_srgb(f64::from(background[channel]) / 255.) * (1. - coverage),
+        );
+    }
+    output
+}
+
+fn decode_srgb(encoded: f64) -> f64 {
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn encode_srgb(linear: f64) -> u8 {
+    let encoded = if linear <= 0.0031308 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1. / 2.4) - 0.055
+    };
+    (encoded.clamp(0., 1.) * 255.).round() as u8
+}
+
+fn near_pixel(actual: [u8; 4], expected: [u8; 4], context: &str) -> Result<()> {
+    ensure!(
+        actual
+            .into_iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual.abs_diff(expected) <= 2),
+        "{context}: actual={actual:?}, expected={expected:?}"
     );
     Ok(())
 }
