@@ -112,6 +112,10 @@ pub(super) struct Renderer {
     pub refusals: Cell<u64>,
     pub diagnostics: Cell<u64>,
     pub diagnostic_next: Cell<bool>,
+    #[cfg(feature = "ui-work-observation")]
+    pub record_cpu: Cell<Duration>,
+    #[cfg(feature = "ui-work-observation")]
+    pub record_calls: Cell<u64>,
     readbacks: RefCell<VecDeque<Readback>>,
 }
 
@@ -151,6 +155,10 @@ impl Renderer {
             refusals: Cell::new(0),
             diagnostics: Cell::new(0),
             diagnostic_next: Cell::new(false),
+            #[cfg(feature = "ui-work-observation")]
+            record_cpu: Cell::new(Duration::ZERO),
+            #[cfg(feature = "ui-work-observation")]
+            record_calls: Cell::new(0),
             readbacks: RefCell::default(),
         }))
     }
@@ -207,6 +215,12 @@ impl Renderer {
 
     pub fn quiesced(&self) -> bool {
         self.delivery.borrow().quiesced
+    }
+
+    #[cfg(feature = "ui-work-observation")]
+    pub fn retained_frames(&self) -> usize {
+        let delivery = self.delivery.borrow();
+        delivery.in_flight.len() + usize::from(delivery.pending.is_some())
     }
 
     pub fn poll(&self) -> Result<()> {
@@ -267,6 +281,8 @@ impl Renderer {
             &displays,
             |frame| {
                 prefix = Some(frame.submission_prefix());
+                #[cfg(feature = "ui-work-observation")]
+                let record_start = Instant::now();
                 let recording = frame
                     .encode(|_, _, encoder, view| {
                         self.recorder.borrow_mut().record(
@@ -277,6 +293,12 @@ impl Renderer {
                         )
                     })
                     .map_err(|error| WgpuRenderHostError::window_paint(error.to_string()))?;
+                #[cfg(feature = "ui-work-observation")]
+                {
+                    self.record_cpu
+                        .set(self.record_cpu.get() + record_start.elapsed());
+                    self.record_calls.set(self.record_calls.get() + 1);
+                }
                 recordings.push(recording);
                 if diagnostic {
                     frame

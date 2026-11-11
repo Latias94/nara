@@ -94,3 +94,81 @@ records, filtering/reconciliation and row callbacks at its named checkpoint. Tho
 allocation, equality/string comparisons, framework layout and GPU work; they are not a total
 O(visible) or latency claim. Source snapshots, optional filter indices and ListState retain
 O(logical rows) metadata; old frame/resource leases can outlive a replacement.
+
+## Native UI Work Measurements
+
+The optional `ui-work-observation` feature enables the existing GPUI profiler and the native
+`--measure-ui-work` mode. It uses the same original Nara Host, renderer and public source-owner
+workflow. Each of the following five cases runs eight warmups followed by 64 recorded samples:
+
+| Case | Work observed |
+| --- | --- |
+| `equal_observation` | Query and publish an equal source observation without a preview refresh. |
+| `static_panels_live_preview` | Refresh the Scene preview while unchanged panels remain retained. |
+| `local_property_edit` | Alternate the Sprite X property through the original source/history owner and publish its projections. |
+| `list_height_change` | Toggle Details through the original variable-height list remeasurement path. |
+| `property_edit_broad_refresh` | Perform the same property edit with an explicit broad UI refresh for comparison. |
+
+From the Nara root on Windows, prebuild the release example and run only the ignored measurement
+test with the matching feature. Use `vulkan` instead of `dx12` for an actual Vulkan adapter; keep
+`NARA_WGPU_FORCE_FALLBACK=0`. Run Cargo commands serially and reuse the shared target directory:
+
+```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:CARGO_TARGET_DIR = Join-Path $PWD.Path 'target'
+$env:WGPU_BACKEND = 'dx12'
+$env:NARA_WGPU_FORCE_FALLBACK = '0'
+$env:NARA_GPUI_VIEW_EXE = Join-Path $env:CARGO_TARGET_DIR 'release/examples/gpui_view.exe'
+cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features ui-work-observation
+cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --test gpui_view --features ui-work-observation --run-ignored only -E 'test(measure_hosted_gpui_work)' --test-threads=1
+```
+
+For a separate allocation observation, keep the same environment and prebuild again with
+`ui-work-allocations`, which includes `ui-work-observation` and installs the existing
+`open_gpui_bench_metrics::CountingAllocator` in the example. Run this build/test pair separately
+from the CPU-only observation because allocation instrumentation changes its cost:
+
+```powershell
+cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features ui-work-allocations
+cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --test gpui_view --features ui-work-allocations --run-ignored only -E 'test(measure_hosted_gpui_work)' --test-threads=1
+```
+
+The test launches only the prebuilt example with `--measure-ui-work`; the child never starts
+Cargo. It allows at most 330 seconds, kills and reaps an overdue child, checks each output log
+against a 256 KiB limit, and retains the logs under the temporary `nara-gpui-view-*` directory.
+It requires the eight-warmup/64-sample configuration, a `NARA_GPUI_WORK_COUNTS` record with
+`samples=64` and a `NARA_GPUI_WORK_CPU` record with `phase=query_snapshot samples=64` for every
+named case, and the exact final marker:
+
+```text
+NARA_GPUI_WORK_OK cases=5 retained_native_frames=0 diagnostics=0 original_host=true
+```
+
+The real example checks draw/record/submission counts, unchanged-panel reuse and final native
+frame retirement. The test checks these completed records without timing thresholds. The
+measurement mode performs no diagnostic pixel readback; the existing `--smoke` workflow retains
+its separate visual and recovery assertions.
+
+`NARA_GPUI_WORK_CPU` reports instrumented CPU-side elapsed P50, P95 and maximum observations.
+The existing `mutation`, `query_snapshot`, `publish`, `preview` and `settle` phases sit inside
+`owner_sample`. GPUI phases and renderer recording are nested within that work, so their totals
+and percentiles are nonadditive. In particular, `gpui_request_layout` includes View description
+construction and layout requests; `gpui_prepaint` includes layout computation and prepaint.
+`recorder_cpu_nested_in_settle` measures CPU recording within the existing settling work. These
+observations do not measure GPU execution, display scanout or end-to-end input latency.
+The mutation interval also includes the original `drive_editor_frame(Duration::ZERO)` after
+dispatch; it does not isolate preparation, commit or Editor model advancement. The Scene preview
+case refreshes static source output and does not advance a Game simulation.
+
+Allocation records count calls and requested bytes on the calling thread for the named owner
+phases. The optional `NARA_GPUI_WORK_HEAP` snapshot reports process allocator-requested live
+bytes, including trace/sample storage; it is not RSS, total native heap usage or GPU memory.
+Retained native frame counts do not establish a total memory bound. Profiler and optional
+allocator overhead remain part of the instrumented run.
+The frame occupancy maximum covers sample-end checkpoints, not transient peak retention.
+
+The source has 10,001 logical rows: 10,000 empty declarations and the Sprite. Each
+`query_snapshot` still consumes the complete public entity query and constructs its snapshot in
+O(N) work, including equal observations. Visible-row construction and retained-panel reuse do
+not make the complete observation O(visible), and these finite samples do not establish a
+general latency or total heap budget.

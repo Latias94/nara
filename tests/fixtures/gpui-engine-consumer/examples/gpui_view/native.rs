@@ -10,6 +10,9 @@ mod renderer;
 mod smoke;
 #[path = "text_input.rs"]
 mod text_input;
+#[cfg(feature = "ui-work-observation")]
+#[path = "work.rs"]
+mod work;
 
 use anyhow::{Context as _, Result, ensure};
 use engine::{Engine, Preview};
@@ -356,6 +359,8 @@ struct Viewer {
     pointer: open_gpui::Point<Pixels>,
     modifiers: Modifiers,
     smoke: Option<smoke::Smoke>,
+    #[cfg(feature = "ui-work-observation")]
+    work: Option<work::UiWork>,
     closing: bool,
     finished: bool,
     failed_at: Option<Instant>,
@@ -364,13 +369,21 @@ struct Viewer {
 }
 
 impl Viewer {
+    fn automated(&self) -> bool {
+        #[cfg(feature = "ui-work-observation")]
+        if self.work.is_some() {
+            return true;
+        }
+        self.smoke.is_some()
+    }
+
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
         let window = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
                     .with_title("Nara · GPUI Scene View")
                     .with_inner_size(LogicalSize::new(1280., 640.))
-                    .with_visible(self.smoke.is_none()),
+                    .with_visible(!self.automated()),
             )?,
         );
         let engine = Rc::new(RefCell::new(Engine::new(window.clone())?));
@@ -529,8 +542,8 @@ impl Viewer {
             return Ok(());
         }
         ensure!(
-            Instant::now() < self.deadline || self.smoke.is_none(),
-            "GPUI engine smoke exceeded its deadline"
+            Instant::now() < self.deadline || !self.automated(),
+            "GPUI engine automation exceeded its deadline"
         );
         let mut changed = false;
         let mut panels_changed = false;
@@ -620,6 +633,16 @@ impl Viewer {
                 self.closing = true;
             }
         }
+        #[cfg(feature = "ui-work-observation")]
+        if !self.closing
+            && let Some(mut work) = self.work.take()
+        {
+            let done = work.advance(self)?;
+            self.work = Some(work);
+            if done {
+                self.closing = true;
+            }
+        }
         if self.closing {
             self.surface.as_ref().unwrap().close()?;
             self.application.as_ref().unwrap().update(|cx| cx.quit());
@@ -631,11 +654,15 @@ impl Viewer {
                     "closing GPUI stopped another engine producer"
                 );
                 engine.close()?;
-                self.finished = true;
+                #[cfg(feature = "ui-work-observation")]
+                if let Some(work) = self.work.as_ref() {
+                    work.report_retired(&renderer)?;
+                }
                 ensure!(
                     self.factory.creates.get() == 0,
                     "GPUI created a native renderer"
                 );
+                self.finished = true;
                 if self.smoke.is_some() {
                     println!(
                         "NARA_GPUI_VIEW_OK ui_submissions={} stale_discarded={} paint_refusals={} diagnostics={} native_gpui_renderers=0 original_host=true independent_producer_alive=true input_delivery=injected",
@@ -887,6 +914,10 @@ impl Viewer {
         }
         self.closing = true;
         self.smoke = None;
+        #[cfg(feature = "ui-work-observation")]
+        {
+            self.work = None;
+        }
         let failed_at = *self.failed_at.get_or_insert_with(Instant::now);
         if let Some(surface) = &self.surface {
             let _ = surface.close();
@@ -925,7 +956,7 @@ impl ApplicationHandler<Wake> for Viewer {
             self.fail(error, event_loop);
             return;
         }
-        if self.smoke.is_some() || self.closing {
+        if self.automated() || self.closing {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(10),
             ));
@@ -941,6 +972,12 @@ pub(super) fn run() -> Result<()> {
         .map_err(|error| anyhow::anyhow!("install consumer diagnostic logger: {error}"))?;
     log::set_max_level(log::LevelFilter::Warn);
     let smoke = std::env::args().any(|arg| arg == "--smoke");
+    let measure = std::env::args().any(|arg| arg == "--measure-ui-work");
+    ensure!(!smoke || !measure, "select --smoke or --measure-ui-work");
+    ensure!(
+        !measure || cfg!(feature = "ui-work-observation"),
+        "--measure-ui-work requires the ui-work-observation feature"
+    );
     let backend =
         std::env::var("WGPU_BACKEND").context("select WGPU_BACKEND=dx12 or vulkan explicitly")?;
     ensure!(
@@ -984,11 +1021,13 @@ pub(super) fn run() -> Result<()> {
         pointer: point(px(0.), px(0.)),
         modifiers: Modifiers::default(),
         smoke: smoke.then(smoke::Smoke::new),
+        #[cfg(feature = "ui-work-observation")]
+        work: measure.then(work::UiWork::new),
         closing: false,
         finished: false,
         failed_at: None,
         error: None,
-        deadline: Instant::now() + Duration::from_secs(90),
+        deadline: Instant::now() + Duration::from_secs(if measure { 300 } else { 90 }),
     };
     event_loop.run_app(&mut viewer)?;
     if let Some(error) = viewer.error.take() {

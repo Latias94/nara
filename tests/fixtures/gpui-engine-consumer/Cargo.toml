@@ -9,6 +9,10 @@ publish = false
 [workspace]
 resolver = "3"
 
+[features]
+ui-work-observation = ["open_gpui/profiler"]
+ui-work-allocations = ["ui-work-observation", "dep:open_gpui_bench_metrics", "dep:criterion"]
+
 [dependencies]
 anyhow = "1"
 log = "0.4"
@@ -24,6 +28,8 @@ wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767
 winit = "=0.30.13"
 
 [target.'cfg(windows)'.dependencies]
+criterion = { version = "0.8.2", default-features = false, optional = true }
+open_gpui_bench_metrics = { package = "open-gpui-bench-metrics", path = "../../../../open-gpui/crates/bench_metrics", optional = true }
 open_gpui = { package = "open-gpui", path = "../../../../open-gpui/crates/gpui", default-features = false, features = ["windows-manifest"] }
 open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../../open-gpui/crates/gpui_wgpu", default-features = false }
 open_gpui_windows = { package = "open-gpui-windows", path = "../../../../open-gpui/crates/gpui_windows", default-features = false }

@@ -11,6 +11,100 @@ use std::{
 #[test]
 #[ignore = "requires an actual Windows GPU and the prebuilt gpui_view example"]
 fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
+    let (output, logs) = run_native_gpui("--smoke", Duration::from_secs(105), 128 * 1024);
+    for marker in [
+        "NARA_GPUI_VIEW_PIXELS",
+        "NARA_GPUI_VIEW_WORKFLOW",
+        "NARA_GPUI_VIEW_SCALED",
+        "NARA_GPUI_VIEW_OK",
+        "NARA_GPUI_STATE_LOCALITY",
+        "NARA_GPUI_COLLECTION",
+        "NARA_GPUI_CONTENT_PIXELS mode=source",
+        "NARA_GPUI_CONTENT_PIXELS mode=processed",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
+#[cfg(feature = "ui-work-observation")]
+#[test]
+#[ignore = "requires an actual Windows GPU and gpui_view prebuilt with ui-work-observation"]
+fn measure_hosted_gpui_work() {
+    let (output, logs) = run_native_gpui("--measure-ui-work", Duration::from_secs(330), 256 * 1024);
+    assert!(
+        output
+            .lines()
+            .any(|line| line.starts_with("NARA_GPUI_WORK_CONFIG warmups=8 samples=64 ")),
+        "missing native GPUI work configuration; logs: {}\n{output}",
+        logs.display()
+    );
+    for mode in [
+        format!(
+            "allocation_observer={}",
+            cfg!(feature = "ui-work-allocations")
+        ),
+        format!("debug_assertions={}", cfg!(debug_assertions)),
+    ] {
+        assert!(
+            output.lines().any(|line| {
+                line.starts_with("NARA_GPUI_WORK_CONFIG ")
+                    && line.split_whitespace().any(|field| field == mode)
+            }),
+            "prebuild the example with the matching profile/features ({mode}); logs: {}\n{output}",
+            logs.display()
+        );
+    }
+    for case in [
+        "equal_observation",
+        "static_panels_live_preview",
+        "local_property_edit",
+        "list_height_change",
+        "property_edit_broad_refresh",
+    ] {
+        for marker in [
+            format!("NARA_GPUI_WORK_COUNTS case={case} samples=64 "),
+            format!("NARA_GPUI_WORK_CPU case={case} phase=query_snapshot samples=64 "),
+        ] {
+            assert!(
+                output.lines().any(|line| line.starts_with(&marker)),
+                "missing {marker}; logs: {}\n{output}",
+                logs.display()
+            );
+        }
+        #[cfg(feature = "ui-work-allocations")]
+        {
+            for phase in ["mutation", "query_snapshot", "publish", "preview", "settle"] {
+                let marker =
+                    format!("NARA_GPUI_WORK_ALLOC case={case} phase={phase} scope=calling_thread ");
+                assert!(
+                    output.lines().any(|line| line.starts_with(&marker)),
+                    "missing {marker}; logs: {}\n{output}",
+                    logs.display()
+                );
+            }
+            let marker =
+                format!("NARA_GPUI_WORK_HEAP case={case} scope=process_requested_not_rss ");
+            assert!(
+                output.lines().any(|line| line.starts_with(&marker)),
+                "missing {marker}; logs: {}\n{output}",
+                logs.display()
+            );
+        }
+    }
+    assert!(
+        output.lines().any(|line| {
+            line == "NARA_GPUI_WORK_OK cases=5 retained_native_frames=0 diagnostics=0 original_host=true"
+        }),
+        "missing native GPUI work retirement marker; logs: {}\n{output}",
+        logs.display()
+    );
+}
+
+fn run_native_gpui(mode: &str, timeout: Duration, max_log_bytes: u64) -> (String, PathBuf) {
     assert!(matches!(
         std::env::var("WGPU_BACKEND").as_deref(),
         Ok("dx12" | "vulkan")
@@ -43,13 +137,13 @@ fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
     let stdout = logs.join("stdout.log");
     let stderr = logs.join("stderr.log");
     let mut child = Command::new(executable)
-        .arg("--smoke")
+        .arg(mode)
         .stdin(Stdio::null())
         .stdout(File::create(&stdout).unwrap())
         .stderr(File::create(&stderr).unwrap())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(105);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -65,7 +159,11 @@ fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
         }
     };
     for path in [&stdout, &stderr] {
-        assert!(fs::metadata(path).unwrap().len() <= 128 * 1024);
+        assert!(
+            fs::metadata(path).unwrap().len() <= max_log_bytes,
+            "native GPUI log exceeded {max_log_bytes} bytes: {}",
+            path.display()
+        );
     }
     let output = fs::read_to_string(stdout).unwrap();
     let errors = fs::read_to_string(stderr).unwrap();
@@ -79,20 +177,5 @@ fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
         "native GPUI consumer failed {status}; logs: {}\n{output}\n{errors}",
         logs.display()
     );
-    for marker in [
-        "NARA_GPUI_VIEW_PIXELS",
-        "NARA_GPUI_VIEW_WORKFLOW",
-        "NARA_GPUI_VIEW_SCALED",
-        "NARA_GPUI_VIEW_OK",
-        "NARA_GPUI_STATE_LOCALITY",
-        "NARA_GPUI_COLLECTION",
-        "NARA_GPUI_CONTENT_PIXELS mode=source",
-        "NARA_GPUI_CONTENT_PIXELS mode=processed",
-    ] {
-        assert!(
-            output.lines().any(|line| line.starts_with(marker)),
-            "missing {marker}; logs: {}\n{output}",
-            logs.display()
-        );
-    }
+    (output, logs)
 }
