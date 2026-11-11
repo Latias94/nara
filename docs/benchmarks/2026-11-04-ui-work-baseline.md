@@ -1489,3 +1489,94 @@ Observe entire materialization/drive/sample alongside this scoped target; no who
 SLA follows. Preserve the complete native smoke and public receiving failure-before-codec,
 limits/owner/reference and source-immutability workflows. No allocation or GPU result is
 inferred from removal of these temporary topology/namespace indexes.
+
+### Compiled Topology Receiving Reuse
+
+Implementation: `9b1376f75b5e5b4656153fb99a292962f564e515`, compared with the 25-span observer
+at `9d1e667c3da159f885e6b7268e138b74214bd042`. Open-GPUI remains unchanged at
+`f75c10b2a9bf7b4dcb2c8c2aa446203997601369`.
+
+The receiving path now relies on the compiled document's existing sealed immutable rooted
+forest. It queries the ID-sorted entity slice for SceneLocal membership instead of constructing
+a duplicate namespace set. Native Visibility eligibility scans the existing parent-child edges
+and retains the minimum offending child ID; it does not infer receiving support from Authoring
+sealing. Raw draft/claims admission and the stronger Runtime exact-definition witness are
+unchanged. All receiving value/definition/reference/asset/codec and late World checks remain.
+No public API, retained index, cache, compiler or World owner is added.
+
+Two new receiving controls exercise real Authoring preview sealing with crossed parent/child
+ID order, zero-codec Native Visibility refusal and last-good preservation, plus shuffled source
+records referencing empty entities at both ends of the sorted namespace. The latter also proves
+receiving-limit refusal before codecs and one actual decode without re-execution at commit.
+Both verify original source/receipt/provenance/occurrence behavior through the existing owner.
+
+The first focused run (`d78c8a34-df50-44e6-a4c0-9d04ddba05b9`) passes 5/6. Its only failure
+is the new limit fixture assuming total World population equals its one sentinel, overlooking
+Bevy's internal resource entities. The correction captures the complete original Entity set
+and requires exact equality after rejection; sentinel, zero-codec and absent identity-domain
+assertions remain. Production is unchanged by this correction. The final focused receiving
+cohort passes 6/6 (`d40e52b4-3229-41bc-878b-e2368b8a6d46`). Independent production/test source
+review finds no P1/P2 in the sealed boundary, complete namespace, diagnostic ordering or raw
+admission paths; it does not replace the complete owner/public/native qualification.
+
+The complete Scene package library/public cohort passes **1180/1180** across 53 binaries,
+with three existing ignored performance observations
+(`d3391e5a-fce0-477f-af67-8a903ac50dcc`). It includes the original flat/raw admission,
+Runtime import/cook, source/value/reference/owner/default/version/budget and late publication
+controls, plus the two new receiving cases. This is correctness evidence, not an elapsed-time
+gain or a complete Editor/framework/platform matrix.
+
+The replacement's optimized smoke/probe pairs pass on DX12, **2/2**
+(`4cf7eb98-21b1-467b-8874-91a127369f86`), and Vulkan, **2/2**
+(`eec8adef-a0d2-4407-8bf5-5d11404ed7e0`). The complete 10,001-record source, eight warmups,
+64 measured samples per case, 25-span observer, geometry/fonts and original five workloads
+are unchanged. The release rebuild takes 12m10s outside samples. Neither allocation observation
+nor measurement readback is enabled.
+
+Elapsed milliseconds **P50 / P95 / max**:
+
+| Backend / source-edit case | Value admission/decoding | Unbound preparation | Preview materialization | Original Editor drive | Entire owner sample |
+| --- | --- | --- | --- | --- | --- |
+| DX12 / local | 0.533 / 0.648 / 1.349 | 14.498 / 19.606 / 28.065 | 74.883 / 92.790 / 119.277 | 144.437 / 181.414 / 204.851 | 167.769 / 204.083 / 248.583 |
+| DX12 / broad refresh | 0.531 / 0.663 / 0.748 | 14.655 / 15.994 / 19.655 | 75.795 / 84.300 / 112.255 | 144.961 / 159.991 / 208.839 | 168.428 / 182.604 / 237.343 |
+| Vulkan / local | 0.539 / 0.684 / 0.800 | 14.359 / 18.805 / 21.137 | 74.620 / 82.322 / 120.045 | 144.188 / 180.817 / 224.036 | 166.931 / 206.093 / 248.951 |
+| Vulkan / broad refresh | 0.520 / 0.671 / 1.178 | 14.483 / 16.272 / 26.248 | 75.146 / 88.151 / 113.394 | 144.574 / 168.643 / 184.411 | 167.138 / 193.545 / 208.849 |
+
+All four decode P95 observations meet the predeclared target below 5 ms. Against the same
+25-span DX12 baseline, local decode changes from 11.783/13.082 to 0.533/0.648 ms P50/P95;
+broad decode changes from 11.708/13.306 to 0.531/0.663 ms. Both backend materialization P50
+observations fall from approximately 85/86 ms to 75/76 ms; entire owner P50 is about 167/168 ms
+instead of 178 ms. These are selected-workload observations on the shared reference machine,
+not exclusive CPU accounting, a general speedup or a whole-operation tail guarantee.
+
+The tail does not improve uniformly. DX12 local owner P95 increases from 186.861 to 204.083 ms;
+Vulkan local increases from 193.168 to 206.093 ms. The unchanged source-compiler P95 is
+80.739 ms on DX12 and 94.895 ms on Vulkan in those local-edit runs, compared with 71.383/
+72.796 ms for their broad-refresh controls. The earlier below-80-ms compiler observations
+therefore do not establish a stable SLA. Do not discard these runs, substitute the lower
+median for tail acceptance or rerun solely to select greener samples. The scoped decode target
+is met; shared-machine timing, entire operation and remaining compiler/identity work stay open.
+
+All five complete source/query/notification/View/row/draw/record/submission vectors and accepted
+draw counts match both 25-span baseline backends. Repeated span counts remain 128/128/256;
+the other 22 are 64 per property case. Local edit still reuses Hierarchy/rows, broad refresh
+still reconstructs its visible rows. Native sample-end occupancy reaches at most one; the
+replacement current/final gauges and diagnostics are zero. The unchanged smoke retains exact
+history/source/input/IME, Source/Cooked colors, geometry/scale, refused/panicking candidates
+and independent native producer retirement. These facts are not peak/live GPU-memory,
+physical input, scanout, allocation or foreign-platform qualification.
+
+The independently locked public Scene spawn/preparation/durable-identity cohort passes
+**21/21** (`72165929-1ba9-4b94-addd-5698ed1ae629`), retaining exact receiving definitions,
+late lifecycle refusal, predecessor/retirement and touched-asset custody. No lockfile or
+dependency version changes in this replacement. Further whole-source compilation/query,
+identity/publication and allocation/retention costs remain; necessary late checks must not be
+replaced by stale preparation merely to meet a larger target. Complete foundation Goal,
+R11a/e budgets and Editor/game/default/framework-maintenance selection remain open.
+
+Final all-target/all-feature correctness Clippy passes for Scene and the independently locked
+GPUI engine consumer with `-D clippy::correctness`; existing other warning categories remain.
+Scene all-target observation-off and independent consumer all-target feature-off checks pass,
+as do root and isolated-consumer formatting, added document links/fragments and whitespace.
+No new compiler-floor, allocation, foreign native/browser or complete Editor/framework matrix
+is claimed. No remote CI or publication is performed.

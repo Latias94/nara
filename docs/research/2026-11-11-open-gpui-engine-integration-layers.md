@@ -1685,3 +1685,14 @@ all target-World admission. Raw drafts/claims continue complete topology validat
 predeclared decode P95 target is below 5 ms in both cases/backends; original source/render
 vectors and complete smoke remain acceptance. This does not select a UI reactive/layout/cache
 mechanism, alter the separate exact Runtime-definition witness or close Editor/game budgets.
+
+The resulting [compiled-topology receiving reuse](../benchmarks/2026-11-04-ui-work-baseline.md#compiled-topology-receiving-reuse)
+at `9b1376f75b5` passes full Scene library/public 1180/1180, independent Scene 21/21 and unchanged
+DX12/Vulkan smoke/probe pairs 2/2 each. All four backend/edit decode P95 observations fall below 0.7 ms against
+the matched 25-span baseline's 12.3–14.3 ms, with complete source/render/call vectors unchanged.
+Materialization P50 is about 75 ms and entire owner P50 about 167/168 ms. Whole-owner local
+P95 increases; unchanged compiler tails also exceed the earlier 80-ms observation. The report
+preserves those values and source/observer limits instead of claiming a stable Editor latency
+budget. Sealed structural reuse adds no retained index, broad pure-validation exemption or
+new identity owner. UI state/layout/render, full Editor/game selection and remaining budgets
+stay independent and open.

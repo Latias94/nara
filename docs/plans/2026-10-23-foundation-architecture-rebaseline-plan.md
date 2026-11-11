@@ -1612,6 +1612,22 @@ drafts/claims still prove complete topology. Before implementation, require deco
 call counts and complete original native recovery/input/retirement. Keep full materialization,
 allocation, UI/GPU and whole-Goal budgets open and report the matched observer/source pins.
 
+The [compiled receiving reuse](../benchmarks/2026-11-04-ui-work-baseline.md#compiled-topology-receiving-reuse)
+at `9b1376f75b5` passes the full Scene library/public cohort 1180/1180, independent Scene consumers
+21/21 and both original optimized native smoke/probe pairs 2/2. Decode P95 is 0.648/0.663 ms on DX12 and
+0.684/0.671 ms on Vulkan, meeting the declared below-5-ms target against the same 25-span
+baseline. Five-case work vectors and every reached call count are identical; complete original
+source/history/input/color/failure/retirement controls remain. Two new receiver controls retain
+Authoring-to-Native Visibility refusal/witness ordering and empty-record local references with
+strict receiving-limit rejection. An initial new fixture population assertion is corrected to
+exact original Entity-set equality, preserving zero codec/target publication. Production is
+unchanged by that fixture correction.
+Materialization P50 is now about 75 ms and entire owner P50 about 167/168 ms. Whole-owner local
+P95 increases in these shared-machine runs and unchanged source compilation exceeds the earlier
+80-ms observation in both local controls; those earlier measurements are not a stable SLA.
+Retain actual tails without rerunning to select greener samples. Remaining compiler/query,
+identity/publication, allocation/retention/UI/GPU and full Editor/game qualification stay open.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

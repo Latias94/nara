@@ -1102,6 +1102,18 @@ while retaining receiving definitions/values/references/assets/codecs, Native pr
 and target-World/lifecycle admission. Raw source/claims keep complete topology proof. No new
 public certificate, retained index, UI runtime/default or framework owner follows.
 
+The [compiled receiving replacement](../../benchmarks/2026-11-04-ui-work-baseline.md#compiled-topology-receiving-reuse)
+at `9b1376f75b5` reuses the sealed topology and searches all ID-sorted entity records while keeping
+Native Visibility edge/witness rules and all receiving value/definition/asset/codec and World checks.
+Full Scene library/public 1180/1180, independent Scene 21/21 and optimized DX12/Vulkan
+smoke/probe pairs 2/2 each pass. All four decode P95 cells meet the declared below-5-ms target
+at below 0.7 ms, with unchanged complete source/render/call vectors and native retirement.
+Materialization/entire-owner P50 is approximately 75/167–168 ms. Higher whole-owner local tails
+and unchanged compiler tails remain explicit in the report; no stable end-to-end budget follows.
+The new controls cover Authoring-to-Native projection refusal, exact child diagnostic order,
+empty-entity local references and receiving limits before codecs. No UI/default ownership or
+full Goal/R11/R12 completion follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
