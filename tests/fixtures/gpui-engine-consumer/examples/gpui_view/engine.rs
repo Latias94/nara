@@ -30,8 +30,9 @@ use nara_engine::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
-        EditorDocumentMutation, EditorNavigationAction, EditorPropertyRead,
-        EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
+        EditorDocumentMutation, EditorDocumentQueryBasis, EditorEntityQuery,
+        EditorEntityQueryLimits, EditorEntityQueryPosition, EditorNavigationAction,
+        EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
     },
 };
 use nara_render::{
@@ -65,6 +66,15 @@ pub(super) struct Preview {
     pub document: EditorDocumentId,
     pub revision: SceneAuthoringRevision,
     presented: RefCell<Option<PresentedPreview>>,
+}
+
+#[derive(Clone, PartialEq)]
+pub(super) struct EditorPanelsSnapshot {
+    pub basis: EditorDocumentQueryBasis,
+    pub entities: Vec<SceneEntityId>,
+    pub selected: Option<SceneEntityId>,
+    pub sprite: Option<SceneEntityId>,
+    pub x: Option<f64>,
 }
 
 #[derive(Clone, Copy)]
@@ -426,6 +436,85 @@ impl Engine {
 
     pub fn revision(&self) -> Result<SceneAuthoringRevision> {
         Ok(self.session.document_query_basis(self.document)?.revision)
+    }
+
+    pub fn panels_snapshot(&self) -> Result<EditorPanelsSnapshot> {
+        let basis = self.session.document_query_basis(self.document)?;
+        let page = self.session.query_document_entities(EditorEntityQuery {
+            position: EditorEntityQueryPosition::Start(basis.clone()),
+            limits: EditorEntityQueryLimits::new(1024, 1024)?,
+        })?;
+        ensure!(
+            page.next.is_none(),
+            "the finite consumer source exceeded one entity page"
+        );
+        let frame = self.session.current_frame();
+        let selected = frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .filter(|scene| scene.document == self.document)
+            .and_then(|scene| scene.selection.top_entity().cloned());
+        let sprite = page
+            .entities
+            .contains(&self.sprite)
+            .then(|| self.sprite.clone());
+        let x = sprite.as_ref().map(|_| self.sprite_x()).transpose()?;
+        Ok(EditorPanelsSnapshot {
+            basis,
+            entities: page.entities,
+            selected,
+            sprite,
+            x,
+        })
+    }
+
+    pub fn select_entity(
+        &mut self,
+        basis: &EditorDocumentQueryBasis,
+        entity: SceneEntityId,
+    ) -> Result<()> {
+        self.session.validate_authoring_query_basis(basis)?;
+        dispatch(
+            &mut self.session,
+            EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                document: basis.document,
+                entity: Some(entity),
+            }),
+        )
+    }
+
+    pub fn set_sprite_x(
+        &mut self,
+        basis: &EditorDocumentQueryBasis,
+        entity: &SceneEntityId,
+        x: f64,
+    ) -> Result<()> {
+        self.session.validate_authoring_query_basis(basis)?;
+        ensure!(
+            self.panels_snapshot()?.selected.as_ref() == Some(entity),
+            "Inspector selection changed before admission"
+        );
+        ensure!(
+            entity == &self.sprite && x.is_finite(),
+            "Inspector requires the selected Sprite and a finite X"
+        );
+        let prepared = self.session.prepare_authoring_property_edit(
+            basis,
+            &[AuthoringPropertyEdit {
+                entity: entity.clone(),
+                component: ComponentTypeId::new(TRANSFORM),
+                component_version: ComponentSchemaVersion::ONE,
+                property: ComponentPropertyPath::new(ComponentFieldId::new("translation.x")),
+                value: ComponentValue::f64(x)?,
+            }],
+        )?;
+        dispatch(
+            &mut self.session,
+            EditorAction::CommitAuthoringEdit(prepared),
+        )?;
+        self.invalidate();
+        Ok(())
     }
 
     pub fn selected_sprite(&self) -> bool {

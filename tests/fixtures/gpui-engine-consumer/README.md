@@ -65,3 +65,14 @@ Cargo feature unification without requiring the Runtime UI product in the framew
 
 Source presence and compilation do not establish native acceptance. Exact runs, revisions,
 failures and limits belong to the integration study and foundation plan.
+
+The current native smoke also mounts a source-owner Hierarchy and two independently retained
+Inspector projections. They consume one observation from the selection-independent entity query, while each draft,
+IME/preedit state and conflict lifetime remains panel-local. A selected X edit is prepared and
+committed through the original Editor basis/history owner; a stale second draft refuses until
+Reload, and the original Undo restores the source and both clean projections. Scene preview
+updates use a separate cached View, so the native output records isolated Hierarchy reuse rather
+than counting a parent refresh as local invalidation. The caller-owned render counters are
+diagnostic only; they do not qualify layout, upload, GPU or latency budgets. The exact DX12
+qualification and public CPU fixture results remain in the foundation plan. Further Undo may
+remove the Sprite itself: the panels show an absent property and keep the Viewer alive for Redo.

@@ -1028,6 +1028,12 @@ the old Dear/kernel measurements do not qualify GPUI. Current rendering/input/re
 remain authoritative. No Signal runtime, raster cache, persistent layout or thread is implemented
 by this documentation update; broader R11a/e budgets and framework/engine adoption stay open.
 
+The first current-framework state-locality consumer now has a real public 5/5 CPU fixture and a
+Nara child 1/1 per selected DX12/Vulkan backend. It uses the existing entity query, cached View,
+panel-local draft/input owners and original prepared Editor mutation/Undo path; its caller render counts are diagnostic
+only. It does not qualify complete incremental layout, upload/GPU reuse, latency budgets,
+virtualization or full Editor replacement. The foundation plan records actual scope and results.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

@@ -1430,6 +1430,34 @@ An offscreen UI/effect consumer must also preserve final occurrence/input admiss
 GPU resource retirement. Thread transport and scroll tiles require their own demonstrated need.
 No article benchmark, new Signal model, crate split or compositor is selected by this amendment.
 
+The first implementation extends `tests/fixtures/gpui-engine-consumer` with a source-owner
+entity query and shared UI observation, a cached source-declaration Hierarchy, and two independently
+owned Inspector drafts for the real Sprite translation property. Explicit observation compares
+each displayed projection while operation preparation still validates its exact current basis.
+Dirty/preedit conflicts require explicit Reload; original Session commands and Undo remain the
+only mutation path. Extend the existing native trajectory, including its failure, resize,
+color/content and retirement assertions. An ordinary public framework consumer separately
+exercises shared-model notifications and subscription retirement. These are the first measured
+work-count/lifecycle prerequisites, not the full field library, virtualization, layout/upload/GPU
+baseline, Editor replacement or R11a/e exit. The public framework locality fixture passes **5/5**
+(`2ae1f4fa-8e62-4817-92b3-7940c5abd6b2`) with CPU publication controls at Open-GPUI
+`92ffbf5d815c4962ddbd68d518133bb5342dc03d`. The final complete Nara child passes **1/1 on DX12**
+(`66e31aef-c76b-4972-83b5-c71f656f99d9`) and **1/1 on Vulkan**
+(`2b8e95b9-fc9c-4991-945b-17e035cf0dc5`): the actual output records
+`NARA_GPUI_STATE_LOCALITY` with two independent drafts, conflict refusal, Undo and isolated
+Hierarchy reuse, followed by the unchanged Source/Cooked, IME, 4096-byte, failure, resize,
+fractional-scale, close and producer-retirement trajectory. Further Undo removes the source Sprite,
+produces an explicit absent Inspector value and preserves Redo recovery without closing the Viewer.
+Caller render counts are diagnostic observations only; these runs do not establish total layout,
+upload, GPU or latency budgets. The [implemented locality record](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-shared-model-editor-projections)
+records the actual integration failures and fixes: row-coordinate correction, accepted focus
+before text injection, explicit text-service notifications, separate cached Scene ownership and
+ordinary demand instead of forced refresh, plus absent-source handling. Both final backends retain
+20 actual UI submissions, ten discarded candidates, two intentional paint failures and five
+correctness-only diagnostic replays. Correctness Clippy, root/framework and isolated-consumer
+format checks, links/fragments and workflow YAML checks pass. No broader native, compiler-floor,
+numerical-budget or remote-CI qualification is claimed by this unit.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

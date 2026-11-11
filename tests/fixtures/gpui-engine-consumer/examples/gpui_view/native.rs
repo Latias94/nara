@@ -2,6 +2,8 @@
 mod content;
 #[path = "engine.rs"]
 mod engine;
+#[path = "panels.rs"]
+mod panels;
 #[path = "renderer.rs"]
 mod renderer;
 #[path = "smoke.rs"]
@@ -11,19 +13,21 @@ mod text_input;
 
 use anyhow::{Context as _, Result, ensure};
 use engine::{Engine, Preview};
+use nara_engine::{scene::SceneEntityId, tooling::EditorDocumentQueryBasis};
 use nara_render::{DisplayMapping2d, DisplayRect, DisplayScale};
 use nara_render_wgpu::WgpuImageDisplay;
 use open_gpui::{
     Application, ApplicationHandle, Bounds, Context, Corners, DevicePixels, Entity, Focusable,
     HostedSurface, HostedSurfaceGeometry, HostedSurfaceOptions, ImageTexture, KeyDownEvent,
     KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, WindowHandle,
-    canvas, div, point, prelude::*, px, rgb, rgba, size,
+    Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, StyleRefinement,
+    WindowHandle, canvas, div, point, prelude::*, px, rgb, rgba, size,
 };
 use open_gpui_wgpu::CosmicTextSystem;
 use open_gpui_windows::{
     WindowsPlatform, WindowsRenderer, WindowsRendererFactory, WindowsRendererWindow,
 };
+use panels::{EditorModel, Hierarchy, Inspector, PanelWork};
 use renderer::{Publication, Renderer, Snapshot};
 use std::{
     cell::{Cell, RefCell},
@@ -49,12 +53,20 @@ enum Command {
     Undo,
     Redo,
     Pick([f32; 2]),
+    Select {
+        basis: EditorDocumentQueryBasis,
+        entity: SceneEntityId,
+    },
+    SetX {
+        basis: EditorDocumentQueryBasis,
+        entity: SceneEntityId,
+        value: f64,
+    },
 }
 
-struct Root {
+struct SceneView {
     preview: Rc<Preview>,
     image: ImageTexture,
-    draft: Entity<DraftInput>,
     commands: Rc<RefCell<VecDeque<Command>>>,
     candidate: Rc<RefCell<Option<Rc<Snapshot>>>>,
     publications: Rc<RefCell<VecDeque<Publication>>>,
@@ -64,7 +76,7 @@ struct Root {
     candidate_content: Rc<RefCell<Vec<WgpuImageDisplay>>>,
 }
 
-impl Render for Root {
+impl Render for SceneView {
     fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
         self.candidate.borrow_mut().take();
         self.candidate_content.borrow_mut().clear();
@@ -250,6 +262,30 @@ impl Render for Root {
                             .child("Overlay control"),
                     ),
             )
+            .child(div().absolute().left(px(24.)).top(px(550.)).child(
+                "Edit the original Scene, Undo/Redo, select its sprite, or type a local UI draft.",
+            ))
+            .children(content_images)
+    }
+}
+
+struct Root {
+    scene_view: Entity<SceneView>,
+    draft: Entity<DraftInput>,
+    hierarchy: Entity<Hierarchy>,
+    inspectors: [Entity<Inspector>; 2],
+}
+
+impl Render for Root {
+    fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .relative()
+            .child(
+                self.scene_view
+                    .clone()
+                    .cached(StyleRefinement::default().w(px(1280.)).h(px(640.))),
+            )
             .child(
                 div()
                     .absolute()
@@ -259,10 +295,29 @@ impl Render for Root {
                     .h(px(44.))
                     .child(self.draft.clone()),
             )
-            .child(div().absolute().left(px(24.)).top(px(550.)).child(
-                "Edit the original Scene, Undo/Redo, select its sprite, or type a local UI draft.",
-            ))
-            .children(content_images)
+            .child(
+                div().absolute().left(px(920.)).top(px(20.)).child(
+                    self.hierarchy
+                        .clone()
+                        .cached(StyleRefinement::default().w(px(320.)).h(px(130.))),
+                ),
+            )
+            .children(
+                self.inspectors
+                    .iter()
+                    .enumerate()
+                    .map(|(index, inspector)| {
+                        div()
+                            .absolute()
+                            .left(px(920.))
+                            .top(px(170. + index as f32 * 190.))
+                            .child(
+                                inspector
+                                    .clone()
+                                    .cached(StyleRefinement::default().w(px(320.)).h(px(176.))),
+                            )
+                    }),
+            )
     }
 }
 
@@ -287,6 +342,9 @@ struct Viewer {
     surface: Option<HostedSurface>,
     root: Option<WindowHandle<Root>>,
     draft: Option<Entity<DraftInput>>,
+    model: Option<Entity<EditorModel>>,
+    panel_work: Rc<PanelWork>,
+    panel_refusals: u64,
     application: Option<ApplicationHandle>,
     platform: Rc<WindowsPlatform>,
     factory: Rc<NativeFactory>,
@@ -310,7 +368,7 @@ impl Viewer {
             event_loop.create_window(
                 Window::default_attributes()
                     .with_title("Nara · GPUI Scene View")
-                    .with_inner_size(LogicalSize::new(1120., 640.))
+                    .with_inner_size(LogicalSize::new(1280., 640.))
                     .with_visible(self.smoke.is_none()),
             )?,
         );
@@ -322,6 +380,7 @@ impl Viewer {
         let renderer = Renderer::new(engine.clone(), wake.clone())?;
         renderer.diagnostic_next.set(self.smoke.is_some());
         let preview = engine.borrow_mut().capture()?;
+        let panel_snapshot = engine.borrow().panels_snapshot()?;
         let image = renderer.import(&preview)?;
         let content_displays = engine.borrow().content_displays();
         let content_images = content_displays
@@ -356,30 +415,47 @@ impl Viewer {
         let clicks = self.clicks.clone();
         let hosted = surface.clone();
         let render = renderer.clone();
+        let panel_work = self.panel_work.clone();
         let application =
             Application::with_platform(self.platform.clone()).run_embedded(move |cx| {
                 DraftInput::bind_keys(cx);
                 let mut draft = None;
+                let mut model_output = None;
                 let root = cx.open_surface(&hosted, |window, cx| {
                     let input = cx.new(|cx| DraftInput::new(window, cx));
                     input.read(cx).focus_handle(cx).focus(window, cx);
                     draft = Some(input.clone());
-                    cx.new(|_| Root {
+                    let model = cx.new(|_| EditorModel {
+                        snapshot: panel_snapshot,
+                    });
+                    let hierarchy = cx.new(|cx| {
+                        Hierarchy::new(model.clone(), commands.clone(), panel_work.clone(), cx)
+                    });
+                    let inspectors =
+                        panels::create_inspectors(&model, &commands, &panel_work, window, cx);
+                    let scene_view = cx.new(|_| SceneView {
                         preview,
                         image,
-                        draft: input,
-                        commands,
+                        commands: commands.clone(),
                         candidate: render.candidate_snapshot.clone(),
                         publications: render.publications.clone(),
                         publication: PrepaintPublicationId::new(),
-                        clicks,
+                        clicks: clicks.clone(),
                         content_images,
                         candidate_content: render.candidate_content.clone(),
+                    });
+                    model_output = Some(model);
+                    cx.new(|_| Root {
+                        scene_view,
+                        draft: input,
+                        hierarchy,
+                        inspectors,
                     })
                 });
-                *output.borrow_mut() = Some(root.map(|root| (root, draft.unwrap())));
+                *output.borrow_mut() =
+                    Some(root.map(|root| (root, draft.unwrap(), model_output.unwrap())));
             });
-        let (root, draft) = initialized
+        let (root, draft, model) = initialized
             .borrow_mut()
             .take()
             .context("external GPUI launch did not run")??;
@@ -393,16 +469,21 @@ impl Viewer {
         self.surface = Some(surface);
         self.root = Some(root);
         self.draft = Some(draft);
+        self.model = Some(model);
         window.set_ime_allowed(true);
         Ok(())
     }
 
     fn request(&self) -> Result<()> {
+        self.request_frame(true)
+    }
+
+    fn request_frame(&self, force_render: bool) -> Result<()> {
         self.surface
             .as_ref()
             .unwrap()
             .request_frame(RequestFrameOptions {
-                force_render: true,
+                force_render,
                 require_presentation: true,
                 ..Default::default()
             })?;
@@ -415,12 +496,25 @@ impl Viewer {
         let image = self.renderer.as_ref().unwrap().import(&preview)?;
         self.application.as_ref().unwrap().update(|cx| {
             self.root.unwrap().update(cx, |root, _, cx| {
-                root.preview = preview;
-                root.image = image;
-                cx.notify();
+                root.scene_view.update(cx, |scene, cx| {
+                    scene.preview = preview;
+                    scene.image = image;
+                    cx.notify();
+                });
             })
         })?;
-        self.request()
+        self.request_frame(false)
+    }
+
+    fn publish_panels(&self) -> Result<()> {
+        let snapshot = self.engine.as_ref().unwrap().borrow().panels_snapshot()?;
+        self.application.as_ref().unwrap().update(|cx| {
+            self.model
+                .as_ref()
+                .unwrap()
+                .update(cx, |model, cx| model.publish(snapshot, cx));
+        });
+        Ok(())
     }
 
     fn drive(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -432,7 +526,9 @@ impl Viewer {
             "GPUI engine smoke exceeded its deadline"
         );
         let mut changed = false;
+        let mut panels_changed = false;
         while let Some(command) = self.commands.borrow_mut().pop_front() {
+            panels_changed = true;
             let mut engine = self.engine.as_ref().unwrap().borrow_mut();
             match command {
                 Command::Move => {
@@ -460,10 +556,30 @@ impl Viewer {
                         }
                     }
                 }
+                Command::Select { basis, entity } => {
+                    if let Err(error) = engine.select_entity(&basis, entity) {
+                        self.panel_refusals += 1;
+                        println!("NARA_GPUI_PANEL_REFUSED {error:#}");
+                    }
+                }
+                Command::SetX {
+                    basis,
+                    entity,
+                    value,
+                } => match engine.set_sprite_x(&basis, &entity, value) {
+                    Ok(()) => changed = true,
+                    Err(error) => {
+                        self.panel_refusals += 1;
+                        println!("NARA_GPUI_PANEL_REFUSED {error:#}");
+                    }
+                },
             }
         }
         if changed {
             self.refresh_preview()?
+        }
+        if panels_changed {
+            self.publish_panels()?;
         }
         self.application.as_ref().unwrap().update(|_| {});
         let renderer = self.renderer.as_ref().unwrap().clone();
@@ -548,6 +664,10 @@ impl Viewer {
             ..Default::default()
         }))?;
         Ok(())
+    }
+
+    fn focus_inspector(&self, index: usize) -> Result<()> {
+        self.click(1000., 252. + index as f32 * 190.)
     }
 
     fn input(&mut self, event: WindowEvent) -> Result<()> {
@@ -813,6 +933,9 @@ pub(super) fn run() -> Result<()> {
         surface: None,
         root: None,
         draft: None,
+        model: None,
+        panel_work: Rc::default(),
+        panel_refusals: 0,
         application: None,
         platform,
         factory,

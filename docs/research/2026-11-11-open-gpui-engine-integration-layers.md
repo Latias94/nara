@@ -1323,3 +1323,66 @@ Test references describe inspected expectations, not tests rerun for this docume
 - [GCR7] `crates/gpui/src/scene.rs:531-594`; `window.rs:9485-9528,9723-9783`; `crates/gpui_wgpu/src/wgpu_renderer.rs:1918-1950,2044-2080,2464-2508`: CPU reuse versus per-recording instance preparation/upload.
 - [GCR8] `crates/gpui/src/element.rs:19-32,50-149`; `elements/canvas.rs:8-90`: custom layout, drawing, semantics and the canvas outer-layout contract.
 - [GCR9] `crates/gpui_docking/src/panel_view.rs:8-126`; `host.rs:923-935`; `host_render_session.rs:166-205`; `render_tabs.rs:397-442`: panel identity/lazy lifetime, explicit observers and selected-content composition.
+
+## Implemented Shared Model Editor Projections
+
+This first implementation of the state-locality direction extends the same independently locked
+[native engine consumer](../../tests/fixtures/gpui-engine-consumer/README.md). It consumes the
+framework runtime qualified at `909f510d18bd0d1e537faf73eb57947cee47f927`; later Open-GPUI
+`92ffbf5d815c4962ddbd68d518133bb5342dc03d` adds the public CPU locality fixture and its CI/docs,
+with no production framework mechanism, manifest or lock change. This is fork-consumer evidence,
+not new official-source adoption or full Editor migration.
+
+The [engine adapter](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/engine.rs) runs
+the existing bounded selection-independent entity query and original property read. One immutable
+observation becomes a shared UI Entity. The
+[panel implementation](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/panels.rs)
+retains one source-declaration Hierarchy and two Inspector entities with independent draft,
+preedit and conflict state. Their existing subscriptions compare each relevant projection;
+visual equality does not replace current operation-basis validation. Full entity/source identity
+keys row state. One shared row-identity snapshot avoids cloning the entire list per row; this
+finite consumer is not a virtualized collection or a total O(visible) work claim.
+
+The original Session prepares/commits X edits and owns Undo/Redo. An invalid draft queues no
+mutation. A changed source value updates clean drafts, while another panel's dirty draft remains
+and refuses Apply until explicit Reload. A changed source/selection binding resets its local
+field under the selected policy. Window-aware observation and Reload issue the original native
+text content/selection notifications immediately. Source removal is an explicit absent projection,
+so Undo of initial Sprite construction keeps the Viewer usable for Redo. This does not qualify
+every source/schema/preedit replacement path, continuous property gestures or generic field types.
+
+Early native execution identifies actual fixture/integration mistakes. The Hierarchy click
+first misses its row; fixed coordinates then exercise the real row handler. Review separates
+focus activation from text injection with an actual accepted frame, and moves programmatic
+text notifications into the original Window rather than relying on repaint. Locality assertions
+also expose forced refresh in the existing adapter. Scene images now have a separate definite-size
+cached View, ordinary source changes notify that owner and request non-forced demand, and panel
+projections retain their own notification boundaries. Forced recovery/geometry refreshes still
+rebuild as required. A separate command-path source edit isolates locality from pointer/focus
+changes; it does not stand in for the earlier real Inspector click/IME/Apply workflow.
+
+The public framework fixture passes **5/5**
+(`2ae1f4fa-8e62-4817-92b3-7940c5abd6b2`), using real CPU callback publication, shared Entity
+observations, broad-refresh versus narrow-projection render/paint controls, equal visual values
+with a changed operation basis, changed constraints/source, entity/subscription release and late
+result rejection. Test-platform Submitted facts are not GPU/OS execution.
+
+The final complete Nara child passes **1/1 on DX12**
+(`66e31aef-c76b-4972-83b5-c71f656f99d9`) and **1/1 on Vulkan**
+(`2b8e95b9-fc9c-4991-945b-17e035cf0dc5`). Both select/report RTX 4090 and the original
+`Bgra8UnormSrgb` Host attachment. The native input path selects the source row, edits independent
+Inspector drafts, refuses invalid/conflicted writes, Reloads, commits through the Session and
+Undo/Redo restores values/absence. Isolated source publication reuses unchanged Hierarchy rendering.
+The original pixel, Source/Cooked alpha/color, long draft/IME, submitted input, refusal/panic,
+geometry, fractional-scale and close/other-producer assertions remain in that one trajectory.
+Each backend observes 20 actual UI submissions, ten discarded candidates, two intentional paint
+failures and five diagnostic replays; the diagnostic remains same-Scene offscreen work in the
+original submission, outside the normal rendering/performance path.
+
+Independent reviews close focus/text-notification and absent-Sprite findings. Focused framework
+and independent-consumer all-target/all-feature correctness Clippy pass; existing warning policy
+is retained. Root/framework and isolated-consumer format, document links/fragments and workflow
+YAML checks pass. No Nara product default/dependency switch, additional GPU or command owner,
+new Signal runtime, persistent layout, upload/raster cache, thread transport, physical input or
+numeric budget follows. R11a/e still require phase attribution, current-source allocation/
+retention/upload/GPU/latency costs and broader sparse/structural/virtualized consumers.

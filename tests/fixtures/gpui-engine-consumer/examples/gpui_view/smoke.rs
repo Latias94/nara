@@ -24,6 +24,18 @@ enum Phase {
     ResumeChange,
     Moved,
     Undo,
+    PanelsStable,
+    PanelsFocusFirst,
+    PanelsInvalid,
+    PanelsFocusSecond,
+    PanelsSecondText,
+    PanelsFocusApply,
+    PanelsApplied,
+    PanelsUndo,
+    PanelsLocality,
+    PanelsLocalityUndo,
+    PanelsRemoved,
+    PanelsRedo,
     Refused,
     RecoveredRefusal,
     Panicked,
@@ -46,6 +58,9 @@ pub(super) struct Smoke {
     discarded: u64,
     picks: u64,
     logged: Option<Phase>,
+    panel_hierarchy_renders: u64,
+    panel_inspector_renders: [u64; 2],
+    panel_revision: Option<nara_engine::scene::SceneAuthoringRevision>,
 }
 
 impl Smoke {
@@ -58,6 +73,9 @@ impl Smoke {
             discarded: 0,
             picks: 0,
             logged: None,
+            panel_hierarchy_renders: 0,
+            panel_inspector_renders: [0; 2],
+            panel_revision: None,
         }
     }
 
@@ -100,10 +118,15 @@ impl Smoke {
                 );
                 self.initial = Some(snapshot);
                 self.picks = viewer.picks;
+                viewer.click(980., 60.)?;
                 viewer.click(80., 128.)?;
                 self.phase = Phase::Inputs;
             }
             Phase::Inputs => {
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().selected_sprite(),
+                    "Hierarchy source row did not reach original selection"
+                );
                 ensure!(
                     viewer.clicks.get() == 1 && viewer.picks == self.picks,
                     "overlay input leaked into Scene picking"
@@ -315,6 +338,229 @@ impl Smoke {
                     "original Session Undo did not restore actual sprite pixels"
                 );
                 self.submitted = renderer.submissions.get();
+                self.panel_hierarchy_renders = viewer.panel_work.hierarchy_renders.get();
+                self.panel_inspector_renders =
+                    std::array::from_fn(|index| viewer.panel_work.inspector_renders[index].get());
+                self.panel_revision = Some(viewer.engine.as_ref().unwrap().borrow().revision()?);
+                self.phase = Phase::PanelsStable;
+            }
+            Phase::PanelsStable => {
+                ensure!(
+                    viewer.panel_work.hierarchy_renders.get() == self.panel_hierarchy_renders,
+                    "unchanged Hierarchy rebuilt during a submitted redraw"
+                );
+                ensure!(
+                    std::array::from_fn::<_, 2, _>(|index| viewer.panel_work.inspector_renders
+                        [index]
+                        .get())
+                        == self.panel_inspector_renders,
+                    "unchanged Inspector rebuilt during a submitted redraw"
+                );
+                viewer.focus_inspector(0)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsFocusFirst;
+            }
+            Phase::PanelsFocusFirst if renderer.submissions.get() > self.submitted => {
+                replace_inspector_text(viewer, 0, "not-a-number")?;
+                viewer.click(970., 292.)?;
+                ensure!(
+                    viewer.commands.borrow().is_empty(),
+                    "invalid numeric draft queued a source mutation"
+                );
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsInvalid;
+            }
+            Phase::PanelsInvalid if renderer.submissions.get() > self.submitted => {
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().revision()?
+                        == self.panel_revision.unwrap(),
+                    "invalid draft mutated source history"
+                );
+                ensure!(
+                    inspector_text(viewer, 0)? == "not-a-number"
+                        && inspector_text(viewer, 1)? == "0",
+                    "panel drafts are not independently owned"
+                );
+                viewer.focus_inspector(1)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsFocusSecond;
+            }
+            Phase::PanelsFocusSecond if renderer.submissions.get() > self.submitted => {
+                replace_inspector_text(viewer, 1, "stale draft")?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsSecondText;
+            }
+            Phase::PanelsSecondText if renderer.submissions.get() > self.submitted => {
+                viewer.focus_inspector(0)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsFocusApply;
+            }
+            Phase::PanelsFocusApply if renderer.submissions.get() > self.submitted => {
+                replace_inspector_text(viewer, 0, "40")?;
+                viewer.click(970., 292.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsApplied;
+            }
+            Phase::PanelsApplied => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 40.,
+                    "Inspector did not commit through the source owner"
+                );
+                ensure!(
+                    inspector_text(viewer, 0)? == "40"
+                        && inspector_text(viewer, 1)? == "stale draft",
+                    "source publication overwrote another panel's dirty draft"
+                );
+                let revision = viewer.engine.as_ref().unwrap().borrow().revision()?;
+                viewer.click(970., 482.)?;
+                ensure!(
+                    viewer.commands.borrow().is_empty(),
+                    "conflicted Inspector queued an unreviewed write"
+                );
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().revision()? == revision,
+                    "conflicted draft mutated the source"
+                );
+                viewer.click(970., 512.)?;
+                ensure!(
+                    inspector_text(viewer, 1)? == "40",
+                    "Reload did not explicitly reset the stale draft"
+                );
+                viewer.click(260., 38.)?;
+                self.panel_revision = Some(revision);
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsUndo;
+            }
+            Phase::PanelsUndo => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 0.,
+                    "one original Undo did not restore the Inspector edit"
+                );
+                ensure!(
+                    inspector_text(viewer, 0)? == "0" && inspector_text(viewer, 1)? == "0",
+                    "Undo did not update both clean Inspector projections"
+                );
+                self.panel_hierarchy_renders = viewer.panel_work.hierarchy_renders.get();
+                let snapshot = viewer.engine.as_ref().unwrap().borrow().panels_snapshot()?;
+                self.panel_revision = Some(snapshot.basis.revision);
+                viewer
+                    .commands
+                    .borrow_mut()
+                    .push_back(super::Command::SetX {
+                        basis: snapshot.basis,
+                        entity: snapshot
+                            .sprite
+                            .expect("locality source still contains the Sprite"),
+                        value: 16.,
+                    });
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsLocality;
+            }
+            Phase::PanelsLocality => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 16.,
+                    "source-locality control did not commit"
+                );
+                ensure!(
+                    viewer.panel_work.hierarchy_renders.get() == self.panel_hierarchy_renders,
+                    "isolated source property publication rebuilt unchanged Hierarchy rows"
+                );
+                ensure!(
+                    inspector_text(viewer, 0)? == "16" && inspector_text(viewer, 1)? == "16",
+                    "locality publication left stale Inspector values"
+                );
+                self.panel_revision = Some(snapshot.preview.revision);
+                viewer.commands.borrow_mut().push_back(super::Command::Undo);
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsLocalityUndo;
+            }
+            Phase::PanelsLocalityUndo => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 0.,
+                    "source-locality Undo did not restore original Scene"
+                );
+                println!(
+                    "NARA_GPUI_STATE_LOCALITY hierarchy_renders={} inspector_renders={:?} projected_notifications={} shared_model=true independent_drafts=true conflict_refused=true undo=true isolated_source_publication_reused_hierarchy=true scope=caller_render_counts",
+                    viewer.panel_work.hierarchy_renders.get(),
+                    std::array::from_fn::<_, 2, _>(|index| viewer.panel_work.inspector_renders
+                        [index]
+                        .get()),
+                    viewer.panel_work.projected_notifications.get()
+                );
+                viewer.commands.borrow_mut().push_back(super::Command::Undo);
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsRemoved;
+            }
+            Phase::PanelsRemoved => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                let panels = viewer.engine.as_ref().unwrap().borrow().panels_snapshot()?;
+                ensure!(
+                    panels.sprite.is_none() && panels.x.is_none(),
+                    "removing the source Sprite did not produce an explicit absent Inspector state"
+                );
+                ensure!(
+                    !viewer.finished,
+                    "an absent source property closed the GPUI viewer"
+                );
+                viewer.commands.borrow_mut().push_back(super::Command::Redo);
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::PanelsRedo;
+            }
+            Phase::PanelsRedo => {
+                let Some(snapshot) = renderer.presented.borrow().clone() else {
+                    return Ok(false);
+                };
+                if snapshot.preview.revision == self.panel_revision.unwrap()
+                    || renderer.submissions.get() <= self.submitted
+                {
+                    return Ok(false);
+                }
+                let panels = viewer.engine.as_ref().unwrap().borrow().panels_snapshot()?;
+                ensure!(
+                    panels.sprite.is_some()
+                        && viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 0.,
+                    "Redo did not restore the source Sprite and Inspector property"
+                );
+                self.submitted = renderer.submissions.get();
                 renderer.failure.set(Some(Failure::Refuse));
                 viewer.request()?;
                 self.phase = Phase::Refused;
@@ -385,7 +631,7 @@ impl Smoke {
                     .unwrap()
                     .borrow()
                     .window
-                    .request_inner_size(LogicalSize::new(1120., 640.));
+                    .request_inner_size(LogicalSize::new(1280., 640.));
                 self.phase = Phase::ResizeBack;
             }
             Phase::ResizeBack => {
@@ -406,7 +652,7 @@ impl Smoke {
                             .scale_factor(),
                     )
                     .width
-                    != 1120
+                    != 1280
                 {
                     return Ok(false);
                 }
@@ -528,6 +774,33 @@ fn initial_pixels(image: &Diagnostic) -> Result<()> {
     println!(
         "NARA_GPUI_VIEW_PIXELS center={:?} glyph_pixels={glyph_pixels}",
         image.logical_pixel(344., 286.)
+    );
+    Ok(())
+}
+
+fn inspector_text(viewer: &Viewer, index: usize) -> Result<String> {
+    viewer.application.as_ref().unwrap().update(|cx| {
+        viewer.root.unwrap().update(cx, |root, _, cx| {
+            let draft = root.inspectors[index].read(cx).draft.clone();
+            draft.read(cx).text().to_owned()
+        })
+    })
+}
+
+fn replace_inspector_text(viewer: &mut Viewer, index: usize, value: &str) -> Result<()> {
+    viewer
+        .surface
+        .as_ref()
+        .unwrap()
+        .dispatch_input(PlatformInput::KeyDown(KeyDownEvent {
+            keystroke: Keystroke::parse("ctrl-a")?,
+            is_held: false,
+            prefer_character_input: false,
+        }))?;
+    viewer.input(WindowEvent::Ime(Ime::Commit(value.into())))?;
+    ensure!(
+        inspector_text(viewer, index)? == value,
+        "Inspector native text route lost its draft"
     );
     Ok(())
 }

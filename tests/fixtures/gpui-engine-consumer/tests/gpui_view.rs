@@ -84,6 +84,7 @@ fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
         "NARA_GPUI_VIEW_WORKFLOW",
         "NARA_GPUI_VIEW_SCALED",
         "NARA_GPUI_VIEW_OK",
+        "NARA_GPUI_STATE_LOCALITY",
         "NARA_GPUI_CONTENT_PIXELS mode=source",
         "NARA_GPUI_CONTENT_PIXELS mode=processed",
     ] {

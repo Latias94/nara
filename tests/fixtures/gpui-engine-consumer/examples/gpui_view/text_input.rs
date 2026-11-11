@@ -123,6 +123,18 @@ impl DraftInput {
         self.marked_range.is_some()
     }
 
+    /// Rebinds an owned field after its selected source value changes.
+    pub(super) fn rebind(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.content = text.into();
+        self.selected_range = self.content.len()..self.content.len();
+        self.selection_reversed = false;
+        self.marked_range = None;
+        self.layout = None;
+        window.notify_text_input_changed(&self.focus_handle);
+        window.notify_text_selection_changed(&self.focus_handle);
+        cx.notify();
+    }
+
     fn left(&mut self, _: &Left, window: &mut Window, cx: &mut Context<Self>) {
         let offset = if self.selected_range.is_empty() {
             self.previous_boundary(self.cursor_offset())

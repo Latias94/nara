@@ -31,6 +31,14 @@ fully materialized rows from virtualization and equal writes from real edits; ke
 and authoring effort alongside time/memory. Article charts and upstream experiments do not
 supply any of these current Nara measurements.
 
+The first [shared-model consumer](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-shared-model-editor-projections)
+now qualifies public CPU render/paint callback differences and an isolated native source edit
+that reuses unchanged Hierarchy rendering. It retains separate real Inspector text/Apply/Undo
+and source-removal/Redo workflows. These are executable work-count/correctness observations;
+the native trajectory includes forced recovery, focus, refusal and scale changes, so its aggregate
+callback/submission counts are not an incremental-layout ratio or a timing baseline. No old
+Dear/kernel timing or current GPUI total cost is inferred from these passes.
+
 Each existing owner exposes a detached cumulative snapshot. Counters saturate, do not reset on
 resource retirement and do not authorize more work, publication, input or presentation. They do
 not change admission limits, revision allocation, last-good fallback or exact backend outcomes.
