@@ -230,11 +230,9 @@ impl ProductUiCapture {
     }
 
     pub fn retry(&self) -> Option<&SemanticCapture> {
-        self.semantic_facts.iter().find(|fact| {
-            fact.actions
-                .iter()
-                .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
-        })
+        self.semantic_facts
+            .iter()
+            .find(|fact| fact.role == UiSemanticRole::Button && fact.name == "Retry")
     }
 }
 
@@ -436,7 +434,7 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
                         .expect("each glyph primitive should reference a retained packet page")
                         .key(),
                 ),
-                UiPacketPrimitive::Rect { .. } => None,
+                UiPacketPrimitive::Rect { .. } | UiPacketPrimitive::Mesh { .. } => None,
             })
             .collect::<Vec<_>>();
         let sample_identity = PlannerPerformanceIdentity {
@@ -1012,7 +1010,7 @@ fn capture(runtime: &RuntimeInstance, target: UiPhysicalTarget) -> ProductUiCapt
                 layout_width: layout.width(),
                 layout_height: layout.height(),
             }),
-            UiPaintPrimitive::Rect { .. } => None,
+            UiPaintPrimitive::Rect { .. } | UiPaintPrimitive::Mesh { .. } => None,
         })
         .collect::<Vec<_>>();
     let semantic_facts = semantics
@@ -1047,11 +1045,9 @@ fn capture(runtime: &RuntimeInstance, target: UiPhysicalTarget) -> ProductUiCapt
         .into_iter()
         .find(|slot| slot.surface_id() == reference_surface_id())
         .expect("the reference UI surface slot should remain installed");
-    let retry = semantic_facts.iter().find(|fact| {
-        fact.actions
-            .iter()
-            .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
-    });
+    let retry = semantic_facts
+        .iter()
+        .find(|fact| fact.role == UiSemanticRole::Button && fact.name == "Retry");
     let retry_packet_rect = retry.and_then(|fact| {
         let minimum = slot
             .transform()

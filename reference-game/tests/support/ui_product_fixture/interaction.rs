@@ -11,7 +11,7 @@ use nara::{
     },
     prelude::{FixedTime, Vec2},
     ui::{
-        UiAccessibilityInput, UiSeatId,
+        UiAccessibilityInput, UiSeatId, UiSemanticRole,
         advanced::{active_ui_surface_slots, ui_semantic_snapshot},
     },
 };
@@ -266,11 +266,7 @@ pub(super) fn retry_platform_center(runtime: &RuntimeInstance) -> Vec2 {
     let retry = semantics
         .nodes()
         .iter()
-        .find(|node| {
-            node.actions()
-                .iter()
-                .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
-        })
+        .find(|node| node.role() == UiSemanticRole::Button && node.name() == "Retry")
         .expect("terminal UI should expose Retry semantics");
     let slot = active_ui_surface_slots(runtime.world())
         .unwrap()

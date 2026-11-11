@@ -179,6 +179,7 @@ fn canonical_target_covers_the_six_product_states() {
     let pending_retry = pending.retry().expect("pending Retry semantics");
     assert_eq!(pending_retry.name, "Retry");
     assert!(!pending_retry.enabled);
+    assert!(pending_retry.actions.is_empty());
     assert!(pending_retry.focused);
     assert!(!pending_retry.focusable);
     assert_eq!(pending_retry.key, completed.retry().unwrap().key);
@@ -439,6 +440,8 @@ fn assert_enabled_retry(capture: &ProductUiCapture, expected_focus: bool) {
     let retry = capture.retry().expect("enabled Retry semantics");
     assert_eq!(retry.name, "Retry");
     assert!(retry.enabled);
+    assert_eq!(retry.actions.len(), 1);
+    assert_eq!(retry.actions[0].as_str(), REFERENCE_RETRY_ACTION);
     assert!(retry.focusable);
     assert_eq!(retry.focused, expected_focus);
     assert!(retry.width >= 44.0, "{retry:#?}");
@@ -549,10 +552,7 @@ fn is_terminal_fact(fact: &SemanticCapture) -> bool {
     fact.name == "VICTORY"
         || fact.name == "DEFEAT"
         || fact.name.starts_with("FINAL SCORE ")
-        || fact
-            .actions
-            .iter()
-            .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+        || (fact.role == nara::ui::UiSemanticRole::Button && fact.name == "Retry")
         || fact.name == "Press Enter or activate Retry"
         || fact.name == "Retry is pending"
         || fact.name == "Retry replacement was rejected"
