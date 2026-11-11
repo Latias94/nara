@@ -1,5 +1,7 @@
 //! A finite scalar/vector graph owned by the ordinary Editor extension document lifecycle.
 
+pub mod preview;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use nara_core::{DocumentContentState, DocumentHistoryStatus, DocumentRevision};
