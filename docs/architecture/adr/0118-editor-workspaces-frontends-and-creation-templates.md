@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-05 (toolkit-independent custody and maintained-framework comparison)
+**Last Revised**: 2026-11-11 (independent framework consumption and host composition)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -121,6 +121,14 @@ ownership may move to a selected adapter through an explicit Host composition; p
 commands, exact native View input and physical resource retirement. The comparison remains R11a
 work until integrated/native and cost evidence selects an implementation. Public attachment for
 user-authored frontends remains an independent requirement regardless of the default toolkit.
+
+Open-GPUI remains a separate framework project. Its native application host, optional renderer
+and component modules must work without Nara. Nara owns the adapter from its Editor services and
+retained render outputs to a selected framework composition; framework entities never become
+document, history, ECS or render-output identities. Selecting a renderer contribution does not
+select a platform loop. The first native consumer must resolve hosting, renderer submission and
+viewport texture sampling separately, then demonstrate their combined input and retirement
+behavior. A host-owned encoder interface alone does not complete that composition.
 
 ### Independent reference and self-drawn Editor implementations
 

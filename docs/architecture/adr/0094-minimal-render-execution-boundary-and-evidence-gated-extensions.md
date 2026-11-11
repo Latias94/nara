@@ -24,6 +24,13 @@ catalogs, persistent recipes, a retained logical render scene, a logical graph c
 `CompiledPipelineTemplate`, `FrameExecutionPlan`, raw-wgpu interop, or replacement Render Host
 parity.
 
+That paragraph records the July decision baseline. The later Accepted
+[finite captured WGPU programs](#finite-captured-wgpu-programs) refinement and its
+[current guide](../../guides/render-programs.md) add a real typed resource graph compiler,
+public native Features, shared Host execution and qualified stock Runtime/Editor/offscreen
+consumers. The complete ADR0121 taxonomy remains Proposed. Neither the old baseline nor the
+proposal's status is evidence that the qualified finite graph needs to be built again.
+
 Bevy, Unity, and Godot demonstrate that these are real solution families, but they make different
 trade-offs. Bevy exposes a render sub-application and ECS schedules; Unity provides Scriptable
 Render Pipeline assets and RenderGraph; Godot keeps product-facing compositor effects separate

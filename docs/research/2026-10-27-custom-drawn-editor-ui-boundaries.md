@@ -5635,3 +5635,26 @@ their existing scope. The next integration gate remains the
 [actual Nara GPU/Host/View consumer](#november-10-modular-gpu-and-host-source-map), including the
 two WGPU source identities and one device/encoding/submission/presentation owner. This does not
 switch Nara's toolkit, add a dependency or complete R11/R12/R11f or the maintenance handoff.
+
+## November 11: Independent Framework And External WGPU Hosting
+
+The [layered integration study](2026-11-11-open-gpui-engine-integration-layers.md) reconciles the
+supplied `gpui_research.txt` with fixed Zed/ImGui source, the maintained fork and actual Nara owners.
+Open-GPUI's bounded fixed-source dispositions close at audited `424a3a0f7c2`, recorded by local
+`e7debc21222`. This grants neither exhaustive API parity nor complete native/platform qualification.
+The owner selects external WGPU application hosting as a reusable framework capability, allowing
+concrete Windows D3D11 coupling to be refactored while preserving mature UI/layout/text/components.
+
+Generic renderer prerequisite `0259c88f9deb26e4caa026ebd39be179d19a3ae5` records into the
+application's device/encoder/target. The final actual GPU consumer passes distinct scenes before
+one submit, clip/path/image/Load pixels, capability refusals, preserved host callbacks and exact
+atlas lifetime. Existing WGPU controls, affected Clippy, production wasm, actual Rust 1.93 and
+format/static qualification retain the framework record's exact scope. Full production event/IME
+driving, Scene/submission acknowledgement, external texture import and a normal native WGPU
+application remain the next independent framework work before Nara consumes those same modules.
+
+Nara already has finite typed graph/program/Host execution; UI composition need not expose GPUI's
+internal passes as engine graph nodes. Game-UI execution is separately compared through the actual
+authored HUD/modal/Retry path, preserving source/commands and one interaction executor. The study
+records current IME/world-space/player/material limits, selective versus full reuse and matched
+cost criteria. No dependency, frontend default, complete R11/R12 or maintenance handoff changes.

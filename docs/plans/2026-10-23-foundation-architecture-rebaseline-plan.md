@@ -1447,6 +1447,41 @@ View, Editor replacement or game-runtime selection required below.
 After fixed-target closure and the first qualified engine-seam consumer, framework maintenance
 moves to its dedicated session while the remaining Nara Editor/game-runtime work continues here.
 
+The November 11 owner clarification explicitly preserves Open-GPUI as an independent project.
+Follow the completed source-based
+[layered-integration study](../research/2026-11-11-open-gpui-engine-integration-layers.md).
+Read the supplied `gpui_research.txt` as a proposal and verify its claims against fixed source
+and first-party documentation. Compare platform hosting, UI renderer recording and engine-viewport
+texture import as independent choices. In particular, compare a GPUI-hosted Editor consuming an
+engine output with an engine-hosted GPUI adapter; account for the maintained Windows D3D11 path
+and the existing Nara Winit/Host path. The current recording API remains a candidate reusable
+prerequisite until the combined consumer selects its arrangement.
+
+The subsequent clarification selects convenient external WGPU application hosting as an
+Open-GPUI framework capability to implement. Qualify a normal non-Nara application using its own
+window/loop/device before Nara consumes the same public modules. Refactor concrete Windows
+D3D11 renderer/text-device coupling where needed; it is not a public-interface constraint.
+Preserve the existing UI/layout/text/components, add production frame/event/IME driving and exact
+host-submission acknowledgement, and provide generic retained texture import. A renderer-only
+consumer cannot satisfy this complete external-host workflow. No many-backend commitment or
+universal RHI is required.
+
+Keep Open-GPUI's core, platform, renderer and component modules usable without Nara dependencies.
+Keep Nara-specific document/ECS/history, content, render-graph placement and View/input adapters
+in Nara. Reuse the existing renderer's primitive/path/text/atlas implementation before considering
+another backend. An opaque framework render contribution may enter Nara's graph without a second
+public framework graph or translating the whole UI into engine-specific nodes. Evaluate unstyled
+behavior versus visual recipes against the existing Open-GPUI modules before adding another
+component dependency. Editor adoption leaves the authored game-UI comparison open.
+
+The [Editor/game reuse boundary](../research/2026-11-11-open-gpui-engine-integration-layers.md#editor-and-game-reuse-boundary)
+prefers shared UI mechanisms and separate product adapters, state and visual composition. Evaluate
+complete host-driven execution before extracting many individual internals. A Base-style split of
+unstyled component behavior and appearance is useful, but does not solve the native-window/device
+boundary. Refactor that known coupling through the ordinary external application now; introduce
+smaller packages only with an independent dependency/lifecycle consumer. Games must not acquire
+Editor workspace, docking, document or theme dependencies just to use controls, text or rendering.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the
@@ -1519,6 +1554,24 @@ The executable comparison must cover:
    test platform do not establish the engine's runtime lifecycle. Count the cost of maintaining
    two text/layout/control stacks as well as extraction or adaptation work before selecting the
    lasting shared boundary.
+
+   The November 11 [runtime mechanism study](../research/2026-11-11-open-gpui-engine-integration-layers.md#game-runtime-mechanism-review)
+   finds that current game UI still rebuilds its compilation-local layout tree during Extract.
+   It qualifies screen-space controls and modal/navigation behavior, not complete authored
+   editable text/IME, world-space/depth, rich player focus or authored per-control materials.
+   Preserve source/occurrence identity, projection semantics, exact presented input and game
+   command ownership while allowing execution modules and internal types to change.
+   After the ordinary external WGPU application works, compare a coherent GPUI runtime against
+   the current execution using `reference-game/prefabs/reference-ui.prefab.json`: changing HUD,
+   terminal modal and Retry. Run the same authored width/action edits and activation workflow
+   through a production no-window/semantic path, offscreen GPU and the existing desktop Host.
+   Cover pause/resume, resize/capture cancellation, refusal, old resource retention and close.
+   One selected executor owns hit/focus/control work per running composition; one original
+   action outlet feeds game commands. Keep the old implementation as an independent control
+   until a replacement passes, then remove the superseded execution rather than retain a
+   permanent synchronization layer. Compare selective neutral reuse only when the complete
+   runtime has a demonstrated lifecycle, dependency or measured-cost mismatch. Game-specific
+   world-space, player and material requirements need named consumers; a HUD cannot close them.
 
 The first [executed maintenance baseline](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-rendering-seam-and-executed-maintenance-baseline)
 is Open-GPUI `8c58cca8`, followed by its upstream continuation at `bce3a902`, both published on

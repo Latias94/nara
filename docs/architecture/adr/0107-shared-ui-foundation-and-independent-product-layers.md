@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05 (scoped composition and maintained-framework comparison)
+**Last Revised**: 2026-11-11 (independent framework and engine integration layers)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -33,6 +33,14 @@ serves Runtime UI; Editor reuse is selective and requires concrete consumer evid
 text, semantics, rendering or platform fundamentals do not imply a shared toolkit or require
 every Editor control to consume the Foundation. Permanent toolkit separation is legitimate.
 
+Independent product ownership does not freeze the current game-UI execution. Authored source,
+occurrence identities, commands and exact presented interaction remain engine-owned when layout,
+text, widget state or rendering mechanisms change. A GPUI-derived runtime is a comparison option;
+it must not synchronize a second live input executor or duplicate game/document command history.
+Use the same authored game workflow and measured workloads before selecting full execution reuse,
+selective neutral reuse or continued independent execution. World-space/depth, player focus and
+special materials remain explicit capabilities with their own consumers.
+
 A Nara-owned, custom-drawn Editor may use a maintained UI framework. Product ownership does not
 require Nara to implement every layout, text, component or platform mechanism. The November 5
 clarification makes the user's existing Open-GPUI fork a primary comparison candidate, including
@@ -40,6 +48,27 @@ maintaining that framework when concrete integration requires it. This reopens f
 it does not select a new production backend or invalidate qualified Nara consumers. R11a owns the
 comparison against complete workflows and total maintenance cost. Domain-neutral Editor models,
 commands, document/history owners and independent Runtime UI remain separate from that choice.
+
+Open-GPUI is an independently maintained, general-purpose UI project. Nara consumes a qualified
+framework revision through an optional integration; it does not become the framework's runtime,
+render graph, asset database or application model. Framework platform and renderer modules remain
+usable by ordinary applications without Nara dependencies. Engine-specific View, document, content
+and retirement adapters belong to Nara. A reusable framework correction motivated by those adapters
+belongs to Open-GPUI and must preserve its ordinary consumers.
+
+Window hosting, UI rendering and engine-viewport composition are separate decisions. A selected
+composition can delegate native hosting to GPUI or drive a supported framework adapter from the
+engine Host. Sharing a GPU device does not select the native loop, and rendering an engine viewport
+inside GPUI does not require every editor control to enter the engine's render graph. Each selected
+window and resource domain has one explicit owner for acquisition, submission, presentation,
+input admission and retirement.
+
+The subsequent November 11 direction makes application-owned WGPU hosting a framework
+development target, with an ordinary non-Nara consumer before Nara integration. Mature GPUI UI,
+layout/text and component mechanisms remain reusable while native renderer coupling may change.
+The official Windows D3D11 construction is not an engine or framework public-interface constraint.
+This selects an integration capability to build; it does not qualify an external driver or switch
+the Editor/game UI implementation.
 
 ```mermaid
 flowchart TB
@@ -101,6 +130,25 @@ execution or a game-specific ECS dependency. `nara_ui` remains the Scene/ECS gam
 an Editor panel must not depend on it merely to obtain text, layout, controls or presentation.
 Editor component composition belongs above these fundamentals and below document-specific tools.
 A separate crate is warranted by an independent dependency closure, not by this layer diagram alone.
+
+Prefer shared mechanisms with separate product adapters when the complete consumer fits. Shared
+framework execution must not make a game depend on Editor docking, workspaces, documents or theme
+recipes. Shared implementation also does not merge per-root focus, text sessions or resource
+lifetimes. Distinguish unstyled component behavior from appearance, and distinguish both from the
+platform/render execution boundary. Existing Open-GPUI `ui-core` and component modules provide
+starting points; a Base-style component split does not itself provide external runtime hosting.
+Allow coherent framework execution, narrower mechanism extraction or independent execution to win
+the authored-game comparison. Do not require a crate for every algorithm or duplicate a complete
+stack merely to maintain independent product ownership.
+
+An engine render graph may schedule a framework renderer as a bounded render contribution while
+the framework retains its own primitive, path, text and atlas implementation. It need not reproduce
+those internals as public engine graph nodes. Conversely, a framework-owned window may composite
+an engine-owned output through a qualified texture adapter. Either route must retain the output's
+original device identity, color/alpha facts, sampling order and retirement custody. Neither route
+requires a second public render graph in Open-GPUI or a universal UI description shared by toolkits.
+The native consumer comparison selects the route; a recording-only renderer is one prerequisite,
+not proof of external texture import, host-driven UI execution or game-UI suitability.
 
 State ownership, description construction and scheduling are separate choices. Nara-owned Editor
 UI retains panel/control incarnations, editing state and reusable artifacts across compatible

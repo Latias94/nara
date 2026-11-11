@@ -16,6 +16,13 @@ repeat variation and no cost winner. The
 has separate stock/native evidence under ADR0078. Complete runner-local Host/epoch/output authority,
 external Runtime/Scene View/offscreen Features and exact UI completion remain unqualified.
 
+That qualification sentence describes the October 31 private comparison checkpoint. Later
+Accepted [ADR0094 finite programs](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md#finite-captured-wgpu-programs)
+and the [current program guide](../../guides/render-programs.md) qualify bounded public
+graph/Feature/Host consumers, including actual Runtime, Editor Scene View and offscreen use.
+Those later records supersede the corresponding historical gaps without promoting this entire
+proposal to Accepted. Consult the implementation ledger and current guide for the supported scope.
+
 ## Context
 
 Current immutable captured packets, one submitter and exact target authority are useful

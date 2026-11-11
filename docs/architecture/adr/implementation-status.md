@@ -915,6 +915,25 @@ map, embedded App lifetime, atlas test or CPU Host control qualifies a real engi
 framework closure and that consumer remain required before maintenance handoff. No new Accepted
 decision, dependency change, toolkit default or R11/R12/R11f completion follows.
 
+The November 11 [layered integration study](../../research/2026-11-11-open-gpui-engine-integration-layers.md)
+reconciles standalone framework/platform/renderer and engine-product responsibilities. Open-GPUI's
+source-adoption dispositions close at audited framework `424a3a0f7c2`, recorded by local documentation
+commit `e7debc21222`; this is not complete API/platform qualification. The owner's subsequent
+direction selects externally hosted WGPU applications as a framework capability to build.
+Existing GPUI UI/layout/text/components remain reusable while concrete native D3D11 coupling may
+change. A non-Nara application must first prove production frame/input driving, external texture
+composition and actual submission/close handling; Nara then consumes the same interfaces.
+The current scene recorder is an implementation prerequisite with separate GPU evidence, not
+that complete workflow. Recorder `0259c88f9deb` passes the final real two-scene/one-submit GPU
+consumer with capability refusals and exact retained atlas release. The framework records 117
+existing WGPU controls at the affected refactor checkpoint, production wasm and actual Rust 1.93,
+correctness Clippy and static gates. No headless fixture is a production host-driver proof.
+The separate game-UI review selects a named HUD/modal/Retry comparison after that driver,
+preserving authored semantics and one live interaction executor while leaving execution reuse open.
+Nara already has a finite typed graph/program/Host under ADR0094;
+full ADR0121 remains Proposed. Editor/game UI selection, extension/reload acceptance and
+numerical costs remain open. This documentation changes no GPU dependency or frontend default.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

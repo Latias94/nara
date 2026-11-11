@@ -2,7 +2,7 @@
 
 **Status**: Design blueprint; qualified mechanisms and unimplemented targets are distinguished below
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-05
+**Last Revised**: 2026-11-11
 **Owners**: UI Foundation, Runtime UI, Editor frontend, Editor Host
 **Authority**: This document is non-normative. Durable contracts live in ADR 0102, ADR 0107-0109 and ADR 0118. Current execution order belongs to R11/R12 in the [foundation rebaseline plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md); the UI Foundation Correction plan is completed lineage.
 
@@ -74,6 +74,21 @@ contexts and lifetimes would then need reconstruction. A versioned dependency or
 source workspace can carry the chosen implementation. Packaging follows demonstrated maintenance
 and integration pressure, not a requirement to copy the repository into Nara.
 
+Open-GPUI remains a standalone project with its own ordinary application, component and platform
+consumers. Nara-specific Editor models, ECS projection, asset identities, render programs and View
+retirement stay in Nara adapters. The reusable framework implementation must not depend on Nara.
+An integration selects a qualified immutable framework revision; the projects can then advance
+independently and exchange focused corrections through their respective owning modules.
+
+The [November 11 layered study](../research/2026-11-11-open-gpui-engine-integration-layers.md)
+selects convenient application-owned WGPU hosting as the next framework capability. First prove a
+normal non-Nara application with its own loop/window/device, production UI driving and real
+retained texture composition. Nara then consumes the same modules. Native Windows D3D11 coupling
+may be refactored; recording alone does not establish the complete external application path.
+Nara already has a typed render graph/program and Host execution. Its final-window transaction is
+the initial composition control; graph placement can wrap a framework renderer as one Feature
+when actual intermediate/history dependencies require it.
+
 The current Nara-drawn executable and Runtime UI remain qualified within their recorded scope.
 An Open-GPUI candidate may replace Editor-local layout/state/input/platform work after complete
 comparison; document/workspace commands, history and game UI do not become GPUI entities. Do not
@@ -97,7 +112,20 @@ descriptions without duplicating every entity into GPUI state. The unresolved co
 runtime/interface adaptation versus ongoing maintenance of two stacks; Editor adoption alone
 does not settle it. Preserve game source, command and input contracts during that comparison.
 
+The preferred reuse boundary is a shared mechanism layer with separate Editor and game adapters,
+state and component recipes. Unstyled component behavior can be shared independently of visual
+themes; that split is distinct from removing native window/device construction from UI execution.
+Use the existing Open-GPUI `ui-core`, component and renderer modules before adding another Base
+package. Establish smaller public packages where actual independent consumers need their complete
+dependency and lifecycle boundary, preserving coherent text/layout/input invalidation and resource
+custody. The [reuse decision table](../research/2026-11-11-open-gpui-engine-integration-layers.md#editor-and-game-reuse-boundary)
+records candidate sharing and product-specific responsibilities.
+
 ## Target topology
+
+This diagram describes the Nara-foundation control path and its extension targets. A qualified
+GPUI composition can replace its Editor execution and, after the authored-game comparison,
+selected game execution. It is not a required adapter chain for the standalone framework.
 
 ```mermaid
 flowchart LR
