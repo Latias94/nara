@@ -6,6 +6,40 @@ revision recorded in the [integration study](../../../docs/research/2026-11-11-o
 The engine and ordinary renderer fixtures do not resolve these framework paths. This is a public
 integration consumer, not the selected full Editor frontend.
 
+## Typed Graph Consumer
+
+The same executable accepts `--graph` for two independent panels over one source-built
+`ValueGraph` extension document; `--smoke-graph` runs its finite native trajectory and closes.
+The graph owns Scalar/Vector constants, scalar Add and one Output, at most 64 nodes/128 links,
+64 history snapshots and a 64 KiB JSON source. An incomplete graph displays no evaluated value.
+Typed ports refuse mismatches, occupied inputs and cycles through the domain command owner.
+
+Use Add controls to create nodes, choose an output port then an input, and select a Scalar node
+to edit its value. Clicking a connected input without a pending output disconnects it. Focus a
+node header and use arrows to move it or Delete to remove it. Tab/Enter/Space operate controls;
+Escape cancels a pending connection. Zoom/pan and scalar drafts belong to each panel. A dirty
+draft survives external source changes and needs explicit Reload. Save/Reopen use the existing
+Editor file Host; reopening issues a fresh source incarnation and clears document history.
+
+Observed control geometry and its document/revision publish only from the original submitted
+Window frame. Automation waits for that displayed basis, rather than treating a domain result
+or increased submission count as proof that the source is already displayed. Pending later
+refresh work may coexist with the correct submitted frame. Input remains subject to the
+original rendered handlers and exact captured-basis validation.
+
+```text
+cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --lib --test graph_document --test-threads=1
+cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features ui-work-observation
+```
+
+After selecting the native backend and shared target as below, launch
+`target/release/examples/gpui_view.exe --graph`. The ordinary `gpui_view` native integration
+test includes a separate graph child alongside the existing complete Scene child. Work sampling
+remains `--measure-ui-work`; the graph is not a new numeric cost baseline. Curved paths use
+the public GPUI canvas and the same original Nara WGPU encoder/submission owner. This finite
+consumer does not qualify a complete Shader Graph, asynchronous graph compiler, two independent
+engine Views, native multi-window docking or game UI execution.
+
 ```text
 cargo +1.95.0 build --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --test gpui_view --run-ignored only --test-threads=1 --no-fail-fast

@@ -1,8 +1,10 @@
 # Source-built Editor documents
 
-One independently compiled dialogue document demonstrates the non-Scene workflow. Its source is
+Independently compiled dialogue and value-graph consumers demonstrate the non-Scene workflow.
+The dialogue source is
 `tests/fixtures/module-consumer/editor-panel-consumer/src/dialogue.rs`; the public Host tests are
 `tests/dialogue_documents.rs`, and `tests/dialogue_panel.rs` covers actual ImGui panel retirement.
+The GPUI graph consumer below uses the same document owner with independent custom-drawn panels.
 The external consumer tests cover the public workflow; execution evidence is recorded separately
 in engineering memory.
 
@@ -128,6 +130,26 @@ objects, pending operation results, and logical task cancellation.
 For persistent panel targets use `EditorPanelTarget::Source` with
 `EditorPanelSourceKind::Extension` and the project-relative locator. Hiding or closing the panel
 retires its draft only; reopening builds fresh panel state over the same document/history.
+
+## Independent GPUI Graph Consumer
+
+The [independently locked graph consumer](../../tests/fixtures/gpui-engine-consumer/README.md#typed-graph-consumer)
+demonstrates another source-built document using this same Host contract. `ValueGraph` owns
+typed nodes/links, validation, atomic commands, history and its JSON codec. Two GPUI panels
+observe one document while retaining independent selection, drafts, connection choice and view
+transforms. Their public canvas draws connections between the actual port geometry; no
+graph-specific engine or UI-kernel extension is required. Save/Reopen and close remain with the
+original EditorProjectSession.
+
+Use `--graph` on the prebuilt `gpui_view` example for interactive inspection, and `--smoke-graph`
+for its finite native workflow. The README supplies commands and GPU environment settings.
+Geometry observation publishes only after the original Window accepts the submitted frame.
+An automation caller must wait for the displayed document/revision it intends to operate;
+domain completion or a new submission count alone does not identify that frame. Panel handlers
+retain exact captured-basis validation even when a newer model is already available.
+
+This is a bounded value-graph integration consumer. It does not select the default Editor,
+deliver a complete Shader Graph or qualify independent engine Views and asynchronous compilation.
 
 ## Focused Verification
 

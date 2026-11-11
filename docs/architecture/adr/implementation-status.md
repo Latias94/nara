@@ -1114,6 +1114,21 @@ The new controls cover Authoring-to-Native projection refusal, exact child diagn
 empty-entity local references and receiving limits before codecs. No UI/default ownership or
 full Goal/R11/R12 completion follows.
 
+The [typed graph consumer](../../research/2026-11-11-open-gpui-engine-integration-layers.md#typed-graph-extension-consumer)
+continues R11c through the independent GPUI engine workspace. The bounded ValueGraph owns typed
+nodes/links, validation, atomic edits, content history and JSON; the original public Session owns
+exact revisions, Save/Reopen and close. Two panel entities keep separate drafts, preedit/conflict,
+connections, focus and pan/zoom while using public canvas/path and ordinary controls. Submitted
+geometry and its captured operation basis publish through the original Window transaction;
+automation cannot infer displayed identity from domain completion or a submission counter.
+This requires no production Open-GPUI change, Signal runtime, new GPU owner or Scene epoch
+contract. Domain/public Host `f954835` passes 11/11; native integration `0d12d38` passes original
+Scene, graph and work trajectories 3/3 on each of DX12 and Vulkan, with exact submitted input,
+fractional-scale connection pixels and original retirement. Correctness Clippy, feature-off
+all-target compilation, format and document checks pass; existing warnings remain. Two panels
+leave independent engine Views, late asynchronous compilation, docking,
+budgets, full R11c and frontend/game selection open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

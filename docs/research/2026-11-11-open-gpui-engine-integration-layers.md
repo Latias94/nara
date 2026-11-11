@@ -2,8 +2,9 @@
 
 Status: research synthesis and selected development direction; implementation remains partial.
 The implemented checkpoints qualify scoped Windows hosting, deferred submission, hosted logical
-roots and the first Nara-owned Host/Scene consumer. Complete engine/frontend and game-specific
-acceptance remain open.
+roots, Nara-owned Host/Scene composition, shared Editor projections, variable-height collections
+and a typed graph extension consumer. Complete engine/frontend and game-specific acceptance
+remain open.
 Date: 2026-11-11. Scope: independent framework hosting, rendering, component layers and engine use.
 
 ## Summary
@@ -1696,3 +1697,96 @@ preserves those values and source/observer limits instead of claiming a stable E
 budget. Sealed structural reuse adds no retained index, broad pure-validation exemption or
 new identity owner. UI state/layout/render, full Editor/game selection and remaining budgets
 stay independent and open.
+
+## Typed Graph Extension Consumer
+
+The next R11c consumer exercises the existing public extension document contract instead of
+introducing another reactive runtime or incremental Scene publication API. Nara's
+[ValueGraph](../../tests/fixtures/gpui-engine-consumer/src/graph.rs) owns Scalar/Vector constants,
+scalar Add and one Output, bounded typed links, complete cycle validation, atomic commands,
+content history and a content-only JSON codec. Its limits are 64 nodes, 128 links, 64 combined
+Undo/Redo snapshots and 64 KiB of source. The original EditorProjectSession owns document and
+revision admission, exact outcomes, asynchronous Save/Reopen and physical close. A fresh source
+incarnation fences actions captured before Reopen. This domain/public Host unit is committed at
+Nara `f954835`; its focused qualification passes 11/11
+(`571ca78b-4abd-4c6b-b482-c508e4de9537`). No production framework code changes in this
+consumer; Open-GPUI remains at `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`.
+
+Two [GraphPanel](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/graph_panel.rs)
+entities share one immutable domain observation. Selection, scalar draft/preedit/conflict,
+pending connection, pan, zoom and focus remain local to each panel. An external edit retains
+another panel's dirty draft and refuses Apply until explicit Reload. Public canvas/path drawing
+uses the same prepaint port geometry and clipping as ordinary button controls; source commands
+still carry their exact captured document/revision. Keyboard arrows move a focused node and
+Delete removes it. New nodes choose an available bounded position instead of covering a node
+after deletion. The fixture does not add a graph-specific framework primitive or graph compiler.
+
+The native trajectory exposed an observation error: a domain revision and an increased GPU
+submission count did not prove that the current frame displayed that revision. Model observers
+had synchronized, but an older focus frame could still be submitted before the successor.
+Its stale keyboard callback correctly refused. Graph geometry and its operation basis now
+publish only through the original `record_prepaint_window_transaction`; rejected candidates
+retain the previous publication, while accepted removal/invalid geometry clears it. Automation
+waits for both panels' submitted basis to match the domain before the next action, without
+replacing the captured basis, forcing focus or inserting sleeps. The same publication owns
+control observation and the GPU connection probe.
+
+Pending frame demand can coexist with a correct submitted frame. An early overstrict check
+rechecked demand after an App observation and would not advance under the original external
+loop. Observations now use read-only window access, and the exact submitted basis remains the
+operation condition even when that observation schedules later work. This does not admit an
+unsubmitted successor: ordinary input still uses the original rendered dispatch tree and its
+captured source/revision.
+
+The local DraftInput also retains the committed buffer and selection across preedit. Cancel or
+blur restores that snapshot; Apply refuses unfinished composition and preserves text focus.
+This is a correction to the independent consumer's field, not a replacement shared text system.
+
+Incremental Preview remains a separate possible successor. Prepared commands and inverse
+history do not supply a complete continuous forward invalidation stream across structural edits,
+Undo/Redo, Reopen, Schema and dependency changes. The existing
+[Scene epoch contract](../architecture/editor-preview-projection-lifetime-design.md) stays in
+force; an in-place successor must preserve its original identity/admission owners and define
+delta/fallback semantics explicitly. Neither this graph nor the earlier compiler cost
+corrections selects Signal bindings, persistent layout, upload/raster caching or a compositor
+thread. Two graph panels do not qualify independent engine Views, asynchronous Shader Graph
+compilation, general docking, physical input, numerical budgets or full R11c/R11f.
+
+### Graph Consumer Qualification
+
+The native integration is committed at Nara `0d12d38`. November 12 qualification uses Rust
+1.95.0, serial Cargo, one build job and the existing root target. The graph mode and prior Scene
+mode share the original Nara Host, HostedSurface, device/queue, immutable outputs, deferred
+submission, input and retirement owners.
+
+| Scope | Actual result | Nextest run |
+| --- | --- | --- |
+| Domain and ordinary public Host | 11/11 | `571ca78b-4abd-4c6b-b482-c508e4de9537` |
+| Windows/DX12: graph, original Scene smoke and five-case work probe | 3/3 | `e3124ddb-9975-43aa-9498-f829cc7e07a7` |
+| Windows/Vulkan: the same three complete trajectories | 3/3 | `80bdde6b-380f-4578-aa72-fcd20641cc03` |
+
+Both native runs select RTX 4090 and `Bgra8UnormSrgb`. Each graph trajectory completes 48 actual
+UI submissions, independent draft/conflict handling, typed refusal, Undo/Redo, original
+Save/Reopen, preedit Apply refusal/cancellation, successive arrow edits, Delete, nonoverlapping
+successor creation and focused Enter activation. The fractional-scale 1.25 connection probe
+finds 23 matching pixels in its 7-by-7 neighborhood. Its one same-Scene offscreen diagnostic
+replay uses the original window submission; this is neither a swapchain readback nor scanout.
+Both close through the original native frame custody while an independent producer remains
+alive, with zero native GPUI renderer creation. Input is injected through the existing native
+adapter, not physical OS keyboard/IME delivery.
+
+The prior Scene trajectory retains all Source/Cooked color/alpha, 4096-byte draft, IME,
+submitted input, selection/property/history, geometry, refusal/panic and retirement assertions;
+each backend observes 32 submissions, 11 discarded candidates, two intentional paint failures
+and five diagnostic replays. Both five-case work probes retain original complete source/render/
+call-count checks and finish with zero retained native frames and no diagnostic replay. These
+runs are regression qualification, not a newly selected timing baseline or improvement claim.
+
+Independent domain/Host and UI reviews close the reported placement, composition/focus and
+observation findings; the final presented-basis review has no remaining P1/P2. Final all-target/
+all-feature correctness Clippy, no-default-feature all-target compilation, package formatting,
+changed-document links/fragments and whitespace checks pass. Existing warnings remain. The lock
+adds only direct consumer edges to the already resolved Serde packages; package versions,
+sources and checksums do not change. No complete unchanged framework/Scene suite is rerun for
+this isolated consumer. Keep remaining R11c two-View/late-result, game execution and numerical
+cost acceptance separate.

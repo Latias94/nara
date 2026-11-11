@@ -4054,9 +4054,49 @@ workflows remain open.
 **Dependencies:** R11b, existing `EditorExtensionDocument` lifecycle and selected R8/R9 render
 Feature/program/output contracts. Do not wait for a full material system or native multi-window.
 
-**Files:** the component/custom-draw owner selected by R11b, `crates/nara_ui_render/`, current
-render Feature/output adapters and planned
-`tests/fixtures/editor-ui-host-consumer/tests/graph_document.rs`. Extend actual
+#### Typed graph consumer execution
+
+After the measured source/preview owner corrections, proceed with the independently compiled
+`tests/fixtures/gpui-engine-consumer` rather than inventing incremental Preview materialization.
+Current prepared patches/history do not expose a complete continuous semantic invalidation set;
+SceneProjection's successful epoch replacement remains the existing contract. A future delta
+requires original document/history facts, exact source/Schema/dependency admission and an
+explicit Scene/Identity publication contract, not treating an inverse as a forward edit.
+
+The selected finite consumer is a typed value graph with scalar/vector constants, scalar Add
+and Output nodes. Its source-built EditorExtensionDocument owns bounded nodes/links, typed
+input admission, cycle/duplicate refusal, one atomic command/history and JSON codec. The
+existing EditorProjectSession owns document revisions, exact command outcomes, Save/Reopen and
+close. Keep graph evaluation a finite domain preview, not a universal graph/compiler service.
+
+Compose two independent GPUI panel instances over that one immutable graph projection. Use
+public custom canvas/path and ordinary controls for typed connections, selected scalar editing,
+pan/zoom and keyboard actions. Draft/focus/selection/view transforms stay panel-local; stale
+document/revision commands refuse. Verify create/connect/edit, invalid type/cycle refusal,
+Undo/Redo, Save/Reopen, source incarnation retirement and late action refusal through the public
+Host. Extend the same logical-root/native renderer consumer with a separate graph trajectory;
+preserve its existing source/preview/cost trajectories and one GPU/submit/input/retirement owner.
+Custom path geometry, scale/clip and actual presented input must have native evidence before
+claiming the graph panel qualified. Two graph panels do not by themselves qualify two independent
+engine Views, asynchronous preview compilation, complete Shader Graph/Timeline, general docking
+or full R11c. Retain those remaining acceptance requirements below.
+
+The [qualified implementation](../research/2026-11-11-open-gpui-engine-integration-layers.md#graph-consumer-qualification)
+is committed as `f954835` (domain/public Host) and `0d12d38` (native integration). Domain/public
+Host passes 11/11; the complete graph, original Scene and five-case work probe pass 3/3 each on
+Windows/DX12 and Vulkan. Both graph runs retain exact submitted control geometry/revision,
+independent drafts, original persistence/history, repeated keyboard edits, IME cancellation and
+fractional-scale connection pixels, with no new GPU/input/Window owner. The work probes retain
+their call/count and retirement checks; this is no new numerical budget or timing improvement.
+Independent reviews and final correctness Clippy, feature-off all-target checks and formatting
+pass. Keep remaining independent engine Views, late preview completion and docking acceptance
+open. Do not substitute an inverse-history patch for a complete forward Preview invalidation
+contract to accelerate those consumers.
+
+**Current consumer files:** `tests/fixtures/gpui-engine-consumer/src/graph.rs`, its domain tests,
+`tests/graph_document.rs` and `examples/gpui_view/{engine/graph,graph_panel,graph_smoke}.rs` in
+that independently locked workspace. The existing logical-root, render Feature/output and
+original Host adapters remain the integration owners. Extend
 `tests/fixtures/render-composition-consumer/tests/composition.rs` and
 `crates/nara_render/src/runtime/tests/view_lifecycle.rs` only for changed shared behavior.
 
