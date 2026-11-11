@@ -884,6 +884,17 @@ consumer checks qualify this import. Metal remains compile-only. Logging, remain
 dispositions, numerical costs and actual Nara GPU/Host/View acceptance stay open; there is no new
 Nara dependency or default decision.
 
+The [standalone logging and Window successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-standalone-logging-win32-dispatch-and-window-interfaces)
+records Open-GPUI `9e7b9c3a36f`, `9d9602bb46d` and `655e9610c77`: official Apache logging/tracing and
+Win32 workers/timers retain application globals and the existing foreground/native owners.
+Logger/SumTree 27/27, independent ordinary hosts 2/2 and 3/3 and actual Rust 1.93/wasm checks
+pass. Window/Inspector follows admitted focus, geometry and unwind recovery; affected
+Core/public/Windows 53/53 and Inspector Gallery 2/2 pass. The confirmed
+Wayland inactive-window IME omission, InputPreference event, FocusMap drop queue,
+focus-lost ancestor query, final fixed-target dispositions and real Nara
+GPU/Host/View consumer still precede maintenance handoff. No Nara dependency, UI default or
+full R11/R12/R11f gate changes follow.
+
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
 producer-local retirement. GPUI's current native renderer still owns device/surface/submission,

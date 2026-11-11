@@ -5540,3 +5540,53 @@ Continue the official logging dependency and residual API/dispatch dispositions,
 off framework maintenance. The independently locked renderer consumer does not bridge the
 two WGPU package identities or prove Nara-owned target encoding, exact View compositing or
 input mapping. This record changes no Nara dependency, UI default or R11/R12/R11f status.
+
+## November 11: Standalone Logging, Win32 Dispatch And Window Interfaces
+
+Open-GPUI restores official standalone logging at
+`9e7b9c3a36fb0266ef68ec7ee7280b2eb8646554` and Win32 background dispatch at
+`9d9602bb46d5a66fc70ef1108073433fc7ce0e12`, against unchanged Zed target
+`635026fabc38440fce5e1767d125026a17b12012`. The source-verified Apache relicense
+`ac5af8b9e1` supersedes the earlier logging exclusion. Local packages preserve the complete
+logger, disabled instrumentation macro and native/browser tracing layer mechanisms. GPL
+application settings remain outside the framework. Explicit Cargo selections replace Zed's
+build policy; the application still installs its logger, subscriber and any profiled allocator.
+Linking Tracy alone does not start its native client. SumTree uses the official instrumentation
+facade, separately from GPUI's foreground task/frame profiler.
+
+The official Win32 pool and one-shot timer replace WinRT while preserving the existing
+foreground queue, HWND validation and RAII task timing. Native callback custody remains exact;
+failed submissions leave the awaitable pending rather than prematurely resolving a timer.
+This does not introduce OS-allocation-failure recovery or a new scheduler owner.
+
+Logger/SumTree tests pass 27/27 after actual target-filtering and sink-retry corrections.
+Independent ordinary hosts pass 2/2 and 3/3, including real List/SumTree spans and host-owned
+global installation without test support. Logger/tracing/SumTree pass actual Windows Rust 1.93
+all-target/all-feature checks, and the Web instrumentation closure compiles for wasm. These
+results do not establish a Tracy capture or execution of browser Performance Measure events.
+
+The scoped Window successor at `655e9610c77299e7704b0513f1bd77bf815b662c` adopts creation
+and prompt facts, entity-owned pending-input
+pause/resume, visible-area centering and per-window lazy Inspector identities/factories. The
+existing focus/context, candidate admission and committed geometry remain authoritative. A
+first-use Inspector factory panic exposes a fork recovery seam: a rejected draw must restore
+App registrations and the original Window Inspector before rethrowing. The Open-GPUI
+verification record owns that correction. Final affected Core/public/Windows tests pass
+53/53, including the two-window panic/retry control; the two existing projected-geometry and
+three-state Inspector Gallery trajectories also pass after the correction.
+The Inspector-disabled release configuration, affected correctness Clippy and Core/Windows
+all-target compilation on actual Rust 1.93 pass. Platform and numerical-cost limits retain
+their own recorded scope.
+
+The final source inventory separately confirms one earlier deferred Wayland omission:
+`137e677a05` skips IME enablement updates from inactive windows, while the current fork's
+leased-handler adaptation lacks that gate. Mac traffic-light frame/tracking-area updates are
+already present in the qualified typed-AppKit successor. A bounded final Core check also
+confirms the remaining public InputPreference event (`86c20cc911`), FocusMap drop queue
+(`e463c5ab74`) and callback-scoped nearest-live-ancestor query (`b2d9c2e122`). Existing
+text-first binding behavior and focus cleanup do not implement those public/structural
+mechanisms. Keep these explicit residuals, final source dispositions and the
+[real Nara GPU/Host/View consumer](#november-10-modular-gpu-and-host-source-map)
+ahead of maintenance handoff. Nara's WGPU package identity, external encoding, immutable output
+leases and exact View presentation/input still need their concrete consumer; this evidence
+changes no dependency, toolkit default or full fixed-target/R11/R12/R11f gate.

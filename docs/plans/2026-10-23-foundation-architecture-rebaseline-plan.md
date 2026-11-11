@@ -2516,6 +2516,17 @@ passes 99/99 at the shared checkpoint, final WGPU 25/25 and independent consumer
 Native Metal execution and rendering costs stay open. Continue logging and final API/dispatch
 dispositions before the actual Nara GPU/Host/View consumer; no toolkit default changes here.
 
+The [standalone logging and Win32 successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-standalone-logging-win32-dispatch-and-window-interfaces)
+records Open-GPUI `9e7b9c3a36f`, `9d9602bb46d` and `655e9610c77`. Complete Apache logger/tracing owners
+retain application-owned globals, and official Win32 workers/timers retain the foreground and
+native lifetime owner. Logger/SumTree 27/27, independent hosts 2/2 and 3/3, actual Rust 1.93
+and wasm instrumentation compilation pass. The scoped Window/Inspector successor retains
+admitted focus, geometry and unwind recovery, with affected Core/public/Windows 53/53 and
+Inspector Gallery 2/2 passing. Final source review confirms the still-missing
+Wayland inactive-window IME gate, public InputPreference event, FocusMap drop queue and
+focus-lost ancestor query; fixed-target closure and the actual Nara GPU/Host/View
+consumer remain prerequisites before independent framework-maintenance handoff.
+
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;
 independent Runtime UI is not required to adopt the Editor toolkit. The complete R11/R12 gates
