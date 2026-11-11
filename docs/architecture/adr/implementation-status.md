@@ -1056,6 +1056,23 @@ The separate optimized allocation-enabled DX12 pair also passes 2/2. Calling-thr
 churn and process requested-live gauges retain separate scopes; they do not qualify total memory
 or leaks. No production framework/default mechanism changes.
 
+The [source-drive attribution and indexed hierarchy successor](../../benchmarks/2026-11-04-ui-work-baseline.md#original-source-and-editor-drive-attribution)
+at `9715832a0b7` and `f1330617bc1` locates the dominant interval in Scene materialization and
+replaces the original hierarchy
+candidate/Vec replay with sparse indexed sequential validation and one final touched-owner
+projection. ADR0100 records final-value publication and complete intermediate lifecycle admission;
+ADRs0100/0101 retain exact order, no-flush custody, non-linked lifetime and completion invalidation.
+Root membership indexes use full Entity identity. Large replacement, invalid tails, frontier,
+recycling/storage and source-epoch tests keep unmanaged state and exact identity retirement.
+Optimized DX12/Vulkan smoke/probe pairs and separate DX12 allocation pair each pass 2/2 with
+unchanged source/render counts. Both backend edit controls meet the predeclared local
+materialization P95 below 150 ms; remaining source compilation/materialization and large
+allocation churn stay measured follow-ups. No GPUI, Editor/game default or full-budget claim
+follows; the complete Goal and R11/R12 remain open.
+Affected Runtime UI/Render pass 176/176 and independent public Scene preparation/spawn/identity
+consumers pass 21/21; core hierarchy/Scene/Transform and corrected large-source coverage remain
+identified separately in the cost record. No independent-consumer lock change is required.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

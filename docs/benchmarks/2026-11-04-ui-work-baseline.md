@@ -1074,3 +1074,188 @@ added document links/fragments and whitespace checks. The final cleanup uses the
 integer `is_multiple_of(2)` spelling in both alternating-edit checks; it changes no workload.
 Only the independent fixture's optional profiler/allocator dependency closure is added; no
 existing locked package is removed or upgraded. Remote CI is not run or published.
+
+## Original Source And Editor Drive Attribution
+
+The next unit begins from Nara `d2226c8` and preserves the same source, original prepared edit,
+history, preview and frame publication. Four fixture scopes subdivide the existing mutation:
+basis/selection observation, original preparation, action dispatch/commit and Editor frame drive.
+No validation, materialization or model work moves outside the operation. Shared dispatch helpers
+retain the original drive-before-outcome-check order. The first check catches a changed closure
+error-inference context; explicit `anyhow::Result` preserves the previous conversion behavior.
+The complete attribution implementation is `9715832a0b701beacb90f274a1eb1680fb600d73`;
+the indexed hierarchy/Scene implementation and ADR0100 refinement are
+`f1330617bc1c1d4ab41383b52bb547bb19cd6ea5`. Later qualification-document changes affect no
+runtime. Maintained Open-GPUI remains `f75c10b2a9bf7b4dcb2c8c2aa446203997601369` throughout.
+
+An optimized DX12 probe passes 1/1, `ad184ef5-e81b-4188-abb1-2ad7a7b51bfc`, before adding the
+deeper tracing scopes. The same five cases retain eight warmups and 64 samples. Source-step
+elapsed milliseconds are P50 / P95 / max, nested inside the existing mutation interval:
+
+| Case | Selection/basis | Prepare | Dispatch/commit | Editor drive |
+| --- | --- | --- | --- | --- |
+| Local property edit | 0.272 / 0.553 / 0.929 | 17.850 / 23.097 / 26.285 | 0.382 / 0.662 / 0.704 | 318.969 / 353.891 / 409.057 |
+| Property edit, broad refresh | 0.271 / 0.387 / 0.714 | 17.785 / 21.353 / 36.917 | 0.389 / 0.642 / 0.855 | 322.166 / 360.942 / 366.392 |
+
+This evidence prioritizes the original frame-drive subdivision. The optional standard
+`editor-work-observation` tracing feature therefore emits static spans for preview, source
+compilation, preview drive, Runtime, materialization and model publication. It is disabled by
+default and installs no engine subscriber. The ordinary consumer installs a current-thread
+Registry layer filtered to those spans and retains it for its observation lifetime. Timing
+includes subscriber overhead; inclusive parent/child spans and their percentiles are not
+additive or exclusive CPU time. Outer source-step allocation counters remain separately scoped.
+This observation is not a new shared profiler, mutation owner or scheduling mechanism.
+
+The deeper optimized DX12 run passes 1/1, `355f5eb9-fc1e-4773-a11d-6ad652ea3fe1`, retaining
+the same five workloads and all original source/render/retirement counts. Each of the six
+owner spans is reached exactly once per measured property edit. Its local-edit source drive
+is 309.205/334.945/362.527 ms; the nested reached intervals are:
+
+| Local-edit owner span | Elapsed ms P50 / P95 / max |
+| --- | --- |
+| Preview total | 307.894 / 332.411 / 361.287 |
+| Preview source compilation | 80.251 / 84.762 / 99.882 |
+| Preview drive | 226.667 / 247.122 / 273.361 |
+| Preview Runtime | 224.785 / 245.171 / 271.399 |
+| Preview materialization | 223.628 / 243.931 / 270.197 |
+| Editor model publication | 1.189 / 1.755 / 2.520 |
+
+The broad-refresh materialization control is 222.997/230.612/270.046 ms. These observations
+identify materialization as the largest reached subinterval, not a measured cost for one
+function within it. Source review then finds quadratic sibling lookup/anchor/removal in the
+original hierarchy candidate and commit replay, plus root-membership scans during Scene
+retirement. A maintained-root index and sequential indexed batch can address that owning path
+without changing which entities, checks or side effects the Scene publishes.
+
+Before implementation, the selected consumer's target is materialization P95 below 150 ms
+for both property-edit cases, with identical source/render counts and complete source/history,
+input, failure/retirement controls. The algorithmic scope is sibling maintenance proportional
+to touched siblings and operations, apart from existing ancestor/cycle validation. Retained
+membership storage is explicit; the public ordered root/child slices and lifecycle/atomicity
+contracts remain intact. This target does not set a general engine frame SLA or make the
+remaining ~80 ms source-compilation path disappear.
+
+### Indexed Batch Implementation And Correctness
+
+`nara_hierarchy::CandidateTopology` now lazily indexes each reached sibling set with complete
+Entity-keyed previous/next links. Placement ownership and exact anchors follow the sequential
+candidate; moving/removing/inserting no longer repeatedly scans or shifts its ordered Vec.
+After complete operation and lifecycle admission, `PreparedHierarchyBatch` owns the final
+touched-owner root/child sequences and final placements. The original commit applies those
+projections once. It still invalidates completion/advances the root epoch for a nonempty batch,
+and keeps its no-flush/no-hierarchy-mutation custody requirement. No compatibility replay or
+second relation remains. Standard public ordered slices and non-linked entity lifetime remain.
+
+`HierarchyRoots` additionally owns a full-Entity membership set, rebuilt from its final ordered
+sequence; Scene replacement builds one retirement-membership set for its anchor search. The
+retained root index is O(peak live roots) requested capacity for that World and does not shrink
+on every retirement. It holds only current root keys. Transient sibling indexes are O(reached
+siblings); operation/lifecycle records remain O(batch operations). Cycle checks can still walk
+ancestors, explicit diagnostic/private preparation still validates the hierarchy, and standalone
+public current-placement lookup retains its ordered-slice scan. This is not a universal O(1)
+hierarchy or allocation-free mutation claim.
+
+The first three-library run, `1517699b-bdc4-4f3c-9d5f-77abb3a39261`, passes hierarchy 43/43,
+Scene 772/773 and Transform 36/36. Its one new Scene test incorrectly expects total World
+population to equal source roots plus two unmanaged roots, overlooking internal observer
+entities. The correction records and compares the exact non-Scene population through every
+replacement and final clear, retaining strict root/entity/identity checks. The corrected test
+passes 1/1, `34e78d1b-4d4c-4906-9fc1-f97d5240f871`; production code is unchanged by that fix.
+
+New owner controls cover 4,096 parallel roots, four replacements preserving unmanaged sibling
+positions, invalid-tail failure atomicity, original frontier promotion, canceled intermediate
+lifecycle targets, remove/reinsert and anchors, and independent despawn admission. A sparse
+control repeatedly edits three children among 2,048 unrelated sibling sets and checks that
+candidate storage stays local. Six 2,048-root recycle/retirement rounds verify full-Entity
+membership and stable capacity at fixed population, including actual ECS index reuse. The
+public Scene projection control performs four 2,048-root source epochs with alternating order,
+old-domain/entity refusal, unmanaged neighbors and final clear. These are correctness/storage
+controls, not elapsed-time gates or whole-process leak measurements.
+
+Independent source review finds no P1/P2 in either observation or indexed batch. ADR0100 now
+explicitly separates sequential validation/final-value publication from fabricated intermediate
+component events; admission still examines every operation target even if final values cancel.
+Actual final relation changes and original completion remain observable. Foreign lifecycle
+observers/hooks are still refused before any mutation. Review does not replace dynamic tests.
+
+### Matched Indexed-Batch Native Results
+
+The optimized indexed implementation passes original smoke plus the full probe on DX12, 2/2
+(`856c1495-2005-4cd1-93f0-2cf300da191f`), and Vulkan, 2/2
+(`3d5c03b4-9125-4ae9-965c-ee78cdfa8641`). The fixed source, eight warmups/64 samples per case,
+fonts, geometry, device/target and observation feature remain as above. The implementation
+rebuild takes 13m48s, outside every sample. No measurement diagnostic readback is enabled.
+
+Elapsed milliseconds **P50 / P95 / max** for the two edited-source controls:
+
+| Backend / case | Preview materialization | Preview source compilation | Original Editor drive | Entire owner sample |
+| --- | --- | --- | --- | --- |
+| DX12 / local edit | 85.291 / 104.706 / 126.061 | 80.039 / 89.399 / 104.152 | 170.041 / 198.505 / 236.745 | 193.599 / 222.068 / 264.071 |
+| DX12 / broad refresh | 86.696 / 94.851 / 117.399 | 80.105 / 85.144 / 93.440 | 172.011 / 186.039 / 202.113 | 195.577 / 213.698 / 225.480 |
+| Vulkan / local edit | 85.082 / 90.708 / 119.763 | 80.076 / 98.869 / 109.438 | 170.132 / 193.818 / 203.043 | 193.951 / 224.564 / 228.775 |
+| Vulkan / broad refresh | 86.407 / 109.762 / 140.246 | 79.870 / 86.589 / 106.177 | 171.477 / 195.068 / 252.903 | 194.893 / 218.494 / 280.885 |
+
+Both backends and both edit controls meet the predeclared materialization P95 target below
+150 ms. Against the same traced DX12 baseline, local-edit materialization changes from
+223.628/243.931 ms P50/P95 to 85.291/104.706 ms; broad-refresh materialization changes from
+222.997/230.612 to 86.696/94.851 ms. These are selected-workload observations on the shared
+reference machine, not hardware-isolated tail guarantees or a general engine speedup. Parent/
+child phase distributions remain nonadditive. The Vulkan result is a second backend acceptance,
+not a traced pre/post Vulkan ratio.
+
+All five query/page/notification/View/row/draw/recorder/submission work totals exactly match
+the preceding table in both runs. Each of the six owner spans is observed once per source edit;
+the local edit still preserves Hierarchy/row reuse, broad refresh still rebuilds them, and
+actual native candidate occupancy reaches zero on retirement. Source/history, text/IME,
+Source/Cooked colors, refusal/panic, geometry/scale and independent-producer close controls
+remain in the separately executed smoke. Frame correctness has not transferred to a new owner.
+
+The remaining approximately 80 ms preview-source compilation and 85 ms materialization are
+still substantial. The next attribution should refine the remaining original compilation/
+materialization stages, preserving complete admission and public workflows. This result does
+not make the source operation incremental, eliminate full-source preparation/query work or
+close R11a/e latency, allocation, GPU, input, memory or running-Game budgets. Open-GPUI and
+the Engine's default frontend remain unchanged.
+
+The separate indexed allocation-enabled DX12 pair also passes 2/2,
+`d7a91104-9dd5-4212-887d-f87b98f7ce1f`, including the same complete smoke and six-span call
+checks. Its local-edit calling-thread allocations, summed over 64 samples, are:
+
+| Scope, nested source rows belong to mutation | Requests | Requested bytes |
+| --- | --- | --- |
+| Entire mutation | 79,130,448 | 12,952,233,192 |
+| Source selection/basis | 641,920 | 85,904,000 |
+| Source preparation | 3,398,400 | 1,542,803,584 |
+| Source dispatch/commit | 643 | 2,357,824 |
+| Original Editor drive | 75,089,357 | 11,321,164,840 |
+
+Mutation still averages 1,236,413 requests and 202,378,644 requested bytes per edit; source
+drive accounts for about 1,173,271 requests and 176,893,201 requested bytes. These are churn,
+not live memory or per-span allocations. The phase sum need not exactly equal its parent,
+which includes observation/validation work outside the named subcalls. Allocation-mode clocks
+remain separate from the CPU-only result. No allocation reduction is claimed.
+
+Compared with the preceding allocation run without source subdivisions/tracing, observed
+mutation request bytes are about 1.465 MB higher per edit. That comparison changes observer
+coverage as well as the hierarchy representation, so it does not isolate index overhead. The
+five process requested-live gauges are 65,763,511; 65,845,183; 70,489,368; 70,522,632;
+70,722,324 bytes. They include history, trace/subscriber/sample state, allocator timing and
+other threads, not just the root index. The observed difference cannot establish native heap,
+peak retention or a per-cache size. The owner tests separately verify live membership keys,
+fixed-population capacity and actual Entity index recycling. Whole-process and GPU memory
+remain unqualified; measured native candidate occupancy still reaches zero at close.
+
+Affected UI/Render libraries pass 176/176 (`91bf3be6-45ce-45bf-934b-385ab6de715f`): Runtime UI
+125 and neutral Render 51. Independently locked public Scene spawn, preparation and durable
+identity consumers pass 21/21 (`9ed2edc4-a374-42a4-a84b-1dd652a2e810`), including late lifecycle
+observer refusal and exact prepared-basis/identity retirement. Their lockfile remains unchanged.
+These complement the hierarchy 43, Scene 772 plus corrected wide-root control, and Transform
+36 checks above; they are not a fresh aggregate Editor/framework/platform matrix.
+No remote CI or publication is performed.
+
+Final all-target/all-feature correctness Clippy passes for hierarchy/Scene/Transform/UI/Render
+and the independent GPUI engine consumer with `-D clippy::correctness`. Existing other warning
+categories remain outside that gate. The locked consumer all-target no-default-feature check
+passes, verifying the observation feature-off path; root and isolated-consumer formatting,
+TOML/lock parsing, added links/fragments and whitespace checks pass. No new compiler floor,
+foreign native/browser execution, GPU timing or complete framework matrix is qualified.

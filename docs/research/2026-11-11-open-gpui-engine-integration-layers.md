@@ -1589,3 +1589,56 @@ and 200.913 million requested bytes per edit. These are allocation churn, not li
 per-View memory. Process gauges include history, traces and background activity. Original native
 candidate occupancy reaches zero at retirement. Full GPU/upload/heap and numeric-budget
 qualification stays open; these observations strengthen attribution of the original source path.
+
+## Measured Source Drive And Hierarchy Batch Locality
+
+Local implementation: attribution `9715832a0b701beacb90f274a1eb1680fb600d73`, indexed
+hierarchy/Scene `f1330617bc1c1d4ab41383b52bb547bb19cd6ea5`.
+
+The next attribution keeps maintained Open-GPUI unchanged and subdivides Nara's original
+property operation. The first four-scope optimized DX12 probe passes 1/1 and identifies frame
+drive rather than selection/preparation/commit as the largest interval. Optional standard
+`tracing` spans then locate the dominant reached subinterval in Scene materialization:
+223.628/243.931 ms P50/P95, compared with source compilation 80.251/84.762 ms and Editor model
+publication 1.189/1.755 ms. The [attribution record](../benchmarks/2026-11-04-ui-work-baseline.md#original-source-and-editor-drive-attribution)
+owns exact runs, inclusive timing and observer limits. This evidence supersedes attributing
+the previous combined ~330 ms interval to source preparation alone.
+
+Source inspection finds quadratic repeated sibling membership, anchor lookup, removal and
+sequence movement in the original runtime hierarchy candidate/commit path. The complete
+10,001-root source exercises replacement and retirement, so root membership matters as well as
+initial append. The selected owning refactor uses private indexed candidate links only for
+touched sibling sets, then materializes final ordered projections through the same prepared
+batch. The original root owner maintains complete-Entity membership beside its ordered slice;
+Scene uses one retirement set when selecting the replacement occurrence. No GPUI mechanism,
+domain command, Runtime or identity owner is replaced.
+
+ADRs0100/0101 retain ordered runtime authority, full sequential validation, exact anchors,
+failure atomicity and the prepared no-flush/no-hierarchy-mutation interval. Lifecycle admission
+still visits every reached operation target even when final values cancel. A nonempty batch
+invalidates completion and advances the original epoch; unchanged final parent values need no
+synthetic remove/reinsert. The new private links are preparation data, not linked entity lifetime
+or a second structural relation. Root-index storage and transient touched-sibling state remain
+explicit costs. Public slices, cycles, independent/unmanaged state and exact source retirement
+remain mandatory acceptance.
+
+The predeclared selected-consumer target is materialization P95 below 150 ms for both edit
+controls, with unchanged source/render work counts and complete original native recovery/input/
+retirement workflow. This is a local optimization target, not a general Editor frame SLA.
+Source compilation, source preparation and remaining whole-source work need their own evidence;
+the UI state/layout/compositor choices stay independent of this materialization correction.
+
+The indexed replacement's full optimized smoke/probe passes on DX12 and Vulkan, 2/2 each, and
+in a separate DX12 allocation build, 2/2. Both edit controls meet the declared materialization
+P95 below 150 ms: DX12 104.706/94.851 ms, Vulkan 90.708/109.762 ms, with identical query,
+projection, View/row, draw/record/submission counts and exact native retirement. The traced
+DX12 local-edit baseline was 243.931 ms P95. Complete hierarchy/Scene/Transform coverage and
+selected storage/large-root tests retain their separately reported scope in the cost record.
+No general engine SLA or incremental-source claim follows.
+
+Allocation churn remains high, approximately 202.379 MB requested per local edit. New deep
+observer coverage and indexing both differ from the preceding allocation run; absolute
+outer-source steps identify remaining drive/preparation churn without attributing all delta
+to the index. Process gauges are not native/peak/cache memory. Preview compilation and remaining
+materialization are still roughly 80/85 ms P50, so the next owning attribution stays in Nara.
+This correction changes no production Open-GPUI mechanism or selected Editor/game default.

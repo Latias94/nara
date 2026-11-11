@@ -1509,6 +1509,53 @@ local source/drive interval averages about 1.236 million allocation requests and
 requested bytes per edit; these are churn, not live memory. The report retains the failed debug
 invocation and subsequent lifecycle/mode-validation corrections separately from final evidence.
 
+The attribution successor preserves the same source operation and five workloads. Add four
+nested fixture intervals around basis/selection observation, prepared property editing, action
+dispatch/commit and the original Editor frame drive. Reuse the current optional observer and
+the same actual source/history owner; do not defer or omit validation, preview work or model
+publication to make the mutation interval smaller. Require complete nested records for both
+property-edit cases, then run the optimized native probe before selecting a production change.
+These subdivisions include their original calls' allocations and remain nested in mutation;
+their percentiles cannot be added. If one stage dominates, refine that owner with an exact
+current-source baseline and retained correctness controls.
+The first native subdivision identifies original frame drive as the dominant interval. Refine
+it with optional standard `tracing` spans at preview compilation, preview driving, Runtime
+execution, materialization and model publication. The existing application installs its own
+thread-scoped subscriber; the engine installs none. Keep this diagnostic feature off by default,
+and label inclusive/nested wall-time intervals and subscriber overhead. No second profiling
+kernel, work scheduler or public timing-state owner is introduced.
+
+The scoped native trace identifies materialization as the largest reached interval: local-edit
+P50/P95 is approximately 223.6/243.9 ms, versus preview compilation 80.3/84.8 ms and model
+publication 1.2/1.8 ms. Source review locates quadratic sibling membership/anchor/removal work
+in the existing hierarchy batch and root retirement. Refactor that original private candidate
+and publication path to indexed sequential edits and one ordered projection materialization,
+retaining public ordered slices, exact anchors, cycles, lifecycle admission, failure atomicity,
+frontier promotion, generations and original Scene replacement. No second hierarchy owner or
+changed source/validation workload is allowed. Keep sparse operations local to touched sibling
+sets rather than eagerly cloning the entire World hierarchy. For the selected 10,001-root
+consumer, predeclare materialization P95 below 150 ms with unchanged source/render work counts;
+also qualify large root replacement/churn and invalid-tail atomicity. This is a scoped target,
+not a general engine SLA. Record the extra owned membership-index storage and remaining
+compiler/whole-source work separately; missing the target requires further attribution.
+
+The indexed candidate/final-projection replacement is `f1330617bc1c1d4ab41383b52bb547bb19cd6ea5`,
+using attribution `9715832a0b701beacb90f274a1eb1680fb600d73`. It passes the original smoke and complete
+probe on DX12 2/2 (`856c1495-2005-4cd1-93f0-2cf300da191f`) and Vulkan 2/2
+(`3d5c03b4-9125-4ae9-965c-ee78cdfa8641`), plus the separate DX12 allocation pair 2/2
+(`d7a91104-9dd5-4212-887d-f87b98f7ce1f`). Source/render work counts remain identical. Local-edit
+materialization P50/P95 changes from traced DX12 223.628/243.931 ms to 85.291/104.706 ms;
+broad-refresh P95 is 94.851 ms. Vulkan P95 is 90.708/109.762 ms for the same controls. All meet
+the scoped target, without a general tail/SLA claim. Allocation churn remains about 202.379 MB
+requested per edit; added observation coverage and indexing prevent attributing its delta to
+one structure. The cost report keeps that storage tradeoff and initial test-fixture correction.
+Next refine the remaining original compilation/materialization costs, still approximately
+80/85 ms in the selected local edit, rather than changing GPUI's state/layout/render mechanism.
+Affected UI/Render controls pass 176/176 and independently locked public Scene preparation/
+spawn/durable-identity workflows pass 21/21. The core run covers hierarchy 43, Scene 772 plus
+the corrected large-source control, and Transform 36. Complete Goal, R11/R12, full Editor/game
+adoption and remaining numerical budget cells stay open.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The
