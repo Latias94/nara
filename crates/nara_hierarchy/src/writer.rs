@@ -113,7 +113,7 @@ pub struct HierarchyWriter<'world> {
 /// retain exclusive control of the target World between preparation and commit.
 #[must_use]
 pub struct PreparedHierarchyBatch {
-    resolved: Vec<ResolvedOperation>,
+    projection: Option<HierarchyProjection>,
 }
 
 pub(crate) fn prepare_mutation_baseline(world: &mut World) {
@@ -129,18 +129,14 @@ pub(crate) fn prepare_hierarchy_batch(
     world: &World,
     operations: &[HierarchyOperation],
 ) -> Result<PreparedHierarchyBatch, HierarchyError> {
-    let resolved = resolve_operations(world, operations, true)?;
-    validate_hierarchy_mutation_lifecycle(world, &resolved)?;
-    Ok(PreparedHierarchyBatch { resolved })
+    prepare_batch(world, operations, true)
 }
 
 fn prepare_writer_batch(
     world: &mut World,
     operations: &[HierarchyOperation],
 ) -> Result<PreparedHierarchyBatch, HierarchyError> {
-    let resolved = resolve_operations(world, operations, !hierarchy_baseline_is_valid(world))?;
-    validate_hierarchy_mutation_lifecycle(world, &resolved)?;
-    Ok(PreparedHierarchyBatch { resolved })
+    prepare_batch(world, operations, !hierarchy_baseline_is_valid(world))
 }
 
 pub(crate) fn hierarchy_retirement_operations(
@@ -186,10 +182,11 @@ pub(crate) fn hierarchy_retirement_operations(
         }
     }
     if postorder.len() != retirement.len() {
+        let visited = postorder.iter().copied().collect::<EntityHashSet>();
         let entity = retirement
             .iter()
             .copied()
-            .find(|entity| !postorder.contains(entity))
+            .find(|entity| !visited.contains(entity))
             .expect("retirement cardinality mismatch must identify one missing entity");
         return Err(HierarchyError::Unplaced { entity });
     }
@@ -307,11 +304,11 @@ pub(crate) fn validate_hierarchy_retirement_despawn_with_claimed_components(
 impl PreparedHierarchyBatch {
     /// Publishes the prevalidated ordered transaction without a recoverable failure branch.
     pub fn commit(self, world: &mut World) {
-        if self.resolved.is_empty() {
+        let Some(projection) = self.projection else {
             return;
-        }
+        };
 
-        commit_resolved(world, self.resolved);
+        commit_projection(world, projection);
         mark_topology_dirty(world);
         mark_hierarchy_baseline_valid(world);
     }
@@ -388,9 +385,31 @@ impl HierarchyCommandsExt for Commands<'_, '_> {
 
 struct CandidateTopology<'world> {
     world: &'world World,
-    roots: Option<Vec<Entity>>,
-    children_overrides: EntityHashMap<Vec<Entity>>,
+    roots: Option<CandidateSiblings>,
+    children_overrides: EntityHashMap<CandidateSiblings>,
+    links: EntityHashMap<SiblingLinks>,
     placement_overrides: EntityHashMap<Option<HierarchyPlacementOwner>>,
+}
+
+/// Only sibling sets reached by the batch are indexed. Public ordered Vec projections are built
+/// once after all sequential edits and lifecycle admission, then the candidate index is dropped.
+#[derive(Clone, Copy)]
+struct CandidateSiblings {
+    first: Option<Entity>,
+    last: Option<Entity>,
+    len: usize,
+}
+
+#[derive(Clone, Copy)]
+struct SiblingLinks {
+    previous: Option<Entity>,
+    next: Option<Entity>,
+}
+
+struct HierarchyProjection {
+    roots: Option<Vec<Entity>>,
+    children: Vec<(Entity, Vec<Entity>)>,
+    placements: EntityHashMap<Option<HierarchyPlacementOwner>>,
 }
 
 impl<'world> CandidateTopology<'world> {
@@ -399,6 +418,7 @@ impl<'world> CandidateTopology<'world> {
             world,
             roots: None,
             children_overrides: EntityHashMap::default(),
+            links: EntityHashMap::default(),
             placement_overrides: EntityHashMap::default(),
         }
     }
@@ -414,24 +434,27 @@ impl<'world> CandidateTopology<'world> {
                 if self.is_placed(entity) {
                     return Err(HierarchyError::AlreadyPlaced { entity });
                 }
-                let insertion = self.resolve_insertion(world, entity, placement, false)?;
-                self.insert(entity, insertion);
-                Ok(ResolvedOperation::Place { entity, insertion })
+                self.validate_insertion(world, entity, placement, false)?;
+                self.insert(entity, placement);
+                Ok(ResolvedOperation::Place {
+                    entity,
+                    owner: placement.owner,
+                })
             }
             HierarchyOperation::Move { entity, from, to } => {
                 self.require_entity(world, entity)?;
                 if !self.placement_matches(entity, from) {
                     return Err(HierarchyError::PlacementContextMismatch { entity });
                 }
-                let insertion = self.resolve_insertion(world, entity, to, true)?;
+                self.validate_insertion(world, entity, to, true)?;
                 let owner = self
                     .detach(entity)
                     .expect("matched placement must have one candidate owner");
-                self.insert(entity, insertion);
+                self.insert(entity, to);
                 Ok(ResolvedOperation::Move {
                     entity,
                     from: owner,
-                    insertion,
+                    to: to.owner,
                 })
             }
             HierarchyOperation::Remove { entity, from } => {
@@ -439,10 +462,7 @@ impl<'world> CandidateTopology<'world> {
                 if !self.placement_matches(entity, from) {
                     return Err(HierarchyError::PlacementContextMismatch { entity });
                 }
-                if !self
-                    .siblings(HierarchyPlacementOwner::Parent { parent: entity })
-                    .is_empty()
-                {
+                if self.has_children(entity) {
                     return Err(HierarchyError::HasChildren { entity });
                 }
                 let owner = self
@@ -467,20 +487,16 @@ impl<'world> CandidateTopology<'world> {
         self.owner(entity).is_some()
     }
 
-    fn resolve_insertion(
+    fn validate_insertion(
         &self,
         world: &World,
         entity: Entity,
         placement: HierarchyPlacement,
-        remove_entity_first: bool,
-    ) -> Result<ResolvedInsertion, HierarchyError> {
-        self.validate_owner(world, entity, placement.owner, remove_entity_first)?;
-        let siblings = self.siblings(placement.owner);
-        let index = match placement.anchor {
-            HierarchyPlacementAnchor::First => 0,
-            HierarchyPlacementAnchor::Last => {
-                siblings.len() - usize::from(remove_entity_first && siblings.contains(&entity))
-            }
+        check_cycle: bool,
+    ) -> Result<(), HierarchyError> {
+        self.validate_owner(world, entity, placement.owner, check_cycle)?;
+        match placement.anchor {
+            HierarchyPlacementAnchor::First | HierarchyPlacementAnchor::Last => {}
             HierarchyPlacementAnchor::Before { sibling }
             | HierarchyPlacementAnchor::After { sibling }
                 if sibling == entity =>
@@ -489,35 +505,15 @@ impl<'world> CandidateTopology<'world> {
             }
             HierarchyPlacementAnchor::Before { sibling }
             | HierarchyPlacementAnchor::After { sibling } => {
-                let Some(anchor_index) =
-                    siblings.iter().position(|candidate| *candidate == sibling)
-                else {
+                if self.owner(sibling) != Some(placement.owner) {
                     return Err(HierarchyError::AnchorMissing {
                         entity,
                         anchor: sibling,
                     });
-                };
-                let mut index =
-                    if matches!(placement.anchor, HierarchyPlacementAnchor::Before { .. }) {
-                        anchor_index
-                    } else {
-                        anchor_index.saturating_add(1)
-                    };
-                if remove_entity_first
-                    && siblings
-                        .iter()
-                        .position(|candidate| *candidate == entity)
-                        .is_some_and(|entity_index| entity_index < index)
-                {
-                    index -= 1;
                 }
-                index
             }
-        };
-        Ok(ResolvedInsertion {
-            owner: placement.owner,
-            index,
-        })
+        }
+        Ok(())
     }
 
     fn validate_owner(
@@ -558,146 +554,209 @@ impl<'world> CandidateTopology<'world> {
         Ok(())
     }
 
-    fn siblings(&self, owner: HierarchyPlacementOwner) -> &[Entity] {
-        match owner {
-            HierarchyPlacementOwner::Root => match &self.roots {
-                Some(roots) => roots.as_slice(),
-                None => self
-                    .world
-                    .get_resource::<HierarchyRoots>()
-                    .map_or(&[], HierarchyRoots::as_slice),
+    fn has_children(&self, parent: Entity) -> bool {
+        self.children_overrides.get(&parent).map_or_else(
+            || {
+                self.world
+                    .get::<Children>(parent)
+                    .is_some_and(|children| !children.is_empty())
             },
-            HierarchyPlacementOwner::Parent { parent } => self
-                .children_overrides
-                .get(&parent)
-                .map(Vec::as_slice)
-                .or_else(|| self.world.get::<Children>(parent).map(Children::as_slice))
-                .unwrap_or(&[]),
+            |children| children.len != 0,
+        )
+    }
+
+    fn siblings(&mut self, owner: HierarchyPlacementOwner) -> CandidateSiblings {
+        let indexed = match owner {
+            HierarchyPlacementOwner::Root => self.roots,
+            HierarchyPlacementOwner::Parent { parent } => {
+                self.children_overrides.get(&parent).copied()
+            }
+        };
+        if let Some(indexed) = indexed {
+            return indexed;
+        }
+
+        let entities = siblings_for_owner(self.world, owner).unwrap_or(&[]);
+        self.links.reserve(entities.len());
+        for (index, entity) in entities.iter().copied().enumerate() {
+            self.links.insert(
+                entity,
+                SiblingLinks {
+                    previous: index.checked_sub(1).map(|index| entities[index]),
+                    next: entities.get(index + 1).copied(),
+                },
+            );
+        }
+        let siblings = CandidateSiblings {
+            first: entities.first().copied(),
+            last: entities.last().copied(),
+            len: entities.len(),
+        };
+        self.set_siblings(owner, siblings);
+        siblings
+    }
+
+    fn set_siblings(&mut self, owner: HierarchyPlacementOwner, siblings: CandidateSiblings) {
+        match owner {
+            HierarchyPlacementOwner::Root => self.roots = Some(siblings),
+            HierarchyPlacementOwner::Parent { parent } => {
+                self.children_overrides.insert(parent, siblings);
+            }
         }
     }
 
-    fn placement_matches(&self, entity: Entity, placement: HierarchyPlacement) -> bool {
+    fn placement_matches(&mut self, entity: Entity, placement: HierarchyPlacement) -> bool {
         let Some(owner) = self.owner(entity) else {
             return false;
         };
         if owner != placement.owner {
             return false;
         }
-        let siblings = self.siblings(owner);
-        let Some(index) = siblings.iter().position(|candidate| *candidate == entity) else {
+        self.siblings(owner);
+        let Some(links) = self.links.get(&entity) else {
             return false;
         };
         match placement.anchor {
-            HierarchyPlacementAnchor::First => index == 0,
-            HierarchyPlacementAnchor::Last => index + 1 == siblings.len(),
-            HierarchyPlacementAnchor::Before { sibling } => {
-                siblings.get(index + 1) == Some(&sibling)
-            }
-            HierarchyPlacementAnchor::After { sibling } => {
-                index > 0 && siblings.get(index - 1) == Some(&sibling)
-            }
+            HierarchyPlacementAnchor::First => links.previous.is_none(),
+            HierarchyPlacementAnchor::Last => links.next.is_none(),
+            HierarchyPlacementAnchor::Before { sibling } => links.next == Some(sibling),
+            HierarchyPlacementAnchor::After { sibling } => links.previous == Some(sibling),
         }
     }
 
-    fn current_placement(&self, entity: Entity) -> Option<HierarchyPlacement> {
+    fn current_placement(&mut self, entity: Entity) -> Option<HierarchyPlacement> {
         let owner = self.owner(entity)?;
-        placement_in_siblings(owner, self.siblings(owner), entity)
+        self.siblings(owner);
+        let links = self.links.get(&entity)?;
+        Some(HierarchyPlacement {
+            owner,
+            anchor: links
+                .previous
+                .map_or(HierarchyPlacementAnchor::First, |sibling| {
+                    HierarchyPlacementAnchor::After { sibling }
+                }),
+        })
     }
 
     fn owner(&self, entity: Entity) -> Option<HierarchyPlacementOwner> {
         if let Some(owner) = self.placement_overrides.get(&entity) {
             return *owner;
         }
-        let is_root = if let Some(roots) = &self.roots {
-            roots.contains(&entity)
-        } else {
-            self.world
-                .get_resource::<HierarchyRoots>()
-                .is_some_and(|roots| roots.contains(entity))
-        };
-        if is_root {
-            return Some(HierarchyPlacementOwner::Root);
-        }
-        self.world
-            .get::<Parent>(entity)
-            .map(|parent| HierarchyPlacementOwner::Parent {
-                parent: parent.parent(),
-            })
+        placement_owner(self.world, entity)
     }
 
     fn detach(&mut self, entity: Entity) -> Option<HierarchyPlacementOwner> {
         let owner = self.owner(entity)?;
-        let index = self
-            .siblings(owner)
-            .iter()
-            .position(|candidate| *candidate == entity)
+        let mut siblings = self.siblings(owner);
+        let links = self
+            .links
+            .remove(&entity)
             .expect("validated placement must remain in the candidate");
-        match owner {
-            HierarchyPlacementOwner::Root => {
-                self.roots_mut().remove(index);
-            }
-            HierarchyPlacementOwner::Parent { parent } => {
-                self.children_mut(parent).remove(index);
-            }
+        if let Some(previous) = links.previous {
+            self.links
+                .get_mut(&previous)
+                .expect("previous sibling must be indexed")
+                .next = links.next;
+        } else {
+            siblings.first = links.next;
         }
+        if let Some(next) = links.next {
+            self.links
+                .get_mut(&next)
+                .expect("next sibling must be indexed")
+                .previous = links.previous;
+        } else {
+            siblings.last = links.previous;
+        }
+        siblings.len -= 1;
+        self.set_siblings(owner, siblings);
         self.placement_overrides.insert(entity, None);
         Some(owner)
     }
 
-    fn insert(&mut self, entity: Entity, insertion: ResolvedInsertion) {
-        match insertion.owner {
-            HierarchyPlacementOwner::Root => {
-                self.roots_mut().insert(insertion.index, entity);
-            }
-            HierarchyPlacementOwner::Parent { parent } => {
-                self.children_mut(parent).insert(insertion.index, entity);
-            }
+    fn insert(&mut self, entity: Entity, placement: HierarchyPlacement) {
+        let mut siblings = self.siblings(placement.owner);
+        let (previous, next) = match placement.anchor {
+            HierarchyPlacementAnchor::First => (None, siblings.first),
+            HierarchyPlacementAnchor::Last => (siblings.last, None),
+            HierarchyPlacementAnchor::Before { sibling } => (
+                self.links
+                    .get(&sibling)
+                    .expect("validated anchor must be indexed")
+                    .previous,
+                Some(sibling),
+            ),
+            HierarchyPlacementAnchor::After { sibling } => (
+                Some(sibling),
+                self.links
+                    .get(&sibling)
+                    .expect("validated anchor must be indexed")
+                    .next,
+            ),
+        };
+        self.links.insert(entity, SiblingLinks { previous, next });
+        if let Some(previous) = previous {
+            self.links
+                .get_mut(&previous)
+                .expect("previous sibling must be indexed")
+                .next = Some(entity);
+        } else {
+            siblings.first = Some(entity);
         }
+        if let Some(next) = next {
+            self.links
+                .get_mut(&next)
+                .expect("next sibling must be indexed")
+                .previous = Some(entity);
+        } else {
+            siblings.last = Some(entity);
+        }
+        siblings.len += 1;
+        self.set_siblings(placement.owner, siblings);
         self.placement_overrides
-            .insert(entity, Some(insertion.owner));
+            .insert(entity, Some(placement.owner));
     }
 
-    fn roots_mut(&mut self) -> &mut Vec<Entity> {
-        if self.roots.is_none() {
-            let roots = self
-                .world
-                .get_resource::<HierarchyRoots>()
-                .map_or_else(Vec::new, |roots| roots.as_slice().to_vec());
-            self.roots = Some(roots);
+    fn materialize(&self, siblings: CandidateSiblings) -> Vec<Entity> {
+        let mut entities = Vec::with_capacity(siblings.len);
+        let mut cursor = siblings.first;
+        while let Some(entity) = cursor {
+            entities.push(entity);
+            cursor = self
+                .links
+                .get(&entity)
+                .expect("final sibling must be indexed")
+                .next;
         }
-        self.roots.as_mut().expect("roots override must exist")
+        debug_assert_eq!(entities.len(), siblings.len);
+        entities
     }
 
-    fn children_mut(&mut self, parent: Entity) -> &mut Vec<Entity> {
-        if !self.children_overrides.contains_key(&parent) {
-            let children = self
-                .world
-                .get::<Children>(parent)
-                .map_or_else(Vec::new, |children| children.as_slice().to_vec());
-            self.children_overrides.insert(parent, children);
+    fn into_projection(self) -> HierarchyProjection {
+        let roots = self.roots.map(|siblings| self.materialize(siblings));
+        let children = self
+            .children_overrides
+            .iter()
+            .map(|(&parent, &siblings)| (parent, self.materialize(siblings)))
+            .collect();
+        HierarchyProjection {
+            roots,
+            children,
+            placements: self.placement_overrides,
         }
-        self.children_overrides
-            .get_mut(&parent)
-            .expect("children override must be inserted before mutation")
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ResolvedInsertion {
-    owner: HierarchyPlacementOwner,
-    index: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
 enum ResolvedOperation {
     Place {
         entity: Entity,
-        insertion: ResolvedInsertion,
+        owner: HierarchyPlacementOwner,
     },
     Move {
         entity: Entity,
         from: HierarchyPlacementOwner,
-        insertion: ResolvedInsertion,
+        to: HierarchyPlacementOwner,
     },
     Remove {
         entity: Entity,
@@ -719,28 +778,14 @@ fn validate_hierarchy_mutation_lifecycle(
     let mut children_targets = EntityHashSet::default();
     for operation in operations {
         match *operation {
-            ResolvedOperation::Place { entity, insertion } => {
+            ResolvedOperation::Place { entity, owner } => {
                 validate_registered_component_observers::<HierarchyMember>(world, Some(entity))
                     .map_err(|_| HierarchyError::LifecycleWork)?;
-                record_component_targets(
-                    entity,
-                    insertion.owner,
-                    &mut parent_targets,
-                    &mut children_targets,
-                );
+                record_component_targets(entity, owner, &mut parent_targets, &mut children_targets);
             }
-            ResolvedOperation::Move {
-                entity,
-                from,
-                insertion,
-            } => {
+            ResolvedOperation::Move { entity, from, to } => {
                 record_component_targets(entity, from, &mut parent_targets, &mut children_targets);
-                record_component_targets(
-                    entity,
-                    insertion.owner,
-                    &mut parent_targets,
-                    &mut children_targets,
-                );
+                record_component_targets(entity, to, &mut parent_targets, &mut children_targets);
             }
             ResolvedOperation::Remove { entity, from } => {
                 validate_registered_component_observers::<HierarchyMember>(world, Some(entity))
@@ -822,90 +867,67 @@ fn record_component_targets(
     }
 }
 
-fn resolve_operations(
+fn prepare_batch(
     world: &World,
     operations: &[HierarchyOperation],
     validate: bool,
-) -> Result<Vec<ResolvedOperation>, HierarchyError> {
+) -> Result<PreparedHierarchyBatch, HierarchyError> {
     if validate {
         validate_hierarchy(world)?;
     }
     let mut candidate = CandidateTopology::read(world);
-    operations
+    let resolved = operations
         .iter()
         .copied()
         .map(|operation| candidate.apply(world, operation))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    validate_hierarchy_mutation_lifecycle(world, &resolved)?;
+    Ok(PreparedHierarchyBatch {
+        projection: (!resolved.is_empty()).then(|| candidate.into_projection()),
+    })
 }
 
-fn commit_resolved(world: &mut World, operations: Vec<ResolvedOperation>) {
+fn commit_projection(world: &mut World, projection: HierarchyProjection) {
     let mut roots = world
         .remove_resource::<HierarchyRoots>()
         .unwrap_or_else(HierarchyRoots::new);
-    for operation in operations {
-        match operation {
-            ResolvedOperation::Place { entity, insertion } => {
-                world.entity_mut(entity).insert(HierarchyMember);
-                commit_insert(world, &mut roots, entity, insertion);
+    if let Some(values) = projection.roots {
+        roots.replace(values);
+    }
+
+    for (entity, owner) in projection.placements {
+        let parent = match owner {
+            Some(HierarchyPlacementOwner::Parent { parent }) => Some(parent),
+            Some(HierarchyPlacementOwner::Root) | None => None,
+        };
+        let mut entity = world.entity_mut(entity);
+        if entity.get::<Parent>().map(Parent::parent) != parent {
+            if let Some(parent) = parent {
+                entity.insert(Parent::new(parent));
+            } else {
+                entity.remove::<Parent>();
             }
-            ResolvedOperation::Move {
-                entity,
-                from,
-                insertion,
-            } => {
-                commit_detach(world, &mut roots, entity, from);
-                commit_insert(world, &mut roots, entity, insertion);
+        }
+        if owner.is_some() {
+            if entity.get::<HierarchyMember>().is_none() {
+                entity.insert(HierarchyMember);
             }
-            ResolvedOperation::Remove { entity, from } => {
-                commit_detach(world, &mut roots, entity, from);
-                world.entity_mut(entity).remove::<HierarchyMember>();
-            }
+        } else {
+            entity.remove::<HierarchyMember>();
+        }
+    }
+
+    for (parent, children) in projection.children {
+        if children.is_empty() {
+            world.entity_mut(parent).remove::<Children>();
+        } else {
+            world
+                .entity_mut(parent)
+                .insert(Children::from_entities(children));
         }
     }
     roots.advance_epoch();
     world.insert_resource(roots);
-}
-
-fn commit_insert(
-    world: &mut World,
-    roots: &mut HierarchyRoots,
-    entity: Entity,
-    insertion: ResolvedInsertion,
-) {
-    match insertion.owner {
-        HierarchyPlacementOwner::Root => roots.insert(insertion.index, entity),
-        HierarchyPlacementOwner::Parent { parent } => {
-            let mut children = world
-                .entity_mut(parent)
-                .take::<Children>()
-                .unwrap_or_else(Children::new);
-            children.insert(insertion.index, entity);
-            world.entity_mut(parent).insert(children);
-            world.entity_mut(entity).insert(Parent::new(parent));
-        }
-    }
-}
-
-fn commit_detach(
-    world: &mut World,
-    roots: &mut HierarchyRoots,
-    entity: Entity,
-    owner: HierarchyPlacementOwner,
-) {
-    match owner {
-        HierarchyPlacementOwner::Root => roots.remove(entity),
-        HierarchyPlacementOwner::Parent { parent } => {
-            let _ = world.entity_mut(entity).take::<Parent>();
-            let mut children = world
-                .entity_mut(parent)
-                .take::<Children>()
-                .expect("prepared hierarchy parent must retain its reverse projection");
-            children.remove(entity);
-            if !children.is_empty() {
-                world.entity_mut(parent).insert(children);
-            }
-        }
-    }
 }
 
 fn placement_owner(world: &World, entity: Entity) -> Option<HierarchyPlacementOwner> {
@@ -948,3 +970,6 @@ fn placement_in_siblings(
     };
     Some(HierarchyPlacement { owner, anchor })
 }
+
+#[cfg(test)]
+mod tests;

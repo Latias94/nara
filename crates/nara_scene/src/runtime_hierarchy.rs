@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use nara_ecs::{__private::LifecycleFreeDespawnError, Entity, World};
+use nara_ecs::{
+    __private::LifecycleFreeDespawnError, Entity, World, bevy_ecs::entity::EntityHashSet,
+};
 use nara_hierarchy::{
     __private::{retirement_operations, validate_retirement_despawn},
     Children, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
@@ -153,6 +155,7 @@ pub(crate) fn combine_scene_hierarchy_operations(
     new_operations: &[HierarchyOperation],
     retiring_entities: &[Entity],
 ) -> Vec<HierarchyOperation> {
+    let retiring_entities = retiring_entities.iter().copied().collect::<EntityHashSet>();
     let replacement_root_placement = world
         .get_resource::<HierarchyRoots>()
         .and_then(|roots| roots.iter().find(|root| retiring_entities.contains(root)))

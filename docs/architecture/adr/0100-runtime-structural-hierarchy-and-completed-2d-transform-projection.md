@@ -5,6 +5,7 @@
 **Amended**: 2026-08-05 by NUI-U8 ordered runtime projection
 **Amended**: 2026-10-23 by U4 private phase spatial snapshots
 **Amended**: 2026-10-25 by complete guarded resource-effect admission
+**Amended**: 2026-11-12 by indexed sequential batches and final ordered projection
 **Owner**: Runtime hierarchy, 2D transform projection, and consuming product hosts
 **Related**: ADR 0005, ADR 0006, and ADR 0018
 **Refines**: The current 2D completion slice of
@@ -109,10 +110,22 @@ flowchart LR
   also withholds completion. Direct reverse-collection mutation is unavailable; raw despawn never
   cascades and leaves the hierarchy fail-closed until its owning placement transaction runs.
 - Ordinary owner-controlled writer batches may reuse a private validated baseline and resolve through
-  a sparse touched-owner copy-on-write overlay. The baseline is invalidated by relation hooks and a
-  private root-resource epoch; raw escapes and diagnostic/private construction paths retain complete
-  validation. The overlay is dropped before a prepared batch crosses its prepare/commit boundary.
-  Prepared batches still require the enclosing owner's no-flush/no-hierarchy-mutation window.
+  a sparse touched-owner candidate. Sequential anchor and placement validation retains the complete
+  operation order; private indexed sibling links avoid repeated sequence scans/shifts. The original
+  writer materializes each touched owner's final ordered sequence once. This is private transaction
+  storage, not a second runtime relation. Roots retain a private complete-Entity membership index
+  alongside their public ordered sequence, maintained by that same writer. The baseline is
+  invalidated by relation hooks and a private root-resource epoch; raw escapes and diagnostic/private
+  construction paths retain complete validation. Transient indexes are dropped before a prepared
+  batch crosses its prepare/commit boundary; that batch owns its final projection and still requires
+  the enclosing owner's no-flush/no-hierarchy-mutation window.
+- Batch publication exposes final relation values, not intermediate per-operation component events.
+  Lifecycle/resource admission still examines every reached operation target, including operations
+  whose values cancel within the batch. A nonempty batch revokes structural completion and advances
+  the original epoch even when final relation values match the previous ones. Unchanged final parent
+  values need no fabricated remove/reinsert; actual changed relations and completed-generation
+  publication remain observable through their original owners. Foreign observers/hooks remain
+  subject to the same preflight refusal. Structural removal does not authorize entity destruction.
 - Guarded construction and placement admit every resource effect of their publication, not only
   Parent/Children/member/root components: generation-state insertion when absent and completion
   resource removal when present must be lifecycle-free. Fresh-target and bound final admission

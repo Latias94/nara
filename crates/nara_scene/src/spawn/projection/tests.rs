@@ -240,6 +240,129 @@ fn repeated_epochs_bound_claims_without_replacing_the_world_or_unmanaged_state()
 }
 
 #[test]
+fn wide_root_epochs_preserve_order_unmanaged_neighbors_and_exact_identity_retirement() {
+    use nara_hierarchy::{
+        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
+        HierarchyWriter,
+    };
+
+    let mut world = World::new();
+    let registry = registry();
+    let database = ProjectAssetDatabase::default();
+    let head = world.spawn(Unmanaged(11)).id();
+    HierarchyWriter::new(&mut world)
+        .apply(HierarchyOperation::Place {
+            entity: head,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        })
+        .unwrap();
+    let ids = (0..2048)
+        .map(|index| scene_id(&format!("wide-{index:05}")))
+        .collect::<Vec<_>>();
+    let forward = bound_scene(
+        &registry,
+        SceneDocument::from_ordered_roots(ids.iter().cloned().map(SceneEntityRecord::new)),
+    );
+    let reversed = bound_scene(
+        &registry,
+        SceneDocument::from_ordered_roots(ids.iter().rev().cloned().map(SceneEntityRecord::new)),
+    );
+    let mut projection = SceneProjection::new(occurrence("wide-roots"));
+    let mut tail = None;
+    let mut previous: Option<(SpawnedSceneInstance, Vec<Entity>)> = None;
+    let mut non_scene_population = None;
+    let world_id = world.id();
+    for epoch in 0usize..4 {
+        let reverse = !epoch.is_multiple_of(2);
+        let report = projection.publish(
+            &mut world,
+            &registry,
+            if reverse { &reversed } else { &forward },
+            database.resolver(&nara_asset::AssetPathScope::ROOT),
+        );
+        assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+        assert_eq!(
+            report.retired_entities(),
+            if epoch == 0 { 0 } else { ids.len() }
+        );
+        let instance = report.instance.unwrap();
+        let entities = ids
+            .iter()
+            .map(|id| resolved_entity(&world, &instance, id))
+            .collect::<Vec<_>>();
+        let tail = *tail.get_or_insert_with(|| {
+            let tail = world.spawn(Unmanaged(22)).id();
+            HierarchyWriter::new(&mut world)
+                .apply(HierarchyOperation::Place {
+                    entity: tail,
+                    placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                })
+                .unwrap();
+            tail
+        });
+        let mut expected = vec![head];
+        if reverse {
+            expected.extend(entities.iter().rev().copied());
+        } else {
+            expected.extend(entities.iter().copied());
+        }
+        expected.push(tail);
+        assert_eq!(world.resource::<HierarchyRoots>().as_slice(), expected);
+        let mut other_entities = world
+            .iter_entities()
+            .filter(|entry| entry.get::<SceneEntitySource>().is_none())
+            .map(|entry| entry.id())
+            .collect::<Vec<_>>();
+        other_entities.sort_unstable_by_key(|entity| entity.to_bits());
+        let expected_other_entities = non_scene_population.get_or_insert(other_entities.clone());
+        assert_eq!(&other_entities, expected_other_entities);
+        assert!(other_entities.contains(&head) && other_entities.contains(&tail));
+        assert_eq!(
+            world.iter_entities().count(),
+            ids.len() + other_entities.len()
+        );
+        assert_eq!(
+            world
+                .resource::<WorldIdentityDomain>()
+                .stats()
+                .registered_entities,
+            ids.len()
+        );
+        assert_eq!(world.id(), world_id);
+        assert_eq!(world.get::<Unmanaged>(head).unwrap().0, 11);
+        assert_eq!(world.get::<Unmanaged>(tail).unwrap().0, 22);
+        nara_hierarchy::validate_hierarchy(&world).unwrap();
+        if let Some((old, old_entities)) = previous {
+            assert_ne!(old.domain_id(), instance.domain_id());
+            for (id, entity) in ids.iter().zip(old_entities) {
+                assert!(world.get_entity(entity).is_err());
+                assert!(!world.resource::<HierarchyRoots>().contains(entity));
+                assert_eq!(
+                    resolve_in_world(&world, &old.locator(id).unwrap()),
+                    EntityLookup::WrongDomain {
+                        expected: instance.domain_id(),
+                        actual: old.domain_id()
+                    }
+                );
+            }
+        }
+        previous = Some((instance, entities));
+    }
+    assert_eq!(projection.clear(&mut world).unwrap(), ids.len());
+    assert_eq!(
+        world.resource::<HierarchyRoots>().as_slice(),
+        &[head, tail.unwrap()]
+    );
+    let mut remaining = world
+        .iter_entities()
+        .map(|entry| entry.id())
+        .collect::<Vec<_>>();
+    remaining.sort_unstable_by_key(|entity| entity.to_bits());
+    assert_eq!(remaining, non_scene_population.unwrap());
+    nara_hierarchy::validate_hierarchy(&world).unwrap();
+}
+
+#[test]
 fn empty_projection_is_an_owned_epoch_that_can_be_replaced_cleared_and_republished() {
     let mut fixture = ProjectionFixture::new();
     let nonempty = fixture.projection.instance().unwrap().clone();

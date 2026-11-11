@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nara_ecs::{Component, Entity, Resource, bevy_ecs::entity::EntityHashMap};
+use nara_ecs::{
+    Component, Entity, Resource,
+    bevy_ecs::entity::{EntityHashMap, EntityHashSet},
+};
 
 static NEXT_ROOT_EPOCH: AtomicU64 = AtomicU64::new(1);
 
@@ -26,6 +29,7 @@ pub(crate) struct HierarchyMember;
 #[derive(Debug, Resource)]
 pub struct HierarchyRoots {
     values: Vec<Entity>,
+    membership: EntityHashSet,
     epoch: u64,
 }
 
@@ -41,6 +45,7 @@ impl HierarchyRoots {
     pub(crate) fn new() -> Self {
         Self {
             values: Vec::new(),
+            membership: EntityHashSet::default(),
             epoch: next_root_epoch(),
         }
     }
@@ -53,17 +58,11 @@ impl HierarchyRoots {
         self.epoch = next_root_epoch();
     }
 
-    pub(crate) fn insert(&mut self, index: usize, entity: Entity) {
-        self.values.insert(index, entity);
-    }
-
-    pub(crate) fn remove(&mut self, entity: Entity) {
-        let index = self
-            .values
-            .iter()
-            .position(|candidate| *candidate == entity)
-            .expect("prepared hierarchy root must remain registered through commit");
-        self.values.remove(index);
+    pub(crate) fn replace(&mut self, values: Vec<Entity>) {
+        self.membership.clear();
+        self.membership.reserve(values.len());
+        self.membership.extend(values.iter().copied());
+        self.values = values;
     }
 
     /// Iterates registered roots in structural order.
@@ -92,7 +91,7 @@ impl HierarchyRoots {
     /// Returns whether `entity` is a registered root.
     #[must_use]
     pub fn contains(&self, entity: Entity) -> bool {
-        self.values.contains(&entity)
+        self.membership.contains(&entity)
     }
 }
 
@@ -219,21 +218,18 @@ impl Parent {
 pub struct Children(Vec<Entity>);
 
 impl Children {
+    #[cfg(test)]
     pub(crate) const fn new() -> Self {
         Self(Vec::new())
     }
 
-    pub(crate) fn insert(&mut self, index: usize, entity: Entity) {
-        self.0.insert(index, entity);
+    pub(crate) fn from_entities(entities: Vec<Entity>) -> Self {
+        Self(entities)
     }
 
-    pub(crate) fn remove(&mut self, entity: Entity) {
-        let index = self
-            .0
-            .iter()
-            .position(|candidate| *candidate == entity)
-            .expect("prepared hierarchy child must remain in its reverse projection");
-        self.0.remove(index);
+    #[cfg(test)]
+    pub(crate) fn insert(&mut self, index: usize, entity: Entity) {
+        self.0.insert(index, entity);
     }
 
     /// Iterates children in the order committed by Nara's hierarchy writer.
@@ -257,5 +253,89 @@ impl Children {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use nara_ecs::World;
+
+    use super::*;
+    use crate::{
+        __private, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
+    };
+
+    #[test]
+    fn root_membership_storage_tracks_live_entities_through_recycling_and_owner_changes() {
+        const ROOT_COUNT: usize = 2_048;
+        let mut world = World::new();
+        let head = world.spawn_empty().id();
+        let root_owner = HierarchyPlacementOwner::Root;
+        HierarchyWriter::new(&mut world)
+            .place(head, HierarchyPlacement::last(root_owner))
+            .unwrap();
+        let mut retired = Vec::<Entity>::new();
+        let mut peak_capacity = None;
+        let mut recycled = false;
+        for _ in 0..6 {
+            let entities = (0..ROOT_COUNT)
+                .map(|_| world.spawn_empty().id())
+                .collect::<Vec<_>>();
+            let retired_indices = retired
+                .iter()
+                .map(|entity| entity.index())
+                .collect::<HashSet<_>>();
+            recycled |= entities
+                .iter()
+                .any(|entity| retired_indices.contains(&entity.index()));
+            let mut previous = head;
+            let mut operations = Vec::new();
+            for entity in entities.iter().copied() {
+                operations.push(HierarchyOperation::Place {
+                    entity,
+                    placement: HierarchyPlacement::after(root_owner, previous),
+                });
+                previous = entity;
+            }
+            operations.push(HierarchyOperation::Move {
+                entity: previous,
+                from: HierarchyPlacement::last(root_owner),
+                to: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: head }),
+            });
+            HierarchyWriter::new(&mut world)
+                .apply_batch(&operations)
+                .unwrap();
+            let roots = world.resource::<HierarchyRoots>();
+            assert_eq!(roots.len(), ROOT_COUNT);
+            assert_eq!(roots.membership.len(), roots.len());
+            assert!(roots.iter().all(|entity| roots.contains(entity)));
+            assert!(!roots.contains(previous));
+            assert!(retired.iter().all(|entity| !roots.contains(*entity)));
+            let capacity = *peak_capacity.get_or_insert(roots.membership.capacity());
+            assert!(roots.membership.capacity() <= capacity);
+
+            let operations = __private::retirement_operations(&world, &entities).unwrap();
+            let mut affected = entities.clone();
+            affected.push(head);
+            __private::validate_retirement_despawn(&world, &entities, &affected).unwrap();
+            __private::prepare_construction_batch(&world, &operations)
+                .unwrap()
+                .commit(&mut world);
+            let roots = world.resource::<HierarchyRoots>();
+            assert_eq!(roots.as_slice(), [head]);
+            assert_eq!(roots.membership.len(), 1);
+            assert!(roots.membership.capacity() <= capacity);
+            assert!(world.get::<Children>(head).is_none());
+            for entity in entities {
+                assert!(!world.resource::<HierarchyRoots>().contains(entity));
+                assert!(world.get::<HierarchyMember>(entity).is_none());
+                assert!(world.despawn(entity));
+                retired.push(entity);
+            }
+        }
+        assert!(recycled, "the test must exercise a reused ECS entity index");
+        crate::validate_hierarchy(&world).unwrap();
     }
 }
