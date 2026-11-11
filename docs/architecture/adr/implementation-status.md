@@ -1093,6 +1093,15 @@ retirement. This changes no UI runtime, default frontend, renderer or receiving-
 authority. Remaining approximately 64/85 ms compilation/materialization P50 and full budgets
 stay open.
 
+The [25-span materialization attribution](../../benchmarks/2026-11-04-ui-work-baseline.md#materialization-owner-attribution)
+at `9d1e667c3da` passes original optimized DX12/Vulkan smoke/probe pairs 2/2 each. Complete
+repeated call counts accompany per-sample inclusive sums. Value admission/decoding is about
+11.7 ms P50 and adoption about 1.9 ms; no new batch identity API is selected. The next bounded
+change reuses the existing compiled document's sealed immutable topology and ID-sorted namespace
+while retaining receiving definitions/values/references/assets/codecs, Native projection checks
+and target-World/lifecycle admission. Raw source/claims keep complete topology proof. No new
+public certificate, retained index, UI runtime/default or framework owner follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

@@ -1669,3 +1669,19 @@ four backend/edit cells. Source/render/call vectors remain identical, with exact
 retirement. Materialization remains about 85 ms P50 and full owner samples about 178 ms;
 no Editor latency SLA, allocation/memory or GPU/cache result follows. This is a measured
 Nara compiler correction, not GPUI incremental UI layout or a Signal architecture result.
+
+The [materialization owner attribution](../benchmarks/2026-11-04-ui-work-baseline.md#materialization-owner-attribution)
+at `9d1e667c3da159f885e6b7268e138b74214bd042` qualifies 25 optional standard intervals through
+the same optimized native consumer, with both backend smoke/probe pairs passing 2/2. Repeated
+predecessor/identity preparations and retirement hierarchy are counted explicitly; timings
+for repeated intervals are per-sample inclusive sums. Decode/value admission is about 11.7 ms
+P50; identity adoption is about 1.9 ms. The source review does not select a new adoption API.
+
+The next selected reuse belongs to the existing compiled-document/validation owner. Its sealed
+immutable rooted forest and ID-sorted entities can serve receiving placement/membership without
+rebuilding duplicate indexes. Receiving Native Visibility projection eligibility and lowest-ID
+child diagnostics remain, as do definitions, values/limits, references/assets, actual codecs and
+all target-World admission. Raw drafts/claims continue complete topology validation. The
+predeclared decode P95 target is below 5 ms in both cases/backends; original source/render
+vectors and complete smoke remain acceptance. This does not select a UI reactive/layout/cache
+mechanism, alter the separate exact Runtime-definition witness or close Editor/game budgets.

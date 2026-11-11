@@ -1591,6 +1591,27 @@ substantial. Record the exact observer/platform/correctness limits in that repor
 compiler optimization does not close R11a/e numeric budgets, full Editor/game selection or
 the foundation Goal.
 
+Next attribute the remaining original Scene materialization through the same optional standard
+tracing. Observe value admission/decoding, predecessor admission, retirement hierarchy planning,
+identity preparation/adoption/registration and final hierarchy/epoch publication, retaining
+current checks and execution order. For repeated scopes, report complete call counts and the
+per-sample summed inclusive interval. The fixed flat-source projection is expected to perform
+two predecessor/identity preparations and four hierarchy-retirement preparations per edit;
+verify those facts in the actual native path. Select the next owner change from these results,
+preserving late target-World admission and exact source/render/retirement behavior. A repeated
+validation alone does not authorize replacing it with a stale preparation token.
+
+The qualified 25-span observation `9d1e667c3da` passes both optimized backend smoke/probe pairs,
+2/2 each, with exact repeated counts. Its [materialization attribution](../benchmarks/2026-11-04-ui-work-baseline.md#materialization-owner-attribution)
+observes value admission/decoding at approximately 11.7 ms P50, while identity adoption is about
+1.9 ms. Select reuse of the sealed immutable compiled topology and sorted namespace rather than
+a new adoption batch API. Preserve all receiving definitions/values/references/assets/codecs,
+Native Visibility projection/witness ordering and receiving-World/lifecycle admission. Raw
+drafts/claims still prove complete topology. Before implementation, require decode P95 below
+5 ms in all four backend/edit cells, with unchanged five-case source/render vectors, all 25
+call counts and complete original native recovery/input/retirement. Keep full materialization,
+allocation, UI/GPU and whole-Goal budgets open and report the matched observer/source pins.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

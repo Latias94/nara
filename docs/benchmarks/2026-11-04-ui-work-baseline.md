@@ -1414,3 +1414,78 @@ may examine actual reusable pure facts separately from receiving-World admission
 late validation must not be removed merely because it appears more than once. This result
 selects no new Signal runtime, persistent UI layout, raster cache, default frontend or game UI
 execution model and does not complete the foundation Goal or R11/R12.
+
+### Materialization Owner Attribution
+
+The next observation starts from `421f6880b34316b97178e34ccae8fff50ec52bac`, preserving the
+stable-structure compiler and the same complete native consumer. Eight more optional static
+Scene spans subdivide value admission/decoding, predecessor admission, retirement hierarchy,
+identity preparation/adoption/registration and final hierarchy/epoch publication. The engine
+still installs no subscriber; feature-off removes these observation declarations.
+
+The same thread-scoped Registry records all 25 intervals. In this fixed successful projection
+replacement, each property edit reaches predecessor admission twice, identity preparation
+twice and hierarchy-retirement preparation four times; the other 22 scopes are reached once.
+Each sample reports the sum of all invocations of its named interval, with complete call counts.
+The P50/P95/max of repeated scopes describes that per-sample sum, not individual-call latency.
+Parents and children remain inclusive and nonadditive. Epoch publication includes identity
+indexes, old entities/domain retirement and the successor domain insertion; it is not pure
+index-update time. Existing outer-source allocation observations remain distinct.
+
+Independent source review confirms the original operation/error/borrow/drop order and exact
+expected counts without finding P1/P2. This source review supplies no numeric result or
+machine-code equality claim. Keep actual optimized native call-count/workflow qualification
+and matched observer pins before choosing the next owning optimization. Necessary receiving
+World/lifecycle checks cannot be replaced by earlier or merely pure admission.
+
+The observation implementation is `9d1e667c3da159f885e6b7268e138b74214bd042`. Optimized
+DX12 smoke/probe passes 2/2 (`e4d0c02a-d46a-4df2-ba5f-0c675e4c2401`); Vulkan passes 2/2
+(`e49fdcfc-7eb6-4fcd-b335-25e633afd96e`). Both measured edit cases verify all 25 exact call
+counts: 128 each for predecessor/identity preparation, 256 for retirement hierarchy and 64
+each for the other 22 intervals. The original five workloads and native smoke remain intact.
+The release rebuild takes 12m15s outside samples. No allocation observer is enabled.
+
+DX12 elapsed milliseconds **P50 / P95 / max**:
+
+| Inclusive interval, repeated intervals are per-sample sums | Local edit | Broad refresh |
+| --- | --- | --- |
+| Value admission and actual decoding | 11.783 / 13.082 / 16.990 | 11.708 / 13.306 / 22.749 |
+| Predecessor admission, two calls | 11.415 / 12.928 / 16.667 | 12.016 / 14.108 / 18.866 |
+| Retirement hierarchy, four calls | 5.321 / 6.466 / 7.895 | 6.409 / 7.355 / 9.206 |
+| Identity preparation, two calls | 13.208 / 15.380 / 17.842 | 13.264 / 14.199 / 22.167 |
+| Identity adoption | 1.873 / 2.192 / 4.404 | 1.882 / 1.973 / 2.131 |
+| Bound identity registration preparation | 8.866 / 9.485 / 16.099 | 8.886 / 9.395 / 11.127 |
+| Hierarchy publication | 1.175 / 1.373 / 3.312 | 1.197 / 1.333 / 1.405 |
+| Identity-epoch publication | 10.608 / 11.113 / 12.992 | 10.599 / 11.538 / 17.248 |
+| Entire preview materialization | 85.643 / 89.886 / 115.560 | 86.283 / 93.206 / 114.563 |
+| Original Editor drive | 154.460 / 164.105 / 187.825 | 155.431 / 182.587 / 188.559 |
+
+The Vulkan control observes decode 11.747/14.265/24.419 ms locally and
+11.678/12.308/14.232 ms with broad refresh; materialization remains
+85.095/96.223/103.868 and 86.077/89.383/95.650 ms. Adoption is about 1.9 ms P50 in each
+backend. Source investigation identifies shareable support checks in adoption, but exact target
+observers, marker ownership/incarnation, deferred work and successful-prefix/error order must
+remain. Its measured scope does not justify a new batch API in this unit.
+
+### Selected Compiled-Topology Reuse
+
+Receiving validation rebuilds complete placement and namespace indexes for an immutable
+`CompiledSceneDocument`. Its sole storage constructor follows full flat admission, including
+unique ID sorting and complete rooted-forest validation; normal/Authoring sealing and Runtime
+imports/cook all use that owner. World data edits change separate carriers. Reuse the original
+closed topology and ID-sorted slice without a retained duplicate index, public proof token or
+new compiler. Raw drafts/claims still require their complete original placement admission.
+
+All receiving Schema/owner/version/capability, explicit default, shape/value limit, native
+reference-flatness, SceneLocal membership, asset and actual codec checks remain. In particular,
+Authoring sealing does not establish receiving Native Visibility projection eligibility; keep
+the direct parent-child predicate and the original lowest-ID offending child diagnostic.
+Check local references against every compiled entity, including empty records. Do not widen
+the stronger Runtime exact-definition witness or bypass any receiving-World/lifecycle checks.
+
+Before implementation, require `scene_decode` P95 below **5 ms** in both edit cases on DX12
+and Vulkan, with identical complete source/render vectors and all 25 interval call counts.
+Observe entire materialization/drive/sample alongside this scoped target; no whole-operation
+SLA follows. Preserve the complete native smoke and public receiving failure-before-codec,
+limits/owner/reference and source-immutability workflows. No allocation or GPU result is
+inferred from removal of these temporary topology/namespace indexes.
