@@ -29,8 +29,8 @@ use nara_engine::{
         SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
-        EditorDocumentMutation, EditorDocumentQueryBasis, EditorEntityQuery,
+        EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionOutcome,
+        EditorDocumentId, EditorDocumentMutation, EditorDocumentQueryBasis, EditorEntityQuery,
         EditorEntityQueryLimits, EditorEntityQueryPosition, EditorNavigationAction,
         EditorPropertyRead, EditorPropertyReadLimits, EditorPropertyTarget, EditorPropertyValue,
     },
@@ -53,6 +53,18 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const SPRITE: &str = "nara.sprite.Sprite";
 pub(super) const SOURCE_ROWS: usize = 10_000;
+
+macro_rules! source_step {
+    ($engine:ident, $index:literal, $operation:expr) => {{
+        #[cfg(feature = "ui-work-observation")]
+        let (value, observation) = super::work::observe(|| $operation)?;
+        #[cfg(feature = "ui-work-observation")]
+        $engine.source_steps[$index].set(observation);
+        #[cfg(not(feature = "ui-work-observation"))]
+        let value = $operation;
+        value
+    }};
+}
 
 struct ContentImage {
     _input: nara_render_wgpu::WgpuRenderInput,
@@ -97,6 +109,8 @@ pub(super) struct Engine {
     pub other_frames: u64,
     pub panel_query_pages: std::cell::Cell<u64>,
     pub panel_query_records: std::cell::Cell<u64>,
+    #[cfg(feature = "ui-work-observation")]
+    pub source_steps: [std::cell::Cell<super::work::Observation>; 4],
     session: EditorProjectSession,
     presentation: EditorPreviewPresentation,
     scene_producer: WgpuRenderProducer,
@@ -189,6 +203,8 @@ impl Engine {
             other_frames: 0,
             panel_query_pages: std::cell::Cell::new(0),
             panel_query_records: std::cell::Cell::new(0),
+            #[cfg(feature = "ui-work-observation")]
+            source_steps: Default::default(),
             session,
             presentation: EditorPreviewPresentation::new(),
             scene_producer,
@@ -512,29 +528,41 @@ impl Engine {
         entity: &SceneEntityId,
         x: f64,
     ) -> Result<()> {
-        self.session.validate_authoring_query_basis(basis)?;
-        ensure!(
-            self.panels_snapshot()?.selected.as_ref() == Some(entity),
-            "Inspector selection changed before admission"
-        );
-        ensure!(
-            entity == &self.sprite && x.is_finite(),
-            "Inspector requires the selected Sprite and a finite X"
-        );
-        let prepared = self.session.prepare_authoring_property_edit(
-            basis,
-            &[AuthoringPropertyEdit {
-                entity: entity.clone(),
-                component: ComponentTypeId::new(TRANSFORM),
-                component_version: ComponentSchemaVersion::ONE,
-                property: ComponentPropertyPath::new(ComponentFieldId::new("translation.x")),
-                value: ComponentValue::f64(x)?,
-            }],
+        source_step!(self, 0, {
+            self.session.validate_authoring_query_basis(basis)?;
+            ensure!(
+                self.panels_snapshot()?.selected.as_ref() == Some(entity),
+                "Inspector selection changed before admission"
+            );
+            ensure!(
+                entity == &self.sprite && x.is_finite(),
+                "Inspector requires the selected Sprite and a finite X"
+            );
+            Ok::<(), anyhow::Error>(())
+        })?;
+        let prepared = source_step!(self, 1, {
+            let prepared = self.session.prepare_authoring_property_edit(
+                basis,
+                &[AuthoringPropertyEdit {
+                    entity: entity.clone(),
+                    component: ComponentTypeId::new(TRANSFORM),
+                    component_version: ComponentSchemaVersion::ONE,
+                    property: ComponentPropertyPath::new(ComponentFieldId::new("translation.x")),
+                    value: ComponentValue::f64(x)?,
+                }],
+            )?;
+            Ok::<_, anyhow::Error>(prepared)
+        })?;
+        let report = source_step!(
+            self,
+            2,
+            dispatch_without_drive(
+                &mut self.session,
+                EditorAction::CommitAuthoringEdit(prepared),
+            )
         )?;
-        dispatch(
-            &mut self.session,
-            EditorAction::CommitAuthoringEdit(prepared),
-        )?;
+        source_step!(self, 3, self.session.drive_editor_frame(Duration::ZERO));
+        require_applied(&report)?;
         self.invalidate();
         Ok(())
     }
@@ -695,11 +723,22 @@ impl Engine {
 }
 
 fn dispatch(session: &mut EditorProjectSession, action: EditorAction) -> Result<()> {
-    let frame = session.current_frame();
-    let report = session
-        .dispatch_editor_actions(EditorActionBatch::new(frame.revision(), [action]))
-        .map_err(|error| anyhow!("Editor action admission failed: {error:?}"))?;
+    let report = dispatch_without_drive(session, action)?;
     session.drive_editor_frame(Duration::ZERO);
+    require_applied(&report)
+}
+
+fn dispatch_without_drive(
+    session: &mut EditorProjectSession,
+    action: EditorAction,
+) -> Result<EditorActionBatchReport> {
+    let frame = session.current_frame();
+    session
+        .dispatch_editor_actions(EditorActionBatch::new(frame.revision(), [action]))
+        .map_err(|error| anyhow!("Editor action admission failed: {error:?}"))
+}
+
+fn require_applied(report: &EditorActionBatchReport) -> Result<()> {
     match report.outcomes() {
         [EditorActionOutcome::Workspace(report)] if report.applied => Ok(()),
         outcomes => bail!("Editor command did not apply: {outcomes:?}"),

@@ -3,7 +3,14 @@
 use super::{Viewer, renderer::Renderer};
 use anyhow::{Context as _, Result, ensure};
 use open_gpui::{FrameEvent, FrameTimingCollector, profiler};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tracing::{Subscriber, span::Id};
+use tracing_subscriber::{
+    Layer,
+    layer::{Context as TraceContext, SubscriberExt},
+    registry::LookupSpan,
+};
 
 #[cfg(feature = "ui-work-allocations")]
 use {
@@ -21,9 +28,55 @@ const CASES: [&str; 5] = [
     "property_edit_broad_refresh",
 ];
 const PHASES: [&str; 5] = ["mutation", "query_snapshot", "publish", "preview", "settle"];
+const SOURCE_PHASES: [&str; 4] = [
+    "source_selection",
+    "source_prepare",
+    "source_commit",
+    "source_drive",
+];
+const DRIVE_PHASES: [&str; 6] = [
+    "editor_preview",
+    "editor_preview_compile",
+    "editor_preview_drive",
+    "editor_preview_runtime",
+    "editor_preview_materialize",
+    "editor_publish_model",
+];
 
 #[derive(Clone, Copy, Default)]
-struct Observation {
+struct SpanObservation {
+    cpu: Duration,
+    calls: u64,
+}
+
+struct DriveLayer(Arc<Mutex<[SpanObservation; 6]>>);
+struct SpanStart(Instant);
+
+impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DriveLayer {
+    fn on_enter(&self, id: &Id, cx: TraceContext<'_, S>) {
+        let span = cx.span(id).expect("an entered observation span exists");
+        if span.metadata().target() == "nara::editor::work" && DRIVE_PHASES.contains(&span.name()) {
+            span.extensions_mut().insert(SpanStart(Instant::now()));
+        }
+    }
+
+    fn on_exit(&self, id: &Id, cx: TraceContext<'_, S>) {
+        let span = cx.span(id).expect("an exiting observation span exists");
+        if let Some(start) = span.extensions_mut().remove::<SpanStart>() {
+            let duration = start.0.elapsed();
+            let index = DRIVE_PHASES
+                .iter()
+                .position(|name| *name == span.name())
+                .unwrap();
+            let mut work = self.0.lock().unwrap();
+            work[index].cpu += duration;
+            work[index].calls += 1;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) struct Observation {
     cpu: Duration,
     #[cfg(feature = "ui-work-allocations")]
     allocations: u64,
@@ -31,7 +84,7 @@ struct Observation {
     allocated_bytes: u64,
 }
 
-fn observe<T>(operation: impl FnOnce() -> T) -> Result<(T, Observation)> {
+pub(super) fn observe<T>(operation: impl FnOnce() -> T) -> Result<(T, Observation)> {
     #[cfg(feature = "ui-work-allocations")]
     let (calls, bytes, call_start, byte_start) = {
         let calls =
@@ -57,6 +110,8 @@ fn observe<T>(operation: impl FnOnce() -> T) -> Result<(T, Observation)> {
 #[derive(Default)]
 struct Sample {
     phases: [Observation; 5],
+    source_phases: [Observation; 4],
+    drive_phases: [SpanObservation; 6],
     total: Duration,
     draw: [Duration; 3],
     draws: u64,
@@ -110,11 +165,20 @@ pub(super) struct UiWork {
     collector: FrameTimingCollector,
     initialized: bool,
     trace_was_changed: bool,
+    drive_work: Arc<Mutex<[SpanObservation; 6]>>,
+    _subscriber: tracing::subscriber::DefaultGuard,
 }
 
 impl UiWork {
     pub fn new() -> Self {
         let trace_was_changed = profiler::set_trace_enabled(true);
+        let drive_work = Arc::new(Mutex::new([SpanObservation::default(); 6]));
+        let subscriber = tracing_subscriber::registry().with(
+            DriveLayer(drive_work.clone()).with_filter(tracing_subscriber::filter::filter_fn(
+                |metadata| metadata.target() == "nara::editor::work",
+            )),
+        );
+        let subscriber = tracing::subscriber::set_default(subscriber);
         println!(
             "NARA_GPUI_WORK_CONFIG warmups={WARMUPS} samples={SAMPLES} source_rows=10001 debug_assertions={} allocation_observer={} font=Segoe_UI geometry=1280x640 scale=host_logical no_readback=true timings=instrumented_cpu_not_gpu",
             cfg!(debug_assertions),
@@ -127,6 +191,8 @@ impl UiWork {
             collector: FrameTimingCollector::new(),
             initialized: false,
             trace_was_changed,
+            drive_work,
+            _subscriber: subscriber,
         }
     }
 
@@ -163,6 +229,7 @@ impl UiWork {
         let before = counters(viewer);
         let renderer = viewer.renderer.as_ref().unwrap();
         let record_before = renderer.record_cpu.get();
+        *self.drive_work.lock().unwrap() = [SpanObservation::default(); 6];
         let start = Instant::now();
         let mut sample = Sample::default();
         let (mutation, observation) = observe(|| -> Result<()> {
@@ -185,6 +252,16 @@ impl UiWork {
         })?;
         mutation?;
         sample.phases[0] = observation;
+        sample.drive_phases = *self.drive_work.lock().unwrap();
+        if matches!(self.case, 2 | 4) {
+            ensure!(
+                sample.drive_phases.iter().all(|phase| phase.calls == 1),
+                "the original source drive did not reach each expected observation once"
+            );
+            sample.source_phases = std::array::from_fn(|index| {
+                viewer.engine.as_ref().unwrap().borrow().source_steps[index].take()
+            });
+        }
         let (snapshot, observation) =
             observe(|| viewer.engine.as_ref().unwrap().borrow().panels_snapshot())?;
         let snapshot = snapshot?;
@@ -327,6 +404,45 @@ impl UiWork {
                     .map(|sample| sample.phases[index].allocated_bytes)
                     .sum::<u64>(),
             );
+        }
+        if matches!(self.case, 2 | 4) {
+            for (index, phase) in SOURCE_PHASES.iter().enumerate() {
+                report_cpu(
+                    name,
+                    phase,
+                    self.samples
+                        .iter()
+                        .map(|sample| sample.source_phases[index].cpu),
+                );
+                #[cfg(feature = "ui-work-allocations")]
+                println!(
+                    "NARA_GPUI_WORK_ALLOC case={name} phase={phase} scope=calling_thread totals_calls={} totals_requested_bytes={}",
+                    self.samples
+                        .iter()
+                        .map(|sample| sample.source_phases[index].allocations)
+                        .sum::<u64>(),
+                    self.samples
+                        .iter()
+                        .map(|sample| sample.source_phases[index].allocated_bytes)
+                        .sum::<u64>(),
+                );
+            }
+            for (index, phase) in DRIVE_PHASES.iter().enumerate() {
+                report_cpu(
+                    name,
+                    phase,
+                    self.samples
+                        .iter()
+                        .map(|sample| sample.drive_phases[index].cpu),
+                );
+                println!(
+                    "NARA_GPUI_WORK_SPANS case={name} phase={phase} calls={} scope=current_thread_nested_in_mutation",
+                    self.samples
+                        .iter()
+                        .map(|sample| sample.drive_phases[index].calls)
+                        .sum::<u64>()
+                );
+            }
         }
         for (index, phase) in ["gpui_request_layout", "gpui_prepaint", "gpui_paint"]
             .iter()

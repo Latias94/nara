@@ -2680,6 +2680,9 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
+        #[cfg(feature = "editor-work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::editor::work", "editor_preview").entered();
         if self.closing || self.authoring_operation_fenced() {
             return;
         }
@@ -2699,6 +2702,8 @@ impl EditorProjectSession {
                     .authoring_runtime
                     .preview_requires_source_projection(document, slot.revision(), &dependencies)
                     .then(|| {
+                        #[cfg(feature = "editor-work-observation")]
+                        let _work_span = tracing::info_span!(target: "nara::editor::work", "editor_preview_compile").entered();
                         let Some(registry) = self.authoring_runtime.installed_preview_registry()
                         else {
                             return preview::EditorPreviewProjection::rejected(single_error(
@@ -2750,7 +2755,13 @@ impl EditorProjectSession {
                 })
             })
         };
-        if let Some(report) = self.authoring_runtime.drive_preview(source) {
+        let report = {
+            #[cfg(feature = "editor-work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::editor::work", "editor_preview_drive").entered();
+            self.authoring_runtime.drive_preview(source)
+        };
+        if let Some(report) = report {
             let _ = self.diagnostics.extend(report);
         }
     }

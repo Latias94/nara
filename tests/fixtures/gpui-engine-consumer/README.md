@@ -159,6 +159,20 @@ observations do not measure GPU execution, display scanout or end-to-end input l
 The mutation interval also includes the original `drive_editor_frame(Duration::ZERO)` after
 dispatch; it does not isolate preparation, commit or Editor model advancement. The Scene preview
 case refreshes static source output and does not advance a Game simulation.
+The attribution successor additionally records `source_selection`, `source_prepare`,
+`source_commit` and `source_drive` inside the two property-edit cases. These are nested scopes
+around the same basis/selection validation, original prepared edit, action dispatch and original
+Editor drive. They preserve its checks, preview/model work and ordering. Their CPU observations
+and optional allocation records are subdivisions of `mutation`; do not add them to the parent
+or add their percentiles together.
+The same optional mode forwards Nara's `editor-work-observation` feature and installs a standard
+thread-scoped `tracing-subscriber` Registry layer filtered to `nara::editor::work`. Six original
+owner spans distinguish preview compilation, preview drive/Runtime/materialization and Editor
+model publication. The engine installs no subscriber and the feature is disabled by default.
+These elapsed spans are inclusive/nested, with subscriber overhead; their per-sample call
+checks do not establish worker-thread work or exclusive CPU time. The probe requires one reached
+span of each kind in both original property-edit cases. Allocation requests remain observed
+at the four outer source steps, without invented per-span allocation attribution.
 
 Allocation records count calls and requested bytes on the calling thread for the named owner
 phases. The optional `NARA_GPUI_WORK_HEAP` snapshot reports process allocator-requested live

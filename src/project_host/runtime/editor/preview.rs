@@ -668,9 +668,15 @@ impl EditorPreviewSession {
             .input
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(request);
-        let outcome = runtime
-            .drive(Duration::ZERO)
-            .map_err(|_| preview_error("project.editor.preview-frame-failed"))?;
+        let outcome = {
+            #[cfg(feature = "editor-work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::editor::work", "editor_preview_runtime")
+                    .entered();
+            runtime
+                .drive(Duration::ZERO)
+                .map_err(|_| preview_error("project.editor.preview-frame-failed"))?
+        };
         let runtime_state = runtime.world().resource::<EditorPreviewRuntimeState>();
         let Some(accepted) = runtime_state
             .accepted
@@ -846,38 +852,47 @@ fn apply_editor_preview_request(world: &mut World) {
             .as_ref()
             .expect("a requested preview retains its exact projection");
         let native_registry = registry.snapshot(world);
-        let report = match (&project, projection, native_registry.as_ref()) {
-            (_, EditorPreviewProjection::Rejected(diagnostics), _) => {
-                let mut report = nara_scene::SceneSpawnReport::default();
-                report.diagnostics = diagnostics.clone();
-                report
-            }
-            (
-                EditorPreviewProject::Authoring(_),
-                EditorPreviewProjection::Authoring {
+        let report = {
+            #[cfg(feature = "editor-work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::editor::work", "editor_preview_materialize")
+                    .entered();
+            match (&project, projection, native_registry.as_ref()) {
+                (_, EditorPreviewProjection::Rejected(diagnostics), _) => {
+                    let mut report = nara_scene::SceneSpawnReport::default();
+                    report.diagnostics = diagnostics.clone();
+                    report
+                }
+                (
+                    EditorPreviewProject::Authoring(_),
+                    EditorPreviewProjection::Authoring {
+                        candidate,
+                        database,
+                        asset_scope,
+                        ..
+                    },
+                    Some(native),
+                ) => state.materializer.publish(
+                    world,
+                    native,
                     candidate,
-                    database,
-                    asset_scope,
-                    ..
-                },
-                Some(native),
-            ) => {
-                state
-                    .materializer
-                    .publish(world, native, candidate, database.resolver(asset_scope))
-            }
-            (
-                EditorPreviewProject::TrustedCompiled(project),
-                EditorPreviewProjection::TrustedCompiled { candidate, .. },
-                Some(native),
-            ) => state
-                .materializer
-                .publish(world, native, candidate, project.asset_resolution()),
-            _ => {
-                let mut report = nara_scene::SceneSpawnReport::default();
-                report.diagnostics =
-                    preview_error("project.editor.preview-projection-lane-mismatch");
-                report
+                    database.resolver(asset_scope),
+                ),
+                (
+                    EditorPreviewProject::TrustedCompiled(project),
+                    EditorPreviewProjection::TrustedCompiled { candidate, .. },
+                    Some(native),
+                ) => {
+                    state
+                        .materializer
+                        .publish(world, native, candidate, project.asset_resolution())
+                }
+                _ => {
+                    let mut report = nara_scene::SceneSpawnReport::default();
+                    report.diagnostics =
+                        preview_error("project.editor.preview-projection-lane-mismatch");
+                    report
+                }
             }
         };
         state.diagnostics = report.diagnostics;

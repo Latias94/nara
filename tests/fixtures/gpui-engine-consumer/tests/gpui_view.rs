@@ -75,6 +75,49 @@ fn measure_hosted_gpui_work() {
                 logs.display()
             );
         }
+        if matches!(case, "local_property_edit" | "property_edit_broad_refresh") {
+            for phase in [
+                "source_selection",
+                "source_prepare",
+                "source_commit",
+                "source_drive",
+            ] {
+                let marker = format!("NARA_GPUI_WORK_CPU case={case} phase={phase} samples=64 ");
+                assert!(
+                    output.lines().any(|line| line.starts_with(&marker)),
+                    "missing {marker}; logs: {}\n{output}",
+                    logs.display()
+                );
+                #[cfg(feature = "ui-work-allocations")]
+                {
+                    let marker = format!(
+                        "NARA_GPUI_WORK_ALLOC case={case} phase={phase} scope=calling_thread "
+                    );
+                    assert!(
+                        output.lines().any(|line| line.starts_with(&marker)),
+                        "missing {marker}; logs: {}\n{output}",
+                        logs.display()
+                    );
+                }
+            }
+            for phase in [
+                "editor_preview",
+                "editor_preview_compile",
+                "editor_preview_drive",
+                "editor_preview_runtime",
+                "editor_preview_materialize",
+                "editor_publish_model",
+            ] {
+                let marker = format!(
+                    "NARA_GPUI_WORK_SPANS case={case} phase={phase} calls=64 scope=current_thread_nested_in_mutation"
+                );
+                assert!(
+                    output.lines().any(|line| line == marker),
+                    "missing {marker}; logs: {}\n{output}",
+                    logs.display()
+                );
+            }
+        }
         #[cfg(feature = "ui-work-allocations")]
         {
             for phase in ["mutation", "query_snapshot", "publish", "preview", "settle"] {

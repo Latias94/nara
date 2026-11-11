@@ -10,7 +10,7 @@ publish = false
 resolver = "3"
 
 [features]
-ui-work-observation = ["open_gpui/profiler"]
+ui-work-observation = ["open_gpui/profiler", "nara_engine/editor-work-observation", "dep:tracing", "dep:tracing-subscriber"]
 ui-work-allocations = ["ui-work-observation", "dep:open_gpui_bench_metrics", "dep:criterion"]
 
 [dependencies]
@@ -29,6 +29,8 @@ winit = "=0.30.13"
 
 [target.'cfg(windows)'.dependencies]
 criterion = { version = "0.8.2", default-features = false, optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }
 open_gpui_bench_metrics = { package = "open-gpui-bench-metrics", path = "../../../../open-gpui/crates/bench_metrics", optional = true }
 open_gpui = { package = "open-gpui", path = "../../../../open-gpui/crates/gpui", default-features = false, features = ["windows-manifest"] }
 open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../../open-gpui/crates/gpui_wgpu", default-features = false }

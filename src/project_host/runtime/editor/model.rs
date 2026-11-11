@@ -91,6 +91,9 @@ impl EditorProjectSession {
         &mut self,
         scan_work_observed: bool,
     ) -> Arc<EditorFrameModel> {
+        #[cfg(feature = "editor-work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::editor::work", "editor_publish_model").entered();
         let source_index = self.synchronize_project_browser(scan_work_observed);
         let project_browser = self.project_browser.view();
         let source_target = project_browser
