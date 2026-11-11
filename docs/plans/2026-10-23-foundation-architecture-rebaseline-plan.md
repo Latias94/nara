@@ -1506,6 +1506,19 @@ workflow, numeric budgets, the game executor decision or maintenance handoff.
 Browser-custody correction `7c5c0cd810f` passes production wasm compilation/Clippy and final
 native retention 6/6; a new browser imported-image trajectory remains unexecuted.
 
+The [synchronous external-Win32 successor](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-synchronous-external-win32-host)
+implements App's explicit platform-window factory/detachment at Open-GPUI `6ad133d3662` and
+application-owned HWND/loop driving at `911e628c0e9`. It reuses the original Window creation,
+native services and exact retirement authority. Final Core/public 27/27, affected native 22/22,
+independent consumers 1/1 and 2/2, and both ordinary real-GPU host smoke modes pass. Existing
+correctness Clippy and static/document checks pass. The host retains userdata, native lifetime
+and quit policy after quiesced detachment. This supersedes the preceding missing synchronous
+host checkpoint, not delayed Scene/input publication or the real Nara consumer. A game HUD,
+split-screen region or world-plane texture must also prove a production logical root without
+an extra native window. Keep that runtime consumer distinct from the two-skin public-control
+behavior proof; extract packages only when either consumer demonstrates a dependency/lifecycle
+need. No current frontend, GPU dependency or game-runtime default changes.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the

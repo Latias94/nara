@@ -949,6 +949,19 @@ comparison and full R11/R12/R11f remain open; no frontend or dependency default 
 The subsequent browser-custody correction `7c5c0cd810f` passes production wasm compilation
 and Clippy plus final native retention 6/6, without new browser execution qualification.
 
+The [synchronous external-Win32 checkpoint](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-synchronous-external-win32-host)
+supersedes the missing synchronous HWND/loop prerequisite at Open-GPUI `6ad133d3662` and
+`911e628c0e9`. App's factory retains original creation/rollback authority; Win32 binds existing
+native services to the application's hidden top-level HWND and loop. Exact detachment follows
+GPU quiescence without claiming OS destruction or consuming host userdata/quit ownership.
+Final Core/public 27/27, affected native 22/22, ordinary independent consumers 1/1 and 2/2,
+both real-GPU host smoke modes, correctness Clippy and static checks pass. The original
+framework record retains failures and reviewed authority/IME/COM corrections. Delayed Scene
+and last-submitted interaction, production logical roots, real Nara Host/View and authored-game
+comparison remain open. Base-style skin/behavior reuse and neutral `ui-core`/`motion` do not
+independently qualify those runtime requirements. No dependency/frontend default or full
+R11/R12/R11f/maintenance handoff changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

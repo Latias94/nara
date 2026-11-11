@@ -233,6 +233,12 @@ world-space/depth, resource loading/retirement, platform scope and special mater
 Selective algorithm/semantics/motion reuse does not require sharing all components; neither
 does independent product ownership require permanently maintaining two execution engines.
 
+The [reuse map](#editor-and-game-reuse-boundary) and
+[runtime comparison](#game-runtime-mechanism-review) define that decision. Include shipped UI
+resource loading and retirement through the Player's actual content providers or explicitly
+executable-owned resources. Existing [cooked delivery](../guides/cooked-player-delivery.md)
+does not qualify a GPUI asset/font adapter or justify falling back to Editor source loaders.
+
 ## WGPU Identity And Dependency Policy
 
 Nara currently requires registry WGPU `=30.0.1`; Open-GPUI selects the official Git revision
@@ -272,6 +278,8 @@ models and appearance/adapter seams, then move a responsibility only when a conc
 exposes inappropriate coupling. Existing `ui-core` is not claimed to be a complete headless Base.
 A source-built independent Dialogue panel, extended into a custom Dialogue Graph, is a useful
 next consumer for custom Element/canvas, ordinary controls, exact domain edits and cleanup. [C3]
+The [pinned Base/module comparison](#editor-and-game-reuse-boundary) distinguishes public state
+from private behavior bindings and defines the consumer criterion for further extraction.
 
 Trusted source-built extensions can use the selected framework directly. Keep document commands,
 query/preparation and exact results framework-neutral. An alternate toolkit uses explicit Host
@@ -526,9 +534,40 @@ with the pre-change executable. The passing 18-test selection is not a complete 
 Desktop automation was unavailable; no screenshot or manual physical-input claim follows. [W3]
 
 These are fork-owned general framework extensions, not newly imported official implementations.
-The next complete prerequisite is the production host-driven Window/loop and exact delayed
-Scene/submission/interaction lifecycle. Keep the current Nara UI as the control until the actual
-Host/View and authored HUD consumers qualify a selected arrangement. [W3]
+The synchronous host-driven Window/loop successor below supersedes that missing prerequisite;
+the exact delayed Scene/submission/interaction lifecycle remains open. Keep the current Nara UI
+as the control until the actual Host/View and authored HUD consumers qualify an arrangement. [W3]
+
+## Implemented Synchronous External Win32 Host
+
+Open-GPUI `6ad133d36622851025eee882d63bb8a47787d524` adds an explicit App platform-window
+factory inside the original reservation, resolved options, display snapshot, first-presentation
+and rollback transaction. `911e628c0e9cd66cf63f5c04e7d46c0d87c67fdd` attaches the existing
+Win32 services to an application-created hidden top-level HWND and returns launch to the host's
+message loop. The ordinary non-Nara WGPU application owns its window, loop, device, encoder and
+actual synchronous submission; normal elements and native services retain their existing owners.
+Successful binding detachment quiesces the original GPU prefix and leaves the host HWND alive,
+with its userdata, original IME association and message chain intact. It is a different terminal
+fact from OS destruction. [W4]
+
+Final affected Core/public tests pass 27/27; native attachment/input/retirement controls pass
+22/22; independently locked consumers pass 1/1 without test support and 2/2 with ordinary
+headless execution. The final ordinary external smoke changes GPU images, routes native button,
+F6 and UTF-16 messages, checks actual resize and quiesces original prefix 6 before detachment.
+Host private messages and its quit marker remain usable. The original GPUI-owned application
+also passes its changed-image and prefix-3 shutdown trajectory. Correctness Clippy, production
+Core/WGPU/Web wasm compilation, root/consumer formatting and existing static/document checks
+pass; qualification is recorded at `af68cbad1133d40c59f8f0cd342156a12ad475e8`.
+These are fork-owned framework extensions; no additional official
+source-adoption credit follows. The framework record retains initial fixture failures, a real
+COM access violation and its CDB diagnosis, and the reviewed exact-authority/IME/resource fixes. [W4]
+
+This checkpoint accepts hidden, non-child normal/floating top-level windows and submits
+synchronously. It does not provide delayed Scene delivery, last-submitted interaction/text/
+accessibility publication, a production no-window logical root, physical IME/DPI qualification,
+performance budgets or Nara Host/View acceptance. A game HUD or world-plane texture must not need
+an extra native window merely to obtain controls. Keep those runtime requirements separate from
+the Base-style public behavior/skin consumer and subsequent crate-extraction decisions. [W4]
 
 ## References
 
@@ -553,6 +592,7 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [W1] Recording commit `0259c88f9deb26e4caa026ebd39be179d19a3ae5`, `crates/gpui_wgpu/src/wgpu_renderer/scene_renderer.rs:4`, `wgpu_renderer.rs:49`, `gpui_wgpu.rs:20`: recorder, target/limit checks and resource receipt.
 - [W2] Same recording commit, `crates/gpui_wgpu/tests/external_scene.rs:1`: explicit simulated scene production and separate actual GPU submission/readback; Open-GPUI `docs/verification.md#application-owned-wgpu-scene-recording` owns executed results and limits.
 - [W3] Local Open-GPUI image commit `a5d7dea101ca643a9fd462f1c0476499967c9276`, native/application commit `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01`, and browser custody correction `7c5c0cd810f15c3e4c3591c400e42aa72f25a2b4`, qualified at `12f9bb50e8e`; `crates/gpui/src/{image_texture.rs,window/imported_image.rs}`, `crates/gpui_wgpu/src/wgpu_atlas/imported_image.rs`, `crates/gpui_windows/src/renderer.rs`, `examples/wgpu-native/` and the public/native consumers. Open-GPUI `docs/external-wgpu.md` and `docs/verification.md#retained-gpu-images-and-supplied-win32-renderers` own public usage, actual results and failures. These local revisions are not remotely published.
+- [W4] Local Open-GPUI App factory/detachment commit `6ad133d36622851025eee882d63bb8a47787d524` and Win32/application commit `911e628c0e9cd66cf63f5c04e7d46c0d87c67fdd`, qualified at `af68cbad1133d40c59f8f0cd342156a12ad475e8`; `crates/gpui/src/{app.rs,platform.rs,app/cell.rs}`, `crates/gpui_windows/src/{platform.rs,window.rs,direct_manipulation.rs,native_attachment_tests.rs}`, `examples/wgpu-native/` and the two public `platform_window_factory` consumers. Open-GPUI `docs/external-wgpu.md#drive-an-application-owned-win32-window` and `docs/verification.md#supplied-platform-windows-and-external-win32-driving` own usage, actual results/failures and current limits. Local commits only.
 - [I1] ImGui pin above, [`docs/BACKENDS.md:25–67,129–172`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L25-L67): platform/renderer split and custom-engine guidance.
 - [I2] Same pin, [`examples/example_win32_directx11/main.cpp:74–75,101–109,134–136,176–183,267`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/examples/example_win32_directx11/main.cpp#L74-L183): existing HWND/device, application loop, draw and present.
 - [I3] Same pin, [`docs/BACKENDS.md:214–287`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L214-L287): texture updates, indexed triangles, clip offset and framebuffer scale.

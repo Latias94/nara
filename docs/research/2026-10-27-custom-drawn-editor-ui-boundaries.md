@@ -5692,3 +5692,29 @@ actual dependency/lifecycle consumer. The production external HWND/loop and exac
 Scene/input lifecycle remain next, followed by Nara's real Host/View and authored HUD comparison.
 No Nara GPU dependency, toolkit default, game-runtime selection, numerical budget or full
 R11/R12/R11f completion changes.
+
+## November 11: Synchronous Application-Owned Win32 Hosting
+
+Open-GPUI `6ad133d36622851025eee882d63bb8a47787d524` preserves App's complete creation
+transaction while accepting an explicit platform-window factory and neutral detached outcome.
+`911e628c0e9cd66cf63f5c04e7d46c0d87c67fdd` reuses native Window/input services with an
+application-created hidden top-level HWND and application-owned message loop. These fork-owned
+extensions qualify synchronous rendering through an ordinary WGPU application without a
+test/bench-support runtime. Successful shutdown quiesces the original submitted GPU prefix,
+detaches GPUI's binding and preserves the host window, userdata, IME association and quit policy.
+The [implemented successor](2026-11-11-open-gpui-engine-integration-layers.md#implemented-synchronous-external-win32-host)
+and framework qualification own the exact contracts and limits.
+
+Final affected Core/public tests pass 27/27, native controls 22/22 and independently locked
+consumers 1/1 and 2/2. Both ordinary GPU smoke modes pass: external-host mode exercises native
+button/F6/UTF-16 routing, actual resize, image changes and prefix-6 detachment; the original
+GPUI-owned mode retains its changed-image/prefix-3 shutdown. Correctness Clippy and existing
+static/document checks pass. Framework records retain the early fixture failures, actual COM
+access violation/CDB diagnosis and reviewed exact-authority, IME and retirement corrections.
+
+The synchronous host prerequisite is now implemented. Delayed Scene submission and last-submitted
+interaction/publication, production no-native-window logical roots, physical IME/DPI, numeric
+costs and actual Nara Host/View remain separate work. Editor/game reuse should share suitable
+mechanisms and control behavior through separate product adapters; the pinned Base comparison
+does not justify an extra crate per algorithm or claim game-runtime support. The authored HUD
+and custom-skin consumers determine further extraction. No Nara dependency or default switches.
