@@ -2526,6 +2526,17 @@ Inspector Gallery 2/2 passing. Final source review confirms the still-missing
 Wayland inactive-window IME gate, public InputPreference event, FocusMap drop queue and
 focus-lost ancestor query; fixed-target closure and the actual Nara GPU/Host/View
 consumer remain prerequisites before independent framework-maintenance handoff.
+The subsequent Wayland patch `c0a36ddce01` restores its official gate and passes affected
+cache/native 13/13; the input/focus successor remains in progress.
+
+The [input/focus successor](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-input-priority-focus-lifetime-and-hover-readmission)
+at Open-GPUI `571484691ea` closes those three explicit Core rows. The separate fork correction
+`8ff031e95f2` preserves fresh-pointer readmission after Hidden/Inert while retaining official
+stationary-layout hover. Final affected tests pass 113/113 with and without profiler, native
+input/retirement 3/3 plus explicit native profiler 1/1, and ordinary consumers 1/1 and 2/2.
+Preserve actual platform/numeric limits and complete final source dispositions, then execute
+the real Nara GPU/Host/View gate before the independent maintenance session. Nara's dependency
+and toolkit default remain unchanged.
 
 An owning ADR change and default switch follow the comparison's complete evidence. Preserve
 qualified domain/Host mechanisms and remove displaced Editor execution code after acceptance;

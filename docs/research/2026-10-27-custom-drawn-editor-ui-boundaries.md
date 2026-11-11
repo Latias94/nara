@@ -5581,7 +5581,11 @@ their own recorded scope.
 The final source inventory separately confirms one earlier deferred Wayland omission:
 `137e677a05` skips IME enablement updates from inactive windows, while the current fork's
 leased-handler adaptation lacks that gate. Mac traffic-light frame/tracking-area updates are
-already present in the qualified typed-AppKit successor. A bounded final Core check also
+already present in the qualified typed-AppKit successor. The subsequent Wayland implementation
+`c0a36ddce01d3992134fd2ed4691a1b1a8c42f4a` restores the official check. It passes 13/13
+affected cursor/cache and native surface controls on WSLg/Lavapipe, including the shared
+enablement state after an inactive window update. Physical IME/protocol delivery and native
+blur visuals remain unqualified. A bounded final Core check also
 confirms the remaining public InputPreference event (`86c20cc911`), FocusMap drop queue
 (`e463c5ab74`) and callback-scoped nearest-live-ancestor query (`b2d9c2e122`). Existing
 text-first binding behavior and focus cleanup do not implement those public/structural
@@ -5590,3 +5594,44 @@ mechanisms. Keep these explicit residuals, final source dispositions and the
 ahead of maintenance handoff. Nara's WGPU package identity, external encoding, immutable output
 leases and exact View presentation/input still need their concrete consumer; this evidence
 changes no dependency, toolkit default or full fixed-target/R11/R12/R11f gate.
+
+## November 11: Input Priority, Focus Lifetime And Hover Readmission
+
+Open-GPUI `571484691eaf56cbf3e67d2c497274be12d38db0`, qualified at
+`424a3a0f7c2e71f6ce5a933de00138919c50893d`, implements the final bounded Core
+findings against the unchanged Zed `635026fabc38440fce5e1767d125026a17b12012` target.
+Official `86c20cc911` exposes InputPreference to keystroke interceptors and observers, with
+pre-interception and post-interception/replay computation. Official `e463c5ab74` supplies the
+final-strong-handle release queue; one private focus module replaces the full-map scan. App
+removes queued identities and unlocks before Window cleans its current, pending, provisional,
+fallback and candidate references. Official `b2d9c2e122` supplies the nearest surviving ancestor
+query during focus-lost callbacks. Its old committed path is temporary and restored on unwind;
+the new accepted dispatch tree determines eligible ancestors.
+
+The separate fork adaptation `8ff031e95f299a284738c722aa43e6b918fc5835` reconciles official
+stationary-layout hover with ADR 0022's Hidden/Inert withdrawal semantics. An accepted withdrawal
+waits for a fresh pointer event; restoration, geometry updates and cached replay cannot revive
+the listener. Rejected suppression candidates retain the original admitted hover. Both listener
+modes keep the existing keyboard, drag and mouse-down rules. This is an explicit fork lifecycle
+contract, not an alternative official hover algorithm or a new input owner.
+
+The first affected aggregate passes 97/99; both hover failures reproduce in the retained
+pre-input/focus binary. Their original assertions are retained and the owning fix adds repeated
+refresh, actual restored cache reuse, same-position input and failed-candidate controls. Final
+affected Core/public/presentation/gesture tests pass 113/113 with profiler and 113/113 without.
+Actual native input/MouseLeave/quit retirement passes 3/3, and the explicitly enabled native
+profiler input/submission/reconstructed-window trajectory passes 1/1. Ordinary independently
+locked consumers pass 1/1 and 2/2; their public signatures compile without test support. Correctness
+Clippy passes for the affected native packages and targets. Bounded independent reviews find no
+P1/P2 in input-handler, queue, focus-callback or hover publication/cache adaptations.
+The final affected Core/Windows libraries compile with the declared Rust 1.93 floor, and the
+Web production closure compiles for wasm without default features. Root/consumer formatting
+and existing import/document/API/release checks pass.
+
+The scoped inventory's concrete Wayland and input/focus findings now have implementations and
+verification, with final source disposition still distinct from exhaustive monorepo equivalence.
+Physical AltGr/IME, other native environments, numerical costs and canonical docking retain
+their existing scope. The next integration gate remains the
+[actual Nara GPU/Host/View consumer](#november-10-modular-gpu-and-host-source-map), including the
+two WGPU source identities and one device/encoding/submission/presentation owner. This does not
+switch Nara's toolkit, add a dependency or complete R11/R12/R11f or the maintenance handoff.

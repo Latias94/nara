@@ -889,11 +889,20 @@ records Open-GPUI `9e7b9c3a36f`, `9d9602bb46d` and `655e9610c77`: official Apach
 Win32 workers/timers retain application globals and the existing foreground/native owners.
 Logger/SumTree 27/27, independent ordinary hosts 2/2 and 3/3 and actual Rust 1.93/wasm checks
 pass. Window/Inspector follows admitted focus, geometry and unwind recovery; affected
-Core/public/Windows 53/53 and Inspector Gallery 2/2 pass. The confirmed
-Wayland inactive-window IME omission, InputPreference event, FocusMap drop queue,
+Core/public/Windows 53/53 and Inspector Gallery 2/2 pass. The Wayland follow-up
+`c0a36ddce01` restores the official inactive-window gate and passes affected cache/native
+13/13. The remaining InputPreference event, FocusMap drop queue,
 focus-lost ancestor query, final fixed-target dispositions and real Nara
 GPU/Host/View consumer still precede maintenance handoff. No Nara dependency, UI default or
 full R11/R12/R11f gate changes follow.
+
+The [input/focus and hover successor](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-11-input-priority-focus-lifetime-and-hover-readmission)
+records Open-GPUI `571484691ea` for official InputPreference, final-drop FocusMap and nearest
+ancestor recovery, and `8ff031e95f2` for fork Hidden/Inert hover readmission. Final affected
+113/113 with and without profiler, native input/retirement 3/3, explicit native profiler 1/1,
+ordinary consumers 1/1 and 2/2 and correctness Clippy pass. Final source disposition, real Nara
+GPU/Host/View, numerical budgets and maintenance handoff remain separate; Nara gains no new
+dependency, owner or default and full R11/R12/R11f remain open.
 
 The November 10 [modular GPU/Host source map](../../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-10-modular-gpu-and-host-source-map)
 identifies existing Nara device scopes, immutable output leases, actual composite receipts and
