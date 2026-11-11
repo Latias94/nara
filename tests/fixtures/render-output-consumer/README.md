@@ -185,3 +185,9 @@ and [ownership design](../../../docs/architecture/render-host-ownership-design.m
 
 Source presence is not execution evidence. Record the exact engine revision, toolchain,
 backend/adapter and actual test results when qualifying this fixture.
+
+## Engine-Owned GPUI Rendering
+
+The separate [GPUI engine consumer](../gpui-engine-consumer/README.md) exercises this Host with
+the maintained framework and a real Editor Scene preview. It owns its own dependency graph and
+lockfile so ordinary image-output consumers do not require a sibling framework checkout.

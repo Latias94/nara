@@ -1,0 +1,36 @@
+[package]
+name = "nara-gpui-engine-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+nara_engine = { package = "nara", path = "../../..", default-features = false, features = ["project-workflow", "tooling", "presentation-2d", "render-wgpu"] }
+nara_core = { path = "../../../crates/nara_core", default-features = false }
+nara_ecs = { path = "../../../crates/nara_ecs", default-features = false }
+nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }
+nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-sprite", "stock-ui"] }
+nara_window = { path = "../../../crates/nara_window", default-features = false, features = ["runtime"] }
+tempfile = "3"
+unicode-segmentation = "1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+winit = "=0.30.13"
+
+[target.'cfg(windows)'.dependencies]
+open_gpui = { package = "open-gpui", path = "../../../../open-gpui/crates/gpui", default-features = false, features = ["windows-manifest"] }
+open_gpui_wgpu = { package = "open-gpui-wgpu", path = "../../../../open-gpui/crates/gpui_wgpu", default-features = false }
+open_gpui_windows = { package = "open-gpui-windows", path = "../../../../open-gpui/crates/gpui_windows", default-features = false }
+windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[[example]]
+name = "gpui_view"
+
+[[test]]
+name = "gpui_view"

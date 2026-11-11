@@ -9,6 +9,26 @@ make synchronous initialization suitable for a browser event loop.
 The independent [render-output consumer](../../tests/fixtures/render-output-consumer/README.md)
 contains a complete example using public crate-root interfaces with no default features.
 
+## Shared WGPU Source
+
+The maintained native renderer currently uses official WGPU Git revision
+`cddb2f5d80dc0009b2ef6767635140cacf90a007`. Its package version is `30.0.0`, but it includes
+surface-drop and wasm-timeout fixes newer than registry `30.0.1`. A later corrected registry
+release can replace this source after affected-consumer qualification.
+
+An application directly sharing Device/Queue/Texture types must select that same Cargo source
+and use the actual original device. If the application also builds the reference Dear renderer,
+patch its compatible `wgpu = "30.0"` registry edge at the application workspace root:
+
+```toml
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+```
+
+The patch is application-owned and does not propagate through path dependencies. Direct exact
+`=30.0.1` requirements must be reconciled as well; that version requirement cannot select a Git
+package declaring `30.0.0`. Each independent workspace retains its own lockfile.
+
 ## Producers And Configuration
 
 Create an owned producer with `host.create_producer()`. Its copyable `producer.id()` is an
@@ -130,12 +150,34 @@ receipts. Join each `WgpuImageCompositeReceipt` to its original immutable placem
 snapshot before accepting picking or UI interaction. A repaint cannot mint another one-shot UI
 permit, and another window's mirror cannot complete the designated occurrence.
 
+An external frontend retaining UI-thread-local recordings calls
+`WgpuWindowFrame::submission_prefix()` before its first upload or encoding operation. Keep that
+exact observation and all local recording resources outside the paint callback. The observation
+starts unbound and incomplete, then shares the Host's one-time original submission binding even
+when paint, encoding, submission or pre-present fails. Release resources only after the original
+prefix settles through `poll` or explicit abandoned-callback recovery. A failed attempt has no
+presentation authority even if its resources later settle. A producer's earlier render prefix
+and a later latest-prefix query cannot replace this window attempt's resource obligation.
+
+The independent [GPUI consumer](../../tests/fixtures/gpui-engine-consumer/README.md)
+records a hosted root through this same window encoder. The framework provides UI execution and
+an optional Scene recorder; Nara owns the device, target, submit/present and retirement. Its
+workspace consumes the sibling maintained framework; ordinary renderer consumers
+do not acquire a GPUI dependency.
+
 Each native attempt admits at most256 output/display items and256 extra command buffers.
 Repeated sampling of one occurrence consumes one record. Engine tables and original-prefix
 metadata admit before clones/native work; receipt storage and generation checks precede present.
 Paint/read-use callback refusal or panic still binds its queued uploads and retains the original
 prefix. `NativeCallbackPanicked` is attempt-local; actual native execution failure retains its
 separate owner-replacement classification. A skipped/minimized target returns no present facts.
+
+Acquiring a window texture marks that surface configuration for recovery until actual native
+presentation succeeds. If encoding, validation, submission or pre-present fails, the next Host
+turn reconfigures the same surface before acquiring again. This also covers Vulkan backends
+whose discarded acquired image does not reset its binary semaphore. The failure never presents
+partial drawing or publishes a window/composite receipt. Healthy presentations clear this
+recovery requirement; a suboptimal acquire retains the existing reconfiguration policy.
 
 The independent [composition consumer](../../tests/fixtures/render-composition-consumer/README.md)
 exercises two real windows and an independent image stream. Its source, processed-content and
