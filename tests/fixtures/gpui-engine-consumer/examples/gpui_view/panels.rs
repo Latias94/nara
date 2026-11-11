@@ -11,6 +11,10 @@ use std::{
     rc::Rc,
 };
 
+#[path = "hierarchy.rs"]
+mod hierarchy;
+pub(super) use hierarchy::Hierarchy;
+
 pub(super) struct EditorModel {
     pub snapshot: EditorPanelsSnapshot,
 }
@@ -35,116 +39,9 @@ pub(super) struct PanelWork {
     pub hierarchy_renders: Cell<u64>,
     pub inspector_renders: [Cell<u64>; 2],
     pub projected_notifications: Cell<u64>,
-}
-
-pub(super) struct Hierarchy {
-    model: Entity<EditorModel>,
-    entities: Vec<SceneEntityId>,
-    selected: Option<SceneEntityId>,
-    basis: EditorDocumentQueryBasis,
-    commands: Rc<RefCell<VecDeque<Command>>>,
-    work: Rc<PanelWork>,
-    _subscription: Subscription,
-}
-
-impl Hierarchy {
-    pub fn new(
-        model: Entity<EditorModel>,
-        commands: Rc<RefCell<VecDeque<Command>>>,
-        work: Rc<PanelWork>,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let snapshot = model.read(cx).snapshot.clone();
-        let subscription = cx.observe(&model, |this, model, cx| {
-            this.work
-                .projected_notifications
-                .set(this.work.projected_notifications.get() + 1);
-            let snapshot = &model.read(cx).snapshot;
-            let changed_binding = !same_binding(&this.basis, &snapshot.basis);
-            this.basis = snapshot.basis.clone();
-            if changed_binding
-                || this.entities != snapshot.entities
-                || this.selected != snapshot.selected
-            {
-                this.entities = snapshot.entities.clone();
-                this.selected = snapshot.selected.clone();
-                cx.notify();
-            }
-        });
-        Self {
-            model,
-            entities: snapshot.entities,
-            selected: snapshot.selected,
-            basis: snapshot.basis,
-            commands,
-            work,
-            _subscription: subscription,
-        }
-    }
-}
-
-impl Render for Hierarchy {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.work
-            .hierarchy_renders
-            .set(self.work.hierarchy_renders.get() + 1);
-        let snapshot = self.model.read(cx).snapshot.clone();
-        let displayed_entities: Rc<[SceneEntityId]> = self.entities.clone().into();
-        let rows = self
-            .entities
-            .iter()
-            .enumerate()
-            .map(|(index, entity)| {
-                let entity = entity.clone();
-                let basis = snapshot.basis.clone();
-                let commands = self.commands.clone();
-                let model = self.model.clone();
-                let displayed_entities = Rc::clone(&displayed_entities);
-                let displayed_selection = self.selected.clone();
-                let label = if snapshot.sprite.as_ref() == Some(&entity) {
-                    "Sprite".to_owned()
-                } else {
-                    format!("Source entity {}", index + 1)
-                };
-                div()
-                    .id(format!(
-                        "source-row:{:?}:{entity}",
-                        basis.revision.source_id()
-                    ))
-                    .h(px(30.))
-                    .px_2()
-                    .py_1()
-                    .bg(if self.selected.as_ref() == Some(&entity) {
-                        rgb(0x315878)
-                    } else {
-                        rgb(0x243040)
-                    })
-                    .cursor_pointer()
-                    .child(label)
-                    .on_click(move |_, _, cx| {
-                        let current = &model.read(cx).snapshot;
-                        let basis = if current.entities.as_slice() == displayed_entities.as_ref()
-                            && current.selected == displayed_selection
-                            && same_binding(&current.basis, &basis)
-                        {
-                            current.basis.clone()
-                        } else {
-                            basis.clone()
-                        };
-                        commands.borrow_mut().push_back(Command::Select {
-                            basis,
-                            entity: entity.clone(),
-                        });
-                    })
-            })
-            .collect::<Vec<_>>();
-        div()
-            .size_full()
-            .bg(rgb(0x243040))
-            .rounded_md()
-            .child("Hierarchy · source declarations")
-            .children(rows)
-    }
+    pub hierarchy_row_callbacks: Cell<u64>,
+    pub hierarchy_filter_records: Cell<u64>,
+    pub hierarchy_reconciled_records: Cell<u64>,
 }
 
 #[derive(Clone, PartialEq)]

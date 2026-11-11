@@ -39,6 +39,15 @@ the native trajectory includes forced recovery, focus, refusal and scale changes
 callback/submission counts are not an incremental-layout ratio or a timing baseline. No old
 Dear/kernel timing or current GPUI total cost is inferred from these passes.
 
+The subsequent [collection consumer](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-variable-height-source-collections)
+uses a real 10,001-record native source and public 10k/100k logical-row controls. Its observations
+separate query pages/scanned records, filter/reconciliation visits and list render callbacks.
+The native checkpoint's callback count is not the entire trajectory, and equality/string
+comparison, immutable snapshot construction, allocation, framework traversal and GPU work are
+outside these counters. Dense source/measurement metadata remains O(logical rows). A bounded
+visible callback count therefore establishes one work property, not complete incremental cost.
+The original Dear/kernel measurements retain their own source and consumer scope.
+
 Each existing owner exposes a detached cumulative snapshot. Counters saturate, do not reset on
 resource retirement and do not authorize more work, publication, input or presentation. They do
 not change admission limits, revision allocation, last-good fallback or exact backend outcomes.

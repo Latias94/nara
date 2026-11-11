@@ -26,7 +26,7 @@ use nara_engine::{
     },
     scene::{
         AuthoringPropertyEdit, SceneAuthoringRevision, SceneDocument, SceneEntityId,
-        ScenePlacement, ScenePlacementParent,
+        SceneEntityRecord, ScenePlacement, ScenePlacementParent,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentId,
@@ -52,6 +52,7 @@ use winit::window::Window;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const SPRITE: &str = "nara.sprite.Sprite";
+pub(super) const SOURCE_ROWS: usize = 10_000;
 
 struct ContentImage {
     _input: nara_render_wgpu::WgpuRenderInput,
@@ -71,7 +72,7 @@ pub(super) struct Preview {
 #[derive(Clone, PartialEq)]
 pub(super) struct EditorPanelsSnapshot {
     pub basis: EditorDocumentQueryBasis,
-    pub entities: Vec<SceneEntityId>,
+    pub entities: Rc<[SceneEntityId]>,
     pub selected: Option<SceneEntityId>,
     pub sprite: Option<SceneEntityId>,
     pub x: Option<f64>,
@@ -94,6 +95,8 @@ pub(super) struct Engine {
     pub undos: u64,
     pub redos: u64,
     pub other_frames: u64,
+    pub panel_query_pages: std::cell::Cell<u64>,
+    pub panel_query_records: std::cell::Cell<u64>,
     session: EditorProjectSession,
     presentation: EditorPreviewPresentation,
     scene_producer: WgpuRenderProducer,
@@ -184,6 +187,8 @@ impl Engine {
             undos: 0,
             redos: 0,
             other_frames: 0,
+            panel_query_pages: std::cell::Cell::new(0),
+            panel_query_records: std::cell::Cell::new(0),
             session,
             presentation: EditorPreviewPresentation::new(),
             scene_producer,
@@ -440,14 +445,34 @@ impl Engine {
 
     pub fn panels_snapshot(&self) -> Result<EditorPanelsSnapshot> {
         let basis = self.session.document_query_basis(self.document)?;
-        let page = self.session.query_document_entities(EditorEntityQuery {
-            position: EditorEntityQueryPosition::Start(basis.clone()),
-            limits: EditorEntityQueryLimits::new(1024, 1024)?,
-        })?;
-        ensure!(
-            page.next.is_none(),
-            "the finite consumer source exceeded one entity page"
-        );
+        let mut position = EditorEntityQueryPosition::Start(basis.clone());
+        let mut entities = Vec::new();
+        loop {
+            let page = self.session.query_document_entities(EditorEntityQuery {
+                position,
+                limits: EditorEntityQueryLimits::new(1024, 1024)?,
+            })?;
+            self.panel_query_pages.set(self.panel_query_pages.get() + 1);
+            self.panel_query_records
+                .set(self.panel_query_records.get() + page.scanned_records as u64);
+            ensure!(
+                page.basis == basis,
+                "entity pages changed their original source basis"
+            );
+            entities.extend(page.entities);
+            ensure!(
+                entities.len() <= SOURCE_ROWS + 1,
+                "the finite source fixture exceeded its declared row bound"
+            );
+            match page.next {
+                Some(cursor) => position = EditorEntityQueryPosition::Continue(cursor),
+                None => break,
+            }
+        }
+        if let Some(index) = entities.iter().position(|entity| entity == &self.sprite) {
+            let sprite = entities.remove(index);
+            entities.insert(0, sprite);
+        }
         let frame = self.session.current_frame();
         let selected = frame
             .workspace()
@@ -455,14 +480,11 @@ impl Engine {
             .as_ref()
             .filter(|scene| scene.document == self.document)
             .and_then(|scene| scene.selection.top_entity().cloned());
-        let sprite = page
-            .entities
-            .contains(&self.sprite)
-            .then(|| self.sprite.clone());
+        let sprite = entities.contains(&self.sprite).then(|| self.sprite.clone());
         let x = sprite.as_ref().map(|_| self.sprite_x()).transpose()?;
         Ok(EditorPanelsSnapshot {
             basis,
-            entities: page.entities,
+            entities: entities.into(),
             selected,
             sprite,
             x,
@@ -790,7 +812,13 @@ requested = ["runtime-2d"]
     )?;
     fs::write(
         project.path().join("scenes/startup.scene.json"),
-        SceneDocument::default().to_json_string()?,
+        SceneDocument::from_ordered_roots((0..SOURCE_ROWS).map(|index| {
+            SceneEntityRecord::new(
+                SceneEntityId::new(format!("item-{index:05}"))
+                    .expect("finite source IDs are valid"),
+            )
+        }))
+        .to_json_string()?,
     )?;
     Ok(project)
 }

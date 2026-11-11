@@ -4,12 +4,13 @@ use super::{
 };
 use anyhow::{Result, ensure};
 use open_gpui::{
-    DevicePixels, HostedSurfaceGeometry, KeyDownEvent, Keystroke, PlatformInput, px, size,
+    DevicePixels, HostedSurfaceGeometry, KeyDownEvent, Keystroke, MouseMoveEvent, PlatformInput,
+    point, px, size,
 };
 use std::rc::Rc;
 use winit::{
-    dpi::LogicalSize,
-    event::{ElementState, Ime, WindowEvent},
+    dpi::{LogicalSize, PhysicalPosition},
+    event::{DeviceId, ElementState, Ime, MouseScrollDelta, WindowEvent},
     keyboard::{Key, NamedKey},
 };
 
@@ -36,6 +37,17 @@ enum Phase {
     PanelsLocalityUndo,
     PanelsRemoved,
     PanelsRedo,
+    CollectionRevealed,
+    CollectionScrolled,
+    CollectionLineScrolled,
+    CollectionDetails,
+    CollectionFilterFocus,
+    CollectionFiltered,
+    CollectionSelected,
+    CollectionClearFocus,
+    CollectionCleared,
+    CollectionSprite,
+    CollectionRestored,
     Refused,
     RecoveredRefusal,
     Panicked,
@@ -45,6 +57,7 @@ enum Phase {
     ResizeBack,
     Resized,
     Scaled,
+    ScaledWheel,
     StageClose,
     Close,
     Done,
@@ -61,6 +74,8 @@ pub(super) struct Smoke {
     panel_hierarchy_renders: u64,
     panel_inspector_renders: [u64; 2],
     panel_revision: Option<nara_engine::scene::SceneAuthoringRevision>,
+    collection_rows: u64,
+    collection_anchor: Option<(nara_engine::scene::SceneEntityId, open_gpui::Pixels)>,
 }
 
 impl Smoke {
@@ -76,6 +91,8 @@ impl Smoke {
             panel_hierarchy_renders: 0,
             panel_inspector_renders: [0; 2],
             panel_revision: None,
+            collection_rows: 0,
+            collection_anchor: None,
         }
     }
 
@@ -116,10 +133,51 @@ impl Smoke {
                     renderer.submissions.get() > 0,
                     "diagnostic did not accompany a real Nara window submission"
                 );
+                let source_count = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .model
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .snapshot
+                        .entities
+                        .len()
+                });
+                ensure!(
+                    source_count == super::engine::SOURCE_ROWS + 1,
+                    "the native collection did not consume the complete real source"
+                );
+                ensure!(
+                    viewer
+                        .engine
+                        .as_ref()
+                        .unwrap()
+                        .borrow()
+                        .panel_query_pages
+                        .get()
+                        >= 10,
+                    "the real source query did not traverse its pages"
+                );
+                ensure!(
+                    viewer.panel_work.hierarchy_row_callbacks.get() < 128,
+                    "initial list construction materialized the whole source"
+                );
                 self.initial = Some(snapshot);
                 self.picks = viewer.picks;
-                viewer.click(980., 60.)?;
+                let sprite = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .model
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .snapshot
+                        .sprite
+                        .clone()
+                        .unwrap()
+                });
+                click_hierarchy(viewer, &sprite)?;
                 viewer.click(80., 128.)?;
+                viewer.request_frame(false)?;
                 self.phase = Phase::Inputs;
             }
             Phase::Inputs => {
@@ -560,6 +618,197 @@ impl Smoke {
                         && viewer.engine.as_ref().unwrap().borrow().sprite_x()? == 0.,
                     "Redo did not restore the source Sprite and Inspector property"
                 );
+                let entity = nara_engine::scene::SceneEntityId::new("item-09991")?;
+                self.collection_rows = viewer.panel_work.hierarchy_row_callbacks.get();
+                hierarchy_update(viewer, |hierarchy, cx| {
+                    hierarchy.reveal(&entity, px(6.), cx)
+                })?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionRevealed;
+            }
+            Phase::CollectionRevealed if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                ensure!(
+                    anchor.0.as_str() == "item-09991" && (anchor.1 - px(6.)).abs() < px(0.1),
+                    "deep keyed scroll lost its original row/offset"
+                );
+                ensure!(
+                    viewer.panel_work.hierarchy_row_callbacks.get() - self.collection_rows < 128,
+                    "deep scrolling materialized the source"
+                );
+                viewer.pointer = point(px(980.), px(112.));
+                surface.dispatch_input(PlatformInput::MouseMove(MouseMoveEvent {
+                    position: viewer.pointer,
+                    ..Default::default()
+                }))?;
+                let scale = surface.geometry().scale_factor();
+                viewer.input(WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+                        0.,
+                        -12. * f64::from(scale),
+                    )),
+                    phase: winit::event::TouchPhase::Moved,
+                })?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionScrolled;
+            }
+            Phase::CollectionScrolled if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                ensure!(
+                    anchor.0.as_str() == "item-09991" && anchor.1 > px(6.),
+                    "native wheel routing did not move the keyed list"
+                );
+                self.collection_anchor = Some(anchor);
+                viewer.input(WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::LineDelta(0., -0.25),
+                    phase: winit::event::TouchPhase::Moved,
+                })?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionLineScrolled;
+            }
+            Phase::CollectionLineScrolled if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                let old = self.collection_anchor.as_ref().unwrap();
+                ensure!(
+                    anchor.0 == old.0 && anchor.1 > old.1,
+                    "Winit line scrolling did not use the original list route"
+                );
+                self.collection_anchor = Some(anchor);
+                viewer.click(1220., 32.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionDetails;
+            }
+            Phase::CollectionDetails if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                let old = self.collection_anchor.as_ref().unwrap();
+                ensure!(
+                    anchor.0 == old.0 && (anchor.1 - old.1 * (52. / 30.)).abs() < px(0.2),
+                    "row remeasurement lost its keyed proportional anchor"
+                );
+                let bounds =
+                    hierarchy_read(viewer, |hierarchy| hierarchy.bounds_for(&anchor.0)).unwrap();
+                ensure!(
+                    bounds.size.height == px(52.),
+                    "visible variable row retained an obsolete height"
+                );
+                self.collection_anchor = Some(anchor);
+                viewer.click(1000., 58.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionFilterFocus;
+            }
+            Phase::CollectionFilterFocus if renderer.submissions.get() > self.submitted => {
+                replace_filter(viewer, "item-0999")?;
+                viewer.click(1200., 58.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionFiltered;
+            }
+            Phase::CollectionFiltered if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                ensure!(
+                    hierarchy_read(viewer, |hierarchy| hierarchy.row_count()) == 10,
+                    "source filter did not retain the exact matching records"
+                );
+                let old = self.collection_anchor.as_ref().unwrap();
+                ensure!(
+                    anchor.0 == old.0 && (anchor.1 - old.1).abs() < px(0.2),
+                    "filtering changed a surviving keyed anchor"
+                );
+                click_hierarchy(viewer, &anchor.0)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionSelected;
+            }
+            Phase::CollectionSelected if renderer.submissions.get() > self.submitted => {
+                let selected = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .model
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .snapshot
+                        .selected
+                        .clone()
+                });
+                ensure!(
+                    selected.as_ref().map(|entity| entity.as_str()) == Some("item-09991"),
+                    "virtual row input did not select its exact original source entity"
+                );
+                viewer.click(1000., 58.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionClearFocus;
+            }
+            Phase::CollectionClearFocus if renderer.submissions.get() > self.submitted => {
+                replace_filter(viewer, "")?;
+                viewer.click(1200., 58.)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionCleared;
+            }
+            Phase::CollectionCleared if renderer.submissions.get() > self.submitted => {
+                ensure!(
+                    hierarchy_read(viewer, |hierarchy| hierarchy.row_count())
+                        == super::engine::SOURCE_ROWS + 1,
+                    "clearing the filter lost source rows"
+                );
+                let old = self.collection_anchor.as_ref().unwrap();
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                ensure!(
+                    anchor.0 == old.0 && (anchor.1 - old.1).abs() < px(0.2),
+                    "restoring the full source lost its keyed anchor"
+                );
+                let sprite = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .model
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .snapshot
+                        .sprite
+                        .clone()
+                        .unwrap()
+                });
+                hierarchy_update(viewer, |hierarchy, cx| {
+                    hierarchy.reveal(&sprite, px(0.), cx)
+                })?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionSprite;
+            }
+            Phase::CollectionSprite if renderer.submissions.get() > self.submitted => {
+                let sprite = viewer.application.as_ref().unwrap().update(|cx| {
+                    viewer
+                        .model
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .snapshot
+                        .sprite
+                        .clone()
+                        .unwrap()
+                });
+                click_hierarchy(viewer, &sprite)?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::CollectionRestored;
+            }
+            Phase::CollectionRestored if renderer.submissions.get() > self.submitted => {
+                ensure!(
+                    viewer.engine.as_ref().unwrap().borrow().selected_sprite(),
+                    "collection workflow did not restore source Sprite selection"
+                );
+                ensure!(
+                    viewer.panel_work.hierarchy_filter_records.get()
+                        >= (super::engine::SOURCE_ROWS + 1) as u64,
+                    "filtering hid its full-source work"
+                );
+                let engine = viewer.engine.as_ref().unwrap().borrow();
+                println!(
+                    "NARA_GPUI_COLLECTION logical_rows={} row_callbacks={} query_pages={} query_records={} filter_records={} reconciled_records={} variable_heights=true keyed_anchor=true wheel=true filter=true exact_selection=true scope=caller_work_counts",
+                    super::engine::SOURCE_ROWS + 1,
+                    viewer.panel_work.hierarchy_row_callbacks.get(),
+                    engine.panel_query_pages.get(),
+                    engine.panel_query_records.get(),
+                    viewer.panel_work.hierarchy_filter_records.get(),
+                    viewer.panel_work.hierarchy_reconciled_records.get()
+                );
                 self.submitted = renderer.submissions.get();
                 renderer.failure.set(Some(Failure::Refuse));
                 viewer.request()?;
@@ -710,6 +959,31 @@ impl Smoke {
                     "NARA_GPUI_VIEW_SCALED extent={}x{} logical_content={content:?} scale=1.25 physical_dpi=unqualified",
                     diagnostic.width, diagnostic.height
                 );
+                self.collection_anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor());
+                let viewport = hierarchy_read(viewer, |hierarchy| hierarchy.viewport());
+                viewer.pointer = point(px(980.), viewport.center().y);
+                surface.dispatch_input(PlatformInput::MouseMove(MouseMoveEvent {
+                    position: viewer.pointer,
+                    ..Default::default()
+                }))?;
+                viewer.input(WindowEvent::MouseWheel {
+                    device_id: DeviceId::dummy(),
+                    delta: MouseScrollDelta::PixelDelta(PhysicalPosition::new(0., -6.25)),
+                    phase: winit::event::TouchPhase::Moved,
+                })?;
+                self.submitted = renderer.submissions.get();
+                self.phase = Phase::ScaledWheel;
+            }
+            Phase::ScaledWheel if renderer.submissions.get() > self.submitted => {
+                let anchor = hierarchy_read(viewer, |hierarchy| hierarchy.anchor()).unwrap();
+                let old = self.collection_anchor.as_ref().unwrap();
+                ensure!(
+                    anchor.0 == old.0 && (anchor.1 - old.1 - px(5.)).abs() < px(0.2),
+                    "fractional-root Winit pixel scrolling used physical pixels as logical units"
+                );
+                println!(
+                    "NARA_GPUI_COLLECTION_SCALED winit_pixel_delta=6.25 logical_delta=5 scale=1.25 physical_dpi=unqualified"
+                );
                 renderer.paused.set(true);
                 viewer.request()?;
                 self.phase = Phase::StageClose;
@@ -774,6 +1048,75 @@ fn initial_pixels(image: &Diagnostic) -> Result<()> {
     println!(
         "NARA_GPUI_VIEW_PIXELS center={:?} glyph_pixels={glyph_pixels}",
         image.logical_pixel(344., 286.)
+    );
+    Ok(())
+}
+
+fn hierarchy_read<R>(viewer: &Viewer, read: impl FnOnce(&super::panels::Hierarchy) -> R) -> R {
+    viewer
+        .application
+        .as_ref()
+        .unwrap()
+        .update(|cx| {
+            viewer
+                .root
+                .unwrap()
+                .update(cx, |root, _, cx| read(root.hierarchy.read(cx)))
+        })
+        .expect("collection observation requires its live root")
+}
+
+fn hierarchy_update(
+    viewer: &Viewer,
+    update: impl FnOnce(
+        &mut super::panels::Hierarchy,
+        &mut open_gpui::Context<super::panels::Hierarchy>,
+    ),
+) -> Result<()> {
+    viewer.application.as_ref().unwrap().update(|cx| {
+        viewer
+            .root
+            .unwrap()
+            .update(cx, |root, _, cx| root.hierarchy.update(cx, update))
+    })
+}
+
+fn click_hierarchy(viewer: &Viewer, entity: &nara_engine::scene::SceneEntityId) -> Result<()> {
+    let bounds = hierarchy_read(viewer, |hierarchy| hierarchy.bounds_for(entity))
+        .ok_or_else(|| anyhow::anyhow!("the requested source row has no current list geometry"))?;
+    let viewport = hierarchy_read(viewer, |hierarchy| hierarchy.viewport());
+    let top = bounds.top().max(viewport.top());
+    let bottom = bounds.bottom().min(viewport.bottom());
+    ensure!(
+        bottom > top,
+        "the requested source row is outside the visible list clip"
+    );
+    viewer.click(
+        f32::from(bounds.left() + px(24.)),
+        f32::from((top + bottom) * 0.5),
+    )
+}
+
+fn replace_filter(viewer: &mut Viewer, text: &str) -> Result<()> {
+    viewer
+        .surface
+        .as_ref()
+        .unwrap()
+        .dispatch_input(PlatformInput::KeyDown(KeyDownEvent {
+            keystroke: Keystroke::parse("ctrl-a")?,
+            is_held: false,
+            prefer_character_input: false,
+        }))?;
+    viewer.input(WindowEvent::Ime(Ime::Commit(text.into())))?;
+    let actual = viewer.application.as_ref().unwrap().update(|cx| {
+        viewer.root.unwrap().update(cx, |root, _, cx| {
+            let input = root.hierarchy.read(cx).filter_input.clone();
+            input.read(cx).text().to_owned()
+        })
+    })?;
+    ensure!(
+        actual == text,
+        "native filter input lost its committed text"
     );
     Ok(())
 }

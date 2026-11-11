@@ -1386,3 +1386,72 @@ YAML checks pass. No Nara product default/dependency switch, additional GPU or c
 new Signal runtime, persistent layout, upload/raster cache, thread transport, physical input or
 numeric budget follows. R11a/e still require phase attribution, current-source allocation/
 retention/upload/GPU/latency costs and broader sparse/structural/virtualized consumers.
+
+## Implemented Variable-Height Source Collections
+
+This successor starts from Nara `c66a8b049367fd28c346ee570f3f6f843cd6e1eb` and reuses the
+unchanged production framework at Open-GPUI `92ffbf5d815c4962ddbd68d518133bb5342dc03d`.
+The public collection fixture and its qualification/CI are committed separately at local
+Open-GPUI `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`, with no production mechanism or GPU
+dependency change.
+The independently locked consumer's temporary Scene contains 10,000 real empty source records
+plus its constructed Sprite. The
+[source adapter](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/engine.rs) follows
+every bounded entity-query continuation under the same original basis, reports query pages and
+scanned records, and returns one immutable identity observation. Pinning the Sprite first is an
+explicit fixture display policy; all other declarations retain source order. This is a finite
+source-declaration list, not effective Prefab topology or a new general Hierarchy contract.
+
+The extracted [Hierarchy module](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/hierarchy.rs)
+owns filtering, original `ListState` and its consumer-side key reconciliation. Empty filtering
+uses the source indices directly; a committed nonempty filter scans the complete observation
+and retains matching indices. The first changed key span is spliced through ListState, while a
+surviving key retains its absolute intra-row offset across filtering/structural replacement.
+If that key disappears, this native consumer falls back to the first row with zero offset.
+The public framework fixture separately exercises forward-then-backward fallback as a different
+consumer policy. Source/Schema incarnation replacement resets the list/filter binding. Details
+changes row heights with original proportional remeasurement. No second layout or height index
+is implemented, and this finite module does not add a universal keyed-list interface.
+
+The native [complete trajectory](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/smoke.rs)
+checks complete source paging, bounded startup/deep-scroll row construction, key/offset retention,
+real filter text input, row-height changes, exact source selection and restoration of the Sprite.
+PixelDelta/LineDelta enter the ordinary Winit event conversion; at logical scale 1.25, 6.25
+physical delta pixels become five logical pixels. This is injected input and logical-root scaling,
+not physical monitor DPI migration or a wheel/trackpad latency claim. Original Source/Cooked
+pixels, color/alpha, Inspector draft/conflict/Undo/Redo, long text/IME, deferred input, paint
+refusal/panic, resize/ABA/zero extent and pending close/other-producer retirement remain in the
+same native trajectory. No native aggregate or unrelated official implementation is requalified.
+
+Early native attempts fail on row selection despite valid list bounds. MouseDown reaches the
+row but Click does not: the Filter field's intrinsic height overflows its 30px wrapper and takes
+pointer capture inside the first row. Correcting the recipe to header 24px, field 48px and list
+58px, with explicit nonshrinking allocation, removes the overlap. The unchanged full trajectory
+then passes (`ab8a9c57-ae23-4123-9dea-3d0d3236d1bf`). A new ordinary List-row Click control also
+passes without an intervening frame, so no GPUI production workaround is introduced. Independent
+review identifies that the initial wheel probe bypasses Winit conversion; the final trajectory
+replaces it with actual Winit PixelDelta/LineDelta and fractional-scale delta assertions.
+
+Final native qualification passes **1/1 on DX12**
+(`7bfccc3e-d4c9-4326-8cb9-6a1c00704c28`) and **1/1 on Vulkan**
+(`6cb98443-f88f-4f6b-8198-6d24c19c6ea1`). Both report RTX 4090, original `Bgra8UnormSrgb`,
+32 UI submissions, eleven discarded candidates, two intentional paint failures and five
+correctness-only same-Scene diagnostic replays. At the named collection checkpoint, both observe
+10,001 source rows, 86 row callbacks, 180 query pages/180,016 scanned records, 10,001 filter visits
+and 40,021 reconciliation checks. Later scale/recovery work is outside that checkpoint count.
+
+The public framework collection fixture supplies five CPU controls, combined with the five
+previous state-locality controls for **10/10**
+(`72777591-cc96-4d43-b0c5-17d6b8d5b3f8`). It covers 10k/100k logical rows, wrapped/variable
+heights, clipped input/bounds, insertion/deletion/reversal, offscreen same-key content/width/font
+remeasurement, stale pointer/keyboard/source publications and release-time Click. Its 96px
+viewport/16px minimum row recipe bounds callbacks at 14 in those cases; this is CPU callback/
+publication evidence, not GPU execution or an engine-authoring throughput result.
+
+Independent bounded reviews find no remaining P1/P2. Framework-fixture correctness Clippy and
+independent engine-consumer all-target/all-feature correctness Clippy pass. Formatting and
+document/workflow checks retain their final recorded scope. Source, filter/key metadata and
+ListState remain O(logical rows); equality/string comparisons, snapshot allocation, framework
+traversal, upload/GPU work and old-frame retention lie outside the added counters. No measured
+latency, heap/leak bound, general O(visible) cost, cache/persistent-layout implementation or
+complete Editor/game/default/handoff acceptance follows. Those R11a/e requirements remain open.

@@ -73,6 +73,24 @@ committed through the original Editor basis/history owner; a stale second draft 
 Reload, and the original Undo restores the source and both clean projections. Scene preview
 updates use a separate cached View, so the native output records isolated Hierarchy reuse rather
 than counting a parent refresh as local invalidation. The caller-owned render counters are
-diagnostic only; they do not qualify layout, upload, GPU or latency budgets. The exact DX12
+diagnostic only; they do not qualify layout, upload, GPU or latency budgets. The exact native
 qualification and public CPU fixture results remain in the foundation plan. Further Undo may
 remove the Sprite itself: the panels show an absent property and keep the Viewer alive for Redo.
+
+The Hierarchy now uses GPUI's original variable-height `ListState`. Its temporary source contains
+10,000 real empty declarations plus the constructed Sprite. The Sprite is pinned first as a
+fixture display policy; other declarations retain source order. Public entity-query pages are
+consumed completely, while the list builds only its visible/overdraw rows. The local Filter field
+applies committed text explicitly, and Details changes row extents through original list
+remeasurement. Surviving row keys retain their scroll offset across filtering; an absent anchor
+falls back to the first row with zero offset. This is a finite consumer, not a generic tree editor.
+
+The full native smoke scrolls near the end, filters and clears the source, changes row heights,
+selects an exact virtual row and restores the Sprite before the original recovery/close path.
+Injected Winit PixelDelta/LineDelta events exercise the ordinary wheel adapter; at logical scale
+1.25, 6.25 physical delta pixels become five logical pixels. Actual monitor DPI migration and
+physical wheel/trackpad behavior remain unqualified. `NARA_GPUI_COLLECTION` separates query pages/
+records, filtering/reconciliation and row callbacks at its named checkpoint. Those counts omit
+allocation, equality/string comparisons, framework layout and GPU work; they are not a total
+O(visible) or latency claim. Source snapshots, optional filter indices and ListState retain
+O(logical rows) metadata; old frame/resource leases can outlive a replacement.

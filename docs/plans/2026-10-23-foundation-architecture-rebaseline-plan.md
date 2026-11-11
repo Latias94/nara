@@ -1458,6 +1458,25 @@ correctness-only diagnostic replays. Correctness Clippy, root/framework and isol
 format checks, links/fragments and workflow YAML checks pass. No broader native, compiler-floor,
 numerical-budget or remote-CI qualification is claimed by this unit.
 
+The [collection successor](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-variable-height-source-collections)
+replaces that consumer's eager Hierarchy rows with the existing GPUI
+variable-height `ListState`, complete paginated source queries and explicit local filtering.
+The native source contains 10,000 real declarations plus the constructed Sprite, pinned first
+as a visible fixture policy while other declarations retain their source order. Keep query-page/
+record work, filter/reconciliation work and row callbacks separate. One finite native workflow
+must scroll, filter and change row extents while preserving original source selection, exact
+operation basis, Inspector drafts and the prior failure/retirement assertions. A separate public
+framework consumer compares 10,000/100,000 logical keyed collections, structural edits, offscreen
+measurement invalidation and stale input through the existing list owner. The final public
+state/collection selection passes 10/10 (`72777591-cc96-4d43-b0c5-17d6b8d5b3f8`); that framework
+consumer/qualification is local Open-GPUI `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`.
+The complete native trajectory passes 1/1 on DX12 (`7bfccc3e-d4c9-4326-8cb9-6a1c00704c28`) and 1/1 on Vulkan
+(`6cb98443-f88f-4f6b-8198-6d24c19c6ea1`), including Winit pixel/line and fractional-root wheel
+conversion. The study records the actual field-overlap/capture failure and recipe correction,
+source/callback counts and coverage limits. Correctness Clippy passes; no production GPUI
+mechanism, manifest or lock changes. Visible-row counts alone do not establish latency,
+allocation or total O(visible) cost, finish R11a/e or admit another collection/reactive framework.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

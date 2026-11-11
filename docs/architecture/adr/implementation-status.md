@@ -1034,6 +1034,14 @@ panel-local draft/input owners and original prepared Editor mutation/Undo path; 
 only. It does not qualify complete incremental layout, upload/GPU reuse, latency budgets,
 virtualization or full Editor replacement. The foundation plan records actual scope and results.
 
+The [variable-height collection successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-variable-height-source-collections)
+replaces the finite consumer's eager rows with the existing ListState and complete paginated
+source queries. Public state/collection controls pass 10/10; the same real 10,001-record native
+trajectory passes 1/1 on each selected DX12/Vulkan backend, including filtering, variable heights,
+keyed scroll and Winit scale-aware wheel conversion. It records full query/filter/reconciliation
+work separately from bounded row callbacks. Logical metadata, allocation/retention/latency/GPU
+costs and complete Editor migration remain open; no new reactive/layout/cache owner follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

@@ -20,8 +20,9 @@ use open_gpui::{
     Application, ApplicationHandle, Bounds, Context, Corners, DevicePixels, Entity, Focusable,
     HostedSurface, HostedSurfaceGeometry, HostedSurfaceOptions, ImageTexture, KeyDownEvent,
     KeyUpEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, StyleRefinement,
-    WindowHandle, canvas, div, point, prelude::*, px, rgb, rgba, size,
+    Pixels, PlatformInput, PrepaintPublicationId, Render, RequestFrameOptions, ScrollDelta,
+    ScrollEvent, StyleRefinement, TouchPhase, WindowHandle, canvas, div, point, prelude::*, px,
+    rgb, rgba, size,
 };
 use open_gpui_wgpu::CosmicTextSystem;
 use open_gpui_windows::{
@@ -41,7 +42,7 @@ use windows::Win32::UI::WindowsAndMessaging::MSG;
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
-    event::{ElementState, Ime, MouseButton as NativeButton, WindowEvent},
+    event::{ElementState, Ime, MouseButton as NativeButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{Key, NamedKey},
     platform::windows::EventLoopBuilderExtWindows,
@@ -429,7 +430,13 @@ impl Viewer {
                         snapshot: panel_snapshot,
                     });
                     let hierarchy = cx.new(|cx| {
-                        Hierarchy::new(model.clone(), commands.clone(), panel_work.clone(), cx)
+                        Hierarchy::new(
+                            model.clone(),
+                            commands.clone(),
+                            panel_work.clone(),
+                            window,
+                            cx,
+                        )
                     });
                     let inspectors =
                         panels::create_inspectors(&model, &commands, &panel_work, window, cx);
@@ -670,6 +677,20 @@ impl Viewer {
         self.click(1000., 252. + index as f32 * 190.)
     }
 
+    fn scroll_input(&self, delta: ScrollDelta, touch_phase: TouchPhase) -> Result<()> {
+        self.surface
+            .as_ref()
+            .unwrap()
+            .dispatch_input(PlatformInput::Scroll(ScrollEvent {
+                position: self.pointer,
+                delta,
+                modifiers: self.modifiers,
+                touch_phase,
+                ..Default::default()
+            }))?;
+        Ok(())
+    }
+
     fn input(&mut self, event: WindowEvent) -> Result<()> {
         if self.closing || self.finished {
             return Ok(());
@@ -735,6 +756,23 @@ impl Viewer {
                     }),
                 };
                 surface.dispatch_input(input)?;
+            }
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                let scale = surface.geometry().scale_factor();
+                let delta = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => ScrollDelta::Lines(point(x, y)),
+                    MouseScrollDelta::PixelDelta(position) => ScrollDelta::Pixels(point(
+                        px(position.x as f32 / scale),
+                        px(position.y as f32 / scale),
+                    )),
+                };
+                let phase = match phase {
+                    winit::event::TouchPhase::Started => TouchPhase::Started,
+                    winit::event::TouchPhase::Moved => TouchPhase::Moved,
+                    winit::event::TouchPhase::Ended => TouchPhase::Ended,
+                    winit::event::TouchPhase::Cancelled => TouchPhase::Cancelled,
+                };
+                self.scroll_input(delta, phase)?;
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
