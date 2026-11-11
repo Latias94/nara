@@ -9,6 +9,24 @@ use std::{
 };
 
 #[test]
+#[ignore = "requires an actual Windows GPU and the prebuilt gpui_view graph consumer"]
+fn engine_owned_gpui_graph_edits_connects_and_reopens_through_original_host() {
+    let (output, logs) = run_native_gpui("--smoke-graph", Duration::from_secs(105), 128 * 1024);
+    for marker in [
+        "NARA_GPUI_GRAPH_WORKFLOW",
+        "NARA_GPUI_GRAPH_INPUT",
+        "NARA_GPUI_GRAPH_PIXELS",
+        "NARA_GPUI_GRAPH_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires an actual Windows GPU and the prebuilt gpui_view example"]
 fn engine_owned_gpui_renders_edits_picks_and_retires_under_original_host() {
     let (output, logs) = run_native_gpui("--smoke", Duration::from_secs(105), 128 * 1024);

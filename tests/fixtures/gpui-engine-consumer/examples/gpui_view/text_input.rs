@@ -44,6 +44,7 @@ pub(super) struct DraftInput {
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
+    composition: Option<(SharedString, Range<usize>, bool)>,
     layout: Option<Rc<DraftLayout>>,
     publication: PrepaintPublicationId,
 }
@@ -56,7 +57,7 @@ impl DraftInput {
             .detach();
         cx.on_blur(&focus_handle, window, |this, window, cx| {
             this.release_pointer(window);
-            this.marked_range = None;
+            this.cancel_composition();
             cx.notify();
         })
         .detach();
@@ -68,6 +69,7 @@ impl DraftInput {
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
+            composition: None,
             layout: None,
             publication: PrepaintPublicationId::new(),
         }
@@ -129,6 +131,7 @@ impl DraftInput {
         self.selected_range = self.content.len()..self.content.len();
         self.selection_reversed = false;
         self.marked_range = None;
+        self.composition = None;
         self.layout = None;
         window.notify_text_input_changed(&self.focus_handle);
         window.notify_text_selection_changed(&self.focus_handle);
@@ -377,6 +380,16 @@ impl DraftInput {
         self.marked_range = None;
         inserted
     }
+
+    fn cancel_composition(&mut self) {
+        if let Some((content, selection, reversed)) = self.composition.take() {
+            self.content = content;
+            self.selected_range = selection;
+            self.selection_reversed = reversed;
+            self.layout = None;
+        }
+        self.marked_range = None;
+    }
 }
 
 fn byte_offset(text: &str, utf16_offset: usize) -> usize {
@@ -446,9 +459,10 @@ impl EntityInputHandler for DraftInput {
     }
 
     fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.marked_range.take().is_some() {
+        if self.composition.is_some() {
+            self.cancel_composition();
             window.notify_text_input_changed(&self.focus_handle);
-            cx.notify();
+            self.notify_selection(window, cx);
         }
     }
 
@@ -460,6 +474,7 @@ impl EntityInputHandler for DraftInput {
         cx: &mut Context<Self>,
     ) {
         self.replace(range_utf16, text);
+        self.composition = None;
         window.notify_text_input_changed(&self.focus_handle);
         self.notify_selection(window, cx);
     }
@@ -472,6 +487,13 @@ impl EntityInputHandler for DraftInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.composition.is_none() {
+            self.composition = Some((
+                self.content.clone(),
+                self.selected_range.clone(),
+                self.selection_reversed,
+            ));
+        }
         let inserted = self.replace(range_utf16, text);
         if let Some(selected_range_utf16) = selected_range_utf16 {
             let relative = byte_range(&self.content[inserted.clone()], selected_range_utf16);

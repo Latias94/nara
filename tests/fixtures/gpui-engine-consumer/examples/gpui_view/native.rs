@@ -2,6 +2,10 @@
 mod content;
 #[path = "engine.rs"]
 mod engine;
+#[path = "graph_panel.rs"]
+mod graph_panel;
+#[path = "graph_smoke.rs"]
+mod graph_smoke;
 #[path = "panels.rs"]
 mod panels;
 #[path = "renderer.rs"]
@@ -16,6 +20,7 @@ mod work;
 
 use anyhow::{Context as _, Result, ensure};
 use engine::{Engine, Preview};
+use graph_panel::{GraphModel, GraphPanel};
 use nara_engine::{scene::SceneEntityId, tooling::EditorDocumentQueryBasis};
 use nara_render::{DisplayMapping2d, DisplayRect, DisplayScale};
 use nara_render_wgpu::WgpuImageDisplay;
@@ -278,50 +283,62 @@ struct Root {
     draft: Entity<DraftInput>,
     hierarchy: Entity<Hierarchy>,
     inspectors: [Entity<Inspector>; 2],
+    graph_panels: Option<[Entity<GraphPanel>; 2]>,
 }
 
 impl Render for Root {
     fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .relative()
-            .child(
-                self.scene_view
+        let base = div().size_full().relative().child(
+            self.scene_view
+                .clone()
+                .cached(StyleRefinement::default().w(px(1280.)).h(px(640.))),
+        );
+        if let Some(graphs) = &self.graph_panels {
+            return base
+                .children(graphs.iter().enumerate().map(|(index, graph)| {
+                    div()
+                        .absolute()
+                        .left(px(16. + index as f32 * 632.))
+                        .top(px(16.))
+                        .w(px(600.))
+                        .h(px(608.))
+                        .child(graph.clone())
+                }))
+                .into_any_element();
+        }
+        base.child(
+            div()
+                .absolute()
+                .left(px(24.))
+                .top(px(488.))
+                .w(px(640.))
+                .h(px(44.))
+                .child(self.draft.clone()),
+        )
+        .child(
+            div().absolute().left(px(920.)).top(px(20.)).child(
+                self.hierarchy
                     .clone()
-                    .cached(StyleRefinement::default().w(px(1280.)).h(px(640.))),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(24.))
-                    .top(px(488.))
-                    .w(px(640.))
-                    .h(px(44.))
-                    .child(self.draft.clone()),
-            )
-            .child(
-                div().absolute().left(px(920.)).top(px(20.)).child(
-                    self.hierarchy
-                        .clone()
-                        .cached(StyleRefinement::default().w(px(320.)).h(px(130.))),
-                ),
-            )
-            .children(
-                self.inspectors
-                    .iter()
-                    .enumerate()
-                    .map(|(index, inspector)| {
-                        div()
-                            .absolute()
-                            .left(px(920.))
-                            .top(px(170. + index as f32 * 190.))
-                            .child(
-                                inspector
-                                    .clone()
-                                    .cached(StyleRefinement::default().w(px(320.)).h(px(176.))),
-                            )
-                    }),
-            )
+                    .cached(StyleRefinement::default().w(px(320.)).h(px(130.))),
+            ),
+        )
+        .children(
+            self.inspectors
+                .iter()
+                .enumerate()
+                .map(|(index, inspector)| {
+                    div()
+                        .absolute()
+                        .left(px(920.))
+                        .top(px(170. + index as f32 * 190.))
+                        .child(
+                            inspector
+                                .clone()
+                                .cached(StyleRefinement::default().w(px(320.)).h(px(176.))),
+                        )
+                }),
+        )
+        .into_any_element()
     }
 }
 
@@ -347,6 +364,10 @@ struct Viewer {
     root: Option<WindowHandle<Root>>,
     draft: Option<Entity<DraftInput>>,
     model: Option<Entity<EditorModel>>,
+    graph_mode: bool,
+    graph_model: Option<Entity<GraphModel>>,
+    graph_intents: Rc<RefCell<VecDeque<graph_panel::GraphIntent>>>,
+    graph_smoke: Option<graph_smoke::GraphSmoke>,
     panel_work: Rc<PanelWork>,
     panel_refusals: u64,
     application: Option<ApplicationHandle>,
@@ -374,7 +395,7 @@ impl Viewer {
         if self.work.is_some() {
             return true;
         }
-        self.smoke.is_some()
+        self.smoke.is_some() || self.graph_smoke.is_some()
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -386,7 +407,15 @@ impl Viewer {
                     .with_visible(!self.automated()),
             )?,
         );
-        let engine = Rc::new(RefCell::new(Engine::new(window.clone())?));
+        let mut engine = Engine::new(window.clone())?;
+        if self.graph_mode {
+            engine.open_graph()?;
+        }
+        let graph_snapshot = self
+            .graph_mode
+            .then(|| engine.graph_snapshot())
+            .transpose()?;
+        let engine = Rc::new(RefCell::new(engine));
         let proxy = self.proxy.clone();
         let wake: Rc<dyn Fn()> = Rc::new(move || {
             let _ = proxy.send_event(Wake);
@@ -430,11 +459,13 @@ impl Viewer {
         let hosted = surface.clone();
         let render = renderer.clone();
         let panel_work = self.panel_work.clone();
+        let graph_intents = self.graph_intents.clone();
         let application =
             Application::with_platform(self.platform.clone()).run_embedded(move |cx| {
                 DraftInput::bind_keys(cx);
                 let mut draft = None;
                 let mut model_output = None;
+                let mut graph_model_output = None;
                 let root = cx.open_surface(&hosted, |window, cx| {
                     let input = cx.new(|cx| DraftInput::new(window, cx));
                     input.read(cx).focus_handle(cx).focus(window, cx);
@@ -465,17 +496,40 @@ impl Viewer {
                         candidate_content: render.candidate_content.clone(),
                     });
                     model_output = Some(model);
+                    let graph_panels = graph_snapshot.map(|snapshot| {
+                        let model = cx.new(|_| GraphModel { snapshot });
+                        let panels = std::array::from_fn(|index| {
+                            cx.new(|cx| {
+                                GraphPanel::new(
+                                    index,
+                                    model.clone(),
+                                    graph_intents.clone(),
+                                    window,
+                                    cx,
+                                )
+                            })
+                        });
+                        graph_model_output = Some(model);
+                        panels
+                    });
                     cx.new(|_| Root {
                         scene_view,
                         draft: input,
                         hierarchy,
                         inspectors,
+                        graph_panels,
                     })
                 });
-                *output.borrow_mut() =
-                    Some(root.map(|root| (root, draft.unwrap(), model_output.unwrap())));
+                *output.borrow_mut() = Some(root.map(|root| {
+                    (
+                        root,
+                        draft.unwrap(),
+                        model_output.unwrap(),
+                        graph_model_output,
+                    )
+                }));
             });
-        let (root, draft, model) = initialized
+        let (root, draft, model, graph_model) = initialized
             .borrow_mut()
             .take()
             .context("external GPUI launch did not run")??;
@@ -490,6 +544,7 @@ impl Viewer {
         self.root = Some(root);
         self.draft = Some(draft);
         self.model = Some(model);
+        self.graph_model = graph_model;
         window.set_ime_allowed(true);
         Ok(())
     }
@@ -542,7 +597,7 @@ impl Viewer {
             return Ok(());
         }
         ensure!(
-            Instant::now() < self.deadline || !self.automated(),
+            self.closing || Instant::now() < self.deadline || !self.automated(),
             "GPUI engine automation exceeded its deadline"
         );
         let mut changed = false;
@@ -601,6 +656,23 @@ impl Viewer {
         if panels_changed {
             self.publish_panels()?;
         }
+        while let Some(intent) = self.graph_intents.borrow_mut().pop_front() {
+            self.engine
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .graph_intent(intent)?;
+        }
+        if let Some(model) = &self.graph_model {
+            let snapshot = {
+                let mut engine = self.engine.as_ref().unwrap().borrow_mut();
+                engine.poll_graph()?;
+                engine.graph_snapshot()?
+            };
+            self.application.as_ref().unwrap().update(|cx| {
+                model.update(cx, |model, cx| model.publish(snapshot, cx));
+            });
+        }
         self.application.as_ref().unwrap().update(|_| {});
         let renderer = self.renderer.as_ref().unwrap().clone();
         renderer.promote()?;
@@ -629,6 +701,13 @@ impl Viewer {
         if let Some(mut smoke) = self.smoke.take() {
             let done = smoke.advance(self)?;
             self.smoke = Some(smoke);
+            if done {
+                self.closing = true;
+            }
+        }
+        if let Some(mut smoke) = self.graph_smoke.take() {
+            let done = smoke.advance(self)?;
+            self.graph_smoke = Some(smoke);
             if done {
                 self.closing = true;
             }
@@ -669,6 +748,13 @@ impl Viewer {
                         renderer.submissions.get(),
                         renderer.discarded.get(),
                         renderer.refusals.get(),
+                        renderer.diagnostics.get()
+                    );
+                }
+                if self.graph_smoke.is_some() {
+                    println!(
+                        "NARA_GPUI_GRAPH_OK ui_submissions={} diagnostics={} native_gpui_renderers=0 original_host=true independent_producer_alive=true input_delivery=injected",
+                        renderer.submissions.get(),
                         renderer.diagnostics.get()
                     );
                 }
@@ -751,7 +837,9 @@ impl Viewer {
                 }
                 surface.set_geometry(geometry.size(), geometry.scale_factor())?;
             }
-            WindowEvent::Focused(active) if self.smoke.is_none() => surface.set_active(active)?,
+            WindowEvent::Focused(active) if self.smoke.is_none() && self.graph_smoke.is_none() => {
+                surface.set_active(active)?
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = surface.geometry().scale_factor();
                 self.pointer = point(px(position.x as f32 / scale), px(position.y as f32 / scale));
@@ -824,9 +912,7 @@ impl Viewer {
             }
             WindowEvent::Ime(Ime::Disabled) => {
                 surface.with_input_handler(|handler| {
-                    if let Some(range) = handler.marked_text_range() {
-                        handler.replace_text_in_range(Some(range), "");
-                    }
+                    handler.unmark_text();
                 })?;
             }
             WindowEvent::Ime(Ime::Preedit(text, cursor)) => {
@@ -861,6 +947,9 @@ impl Viewer {
             Key::Named(value) => match value {
                 NamedKey::ArrowLeft => "left",
                 NamedKey::ArrowRight => "right",
+                NamedKey::ArrowUp => "up",
+                NamedKey::ArrowDown => "down",
+                NamedKey::Enter => "enter",
                 NamedKey::Backspace => "backspace",
                 NamedKey::Delete => "delete",
                 NamedKey::Home => "home",
@@ -908,12 +997,13 @@ impl Viewer {
     }
 
     fn fail(&mut self, error: anyhow::Error, event_loop: &ActiveEventLoop) {
-        eprintln!("NARA_GPUI_VIEW_FAILURE {error:#}");
         if self.error.is_none() {
+            eprintln!("NARA_GPUI_VIEW_FAILURE {error:#}");
             self.error = Some(error);
         }
         self.closing = true;
         self.smoke = None;
+        self.graph_smoke = None;
         #[cfg(feature = "ui-work-observation")]
         {
             self.work = None;
@@ -973,7 +1063,13 @@ pub(super) fn run() -> Result<()> {
     log::set_max_level(log::LevelFilter::Warn);
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let measure = std::env::args().any(|arg| arg == "--measure-ui-work");
-    ensure!(!smoke || !measure, "select --smoke or --measure-ui-work");
+    let graph_smoke = std::env::args().any(|arg| arg == "--smoke-graph");
+    let graph_mode = graph_smoke || std::env::args().any(|arg| arg == "--graph");
+    ensure!(
+        usize::from(smoke) + usize::from(measure) + usize::from(graph_smoke) <= 1
+            && (!graph_mode || !smoke && !measure),
+        "select one consumer mode"
+    );
     ensure!(
         !measure || cfg!(feature = "ui-work-observation"),
         "--measure-ui-work requires the ui-work-observation feature"
@@ -1009,6 +1105,10 @@ pub(super) fn run() -> Result<()> {
         root: None,
         draft: None,
         model: None,
+        graph_mode,
+        graph_model: None,
+        graph_intents: Rc::default(),
+        graph_smoke: graph_smoke.then(graph_smoke::GraphSmoke::new),
         panel_work: Rc::default(),
         panel_refusals: 0,
         application: None,
