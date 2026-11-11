@@ -1564,7 +1564,71 @@ the framework when a release includes its required fixes; a permanent Git pin is
 requirement. The original device and attachment are already available. Complete the window
 attempt's retained-resource/prefix handoff, including refusal and unwind paths, then qualify
 the complete changing View, overlap/clip/input, refusal and retirement workflow.
-This is a selected implementation route, not executed Nara integration evidence.
+That ownership selection is implemented by the subsequent
+[Nara Host/Scene consumer](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-nara-owned-host-and-scene-consumer).
+Its generic framework support is local Open-GPUI `7bfe8022f68169879464296e0d6d8ad09d89c7e3`;
+this is fork-owned hosting work after the fixed official-source audit.
+Nara renderer/source/capture prerequisites are local `3095fa5b291ed895188f8c4fc4d20007c6081bcd`.
+The independent adapter, native workflow and public usage are local
+`8d0849da1bdee7d18f07a99ef89462a4a5c07b6e`.
+Its independently locked workspace uses actual Editor source construction/property editing,
+immutable preview output, original window encoding and exact composite/publication-to-pick joins.
+The common WGPU source changes only its required closure in fifteen existing locks; ordinary
+renderer consumers resolve no GPUI path. UI-local recordings retain the original pre-upload
+window prefix through success and failure. DX12 and Vulkan execute the complete bounded
+consumer, including 4096-byte field presentation and another producer alive after UI close.
+Vulkan's first failure identifies a real discarded-acquired-image recovery gap; reconfiguration
+remains with Nara's existing surface owner and successful frames retain their original fast path.
+The concrete failures and final qualification below remain separate from full frontend,
+processed-content/color-alpha, device-loss, physical input/DPI and numerical-cost acceptance.
+
+The final affected runs use Rust 1.95.0, serialized Cargo with one job and the existing Nara
+`target`. They exercise the fork adapter and changed engine contracts; unchanged official
+framework mechanisms do not receive another complete framework/component test cycle.
+
+| Affected qualification | Result | Nextest run |
+|---|---|---|
+| Shared renderer, capture, resource and submission contracts | 405/405; 57 skipped | `28781074-3311-4c70-aa90-b035bb87e953` |
+| Native window/prefix/Canvas/reference-renderer controls, DX12 | 14/14; 448 skipped | `e430cc5e-4124-4334-95d6-f6cdbf135c15` |
+| Same native controls, Vulkan | 14/14; 448 skipped | `bc89c341-1514-4db7-8c05-7e1265152ec8` |
+| Runtime native surface/composite controls, DX12 | 3/3; 459 skipped | `7fcb0550-ef8a-41ae-885c-4d2e45c6da66` |
+| Same Runtime controls, Vulkan | 3/3; 459 skipped | `c582156c-72d4-4c73-b45e-4152c1116d38` |
+| Independent actual Editor Scene/GPUI child, DX12 | 1/1; actual native submission and same-Scene diagnostic pixels | `9a34f27b-416b-415d-b80b-af16a18b7c1c` |
+| Same complete child, Vulkan | 1/1; actual native submission and same-Scene diagnostic pixels | `17e7598c-2abf-4934-8d4a-294d9cca513c` |
+| Independent incumbent retained image outputs | 4/4 | `0933365b-74e8-4ebd-b123-9bed4e2315c0` |
+| Independent incumbent render programs | 3/3; 5 skipped | `416e8d0b-f2c6-4b9d-9251-66e9ad50ab5c` |
+| Framework Scene residency and physical attachment conversion, profiler disabled | 3/3 | `4ee1b224-ad29-4e42-9b3f-e75944312d02` |
+| Render-only capture with stock UI disabled | 1/1; 293 skipped | `f48425ce-b98c-4b89-aae4-a4443d82b004` |
+| Existing Reference Game product UI and planner controls | 11/11 | `0e965b6f-4383-43b5-a750-476aa2575801` |
+
+Both engine children report RTX 4090, `Bgra8UnormSrgb`, original device epoch 1, nine successful
+UI window submissions, seven discarded candidates and two intentional paint failures. Each
+successful window composition asserts one Host queue submission and one present. The Scene
+producer's rendering remains separate work, and diagnostic Scene replay/readback is not part of
+normal composition. Native input is injected through the adapter, not physical keyboard/IME
+automation. The nine-terminal-path custody regression renders three subsequent frames after
+each attempt to exercise acquire-semaphore reuse. All ten implementation/research/review
+threads are closed; the full foundation Goal remains active.
+
+The Reference Game's first independently locked all-target/all-feature check fails on two old
+glyph-only matches that omit Mesh. Adding explicit non-glyph branches restores compilation.
+The first actual UI run then passes 8/11 (`4a071820-783e-4e11-8885-eccd2152d14c`): disabled
+Retry has no executable actions, while three fixture lookups incorrectly use the action list as
+control identity. Two failing fixtures abort during panic cleanup; this is not GPU failure
+evidence. Fixture correction `db122deb75058678510497e10fe57d1daf44b308` locates the exact Retry
+button by its observed role/name, preserves key/focus/geometry and repeated-activation refusal,
+and asserts that disabled actions are empty while enabled actions contain only the exact Retry
+action. The unchanged product trajectories then pass 11/11 above. No runtime UI behavior changes.
+
+The final locked root workspace/all-target check, seven independently locked direct-renderer
+all-target/all-feature checks, Reference Game all-target/all-feature check and complete module
+consumer workspace all-target/all-feature check pass. Correctness Clippy passes for the changed
+renderer with all targets/features, the independent engine consumer with all targets/features,
+and framework Core with defaults disabled. Root/framework formatting and the independently
+edited consumer/reference/effect sources are checked separately to avoid Windows command-length
+failure from recursively formatting both workspaces. Added local Markdown links/fragments and
+affected manifests/locks validate. No new aggregate framework scan, compiler-floor, foreign
+native/browser execution or unrelated complete component matrix is claimed by this unit.
 
 The executable comparison must cover:
 

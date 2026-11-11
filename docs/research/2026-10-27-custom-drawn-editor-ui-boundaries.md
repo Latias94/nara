@@ -5765,3 +5765,32 @@ affected CPU/public 45/45, disabled capture 1/1, independent interfaces 5/5 and 
 This supplies the selected logical-root prerequisite for actual Nara GPU-source/Host/View
 integration. It does not choose a game UI executor, add Editor dependencies to games, qualify
 player/time/world-space/cooked-resource contracts, or complete R11/R12/R11f and maintenance handoff.
+
+## November 11: Nara-Owned Rendering And Real Editor Scene Consumption
+
+The [engine-owned successor](2026-11-11-open-gpui-engine-integration-layers.md#implemented-nara-owned-host-and-scene-consumer)
+uses one ordinary Nara window and its original `WgpuRenderHost` to encode, submit and present a
+hosted GPUI root. GPUI supplies retained UI execution and the optional primitive recorder. The
+independent `gpui-engine-consumer` workspace imports an actual immutable Editor Scene preview,
+joins exact Host composites to GPUI accepted-frame publication, and uses original selection,
+prepared source construction/property edit and Undo owners. Ordinary Nara consumers acquire no
+framework dependency or sibling-checkout requirement.
+Renderer prerequisites are local `3095fa5b291ed895188f8c4fc4d20007c6081bcd`; the actual public
+adapter/consumer is `8d0849da1bdee7d18f07a99ef89462a4a5c07b6e`.
+
+The GPU-source migration selects the maintained fixed WGPU/Naga revision across the existing
+application roots without unrelated lockfile changes. A concrete prefix observation retains
+UI-thread recordings through their original window submission, including failures. Framework
+corrections expose Scene atlas custody and exact physical-size conversion at fractional scale.
+Those generic framework APIs are committed at Open-GPUI
+`7bfe8022f68169879464296e0d6d8ad09d89c7e3`, separately from the fixed official-source audit.
+The actual DX12 and Vulkan workflows execute pixels, glyphs/overlay, input, 4096-byte text,
+prepared editing/Undo, invalidation, refusal/panic recovery and pending close beside a surviving
+engine producer. Vulkan initially reproduced reuse of a signaled acquire semaphore after
+abandoned drawing; the existing surface owner now requires reconfiguration on unsuccessful
+presentation, and the unchanged workflow passes. Final results and precise revisions stay in
+the [foundation plan](../plans/2026-10-23-foundation-architecture-rebaseline-plan.md).
+
+This is a qualified integration prerequisite rather than the whole engine adoption gate.
+Processed image/color-alpha breadth, physical input/DPI/accessibility, device loss, numeric
+costs, complete frontend workflows, control-skin reuse and authored-game execution remain open.

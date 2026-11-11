@@ -988,7 +988,21 @@ selects a Nara-side `HostedSurfaceRenderer` over the existing engine Host, initi
 optional framework WGPU Scene recorder. Nara retains its original device, target, submission,
 composite and retirement authority. A custom Scene backend remains possible through the
 framework contract. This documents the next implementation route; no Nara renderer adapter,
-GPU-source reconciliation or additional runtime qualification is claimed by this decision.
+GPU-source reconciliation or additional runtime qualification is claimed by that decision alone.
+
+The following [actual Host/Scene consumer](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-nara-owned-host-and-scene-consumer)
+implements the selected Nara renderer adapter in an independent workspace. It shares the fixed
+WGPU source, original engine device/target/encoder and actual submit/present; exact composite
+and GPUI accepted-frame publication admit Editor picking. Generic framework support is committed
+at Open-GPUI `7bfe8022f68169879464296e0d6d8ad09d89c7e3`. Prepared source construction/editing,
+Undo, submitted input, 4096-byte draft presentation and pending close run on actual DX12 and
+Vulkan. Nara renderer prerequisites are local `3095fa5b291ed895188f8c4fc4d20007c6081bcd`.
+The actual public adapter/consumer is local `8d0849da1bdee7d18f07a99ef89462a4a5c07b6e`.
+Original per-window-prefix observation keeps local recordings alive through all terminal
+paths. Recovery from an acquired frame that did not present now reconfigures the existing surface
+before another acquire, closing the Vulkan signaled-semaphore failure without presenting failed
+drawing. Complete engine/default/frontend/game, processed-content/color-alpha, physical input/DPI, device loss,
+performance and maintenance-handoff gates remain open; final run evidence belongs to the plan.
 
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics

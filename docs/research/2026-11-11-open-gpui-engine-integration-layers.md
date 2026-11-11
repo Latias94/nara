@@ -1,8 +1,9 @@
 # Open-GPUI Engine Integration Layers
 
 Status: research synthesis and selected development direction; implementation remains partial.
-The implemented checkpoints qualify scoped Windows hosting, deferred submission and hosted
-logical roots. Actual Nara integration and game-specific acceptance remain open.
+The implemented checkpoints qualify scoped Windows hosting, deferred submission, hosted logical
+roots and the first Nara-owned Host/Scene consumer. Complete engine/frontend and game-specific
+acceptance remain open.
 Date: 2026-11-11. Scope: independent framework hosting, rendering, component layers and engine use.
 
 ## Summary
@@ -296,7 +297,8 @@ avoids shared renderer types but does not remove the native-host, atlas and life
 
 ## WGPU Identity And Dependency Policy
 
-Nara currently requires registry WGPU `=30.0.1`; Open-GPUI selects the official Git revision
+At the ownership-decision checkpoint, Nara required registry WGPU `=30.0.1`; Open-GPUI selected
+the official Git revision
 `cddb2f5d80dc0009b2ef6767635140cacf90a007`, whose package version is `30.0.0`.
 The existing independently locked GPUI consumer selects that same Git source. `open-gpui-wgpu`
 already is the optional renderer package; another package with the same responsibility is
@@ -314,10 +316,10 @@ two devices were created. [D1]
 
 Do not reinterpret WGPU handles across source versions. Record the framework revision, GPU
 source/revision/package version, Naga, enabled features/limits and compiler floor for each consumed
-combination. Root overrides do not propagate into independently built workspace roots: Nara has
-seven relevant fixture workspaces with nine direct `=30.0.1` declarations, plus the reference
-ImGui renderer's registry edge. Change affected roots intentionally when adopting a source policy.
-The current research changes no Nara manifest or lockfile. [D1] [D2]
+combination. Root overrides do not propagate into independently built workspace roots. The source
+inventory found seven fixture workspaces with nine direct `=30.0.1` declarations, plus the main
+workspace and reference ImGui renderer's registry edge. Change affected roots intentionally when
+adopting a source policy. That research checkpoint changed no manifest or lockfile. [D1] [D2]
 
 A read-only crates.io query on November 11 reports `30.0.1` as the newest non-yanked release,
 published August 22. The maintained Git revision is dated September 15 and includes the
@@ -328,6 +330,17 @@ and passed on the fixed source; do not rerun the entire official framework to es
 known source difference. A later corrected release can replace the Git pin in both projects.
 Align WGPU/Naga and affected independently locked roots deliberately, retaining compiler and
 feature requirements rather than changing a version string alone. [D1] [D3]
+
+The subsequent engine implementation selects the existing fixed Git revision in Nara's main
+workspace and all nine independent direct declarations. It also resolves the fifteen affected
+lock roots, including source games and presentation/prelude consumers. Application roots that
+build the reference Dear renderer patch its `wgpu = "30.0"` registry edge to that same source;
+the dependency accepts the Git package version without modifying Dear. The separate
+`gpui-engine-consumer` workspace owns the independent framework closure; ordinary image-output
+consumers do not resolve sibling framework paths. An optional path dependency in their existing
+manifest would still impose that resolution requirement and is therefore not used.
+Its actual compilation and native qualification remain implementation evidence, separate from
+this dependency disposition. Future corrected registry releases remain eligible replacements.
 
 ## Components, Extensions And Iteration
 
@@ -708,7 +721,7 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [N2] [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md), [implementation status](../architecture/adr/implementation-status.md): bounded implemented refinements and full proposal status.
 - [N3] `crates/nara_render_wgpu/src/host.rs:969,1229,2214,2384,2901,3071`, `host/imgui.rs:102,172,297`, `output.rs:86`; `editor/src/platform/drawn/graphics.rs:329`.
 - [N4] `editor/src/native/images.rs:82,108`, `native/images/presentation.rs:22,203`; `src/project_host/runtime/editor/presentation.rs:159`.
-- [N5] `crates/nara_render_wgpu/src/host.rs:728,943,2901`, `submission.rs:275,440`, `retirement.rs:30`; WGPU 30 `src/api/texture_view.rs:30`. The original window attempt already retains its own prefix internally; the public renderer-resource handoff is not yet implemented.
+- [N5] `crates/nara_render_wgpu/src/host.rs:728,943,2901`, `submission.rs:275,440`, `retirement.rs:30`; WGPU 30 `src/api/texture_view.rs:30`. At the renderer-selection checkpoint the window attempt retained its own prefix internally, while its public resource handoff was missing. The implemented Host/Scene successor below supplies that original observation.
 - [D1] `nara/Cargo.toml:139`; `open-gpui/Cargo.toml:243`, `crates/gpui_wgpu/Cargo.toml:26,68`, `tests/fixtures/dependency-consumer/Cargo.toml:43`; sibling Open-GPUI `docs/verification.md#wgpu-dependency-shaders-and-webgl`.
 - [D2] [Cargo dependency overrides](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html): source/version selection and root-only patches.
 - [D3] [crates.io WGPU API](https://crates.io/api/v1/crates/wgpu), read November 11, 2026: newest `30.0.1`, published `2026-08-22T02:53:38.229945Z`, not yanked. Official Git [surface-drop correction](https://github.com/gfx-rs/wgpu/commit/3b3506ea31154edc04de64debda0e780cba2639c) and [maintained dependency revision](https://github.com/gfx-rs/wgpu/commit/cddb2f5d80dc0009b2ef6767635140cacf90a007); commit dates read from the local official dependency checkout.
@@ -841,3 +854,87 @@ executor or establish actual Nara GPU-source/Host/View, physical IME/accessibili
 player/gamepad focus, cooked resources, world-space/depth/materials or numerical budgets. The
 independent framework remains a normal application dependency; no Nara type enters its core.
 Keep the public two-skin behavior consumer and authored HUD comparison separate from hosting.
+
+## Implemented Nara-Owned Host And Scene Consumer
+
+The maintained framework support is local Open-GPUI
+`7bfe8022f68169879464296e0d6d8ad09d89c7e3`. Its two generic API additions are fork-owned hosting
+support after the fixed official-source audit, not additional upstream-adoption credit.
+Nara's source-alignment, original window-prefix, surface-recovery and stable capture prerequisite
+is local commit `3095fa5b291ed895188f8c4fc4d20007c6081bcd`.
+The independently assembled adapter/consumer and usage are local
+`8d0849da1bdee7d18f07a99ef89462a4a5c07b6e`.
+
+The independently locked [engine consumer](../../tests/fixtures/gpui-engine-consumer/README.md)
+implements `HostedSurfaceRenderer` in Nara. Its ordinary Winit window and `WgpuRenderHost` own
+the device, window attachment, command encoder, submission, presentation and retirement.
+Open-GPUI retains its original App/Window, text/layout/input and candidate/publication execution.
+The optional WGPU Scene recorder uses that exact original enabled device and records directly
+to the acquired Nara window attachment. It creates no second UI window, device, surface, submitter
+or Scene executor. Ordinary Nara renderer roots resolve no framework packages or sibling paths.
+
+The real `EditorProjectSession` opens a trusted compiled source project. One prepared construction
+creates the Sprite through source-owner templates and property writes; later movement uses the
+existing prepared property edit, followed by the original Undo. Its real preview candidate and
+stock policy produce an immutable `WgpuImageOutput`. Importing the original texture and retaining
+its display lease adds no pixel copy. A frozen Scene keeps its exact atlas lease, geometry and
+display snapshot while waiting for Nara's attachment. The reusable framework helper follows
+actual Scene batches, including directly assembled public sprite arrays.
+
+After real window submission, the adapter completes only the original GPUI attempt. Its normal
+accepted-frame publication must match that attempt and the actual Nara image/occurrence/window
+composite before `EditorPreviewPresentation` admits picking. Capturing a new unpresented preview
+does not revoke still-valid displayed content merely because it is no longer latest. Actual
+source or geometry changes still invalidate its authority. A scene clone, texture registration,
+successful recording or GPU completion alone cannot admit View input.
+
+`WgpuWindowFrame::submission_prefix` exposes an observation before uploads. It shares the Host's
+one-time original index binding, including failure paths, while the adapter keeps non-Send
+recordings on its UI thread. The same mechanism preserves custody through paint refusal/panic,
+validation, finalization/submission failure and pre-present failure. Final root shutdown cancels
+pending work and waits only for its retained original window uses. Another producer submits
+before and after that root closes; this is not a forced hardware-busy or bounded-latency proof.
+
+The common WGPU source migration updates fifteen existing locks without unrelated package
+identity changes. New framework dependencies live only in this integration workspace. An initial
+attempt to use an optional path dependency in the old render-output fixture still imposed sibling
+checkout resolution and conflicted with its exact Lyon pins. The final consumer has a separate
+workspace; the old fixture and its original pins remain independent. Feature unification also
+exposed a private capture method whose tuple shape depended on stock UI. Its render-only method
+now has one return type and explicitly refuses UI permissions, returning their original completion
+rather than dropping product authority silently.
+
+Actual Windows/DX12 and Vulkan trajectories execute Scene pixels, glyphs, overlay exclusion,
+selection, prepared source editing/Undo, 4096-byte field presentation, IME preedit/commit/cancel,
+ordinary spaces, submitted input while a successor waits, stale picking, paint refusal/panic
+recovery, resize/ABA/zero-size, fractional-root geometry and pending close. Qualification renders
+the same frozen Scene into an offscreen diagnostic attachment in that original window submission;
+the normal path has no readback or intermediate UI copy. The diagnostic is not swapchain readback
+or scanout evidence. Both backends observe center RGBA `[255,0,0,255]`, 1,679 nonbackground glyph
+samples, nine successful UI submissions, seven discarded candidates and two intentional failures.
+
+Initial DX12 runs exposed an over-strict latest-preview check and an extra event-loop drive after
+successful close; both were corrected without weakening the workflow. Vulkan then exposed a
+native acquired-image lifetime issue: the pinned backend's discard operation is a no-op and left
+an acquire semaphore signaled after failed drawing. The existing Nara surface owner now keeps
+reconfiguration required from acquisition until successful present. Failed encoding, validation,
+submission or pre-present paths therefore rebuild the same swapchain before another acquire;
+normal successful frames retain their fast path and suboptimal acquisition retains its policy.
+Vulkan's unchanged complete trajectory passes after this owning correction. Error-level native
+validation logs fail the independent child-process test.
+
+The independently locked Reference Game all-target/all-feature check additionally finds two
+pre-existing non-exhaustive fixture matches after Mesh entered the UI primitive enums. Their
+glyph-only captures now explicitly exclude Rect and Mesh while retaining every original glyph,
+page-identity and product-state assertion. The corrected locked check passes; its existing UI
+product/planner run initially passes 8/11 because disabled Retry controls expose no executable
+actions and old fixture lookups mistake that for missing control identity. Test-only correction
+`db122deb75058678510497e10fe57d1daf44b308` observes the exact role/name, preserves key/focus and
+repeat-refusal assertions, and explicitly checks disabled and enabled action exposure. All eleven
+original product/planner controls then pass; the plan retains both run results and cleanup-abort
+facts separately from native GPU qualification.
+
+Final affected qualification and exact commits are recorded in the foundation plan. This scoped
+consumer does not select the full Editor frontend/game executor, close the processed-image and
+translucent-color matrix, prove physical IME/DPI migration, device-loss/reconstruction, numeric
+budgets or continuous busy-producer retirement, or complete R11/R12/R11f and maintenance handoff.
