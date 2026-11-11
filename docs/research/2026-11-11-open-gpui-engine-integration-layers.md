@@ -247,6 +247,53 @@ resource loading and retirement through the Player's actual content providers or
 executable-owned resources. Existing [cooked delivery](../guides/cooked-player-delivery.md)
 does not qualify a GPUI asset/font adapter or justify falling back to Editor source loaders.
 
+## Selected Nara Renderer Adapter
+
+The November 11 clarification selects Nara-owned rendering adaptation for the first actual
+engine consumer. This resolves the application-side owner without changing Open-GPUI's status
+as an independent framework or selecting the Editor/game-runtime default.
+
+| Owner | Selected responsibility |
+| --- | --- |
+| Open-GPUI App/Window | UI state, invalidation, layout/text, input, ordered Scene production and exact prepared/submitted publications. |
+| Framework rendering contract | Backend-independent Scene and atlas semantics, original candidate delivery and exact submission/shutdown authority. |
+| Nara renderer adapter | Implement `HostedSurfaceRenderer`, adapt exact engine outputs and retain recordings/imports through the original engine GPU use. |
+| Nara `WgpuRenderHost` | Original enabled device/queue, window/target acquisition, encoder transaction, actual submit/present, composite receipts and retirement. |
+| Optional `WgpuSceneRenderer` | Reuse existing primitive shaders, atlas and private passes inside the Nara-owned encoding transaction. |
+
+This resembles ImGui's application-owned rendering integration. The runtime remains retained:
+consuming a Scene does not require rebuilding UI interaction in Nara or changing GPUI to an
+immediate-mode API. Scene delivery and renderer resource custody are explicit because recorded
+commands can wait while the last-submitted controls remain active.
+
+Use the qualified optional WGPU recorder for the first consumer. Nara can later replace it with
+an engine-specific Scene renderer without replacing components or layout/input execution.
+That replacement must implement the complete admitted primitive/atlas contract, including
+paths, glyphs, shadows, exact clips, painter order, color/alpha and resource lifetime. Avoid
+introducing a second RHI or a universal render-graph wrapper to conceal those obligations.
+
+Record inside the existing final-window transaction first. Declare actual engine-output samples
+with their original display occurrence and join View input only to the successful Host composite.
+Complete the framework's original candidate from the Host's actual outcome, preserve the
+submitted UI on refusal, and retain renderer/import resources through the original GPU prefix.
+One closing UI root must not drain unrelated producers. A graph placement is warranted when
+real cross-feature reads/writes, intermediate outputs or history require it; internal UI passes
+need not become public graph nodes.
+
+The source check confirms that `WgpuWindowDeviceScope` already exposes its original adapter,
+device and queue. The window encoding callback's `TextureView::texture()` supplies the original
+target required by `WgpuSceneRenderer::record`; no new attachment accessor or intermediate copy
+is needed for that access. The concrete missing handoff is per-attempt window submission custody:
+the Host internally freezes a `WgpuSubmissionPrefix`, but its public outcome exposes only
+presentation/composite receipts. Preserve that exact prefix on successful and failed attempts,
+including writes before a paint refusal or callback panic. Establish resource custody before
+native work; release UI-thread recordings only after their original prefix settles. A producer's
+earlier render prefix, a later latest-prefix query or whole-device idle cannot substitute for
+that window use. [N5]
+
+The WGPU-source decision below is still required for recorder reuse; a custom Scene backend
+avoids shared renderer types but does not remove the native-host, atlas and lifecycle work.
+
 ## WGPU Identity And Dependency Policy
 
 Nara currently requires registry WGPU `=30.0.1`; Open-GPUI selects the official Git revision
@@ -259,8 +306,8 @@ two devices were created. [D1]
 
 | Option | Tradeoff and current disposition |
 | --- | --- |
-| Align the Nara consumer to the maintained fixed Git | Preserves known upstream Vulkan/WebGL fixes; requires deliberate Nara requirements/API/source changes and actual affected-consumer qualification. Preferred bounded compatibility experiment. |
-| Move GPUI renderer to a registry release | Viable when the release contains the required fixes; registry 30.0.1 has an already reproduced Vulkan semaphore failure. Compilation alone is insufficient. |
+| Upgrade both consumers to a common registry release | Prefer a supported common release when it contains the required fixes. Check source and affected integration behavior; registry 30.0.1 has an already reproduced Vulkan semaphore failure. |
+| Align the Nara consumer to the maintained fixed Git | Current bounded alternative while no qualifying newer release is available. Preserves known upstream Vulkan/WebGL fixes; requires deliberate Nara requirements/source changes and affected-consumer qualification. This is not a permanent Git-source requirement. |
 | Application-root source overrides | Useful assembly mechanism, subject to every dependency's version requirement; a 30.0.0 patch cannot satisfy `=30.0.1`. Explicit Git edges also need reconciliation. |
 | Implement Scene rendering in Nara | Avoids directly sharing renderer WGPU types, but assumes all primitive/atlas/path/text maintenance. Reserve for demonstrated needs. |
 | Native cross-device/backend texture interop | Separate dependency policy is possible, with allocation, fences, format/state and dual retirement costs. Higher current complexity than same-device recording. |
@@ -271,6 +318,16 @@ combination. Root overrides do not propagate into independently built workspace 
 seven relevant fixture workspaces with nine direct `=30.0.1` declarations, plus the reference
 ImGui renderer's registry edge. Change affected roots intentionally when adopting a source policy.
 The current research changes no Nara manifest or lockfile. [D1] [D2]
+
+A read-only crates.io query on November 11 reports `30.0.1` as the newest non-yanked release,
+published August 22. The maintained Git revision is dated September 15 and includes the
+September 12 surface-drop fix `3b3506ea31154edc04de64debda0e780cba2639c`, although its package
+still says `30.0.0`. Replacing it with published `30.0.1` is therefore not an upgrade to that
+correction. The existing unchanged Vulkan controls already reproduced the registry failure
+and passed on the fixed source; do not rerun the entire official framework to establish this
+known source difference. A later corrected release can replace the Git pin in both projects.
+Align WGPU/Naga and affected independently locked roots deliberately, retaining compiler and
+feature requirements rather than changing a version string alone. [D1] [D3]
 
 ## Components, Extensions And Iteration
 
@@ -651,8 +708,10 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [N2] [ADR0121](../architecture/adr/0121-composable-render-programs-and-host-execution.md), [implementation status](../architecture/adr/implementation-status.md): bounded implemented refinements and full proposal status.
 - [N3] `crates/nara_render_wgpu/src/host.rs:969,1229,2214,2384,2901,3071`, `host/imgui.rs:102,172,297`, `output.rs:86`; `editor/src/platform/drawn/graphics.rs:329`.
 - [N4] `editor/src/native/images.rs:82,108`, `native/images/presentation.rs:22,203`; `src/project_host/runtime/editor/presentation.rs:159`.
+- [N5] `crates/nara_render_wgpu/src/host.rs:728,943,2901`, `submission.rs:275,440`, `retirement.rs:30`; WGPU 30 `src/api/texture_view.rs:30`. The original window attempt already retains its own prefix internally; the public renderer-resource handoff is not yet implemented.
 - [D1] `nara/Cargo.toml:139`; `open-gpui/Cargo.toml:243`, `crates/gpui_wgpu/Cargo.toml:26,68`, `tests/fixtures/dependency-consumer/Cargo.toml:43`; sibling Open-GPUI `docs/verification.md#wgpu-dependency-shaders-and-webgl`.
 - [D2] [Cargo dependency overrides](https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html): source/version selection and root-only patches.
+- [D3] [crates.io WGPU API](https://crates.io/api/v1/crates/wgpu), read November 11, 2026: newest `30.0.1`, published `2026-08-22T02:53:38.229945Z`, not yanked. Official Git [surface-drop correction](https://github.com/gfx-rs/wgpu/commit/3b3506ea31154edc04de64debda0e780cba2639c) and [maintained dependency revision](https://github.com/gfx-rs/wgpu/commit/cddb2f5d80dc0009b2ef6767635140cacf90a007); commit dates read from the local official dependency checkout.
 - [C1] [GPUI Base](https://gpui-kit.com/base/), observed November 11 [workspace manifest](https://github.com/longbridge/gpui-kit/blob/main/Cargo.toml), [Base manifest](https://github.com/longbridge/gpui-kit/blob/main/crates/base/Cargo.toml): main-branch evidence, not a latest-release claim.
 - [C2] [Dock documentation](https://gpui-kit.com/base/dock/), [DockAreaRenderer](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/dock/dock_area.rs), [TabGroupRenderer](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/dock/tab_group.rs).
 - [C3] Open-GPUI `crates/ui_core/src/lib.rs:9`, `crates/ui_components/README.md`, `docs/ui/component-contract.md`, `crates/gpui_docking/README.md`, `crates/canvas/README.md`, `crates/motion/README.md`; Nara [independent documents](../guides/editor-documents.md) and `tests/fixtures/module-consumer/editor-panel-consumer/tests/dialogue_panel.rs:85`.

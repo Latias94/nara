@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Last Revised**: 2026-11-11 (independent framework and engine integration layers)
+**Last Revised**: 2026-11-11 (independent framework and Nara-owned rendering adaptation)
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md);
@@ -70,6 +70,22 @@ layout/text and component mechanisms remain reusable while native renderer coupl
 The official Windows D3D11 construction is not an engine or framework public-interface constraint.
 This selects an integration capability to build; it does not qualify an external driver or switch
 the Editor/game UI implementation.
+
+The first actual Nara integration uses a Nara-owned renderer adapter. Open-GPUI supplies its
+coherent UI execution, Scene and renderer/atlas contracts; Nara supplies the existing engine
+device, targets, encoding transaction, final submission/presentation and resource retirement.
+The adapter belongs to Nara and implements the framework's public hosting interfaces. Reusing
+the optional framework WGPU Scene recorder does not transfer those engine responsibilities to
+the framework. A renderer contribution must not construct a second device or independently
+submit the engine's composition work.
+
+The framework Scene contract remains independent of WGPU so an application can implement its
+own renderer. Start the Nara comparison by reusing the qualified recorder; replace its primitive
+implementation only when a concrete engine requirement warrants the maintenance cost. Such a
+replacement includes path, glyph/atlas, clip, ordering, color and resource-lifetime semantics,
+not just triangles. Keep internal renderer passes private unless existing engine graph
+dependencies require their exposure. This selects the adapter ownership and first integration
+route, not a production toolkit or a game-runtime executor.
 
 ```mermaid
 flowchart TB

@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-10-16
-**Last Revised**: 2026-11-11 (independent framework consumption and host composition)
+**Last Revised**: 2026-11-11 (Nara-owned framework rendering adaptation)
 **Owner**: Private Editor product, tooling, reflection and document-domain owners
 **Refines**: [0015](0015-editor-tooling-and-dogfooding-boundary.md), [0081](0081-schema-source-stable-identity-catalog-and-runtime-binding.md), [0090](0090-unavailable-schema-and-lossless-authoring.md), [0107](0107-shared-ui-foundation-and-independent-product-layers.md), [0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md), [0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [0117](0117-2d-foundation-ownership-and-authoring-contracts.md)
@@ -129,6 +129,15 @@ document, history, ECS or render-output identities. Selecting a renderer contrib
 select a platform loop. The first native consumer must resolve hosting, renderer submission and
 viewport texture sampling separately, then demonstrate their combined input and retirement
 behavior. A host-owned encoder interface alone does not complete that composition.
+
+For the first actual framework consumer, Nara owns the rendering adapter and uses its existing
+Host for the native window transaction, original device/queue, targets, submit/present and
+retirement. Open-GPUI delivers a Scene and exact original submission authority through its public
+hosted-surface interface. The optional framework WGPU recorder is an implementation reused by
+that Nara adapter; it is not another application host or a requirement on future custom Scene
+renderers. Framework execution and components do not depend on Nara rendering or document types.
+Any missing target, retained-use or completion capability is corrected at its existing owner
+and qualified through the complete Nara View/input workflow before selecting the frontend.
 
 ### Independent reference and self-drawn Editor implementations
 

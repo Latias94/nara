@@ -983,6 +983,13 @@ Core `2910b52424e` and consumer `8809f12929e` are qualified at `5925a34f920`: af
 CPU/public 45/45, disabled capture 1/1, independent interfaces 5/5 and native lifecycle 14/14
 pass, along with correctness Clippy, production wasm, formatting and document checks.
 
+The subsequent [renderer-adapter ownership clarification](../../research/2026-11-11-open-gpui-engine-integration-layers.md#selected-nara-renderer-adapter)
+selects a Nara-side `HostedSurfaceRenderer` over the existing engine Host, initially reusing the
+optional framework WGPU Scene recorder. Nara retains its original device, target, submission,
+composite and retirement authority. A custom Scene backend remains possible through the
+framework contract. This documents the next implementation route; no Nara renderer adapter,
+GPU-source reconciliation or additional runtime qualification is claimed by this decision.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

@@ -1551,6 +1551,21 @@ formatting and document checks.
 No Nara dependency or frontend/runtime default changes. Complete control behavior/skin reuse,
 authored HUD execution selection and numerical-cost consumers remain required.
 
+The next engine consumer follows the
+[selected Nara renderer adapter](../research/2026-11-11-open-gpui-engine-integration-layers.md#selected-nara-renderer-adapter).
+Nara implements the public hosted-surface renderer interface over its existing Host's original
+device/queue, target/encoder transaction, exact image/display receipts and retirement. Reuse the
+qualified optional WGPU Scene recorder first; its shaders and atlas remain a reusable backend
+implementation, while Nara retains final rendering authority. An application-specific Scene
+renderer remains possible without replacing framework UI execution. Do not begin a second
+primitive renderer or expose every internal UI pass in the engine graph before a concrete
+requirement justifies it. Align both consumers to a common supported WGPU source, upgrading
+the framework when a release includes its required fixes; a permanent Git pin is not a design
+requirement. The original device and attachment are already available. Complete the window
+attempt's retained-resource/prefix handoff, including refusal and unwind paths, then qualify
+the complete changing View, overlap/clip/input, refusal and retirement workflow.
+This is a selected implementation route, not executed Nara integration evidence.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the
