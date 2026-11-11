@@ -214,6 +214,9 @@ pub(crate) fn admit_draft<E>(
     asset_resolution: Option<AssetReferenceResolver<'_>>,
     mut admit: impl FnMut(usize, usize, Option<usize>) -> Result<(), E>,
 ) -> Result<CompiledSceneDocument, CompiledSceneAdmissionError<E>> {
+    #[cfg(feature = "work-observation")]
+    let _work_span =
+        tracing::info_span!(target: "nara::scene::work", "scene_flat_admission").entered();
     use claims::{FlatSceneClaims, FlatSceneComponentClaim, FlatSceneEntityClaim};
 
     // Instance declarations cannot enter a flat draft. Validate the remaining source metadata

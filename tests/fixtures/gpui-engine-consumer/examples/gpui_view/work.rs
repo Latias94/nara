@@ -34,13 +34,24 @@ const SOURCE_PHASES: [&str; 4] = [
     "source_commit",
     "source_drive",
 ];
-const DRIVE_PHASES: [&str; 6] = [
+const DRIVE_PHASES: &[&str] = &[
     "editor_preview",
     "editor_preview_compile",
     "editor_preview_drive",
     "editor_preview_runtime",
     "editor_preview_materialize",
     "editor_publish_model",
+    "scene_expand",
+    "scene_structure",
+    "scene_compile_output",
+    "scene_authoring_finish",
+    "scene_native_preview",
+    "scene_flat_admission",
+    "scene_prepare_unbound",
+    "scene_bind",
+    "scene_bind_revalidate",
+    "scene_publish",
+    "scene_final_validate",
 ];
 
 #[derive(Clone, Copy, Default)]
@@ -49,13 +60,17 @@ struct SpanObservation {
     calls: u64,
 }
 
-struct DriveLayer(Arc<Mutex<[SpanObservation; 6]>>);
+struct DriveLayer(Arc<Mutex<[SpanObservation; DRIVE_PHASES.len()]>>);
 struct SpanStart(Instant);
 
 impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for DriveLayer {
     fn on_enter(&self, id: &Id, cx: TraceContext<'_, S>) {
         let span = cx.span(id).expect("an entered observation span exists");
-        if span.metadata().target() == "nara::editor::work" && DRIVE_PHASES.contains(&span.name()) {
+        if matches!(
+            span.metadata().target(),
+            "nara::editor::work" | "nara::scene::work"
+        ) && DRIVE_PHASES.contains(&span.name())
+        {
             span.extensions_mut().insert(SpanStart(Instant::now()));
         }
     }
@@ -111,7 +126,7 @@ pub(super) fn observe<T>(operation: impl FnOnce() -> T) -> Result<(T, Observatio
 struct Sample {
     phases: [Observation; 5],
     source_phases: [Observation; 4],
-    drive_phases: [SpanObservation; 6],
+    drive_phases: [SpanObservation; DRIVE_PHASES.len()],
     total: Duration,
     draw: [Duration; 3],
     draws: u64,
@@ -165,19 +180,23 @@ pub(super) struct UiWork {
     collector: FrameTimingCollector,
     initialized: bool,
     trace_was_changed: bool,
-    drive_work: Arc<Mutex<[SpanObservation; 6]>>,
+    drive_work: Arc<Mutex<[SpanObservation; DRIVE_PHASES.len()]>>,
     _subscriber: tracing::subscriber::DefaultGuard,
 }
 
 impl UiWork {
     pub fn new() -> Self {
         let trace_was_changed = profiler::set_trace_enabled(true);
-        let drive_work = Arc::new(Mutex::new([SpanObservation::default(); 6]));
-        let subscriber = tracing_subscriber::registry().with(
-            DriveLayer(drive_work.clone()).with_filter(tracing_subscriber::filter::filter_fn(
-                |metadata| metadata.target() == "nara::editor::work",
-            )),
-        );
+        let drive_work = Arc::new(Mutex::new([SpanObservation::default(); DRIVE_PHASES.len()]));
+        let subscriber =
+            tracing_subscriber::registry().with(DriveLayer(drive_work.clone()).with_filter(
+                tracing_subscriber::filter::filter_fn(|metadata| {
+                    matches!(
+                        metadata.target(),
+                        "nara::editor::work" | "nara::scene::work"
+                    )
+                }),
+            ));
         let subscriber = tracing::subscriber::set_default(subscriber);
         println!(
             "NARA_GPUI_WORK_CONFIG warmups={WARMUPS} samples={SAMPLES} source_rows=10001 debug_assertions={} allocation_observer={} font=Segoe_UI geometry=1280x640 scale=host_logical no_readback=true timings=instrumented_cpu_not_gpu",
@@ -229,7 +248,7 @@ impl UiWork {
         let before = counters(viewer);
         let renderer = viewer.renderer.as_ref().unwrap();
         let record_before = renderer.record_cpu.get();
-        *self.drive_work.lock().unwrap() = [SpanObservation::default(); 6];
+        *self.drive_work.lock().unwrap() = [SpanObservation::default(); DRIVE_PHASES.len()];
         let start = Instant::now();
         let mut sample = Sample::default();
         let (mutation, observation) = observe(|| -> Result<()> {
@@ -254,10 +273,13 @@ impl UiWork {
         sample.phases[0] = observation;
         sample.drive_phases = *self.drive_work.lock().unwrap();
         if matches!(self.case, 2 | 4) {
-            ensure!(
-                sample.drive_phases.iter().all(|phase| phase.calls == 1),
-                "the original source drive did not reach each expected observation once"
-            );
+            for (name, phase) in DRIVE_PHASES.iter().zip(&sample.drive_phases) {
+                ensure!(
+                    phase.calls == 1,
+                    "the original source drive reached {name} {} times instead of once",
+                    phase.calls
+                );
+            }
             sample.source_phases = std::array::from_fn(|index| {
                 viewer.engine.as_ref().unwrap().borrow().source_steps[index].take()
             });

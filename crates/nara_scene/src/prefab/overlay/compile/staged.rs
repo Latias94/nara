@@ -213,6 +213,8 @@ fn compile<F, E>(
 where
     F: FnMut(&AssetRef, &mut SceneCompilationWorkingSet) -> Result<Option<ResolvedPrefabSource>, E>,
 {
+    #[cfg(feature = "work-observation")]
+    let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_expand").entered();
     let mut compiler = Compiler::start(context, source, selected_anchor)?;
     let mut scanned = 0;
     let mut layout = compiler.close_structure(&mut scanned)?;
@@ -1406,6 +1408,9 @@ where
         &mut self,
         scanned: &mut usize,
     ) -> Result<SceneDraft, SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_structure").entered();
         loop {
             self.close_demands(scanned)?;
             self.postorder.clear();

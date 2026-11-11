@@ -510,6 +510,9 @@ impl UnboundScenePublication {
         &mut self,
         world: &mut World,
     ) -> Result<Option<WorldIdentityDomain>, SceneSpawnReport> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_bind_revalidate").entered();
         self.definition.validate(world)?;
         let has_targets = !self.preflight.entities.is_empty();
         self.prepared_values
@@ -628,6 +631,8 @@ impl UnboundScenePublication {
         mut self,
         world: &mut World,
     ) -> Result<PreparedScenePublication, SceneSpawnReport> {
+        #[cfg(feature = "work-observation")]
+        let _work_span = tracing::info_span!(target: "nara::scene::work", "scene_bind").entered();
         let new_identity_domain = self.revalidate(world)?;
         let Self {
             definition,

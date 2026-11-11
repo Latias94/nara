@@ -100,6 +100,9 @@ where
         mut document: SceneDraft,
         references: ReferencePrograms,
     ) -> Result<StagedSceneOutput, SceneCompilationFailure> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_compile_output").entered();
         self.admit(self.nodes.len().checked_mul(256))?;
         self.admit(self.root.entities.iter().try_fold(0usize, |bytes, record| {
             bytes

@@ -282,9 +282,17 @@ impl PreparedScenePublication {
         self,
         world: &mut World,
     ) -> Result<SceneSpawnReport, (Self, SceneSpawnReport)> {
-        let finalization = match self.validate(world, true) {
-            Ok(finalization) => finalization,
-            Err(report) => return Err((self, report)),
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_publish").entered();
+        let finalization = {
+            #[cfg(feature = "work-observation")]
+            let _work_span =
+                tracing::info_span!(target: "nara::scene::work", "scene_final_validate").entered();
+            match self.validate(world, true) {
+                Ok(finalization) => finalization,
+                Err(report) => return Err((self, report)),
+            }
         };
         let Self {
             prepared_identity,

@@ -20,9 +20,11 @@ nara_reflect.workspace = true
 ron = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = []
+work-observation = ["dep:tracing"]
 serde = [
     "dep:serde",
     "nara_asset/serde",

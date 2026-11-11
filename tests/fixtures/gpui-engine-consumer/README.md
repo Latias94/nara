@@ -166,13 +166,18 @@ Editor drive. They preserve its checks, preview/model work and ordering. Their C
 and optional allocation records are subdivisions of `mutation`; do not add them to the parent
 or add their percentiles together.
 The same optional mode forwards Nara's `editor-work-observation` feature and installs a standard
-thread-scoped `tracing-subscriber` Registry layer filtered to `nara::editor::work`. Six original
-owner spans distinguish preview compilation, preview drive/Runtime/materialization and Editor
-model publication. The engine installs no subscriber and the feature is disabled by default.
+thread-scoped `tracing-subscriber` Registry layer filtered to `nara::editor::work` and
+`nara::scene::work`. Seventeen original owner spans distinguish preview compilation, preview
+drive/Runtime/materialization, Editor model publication, Scene expansion/structural closure,
+values/provenance output, Authoring completion, Native restriction/flat admission, unbound
+preparation, binding/revalidation and final validation/publication. The engine installs no
+subscriber and the feature is disabled by default.
 These elapsed spans are inclusive/nested, with subscriber overhead; their per-sample call
 checks do not establish worker-thread work or exclusive CPU time. The probe requires one reached
 span of each kind in both original property-edit cases. Allocation requests remain observed
 at the four outer source steps, without invented per-span allocation attribution.
+These call expectations apply to this flat source without Prefab instances; a structural
+closure invocation can perform multiple internal layouts, and other sources can require retries.
 
 Allocation records count calls and requested bytes on the calling thread for the named owner
 phases. The optional `NARA_GPUI_WORK_HEAP` snapshot reports process allocator-requested live

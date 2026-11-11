@@ -107,6 +107,17 @@ fn measure_hosted_gpui_work() {
                 "editor_preview_runtime",
                 "editor_preview_materialize",
                 "editor_publish_model",
+                "scene_expand",
+                "scene_structure",
+                "scene_compile_output",
+                "scene_authoring_finish",
+                "scene_native_preview",
+                "scene_flat_admission",
+                "scene_prepare_unbound",
+                "scene_bind",
+                "scene_bind_revalidate",
+                "scene_publish",
+                "scene_final_validate",
             ] {
                 let marker = format!(
                     "NARA_GPUI_WORK_SPANS case={case} phase={phase} calls=64 scope=current_thread_nested_in_mutation"

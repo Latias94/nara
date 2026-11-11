@@ -1784,6 +1784,9 @@ where
 
     #[cfg(feature = "serde")]
     fn finish_authoring_document(&mut self, document: SceneDraft) -> Option<ExpandedSceneDocument> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_authoring_finish").entered();
         let validation = self.validate_authoring_document(&document);
         self.diagnostics.extend(validation);
         if self.diagnostics.has_errors() {

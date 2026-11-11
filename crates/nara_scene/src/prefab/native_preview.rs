@@ -46,6 +46,9 @@ impl AuthoringSceneCompilationReport {
         &mut self,
         registry: Option<&ComponentRegistrySnapshot>,
     ) -> Result<AuthoringNativePreview, DiagnosticReport> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_native_preview").entered();
         let Some(candidate) = self.candidate.take() else {
             return Err(std::mem::take(&mut self.diagnostics));
         };

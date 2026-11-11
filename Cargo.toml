@@ -213,7 +213,7 @@ trybuild.workspace = true
 yaml-rust2.workspace = true
 
 [features]
-editor-work-observation = ["dep:tracing"]
+editor-work-observation = ["dep:tracing", "nara_scene?/work-observation"]
 default = ["runtime-core"]
 runtime-core = [
     "dep:blake3",

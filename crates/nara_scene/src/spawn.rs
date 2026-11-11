@@ -393,6 +393,9 @@ impl SceneSpawner {
         claims: &SceneNativeRetirementClaims,
         value_limits: ComponentValueMaterializationLimits,
     ) -> Result<UnboundScenePublication, SceneSpawnReport> {
+        #[cfg(feature = "work-observation")]
+        let _work_span =
+            tracing::info_span!(target: "nara::scene::work", "scene_prepare_unbound").entered();
         if !definition.matches_registry(registry) {
             return Err(preparation::definition_rejection());
         }
