@@ -48,7 +48,12 @@ impl fmt::Debug for ResourceVersion {
     }
 }
 
-/// Explicit content transfer interpretation carried by a texture port and its physical lease.
+/// Stored RGB transfer interpretation carried by a texture port and its physical lease.
+///
+/// Linear uses the selected working primaries without a transfer encoding. Srgb stores the sRGB
+/// transfer function; an sRGB native view decodes those RGB channels during sampling. Alpha is
+/// linear coverage and never receives that transfer function. This does not describe HDR output,
+/// display primaries, exposure or tone mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextureTransfer {
     Linear,
@@ -56,6 +61,10 @@ pub enum TextureTransfer {
 }
 
 /// Alpha interpretation that must agree between a port and its exact texture version.
+///
+/// Opaque ignores stored alpha. Straight stores unassociated RGB; Premultiplied stores RGB
+/// associated with alpha in the decoded linear sampling domain. For sRGB storage, associated
+/// linear RGB is encoded after multiplication, so sampling an sRGB view yields associated RGB.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextureAlpha {
     Opaque,

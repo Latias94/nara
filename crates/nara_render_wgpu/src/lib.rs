@@ -334,7 +334,7 @@ fn encode_view_draws(
                 ops: wgpu::Operations {
                     load: match view.load {
                         nara_render::ViewLoadOp::Clear(color) => {
-                            wgpu::LoadOp::Clear(clear_color_to_wgpu(color))
+                            wgpu::LoadOp::Clear(stock_policy::premultiplied_clear_color(color))
                         }
                         nara_render::ViewLoadOp::Load => wgpu::LoadOp::Load,
                     },

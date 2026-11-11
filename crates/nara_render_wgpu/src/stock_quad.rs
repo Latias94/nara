@@ -60,9 +60,9 @@ impl StockQuadPrepared {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: match load {
-                            nara_render::ViewLoadOp::Clear(color) => {
-                                wgpu::LoadOp::Clear(crate::clear_color_to_wgpu(color))
-                            }
+                            nara_render::ViewLoadOp::Clear(color) => wgpu::LoadOp::Clear(
+                                crate::stock_policy::premultiplied_clear_color(color),
+                            ),
                             nara_render::ViewLoadOp::Load => wgpu::LoadOp::Load,
                         },
                         store: wgpu::StoreOp::Store,

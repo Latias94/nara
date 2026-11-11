@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
+**Amended**: 2026-11-12 for reusable accumulated targets and explicit external UI composition
 **Owner**: `nara_core`, `nara_image`, material and render domains, render backends
 **Related**: ADR 0005, ADR 0033, ADR 0040, ADR 0051, ADR 0094
 **Revisit Trigger**: A concrete HDR, wide-gamut, color-grading, display-profile, or
@@ -90,17 +91,53 @@ flowchart LR
 - `AlphaMode2d::Blend` means straight-alpha source-over blending. The color blend factors are
   source alpha and one minus source alpha; the alpha blend factors are one and one minus source
   alpha. No importer, shader, or backend may silently premultiply only one source stage of the path.
-- `AlphaMode2d::Opaque` disables blending and does not reinterpret stored color channels.
+- `AlphaMode2d::Opaque` disables blending, preserves the shaded RGB channels and writes alpha one
+  into stock accumulated color targets. It does not rewrite source Image pixels or persistent tints.
 - A transparent offscreen target that accumulates source-over results does not thereby become a
   reusable straight-alpha source texture. Its associated/composited representation and any resolve
-  or conversion must be declared before another pass samples it. The current presentation path does
-  not establish that future offscreen contract.
+  or conversion must be declared before another pass samples it. Stock Scene and Canvas image
+  outputs use the premultiplied accumulated representation defined below; separately authored
+  finite programs retain their own declared texture meaning.
 - A future premultiplied-alpha, additive, masked, or custom blend mode must be explicit in stable
   material intent and must align import processing, shader output, pipeline state, batching keys,
   and tests. It may coexist with this contract but cannot reinterpret existing `Blend` assets.
 - Any future separately admitted backend-specific integration owns the correctness of its private
   intermediate format, but its result must still satisfy the declared target encoding when it
   rejoins a Nara-owned target path.
+
+### Reusable accumulated color
+
+The stock image-output workflow now reuses transparent Scene and Canvas targets. Their admitted
+program descriptors declare premultiplied accumulated RGB in the decoded linear-sRGB domain.
+Persistent tints and source color Images retain the straight-alpha authoring contract above.
+
+- A camera or Canvas clear is authored as linear straight `Color`; writing that clear into a
+  premultiplied accumulated target multiplies RGB by alpha once. Transparent black is the empty
+  identity. A nonblack alpha-zero clear cannot leave hidden RGB in that accumulated target.
+- A Blend source keeps its straight shader output and existing source-over factors. Accumulation
+  produces associated RGB without a second source premultiplication.
+- Opaque material drawing ignores source opacity for its final opaque write: RGB is preserved and
+  stored alpha is one. Source Image pixels and persistent tint values are not rewritten. Any
+  separately declared coverage or masked mode needs its own explicit contract.
+- Finite program clears and arbitrary native encoding use the representation declared by their
+  own target. The stock clear conversion is not a global reinterpretation of raw WGPU clears.
+- A published output retains its exact transfer and alpha meaning with its allocation. A passive
+  descriptor observation cannot change that meaning, nominal semantic, epoch or sampling rights.
+
+### External UI and display composition
+
+Retained versus immediate UI execution does not select a color space. An external renderer must
+declare its composition domain independently of the native attachment's format. GPUI's existing
+numeric sRGB composition remains its framework default; it is not Nara's canonical linear working
+space. A Nara adapter selects an explicit linear-sRGB recorder mode before recording into Nara's
+sRGB target, so authored UI colors decode before blending and the attachment encodes once.
+Imported Scene colors use their exact original transfer and alpha facts; adapters must not relabel
+them to compensate for an output mismatch.
+
+This does not move engine ownership into the framework. Nara retains device/queue, target,
+submission, display policy and retirement. UI controls may be authored using familiar sRGB colors
+while their rendering accumulates in linear space. Glyph coverage remains linear scalar coverage;
+font contrast/gamma tuning is a separate appearance policy, not an RGB transfer declaration.
 
 ### SDR target and authoring semantics
 
@@ -109,6 +146,10 @@ flowchart LR
 - Blending occurs against the linear target representation before output encoding.
 - Offscreen color targets must declare whether they contain linear working data or encoded output.
   A backend must not infer that distinction from a texture's eventual file extension or UI use.
+- Transfer correctness does not establish adequate intermediate precision. Eight-bit linear targets
+  have coarse dark-color quantization. Select sRGB SDR storage or higher-precision linear working
+  targets through a concrete Scene/effect/output workflow and its quality/memory/bandwidth budget;
+  changing storage precision must preserve authored color meaning and explicit sampling conversion.
 - If a target format cannot provide the declared sRGB output view, the backend must report a
   capability failure or select an explicit semantic fallback. It must not silently present linear
   bytes as though they were sRGB encoded.
@@ -131,6 +172,14 @@ This ADR does not choose:
 
 Those choices require a concrete output and authoring workflow. They must preserve this SDR path as
 an explicit compatibility mode or replace it through a later ADR with migration evidence.
+
+Future HDR or wide-gamut work must keep the following facts separate: source/working primaries,
+transfer encoding, alpha association, numeric range/precision, scene-referred versus display-referred
+meaning, and display mapping. `Linear` does not imply HDR or identify a gamut; an sRGB-capable texture
+format does not select tone mapping, display capabilities or mastering metadata. Existing
+`ImageColorSpace` values retain their SDR meanings; new gamut/transfer content requires explicit
+versioned metadata and conversion instead of silently reusing those tags. No universal HDR flag,
+speculative output provider or default ACES pipeline is introduced by this separation.
 
 ## Alternatives Considered
 

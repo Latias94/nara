@@ -23,6 +23,14 @@ use crate::{
     WgpuRenderProgramError,
 };
 
+pub(crate) fn premultiplied_clear_color(color: nara_render::Color) -> wgpu::Color {
+    let mut clear = crate::clear_color_to_wgpu(color);
+    clear.r *= clear.a;
+    clear.g *= clear.a;
+    clear.b *= clear.a;
+    clear
+}
+
 /// Ordered world drawing in its actual raster extent, before optional Canvas resolution.
 #[derive(Debug)]
 pub struct WgpuWorldColor;
@@ -358,7 +366,7 @@ impl WgpuStockProgramBuilder<'_> {
                 &self.bindings.world,
                 Arc::new(sprite_capture),
                 &[],
-                &[scene.clear(crate::clear_color_to_wgpu(clear), AccessRole::Attachment)],
+                &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
             )?;
         }
         #[cfg(feature = "stock-sprite")]
@@ -378,7 +386,7 @@ impl WgpuStockProgramBuilder<'_> {
                 .unwrap_or(clear);
             self.graph.initialize(
                 operation,
-                &[scene.clear(crate::clear_color_to_wgpu(clear), AccessRole::Attachment)],
+                &[scene.clear(premultiplied_clear_color(clear), AccessRole::Attachment)],
             )?;
         }
         Ok(scene)
@@ -406,7 +414,7 @@ impl WgpuStockProgramBuilder<'_> {
             Arc::new(capture),
             &[scene.read(AccessRole::Sampled)],
             &[resolved.clear(
-                crate::clear_color_to_wgpu(frame.bar_color()),
+                premultiplied_clear_color(frame.bar_color()),
                 AccessRole::Attachment,
             )],
         )?;

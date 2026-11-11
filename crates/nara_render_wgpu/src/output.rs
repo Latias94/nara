@@ -108,6 +108,17 @@ impl WgpuImageOutput {
         self.0.texture().format()
     }
 
+    /// Observes the exact retained output's admitted shape, transfer and alpha interpretation.
+    ///
+    /// Native texture format alone does not describe color or alpha meaning. The returned
+    /// descriptor is a detached observation; changing it cannot change this output or relabel
+    /// its nominal semantic. Typed program imports still require the original marker through
+    /// [`Self::texture`], and native sampling still requires this output's live allocation.
+    #[must_use]
+    pub fn descriptor(&self) -> crate::WgpuProgramTextureDescriptor {
+        self.0.resource.texture_descriptor()
+    }
+
     #[must_use]
     pub fn extent(&self) -> nara_render::Extent2d {
         self.receipt().target().extent()

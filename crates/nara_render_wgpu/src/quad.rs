@@ -326,7 +326,10 @@ pub(crate) fn create_quad_pipeline(
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(match key.alpha_mode {
+                AlphaMode2d::Opaque => "fs_opaque",
+                AlphaMode2d::Blend => "fs_main",
+            }),
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(quad_color_target_state(key.format, key.alpha_mode))],
         }),

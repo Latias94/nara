@@ -6,6 +6,8 @@ use crate::{
     WgpuRenderProgramBuilder, WgpuRenderProgramError,
 };
 
+mod alpha;
+
 #[cfg(feature = "stock-ui")]
 mod ui_mesh;
 

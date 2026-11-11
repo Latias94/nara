@@ -72,6 +72,27 @@ once until its last responsibility releases it, including cached state, output l
 uses. Toolkit-owned storage and native pipeline/driver overhead are excluded; the budget does not
 measure physical driver residency. A WorldCanvas world image is a declared program resource.
 
+`output.descriptor()` observes that exact resource's admitted shape, transfer and alpha meaning.
+External UI/image adapters use those facts rather than infer opacity from the native format or
+look up the producer's latest policy. The returned descriptor is detached metadata: editing it
+does not alter the resource or its nominal semantic. Typed program imports still require their
+original marker, and readable metadata after retirement does not permit native sampling.
+
+Stock Scene and Canvas outputs contain premultiplied accumulated RGB. Their source Images and
+authored tints remain straight alpha: the stock shader/blend path associates each source once,
+and stock camera/Canvas clears convert to the target's associated representation. Opaque drawing
+preserves shaded RGB and writes alpha one. Arbitrary finite-program clears remain raw values under
+that program's declared target meaning. For an sRGB output, association happens in decoded linear
+RGB before storage encoding; alpha never receives the sRGB transfer function. See
+[ADR0092](../architecture/adr/0092-sdr-color-space-alpha-and-output-encoding.md).
+
+An external UI adapter must also select its renderer's working domain. Sampling an sRGB texture
+decodes its RGB; writing a linear result to an sRGB attachment encodes it. Neither operation fixes
+a renderer that blends numeric sRGB UI colors into the engine's linear target. Preserve imported
+transfer/alpha facts and choose the correct composition mode rather than relabeling resources.
+The [GPUI engine consumer](../../tests/fixtures/gpui-engine-consumer/README.md) demonstrates this
+boundary using the original engine device, encoder and window submission.
+
 The existing transaction observation also exposes `frame_transaction_stats().native_work()`.
 It records work reached through Nara's preparation/program paths, separately from allocation
 demand and retained bytes. Retries after failure accumulate until the next transaction; native

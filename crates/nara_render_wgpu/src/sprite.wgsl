@@ -71,13 +71,23 @@ fn coverage(distance: f32) -> f32 {
     return 1.0 - smoothstep(-0.5, 0.5, distance);
 }
 
-@fragment
-fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn fragment_color(input: VertexOutput) -> vec4<f32> {
     let sampled = textureSample(sprite_texture, sprite_sampler, input.uv);
     var output_color = material_fragment(sampled, input.color, input.uv);
     if input.texture_mode == 1u {
         output_color = vec4<f32>(input.color.rgb, input.color.a * sampled.r);
     }
+    return output_color;
+}
+
+@fragment
+fn fs_opaque(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(fragment_color(input).rgb, 1.0);
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let output_color = fragment_color(input);
     if input.shape_mode == 0u {
         return output_color;
     }

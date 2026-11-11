@@ -358,6 +358,14 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     let image_b = published_b.into_image();
     let image_texture_b = image_b.texture::<FinalColor>().unwrap();
     assert!(Arc::ptr_eq(&final_b.storage, &image_texture_b.storage));
+    let original_descriptor = image_texture_b.descriptor();
+    assert_eq!(image_b.descriptor(), original_descriptor);
+    let mut detached_descriptor = image_b.descriptor();
+    detached_descriptor.alpha = crate::TextureAlpha::Straight;
+    detached_descriptor.transfer = crate::TextureTransfer::Srgb;
+    detached_descriptor.native.size.width += 1;
+    assert_ne!(detached_descriptor, original_descriptor);
+    assert_eq!(image_b.descriptor(), original_descriptor);
     assert!(matches!(
         image_b.texture::<crate::WgpuWorldColor>(),
         Err(WgpuRenderProgramError::ResourceSemantic)
@@ -377,6 +385,7 @@ fn native_published_output_survives_old_binding_drop_panic_without_reusing_its_i
     assert_eq!(read_pixel(&mut host, published_c.image()), [0, 0, 255, 255]);
     assert_eq!(read_pixel(&mut host, &image_b), [0, 255, 0, 255]);
     assert_eq!(image_texture_b.frame_index(), 2);
+    assert_eq!(image_b.descriptor(), original_descriptor);
     assert_eq!(history_b.frame_index(), 2);
     assert_eq!(probe_a.binding_drops.load(Ordering::SeqCst), 1);
 }

@@ -354,7 +354,9 @@ impl PreparedWorldCanvas {
             &self.mapping,
             encoder,
             destination,
-            wgpu::LoadOp::Clear(crate::clear_color_to_wgpu(self.mapping.frame.bar_color())),
+            wgpu::LoadOp::Clear(crate::stock_policy::premultiplied_clear_color(
+                self.mapping.frame.bar_color(),
+            )),
         );
     }
 }

@@ -222,6 +222,20 @@ impl ProgramResourceStorage {
     pub(crate) fn is_current(&self) -> bool {
         !self.epoch_lost.load(std::sync::atomic::Ordering::Acquire)
     }
+
+    pub(crate) fn texture_descriptor(&self) -> WgpuProgramTextureDescriptor {
+        let ResourceDescriptor::Texture {
+            native, meaning, ..
+        } = &self.descriptor
+        else {
+            unreachable!("texture descriptors require retained texture storage")
+        };
+        WgpuProgramTextureDescriptor {
+            native: native.clone(),
+            transfer: meaning.transfer,
+            alpha: meaning.alpha,
+        }
+    }
 }
 
 /// Exact initialized texture pixels issued after successful Host submission admission.
@@ -262,17 +276,7 @@ impl<S: 'static> WgpuProgramTextureOutput<S> {
 
     #[must_use]
     pub fn descriptor(&self) -> WgpuProgramTextureDescriptor {
-        let ResourceDescriptor::Texture {
-            native, meaning, ..
-        } = &self.storage.descriptor
-        else {
-            unreachable!("typed texture outputs are issued only for texture storage")
-        };
-        WgpuProgramTextureDescriptor {
-            native: native.clone(),
-            transfer: meaning.transfer,
-            alpha: meaning.alpha,
-        }
+        self.storage.texture_descriptor()
     }
 
     #[must_use]
