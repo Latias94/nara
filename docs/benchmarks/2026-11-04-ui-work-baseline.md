@@ -1341,3 +1341,76 @@ attempted. Keep the same limit policy, checked arithmetic and final admission ag
 current usage after every pending slot; do not claim identical obsolete cumulative charges.
 This is compilation-local reuse, not a persistent cache, incremental compiler or changed
 World/lifecycle revalidation. No new allocation, GPU or general Editor frame SLA follows.
+
+### Stable Structural Closure Qualification
+
+Implementation: `969c6f52db2d6d6ba7aa7617bb6ec2db8be3c5b7`, on the seventeen-span observation
+at `a55043b3b32ff702e579d948807095f217d8e34e`. Open-GPUI remains unchanged at
+`f75c10b2a9bf7b4dcb2c8c2aa446203997601369`.
+
+The implementation records the current scope count, opens every pending slot in the original
+order with the same error propagation, and retains the current unpublished document only if
+no scope was added. Final materialized-entity and working-usage admission is shared after the
+loop and uses the actual post-selection usage. No cross-compilation cache, public proof object
+or second compiler is introduced. Original postorder, facet aliases, selected-anchor behavior
+and later reference-demand reconstruction stay with the same compiler.
+
+The complete `nara_scene` library and package integration cohort passes **1178/1178**, with
+three existing ignored performance observations, across 53 test binaries
+(`62435a43-2798-4a3e-b53f-111f834d7aea`). This covers nested/routed root bindings, independent
+facets, suppressed-demand rescue, selected retained references, exact final-entity caps and
+working-byte boundaries, as well as the original spawn/publication lifecycle contracts.
+Independent source review finds no P1/P2 or additional concrete unrepresented semantic case.
+No pass-count test or new observation kernel is added.
+
+Both optimized original smoke/probe pairs pass again: DX12 **2/2**
+(`56e23e04-7e51-4001-8c38-b9bedf522a08`) and Vulkan **2/2**
+(`625f8eaa-5f8d-4cd4-9ef2-ea8fdf15c87c`). Geometry, fonts, source, eight warmups, 64 samples,
+seventeen-span observer and all five workloads match the preceding attributed baseline. The
+release rebuild takes 12m05s outside all samples. No allocation observer or measurement
+readback is enabled.
+
+Elapsed milliseconds **P50 / P95 / max**:
+
+| Backend / source-edit case | Structural closure | Preview source compilation | Preview materialization | Original Editor drive | Entire owner sample |
+| --- | --- | --- | --- | --- | --- |
+| DX12 / local | 16.934 / 19.408 / 24.262 | 64.300 / 71.712 / 81.448 | 85.305 / 91.054 / 98.885 | 154.662 / 167.640 / 179.327 | 178.145 / 191.191 / 207.956 |
+| DX12 / broad refresh | 17.052 / 18.234 / 23.148 | 64.501 / 71.132 / 79.143 | 86.599 / 97.817 / 118.075 | 155.462 / 171.591 / 202.271 | 178.709 / 194.668 / 226.694 |
+| Vulkan / local | 17.076 / 19.955 / 27.402 | 64.382 / 78.651 / 98.294 | 85.191 / 99.459 / 108.432 | 154.555 / 177.291 / 195.740 | 177.633 / 203.960 / 225.570 |
+| Vulkan / broad refresh | 17.020 / 18.340 / 32.791 | 64.430 / 67.537 / 96.674 | 86.347 / 93.810 / 100.605 | 154.997 / 163.897 / 188.596 | 178.467 / 186.600 / 226.637 |
+
+All four source-compilation P95 observations meet the predeclared target below 80 ms. Against
+the same seventeen-span DX12 baseline, local structural P50/P95 changes from 32.698/36.707 to
+16.934/19.408 ms and compilation from 80.280/89.065 to 64.300/71.712 ms. The Vulkan baseline
+compilation P95 was 88.617/86.051 ms for local/broad cases. These are matched observations on
+a shared machine, not isolated tail guarantees or a general Editor SLA; maxima can exceed
+80 ms and whole-operation latency remains substantially higher.
+
+All five complete source/query/notification/View/row/draw/record/submission vectors and
+accepted-draw counts are identical across both baseline and replacement backends. Each of
+the seventeen spans is still reached exactly 64 times per measured property case. Local
+editing preserves Hierarchy/row reuse, while broad refresh retains its 128 visible callbacks.
+Sample-end native frame gauges reach at most one; current/final retirement is zero with zero
+diagnostics. The separate smoke retains complete source/history, input/IME, Source/Cooked color,
+scale/geometry, refusal/panic and independent-producer retirement controls. There is no new
+allocation, retained-memory, GPU-time, physical-input or foreign-platform qualification.
+
+The independently locked public Scene spawn/preparation/durable-identity cohort passes
+21/21 (`5fbe5c83-c015-4385-addc-84dd084ad99a`), including late lifecycle rejection and exact
+token/predecessor custody. Its lockfile remains unchanged. An initially hand-added optional
+tracing edge was not activated by this consumer and caused `--locked` metadata refusal;
+ordinary offline Cargo resolution removes that unnecessary edge, with no package changes.
+The final locked run above succeeds; this dependency correction does not change product code.
+
+Final all-target/all-feature correctness Clippy passes for Scene and the independently locked
+GPUI engine consumer with `-D clippy::correctness`; other existing warning categories are not
+promoted by that gate. The locked all-target feature-off consumer check and root/isolated
+consumer formatting pass. Added document links/fragments, lock TOML and whitespace checks
+pass. No new compiler-floor execution, full Editor/framework matrix or remote CI is claimed.
+
+The remaining approximately 64 ms compilation and 85 ms materialization P50, complete-source
+query/preparation and previously measured allocation churn stay open. Further owner attribution
+may examine actual reusable pure facts separately from receiving-World admission; mandatory
+late validation must not be removed merely because it appears more than once. This result
+selects no new Signal runtime, persistent UI layout, raster cache, default frontend or game UI
+execution model and does not complete the foundation Goal or R11/R12.

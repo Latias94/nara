@@ -1660,3 +1660,12 @@ budget policy remains, without retaining phantom charges. The predeclared consum
 compilation P95 below 80 ms for both source-edit cases on both selected backends. This bounded
 compiler change leaves GPUI state/layout/raster choices, receiving-World lifecycle checks and
 the independent Editor/game/runtime decision intact.
+
+The resulting [stable-structure qualification](../benchmarks/2026-11-04-ui-work-baseline.md#stable-structural-closure-qualification)
+at `969c6f52db2` passes Scene library/public 1178/1178, independent Scene 21/21, and original
+DX12/Vulkan smoke/probe pairs 2/2 each. With identical workloads and observer, structural P50 is about
+17 ms instead of 32.7 ms; compilation P95 meets the predeclared below-80-ms target in all
+four backend/edit cells. Source/render/call vectors remain identical, with exact native
+retirement. Materialization remains about 85 ms P50 and full owner samples about 178 ms;
+no Editor latency SLA, allocation/memory or GPU/cache result follows. This is a measured
+Nara compiler correction, not GPUI incremental UI layout or a Signal architecture result.

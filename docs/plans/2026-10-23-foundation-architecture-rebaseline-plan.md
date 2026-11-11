@@ -1579,6 +1579,18 @@ Before implementation, require compilation P95 below 80 ms in both source-edit c
 selected backends, unchanged five-case work totals and the complete native smoke. No persistent
 cache, new compiler owner, GPUI mechanism or default selection is introduced by this slice.
 
+The [stable-structure qualification](../benchmarks/2026-11-04-ui-work-baseline.md#stable-structural-closure-qualification)
+at `969c6f52db2` passes the complete Scene package library/public cohort, 1178/1178 with three
+existing ignored performance observations, and the independent spawn/preparation/identity cohort,
+21/21. Both optimized DX12/Vulkan smoke/probe pairs pass 2/2. All four compilation P95 observations meet
+the predeclared target: DX12 local/broad 71.712/71.132 ms, Vulkan 78.651/67.537 ms, versus
+89.065/85.454 and 88.617/86.051 ms in the same seventeen-span baseline. Five-case source/render
+counts and all reached span counts are unchanged. The structural P50 falls from approximately
+32.7 to 17 ms; materialization remains approximately 85 ms and complete-source work is still
+substantial. Record the exact observer/platform/correctness limits in that report. This scoped
+compiler optimization does not close R11a/e numeric budgets, full Editor/game selection or
+the foundation Goal.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

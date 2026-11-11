@@ -1082,6 +1082,17 @@ remain about 80/85 ms. Feature-off Scene and independent-consumer all-target che
 Local reuse of a stable unpublished structure is the next selected compiler change; final
 World/lifecycle admission and UI/default/framework ownership remain unchanged.
 
+The [stable-structure replacement](../../benchmarks/2026-11-04-ui-work-baseline.md#stable-structural-closure-qualification)
+at `969c6f52db2` subsequently passes Scene library/public 1178/1178, independent Scene 21/21 and
+optimized DX12/Vulkan smoke/probe pairs 2/2 each. It retains the original compiler's stable unpublished
+structure after complete successful slot selection without adding any scope; all final
+entity/working-limit and later reference-demand admission remains. Working usage reflects
+removed actual scratch work rather than obsolete charges. All four selected compilation P95
+cells meet the predeclared below-80-ms target with identical source/render counts and exact
+retirement. This changes no UI runtime, default frontend, renderer or receiving-World lifecycle
+authority. Remaining approximately 64/85 ms compilation/materialization P50 and full budgets
+stay open.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
