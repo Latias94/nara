@@ -1455,3 +1455,137 @@ ListState remain O(logical rows); equality/string comparisons, snapshot allocati
 traversal, upload/GPU work and old-frame retention lie outside the added counters. No measured
 latency, heap/leak bound, general O(visible) cost, cache/persistent-layout implementation or
 complete Editor/game/default/handoff acceptance follows. Those R11a/e requirements remain open.
+
+## Cost Observation Interfaces And Limits
+
+Open-GPUI source pin: `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`; the official Zed baseline already exports its optional profiler/frame collector. [CO1]
+
+### Public Capture In An Ordinary Hosted Consumer
+
+- Enable `open_gpui`'s `profiler` dependency feature and gate consumer profiling code accordingly.
+  Observe the original Window without `test-support`, a benchmark App or a second profiler. [CO1] [CO2]
+- Before the workload, call `open_gpui::profiler::set_trace_enabled(true)` and create
+  `FrameTimingCollector::new()`; periodically call `collect_unseen()`. Read `FrameEvent::Draw(t)`'s
+  `phases`, `draw_duration()` and `invalidations`, or `FrameEvent::Present(p)`'s `present_duration()`;
+  filter both by the original `window_id`.
+  The process-global ring retains at most `16 MiB / size_of::<FrameEvent>()` entries; each
+  collector starts at creation and copies unseen entries independently. Eviction is silent.
+  Drain before disabling tracing: the final trace owner clears task/frame buffers. Preserve
+  the prior manual trace setting; it is process-global. [CO2]
+- On the actual App, call `cx.foreground_journal().collector()`, then `collect_unseen()` and
+  inspect `ForegroundJournalEntry::Event(ForegroundEvent::View(t))`. This profiler-feature
+  journal is independent of manual tracing; its fixed ring targets 4 MiB. Preserve
+  `DrainedEntries::lost`/`Discontinuity`; retain an `IntervalSealer::new(start)` and feed its
+  `push_entries(...)` successive drains for interval analysis. [CO3]
+- Call `window.frame_duration_snapshot()` and `window.input_latency_snapshot()` for per-window
+  histograms (nanoseconds) and outcome/refresh counters without manual tracing.
+  `reset_input_latency_measurements()` resets input diagnostics, not frame-duration histograms. [CO2]
+
+### Attribution And Thresholds
+
+- `request_layout` includes View rendering and layout requests; root layout computation runs in
+  `prepaint`. Cached Views request an outer placeholder; misses render/lay out their subtree in
+  prepaint, while hits reuse prepaint/paint data. Neither phase measures pure layout or render. [CO4]
+- Window phase intervals are sequential portions of drawing; their sum does not cover all draw
+  bookkeeping or the external recorder. View `end - start` spans nest within those intervals;
+  `self_duration` subtracts nested View scopes. Do not add View spans to Window phases, or sum
+  task/input/action/draw spans as independent CPU work. `FrameSnapshot::occupancy()` unions
+  recorded spans; folded short polls make its result an approximation. [CO3] [CO4]
+- `VIEW_TIMING_FLOOR` is 500 microseconds of **self** time per phase. A missing View event can
+  mean below-threshold work, cache reuse, lost data or interrupted sampling; it never proves zero.
+  View events name a type, not an Entity/row identity. Task polls below 100 microseconds are folded.
+  Measure smaller render/projection/list operations with scoped consumer counters/timers. [CO3] [CO4]
+- `FrameTiming::budget()` uses the known refresh interval with an 8.333333 ms floor, or
+  16.666667 ms if unknown; `work()` requires a frame signal. These classification rules do not set
+  a consumer target. Draw events cover accepted frames; account for refused/unwound work separately. [CO2] [CO4]
+- Deferred Window acceptance publishes the prepared draw, and submission acknowledgement uses
+  equal original `settled_at` timestamps. Its zero `present_duration()` is an unmeasured renderer
+  interval. Keep host recording/submission timers separately; neither Present timing nor
+  input-to-submission histograms establish GPU execution duration or scanout. [CO2] [CO5]
+
+### Allocator And Benchmark Scope
+
+- Independently depend on `open-gpui-bench-metrics` (`open_gpui_bench_metrics` in Rust); install
+  its `CountingAllocator::new(the_shipped_allocator)` as the binary's single global allocator.
+  `allocation_stats()` returns optional process totals. Before/after `allocations`, `allocated_bytes`,
+  `freed_bytes` and `live_bytes()` differences include every thread using that wrapper. Reallocation
+  counts as old free/new allocation; sharded relaxed reads are not an atomic concurrent snapshot. [CO6]
+- `AllocationCounter::new(AllocationMetric::Allocations, MetricScope::CallingThread)` and
+  `AllocatedBytes`, measured through Criterion's `Measurement::start/end`, isolate that thread's
+  allocation churn; thread-local frees are not tracked. Requested/live-byte deltas do not establish
+  peak/RSS, per-View/cache retention, leaks or allocations bypassing the wrapper, including GPU memory.
+  Keep allocating snapshot/trace/reporting work outside the named interval; label background noise. [CO6]
+- `bench-support` enables the GPUI Criterion harness and profiler; `bench_main!` installs the
+  counting allocator unless `allocator = none`. `BenchMeasurement::from_env()` supports
+  `BENCH_MEASUREMENT=allocations` / `foreground-allocations`; default mode adds available secondaries,
+  `wall-time` disables them. Unavailable explicit primaries fail; Windows hardware/getrusage
+  counters are unavailable, not zero. [CO1] [CO6] [CO7]
+- `BenchAppContext::{bench_renderer,bench_renderer_session}` run unpaced work, not native latency.
+  `bench_platform(None, text_system)` discards Scenes; the current Windows default has no renderer.
+  Name an injected GPU renderer; CPU benchmarks do not qualify the ordinary hosted GPU path. [CO7]
+
+### GPU And Host Limits
+
+`WgpuSceneRenderer::record(...)` stages instance/path data and encodes copies/draws in the Host
+encoder; its `WgpuSceneRecording` retains resources, not upload-byte or GPU-time statistics.
+Nara's `frame_transaction_stats().native_work()` excludes direct callbacks/third-party commands,
+including this GPUI recorder: zero there is not zero GPUI upload. `submission_prefix().poll()`
+establishes resource settlement. Wall time to that observation includes host/queue/polling delay;
+it is not GPU duration. Use a supported timestamp scope for GPU pass time; absent upload,
+GPU-time and retained-memory observations remain **unmeasured**. [CO8] [CO9]
+
+Source map: `CO2` through `CO8` use sibling paths at the Open-GPUI revision above;
+`CO9` is Nara `64946fee8211884e13083a6d0d9a576bc1ef0ee6`. No Cargo/native measurements were run.
+
+- [CO1] Open-GPUI `crates/gpui/{Cargo.toml:21-45,src/gpui.rs:61-62,154}`; official Zed `635026fabc38440fce5e1767d125026a17b12012`, `crates/gpui/{Cargo.toml:49,src/gpui.rs:25,138,src/profiler.rs:1582-1654}`.
+- [CO2] `crates/gpui/src/{profiler.rs:835-873,918-1144,2038-2042,2144-2191,2220-2275,2378-2450,window.rs:8728-8744}`; `tests/fixtures/dependency-consumer/tests/profiler.rs:15-69` (inspected, not rerun).
+- [CO3] `crates/gpui/src/{app.rs:2855-2860,profiler/journal.rs:36-69,71-94,301-420,670-684,781-801,1106-1144,1399-1528}`.
+- [CO4] `crates/gpui/src/{window.rs:7794-7846,8772-8787,8822-8834,8884-8923,view/element.rs:92-211,217-350,profiler.rs:999-1021,1735-1779}`.
+- [CO5] `crates/gpui/src/{window/deferred_frame.rs:380-392,438-451,profiler.rs:2152-2158}`.
+- [CO6] `crates/bench_metrics/{Cargo.toml:1-18,src/bench_metrics.rs:44-54,188-204,832-861,899-965,1003-1202,1233-1293,1404-1444}`.
+- [CO7] `crates/gpui/src/{bench.rs:35-64,app/bench_context.rs:31-69,776-791,832-855}`.
+- [CO8] `crates/gpui_wgpu/src/{wgpu_renderer/scene_renderer.rs:4-21,158-209,wgpu_renderer.rs:1733-1775,1918-1950,2464-2508}`.
+- [CO9] `crates/nara_render_wgpu/src/{work.rs:1-30,host.rs:953-990,telemetry.rs:181-192,573-588}`; `tests/fixtures/gpui-engine-consumer/examples/gpui_view/renderer.rs:264-280,347-364`.
+
+## Implemented Hosted UI Cost Observation
+
+The November 12 successor adds opt-in observation to the same independently locked Nara
+consumer, starting at `64946fee8211884e13083a6d0d9a576bc1ef0ee6`, while maintained Open-GPUI
+stays at `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`. No production framework mechanism, domain
+owner or default frontend changes. The existing public `FrameTimingCollector` supplies accepted
+draw phases; original renderer timing stays local to the existing Host contribution. A second
+optional mode uses the already maintained `CountingAllocator` and calling-thread counters.
+The [cost record](../benchmarks/2026-11-04-ui-work-baseline.md#hosted-gpui-source-and-frame-cost-probe)
+owns exact phase meanings, build/hardware/geometry, distributions, work counts, initial failure
+and remaining unmeasured scope. The consumer README owns commands.
+The local implementation commit is `c11e131b5dc705ca73c68221e4716c7fa966805d`.
+
+Five cases each keep eight warmups and 64 samples over the real 10,001-record source: equal
+observation, static panels beside refreshed Scene output, an original property edit, list-height
+remeasurement and the same edit with explicit broad refresh. They distinguish mutation/drive,
+complete query/snapshot, projection publication, preview capture/import, hosted settlement,
+GPUI draw phases and nested recorder work. They never substitute a CPU-only test platform for
+the original native GPU Host or add qualification readbacks to timed samples.
+
+Both optimized DX12 and Vulkan complete the new probe and original visual/recovery workflow,
+2/2 each. Local edits rebuild both changed Inspectors but no Hierarchy rows; broad refresh also
+rebuilds Hierarchy and visible rows. Equal observations draw nothing but still query and compare
+the complete observation. Across 64 samples, local edit queries scan 1,280,128 records because
+the internal selection check and explicit query each enumerate the source. This is not an
+idle-per-display-frame scan: the interactive consumer publishes panels after commands.
+
+The combined source mutation/drive P50 is 330.441 ms on DX12 and 326.777 ms on Vulkan; GPUI
+request-layout/prepaint/paint and recorder work are much smaller in this finite fixture.
+The mutation interval also reaches source preparation/validation/history, Editor frame drive,
+preview compilation/Runtime and Editor model publication. It cannot identify their individual
+contribution. Thus the next measurement seam is that original path, before selecting a new
+Signal system, persistent layout arena or raster cache. The evidence does not rank general
+toolkits, qualify Shader Graph/Timeline workloads or close the R11a/e cost matrix.
+
+The separate optimized allocation-enabled DX12 run also completes probe plus original smoke,
+2/2. Complete explicit query/snapshot requests 10,030 allocations and 1,342,250 bytes per
+observation; the combined local mutation/drive averages approximately 1.236 million requests
+and 200.913 million requested bytes per edit. These are allocation churn, not live heap or
+per-View memory. Process gauges include history, traces and background activity. Original native
+candidate occupancy reaches zero at retirement. Full GPU/upload/heap and numeric-budget
+qualification stays open; these observations strengthen attribution of the original source path.

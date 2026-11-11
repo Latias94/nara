@@ -1477,6 +1477,38 @@ source/callback counts and coverage limits. Correctness Clippy passes; no produc
 mechanism, manifest or lock changes. Visible-row counts alone do not establish latency,
 allocation or total O(visible) cost, finish R11a/e or admit another collection/reactive framework.
 
+The next observation unit keeps that same independently hosted consumer and its 10,001-record
+source. An opt-in executable mode compares equal observation, static panels beside refreshed
+Scene content, one original property edit, list-height remeasurement and an explicit broad
+refresh. Reuse the public framework frame collector and optional existing allocation counters;
+do not introduce another profiler or a cache implementation. Separate original mutation,
+complete query/snapshot, projection publication, preview preparation, hosted drawing and actual
+recorder CPU work. Framework request-layout includes View description/layout requests, and
+prepaint includes layout computation: neither is a pure layout timer. Keep nested measurements
+non-additive, trace/allocation overhead explicit, and use no diagnostic readback in samples.
+Record the build, hardware, fonts, geometry, warmups, samples and retained-state scope before
+using the observations to choose a successor. These comparisons establish no GPU timestamp,
+scanout, full Editor/game budget or optimization win.
+
+The [implemented cost probe](../benchmarks/2026-11-04-ui-work-baseline.md#hosted-gpui-source-and-frame-cost-probe)
+at Nara `c11e131b5dc705ca73c68221e4716c7fa966805d` now completes all five cases and the original
+visual/recovery smoke in optimized native builds:
+DX12 2/2 (`e2317ff3-5818-4b85-8f87-62fd80aadc06`) and Vulkan 2/2
+(`cfafed5f-114d-4bd8-9412-47075f5a7e5f`). One property edit preserves Hierarchy/row reuse;
+explicit broad refresh rebuilds them. Complete source/query work stays visible. The source
+mutation/Editor-drive interval has P50 330.441/326.777 ms respectively and dominates this
+consumer; source inspection confirms preview compilation/Runtime and Editor model publication
+inside that interval. Next split selection observation, preparation, action dispatch/commit and
+frame drive through the original Session path, then refine the responsible owner. These
+measurements provide no reason to prioritize a new Signal/layout/raster-cache mechanism first.
+Keep the running-Game, complex custom editor, GPU/upload/input/retention and full numeric-budget
+cells open; static preview refresh is not an advancing Game workload.
+The separate allocation-enabled DX12 pair passes 2/2
+(`580b5087-02d8-4239-9122-acc796fc6c05`), retaining the same correctness controls. The combined
+local source/drive interval averages about 1.236 million allocation requests and 200.913 million
+requested bytes per edit; these are churn, not live memory. The report retains the failed debug
+invocation and subsequent lifecycle/mode-validation corrections separately from final evidence.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

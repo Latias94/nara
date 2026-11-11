@@ -14,7 +14,8 @@ separately observe description/layout/prepaint/paint, actual recorder staging/up
 final composition and retained payload. Existing Host native-work counters exclude third-party
 renderer callbacks; zero there cannot establish zero GPUI upload. Queue-completion spans remain
 distinct from GPU timestamps. The correctness-only same-Scene diagnostic replay is outside the
-normal measured workload. No current GPUI numeric baseline or cache win is recorded here.
+normal measured workload. The later [hosted GPUI probe](#hosted-gpui-source-and-frame-cost-probe)
+supplies scoped current-source CPU/allocation observations, not a complete baseline or cache win.
 
 CPU reuse and GPU raster reuse have separate acceptance. Direct or retained-geometry rendering
 can legitimately redraw unchanged primitives at each presentation. A raster-cache experiment
@@ -855,3 +856,221 @@ timestamps, OS input/display latency, theme/typography changes and multiple nati
 unmeasured. No numeric SLA, cache architecture or optimization is selected from these observations.
 R11a remains open until its remaining matched workloads and fixed budgets are recorded; R11b-f
 and complete R11/R12 remain separate implementation work.
+
+## Hosted GPUI Source And Frame Cost Probe
+
+The November 12 probe extends the independently locked
+[native consumer](../../tests/fixtures/gpui-engine-consumer/README.md#native-ui-work-measurements)
+from Nara `64946fee8211884e13083a6d0d9a576bc1ef0ee6`; maintained Open-GPUI remains
+`f75c10b2a9bf7b4dcb2c8c2aa446203997601369`. No production framework mechanism or Nara default
+changes. The opt-in `ui-work-observation` feature uses the existing public frame collector;
+`ui-work-allocations` additionally installs the existing framework benchmark allocator. The
+[source-based observation map](../research/2026-11-11-open-gpui-engine-integration-layers.md#cost-observation-interfaces-and-limits)
+documents their exact scopes and thresholds.
+The complete probe implementation is Nara `c11e131b5dc705ca73c68221e4716c7fa966805d`; subsequent
+qualification-document changes do not change its runtime. The recorded native runs precede only
+the equivalent integer predicate spelling described in the final check record below.
+
+The ordinary original Host still owns device, targets, encoding, submission and retirement.
+Samples use the real 10,001-record source, Hierarchy and two Inspector projections. Each of five
+sequential cases runs eight warmups and 64 observations: equal publication without rendering,
+static panels beside refreshed Scene content, alternating original Sprite X edits, list-height
+remeasurement, and the same property edits with a broad window refresh. Warmups, initialization,
+reporting and correctness-only readbacks are outside samples. Measurement mode performs no
+diagnostic replay/readback. Cases share the original Session and retain their normal history;
+they do not recreate an identical history/cache state between cases. The list-height case is a
+constraint change; broad refresh is change-dense presentation, not edits to all source records.
+The probe deliberately requests a source observation per sample. The interactive Viewer publishes
+panels after queued commands; these per-observation costs do not establish an idle full scan at
+every display frame.
+
+`mutation` includes original admission/preparation/commit, its observation work and
+`session.drive_editor_frame(Duration::ZERO)` after dispatch. These internal stages are not
+individually timed, so a large mutation interval cannot be assigned to preparation alone.
+The successful drive also reaches requested-revision preview compilation, preview Runtime/
+capture production and immutable Editor model publication. `publish_editor_frame` builds the
+Workspace/Inspector model; `current_frame()` clones the already published Arc. Consequently the
+later `preview` and `query_snapshot` intervals do not cover all earlier preview/model/query work.
+`query_snapshot` completely enumerates the public entity query and constructs the detached
+snapshot; `publish` includes projection equality, subscription effects and any explicit list
+remeasurement. `preview` captures/imports original Scene output and requests a frame. `settle`
+drives original hosted demand, recorder and actual submission acknowledgement to an idle demand
+state, without waiting for every GPU prefix. `owner_sample` includes these phases and their
+instrumentation/validation. Window draw phases and recorder time are nested in this work:
+their distributions are **not additive**. Request-layout includes View description/layout
+requests; prepaint includes layout computation and cached-View misses. Accepted draw events
+are required per changed sample; an absent per-View sub-500-microsecond trace is never zero work.
+
+Allocation samples count successful calling-thread allocation/reallocation requests and requested
+bytes in each named owner phase, not frees, peak memory or native/GPU storage. The separately
+reported process live-request gauge includes other threads, trace buffers, samples and retained
+document history; relaxed concurrent reads are not an atomic heap snapshot. It cannot attribute
+bytes to a View or prove a leak/bound. Native-frame occupancy reports only the adapter's pending/
+in-flight candidate count at sample ends, followed by actual zero occupancy at close. Its maximum
+over those checkpoints is not a transient peak. Source/filter/ListState
+metadata remains O(logical rows). Allocation instrumentation is a separate run and its clock
+values do not replace the CPU-only observations.
+
+These owner-thread wall-clock observations include any blocking reached in their scopes.
+They establish neither pure layout/algorithm CPU time, recorder upload bytes, GPU timestamps,
+scanout, physical input latency nor whole-Editor/game cost. The machine is shared and not CPU
+isolated; finite sample P95/max values are observations, not tail guarantees or selected budgets.
+Refreshing a static Scene output does not advance a running Game simulation. That matched
+Game workload, multiple Views, fonts/themes, physical input and the complete R11a/e matrix stay
+separate from this finite source/preview probe.
+No persistent-layout, Signal, GPU/raster-cache or optimization selection follows merely from
+collecting these numbers.
+
+### Initial Development-Profile Run
+
+The first DX12 development-profile invocation, `df09707e-5a37-4c92-9feb-f74156d654d3`, fails
+0/1 after 313.973 seconds. It completes the first four cases, but source mutation's combined
+interval has P50 3.4315019 seconds and the run reaches its declared 300-second automation
+deadline during the final case. Repeated deadline handling then exceeds the 256 KiB stderr
+bound, which is the harness's reported failure. This is an intermediate diagnostic, not a
+completed baseline or evidence of a GPUI layout bottleneck.
+
+Error cleanup now drops the unfinished observation like the existing smoke controller, so
+measurement deadlines do not keep gating retirement. The finished flag moves after fallible
+retirement checks. Independent review also catches possible prebuilt feature mismatch: the
+test now requires the actual allocator/debug configuration to match its own build, and requires
+all allocation phase/gauge records in the allocation mode. Manual tracing restores only the
+setting changed by this probe. Source cardinality, eight warmups and 64 samples are preserved;
+the documented numeric path uses an optimized build instead of extending the experiment's
+deadline. The initial failure is retained separately from subsequent qualification.
+
+The source audit follows `Session::prepare_authoring_property_edit` in
+`src/project_host/runtime/editor/prepared_edit.rs`, preparation/shape/classification/history
+admission in `crates/nara_scene/src/authoring_decode.rs`, commit in
+`crates/nara_scene/src/authoring/prepared.rs`, frame publication in
+`src/project_host/runtime/editor/model.rs`, preview compilation/Runtime in the existing Editor
+and `preview.rs`, and `build_inspector_model` in `crates/nara_tooling/src/inspector.rs`.
+Those paths establish reached work, not measured hotspots. If the optimized combined interval
+dominates, first split selection observation, prepare, dispatch/commit and frame drive at the
+existing fixture call sites, then refine the expensive original owner. Existing history budgets,
+compiler modeled-work reports and query counters do not supply these missing durations.
+
+### Optimized CPU Observations
+
+Reference machine: Windows 11, Intel Core i9-13900KF (24 cores/32 logical processors),
+68,400,455,680 bytes installed memory, NVIDIA RTX 4090. Rust 1.95.0, ordinary optimized Cargo
+`release`, one build job, no profile overrides or machine isolation. The native root is
+1,280 × 640 logical pixels at scale 1.5, with a 1,920 × 960 physical attachment; text uses the
+original Cosmic system with Segoe UI. Both backends use `Bgra8UnormSrgb`, device epoch 1 and
+explicit linear-sRGB Scene recording. DX12 reports driver `32.0.16.2114`. The original font
+database warns about malformed `mstmc.ttf`; this nonfatal warning does not establish coverage of
+every fallback face. Initial full optimized compilation takes 38m34s, outside every sample.
+
+DX12 completes both the unchanged visual/recovery trajectory and the new five-case probe:
+2/2, `e2317ff3-5818-4b85-8f87-62fd80aadc06`. Each probe case has 64 recorded samples after its
+eight warmups. Values below are elapsed milliseconds **P50 / P95 / max**; these are one shared-
+machine run, not benchmark ratios or a CPU-time/latency SLA.
+
+| DX12 case | Entire owner sample | Complete query/snapshot | Combined mutation/drive |
+| --- | --- | --- | --- |
+| Equal observation | 0.349 / 0.392 / 0.442 | 0.233 / 0.272 / 0.323 | No source edit |
+| Static panels, refreshed preview | 4.875 / 5.136 / 6.123 | 0.211 / 0.275 / 0.360 | No source edit |
+| Local property edit | 335.998 / 408.397 / 417.451 | 0.213 / 0.307 / 0.501 | 330.441 / 403.059 / 410.567 |
+| List-height change | 4.764 / 5.531 / 5.887 | 0.190 / 0.242 / 0.442 | No source edit |
+| Property edit, broad refresh | 334.818 / 386.659 / 406.387 | 0.208 / 0.315 / 0.330 | 329.492 / 379.993 / 401.002 |
+
+| DX12 changed case | GPUI request-layout | GPUI prepaint | GPUI paint | Recorder CPU |
+| --- | --- | --- | --- | --- |
+| Static panels, refreshed preview | 0.029 / 0.039 / 0.044 | 0.115 / 0.135 / 0.141 | 0.122 / 0.134 / 0.141 | 0.148 / 0.166 / 0.172 |
+| Local property edit | 0.031 / 0.062 / 0.090 | 0.239 / 0.388 / 0.592 | 0.171 / 0.241 / 0.476 | 0.149 / 0.194 / 0.513 |
+| List-height change | 0.021 / 0.028 / 0.033 | 0.168 / 0.217 / 0.258 | 0.132 / 0.155 / 0.172 | 0.122 / 0.142 / 0.151 |
+| Property edit, broad refresh | 0.034 / 0.065 / 0.091 | 0.294 / 0.561 / 0.840 | 0.193 / 0.340 / 0.591 | 0.150 / 0.378 / 0.523 |
+
+The local edit's preview capture/import P50/P95/max is 3.502/4.858/8.558 ms; its projection
+publication is 0.190/0.339/0.637 ms. All accepted draws use one recorder call and original Host
+submission. Equal observations use neither drawing nor recording/submission. Their complete
+query and equality work remain observable even though their render counters stay zero.
+
+The dominant combined source/edit/drive interval is therefore the first follow-up measurement
+target for this consumer. This run does not distinguish its prepare, commit, preview compilation,
+Runtime or model-publication contribution, and cannot identify a hotspot within them. It gives
+no evidence to prioritize a new Signal/layout/raster-cache mechanism over that attribution.
+Local versus broad whole-sample timing is not an optimization result: sequential history/cache
+state and background load differ, while most elapsed time lies outside the UI draw phases.
+
+Vulkan independently completes the same two native tests, 2/2,
+`cfafed5f-114d-4bd8-9412-47075f5a7e5f`, driver `NVIDIA / 621.14`, on the same target/scale and
+sample protocol. These are independent backend observations, not a controlled speed ranking.
+
+| Vulkan case | Entire owner sample, ms P50 / P95 / max | Combined mutation/drive, ms P50 / P95 / max |
+| --- | --- | --- |
+| Equal observation | 0.314 / 0.355 / 0.454 | No source edit |
+| Static panels, refreshed preview | 3.995 / 4.735 / 4.934 | No source edit |
+| Local property edit | 331.892 / 352.780 / 414.270 | 326.777 / 347.349 / 409.447 |
+| List-height change | 4.540 / 5.085 / 5.881 | No source edit |
+| Property edit, broad refresh | 332.198 / 366.547 / 385.697 | 327.110 / 360.934 / 380.794 |
+
+Vulkan's local edit records request-layout 0.032/0.044/0.070 ms, prepaint
+0.241/0.329/0.614 ms, paint 0.170/0.191/0.472 ms and recorder CPU
+0.068/0.078/0.167 ms. The same combined source path dominates. Equal query/snapshot cost remains
+0.209/0.243/0.342 ms despite no UI drawing; its publication/equality also remains real work.
+
+The two backend runs produce identical measured work totals:
+
+| Case, 64 samples | Query pages / scanned records | Projection notifications | Hierarchy / Inspector 0 / Inspector 1 renders | Row callbacks | Accepted draws / recorder calls / submissions |
+| --- | --- | --- | --- | --- | --- |
+| Equal observation | 640 / 640,064 | 0 | 0 / 0 / 0 | 0 | 0 / 0 / 0 |
+| Static panels, refreshed preview | 640 / 640,064 | 0 | 0 / 0 / 0 | 0 | 64 / 64 / 64 |
+| Local property edit | 1,280 / 1,280,128 | 192 | 0 / 64 / 64 | 0 | 64 / 64 / 64 |
+| List-height change | 640 / 640,064 | 0 | 64 / 0 / 0 | 160 | 64 / 64 / 64 |
+| Property edit, broad refresh | 1,280 / 1,280,128 | 192 | 64 / 64 / 64 | 128 | 64 / 64 / 64 |
+
+Mutation samples include an internal complete selection observation plus the explicitly timed
+query, explaining their doubled query counts. Local edits notify the three projections but
+rebuild only the two changed Inspectors. Broad refresh additionally rebuilds Hierarchy/visible
+rows; this is measured work locality, not evidence that all downstream work disappears.
+Maximum sample-end native occupancy is zero or one in these runs; final occupancy is actually
+zero after retirement. No diagnostic readback/replay occurs in either measurement. The separate
+original smoke still qualifies its real visual, source/history, text/IME, fractional-scale,
+failure/recovery, geometry and independent-producer retirement controls.
+
+### Separate Allocation Observation And Qualification
+
+The optimized allocation-enabled DX12 build independently passes the probe and original smoke,
+2/2, `580b5087-02d8-4239-9122-acc796fc6c05`. Its instrumented elapsed values do not replace the
+CPU-only tables. The same accepted-work/reuse and zero-diagnostic/retirement assertions pass.
+The following are successful calling-thread requests **summed over 64 samples**, not retained
+bytes, process peak memory or quantiles:
+
+| Case / owner phase | Allocation/reallocation calls | Requested bytes, total |
+| --- | --- | --- |
+| Any case / complete query-snapshot | 641,920 | 85,904,000 |
+| Equal observation / publication | 64 | 1,536 |
+| Static preview / preview capture-import | 2,247,878 | 288,091,008 |
+| Local property edit / combined mutation-drive | 79,130,174 | 12,858,454,216 |
+| Local property edit / publication | 773 | 16,640 |
+| Local property edit / hosted settlement | 133,644 | 42,849,472 |
+| List-height change / publication-remeasure | 60,100 | 61,604,352 |
+| Broad-refresh property edit / combined mutation-drive | 79,130,172 | 12,858,456,728 |
+| Broad-refresh property edit / hosted settlement | 157,450 | 50,801,984 |
+
+Every explicit complete query requests 10,030 allocations and 1,342,250 bytes in this run.
+The local mutation/drive phase averages approximately 1,236,409 requests and 200,913,347 bytes
+per edit; those allocations can be short-lived and are not a 201 MB live-memory claim.
+Its near-identical broad-refresh source-phase churn reinforces measuring the original source/
+preview/model owner first. The allocation data still does not isolate which substage causes it.
+No Vulkan allocation observation is claimed.
+
+The five process requested-live-byte gauges are 65,608,543; 65,690,215; 66,926,528; 66,959,792;
+67,159,484, in case order. They include retained document history, trace/sample capacity and
+background work; they are not cache attribution, RSS, a leak result or whole-process close
+accounting. Native candidate occupancy returns to zero on actual retirement in all three
+optimized runs. GPU/upload bytes, full heap/peak/retirement and numeric budgets remain open.
+
+Source correctness review closes its prebuilt-mode mismatch finding, and an independent
+interpretation review verifies the two CPU logs, phase labels, tables and selected next
+measurement without P1/P2. Review does not qualify unexecuted workloads. The unchanged official
+framework and unrelated component matrices are not rerun for this fixture-only addition.
+
+All-target/all-feature consumer Clippy passes with `-D clippy::correctness`; three unchanged
+style warnings in the existing example remain outside that gate. The locked no-default-feature
+all-target check passes, as do root and isolated-consumer formatting, manifest/lock parsing,
+added document links/fragments and whitespace checks. The final cleanup uses the equivalent
+integer `is_multiple_of(2)` spelling in both alternating-edit checks; it changes no workload.
+Only the independent fixture's optional profiler/allocator dependency closure is added; no
+existing locked package is removed or upgraded. Remote CI is not run or published.

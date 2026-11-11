@@ -1042,6 +1042,20 @@ keyed scroll and Winit scale-aware wheel conversion. It records full query/filte
 work separately from bounded row callbacks. Logical metadata, allocation/retention/latency/GPU
 costs and complete Editor migration remain open; no new reactive/layout/cache owner follows.
 
+The subsequent [hosted cost observation](../../benchmarks/2026-11-04-ui-work-baseline.md#hosted-gpui-source-and-frame-cost-probe)
+at Nara `c11e131b5dc705ca73c68221e4716c7fa966805d` uses the same public profiler and original
+Host/source workflow, with five eight-warmup/64-sample
+cases. Optimized DX12 and Vulkan each pass the probe plus unchanged complete native smoke, 2/2.
+The measured local edit rebuilds both changed Inspectors without Hierarchy/row reconstruction;
+broad refresh additionally rebuilds Hierarchy rows. The dominant combined source/Editor-drive
+interval includes preview production and model publication, so the next owning measurement
+splits that path. No new Signal, persistent-layout or raster-cache implementation follows.
+The report separates elapsed CPU-side phases from unmeasured GPU/upload/scanout and full
+Editor/game budgets; R11a/e and foundation/default/handoff acceptance remain open.
+The separate optimized allocation-enabled DX12 pair also passes 2/2. Calling-thread request
+churn and process requested-live gauges retain separate scopes; they do not qualify total memory
+or leaks. No production framework/default mechanism changes.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
