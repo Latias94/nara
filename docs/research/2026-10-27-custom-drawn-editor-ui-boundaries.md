@@ -5658,3 +5658,37 @@ internal passes as engine graph nodes. Game-UI execution is separately compared 
 authored HUD/modal/Retry path, preserving source/commands and one interaction executor. The study
 records current IME/world-space/player/material limits, selective versus full reuse and matched
 cost criteria. No dependency, frontend default, complete R11/R12 or maintenance handoff changes.
+
+## November 11: Retained Images And Supplied Native Renderers
+
+Open-GPUI `a5d7dea101ca643a9fd462f1c0476499967c9276` adds retained application GPU
+images; `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01` separates supplied synchronous
+graphics/text from Win32 services and adds the ordinary `open-gpui-wgpu-native` application.
+Local qualification is recorded at `12f9bb50e8e`.
+These are fork-owned framework extensions after fixed-source adoption, not official upstream
+ports. The [implemented checkpoint](2026-11-11-open-gpui-engine-integration-layers.md#implemented-image-and-native-renderer-prerequisites)
+and framework qualification own their public contracts, failures and exact scope.
+
+Images retain explicit mip/layer/region, sampling and transfer/alpha through existing atlas,
+paint, clip/transform and resource owners. Both external recordings and built-in submissions
+retain the original allocation through GPU completion. The real Win32 WGPU consumer checks
+submitted pixels, normal controls, resize/minimize, refusal and original-prefix retirement;
+the native platform creates no Direct3D device in supplied-renderer mode. It still owns HWNDs
+and the event loop. Synchronous renderer selection does not implement delayed Scene delivery.
+
+Changed WGPU/public GPU tests pass 125/125, final affected native tests 18/18 and ordinary
+independently locked consumption 1/1. The normal application changes state, submits its changed
+GPU image and shuts down after original prefix 3 quiesces. Its initial OS-loader failure is
+corrected by enabling the existing Windows manifest feature. Affected correctness Clippy,
+formatting and static gates pass. A pre-existing accessibility-observer fixture failure remains
+separate, with identical pre-change evidence; no complete all-green native aggregate follows.
+Browser resource custody correction `7c5c0cd810f15c3e4c3591c400e42aa72f25a2b4` then passes
+production wasm compilation/Clippy and final native retention 6/6; browser execution remains open.
+
+The updated Base source study confirms unstyled GPUI controls still require GPUI execution.
+Prefer shared mechanisms, independent product adapters and optional appearance/components.
+Open-GPUI already provides neutral `ui-core`/`motion`; further package extraction needs an
+actual dependency/lifecycle consumer. The production external HWND/loop and exact delayed
+Scene/input lifecycle remain next, followed by Nara's real Host/View and authored HUD comparison.
+No Nara GPU dependency, toolkit default, game-runtime selection, numerical budget or full
+R11/R12/R11f completion changes.

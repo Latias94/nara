@@ -17,9 +17,10 @@ conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z
 
 Runtime UI and Editor UI both need layout, text, focus, semantics and presentation, but they do not
 own the same product state. Runtime UI projects Scene/Prefab and game values into typed intents.
-Editor UI owns documents, selection, undo, save, play and Host-coordinated Viewports. A single
-top-level widget/toolkit object model would either leak Editor authority into games or make the
-Editor depend on a Runtime-specific ECS authoring model.
+Editor UI owns documents, selection, undo, save, play and Host-coordinated Viewports. Forcing those
+product models into one authoring object model would leak Editor authority into games or make the
+Editor depend on Runtime-specific ECS authoring. A shared neutral toolkit can still serve both
+through separate adapters without merging their domain objects or live UI state.
 
 The current UI work also demonstrated that product acceptance can expose missing shared behavior.
 That pressure is useful, but allowing the Reference Game to become the primary interface-design

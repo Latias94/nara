@@ -934,6 +934,21 @@ Nara already has a finite typed graph/program/Host under ADR0094;
 full ADR0121 remains Proposed. Editor/game UI selection, extension/reload acceptance and
 numerical costs remain open. This documentation changes no GPU dependency or frontend default.
 
+The [retained-image/native-renderer successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-image-and-native-renderer-prerequisites)
+is locally implemented at Open-GPUI `a5d7dea101c` and `f0a51dd041b`. Existing atlas/paint and
+native Window/retirement owners support retained external GPU images and supplied synchronous
+Win32 graphics/text; the ordinary non-Nara application has no test/bench-support runtime.
+Changed WGPU/public 125, affected native 18 and ordinary independent consumer 1 pass; the
+normal application submits a changed image and quiesces its original prefix before exit.
+Clippy, formatting and static gates pass. A separately reproduced pre-existing accessibility
+fixture failure remains recorded, without a complete native aggregate claim. ADR0107 clarifies
+that independent product authoring models permit a shared neutral toolkit. Source-confirmed
+Base behavior/appearance separation does not provide external runtime hosting. The production
+host-driven Window/loop, delayed Scene/input lifecycle, real Nara Host/View, authored HUD
+comparison and full R11/R12/R11f remain open; no frontend or dependency default switches.
+The subsequent browser-custody correction `7c5c0cd810f` passes production wasm compilation
+and Clippy plus final native retention 6/6, without new browser execution qualification.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

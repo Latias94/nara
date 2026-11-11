@@ -29,6 +29,11 @@ Open-GPUI is an independent general UI library; Nara is an optional consumer, no
   This is a qualified generic renderer module, not a complete external-host adapter or a
   selected Nara frontend. Source-adoption documentation is separately committed at `e7debc21222`.
   [W1] [W2]
+- **Image/native-renderer successor:** Open-GPUI `a5d7dea101ca643a9fd462f1c0476499967c9276`
+  and `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01` implement retained GPU images and a
+  supplied synchronous Win32 renderer with an ordinary application. The implemented checkpoint
+  below supersedes the earlier missing-import/native-selection observations; external HWND/loop
+  driving and delayed Scene publication remain incomplete. [W3]
 - **Nara context:** initial HEAD `46ad5dd6d7d77c2e4a45ad36567d19d73f050582`; later owner-document
   reconciliation by the main lane does not turn this research into an adoption decision.
 - **ImGui reference:** `d3b36a875f0f7e7446b99606ca3d6df27b7dad7a`, local `repo-ref/imgui`.
@@ -311,6 +316,55 @@ focus-policy, virtualizer and geometry models; its `ui-components` package compo
 That foundation does not yet make complete widgets, text editing or layout usable outside the
 framework runtime. Both boundaries are useful and should be described separately. [C1] [C3]
 
+The source check retrieved on **2026-11-11** pins official `longbridge/gpui-kit` main to
+`8650093ccee70317fe96d48d53ead459620d38f0`, committed at `2026-11-11T10:11:33+08:00`.
+Its manifests declare `gpui-base`/`gpui-component` `0.9.1`; mandatory `gpui` resolves to
+`gpui-pre =0.3.12`, alongside `gpui_macros` and text/parser dependencies. The optional
+`gpui-fast` backend does not turn Base into runtime-neutral state. Base also declares native
+platform dependencies; `gpui-component` depends on Base, with no reverse component dependency.
+These are inspected source versions, not a latest-release or fork-compatibility claim. [ERB1]
+
+Two implementations show the actual boundary:
+
+- `Checkbox` accepts controlled `CheckboxState`, computes the next activation value and reports it
+  through a callback; the application supplies the value again. Its otherwise unstyled control
+  retains GPUI `Stateful<Div>`, keyed `FocusHandle`, accessibility mapping and a callback receiving
+  `Window`/`App`. Reusing that complete behavior still requires GPUI execution. [ERB2]
+- `TabGroup` retains active-panel, focus and drag state, emitting layout-edit intents for its
+  container. `TabGroupRenderer` customizes appearance through `Stateful<Div>`/`AnyElement` and
+  `Window`/`App`, while the group installs structural layout and interaction. This separates
+  docking behavior from its skin; it does not replace the platform or GPU renderer. [ERB3]
+
+The bounded Open-GPUI comparison uses unchanged package sources at
+`43a36754102858deea8bf1668e6cdaabab40f0d6`, inspected on the same date:
+
+| Existing package | Present boundary and reuse limit |
+| --- | --- |
+| `ui-core` | Only production dependency is neutral `motion`; controlled state, focus policy, geometry and virtualizer models do not require GPUI. They are not complete control execution. |
+| `motion` | No dependencies; caller-supplied elapsed time, shared spring sampling and frame-demand values. The adapter owns the clock and scheduling. |
+| `ui-components` | GPUI elements, themes and adapters share a package with resolved component state; the state/adapter separation is a module contract, not a separately consumable unstyled package. |
+| `canvas` | Document/store/tool owners and a GPUI `adapter` module are distinct, but the package still has a mandatory GPUI dependency. |
+| `docking` | Durable layout/model and runtime/visual owners are distinct modules; the package still depends on GPUI, `ui-core` and `motion`. It is optional workspace infrastructure, not a game-UI prerequisite. |
+
+The manifests and source boundaries support selective reuse already. Accepted Open-GPUI ADR0008
+keeps the existing component packages as the active product boundary and defers another headless
+package; ADR0018 already supplies the independently reusable motion owner. [ERB4] [ERB5]
+This does not establish Base-equivalent public behavior primitives. For example, resolved button
+state and the semantic activation handle are public, while the focus/input/publication binding
+used by official controls remains crate-private. A custom skin must be able to reuse complete
+keyboard, pointer, focus and semantic behavior through a supported interface; exporting state
+structs alone does not prove that capability. Use the custom Editor/HUD composition to identify
+the needed module/API extraction before selecting a new package. [ERB7]
+
+Existing dependency and feature choices are the first levers. GPUI Kit's `default-features = false`
+omits its optional styled `component` and `assets`, while retaining Base, GPUI and, on desktop,
+the platform dependency. In Open-GPUI, depending only on `ui-core`/`motion` avoids GPUI entirely;
+using core plus `gpui_wgpu` instead of the desktop platform selector keeps renderer selection
+explicit but still needs a production host adapter. The workspace already disables GPUI's default
+features. However, `ui-components`, `canvas` and `docking` all require GPUI, so disabling their
+defaults cannot make them runtime-independent. Neither a new crate nor another umbrella feature
+is required to express these conceptual boundaries. [ERB6]
+
 Refactor the known platform/renderer coupling now through the external WGPU application consumer.
 Keep unstyled behavior and appearance distinct through existing component modules. Do not first
 split text, layout, focus, caching and every control into separate public crates: their shared
@@ -319,12 +373,36 @@ owner. Extract a package when an independently consuming application can use it 
 dependency closure and a complete lifecycle contract. Module boundaries can precede crate splits;
 fewer crates are not a reason to retain native-device coupling.
 
+For the host-driven comparison, clarify three concrete owners within the existing modules:
+
+1. The production `Platform`/`PlatformWindow` adapter delivers host events, text/IME, wakeups and
+   frame demand into the existing App/Window lifecycle, including exact Scene admission and later
+   submission acknowledgement. Keep one focus/input/semantic executor. [O1] [O2] [O7]
+2. Existing `gpui_wgpu` owns Scene recording, atlas/sampled-image bindings and resource receipts;
+   the application owns device/queue, encoder/target, submit/present and completion. Texture import
+   is a renderer resource contract, not a reason to create another UI foundation. [O5] [O8] [W1]
+3. The native platform owns windowing and OS services; its default renderer construction must allow
+   an injected renderer choice. Preserve the normal desktop composition while qualifying the
+   external driver. This is an ownership seam, not a crate for each algorithm. [O11]
+
+Keep element state, invalidation, layout/text caches, hit geometry and Scene generation coherent
+inside the framework. Keep canvas transactions and docking layout authority with their existing
+owners; extract further only for an actual independent consumer. Headless behavior tests, Scene
+recording and texture import each prove their own boundary, not game UI support or a Nara product
+integration choice.
+
 For Nara, full reuse of the framework execution is the first candidate to compare, not a commitment
 to ship the desktop host in a game. If no-window operation, player focus, time policy, platform
 closure or measured costs expose a mismatch, extract the relevant reusable mechanism or retain
 independent execution for that requirement. The HUD comparison below decides execution reuse;
 Editor adoption alone cannot decide it. A common button or virtualizer also cannot establish
 world-space rendering, split-screen input or arbitrary game materials.
+Distinguish a logical UI root/surface from an OS window in that comparison. A HUD, split-screen
+player surface or world-plane texture must not require an extra native window/message loop merely
+to obtain layout, controls and text. Reusing Window internals is viable only if their lifecycle
+can represent those surfaces through the production host contract, without simulating native
+presentation or synchronizing a second interaction tree. This is an acceptance requirement,
+not an already-implemented standalone-root API. [G1] [G2]
 
 ## Development Sequence And Qualification
 
@@ -415,6 +493,43 @@ Rust 1.93 checks, formatting and existing static gates pass. Open-GPUI's verific
 owns the detailed results. The design review finds no blocking ownership/feasibility conflict.
 No native Editor, game runtime, independent external-host driver or performance completion follows.
 
+## Implemented Image And Native Renderer Prerequisites
+
+The November 11 continuation implements two reusable framework seams after the recording unit:
+
+| Implementation | Qualified capability | Remaining ownership boundary |
+| --- | --- | --- |
+| `a5d7dea101ca643a9fd462f1c0476499967c9276` | WGPU imports an explicit mip/layer/texel region of an application texture without copying its pixels. Ordinary Window painting preserves order, clips, transforms, filtering and sampled transfer/alpha. External recordings and built-in submissions retain the original allocation through GPU completion. | Caller supplies the same actual device, orders producer writes and sampling, and prevents premature explicit destruction/reuse. This does not snapshot mutable pixels or select HDR/color policy. |
+| `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01` | Win32 native services accept supplied graphics and text through the existing Window, geometry and retirement owners. An ordinary non-Nara WGPU application produces a changing texture and composes normal controls. | GPUI still owns the HWND/message loop and uses synchronous submission. Application-owned windows/loop and delayed Scene admission remain separate work. |
+
+Changed-renderer/public GPU tests pass 125/125; the final affected native selection passes 18/18;
+the independently locked ordinary image consumer passes 1/1. The actual standalone application
+submits its changed image and normally shuts down after quiescing original prefix 3. Its direct
+Windows dependency initially omits the existing manifest feature and fails in the OS loader;
+enabling `windows-manifest` corrects that normal application configuration. Its resolved production
+graph includes no test/bench-support runtime. Affected correctness Clippy, formatting and existing
+import/API/document/release checks pass. [W3]
+
+Production wasm compilation exposes the new retention path's non-Send browser resource capture.
+Correction `7c5c0cd810f15c3e4c3591c400e42aa72f25a2b4` keeps resources in a browser-local
+future and sends only queue completion across the callback boundary. Locked production wasm
+compilation and correctness Clippy then pass;
+the independently locked production Web smoke composition also compiles after adding the same
+existing dependency edge. The new browser image/completion trajectory is not executed. This is
+a fork portability fix, not additional upstream source adoption. [W3]
+
+The cache-only native fixture had also assumed accessibility inactive. Clean pre-change source
+reproduces its failure; `43a36754102858deea8bf1668e6cdaabab40f0d6` establishes the disabled
+precondition while retaining every exact counter and four combinations. A separate unchanged
+synthetic-accessibility startup test still fails under a preconnected observer, also reproduced
+with the pre-change executable. The passing 18-test selection is not a complete native aggregate.
+Desktop automation was unavailable; no screenshot or manual physical-input claim follows. [W3]
+
+These are fork-owned general framework extensions, not newly imported official implementations.
+The next complete prerequisite is the production host-driven Window/loop and exact delayed
+Scene/submission/interaction lifecycle. Keep the current Nara UI as the control until the actual
+Host/View and authored HUD consumers qualify a selected arrangement. [W3]
+
 ## References
 
 Line numbers below refer to the pinned source or the inspected candidate snapshot. `O` paths are
@@ -437,6 +552,7 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [O12] `crates/gpui/src/app.rs:1895–1916`; `crates/gpui/src/platform/test/window.rs:2472–2501`; `crates/gpui/src/window.rs:3682–3689`: initial admission and simulated headless outcomes.
 - [W1] Recording commit `0259c88f9deb26e4caa026ebd39be179d19a3ae5`, `crates/gpui_wgpu/src/wgpu_renderer/scene_renderer.rs:4`, `wgpu_renderer.rs:49`, `gpui_wgpu.rs:20`: recorder, target/limit checks and resource receipt.
 - [W2] Same recording commit, `crates/gpui_wgpu/tests/external_scene.rs:1`: explicit simulated scene production and separate actual GPU submission/readback; Open-GPUI `docs/verification.md#application-owned-wgpu-scene-recording` owns executed results and limits.
+- [W3] Local Open-GPUI image commit `a5d7dea101ca643a9fd462f1c0476499967c9276`, native/application commit `f0a51dd041b1312b87724d6b6f4f9be48aeb3d01`, and browser custody correction `7c5c0cd810f15c3e4c3591c400e42aa72f25a2b4`, qualified at `12f9bb50e8e`; `crates/gpui/src/{image_texture.rs,window/imported_image.rs}`, `crates/gpui_wgpu/src/wgpu_atlas/imported_image.rs`, `crates/gpui_windows/src/renderer.rs`, `examples/wgpu-native/` and the public/native consumers. Open-GPUI `docs/external-wgpu.md` and `docs/verification.md#retained-gpu-images-and-supplied-win32-renderers` own public usage, actual results and failures. These local revisions are not remotely published.
 - [I1] ImGui pin above, [`docs/BACKENDS.md:25–67,129–172`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L25-L67): platform/renderer split and custom-engine guidance.
 - [I2] Same pin, [`examples/example_win32_directx11/main.cpp:74–75,101–109,134–136,176–183,267`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/examples/example_win32_directx11/main.cpp#L74-L183): existing HWND/device, application loop, draw and present.
 - [I3] Same pin, [`docs/BACKENDS.md:214–287`](https://github.com/ocornut/imgui/blob/d3b36a875f0f7e7446b99606ca3d6df27b7dad7a/docs/BACKENDS.md#L214-L287): texture updates, indexed triangles, clip offset and framebuffer scale.
@@ -456,3 +572,10 @@ relative to `F:/SourceCodes/Rust/open-gpui`; `Z` paths to `nara/repo-ref/zed`; `
 - [G3] Nara `reference-game/src/runtime_ui.rs:64,143,311`, `reference-game/prefabs/reference-ui.prefab.json`, `reference-game/tests/ui_authoring_roundtrip.rs:32`, `reference-game/tests/ui_product.rs:252,286`; the existing test presenter explicitly distinguishes its evidence from native presentation.
 - [P1] [Godot plugin guide](https://docs.godotengine.org/en/stable/tutorials/plugins/editor/making_plugins.html), [Control](https://docs.godotengine.org/en/stable/classes/class_control.html), observed November 11; local `repo-ref/godot/editor/docks/editor_dock.h:40` and `scene/gui/control.h:45` provide additional source context.
 - [P2] [Unity 2023.2 UI Toolkit overview](https://docs.unity3d.com/2023.2/Documentation/Manual/UIElements.html), observed November 11: retained-mode UI for Editor extensions and game/application runtime; other Unity UI systems remain appropriate for some use cases.
+- [ERB1] Official GPUI Kit main pinned by `git ls-remote` on 2026-11-11 to [`8650093ccee70317fe96d48d53ead459620d38f0`](https://github.com/longbridge/gpui-kit/commit/8650093ccee70317fe96d48d53ead459620d38f0), commit timestamp `2026-11-11T10:11:33+08:00`; retrieved 2026-11-11. Pinned [workspace manifest](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/Cargo.toml#L51-L80), [Base manifest](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/Cargo.toml#L27-L82), [Component dependency](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/component/Cargo.toml#L120-L131), [Base backend alias](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/lib.rs#L7-L10); compare the [official overview](https://gpui-kit.com/base/) and pinned [README](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/README.md).
+- [ERB2] Same GPUI Kit pin and retrieval date, [`checkbox.rs`](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/checkbox.rs#L16-L181), especially controlled activation/state, callback and keyed focus; [`RenderOnce`](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/checkbox.rs#L370-L408) installs the actual GPUI interaction/accessibility adapter.
+- [ERB3] Same GPUI Kit pin and retrieval date, [`TabGroup` state](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/dock/tab_group.rs#L136-L178), [`Render`](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/dock/tab_group.rs#L683-L757), and [`TabGroupRenderer`](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/base/src/dock/tab_group.rs#L902-L964): presentation hooks return GPUI elements and retain GPUI context.
+- [ERB4] Open-GPUI local source pin `43a36754102858deea8bf1668e6cdaabab40f0d6`, committed `2026-11-11T13:49:17+08:00`, inspected 2026-11-11; the five compared package trees had no working diff. Paths are relative to the local Open-GPUI repository: `crates/{ui_core,ui_components,canvas,gpui_docking,motion}/Cargo.toml`, `crates/ui_core/src/{lib,controllable_state,virtualizer}.rs`, `docs/ui/component-contract.md:79`, `crates/canvas/src/lib.rs:38`, `crates/gpui_docking/src/lib.rs:165,191`, and `crates/motion/README.md:3`. This is a bounded source comparison, not executed runtime evidence or a remotely published revision.
+- [ERB5] Same local Open-GPUI pin and inspection date, Accepted `docs/adr/0008-open-gpui-ui-component-productization-roadmap.md:23` and `docs/adr/0018-open-gpui-motion-crate-boundary.md:22`: existing component product boundary and neutral motion ownership respectively.
+- [ERB6] GPUI Kit pin/date from ERB1, [`gpui-kit` manifest](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/kit/Cargo.toml#L18-L27) and [mandatory dependencies](https://github.com/longbridge/gpui-kit/blob/8650093ccee70317fe96d48d53ead459620d38f0/crates/kit/Cargo.toml#L78-L92). Open-GPUI local pin/date from ERB4, `Cargo.toml:68`, `crates/gpui/Cargo.toml:21`, `crates/gpui_platform/Cargo.toml:42`, and `crates/gpui_wgpu/Cargo.toml:20`; required component/domain GPUI edges are recorded in ERB4. These source declarations do not prove a production no-window host or the complete resolved feature union of an embedding application.
+- [ERB7] Same local Open-GPUI source pin/date as ERB4, `crates/ui_components/src/public_api/common.rs:20,36`, `crates/ui_components/src/activation.rs:139,328`, and `crates/ui_components/src/button.rs:268`: public resolved state/activation handle versus private concrete activation binding and the current styled adapter.

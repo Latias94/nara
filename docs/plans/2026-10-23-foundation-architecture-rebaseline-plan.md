@@ -1482,6 +1482,30 @@ boundary. Refactor that known coupling through the ordinary external application
 smaller packages only with an independent dependency/lifecycle consumer. Games must not acquire
 Editor workspace, docking, document or theme dependencies just to use controls, text or rendering.
 
+The November 11 source check pins GPUI Kit Base to `8650093ccee70317fe96d48d53ead459620d38f0`:
+its unstyled controls still depend on GPUI execution. Use its state/appearance separation as a
+reference without treating Base as a platform-neutral runtime. Existing Open-GPUI `ui-core` and
+`motion` already have neutral dependency closures. Compare ordinary control behavior under
+Editor and HUD composition through the named consumers, then extract another package only if
+the dependency or lifecycle result requires it; a crate count is not an acceptance metric.
+
+Prove custom appearance through supported public control behavior, including keyboard/pointer,
+focus and semantic publication. Resolved state structs alone do not supply a reusable unstyled
+control; current private activation bindings keep that broader interface claim open.
+
+The [retained-image/native-renderer checkpoint](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-image-and-native-renderer-prerequisites)
+implements the two reusable prerequisites at Open-GPUI `a5d7dea101c` and `f0a51dd041b`.
+Changed WGPU/public 125/125, affected native 18/18 and ordinary independent consumer 1/1
+pass, along with the normal WGPU application's changed-image submission and original-prefix
+shutdown. Its selected production graph has no test/bench-support runtime. Existing Clippy,
+format/static checks pass; pre-existing observer-dependent accessibility evidence stays separate.
+GPUI still owns HWNDs/loop and synchronous submission in that application. Continue the original
+Window's production host-driven and delayed Scene/input lifecycle before the actual Nara
+Host/View and authored-game comparison. These results do not close that complete external-host
+workflow, numeric budgets, the game executor decision or maintenance handoff.
+Browser-custody correction `7c5c0cd810f` passes production wasm compilation/Clippy and final
+native retention 6/6; a new browser imported-image trajectory remains unexecuted.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the
