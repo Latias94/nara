@@ -141,6 +141,26 @@ std::thread_local! {
     // Destroy an encoded attachment immediately before the real native submit validation.
     static IMAGE_SUBMISSION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static PROGRAM_SUBMISSION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static WINDOW_SUBMISSION_FAILURE: std::cell::Cell<Option<WindowSubmissionStage>> = const {
+        std::cell::Cell::new(None)
+    };
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowSubmissionStage {
+    Finalize,
+    Submit,
+}
+
+#[cfg(test)]
+fn fail_window_submission(stage: WindowSubmissionStage) {
+    WINDOW_SUBMISSION_FAILURE.with(|failure| {
+        if failure.get() == Some(stage) {
+            failure.set(None);
+            panic!("injected native window {stage:?} panic");
+        }
+    });
 }
 
 fn finish_viewport_allocation(
@@ -927,9 +947,27 @@ pub struct WgpuWindowFrame<'frame> {
     viewports: &'frame [WgpuImageDisplay],
     leading_command_buffers: &'frame mut Vec<wgpu::CommandBuffer>,
     sampled_viewports: &'frame mut Vec<ImageSample>,
+    submission_prefix: &'frame WgpuSubmissionPrefix,
 }
 
 impl<'frame> WgpuWindowFrame<'frame> {
+    /// Observes the original submission attempt before this paint enqueues any uploads.
+    ///
+    /// Establish custody outside the paint callback before calling `encode`: retain this token
+    /// with every local recording or renderer resource used by the attempt. Keep that custody
+    /// through paint refusal or unwind, encoding/submission failure, and pre-present failure.
+    /// The Host binds this exact observation on those paths, and later window or producer work
+    /// cannot replace its prefix. Completion proves resource settlement, not presentation.
+    ///
+    /// UI-thread-local resources stay with their local owner; this token does not transfer them
+    /// to the GPU callback or impose Send/Sync. Release them only after `poll` or explicit
+    /// `recover_abandoned` establishes completion. Poll errors and callback abandonment preserve
+    /// custody. Before binding, `poll` returns false and `submission_index` returns None.
+    #[must_use]
+    pub fn submission_prefix(&self) -> WgpuSubmissionPrefix {
+        self.submission_prefix.clone()
+    }
+
     #[must_use]
     pub const fn surface_format(&self) -> wgpu::TextureFormat {
         self.surface_format
@@ -1859,7 +1897,8 @@ impl WgpuRenderHost {
                 || native.size.width != surface.acquired.extent.width
                 || native.size.height != surface.acquired.extent.height
                 || !native.usage.contains(wgpu::TextureUsages::TEXTURE_BINDING)
-                || (meaning.transfer == crate::TextureTransfer::Srgb) != native.format.is_srgb()
+                || (meaning.transfer == crate::TextureTransfer::Srgb)
+                    != native.format.has_srgb_suffix()
             {
                 return Err(crate::WgpuRenderProgramError::feature(
                     "the final program image does not match its acquired surface",
@@ -2833,7 +2872,7 @@ impl WgpuRenderHost {
             || native.size.width != extent.width
             || native.size.height != extent.height
             || !native.usage.contains(usage)
-            || (meaning.transfer == crate::TextureTransfer::Srgb) != format.is_srgb()
+            || (meaning.transfer == crate::TextureTransfer::Srgb) != format.has_srgb_suffix()
             || !matches!(
                 meaning.alpha,
                 crate::TextureAlpha::Premultiplied | crate::TextureAlpha::Opaque
@@ -2935,6 +2974,7 @@ impl WgpuRenderHost {
             surface_generation,
             format,
             extent,
+            reconfigure_after_present,
         } = acquired;
         let validation = namespace
             .device
@@ -2960,6 +3000,7 @@ impl WgpuRenderHost {
             &namespace.queue,
             (retained, reservation),
         );
+        let submission_prefix = retention.observe();
         let paint_result = native_callback("window paint", || {
             paint(&mut WgpuWindowFrame {
                 device: &namespace.device,
@@ -2971,6 +3012,7 @@ impl WgpuRenderHost {
                 viewports: viewport_submissions,
                 leading_command_buffers: &mut commands,
                 sampled_viewports: &mut samples,
+                submission_prefix: &submission_prefix,
             })
         });
         let window_receipt = WgpuWindowPresentedReceipt::new(
@@ -2992,10 +3034,14 @@ impl WgpuRenderHost {
         });
         let submitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let native_commands = if paint_result.is_ok() {
+                #[cfg(test)]
+                fail_window_submission(WindowSubmissionStage::Finalize);
                 Some(commands.into_iter().chain([encoder.finish()]))
             } else {
                 None
             };
+            #[cfg(test)]
+            fail_window_submission(WindowSubmissionStage::Submit);
             namespace
                 .queue
                 .submit(native_commands.into_iter().flatten())
@@ -3039,6 +3085,11 @@ impl WgpuRenderHost {
         if let Some(error) = presentation_error {
             return Err(Self::native_error(error));
         }
+        self.backend.complete_editor_surface_presentation(
+            window.id,
+            surface_generation,
+            reconfigure_after_present,
+        );
         self.invalidate_replaced_world_presentations(window.id, None);
         self.backend.record_editor_window_presentation();
         self.last_presentation_generation = presentation_generation;

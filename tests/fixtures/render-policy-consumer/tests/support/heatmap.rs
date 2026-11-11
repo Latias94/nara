@@ -139,7 +139,7 @@ impl WgpuRenderPolicy for HeatmapPolicy {
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if format.is_srgb() {
+            transfer: if format.has_srgb_suffix() {
                 TextureTransfer::Srgb
             } else {
                 TextureTransfer::Linear

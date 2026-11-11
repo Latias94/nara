@@ -143,7 +143,7 @@ fn translucent_sprite_scene_blur_and_grade_keep_premultiplied_alpha_and_exact_tr
         let mut descriptor = source.descriptor();
         descriptor.native.label = Some("translucent-Scene-effect-format");
         descriptor.native.format = format;
-        descriptor.transfer = if format.is_srgb() {
+        descriptor.transfer = if format.has_srgb_suffix() {
             TextureTransfer::Srgb
         } else {
             TextureTransfer::Linear

@@ -97,7 +97,7 @@ impl WgpuRenderPolicy for CustomUiPolicy {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if context.format().is_srgb() {
+            transfer: if context.format().has_srgb_suffix() {
                 TextureTransfer::Srgb
             } else {
                 TextureTransfer::Linear

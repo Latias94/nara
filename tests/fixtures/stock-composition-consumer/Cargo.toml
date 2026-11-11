@@ -24,7 +24,7 @@ nara-stock-blur-effect = { path = "effects/blur" }
 nara-stock-grade-effect = { path = "effects/grade" }
 nara-editor = { path = "../../../editor", optional = true }
 half = "2.7.1"
-wgpu = "=30.0.1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 
 [dev-dependencies]
 nara_text = { path = "../../../crates/nara_text", default-features = false }
@@ -32,3 +32,6 @@ nara_ui_kernel = { path = "../../../crates/nara_ui_kernel", default-features = f
 nara_ui_render = { path = "../../../crates/nara_ui_render", default-features = false }
 tempfile = "3"
 serde_json = "1"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

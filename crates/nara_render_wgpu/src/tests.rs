@@ -133,7 +133,7 @@ fn observe_uninstalled_sprite_contribution(world: &mut nara_ecs::World) {
     #[cfg(feature = "stock-ui")]
     let (captured, ui) = batch.into_parts();
     #[cfg(not(feature = "stock-ui"))]
-    let (captured,) = batch.into_parts();
+    let captured = batch.into_render_input();
     #[cfg(feature = "stock-ui")]
     assert!(ui.is_none());
     let input = captured.unwrap().unwrap();

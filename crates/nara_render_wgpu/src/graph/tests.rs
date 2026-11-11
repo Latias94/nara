@@ -929,7 +929,7 @@ fn unsupported_formats_unknown_flags_and_invalid_format_usages_reject() {
 
 #[test]
 fn zero_unaligned_mapped_mappable_and_unknown_usage_buffers_reject() {
-    for mismatch in 0..8 {
+    for mismatch in 0..9 {
         let mut desc = buffer();
         let ResourceDescriptor::Buffer { native, .. } = &mut desc else {
             unreachable!()
@@ -942,7 +942,11 @@ fn zero_unaligned_mapped_mappable_and_unknown_usage_buffers_reject() {
             4 => native.usage = wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
             5 => native.usage = wgpu::BufferUsages::empty(),
             6 => native.usage = wgpu::BufferUsages::QUERY_RESOLVE,
-            _ => native.usage = wgpu::BufferUsages::from_bits_retain(1 << 31),
+            _ => {
+                let mut bits = wgpu::BufferUsages::empty().bits();
+                bits.0[usize::from(mismatch == 8)] = 1 << 31;
+                native.usage = wgpu::BufferUsages::from_bits_retain(bits);
+            }
         }
         let expected = if mismatch < 3 {
             GraphError::UnsupportedBufferScope

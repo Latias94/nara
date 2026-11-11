@@ -417,6 +417,11 @@ impl WgpuRenderHost {
             if let Some(error) = error {
                 return Err(Self::native_error(error));
             }
+            self.backend.complete_editor_surface_presentation(
+                window.id,
+                acquired.surface_generation,
+                acquired.reconfigure_after_present,
+            );
             let receipt = crate::presented::WgpuPresentedFrameReceipt::new(
                 runtime,
                 window.id,

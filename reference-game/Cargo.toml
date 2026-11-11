@@ -69,3 +69,6 @@ required-features = ["host-parity"]
 [[bin]]
 name = "authoring_bundle"
 path = "src/bin/authoring_bundle.rs"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

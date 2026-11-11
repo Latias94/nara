@@ -119,7 +119,7 @@ fn validate_color(
             "grade requires an RGBA8/BGRA8 unorm or sRGB color port",
         ));
     }
-    let transfer = if native.format.is_srgb() {
+    let transfer = if native.format.has_srgb_suffix() {
         TextureTransfer::Srgb
     } else {
         TextureTransfer::Linear

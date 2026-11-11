@@ -75,7 +75,7 @@ fn independently_authored_effects_preserve_actual_format_transfer_and_premultipl
                     | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             },
-            transfer: if format.is_srgb() {
+            transfer: if format.has_srgb_suffix() {
                 TextureTransfer::Srgb
             } else {
                 TextureTransfer::Linear

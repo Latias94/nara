@@ -2351,7 +2351,7 @@ fn allocated_test_output(
             usage: texture.usage(),
             view_formats: &[],
         },
-        transfer: if texture.format().is_srgb() {
+        transfer: if texture.format().has_srgb_suffix() {
             crate::TextureTransfer::Srgb
         } else {
             crate::TextureTransfer::Linear

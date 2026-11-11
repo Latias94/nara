@@ -101,7 +101,7 @@ fn test_image_output(
             usage: texture.usage(),
             view_formats: &[],
         },
-        transfer: if texture.format().is_srgb() {
+        transfer: if texture.format().has_srgb_suffix() {
             crate::TextureTransfer::Srgb
         } else {
             crate::TextureTransfer::Linear
@@ -304,6 +304,8 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     let mut leading_command_buffers = Vec::new();
     let mut sampled_viewports = Vec::new();
+    let retention = crate::submission::WgpuSubmissionReservation::new(&gpu.device, &gpu.queue, ());
+    let submission_prefix = retention.observe();
     let mut frame = super::WgpuWindowFrame {
         device: &gpu.device,
         queue: &gpu.queue,
@@ -314,6 +316,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         viewports: &[],
         leading_command_buffers: &mut leading_command_buffers,
         sampled_viewports: &mut sampled_viewports,
+        submission_prefix: &submission_prefix,
     };
     assert!(matches!(
         renderer.paint(
@@ -324,6 +327,7 @@ fn renderer_shutdown_preserves_rejected_state_and_releases_bindings_idempotently
         Err(super::WgpuRenderHostError::WindowPaint { message })
             if message == "the renderer is closed"
     ));
+    let _prefix = retention.bind_current_prefix();
     let mut successor_retirement = gpu.scope().gpu_retirement();
     drain_gpu(&mut successor_retirement);
     successor.shutdown(&mut context).unwrap();
@@ -738,6 +742,9 @@ fn owned_renderer_paint_distinguishes_same_window_occurrences_and_retains_regist
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let mut leading_command_buffers = Vec::new();
         let mut samples = Vec::with_capacity(viewports.len());
+        let retention =
+            crate::submission::WgpuSubmissionReservation::new(&gpu.device, &gpu.queue, ());
+        let submission_prefix = retention.observe();
         renderer
             .paint(
                 super::WgpuEditorImguiFrame(super::PreparedFrame::Docked(prepared)),
@@ -751,11 +758,12 @@ fn owned_renderer_paint_distinguishes_same_window_occurrences_and_retains_regist
                     viewports: &viewports,
                     leading_command_buffers: &mut leading_command_buffers,
                     sampled_viewports: &mut samples,
+                    submission_prefix: &submission_prefix,
                 },
                 wgpu::Color::BLACK,
             )
             .unwrap();
-        gpu.queue.submit([encoder.finish()]);
+        let _prefix = retention.submitted(gpu.queue.submit([encoder.finish()]));
         assert_eq!(
             samples
                 .iter()

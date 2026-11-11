@@ -87,7 +87,7 @@ impl WgpuRenderPolicy for UiPolicy {
                     | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
-            transfer: if context.format().is_srgb() {
+            transfer: if context.format().has_srgb_suffix() {
                 TextureTransfer::Srgb
             } else {
                 TextureTransfer::Linear

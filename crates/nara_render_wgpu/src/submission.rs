@@ -6,7 +6,7 @@
 
 use std::{
     fmt,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -196,6 +196,7 @@ impl Drop for RetainedResources {
 struct OriginalSubmissionOwner {
     native: Option<(wgpu::Device, wgpu::Queue)>,
     retained: Arc<RetainedResources>,
+    index: OnceLock<Option<wgpu::SubmissionIndex>>,
 }
 
 impl OriginalSubmissionOwner {
@@ -305,6 +306,7 @@ impl WgpuSubmissionReservation {
         Self {
             original: Arc::new(OriginalSubmissionOwner {
                 native: Some((device.clone(), queue.clone())),
+                index: OnceLock::new(),
                 retained: Arc::new(RetainedResources {
                     inner: Mutex::new(RetainedState {
                         state: PrefixState::Pending,
@@ -317,6 +319,18 @@ impl WgpuSubmissionReservation {
                     notification: Arc::new(AtomicU8::new(0)),
                 }),
             }),
+        }
+    }
+
+    /// Observes this attempt before native work, sharing its eventual one-time prefix binding.
+    ///
+    /// The observation remains incomplete until binding and physical settlement. It retains the
+    /// original pair even if callback registration unwinds, and observes the same frozen index
+    /// as the token returned by `submitted`. Resources that cannot enter a completion callback
+    /// remain with their local owner until this observation settles.
+    pub(crate) fn observe(&self) -> WgpuSubmissionPrefix {
+        WgpuSubmissionPrefix {
+            original: Arc::clone(&self.original),
         }
     }
 
@@ -376,6 +390,11 @@ impl WgpuSubmissionReservation {
 
     fn bind(self, index: Option<wgpu::SubmissionIndex>) -> WgpuSubmissionPrefix {
         self.original.retained.state().uncertain_index = index.is_none();
+        self.original
+            .index
+            .set(index)
+            .expect("reservation binds its original prefix exactly once");
+        let prefix = self.observe();
         let callback = CompletionCallback {
             #[cfg(not(target_arch = "wasm32"))]
             retained: Arc::clone(&self.original.retained),
@@ -390,10 +409,7 @@ impl WgpuSubmissionReservation {
 
         // Until registration returns, the reservation still owns the original pair and resources.
         // Unwinding cannot mark that custody complete or free possibly submitted resources.
-        WgpuSubmissionPrefix {
-            original: self.original,
-            index,
-        }
+        prefix
     }
 }
 
@@ -414,6 +430,10 @@ pub enum WgpuSubmissionPrefixError {
 }
 
 /// A frozen submission prefix on the original Device and Queue.
+///
+/// A window-frame observation can be acquired before the Host binds this attempt. It stays
+/// incomplete until the Host freezes that exact prefix and the original resources settle. All
+/// observations share the one-time binding, including its index for abandoned-callback recovery.
 ///
 /// Clones observe the same monotonic settlement; they never follow a producer's newer submission.
 /// Keep this token outside namespace cleanup until it settles. A later token bound on the same
@@ -439,7 +459,6 @@ pub enum WgpuSubmissionPrefixError {
 #[derive(Clone)]
 pub struct WgpuSubmissionPrefix {
     original: Arc<OriginalSubmissionOwner>,
-    index: Option<wgpu::SubmissionIndex>,
 }
 
 impl fmt::Debug for WgpuSubmissionPrefix {
@@ -447,7 +466,8 @@ impl fmt::Debug for WgpuSubmissionPrefix {
         let state = self.original.retained.state();
         formatter
             .debug_struct("WgpuSubmissionPrefix")
-            .field("index", &self.index)
+            .field("index", &self.submission_index())
+            .field("bound", &self.original.index.get().is_some())
             .field("state", &state.state)
             .field("callback_abandoned", &state.callback_abandoned)
             .field("uncertain_index", &state.uncertain_index)
@@ -463,7 +483,11 @@ impl WgpuSubmissionPrefix {
     /// while other producers continue submitting. A discarded callback reports abandonment instead
     /// of remaining pending forever. Poll errors preserve custody. WGPU can report other native
     /// failures through its fatal handler; this type does not promise general unwind recovery.
+    /// Before the Host binds this attempt, returns false without servicing the device.
     pub fn poll(&self) -> Result<bool, WgpuSubmissionPrefixError> {
+        if self.original.index.get().is_none() {
+            return Ok(false);
+        }
         if self.is_complete() {
             return Ok(true);
         }
@@ -523,7 +547,7 @@ impl WgpuSubmissionPrefix {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let uncertain_index = self.original.retained.state().uncertain_index;
-            if let (false, Some(index)) = (uncertain_index, self.index.as_ref()) {
+            if let (false, Some(index)) = (uncertain_index, self.submission_index()) {
                 match self.original.device().poll(wgpu::PollType::Wait {
                     submission_index: Some(index.clone()),
                     timeout: Some(std::time::Duration::ZERO),
@@ -544,13 +568,13 @@ impl WgpuSubmissionPrefix {
         }
     }
 
-    /// Returns the opaque index from the bound attempt, or None for a native SDK prefix binding.
+    /// Returns the opaque index from the bound attempt, or None before binding or for an SDK.
     ///
     /// The caller's native validation determines whether that attempt was accepted. The index is
     /// not a process-wide identity and is not portable across devices. Ordinary `poll` does not
     /// wait on it; explicit abandoned recovery handles a rejected index conservatively.
     pub fn submission_index(&self) -> Option<&wgpu::SubmissionIndex> {
-        self.index.as_ref()
+        self.original.index.get().and_then(Option::as_ref)
     }
 }
 
@@ -770,6 +794,7 @@ mod tests {
         let weak_capture = Arc::downgrade(&capture);
         let mut reservation =
             WgpuSubmissionReservation::new(&gpu.device, &gpu.queue, Arc::clone(&capture));
+        let clone = reservation.observe();
         assert!(
             reservation
                 .retain((buffer.clone(), DropProbe(Arc::clone(&prepared_drops))))
@@ -780,7 +805,10 @@ mod tests {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         encoder.clear_buffer(&buffer, 0, None);
         let prefix = reservation.submitted(gpu.queue.submit([encoder.finish()]));
-        let clone = prefix.clone();
+        assert!(std::ptr::eq(
+            clone.submission_index().unwrap(),
+            prefix.submission_index().unwrap(),
+        ));
         drop(capture);
         assert_eq!(
             weak_capture.strong_count(),
@@ -835,6 +863,11 @@ mod tests {
                     DropProbe(Arc::clone(&drops)),
                 ),
             );
+            let observation = reservation.observe();
+            let clone = observation.clone();
+            assert!(observation.submission_index().is_none());
+            assert!(!observation.poll().unwrap());
+            assert!(!observation.recover_abandoned().unwrap());
             let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
             let mut encoder = gpu
                 .device
@@ -865,7 +898,15 @@ mod tests {
                 reservation.submitted(index)
             };
             assert_eq!(prefix.submission_index().is_none(), sdk_binding);
-            let clone = prefix.clone();
+            assert_eq!(observation.submission_index().is_none(), sdk_binding);
+            if !sdk_binding {
+                assert!(std::ptr::eq(
+                    observation.submission_index().unwrap(),
+                    prefix.submission_index().unwrap(),
+                ));
+            }
+            drop(prefix);
+            let prefix = observation;
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 let result = catch_unwind(AssertUnwindSafe(|| {
@@ -899,14 +940,19 @@ mod tests {
             // the original resources. The rejected-index case must take the explicit queue-empty
             // uncertainty branch, as must a binding without an exposed SDK index. An accepted
             // exposed index instead uses its own zero-time fence wait.
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while !prefix.recover_abandoned().unwrap() {
-                assert!(
-                    Instant::now() < deadline,
-                    "abandoned prefix could not recover"
-                );
-                std::thread::yield_now();
-            }
+            let prefix = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !prefix.recover_abandoned().unwrap() {
+                    assert!(
+                        Instant::now() < deadline,
+                        "abandoned prefix could not recover"
+                    );
+                    std::thread::yield_now();
+                }
+                prefix
+            })
+            .join()
+            .unwrap();
             assert_eq!(
                 prefix.original.retained.state().uncertain_index,
                 rejected || sdk_binding
@@ -933,6 +979,8 @@ mod tests {
             &gpu.queue,
             (buffer.clone(), DropProbe(Arc::clone(&drops))),
         );
+        let prefix = reservation.observe();
+        assert!(prefix.submission_index().is_none());
         let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let mut encoder = gpu
             .device
@@ -942,6 +990,7 @@ mod tests {
         buffer.destroy();
         let index = gpu.queue.submit([commands]);
         assert!(pollster::block_on(validation.pop()).is_some());
+        reservation.original.index.set(Some(index)).unwrap();
         // A rejected submission has no guaranteed active GPU batch with which to co-dispatch a
         // mapping panic. Model discarded notification explicitly here, while using the actual
         // rejected native index. The preceding test qualifies real callback destruction.
@@ -950,10 +999,8 @@ mod tests {
             _original: Arc::clone(&reservation.original),
         };
         drop(callback);
-        let prefix = WgpuSubmissionPrefix {
-            original: reservation.original,
-            index: Some(index),
-        };
+        drop(reservation);
+        assert!(prefix.submission_index().is_some());
         assert!(matches!(
             prefix.poll(),
             Err(WgpuSubmissionPrefixError::CallbackAbandoned)
@@ -988,6 +1035,9 @@ mod tests {
             &gpu.queue,
             (buffer.clone(), DropProbe(Arc::clone(&drops))),
         );
+        let clone = reservation.observe();
+        assert!(clone.submission_index().is_none());
+        assert!(!clone.poll().unwrap());
         gpu.queue.write_buffer(&buffer, 0, &[7; 16]);
         let mut encoder = gpu
             .device
@@ -1001,7 +1051,10 @@ mod tests {
         );
         let index = gpu.queue.submit([encoder.finish()]);
         let prefix = reservation.submitted(index);
-        let clone = prefix.clone();
+        assert!(std::ptr::eq(
+            clone.submission_index().unwrap(),
+            prefix.submission_index().unwrap(),
+        ));
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         readback.map_async(wgpu::MapMode::Read, .., move |result| {
             sender.send(result).unwrap();
@@ -1123,14 +1176,17 @@ mod tests {
             &gpu.queue,
             (buffer.clone(), DropProbe(Arc::clone(&drops))),
         );
+        let observation = reservation.observe();
+        assert!(!observation.poll().unwrap());
         gpu.queue.write_buffer(&buffer, 0, &[7; 16]);
         // A failed native route need not yield an encodable draw or a submission index. Locked
         // callback registration flushes these uploads once without a caller-issued empty submit.
         let prefix = reservation.bind_current_prefix();
         assert!(prefix.submission_index().is_none());
+        drop(prefix);
         drop(buffer);
         drop(gpu);
-        poll_until_complete(&prefix);
+        poll_until_complete(&observation);
         assert_eq!(drops.load(Ordering::Acquire), 1);
     }
 

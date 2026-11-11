@@ -175,7 +175,7 @@ impl Workflow<'_> {
                     },
                 )?;
                 write_frame_metadata(&mut metadata, frame)?;
-                let pixels = if pixels.format.is_srgb() {
+                let pixels = if pixels.format.has_srgb_suffix() {
                     pixels
                 } else {
                     pixels.convert(wgpu::TextureFormat::Rgba8UnormSrgb)

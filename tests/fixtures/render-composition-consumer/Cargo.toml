@@ -19,7 +19,7 @@ nara_image = { path = "../../../crates/nara_image", default-features = false, fe
 nara_render = { path = "../../../crates/nara_render", default-features = false, features = ["runtime"] }
 nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features = false, features = ["stock-sprite", "stock-ui"] }
 nara_window = { path = "../../../crates/nara_window", default-features = false, features = ["runtime"] }
-wgpu = "=30.0.1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 winit = "=0.30.13"
 
 [dev-dependencies]

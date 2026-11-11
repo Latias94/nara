@@ -136,9 +136,12 @@ quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
 trybuild = "1.0.118"
 yaml-rust2 = { version = "0.11.0", default-features = false }
-wgpu = "=30.0.1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 rustix = "1.1.4"
 windows-sys = "0.61.2"
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
 
 [dependencies]
 blake3 = { workspace = true, optional = true }

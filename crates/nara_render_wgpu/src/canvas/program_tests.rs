@@ -80,7 +80,7 @@ fn descriptor(
                 | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         },
-        transfer: if format.is_srgb() {
+        transfer: if format.has_srgb_suffix() {
             TextureTransfer::Srgb
         } else {
             TextureTransfer::Linear
@@ -562,7 +562,7 @@ fn assert_pixels(
             };
             let mut expected: [u8; 4] = std::array::from_fn(|channel| {
                 let value = linear[channel];
-                let encoded = if channel < 3 && format.is_srgb() {
+                let encoded = if channel < 3 && format.has_srgb_suffix() {
                     if value <= 0.0031308 {
                         value * 12.92
                     } else {

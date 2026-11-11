@@ -438,6 +438,7 @@ pub(super) struct WgpuEditorAcquiredSurface {
     pub(super) surface_generation: u64,
     pub(super) format: wgpu::TextureFormat,
     pub(super) extent: Extent2d,
+    pub(super) reconfigure_after_present: bool,
 }
 
 impl WgpuRenderBackend {
@@ -879,11 +880,13 @@ impl WgpuRenderBackend {
                     .frame_transaction_stats
                     .surface_acquires
                     .saturating_add(1);
+                surface.dirty = true;
                 Ok(Some(WgpuEditorAcquiredSurface {
                     texture,
                     surface_generation,
                     format,
                     extent,
+                    reconfigure_after_present: false,
                 }))
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
@@ -902,6 +905,7 @@ impl WgpuRenderBackend {
                     surface_generation,
                     format,
                     extent,
+                    reconfigure_after_present: true,
                 }))
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -918,6 +922,24 @@ impl WgpuRenderBackend {
             wgpu::CurrentSurfaceTexture::Validation => {
                 Err(WgpuRenderError::SurfaceValidation { window_id })
             }
+        }
+    }
+
+    /// Completes only the exact surface attempt that reached successful native presentation.
+    ///
+    /// Acquisition leaves the configuration dirty until this point. Dropping an unpresented
+    /// Vulkan texture does not reset its acquire semaphore in the selected WGPU implementation;
+    /// refusal or unwind therefore requires reconfiguration before the next acquisition.
+    pub(super) fn complete_editor_surface_presentation(
+        &mut self,
+        window: WindowId,
+        generation: u64,
+        reconfigure_after_present: bool,
+    ) {
+        if let Some(surface) = self.surfaces.get_mut(&window)
+            && surface.surface_generation() == Some(generation)
+        {
+            surface.dirty = reconfigure_after_present;
         }
     }
 

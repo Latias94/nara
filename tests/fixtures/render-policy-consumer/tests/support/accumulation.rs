@@ -440,7 +440,7 @@ fn final_descriptor(format: wgpu::TextureFormat) -> WgpuProgramTextureDescriptor
     descriptor.native.label = Some("independent-history-final");
     descriptor.native.size.width = WIDTH;
     descriptor.native.format = format;
-    descriptor.transfer = if format.is_srgb() {
+    descriptor.transfer = if format.has_srgb_suffix() {
         TextureTransfer::Srgb
     } else {
         TextureTransfer::Linear

@@ -317,7 +317,7 @@ impl WgpuStockProgramBuilder<'_> {
                     | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             },
-            transfer: if format.is_srgb() {
+            transfer: if format.has_srgb_suffix() {
                 TextureTransfer::Srgb
             } else {
                 TextureTransfer::Linear

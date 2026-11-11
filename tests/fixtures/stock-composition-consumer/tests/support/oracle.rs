@@ -121,7 +121,7 @@ impl Image {
         let bytes = self.pixels[(y * self.width + x) as usize];
         std::array::from_fn(|channel| {
             let value = f32::from(bytes[channel]) / 255.0;
-            if channel < 3 && self.format.is_srgb() {
+            if channel < 3 && self.format.has_srgb_suffix() {
                 srgb_decode(value)
             } else {
                 value
@@ -265,7 +265,7 @@ impl Image {
 
 fn encode(linear: [f32; 4], format: wgpu::TextureFormat) -> [u8; 4] {
     std::array::from_fn(|channel| {
-        let value = if channel < 3 && format.is_srgb() {
+        let value = if channel < 3 && format.has_srgb_suffix() {
             srgb_encode(linear[channel])
         } else {
             linear[channel]

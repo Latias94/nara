@@ -1109,7 +1109,11 @@ fn zero_unaligned_mapped_or_mappable_buffers_are_outside_the_admitted_scope() {
             2 => native.mapped_at_creation = true,
             3 => native.usage = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             4 => native.usage = wgpu::BufferUsages::empty(),
-            _ => native.usage = wgpu::BufferUsages::from_bits_retain(1 << 31),
+            _ => {
+                let mut bits = wgpu::BufferUsages::empty().bits();
+                bits.0[0] = 1 << 31;
+                native.usage = wgpu::BufferUsages::from_bits_retain(bits);
+            }
         }
         let expected = if mismatch < 3 {
             GraphError::UnsupportedBufferScope

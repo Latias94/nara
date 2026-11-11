@@ -1179,7 +1179,7 @@ fn capture_candidate(
     #[cfg(feature = "presentation-ui")]
     let (captured, ui_submission) = batch.into_parts();
     #[cfg(not(feature = "presentation-ui"))]
-    let (captured,) = batch.into_parts();
+    let captured = batch.into_render_input();
 
     let captured = (|| {
         // Consume each sealed batch in its own CoreLast. Keeping a second batch behind an

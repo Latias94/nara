@@ -98,6 +98,8 @@ pub enum WgpuFrameCaptureError {
     MissingPolicy,
     #[error(transparent)]
     Policy(#[from] WgpuRenderProgramError),
+    #[error("a render-only consumer cannot accept captured UI presentation permissions")]
+    UiPermissionsRequireConsumer,
     #[cfg(feature = "stock-ui")]
     #[error(transparent)]
     UiPresentation(#[from] UiPresentationIntegrationError),
@@ -539,6 +541,20 @@ pub struct WgpuCapturedPolicyBatch {
 }
 
 impl WgpuCapturedPolicyBatch {
+    /// Takes a render-only capture without depending on this crate's unified feature set.
+    ///
+    /// A batch carrying UI presentation permissions requires a UI-aware consumer. Refusal drops
+    /// those permissions through their original completion owner rather than rendering without
+    /// their admission. Enabling stock UI elsewhere never changes this method's return type.
+    pub fn into_render_input(self) -> Result<Option<WgpuRenderInput>, WgpuFrameCaptureError> {
+        #[cfg(feature = "stock-ui")]
+        if self.ui.is_some() {
+            return Err(WgpuFrameCaptureError::UiPermissionsRequireConsumer);
+        }
+        self.captured
+            .map(|captured| captured.map(|frame| frame.input))
+    }
+
     #[cfg(feature = "stock-ui")]
     #[must_use]
     pub fn into_parts(
@@ -552,14 +568,6 @@ impl WgpuCapturedPolicyBatch {
                 .map(|captured| captured.map(|frame| frame.input)),
             self.ui.map(crate::host::WgpuUiSubmission::from_state),
         )
-    }
-
-    #[cfg(not(feature = "stock-ui"))]
-    #[must_use]
-    pub fn into_parts(self) -> (Result<Option<WgpuRenderInput>, WgpuFrameCaptureError>,) {
-        (self
-            .captured
-            .map(|captured| captured.map(|frame| frame.input)),)
     }
 }
 
@@ -1288,6 +1296,47 @@ mod tests {
             [nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }]
                 if attempt.admission_id().unwrap().get() == 1
         ));
+    }
+
+    #[test]
+    fn render_only_capture_is_stable_under_stock_ui_feature_unification() {
+        let batch = WgpuCapturedPolicyBatch {
+            captured: Ok(None),
+            #[cfg(feature = "stock-ui")]
+            ui: None,
+        };
+        assert!(matches!(batch.into_render_input(), Ok(None)));
+    }
+
+    #[cfg(feature = "stock-ui")]
+    #[test]
+    fn render_only_capture_refuses_ui_permissions_and_returns_the_original_completion() {
+        let packet = ui_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let submissions = prepare_ui_submissions(&mut outcomes, &packet, 1);
+        let mut slot = WgpuFramePacketSlot::default();
+        slot.reset();
+        assert!(
+            slot.collect_policy_with_ui(
+                empty_policy_capture(),
+                WgpuUiSubmissionState::Prepared(submissions)
+            )
+            .is_ok()
+        );
+        slot.seal(Ok(None), 7, Instant::now());
+        let mut world = World::new();
+        world.insert_resource(slot);
+        world.insert_resource(outcomes);
+        let batch = take_captured_policy_batch(&mut world).unwrap();
+        assert!(matches!(
+            batch.into_render_input(),
+            Err(WgpuFrameCaptureError::UiPermissionsRequireConsumer)
+        ));
+        let outcomes = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert!(
+            matches!(outcomes.as_slice(), [nara_ui_render::UiPresentationOutcome::Aborted { attempt, .. }]
+            if attempt.admission_id().unwrap().get() == 1)
+        );
     }
 
     #[cfg(feature = "stock-ui")]

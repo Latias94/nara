@@ -1,6 +1,9 @@
 use super::*;
 use std::time::{Duration, Instant};
 
+#[cfg(all(feature = "editor-imgui", target_os = "windows"))]
+mod native;
+
 #[test]
 fn native_frontend_requirements_do_not_acquire_and_closed_host_refuses_them() {
     let mut host = WgpuRenderHost::offscreen();
@@ -302,6 +305,8 @@ fn native_window_sample_dedup_and_command_limit_stop_growth_at_admission() {
     let mut encoder = namespace
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let retention = WgpuSubmissionReservation::new(&namespace.device, &namespace.queue, ());
+    let submission_prefix = retention.observe();
     let mut frame = WgpuWindowFrame {
         device: &namespace.device,
         queue: &namespace.queue,
@@ -312,6 +317,7 @@ fn native_window_sample_dedup_and_command_limit_stop_growth_at_admission() {
         viewports: &displays,
         leading_command_buffers: &mut storage.commands,
         sampled_viewports: &mut storage.samples,
+        submission_prefix: &submission_prefix,
     };
     for _ in 0..10_000 {
         frame.record_image_sample(&display).unwrap();
@@ -373,6 +379,12 @@ fn native_window_sample_dedup_and_command_limit_stop_growth_at_admission() {
         u64::MAX - 1,
         "a refused complete join cannot partially consume the shared generation"
     );
+    let prefix = retention.bind_current_prefix();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !prefix.poll().unwrap() {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
 }
 
 #[test]

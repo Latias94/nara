@@ -70,7 +70,7 @@ impl<Source: 'static, Dest: 'static> CanvasCompositeCapture<Source, Dest> {
                 "world canvas destination must match the captured physical target extent",
             ));
         }
-        let transfer = if destination.native.format.is_srgb() {
+        let transfer = if destination.native.format.has_srgb_suffix() {
             TextureTransfer::Srgb
         } else {
             TextureTransfer::Linear

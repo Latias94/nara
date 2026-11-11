@@ -20,4 +20,4 @@ nara_render_wgpu = { path = "../../../crates/nara_render_wgpu", default-features
 motion-contract = { path = "../motion-execution/contract" }
 motion-animation = { path = "../motion-execution/animation" }
 motion-physics = { path = "../motion-execution/physics" }
-wgpu = "=30.0.1"
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
