@@ -2921,6 +2921,8 @@ dependencies = [
  "open-gpui-bench-metrics",
  "open-gpui-wgpu",
  "open-gpui-windows",
+ "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",
