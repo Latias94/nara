@@ -972,6 +972,17 @@ This is a framework prerequisite, not actual Nara Host/View or game UI acceptanc
 logical roots, dependency reconciliation, two-skin control behavior, authored HUD and measured
 costs remain open; full R11/R12/R11f and maintenance handoff are not complete.
 
+The [hosted logical-surface successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-hosted-logical-surfaces)
+reuses the original App/Window without an extra native window and captures its own platform
+capabilities. Four ordinary Windows WGPU trajectories pass with actual offscreen output,
+independent root input, exact deferred custody and both logical-first/native-first shutdown.
+The framework record owns final CPU/independent checks and revision evidence. Actual Nara
+GPU-source/Host/View, control skins, authored HUD and measured costs remain open; this changes
+no dependency, production default or full foundation completion claim.
+Core `2910b52424e` and consumer `8809f12929e` are qualified at `5925a34f920`: affected
+CPU/public 45/45, disabled capture 1/1, independent interfaces 5/5 and native lifecycle 14/14
+pass, along with correctness Clippy, production wasm, formatting and document checks.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

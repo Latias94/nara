@@ -1538,6 +1538,19 @@ current executor, including pause/time, player focus, resources, lifetime and me
 Native-window services, component appearance and Editor domain tools are optional compositions;
 splitting more algorithm crates is not a substitute for these consumers.
 
+The [hosted logical-surface successor](../research/2026-11-11-open-gpui-engine-integration-layers.md#implemented-hosted-logical-surfaces)
+implements the no-extra-native-window prerequisite through the original App/Window and a
+hosted capability profile. Four ordinary Windows WGPU trajectories pass, including actual
+offscreen UI readbacks, frozen candidate custody, isolated wake progress and both logical-first
+and native-entry close orders. This advances the sequence to real Nara GPU-source/Host/View
+consumption; final framework qualification and exact revisions remain in its owning record.
+Core implementation is `2910b52424e`, ordinary consumers `8809f12929e`, and framework
+qualification `5925a34f920`. Final CPU/public 45/45, disabled capture 1/1, independent
+interfaces 5/5 and native lifecycle 14/14 pass, with correctness Clippy, production wasm,
+formatting and document checks.
+No Nara dependency or frontend/runtime default changes. Complete control behavior/skin reuse,
+authored HUD execution selection and numerical-cost consumers remain required.
+
 The executable comparison must cover:
 
 1. **Source consumption:** locked standalone framework/platform/component consumption and the

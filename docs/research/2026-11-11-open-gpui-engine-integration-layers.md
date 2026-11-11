@@ -1,8 +1,8 @@
 # Open-GPUI Engine Integration Layers
 
 Status: research synthesis and selected development direction; implementation remains partial.
-The implemented checkpoints qualify scoped Windows hosting and deferred submission; production
-no-native-window roots and Nara integration remain open.
+The implemented checkpoints qualify scoped Windows hosting, deferred submission and hosted
+logical roots. Actual Nara integration and game-specific acceptance remain open.
 Date: 2026-11-11. Scope: independent framework hosting, rendering, component layers and engine use.
 
 ## Summary
@@ -735,3 +735,50 @@ nor `gpui-base` settle these game requirements or require every Editor control t
 - [RD6] `crates/motion/src/controller.rs:MotionClockSample::from_elapsed`; `crates/motion/src/frame_host.rs:MotionFrameHost::sample_elapsed`; `crates/gpui/src/elements/animation.rs:AnimationElement::request_layout`; `crates/gpui/src/interactive.rs:KeyDownEvent`; `crates/gpui/src/window/focus.rs:FocusId::is_focused`.
 - [RD7] Accepted `docs/adr/0008-open-gpui-ui-component-productization-roadmap.md:Decision`; `docs/adr/0018-open-gpui-motion-crate-boundary.md:Decision`.
 - [RD8] `crates/gpui/src/assets.rs:AssetSource`; `crates/gpui/src/app.rs:Application::with_assets`; `crates/gpui/src/text_system.rs:TextSystem::add_fonts`; `crates/gpui/src/image_texture.rs:ImageTexture`.
+
+## Implemented Hosted Logical Surfaces
+
+The next fork-owned successor implements `App::open_surface`, `HostedSurface` and its renderer
+interface through the original App/Window at Core commit
+`2910b52424ea39c28a330056d7ea04e4f5beaa6f`; ordinary GPU consumers are
+`8809f12929eb1aeca4db5d42f06a9c58381b8a4e`, qualified at
+`5925a34f920563592cd6115e6f97867699f8dae6`. These are local framework commits. A logical root
+captures the hosted adapter's own capability profile; desktop opening keeps its original
+platform validation. Layout/text caches, input and prepared/submitted publications retain their
+existing owners. The host supplies local
+geometry, directed input, frame demand, the atlas/renderer and exact presentation shutdown.
+Native handles and desktop mutations remain unsupported, native creation/visibility facts stay
+false, and retiring the logical binding reports detachment without OS destruction.
+
+Four ordinary production WGPU trajectories pass on Windows: owned, external-host and externally
+deferred native compositions with an offscreen root, plus isolated demand followed by native
+entry close. They share the original Device/Queue without another UI HWND or native surface.
+Actual final UI readbacks cover background, button/glyph/image and field changes. Frozen A/B,
+submitted input while a candidate waits, geometry/scale ABA, zero extent, refusal/recovery and
+original-prefix quiescence remain complete paths. Logical close preserves native sibling input
+and redraw; native-entry close instead requests normal App quit with the logical root still live.
+The isolated request advances logical prefix 1 to 2 through two host wake turns, with a timer
+only observing rather than driving it.
+
+Final affected CPU/public controls pass 45/45, profiler-disabled capture 1/1, independently
+locked interfaces 5/5 and affected native lifecycle 14/14. Correctness Clippy, production
+Core/WGPU/Web wasm compilation, root/independent formatting and document checks pass. The
+independent fixture distinguishes executed constructor/value controls from unexecuted typed App
+closures. The ordinary application supplies GPU execution evidence. No aggregate component,
+remote CI, browser runtime or renewed compiler-floor qualification is inferred.
+
+The framework qualification records the actual failures and corrections: retained marked-text
+cleanup belongs to original Window retirement; renderer metadata must be captured with its Scene
+rather than read from newer mutable source; Windows can lazily create IME helper HWNDs; recording
+a deferred packet must wake the next host turn. Exact non-IME UI HWND identities and independent
+renderer/surface creation counters remain unchanged. CPU/public and independent checks have
+separate evidence from these GPU executions. The framework's existing
+`docs/verification.md#host-driven-logical-surfaces-without-native-windows` owns final revisions,
+results and limits; its `docs/external-wgpu.md#drive-a-logical-surface-without-a-native-window`
+owns public usage.
+
+This supplies the selected no-extra-native-window prerequisite. It does not select the Nara
+executor or establish actual Nara GPU-source/Host/View, physical IME/accessibility, game clocks,
+player/gamepad focus, cooked resources, world-space/depth/materials or numerical budgets. The
+independent framework remains a normal application dependency; no Nara type enters its core.
+Keep the public two-skin behavior consumer and authored HUD comparison separate from hosting.

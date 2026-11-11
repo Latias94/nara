@@ -5742,3 +5742,26 @@ These are fork-owned general hosting changes after the fixed Zed source audit. P
 logical roots without native windows, actual Nara GPU-source/Host/View integration, two-skin
 control behavior, authored HUD and numerical costs remain next consumer work. No frontend,
 dependency or game-runtime default changes, full R11/R12/R11f completion or maintenance handoff.
+
+## November 11: Hosted Logical Roots Without Native Windows
+
+The [hosted-surface successor](2026-11-11-open-gpui-engine-integration-layers.md#implemented-hosted-logical-surfaces)
+implements `HostedSurface` and `App::open_surface` through the original Window's creation,
+layout/text, input, candidate and submitted-publication owners. A hosted root uses its own
+capabilities and truthful non-native facts; the application supplies geometry, frame demand,
+directed input, renderer/atlas and exact shutdown. No extra UI HWND, native surface, GPU device
+or executor is required for that root.
+
+Four ordinary Windows WGPU trajectories pass with final offscreen UI-output readbacks and
+complete input, deferred A/B, invalidation/recovery and close paths. A separate isolated-demand
+trajectory proves wake-driven submission before actual native entry close causes normal App
+quit and logical quiescence. The framework record preserves retained-composition, source-capture,
+IME helper enumeration and wake/close corrections rather than inferring success from source.
+Final CPU/public and independently locked consumption evidence remain separate from GPU output.
+Core `2910b52424e` and ordinary consumer `8809f12929e` are qualified at `5925a34f920`:
+affected CPU/public 45/45, disabled capture 1/1, independent interfaces 5/5 and native lifecycle
+14/14 pass; correctness Clippy, production wasm, formatting and document checks also pass.
+
+This supplies the selected logical-root prerequisite for actual Nara GPU-source/Host/View
+integration. It does not choose a game UI executor, add Editor dependencies to games, qualify
+player/time/world-space/cooked-resource contracts, or complete R11/R12/R11f and maintenance handoff.
