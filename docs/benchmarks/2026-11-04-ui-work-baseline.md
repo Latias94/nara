@@ -1259,3 +1259,85 @@ categories remain outside that gate. The locked consumer all-target no-default-f
 passes, verifying the observation feature-off path; root and isolated-consumer formatting,
 TOML/lock parsing, added links/fragments and whitespace checks pass. No new compiler floor,
 foreign native/browser execution, GPU timing or complete framework matrix is qualified.
+
+### Scene Compilation And Publication Attribution
+
+The next observation keeps the indexed implementation, the same complete 10,001-record source,
+the original edit/history/preview workflow and the five cases above. It extends the existing
+default-off standard tracing feature to `nara_scene::work-observation`, weakly forwarded by
+Nara's `editor-work-observation`; the engine installs no subscriber. No mutation, validation,
+publication or scheduling owner changes in this observation unit.
+
+Eleven additional static spans use target `nara::scene::work`. Expansion includes structural
+closure and final values/provenance output; Authoring completion and Native restriction/flat
+admission are subsequent stages. Materialization includes unbound preparation, binding with
+its pre-allocation revalidation, and publication with its final revalidation. Together with
+the original six Editor spans, the consumer observes seventeen intervals and requires each to
+be reached exactly once in each of the 64 measured samples of both property-edit cases.
+The original eight warmups are still excluded from those records.
+These expectations describe this flat, no-Prefab fixture. One structural-closure span includes
+its internal convergence/layout loops; invocation count is not a count of layout passes.
+Reference-demand retries in other inputs may reach that scope again.
+
+All intervals are current-thread elapsed times with subscriber overhead. Parent/child spans
+and percentiles are inclusive and nonadditive; they are not exclusive CPU time, allocation
+attribution, GPU duration or input latency. Publication includes final validation; binding
+includes pre-allocation revalidation. Additional future measurements must not label their
+parents as pure writes or sum nested phase percentiles. The same native source/render work
+and retirement controls remain required before choosing another optimization.
+
+The observation implementation is `a55043b3b32ff702e579d948807095f217d8e34e`. Optimized DX12
+smoke/probe passes 2/2 (`951be6c1-cddd-4aec-9f2b-b49039799060`); Vulkan passes 2/2
+(`b94e278c-1d21-4de7-b3a2-9bc608d8e625`). Both property cases reach all seventeen spans
+exactly 64 times after warmup. All five source/query/notification/View/row/draw/record/submission
+totals match the indexed baseline. Sample-end native frame gauges range from zero to one;
+current and final retirement gauges reach zero and diagnostics remain zero. These are actual
+sample checkpoints, not a GPU/native peak-memory measurement.
+
+Elapsed milliseconds **P50 / P95 / max**, with the same optimized DX12 observer in both cases:
+
+| Inclusive owner span | Local property edit | Property edit with broad refresh |
+| --- | --- | --- |
+| Editor source drive | 170.622 / 184.792 / 200.851 | 170.316 / 188.073 / 211.020 |
+| Preview source compilation | 80.280 / 89.065 / 96.855 | 79.750 / 85.454 / 89.778 |
+| Scene expansion | 54.596 / 59.763 / 71.187 | 54.523 / 57.123 / 61.995 |
+| Structural closure, within expansion | 32.698 / 36.707 / 45.696 | 32.673 / 34.999 / 37.876 |
+| Final values/provenance output, within expansion | 10.192 / 11.633 / 12.523 | 10.217 / 10.733 / 10.930 |
+| Authoring completion | 11.729 / 13.053 / 16.082 | 11.631 / 12.076 / 13.053 |
+| Native preview restriction/admission | 13.326 / 15.012 / 20.651 | 13.239 / 17.551 / 19.606 |
+| Flat admission, within Native preview | 13.296 / 14.982 / 20.622 | 13.212 / 17.515 / 19.575 |
+| Preview materialization | 85.364 / 92.711 / 116.590 | 86.094 / 97.140 / 122.422 |
+| Unbound Scene preparation | 25.514 / 29.943 / 39.605 | 25.625 / 30.958 / 32.464 |
+| Scene binding | 31.527 / 34.044 / 47.740 | 32.017 / 36.831 / 39.608 |
+| Pre-allocation revalidation, within binding | 12.302 / 13.550 / 15.670 | 12.538 / 14.690 / 17.934 |
+| Scene publication | 27.056 / 29.180 / 32.656 | 27.303 / 30.717 / 55.791 |
+| Final revalidation, within publication | 13.510 / 15.041 / 18.453 | 13.738 / 16.099 / 28.103 |
+
+The Vulkan control observes source compilation 79.933/88.617/111.714 ms locally and
+80.030/86.051/100.293 ms with broad refresh; structural closure is
+32.695/35.657/45.164 and 32.688/36.893/45.857 ms respectively. Its materialization remains
+85.570/97.160/113.973 and 86.213/92.050/108.119 ms. These runs subdivide the existing cost;
+they do not establish an optimization gain. The release rebuild takes 12m21s outside samples.
+Enabled Scene compilation, feature-off Scene all-target compilation and the independently
+locked feature-off consumer all-target check pass. Independent observation review finds no
+P1/P2; it does not replace the actual native call-count evidence. No package versions change.
+
+### Selected Structural-Closure Reuse
+
+The measured structural closure is the largest reached child of expansion. Source review
+finds that it rebuilds the complete layout after opening the pending slots even when every
+slot has no selected instance. For this flat input that repeats the layout without adding a
+scope. The selected change retains the current unpublished document, postorder and scope
+indexes after the complete pending list succeeds **only when the scope count is unchanged**.
+Any real instance entry appends a scope and still requires the original loop; later reference
+demands still invalidate and reconstruct their original unpublished value/layout candidate.
+
+Before implementation, the selected consumer target is preview-source-compilation P95 below
+80 ms in both edit cases on DX12 and Vulkan, preserving all source/render work and complete
+native smoke controls. Structural, reference, owner, placement and final materialized-entity
+admission remain mandatory. Removed actual scratch work must not be charged as phantom work:
+tight working-byte acceptance/diagnostic boundaries can change because fewer allocations are
+attempted. Keep the same limit policy, checked arithmetic and final admission against the
+current usage after every pending slot; do not claim identical obsolete cumulative charges.
+This is compilation-local reuse, not a persistent cache, incremental compiler or changed
+World/lifecycle revalidation. No new allocation, GPU or general Editor frame SLA follows.

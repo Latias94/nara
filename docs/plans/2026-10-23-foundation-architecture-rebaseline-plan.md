@@ -1556,6 +1556,29 @@ spawn/durable-identity workflows pass 21/21. The core run covers hierarchy 43, S
 the corrected large-source control, and Transform 36. Complete Goal, R11/R12, full Editor/game
 adoption and remaining numerical budget cells stay open.
 
+The next source/preview unit extends the existing opt-in standard tracing into the Scene owner,
+not a new profiler. Separate source expansion/structural closure, final values/provenance,
+Authoring completion, Native restriction/flat admission and materialization's unbound prepare,
+binding, final revalidation and publication. Observe inclusive intervals and complete reached
+call counts through the unchanged 10,001-record native source operation before selecting the
+next change. Preserve all budgets, errors, operation order, World/basis and late lifecycle
+revalidation. Unchanged public workflows and the complete native source/input/history/color/
+failure/retirement path remain acceptance; no provisional pure-validation reuse may substitute
+for receiving-World admission. Record the same observer/source pins and matched pre/post work.
+
+The seventeen-span observation at `a55043b3b32` passes optimized DX12/Vulkan smoke/probe pairs,
+2/2 each, with identical source/render totals. Its [Scene attribution](../benchmarks/2026-11-04-ui-work-baseline.md#scene-compilation-and-publication-attribution)
+locates structural closure at roughly 32.7 ms P50 within approximately 80 ms source compilation;
+materialization remains about 85 ms across preparation/binding/publication. Select local reuse
+of the already-built unpublished layout only after the complete pending list succeeds without
+appending any scope. Preserve routed roots, suppression/rescue, selected/reference demand and
+all final entity/working-budget admission. Removed scratch work changes actual cumulative
+working-byte usage and may change tight-budget diagnostic boundaries; retain the budget policy
+instead of phantom charges. Keep final receiving-World/lifecycle revalidation unchanged.
+Before implementation, require compilation P95 below 80 ms in both source-edit cases on both
+selected backends, unchanged five-case work totals and the complete native smoke. No persistent
+cache, new compiler owner, GPUI mechanism or default selection is introduced by this slice.
+
 #### Maintained Open-GPUI comparison
 
 Treat the user's existing Open-GPUI fork as the primary maintained-framework candidate. The

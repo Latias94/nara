@@ -1073,6 +1073,15 @@ Affected Runtime UI/Render pass 176/176 and independent public Scene preparation
 consumers pass 21/21; core hierarchy/Scene/Transform and corrected large-source coverage remain
 identified separately in the cost record. No independent-consumer lock change is required.
 
+The [deeper Scene attribution](../../benchmarks/2026-11-04-ui-work-baseline.md#scene-compilation-and-publication-attribution)
+at `a55043b3b32` adds optional standard compiler/binding/publication spans, with the engine
+subscriber-free and no package-version changes. Optimized DX12/Vulkan smoke/probe pairs pass
+2/2 each; all seventeen intervals and five-case source/render totals are checked. The measured
+structural closure is approximately 32.7 ms P50; complete preview compilation/materialization
+remain about 80/85 ms. Feature-off Scene and independent-consumer all-target checks pass.
+Local reuse of a stable unpublished structure is the next selected compiler change; final
+World/lifecycle admission and UI/default/framework ownership remain unchanged.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

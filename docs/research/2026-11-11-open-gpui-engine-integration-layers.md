@@ -1642,3 +1642,21 @@ outer-source steps identify remaining drive/preparation churn without attributin
 to the index. Process gauges are not native/peak/cache memory. Preview compilation and remaining
 materialization are still roughly 80/85 ms P50, so the next owning attribution stays in Nara.
 This correction changes no production Open-GPUI mechanism or selected Editor/game default.
+
+The subsequent [Scene compilation/publication attribution](../benchmarks/2026-11-04-ui-work-baseline.md#scene-compilation-and-publication-attribution)
+at `a55043b3b32ff702e579d948807095f217d8e34e` extends the same default-off standard tracing,
+without installing an engine subscriber. Both optimized DX12/Vulkan smoke/probe pairs pass 2/2;
+the seventeen reached intervals and original five-workload source/render counts are verified.
+Structural closure is about 32.7 ms P50 within approximately 80 ms preview compilation. The
+remaining approximately 85 ms materialization is distributed across preparation, binding and
+publication; the latter two include their necessary revalidation. These are inclusive elapsed
+observations, not exclusive CPU time, new allocation data or GPU measurements.
+
+The selected next owner change reuses an already-built unpublished structure when the complete
+pending instance-selection list succeeds without adding any scope. Real instance entry still
+rebuilds; subsequent reference-demand retries and final entity/working limits remain. Removing
+actual scratch work may admit a source at a formerly failing tight working-byte boundary; the
+budget policy remains, without retaining phantom charges. The predeclared consumer target is
+compilation P95 below 80 ms for both source-edit cases on both selected backends. This bounded
+compiler change leaves GPUI state/layout/raster choices, receiving-World lifecycle checks and
+the independent Editor/game/runtime decision intact.
