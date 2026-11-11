@@ -1411,7 +1411,7 @@ where
         #[cfg(feature = "work-observation")]
         let _work_span =
             tracing::info_span!(target: "nara::scene::work", "scene_structure").entered();
-        loop {
+        let document = loop {
             self.close_demands(scanned)?;
             self.postorder.clear();
             let document = self.layout_scope(0)?;
@@ -1425,33 +1425,35 @@ where
                         && (self.selected_anchor == Some(node) || self.selects_values(node))
                 })
                 .collect::<Vec<_>>();
-            if pending.is_empty() {
-                // Source facets and materialized entities differ under root binding. Their
-                // skeletons have already paid working-storage admission; this public count
-                // bounds the actual surviving hierarchy instead of inventing wrapper entities.
-                let count = self
-                    .context
-                    .observe_item_budget(
-                        SceneCompilationBudgetKind::MaterializedEntities,
-                        0,
-                        document.entities.len(),
-                        self.context.options.limits.materialized_entities(),
-                        None,
-                        None,
-                    )
-                    .ok_or(SceneCompilationFailureKind::WorkLimit)?;
-                let mut usage = self.context.usage;
-                usage.materialized_entities = count;
-                if !self.context.admit_working_usage(usage, None, None) {
-                    return Err(SceneCompilationFailureKind::WorkLimit.into());
-                }
-                self.context.usage = usage;
-                return Ok(document);
-            }
+            let scope_count = self.scopes.len();
             for node in pending {
                 self.open_slot(node)?;
             }
+            if self.scopes.len() == scope_count {
+                break document;
+            }
+        };
+        // Source facets and materialized entities differ under root binding. Their
+        // skeletons have already paid working-storage admission; this public count
+        // bounds the actual surviving hierarchy instead of inventing wrapper entities.
+        let count = self
+            .context
+            .observe_item_budget(
+                SceneCompilationBudgetKind::MaterializedEntities,
+                0,
+                document.entities.len(),
+                self.context.options.limits.materialized_entities(),
+                None,
+                None,
+            )
+            .ok_or(SceneCompilationFailureKind::WorkLimit)?;
+        let mut usage = self.context.usage;
+        usage.materialized_entities = count;
+        if !self.context.admit_working_usage(usage, None, None) {
+            return Err(SceneCompilationFailureKind::WorkLimit.into());
         }
+        self.context.usage = usage;
+        Ok(document)
     }
 
     /// The declaring layer sees its own output, even if an outer layer later removes it.
