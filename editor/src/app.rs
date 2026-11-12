@@ -2949,9 +2949,9 @@ mod tests {
                 feedback,
                 ..Default::default()
             };
-            std::panic::catch_unwind(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 dispatch.into_submission(super::EditorApplicationUpdate::idle())
-            })
+            }))
             .is_ok()
             .then_some(name)
         })

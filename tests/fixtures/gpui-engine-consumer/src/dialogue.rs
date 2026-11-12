@@ -189,6 +189,30 @@ pub enum NodeRecipe {
     End,
 }
 
+/// An existing endpoint to connect atomically to a newly allocated node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireEndpoint {
+    Output(OutputPort),
+    Input(NodeId),
+}
+
+/// A successful command's domain result, including identities allocated by its owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DialogueCommandOutcome {
+    Noop,
+    Changed,
+    Created {
+        node: NodeId,
+        outputs: Vec<OutputPort>,
+        link: Option<Link>,
+    },
+    /// Choice identities in their complete authored order after the edit.
+    ChoicesChanged {
+        node: NodeId,
+        choices: Vec<ChoiceId>,
+    },
+}
+
 /// Existing IDs preserve identity; the document allocates an ID for each new choice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChoiceDraft {
@@ -209,6 +233,11 @@ pub enum DialogueCommand {
         recipe: NodeRecipe,
         position: [f32; 2],
     },
+    CreateFromWire {
+        recipe: NodeRecipe,
+        position: [f32; 2],
+        endpoint: WireEndpoint,
+    },
     SetEntry(Option<NodeId>),
     SetLine {
         node: NodeId,
@@ -228,8 +257,16 @@ pub enum DialogueCommand {
         port: OutputPort,
         target: Option<NodeId>,
     },
+    Reconnect {
+        from: OutputPort,
+        to: OutputPort,
+        target: NodeId,
+    },
     Move(Vec<NodePosition>),
-    Remove(Vec<NodeId>),
+    Remove {
+        nodes: Vec<NodeId>,
+        links: Vec<OutputPort>,
+    },
 }
 
 type Snapshot = (DocumentContentState, Arc<DialogueView>);
@@ -355,13 +392,120 @@ fn allocate(next: &mut u64) -> Result<u64, EditorExtensionDocumentError> {
     Ok(id)
 }
 
+fn create_node(
+    view: &mut DialogueView,
+    recipe: NodeRecipe,
+    position: [f32; 2],
+    next_node: &mut u64,
+    next_choice: &mut u64,
+) -> Result<(NodeId, Vec<OutputPort>), EditorExtensionDocumentError> {
+    let id = NodeId(allocate(next_node)?);
+    let body = match recipe {
+        NodeRecipe::Line => NodeBody::Line {
+            speaker: "Guide".to_owned(),
+            text: "New line".to_owned(),
+        },
+        NodeRecipe::Choice => NodeBody::Choice {
+            prompt: "Choose a response".to_owned(),
+            choices: vec![Choice {
+                id: ChoiceId(allocate(next_choice)?),
+                label: "Continue".to_owned(),
+            }],
+        },
+        NodeRecipe::End => NodeBody::End {
+            text: "End".to_owned(),
+        },
+    };
+    let node = Node {
+        id,
+        position,
+        body: Arc::new(body),
+    };
+    let outputs = node.output_ports().collect();
+    view.nodes.insert(id, node);
+    if view.entry.is_none() {
+        view.entry = Some(id);
+    }
+    Ok((id, outputs))
+}
+
+fn validate_output(
+    view: &DialogueView,
+    port: OutputPort,
+) -> Result<(), EditorExtensionDocumentError> {
+    if !view.contains_output(port) {
+        return Err(error(
+            "dialogue.port-missing",
+            "The selected dialogue output does not exist",
+        ));
+    }
+    Ok(())
+}
+
+fn set_target(
+    view: &mut DialogueView,
+    port: OutputPort,
+    target: Option<NodeId>,
+) -> Result<(), EditorExtensionDocumentError> {
+    validate_output(view, port)?;
+    if let Some(target) = target {
+        view.node(target).ok_or_else(missing_node)?;
+        view.links.insert(port, target);
+    } else {
+        view.links.remove(&port);
+    }
+    Ok(())
+}
+
+fn remove_selection(
+    view: &mut DialogueView,
+    nodes: &[NodeId],
+    links: &[OutputPort],
+) -> Result<(), EditorExtensionDocumentError> {
+    let mut removed_nodes = BTreeSet::new();
+    for node in nodes {
+        view.node(*node).ok_or_else(missing_node)?;
+        if !removed_nodes.insert(*node) {
+            return Err(error(
+                "dialogue.remove-duplicate",
+                "A dialogue removal may name each node only once",
+            ));
+        }
+    }
+    let mut removed_links = BTreeSet::new();
+    for port in links {
+        if !view.links.contains_key(port) {
+            return Err(error(
+                "dialogue.link-missing",
+                "The selected dialogue link does not exist",
+            ));
+        }
+        if !removed_links.insert(*port) {
+            return Err(error(
+                "dialogue.remove-duplicate",
+                "A dialogue removal may name each link only once",
+            ));
+        }
+    }
+    view.nodes.retain(|node, _| !removed_nodes.contains(node));
+    view.links.retain(|port, target| {
+        !removed_nodes.contains(&port.node())
+            && !removed_nodes.contains(target)
+            && !removed_links.contains(port)
+    });
+    if view.entry.is_some_and(|node| removed_nodes.contains(&node)) {
+        view.entry = None;
+    }
+    Ok(())
+}
+
 fn replace_choices(
     view: &mut DialogueView,
     node: NodeId,
     prompt: &str,
     drafts: &[ChoiceDraft],
     next_choice: &mut u64,
-) -> Result<(), EditorExtensionDocumentError> {
+) -> Result<Vec<ChoiceId>, EditorExtensionDocumentError> {
     let current = view.node(node).ok_or_else(missing_node)?;
     let NodeBody::Choice { choices, .. } = current.body.as_ref() else {
         return Err(wrong_kind());
@@ -401,15 +545,17 @@ fn replace_choices(
     }
     view.links.retain(|port, _| port.node() != node);
     view.links.extend(links);
+    let ids = choices.iter().map(|choice| choice.id).collect();
     view.nodes.get_mut(&node).ok_or_else(missing_node)?.body = Arc::new(NodeBody::Choice {
         prompt: prompt.to_owned(),
         choices,
     });
-    Ok(())
+    Ok(ids)
 }
 
 impl EditorExtensionDocument for DialogueGraph {
     type Command = DialogueCommand;
+    type Outcome = DialogueCommandOutcome;
     type View = Arc<DialogueView>;
     const TYPE_ID: &'static str = "consumer.dialogue-graph";
 
@@ -432,39 +578,67 @@ impl EditorExtensionDocument for DialogueGraph {
         self.view.clone()
     }
 
-    fn apply(&mut self, command: &Self::Command) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(
+        &mut self,
+        command: &Self::Command,
+    ) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         let mut candidate = self.view.as_ref().clone();
         let mut next_node = self.next_node;
         let mut next_choice = self.next_choice;
-        match command {
+        let outcome = match command {
             DialogueCommand::Add { recipe, position } => {
-                let id = NodeId(allocate(&mut next_node)?);
-                let body = match recipe {
-                    NodeRecipe::Line => NodeBody::Line {
-                        speaker: "Guide".to_owned(),
-                        text: "New line".to_owned(),
+                let (node, outputs) = create_node(
+                    &mut candidate,
+                    *recipe,
+                    *position,
+                    &mut next_node,
+                    &mut next_choice,
+                )?;
+                DialogueCommandOutcome::Created {
+                    node,
+                    outputs,
+                    link: None,
+                }
+            }
+            DialogueCommand::CreateFromWire {
+                recipe,
+                position,
+                endpoint,
+            } => {
+                match endpoint {
+                    WireEndpoint::Output(port) => validate_output(&candidate, *port)?,
+                    WireEndpoint::Input(target) => {
+                        candidate.node(*target).ok_or_else(missing_node)?;
+                        if *recipe == NodeRecipe::End {
+                            return Err(error(
+                                "dialogue.wire-output",
+                                "A dialogue node created from an input wire must have an output",
+                            ));
+                        }
+                    }
+                }
+                let (node, outputs) = create_node(
+                    &mut candidate,
+                    *recipe,
+                    *position,
+                    &mut next_node,
+                    &mut next_choice,
+                )?;
+                let link = match endpoint {
+                    WireEndpoint::Output(port) => Link {
+                        from: *port,
+                        to: node,
                     },
-                    NodeRecipe::Choice => NodeBody::Choice {
-                        prompt: "Choose a response".to_owned(),
-                        choices: vec![Choice {
-                            id: ChoiceId(allocate(&mut next_choice)?),
-                            label: "Continue".to_owned(),
-                        }],
-                    },
-                    NodeRecipe::End => NodeBody::End {
-                        text: "End".to_owned(),
+                    WireEndpoint::Input(target) => Link {
+                        from: outputs.first().copied().ok_or_else(wrong_kind)?,
+                        to: *target,
                     },
                 };
-                candidate.nodes.insert(
-                    id,
-                    Node {
-                        id,
-                        position: *position,
-                        body: Arc::new(body),
-                    },
-                );
-                if candidate.entry.is_none() {
-                    candidate.entry = Some(id);
+                set_target(&mut candidate, link.from, Some(link.to))?;
+                DialogueCommandOutcome::Created {
+                    node,
+                    outputs,
+                    link: Some(link),
                 }
             }
             DialogueCommand::SetEntry(entry) => {
@@ -472,6 +646,7 @@ impl EditorExtensionDocument for DialogueGraph {
                     candidate.node(*node).ok_or_else(missing_node)?;
                 }
                 candidate.entry = *entry;
+                DialogueCommandOutcome::Changed
             }
             DialogueCommand::SetLine {
                 node,
@@ -486,13 +661,19 @@ impl EditorExtensionDocument for DialogueGraph {
                     speaker: speaker.clone(),
                     text: text.clone(),
                 });
+                DialogueCommandOutcome::Changed
             }
             DialogueCommand::SetChoices {
                 node,
                 prompt,
                 choices,
             } => {
-                replace_choices(&mut candidate, *node, prompt, choices, &mut next_choice)?;
+                let choices =
+                    replace_choices(&mut candidate, *node, prompt, choices, &mut next_choice)?;
+                DialogueCommandOutcome::ChoicesChanged {
+                    node: *node,
+                    choices,
+                }
             }
             DialogueCommand::SetEnd { node, text } => {
                 let selected = candidate.nodes.get_mut(node).ok_or_else(missing_node)?;
@@ -500,20 +681,30 @@ impl EditorExtensionDocument for DialogueGraph {
                     return Err(wrong_kind());
                 }
                 selected.body = Arc::new(NodeBody::End { text: text.clone() });
+                DialogueCommandOutcome::Changed
             }
             DialogueCommand::SetTarget { port, target } => {
-                if !candidate.contains_output(*port) {
+                set_target(&mut candidate, *port, *target)?;
+                DialogueCommandOutcome::Changed
+            }
+            DialogueCommand::Reconnect { from, to, target } => {
+                if !candidate.links.contains_key(from) {
                     return Err(error(
-                        "dialogue.port-missing",
-                        "The selected dialogue output does not exist",
+                        "dialogue.link-missing",
+                        "The selected dialogue link does not exist",
                     ));
                 }
-                if let Some(target) = target {
-                    candidate.node(*target).ok_or_else(missing_node)?;
-                    candidate.links.insert(*port, *target);
-                } else {
-                    candidate.links.remove(port);
+                validate_output(&candidate, *to)?;
+                candidate.node(*target).ok_or_else(missing_node)?;
+                if from != to && candidate.links.contains_key(to) {
+                    return Err(error(
+                        "dialogue.output-occupied",
+                        "The destination dialogue output already has a link",
+                    ));
                 }
+                candidate.links.remove(from);
+                set_target(&mut candidate, *to, Some(*target))?;
+                DialogueCommandOutcome::Changed
             }
             DialogueCommand::Move(positions) => {
                 let mut seen = BTreeSet::new();
@@ -530,30 +721,16 @@ impl EditorExtensionDocument for DialogueGraph {
                         .ok_or_else(missing_node)?
                         .position = change.position;
                 }
+                DialogueCommandOutcome::Changed
             }
-            DialogueCommand::Remove(nodes) => {
-                let mut removed = BTreeSet::new();
-                for node in nodes {
-                    candidate.node(*node).ok_or_else(missing_node)?;
-                    if !removed.insert(*node) {
-                        return Err(error(
-                            "dialogue.remove-duplicate",
-                            "A dialogue removal may name each node only once",
-                        ));
-                    }
-                }
-                candidate.nodes.retain(|node, _| !removed.contains(node));
-                candidate.links.retain(|port, target| {
-                    !removed.contains(&port.node()) && !removed.contains(target)
-                });
-                if candidate.entry.is_some_and(|node| removed.contains(&node)) {
-                    candidate.entry = None;
-                }
+            DialogueCommand::Remove { nodes, links } => {
+                remove_selection(&mut candidate, nodes, links)?;
+                DialogueCommandOutcome::Changed
             }
-        }
+        };
         let _ = codec::encode(&candidate)?;
         if candidate == *self.view {
-            return Ok(());
+            return Ok(DialogueCommandOutcome::Noop);
         }
         if self.clock.generation() == u64::MAX {
             return Err(error(
@@ -574,7 +751,7 @@ impl EditorExtensionDocument for DialogueGraph {
         self.next_incarnation = next_incarnation;
         self.clock = clock;
         self.state = clock.content_state();
-        Ok(())
+        Ok(outcome)
     }
 
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError> {
@@ -622,5 +799,7 @@ impl EditorExtensionDocument for DialogueGraph {
     }
 }
 
+#[cfg(test)]
+mod atomic_tests;
 #[cfg(test)]
 mod tests;

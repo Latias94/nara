@@ -947,6 +947,7 @@ struct UnsupportedExtension(SceneAuthoringSession);
 
 impl EditorExtensionDocument for UnsupportedExtension {
     type Command = Infallible;
+    type Outcome = ();
     type View = ();
     const TYPE_ID: &'static str = "test.schema-reclassification.unsupported";
 
@@ -960,7 +961,10 @@ impl EditorExtensionDocument for UnsupportedExtension {
         self.0.history_status()
     }
     fn view(&self) -> Self::View {}
-    fn apply(&mut self, command: &Infallible) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(
+        &mut self,
+        command: &Infallible,
+    ) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         match *command {}
     }
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError> {

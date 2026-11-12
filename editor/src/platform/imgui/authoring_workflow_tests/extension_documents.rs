@@ -58,6 +58,7 @@ fn document_error() -> EditorExtensionDocumentError {
 
 impl EditorExtensionDocument for Dialogue {
     type Command = SetOpeningLine;
+    type Outcome = ();
     type View = DialogueView;
     const TYPE_ID: &'static str = "qualification.dialogue";
 
@@ -82,7 +83,10 @@ impl EditorExtensionDocument for Dialogue {
         }
     }
 
-    fn apply(&mut self, command: &SetOpeningLine) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(
+        &mut self,
+        command: &SetOpeningLine,
+    ) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         if command.0.len() > LINE_LIMIT {
             return Err(document_error());
         }

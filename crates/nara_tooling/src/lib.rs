@@ -140,13 +140,14 @@ pub use source_tools::{
 pub use workspace::{
     CommittedEditorDocumentConstruction, CommittedEditorPrefabConversion, EditorDocumentDigest,
     EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding, EditorDocumentTabModel,
-    EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentError,
-    EditorExtensionDocumentView, EditorExternalReloadState, EditorPrefabConversionCommitError,
-    EditorPrefabConversionRequest, EditorPrefabSessionPublicationError, EditorPrefabSlot,
-    EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel,
-    EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-    EditorWorkspaceModel, PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit,
-    PreparedEditorPrefabConversion, PreparedEditorWorkspaceSchemaReclassification,
+    EditorExtensionCommand, EditorExtensionCommandOutcome, EditorExtensionDocument,
+    EditorExtensionDocumentError, EditorExtensionDocumentView, EditorExternalReloadState,
+    EditorPrefabConversionCommitError, EditorPrefabConversionRequest,
+    EditorPrefabSessionPublicationError, EditorPrefabSlot, EditorSceneModel,
+    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    PreparedEditorDocumentConstruction, PreparedEditorDocumentEdit, PreparedEditorPrefabConversion,
+    PreparedEditorWorkspaceSchemaReclassification,
 };
 #[doc(hidden)]
 pub use workspace::{

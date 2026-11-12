@@ -29,6 +29,7 @@ const SOURCE: &str = "dialogue/intro.json";
 struct OtherDialogue(Dialogue);
 impl EditorExtensionDocument for OtherDialogue {
     type Command = SetLine;
+    type Outcome = ();
     type View = <Dialogue as EditorExtensionDocument>::View;
     const TYPE_ID: &'static str = Dialogue::TYPE_ID;
     fn title(&self) -> &str {
@@ -43,7 +44,7 @@ impl EditorExtensionDocument for OtherDialogue {
     fn view(&self) -> Self::View {
         self.0.view()
     }
-    fn apply(&mut self, command: &SetLine) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(&mut self, command: &SetLine) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         self.0.apply(command)
     }
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError> {

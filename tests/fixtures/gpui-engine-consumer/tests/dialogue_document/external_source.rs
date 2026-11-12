@@ -295,7 +295,14 @@ fn coalesced_remove_and_undo_retire_only_the_restored_node_ports_and_links() -> 
     collect_layout(&pending, 160.0)?;
     let before = facts(editor, document);
     let before_content = encoded_content(initial.source());
-    edit(editor, document, DialogueCommand::Remove(vec![line]));
+    edit(
+        editor,
+        document,
+        DialogueCommand::Remove {
+            nodes: vec![line],
+            links: Vec::new(),
+        },
+    );
     assert!(view(editor, document).node(line).is_none());
     assert!(external.snapshot()?.ptr_eq(&old));
     history(editor, document, false);

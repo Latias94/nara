@@ -19,19 +19,22 @@ use nara_engine::{
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
         EditorDocumentId, EditorDocumentMutation, EditorDocumentTabModel, EditorExtensionCommand,
-        EditorExtensionDocument, EditorPersistenceAction, EditorPersistenceAttemptId,
-        EditorPersistenceFailureStage, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPersistenceView, EditorReopenTarget,
+        EditorExtensionCommandOutcome, EditorExtensionDocument, EditorPersistenceAction,
+        EditorPersistenceAttemptId, EditorPersistenceFailureStage, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPersistenceView, EditorReopenTarget,
     },
 };
 use nara_gpui_engine_consumer::dialogue::{
-    Choice, ChoiceDraft, ChoiceId, DialogueCommand, DialogueGraph, DialogueView, NodeBody, NodeId,
-    NodePosition, NodeRecipe, OutputPort,
+    Choice, ChoiceDraft, ChoiceId, DialogueCommand, DialogueCommandOutcome, DialogueGraph,
+    DialogueView, NodeBody, NodeId, NodePosition, NodeRecipe, OutputPort,
 };
 use tempfile::TempDir;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const SOURCE: &str = "dialogue/conversation.json";
+
+#[path = "dialogue_document/atomic_edits.rs"]
+mod atomic_edits;
 
 #[cfg(feature = "jellyflow-trial")]
 #[path = "dialogue_document/external_source.rs"]
@@ -225,14 +228,30 @@ fn edit(
     document: EditorDocumentId,
     command: DialogueCommand,
 ) -> EditorDocumentTabModel {
+    edit_with_outcome(editor, document, command).0
+}
+
+fn edit_with_outcome(
+    editor: &mut EditorProjectSession,
+    document: EditorDocumentId,
+    command: DialogueCommand,
+) -> (EditorDocumentTabModel, EditorExtensionCommandOutcome) {
     let before = facts(editor, document);
-    let outcomes = dispatch(editor, [action(document, before.revision, command)]);
+    let command = EditorExtensionCommand::new::<DialogueGraph>(document, before.revision, command);
+    let outcomes = dispatch(editor, [EditorAction::Extension(command.clone())]);
     assert_eq!(outcomes.len(), 1);
     assert_applied(&outcomes[0], document, before.revision.next());
+    let EditorActionOutcome::Workspace(report) = &outcomes[0] else {
+        unreachable!()
+    };
+    let outcome = report.extension_outcome.as_ref().unwrap();
+    assert_eq!(outcome.command(), &command);
+    assert_eq!(outcome.revision(), before.revision.next());
+    assert!(outcome.get::<DialogueGraph>().is_some());
     let after = facts(editor, document);
     assert_eq!(after.revision, before.revision.next());
     assert_eq!(after.saved_revision, before.saved_revision);
-    after
+    (after, outcome.clone())
 }
 
 fn add(
@@ -243,16 +262,30 @@ fn add(
 ) -> NodeId {
     let previous = view(editor, document);
     let before = facts(editor, document);
-    let after = edit(editor, document, DialogueCommand::Add { recipe, position });
+    let (after, outcome) =
+        edit_with_outcome(editor, document, DialogueCommand::Add { recipe, position });
     assert_eq!(after.history.undo_depth, before.history.undo_depth + 1);
     let current = view(editor, document);
-    let added: Vec<_> = current
-        .nodes()
-        .filter(|node| previous.node(node.id).is_none())
-        .map(|node| node.id)
-        .collect();
-    assert_eq!(added.len(), 1);
-    added[0]
+    let DialogueCommandOutcome::Created {
+        node,
+        outputs,
+        link,
+    } = outcome.get::<DialogueGraph>().unwrap()
+    else {
+        panic!("expected the original allocator's creation outcome");
+    };
+    assert!(previous.node(*node).is_none());
+    assert_eq!(current.nodes().len(), previous.nodes().len() + 1);
+    assert_eq!(
+        current
+            .node(*node)
+            .unwrap()
+            .output_ports()
+            .collect::<Vec<_>>(),
+        *outputs
+    );
+    assert!(link.is_none());
+    *node
 }
 
 fn seed_conversation(
@@ -324,6 +357,10 @@ fn history(
     let outcomes = dispatch(editor, [EditorAction::Mutate(mutation)]);
     assert_eq!(outcomes.len(), 1);
     assert_applied(&outcomes[0], document, before.revision.next());
+    let EditorActionOutcome::Workspace(report) = &outcomes[0] else {
+        unreachable!()
+    };
+    assert!(report.extension_outcome.is_none());
     let after = facts(editor, document);
     assert_eq!(after.revision, before.revision.next());
     assert_eq!(after.saved_revision, before.saved_revision);
@@ -602,7 +639,10 @@ fn node_and_property_edits_share_atomic_history_and_saved_content() -> Result<()
             action(
                 document,
                 before_remove.revision,
-                DialogueCommand::Remove(vec![line, ending]),
+                DialogueCommand::Remove {
+                    nodes: vec![line, ending],
+                    links: Vec::new(),
+                },
             ),
             EditorAction::Mutate(EditorDocumentMutation::Undo {
                 document,
@@ -733,7 +773,10 @@ fn invalid_typed_edits_preserve_source_history_and_both_allocators() -> Result<(
             "dialogue.node-missing",
         ),
         (
-            DialogueCommand::Remove(vec![line, missing]),
+            DialogueCommand::Remove {
+                nodes: vec![line, missing],
+                links: Vec::new(),
+            },
             "dialogue.node-missing",
         ),
     ] {

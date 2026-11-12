@@ -7,6 +7,9 @@ use std::sync::Arc;
 use nara_core::{DocumentContentState, DocumentHistoryStatus, DocumentRevision};
 use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 
+#[cfg(test)]
+mod tests;
+
 /// A document domain owns its typed content, commands, history, and codec.
 ///
 /// The workspace owns document identity and persistence checkpoints. The product Host owns file
@@ -18,6 +21,7 @@ use nara_diagnostic::{Diagnostic, DiagnosticCode, SafeSummary};
 /// owner-thread native resources. Decode may run on the Host's I/O worker.
 pub trait EditorExtensionDocument: Send + Sync + 'static {
     type Command: Send + Sync + 'static;
+    type Outcome: Send + Sync + 'static;
     type View: fmt::Debug + Send + Sync + 'static;
 
     const TYPE_ID: &'static str;
@@ -26,8 +30,14 @@ pub trait EditorExtensionDocument: Send + Sync + 'static {
     fn content_state(&self) -> DocumentContentState;
     fn history_status(&self) -> DocumentHistoryStatus;
     fn view(&self) -> Self::View;
-    /// Reject without mutating content or history. Accepted commands must commit atomically.
-    fn apply(&mut self, command: &Self::Command) -> Result<(), EditorExtensionDocumentError>;
+    /// Commits atomically and returns the domain's exact outcome, including allocated identities.
+    ///
+    /// Rejection leaves content, allocators and history unchanged. Successful no-op commands
+    /// may return an outcome without changing authored content or its saved-state identity.
+    fn apply(
+        &mut self,
+        command: &Self::Command,
+    ) -> Result<Self::Outcome, EditorExtensionDocumentError>;
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError>;
     fn redo(&mut self) -> Result<(), EditorExtensionDocumentError>;
     fn encode(&self) -> Result<Vec<u8>, EditorExtensionDocumentError>;
@@ -82,7 +92,7 @@ pub(super) trait ErasedExtensionDocument: Send + Sync {
     fn apply(
         &mut self,
         command: &(dyn Any + Send + Sync),
-    ) -> Result<(), EditorExtensionDocumentError>;
+    ) -> Result<Arc<dyn Any + Send + Sync>, EditorExtensionDocumentError>;
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError>;
     fn redo(&mut self) -> Result<(), EditorExtensionDocumentError>;
     fn encode(&self) -> Result<Vec<u8>, EditorExtensionDocumentError>;
@@ -124,7 +134,7 @@ impl<D: EditorExtensionDocument> ErasedExtensionDocument for TypedExtensionDocum
     fn apply(
         &mut self,
         command: &(dyn Any + Send + Sync),
-    ) -> Result<(), EditorExtensionDocumentError> {
+    ) -> Result<Arc<dyn Any + Send + Sync>, EditorExtensionDocumentError> {
         let command = command.downcast_ref::<D::Command>().ok_or_else(|| {
             EditorExtensionDocumentError::new(
                 DiagnosticCode::new("tooling.extension-document-command-type-mismatch")
@@ -133,7 +143,9 @@ impl<D: EditorExtensionDocument> ErasedExtensionDocument for TypedExtensionDocum
                     .expect("static summary"),
             )
         })?;
-        self.0.apply(command)
+        self.0
+            .apply(command)
+            .map(|outcome| Arc::new(outcome) as Arc<dyn Any + Send + Sync>)
     }
 
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError> {
@@ -203,6 +215,67 @@ impl PartialEq for EditorExtensionCommand {
             && self.base_revision == other.base_revision
             && self.owner == other.owner
             && Arc::ptr_eq(&self.payload, &other.payload)
+    }
+}
+
+/// Immutable domain output from one accepted command through the original workspace.
+///
+/// The original command identity and accepted workspace revision identify the operation.
+/// Neither snapshot equality nor a later document revision substitutes for this result.
+/// Clones share the original command and outcome; equality compares that same observation.
+#[derive(Clone)]
+pub struct EditorExtensionCommandOutcome {
+    command: EditorExtensionCommand,
+    revision: DocumentRevision,
+    value: Arc<dyn Any + Send + Sync>,
+}
+
+impl EditorExtensionCommandOutcome {
+    pub(super) fn new(
+        command: EditorExtensionCommand,
+        revision: DocumentRevision,
+        value: Arc<dyn Any + Send + Sync>,
+    ) -> Self {
+        Self {
+            command,
+            revision,
+            value,
+        }
+    }
+
+    #[must_use]
+    pub const fn command(&self) -> &EditorExtensionCommand {
+        &self.command
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> DocumentRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub fn get<D: EditorExtensionDocument>(&self) -> Option<&D::Outcome> {
+        (self.command.owner == TypeId::of::<D>())
+            .then(|| self.value.downcast_ref())
+            .flatten()
+    }
+}
+
+impl fmt::Debug for EditorExtensionCommandOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EditorExtensionCommandOutcome")
+            .field("command", &self.command)
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for EditorExtensionCommandOutcome {
+    fn eq(&self, other: &Self) -> bool {
+        self.command == other.command
+            && self.revision == other.revision
+            && Arc::ptr_eq(&self.value, &other.value)
     }
 }
 

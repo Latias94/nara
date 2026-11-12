@@ -303,6 +303,7 @@ pub fn evaluate(view: &GraphView) -> Result<Option<f64>, EditorExtensionDocument
 
 impl EditorExtensionDocument for ValueGraph {
     type Command = GraphCommand;
+    type Outcome = ();
     type View = GraphView;
     const TYPE_ID: &'static str = "consumer.value-graph";
 
@@ -325,7 +326,10 @@ impl EditorExtensionDocument for ValueGraph {
         self.view.clone()
     }
 
-    fn apply(&mut self, command: &GraphCommand) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(
+        &mut self,
+        command: &GraphCommand,
+    ) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         let mut candidate = self.view.clone();
         let mut next_id = self.next_id;
         match command {

@@ -47,6 +47,11 @@ The existing list-of-lines Dialogue and finite ValueGraph formats remain separat
 
 With `jellyflow-trial`, `dialogue::jellyflow::DialogueFacts` captures an immutable core graph
 and checked ID/incarnation mappings. It creates no Jellyflow runtime or second history.
+The original extension command result now carries the domain's typed `DialogueCommandOutcome`,
+bound to that exact command and accepted Workspace revision. Creation and choice edits return
+their actual allocated IDs. `CreateFromWire`, endpoint reconnection and mixed node/link removal
+each validate and commit one candidate with one Undo boundary. A successful semantic Noop
+retains source/history while still returning its precise operation result.
 `external_facts()` retains that exact graph allocation and supplies complete live-incarnation
 observations to Jellyflow's `ExternalGraphDocument`. Two ordinary `ViewSession`s now consume
 that Source through the public Session/file tests, with independent local state and geometry.

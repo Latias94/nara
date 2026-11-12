@@ -43,6 +43,7 @@ fn error(code: &'static str, summary: &'static str) -> EditorExtensionDocumentEr
 
 impl EditorExtensionDocument for Dialogue {
     type Command = SetLine;
+    type Outcome = ();
     type View = DialogueView;
     const TYPE_ID: &'static str = "consumer.dialogue";
 
@@ -64,7 +65,7 @@ impl EditorExtensionDocument for Dialogue {
         }
     }
 
-    fn apply(&mut self, command: &SetLine) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(&mut self, command: &SetLine) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         let Some(previous) = self.lines.get(command.index) else {
             return Err(error(
                 "dialogue.line-missing",

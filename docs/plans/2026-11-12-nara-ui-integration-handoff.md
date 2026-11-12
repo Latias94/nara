@@ -350,3 +350,33 @@ allocation and derives link identities. Native intrinsic height must remain View
 Nara retains its domain commands and Session admission; the library retains standalone
 `GraphRuntime`. The native two-View Dialogue consumer and its DX12/Vulkan acceptance remain
 open. Keep the unmerged integrity repair worktree and the published library baseline distinct.
+
+### Exact Domain Outcomes And Atomic Canvas Commands
+
+The [next owner prerequisite](2026-11-12-dialogue-graph-integration-plan.md#domain-outcomes-and-atomic-canvas-operations)
+replaces the unit-only extension apply result with associated `Outcome`. Existing owners that
+need no additional result declare `Outcome = ()`. Accepted reports expose
+`extension_outcome`, retaining the original command, accepted revision and a nominally typed
+domain value. Rejection supplies no accepted outcome; successful Noop retains its precise
+result while preserving unchanged content/history. Clones share the original observation.
+
+Dialogue returns actual node/output and ordered choice allocations. Its `CreateFromWire`,
+`Reconnect` and structured `Remove { nodes, links }` each validate and commit one candidate,
+including all-or-nothing refusal and one Undo boundary. Creation helpers consume those results
+rather than discovering IDs by a snapshot difference. Source schema/codec remain unchanged.
+
+Tooling tests pass 179/179, the independent domain/graph/Session cohort 94/94 and independent
+panel consumers 46/46. The complete public trajectory joins both wire directions, dynamic
+choice IDs, reconnection, mixed removal, Undo/Redo, saved-state identity and Save/Reopen with
+the original owner. Historical results remain readable after real Session close and Reopen.
+Separate generic-result, atomic-domain and scoped-unwind reviews find no concrete P1/P2.
+Affected root persistence, slot-invariant and existing DX12 extension-document controls pass
+45/45, including one actual native trajectory. Correctness Clippy, behavior-language trial
+all-target compilation, fixture feature-off compilation, format and document checks pass in
+the stated scope. Existing unrelated warnings remain. This adds no new Dialogue native UI or
+language/tool-install runtime qualification.
+
+Continue with the original Jellyflow journal/interaction owners: typed external transport,
+exact asynchronous completion and canonical ID adoption, followed by View-local intrinsic
+height and the two native Dialogue Views. An immutable Nara domain outcome is execution
+evidence, not the one-shot external completion capability or accepted native presentation.

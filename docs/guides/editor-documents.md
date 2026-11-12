@@ -14,6 +14,9 @@ Implement `nara_tooling::EditorExtensionDocument` for the domain owner:
 
 - `Command` is a domain-specific Rust type. Validate before mutation; failed apply/Undo/Redo must
   leave content, history and content-state identity unchanged.
+- `Outcome` is the domain's `Send + Sync + 'static` accepted-command result. `apply` returns it
+  after its atomic commit, including allocated IDs when relevant. Use `()` when that domain
+  needs no additional result. Neither commands nor outcomes need `Clone`, `Debug` or serialization.
 - `View` is an immutable `Debug + Send + Sync` projection, not a mutable owner reference.
 - `content_state()` identifies committed content. Use `nara::core::DocumentRevision::initial()`
   for a fresh content identity clock, advance it for every forward edit, and retain earlier
@@ -85,6 +88,21 @@ Queueing is not owner acceptance. Observe the ordinary exact panel dispatch call
 stale draft until explicit review/reapply. The existing `EditorDocumentMutation::Undo`/`Redo`
 actions, navigation, tab history and dirty projection apply to extension documents. Rejected or
 wrong-owner/stale actions do not change the document. No `Any` payload can invoke another service.
+
+An accepted extension action's `EditorWorkspaceCommandReport::extension_outcome` retains the
+original `EditorExtensionCommand`, the accepted Workspace revision and its typed domain result.
+Use `command()` to verify the originating payload and `get::<Dialogue>()` to read that owner's
+`Outcome`; matching output Rust types alone do not permit another document owner to read it.
+The output is immutable and report clones share the original observation. Refused actions have
+no accepted extension outcome. A successful Noop may return one while keeping content and
+history unchanged; the Workspace operation revision still advances.
+A result retains its original command payload and returned value; report clones share those
+allocations.
+
+Keep the exact ordered action outcome when processing a batch. Read allocated identities from
+that accepted result rather than comparing before/after snapshots. A later edit or Reopen can
+replace the document's current facts without changing the historical result of the original
+operation. Native input/presentation acceptance remains a separate framework observation.
 
 ## Save, Reopen And Close
 

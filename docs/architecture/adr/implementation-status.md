@@ -1209,6 +1209,21 @@ Asynchronous external authored completion, canonical ID adoption,
 native intrinsic size and the native Dialogue consumer remain open; the existing unmerged
 graph-integrity draft retains its separate scope.
 
+The subsequent [domain-outcome prerequisite](../../plans/2026-11-12-dialogue-graph-integration-plan.md#domain-outcomes-and-atomic-canvas-operations)
+adds an associated accepted-command `Outcome` to the existing extension document interface.
+The Workspace carries it with original command identity and accepted revision; it does not infer
+allocated IDs from a later snapshot. Unit-returning owners explicitly use `Outcome = ()`.
+Dialogue creation/choice results contain actual allocated identities, and wire creation,
+two-endpoint reconnection and mixed removal each use one validated candidate/history entry.
+Tooling passes 179/179, the independent domain/graph/Session cohort 94/94 and independent panel
+consumers 46/46 in their stated scopes. Readable historical outcomes survive real Reopen/close;
+they do not grant a new native frame or external interaction completion. Separate source reviews
+find no concrete P1/P2. Affected root persistence, slot-invariant and existing DX12 extension
+document controls pass 45/45, including one actual native trajectory. Correctness Clippy,
+behavior-language trial compilation, feature-off compilation, format and document checks pass
+within the unit's recorded scope; existing unrelated warnings remain.
+External typed transport, canonical native ID adoption and the complete Dialogue UI remain open.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate

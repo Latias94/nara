@@ -3,17 +3,20 @@ use super::{
     *,
 };
 
-fn add(graph: &mut DialogueGraph, recipe: NodeRecipe) -> NodeId {
-    graph
+pub(super) fn add(graph: &mut DialogueGraph, recipe: NodeRecipe) -> NodeId {
+    let DialogueCommandOutcome::Created { node, .. } = graph
         .apply(&DialogueCommand::Add {
             recipe,
             position: [0., 0.],
         })
-        .unwrap();
-    graph.view().nodes().last().unwrap().id
+        .unwrap()
+    else {
+        panic!("created node");
+    };
+    node
 }
 
-fn story() -> DialogueGraph {
+pub(super) fn story() -> DialogueGraph {
     let mut graph = DialogueGraph::new();
     assert_eq!(add(&mut graph, NodeRecipe::Line), NodeId(1));
     assert_eq!(add(&mut graph, NodeRecipe::Choice), NodeId(2));
@@ -52,7 +55,9 @@ fn story() -> DialogueGraph {
     graph
 }
 
-fn state(graph: &DialogueGraph) -> (Vec<u8>, DocumentContentState, DocumentHistoryStatus) {
+pub(super) fn state(
+    graph: &DialogueGraph,
+) -> (Vec<u8>, DocumentContentState, DocumentHistoryStatus) {
     (
         graph.encode().unwrap(),
         graph.content_state(),
@@ -60,13 +65,34 @@ fn state(graph: &DialogueGraph) -> (Vec<u8>, DocumentContentState, DocumentHisto
     )
 }
 
-fn refuses(graph: &mut DialogueGraph, command: DialogueCommand) {
+pub(super) fn refuses(graph: &mut DialogueGraph, command: DialogueCommand) {
     let before = state(graph);
+    let view = graph.view();
+    let undo = graph.undo.clone();
+    let redo = graph.redo.clone();
+    let allocation = (
+        graph.next_node,
+        graph.next_choice,
+        graph.next_incarnation,
+        graph.clock,
+    );
     assert!(graph.apply(&command).is_err());
     assert_eq!(state(graph), before);
+    assert!(Arc::ptr_eq(&view, &graph.view()));
+    assert_eq!(graph.undo, undo);
+    assert_eq!(graph.redo, redo);
+    assert_eq!(
+        (
+            graph.next_node,
+            graph.next_choice,
+            graph.next_incarnation,
+            graph.clock,
+        ),
+        allocation
+    );
 }
 
-fn choice_port(choice: u64) -> OutputPort {
+pub(super) fn choice_port(choice: u64) -> OutputPort {
     OutputPort::Choice {
         node: NodeId(2),
         choice: ChoiceId(choice),
@@ -309,14 +335,23 @@ fn batch_removal_preserves_atomicity_and_undo_restores_source_with_fresh_lifetim
     let previous = graph.view();
     refuses(
         &mut graph,
-        DialogueCommand::Remove(vec![NodeId(1), NodeId(404)]),
+        DialogueCommand::Remove {
+            nodes: vec![NodeId(1), NodeId(404)],
+            links: Vec::new(),
+        },
     );
     refuses(
         &mut graph,
-        DialogueCommand::Remove(vec![NodeId(1), NodeId(1)]),
+        DialogueCommand::Remove {
+            nodes: vec![NodeId(1), NodeId(1)],
+            links: Vec::new(),
+        },
     );
     graph
-        .apply(&DialogueCommand::Remove(vec![NodeId(1), NodeId(2)]))
+        .apply(&DialogueCommand::Remove {
+            nodes: vec![NodeId(1), NodeId(2)],
+            links: Vec::new(),
+        })
         .unwrap();
     assert_eq!(graph.view().entry(), None);
     assert_eq!(graph.view().nodes().len(), 1);
@@ -672,7 +707,10 @@ fn node_limit_refusal_preserves_the_allocator_for_a_later_valid_add() {
         },
     );
     graph
-        .apply(&DialogueCommand::Remove(vec![NodeId(1)]))
+        .apply(&DialogueCommand::Remove {
+            nodes: vec![NodeId(1)],
+            links: Vec::new(),
+        })
         .unwrap();
     assert_eq!(
         add(&mut graph, NodeRecipe::Line),

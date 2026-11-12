@@ -322,3 +322,109 @@ cargo +1.95.0 nextest run --locked --release -p jellyflow-runtime --lib --tests 
 Run that command from Jellyflow. The Nara cohort uses the independent fixture manifest with
 `jellyflow-trial,ui-work-observation`, `--lib --test graph_document --test dialogue_document`
 and the same serial release nextest settings.
+
+## Domain Outcomes And Atomic Canvas Operations
+
+Status: original-owner/domain/Session prerequisite qualified. Native external transport remains open.
+
+The next source audit finds prerequisites in the original domain rather than only in the
+native adapter. The extension document's unit-returning `apply` cannot expose its allocator's
+exact result. Dialogue also lacks one-operation mixed node/link removal, source-end
+reconnection and creation from a wire. Complete these original owners before mapping canvas
+submission into asynchronous Session work.
+
+`EditorExtensionDocument` gains associated `Outcome`; `apply` returns that domain-owned value.
+The original Workspace publishes an immutable `EditorExtensionCommandOutcome` in its ordinary
+report, retaining the original command identity and accepted operation revision. Type erasure
+stays at the existing document interface. Results require `Send + Sync`, with no mandatory
+Clone/Debug/codec, side-channel cell, generic command bus or second result owner.
+Successful Noop still publishes its exact outcome; stale, wrong-owner and domain refusals
+publish none. Existing domains without additional output use `Outcome = ()`.
+These immutable results describe domain execution. They do not acknowledge an external canvas
+request or accept a native frame by themselves; the original pending interaction and its
+single-use completion association still belong to the upcoming transport.
+
+Dialogue's result must return allocated node/initial-output and replacement-choice identities
+directly from its validated candidate. The complete operations are:
+
+- Mixed `Remove { nodes, links }` validates every original selection before removing them
+  together. Incident links selected alongside their deleted owner are valid; duplicates and
+  missing items refuse the whole candidate. Empty selection preserves Noop/Redo semantics.
+- `Reconnect { from, to, target }` moves an existing link and updates its target in one
+  candidate. Both outputs and the target must be valid. Moving onto another occupied output
+  refuses; retargeting the same output is legal. Equal values are Noop.
+- `CreateFromWire` allocates the actual node/choice IDs and connects an existing output to the
+  new input, or the new primary output to an existing input, in one candidate. Line and Choice
+  have a primary output; End does not. Invalid endpoint, position or supported source limits
+  refuse without consuming either allocator, changing history or clearing Redo.
+
+Qualify allocator output, exact result identity/owner, Noop, refusal, one-entry Undo/Redo,
+incarnations and Save/Reopen through the original domain and independent Session/file
+consumer. Preserve existing graph/Source controls. The full external typed transport,
+View-local native intrinsic height, multiline controls and two native Dialogue Views remain
+subsequent acceptance within step 3 and the complete consumer.
+
+The implementation replaces the unit-only result contract without adding a compatibility
+method. Existing unit-returning owners explicitly declare `Outcome = ()`. The original narrow
+document erasure wraps the accepted output; Scene and Prefab keep their own concrete reports.
+This follows the existing owner-returned construction/composition result pattern rather than
+introducing a central enum of product-specific command results.
+
+Three new Workspace tests use a non-Clone, non-Debug outcome and two nominal owners sharing
+that same result type. They cover original payload identity, revision, shared observation,
+owner mismatch, stale/domain refusal, Noop and allocation retention. The full Tooling library
+suite passes 179/179, no skips, run `69aaca83-98b2-442c-b459-fe79c8921e7c`.
+
+The independent domain/graph/Session cohort passes 94/94, no skips, run
+`8e01c9ad-6d33-492d-93b6-43740f8d33a4`. It preserves the prior 79 controls and adds 13 atomic
+domain tests plus two complete public Session/file tests. Creation helpers now consume the
+actual result instead of discovering an ID by a snapshot difference. The ordered-batch test
+retains the first exact allocation while a later stale action refuses, then checks Noop and
+reads the original output after real Session close. The complete canvas-command trajectory
+exercises both wire directions, choice allocations, reconnection, mixed deletion, one-entry
+Undo/Redo, return-to-saved identity, exact Save bytes/digest, Reopen and old-source refusal.
+Earlier outcomes remain readable after Reopen; they are not rebound to current facts.
+
+The first independent test build found the new Reopen assertion omitted `digest`. The corrected
+assertion constructs the expected complete digest from the saved bytes; no persistence
+assertion was replaced with a success-only check. Separate generic-result and atomic-domain
+source reviews found no concrete P1/P2. Those reviews did not execute tests or qualify native
+external transport, and the CPU/public results do not establish a new Dialogue native UI.
+
+The first affected Editor test build exposed an implicit `UnwindSafe` assumption in the
+internal malformed-slot panic test: reports can now contain opaque command/result values.
+That test constructs only owned synthetic rejected outcomes and consumes them through the
+pure dispatch mapper. Its catch uses a scoped `AssertUnwindSafe`, preserving all five
+must-panic cases; the production interface gains no blanket unwind-safety implementation or
+additional command/outcome bound. The corrected test joins the affected qualification filter.
+Result retention includes the original command payload and output; no allocation, latency or
+memory improvement is claimed by this interface change.
+
+| Verification | Actual result |
+|---|---|
+| Tooling production library | Locked Rust 1.95.0 check passed. |
+| Complete Tooling library tests | 179/179, no skips; run `69aaca83-98b2-442c-b459-fe79c8921e7c`. |
+| Independent domain/graph/Session and file consumer | Release 94/94, no skips, three binaries; run `8e01c9ad-6d33-492d-93b6-43740f8d33a4`. |
+| Independent panel consumers | 46/46, four existing native/embedded skips, 15 binaries; run `bf9d77d1-989f-44cd-9e12-0aab0bb975c0`. |
+| Root persistence, exact-slot invariant and existing DX12 extension document | 45/45, 2,192 unselected tests; run `24dd5378-7dfd-4c93-879d-b970d9026e6c`. Includes 43 root persistence controls, the five-case malformed-slot test and one actual native extension-document trajectory. |
+| Other migrated owner | Independently locked behavior-language trial all-target compilation passed. This adds no C#/Lua/tool-install runtime qualification. |
+| Correctness | All-target Clippy with `-D clippy::correctness` passed for Tooling/Editor and the release independent GPUI fixture. Existing unrelated warnings remain. |
+| Conditional compilation | Independent GPUI fixture locked release all-target check without default features passed. |
+| Independent review | Generic-result, atomic-domain and scoped-unwind reviews found no concrete P1/P2. All seven scoped agents are closed. |
+
+The native trajectory is the existing reference extension-document workflow, not the new
+Dialogue canvas. Its actual save/reopen, panel and physical-close checks preserve the changed
+shared interface; new Dialogue pixels/input remain open. The unit retains Open-GPUI code pin
+`f75c10b` and Jellyflow `046a660`; neither peer project changes here.
+
+The combined affected Root/Editor command, after setting the existing native font/DX12
+environment, is:
+
+```text
+cargo +1.95.0 nextest run --locked -p nara -p nara-editor --features nara/project-tooling --lib --run-ignored all -E 'test(project_host::runtime::editor::persistence::tests::) | test(native_extension_document_widgets_save_reopen_and_retire_panels) | test(direct_submission_rejects_inconsistent_internal_outcome_mapping)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+This closes the domain outcome/atomic-operation prerequisite. Original external request
+binding, asynchronous admission/completion, canonical native identity adoption, View-local
+intrinsic height and the complete two-View Dialogue product remain within step 3 and the
+following native consumer. The full foundation Goal stays active.

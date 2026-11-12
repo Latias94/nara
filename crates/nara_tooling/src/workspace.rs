@@ -56,8 +56,8 @@ pub use authored_schema_upgrade::{
 };
 pub use construction::{CommittedEditorDocumentConstruction, PreparedEditorDocumentConstruction};
 pub use extension::{
-    EditorExtensionCommand, EditorExtensionDocument, EditorExtensionDocumentCandidate,
-    EditorExtensionDocumentError, EditorExtensionDocumentView,
+    EditorExtensionCommand, EditorExtensionCommandOutcome, EditorExtensionDocument,
+    EditorExtensionDocumentCandidate, EditorExtensionDocumentError, EditorExtensionDocumentView,
 };
 use extension::{ErasedExtensionDocument, TypedExtensionDocument};
 #[doc(hidden)]
@@ -817,14 +817,19 @@ impl EditorWorkspace {
                 slot.revision,
             );
         }
-        let result = slot.owner.apply(action.payload.as_ref());
-        match result {
-            Ok(()) => slot.revision = slot.revision.next(),
+        let outcome = match slot.owner.apply(action.payload.as_ref()) {
+            Ok(outcome) => outcome,
             Err(error) => {
                 return extension_error_report(context, error);
             }
-        }
-        report_for_document(document, active, document_slot)
+        };
+        slot.revision = slot.revision.next();
+        let revision = slot.revision;
+        let mut report = report_for_document(document, active, document_slot);
+        report.extension_outcome = Some(EditorExtensionCommandOutcome::new(
+            action, revision, outcome,
+        ));
+        report
     }
 
     #[must_use]
@@ -3065,6 +3070,7 @@ pub struct EditorWorkspaceCommandReport {
     pub active_document: Option<EditorDocumentId>,
     pub dirty: Option<bool>,
     pub revision: Option<SceneAuthoringRevision>,
+    pub extension_outcome: Option<EditorExtensionCommandOutcome>,
     pub inspector_report: Option<SceneInspectorCommandReport>,
     pub patch_report: Option<ScenePatchReport>,
     pub prefab_composition_outcome: Option<PrefabCompositionOutcome>,

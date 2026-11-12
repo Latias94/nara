@@ -4281,6 +4281,22 @@ pass within that scope. Exact asynchronous authored
 completion, canonical ID adoption, native View-local intrinsic size and the complete Dialogue
 workflow remain open. This is a step-3 prerequisite, not complete R11c or a new native claim.
 
+The [domain-outcome and atomic canvas prerequisite](2026-11-12-dialogue-graph-integration-plan.md#domain-outcomes-and-atomic-canvas-operations)
+then opens exact allocator results through the original extension command report. The document
+declares a typed `Outcome`; the original Workspace binds that immutable result to its original
+command and accepted operation revision. Dialogue wire creation, source/target reconnection and
+mixed node/link removal now share the original candidate validation, inverse and history.
+Tooling passes 179/179, the independent domain/graph/Session cohort 94/94 and independent panel
+consumers 46/46. The new public workflow verifies actual allocated IDs, one-step Undo/Redo,
+saved-content behavior, exact persistence digest and old-source refusal, including readable
+original outcomes after Reopen and physical Session close. Source review finds no concrete
+P1/P2. Affected root persistence, slot-invariant and existing DX12 extension-document controls
+pass 45/45, including one actual native trajectory. Correctness Clippy, other migrated-owner
+compilation, feature-off compilation, format and document checks pass within the unit's scope.
+The external interaction transport still has to consume its own exact pending/completion
+authority and adopt canonical domain IDs. No full step-3, Dialogue native, R11c or foundation
+completion follows from this original-owner prerequisite.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

@@ -183,7 +183,7 @@ semantic owners before using it for comparison; historical native results do not
 ### Independent document domains share the workspace lifecycle
 
 A trusted source-built non-Scene document owner implements `EditorExtensionDocument` with typed
-commands, an immutable typed view, a bounded codec and its own inverse/history storage. The
+commands and accepted-command outcomes, an immutable typed view, a bounded codec and its own inverse/history storage. The
 Workspace retains document identity, monotonic accepted revisions, saved content checkpoints,
 dirty/history projections and ordinary Save/Discard/Cancel arbitration. Domain content-state
 identity follows Undo/Redo, while a forward branch receives a fresh identity. Scene and Prefab
@@ -197,6 +197,16 @@ discovery, automatic session replacement registration, or a dynamic plugin mecha
 extension action erases only a domain-typed command targeted at the exact open owner and live
 revision, not an arbitrary service invocation. A panel receives no mutable document or filesystem
 writer; hiding/closing its draft never removes the document or its history.
+
+An accepted extension command returns its domain-owned `Outcome`, including identities allocated
+inside that atomic operation. The Workspace attaches it to the original command identity and
+accepted revision in the ordinary per-action report. The caller checks the original action
+slot and owner type; it does not infer completion or new identities from equal values, a snapshot
+difference or a later revision. A successful Noop still has an exact outcome and advances the
+Workspace operation revision while preserving unchanged domain content and history.
+Command and outcome erasure remains local to this document interface. Outcomes are immutable
+`Send + Sync` Rust values, with no mandatory serialization, `Clone` or `Debug` requirement and no
+new service invocation, callback registry or cross-document transaction owner.
 
 Source namespaces remain explicit: extension locators are project-relative, while Scene/Prefab
 locators retain their configured source scopes. The Host excludes duplicate publication ownership

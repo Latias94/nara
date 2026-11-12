@@ -1426,6 +1426,7 @@ fn probe_error() -> nara_tooling::EditorExtensionDocumentError {
 
 impl nara_tooling::EditorExtensionDocument for SourceProbe {
     type Command = ();
+    type Outcome = ();
     type View = ();
     const TYPE_ID: &'static str = "nara.test.SourceProbe";
     fn title(&self) -> &str {
@@ -1438,7 +1439,10 @@ impl nara_tooling::EditorExtensionDocument for SourceProbe {
         Default::default()
     }
     fn view(&self) {}
-    fn apply(&mut self, _: &()) -> Result<(), nara_tooling::EditorExtensionDocumentError> {
+    fn apply(
+        &mut self,
+        _: &(),
+    ) -> Result<Self::Outcome, nara_tooling::EditorExtensionDocumentError> {
         Err(probe_error())
     }
     fn undo(&mut self) -> Result<(), nara_tooling::EditorExtensionDocumentError> {

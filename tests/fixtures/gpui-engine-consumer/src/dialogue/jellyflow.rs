@@ -477,7 +477,10 @@ mod tests {
         let ports = before.graph().node(&choice_node).unwrap().ports.clone();
         let edge = edge_from(&before, ports[1]);
         owner
-            .apply(&DialogueCommand::Remove(vec![NodeId(2)]))
+            .apply(&DialogueCommand::Remove {
+                nodes: vec![NodeId(2)],
+                links: Vec::new(),
+            })
             .unwrap();
         owner.undo().unwrap();
         let after = DialogueFacts::capture(document, revision.next().next(), owner.view()).unwrap();

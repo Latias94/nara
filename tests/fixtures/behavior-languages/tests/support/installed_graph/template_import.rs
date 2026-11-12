@@ -66,6 +66,7 @@ fn text_error() -> EditorExtensionDocumentError {
 
 impl EditorExtensionDocument for SampleText {
     type Command = SetText;
+    type Outcome = ();
     type View = String;
 
     const TYPE_ID: &'static str = "trial.imported-sample-text";
@@ -89,7 +90,7 @@ impl EditorExtensionDocument for SampleText {
         self.text.clone()
     }
 
-    fn apply(&mut self, command: &SetText) -> Result<(), EditorExtensionDocumentError> {
+    fn apply(&mut self, command: &SetText) -> Result<Self::Outcome, EditorExtensionDocumentError> {
         if command.0.len() > CONTENT_LIMIT {
             return Err(text_error());
         }
