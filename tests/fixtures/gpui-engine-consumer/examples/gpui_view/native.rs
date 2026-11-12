@@ -8,6 +8,12 @@ mod graph_gestures_smoke;
 mod graph_panel;
 #[path = "graph_smoke.rs"]
 mod graph_smoke;
+#[cfg(feature = "jellyflow-trial")]
+#[path = "jellyflow_panel.rs"]
+mod jellyflow_panel;
+#[cfg(feature = "jellyflow-trial")]
+#[path = "jellyflow_smoke.rs"]
+mod jellyflow_smoke;
 #[path = "panels.rs"]
 mod panels;
 #[path = "preview_jobs.rs"]
@@ -295,6 +301,8 @@ struct Root {
     inspectors: [Entity<Inspector>; 2],
     graph_panels: Option<[Entity<GraphPanel>; 2]>,
     preview_views: Option<Entity<views_panel::ViewsPanel>>,
+    #[cfg(feature = "jellyflow-trial")]
+    jellyflow: Option<Entity<jellyflow_panel::JellyflowPanel>>,
 }
 
 impl Render for Root {
@@ -307,6 +315,20 @@ impl Render for Root {
                 .clone()
                 .cached(StyleRefinement::default().w(px(1280.)).h(px(640.))),
         );
+        #[cfg(feature = "jellyflow-trial")]
+        if let Some(jellyflow) = &self.jellyflow {
+            return base
+                .child(
+                    div()
+                        .absolute()
+                        .left(px(0.))
+                        .top(px(0.))
+                        .size_full()
+                        .occlude()
+                        .child(jellyflow.clone()),
+                )
+                .into_any_element();
+        }
         if let Some(graphs) = &self.graph_panels {
             return base
                 .children(graphs.iter().enumerate().map(|(index, graph)| {
@@ -383,6 +405,15 @@ struct Viewer {
     graph_intents: Rc<RefCell<VecDeque<graph_panel::GraphIntent>>>,
     graph_smoke: Option<graph_smoke::GraphSmoke>,
     graph_gestures_smoke: Option<graph_gestures_smoke::GraphGesturesSmoke>,
+    jellyflow_smoke_mode: bool,
+    #[cfg(feature = "jellyflow-trial")]
+    jellyflow_mode: bool,
+    #[cfg(feature = "jellyflow-trial")]
+    jellyflow_panel: Option<Entity<jellyflow_panel::JellyflowPanel>>,
+    #[cfg(feature = "jellyflow-trial")]
+    jellyflow_smoke: Option<jellyflow_smoke::JellyflowSmoke>,
+    #[cfg(feature = "jellyflow-trial")]
+    expected_jellyflow_history: Option<jellyflow_runtime::graph::HistoryState>,
     views_mode: bool,
     views_panel: Option<Entity<views_panel::ViewsPanel>>,
     views_commands: Rc<RefCell<VecDeque<views_panel::ViewsIntent>>>,
@@ -428,6 +459,7 @@ impl Viewer {
             || self.graph_smoke.is_some()
             || self.views_smoke.is_some()
             || self.graph_gestures_smoke.is_some()
+            || self.jellyflow_smoke_mode
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -451,6 +483,11 @@ impl Viewer {
         }
         let graph_snapshot = (self.graph_mode && !self.views_mode)
             .then(|| engine.graph_snapshot())
+            .transpose()?;
+        #[cfg(feature = "jellyflow-trial")]
+        let jellyflow_trial = self
+            .jellyflow_mode
+            .then(jellyflow_panel::JellyflowTrial::new)
             .transpose()?;
         let engine = Rc::new(RefCell::new(engine));
         let proxy = self.proxy.clone();
@@ -499,6 +536,10 @@ impl Viewer {
         let graph_intents = self.graph_intents.clone();
         let views_mode = self.views_mode;
         let views_commands = self.views_commands.clone();
+        #[cfg(feature = "jellyflow-trial")]
+        let jellyflow_initialized = Rc::new(RefCell::new(None));
+        #[cfg(feature = "jellyflow-trial")]
+        let jellyflow_output = jellyflow_initialized.clone();
         let application =
             Application::with_platform(self.platform.clone()).run_embedded(move |cx| {
                 DraftInput::bind_keys(cx);
@@ -565,6 +606,13 @@ impl Viewer {
                         views_panel_output = Some(panel.clone());
                         panel
                     });
+                    #[cfg(feature = "jellyflow-trial")]
+                    let jellyflow = jellyflow_trial
+                        .map(|trial| cx.new(|cx| jellyflow_panel::JellyflowPanel::new(trial, cx)));
+                    #[cfg(feature = "jellyflow-trial")]
+                    {
+                        *jellyflow_output.borrow_mut() = jellyflow.clone();
+                    }
                     cx.new(|_| Root {
                         scene_view,
                         draft: input,
@@ -572,6 +620,8 @@ impl Viewer {
                         inspectors,
                         graph_panels,
                         preview_views,
+                        #[cfg(feature = "jellyflow-trial")]
+                        jellyflow,
                     })
                 });
                 *output.borrow_mut() = Some(root.map(|root| {
@@ -601,6 +651,10 @@ impl Viewer {
         self.model = Some(model);
         self.graph_model = graph_model;
         self.views_panel = views_panel;
+        #[cfg(feature = "jellyflow-trial")]
+        {
+            self.jellyflow_panel = jellyflow_initialized.borrow_mut().take();
+        }
         self.preview_jobs = self.views_mode.then(preview_jobs::PreviewJobs::default);
         window.set_ime_allowed(true);
         Ok(())
@@ -796,6 +850,16 @@ impl Viewer {
                 self.closing = true;
             }
         }
+        #[cfg(feature = "jellyflow-trial")]
+        if !self.closing
+            && let Some(mut smoke) = self.jellyflow_smoke.take()
+        {
+            let done = smoke.advance(self)?;
+            self.jellyflow_smoke = Some(smoke);
+            if done {
+                self.closing = true;
+            }
+        }
         #[cfg(feature = "ui-work-observation")]
         if !self.closing
             && let Some(mut work) = self.work.take()
@@ -812,9 +876,37 @@ impl Viewer {
             {
                 return Ok(());
             }
+            #[cfg(feature = "jellyflow-trial")]
+            if let Some(panel) = &self.jellyflow_panel
+                && self
+                    .application
+                    .as_ref()
+                    .unwrap()
+                    .update(|cx| !panel.read(cx).views_closed())
+            {
+                self.application.as_ref().unwrap().update(|cx| {
+                    self.root.unwrap().update(cx, |_, window, cx| {
+                        panel.update(cx, |panel, cx| panel.close(window, cx))
+                    })
+                })??;
+            }
             self.surface.as_ref().unwrap().close()?;
             self.application.as_ref().unwrap().update(|cx| cx.quit());
             if renderer.quiesced() && self.platform.is_shutdown_complete() {
+                #[cfg(feature = "jellyflow-trial")]
+                if let Some(panel) = &self.jellyflow_panel {
+                    self.application.as_ref().unwrap().update(|cx| {
+                        let panel = panel.read(cx);
+                        panel.verify_retired(cx)?;
+                        if let Some(expected) = self.expected_jellyflow_history {
+                            ensure!(
+                                panel.history()? == expected,
+                                "closing Jellyflow changed graph history"
+                            );
+                        }
+                        Ok::<_, anyhow::Error>(())
+                    })?;
+                }
                 let mut engine = self.engine.as_ref().unwrap().borrow_mut();
                 if let Some(expected) = self.expected_gesture_close_history {
                     ensure!(
@@ -877,6 +969,17 @@ impl Viewer {
                         renderer.submissions.get(),
                         jobs.accepted,
                         jobs.stale,
+                    );
+                }
+                #[cfg(feature = "jellyflow-trial")]
+                if self.jellyflow_smoke.is_some() {
+                    println!(
+                        "NARA_GPUI_JELLYFLOW_RETIRE views_closed=2 history_preserved=true independent_producer_alive=true"
+                    );
+                    println!(
+                        "NARA_GPUI_JELLYFLOW_OK ui_submissions={} diagnostics={} native_gpui_renderers=0 original_host=true independent_producer_alive=true input_delivery=injected",
+                        renderer.submissions.get(),
+                        renderer.diagnostics.get()
                     );
                 }
                 event_loop.exit();
@@ -978,7 +1081,8 @@ impl Viewer {
                 if self.smoke.is_none()
                     && self.graph_smoke.is_none()
                     && self.graph_gestures_smoke.is_none()
-                    && self.views_smoke.is_none() =>
+                    && self.views_smoke.is_none()
+                    && !self.jellyflow_smoke_mode =>
             {
                 if !active {
                     self.pressed_buttons = [false; 3];
@@ -1157,6 +1261,11 @@ impl Viewer {
         self.graph_smoke = None;
         self.graph_gestures_smoke = None;
         self.views_smoke = None;
+        self.jellyflow_smoke_mode = false;
+        #[cfg(feature = "jellyflow-trial")]
+        {
+            self.jellyflow_smoke = None;
+        }
         #[cfg(feature = "ui-work-observation")]
         {
             self.work = None;
@@ -1231,6 +1340,8 @@ pub(super) fn run() -> Result<()> {
     let views_close_pending = std::env::args().any(|arg| arg == "--smoke-views-close-pending");
     let views_smoke = views_close_pending || std::env::args().any(|arg| arg == "--smoke-views");
     let views_mode = views_smoke || std::env::args().any(|arg| arg == "--views");
+    let jellyflow_smoke = std::env::args().any(|arg| arg == "--smoke-jellyflow");
+    let jellyflow_mode = jellyflow_smoke || std::env::args().any(|arg| arg == "--jellyflow");
     let graph_mode = graph_smoke
         || graph_gestures_smoke
         || views_mode
@@ -1241,10 +1352,16 @@ pub(super) fn run() -> Result<()> {
             + usize::from(graph_smoke)
             + usize::from(views_smoke)
             + usize::from(graph_gestures_smoke)
+            + usize::from(jellyflow_smoke)
             <= 1
             && (!graph_mode || !smoke && !measure)
-            && (!views_mode || !graph_smoke),
+            && (!views_mode || !graph_smoke)
+            && (!jellyflow_mode || !graph_mode && !smoke && !measure),
         "select one consumer mode"
+    );
+    ensure!(
+        !jellyflow_mode || cfg!(feature = "jellyflow-trial"),
+        "--jellyflow and --smoke-jellyflow are unsupported without the jellyflow-trial feature"
     );
     ensure!(
         !measure || cfg!(feature = "ui-work-observation"),
@@ -1287,6 +1404,15 @@ pub(super) fn run() -> Result<()> {
         graph_smoke: graph_smoke.then(graph_smoke::GraphSmoke::new),
         graph_gestures_smoke: graph_gestures_smoke
             .then(graph_gestures_smoke::GraphGesturesSmoke::new),
+        jellyflow_smoke_mode: jellyflow_smoke,
+        #[cfg(feature = "jellyflow-trial")]
+        jellyflow_mode,
+        #[cfg(feature = "jellyflow-trial")]
+        jellyflow_panel: None,
+        #[cfg(feature = "jellyflow-trial")]
+        jellyflow_smoke: jellyflow_smoke.then(jellyflow_smoke::JellyflowSmoke::new),
+        #[cfg(feature = "jellyflow-trial")]
+        expected_jellyflow_history: None,
         views_mode,
         views_panel: None,
         views_commands: Rc::default(),

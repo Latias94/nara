@@ -8,6 +8,30 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "jellyflow-trial")]
+#[test]
+#[ignore = "requires an actual Windows GPU and gpui_view prebuilt with jellyflow-trial"]
+fn engine_owned_gpui_hosts_real_jellyflow_nodes_and_independent_views() {
+    let (output, logs) = run_native_gpui("--smoke-jellyflow", Duration::from_secs(105), 128 * 1024);
+    for marker in [
+        "NARA_GPUI_JELLYFLOW_FIRST_FRAME",
+        "NARA_GPUI_JELLYFLOW_OVERLAY",
+        "NARA_GPUI_JELLYFLOW_NATIVE_CONTROL",
+        "NARA_GPUI_JELLYFLOW_CAPTURE",
+        "NARA_GPUI_JELLYFLOW_DRAG",
+        "NARA_GPUI_JELLYFLOW_UNDO",
+        "NARA_GPUI_JELLYFLOW_VIEWS",
+        "NARA_GPUI_JELLYFLOW_RETIRE",
+        "NARA_GPUI_JELLYFLOW_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
 #[test]
 #[ignore = "requires an actual Windows GPU and prebuilt graph gesture consumer"]
 fn engine_owned_gpui_graph_gestures_capture_cancel_and_preserve_one_history_entry() {
