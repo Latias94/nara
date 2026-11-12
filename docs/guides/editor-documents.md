@@ -161,6 +161,14 @@ compiler or default frontend selection. Its
 [research record](../research/2026-11-11-open-gpui-engine-integration-layers.md#independent-graph-preview-views-and-late-results)
 keeps native qualification and remaining limits separate.
 
+Continuous graph gestures keep their uncommitted node position and viewport transform local
+to each panel. Matching pointer release sends one exact-basis command; cancellation sends none.
+The original document therefore owns the one history entry and ordinary Undo/Redo. This is
+separate from committed continuous-property editing: a richer domain that publishes intermediate
+edits must use its own original gesture/history contract rather than reuse this local-preview
+policy by assumption. See the [graph canvas input study](../research/2026-11-11-open-gpui-engine-integration-layers.md#continuous-graph-canvas-input)
+for pointer, focus, source and submitted-observation boundaries.
+
 ## Focused Verification
 
 From the repository root, serialize with other builds and reuse the root target:

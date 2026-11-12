@@ -1894,3 +1894,98 @@ checks pass. Existing warnings remain. Production framework and engine runtime/r
 unchanged, so their full unrelated matrices are not rerun. Graph canvas continuous pointer/
 wheel/capture ergonomics, general docking, complete frontend/game adoption, numeric budgets
 and full R11/R12 remain open.
+
+## Continuous Graph Canvas Input
+
+The next finite consumer separates node motion from its document mutation. The pure
+[GraphCanvas](../../tests/fixtures/gpui-engine-consumer/src/graph/canvas.rs), committed at Nara
+`3903912`, owns one local viewport transform and at most one transient gesture. Node motion uses
+its captured authored position and starting zoom; a matching primary release yields one
+exact-basis Move for the existing domain owner. Clicking, returning to the original position
+or canceling yields no edit. Middle drag and wheel change only local view state. Numeric input
+is checked before changing state; authored position, pan and zoom have explicit finite bounds.
+
+The behavior reference is Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`,
+`scene/gui/graph_edit.cpp::{gui_input,_pan_callback,set_zoom_custom}`: separate viewport movement
+and anchored zoom from the node-move gesture. This consumer does not import Godot's graph
+framework, snapping, multi-selection, frame/group nodes or panning policy wholesale.
+
+The [panel adapter](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/graph_panel.rs)
+binds the existing GPUI pointer handle to its fixed viewport. Node descendants and paths can
+move while the original owner retains capture, including outside the viewport. Matching release
+uses the original captured document/revision; source change, Escape, pointer cancellation,
+focus loss and changed viewport/scale retire local preview. Typed ports remain independent
+controls. Native input conversion preserves left/middle/right state and Lines/Pixels deltas.
+
+Ctrl/platform-wheel preserves the authored point under the viewport-local pointer wherever pan
+bounds permit it. Wheel while panning rebases the drag to the actual pointer and constrained
+result, preventing a stationary release from restoring an obsolete baseline. Wheel during a node
+drag first retires that uncommitted preview. Original input admission and document history remain
+with GPUI and EditorProjectSession respectively; no new input router or generic gesture service
+is introduced.
+
+Independent review found that stopping propagation in the custom node-down listener blocked
+GPUI's later default focus transfer. Actual native execution also failed the existing graph's
+arrow-key workflow. Node down now retains the official focus behavior; middle panning alone
+explicitly focuses the canvas and consumes the down event. The new native fixture also initially
+changed logical scale before Winit's startup geometry observation, which then replaced it.
+It now waits for that actual initial observation. Neither correction changes the framework's
+focus or geometry authority.
+
+Submitted graph observation additionally compares the local transform and active node-preview
+stamp captured by the accepted frame. Domain revision equality alone cannot identify which local
+gesture state is displayed. The pure gesture/domain/public Host cohort passes 46/46
+(`2501bc73-3d31-43c2-ba55-5d610e509c4a`), including 18 gesture cases. Native integration and
+full affected qualification below remain separate evidence; no physical OS input, broader
+gesture library, full Editor/frontend adoption or numeric budget follows from the pure tests.
+
+### Continuous Canvas Qualification
+
+The native integration is committed at Nara `77dfa4c`, with no production Open-GPUI or engine
+runtime/render change. Qualification uses Rust 1.95.0, serial one-job Cargo and the existing
+shared target on Windows/RTX 4090. Both native backends use the original `Bgra8UnormSrgb` target.
+
+| Scope | Actual result | Nextest run |
+| --- | --- | --- |
+| Pure gestures, graph/request owners and public Host | 46/46 | `2501bc73-3d31-43c2-ba55-5d610e509c4a` |
+| DX12: original graph, continuous gestures, Scene, dual Views, held-task close and work probe | 6/6 | `d473e5d6-61b4-43a5-b85a-56237a07066e` |
+| Vulkan: the same six complete trajectories | 6/6 | `83cd58a7-5563-4a81-9202-60419186a803` |
+| Final strengthened gesture assertions, DX12 | 1/1 | `52b34c82-752d-40f1-9211-1b7c6b4cf412` |
+| Final strengthened gesture assertions, Vulkan | 1/1 | `41ad8075-417c-4a1b-b39c-e0adb18a1133` |
+
+The final gesture reruns follow two qualification-only additions to that trajectory: an actual
+submitted-header displacement check after wheel pan, and closing during an already submitted
+node-drag preview. These overlapping suites are not a unique test total. No later production or
+other-mode change invalidates the six-case cohort's scope.
+
+Each final trajectory completes 44 actual UI submissions at logical scale 1.25. It observes
+several local drag previews without source/history changes, then one Move and exact Undo/Redo.
+Capture survives outside motion and a wrong-button release; Escape, focus loss and a real
+external domain revision cancel it. Ports retain their independent link behavior. Lines wheel
+moves both local pan and the submitted header by the expected displacement while the other
+panel remains unchanged. Pixel-wheel zoom preserves its world anchor and reaches both limits;
+middle-pan wheel rebasing preserves stationary motion/release. A final submitted moved preview
+is retired through original surface/application shutdown, with unchanged domain history and an
+empty mutation queue before Session close. The independent producer remains usable.
+
+The maintained framework snaps layout in device-pixel space
+(`crates/gpui/src/taffy.rs:287-330` at the unchanged framework pin). An initial fixture assumed
+0.02 logical-pixel equality between a pointer and two independently snapped header positions;
+the observed half-device-pixel difference was valid layout. Only that painted-geometry check
+uses a one-device-pixel bound. Source positions, transform math and anchor checks retain their
+0.02 logical-pixel tolerance. Testing review adds the actual header translation oracle so merely
+publishing correct transform metadata cannot hide missing visual pan. It also confirms that
+the final close starts with a moved preview, not only a button-down.
+
+One qualification-only same-Scene diagnostic replay in the original submission finds 21 blue
+curve pixels in the seven-by-seven probe neighborhood on both backends. Diagnostic count is
+the number of those replays, not an error counter; the harness separately rejects backend ERROR
+logs. This is not swapchain readback, scanout or steady-state GPU-cost evidence. Input is
+injected through the existing HostedSurface/keyboard adapter, without physical OS input claims.
+
+Independent correctness and testing reviews close their findings without remaining P1/P2.
+Final all-target/all-feature correctness Clippy, no-default-feature all-target compilation,
+package formatting and changed-document link/whitespace checks pass; existing warnings remain.
+No manifest or lock changes occur. Existing Scene, graph, View/task and work-probe assertions
+remain intact. General docking, richer graph/Timeline tools, complete frontend/game execution,
+physical input and numerical allocation/upload/GPU/latency budgets remain open.

@@ -4165,6 +4165,43 @@ changes, and no new default, Surface Slot aggregation or performance budget foll
 R11c continuous canvas pointer/wheel/capture ergonomics, general docking, wider workflows and
 the independent Editor/game selection retain their full acceptance requirements.
 
+#### Continuous graph canvas gestures
+
+Continue in the same public graph consumer. Keep viewport pan/zoom and uncommitted node motion
+panel-local. A primary-button drag previews from the captured node position and displayed zoom;
+matching release emits one exact-basis Move through the original document/history owner. A
+click or canceled gesture emits none. Source/revision replacement, Escape, pointer cancellation,
+focus loss and viewport/scale retirement cancel local preview. Wrong-button release cannot end
+the admitted gesture. Bind the original GPUI pointer handle to the fixed viewport so children
+can move while capture remains with its original owner, including outside viewport bounds.
+
+Middle-button panning and Lines/Pixels wheel deltas affect only that panel. Ctrl/platform-wheel
+zoom preserves the world point under its viewport-local anchor within finite pan/zoom bounds.
+Wheel during pan rebases its drag baseline; stationary release must not jump. Wheel during node
+drag cancels its uncommitted edit before changing view transform. Node/port controls retain
+their normal focus, semantics and typed-link behavior.
+
+Use Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`,
+`scene/gui/graph_edit.cpp::{gui_input,set_zoom_custom}` as the bounded behavior reference:
+separate graph motion from view transform and close one node-move gesture at release. Keep
+existing GPUI public pointer capture/targeted wheel and original Window/Host authority rather
+than adding another input router. Qualify repeated native presentations, outside motion,
+wrong release, one history entry/Undo/Redo, cancellation and independent panels at fractional
+scale. Preserve prior graph, Scene, dual-View, task-close and work-probe trajectories.
+
+The [qualified finite consumer](../research/2026-11-11-open-gpui-engine-integration-layers.md#continuous-canvas-qualification)
+is committed as `3903912` (pure gestures) and `77dfa4c` (native integration). Pure/domain/public
+Host passes 46/46. Six affected native trajectories pass 6/6 on DX12 and Vulkan; subsequent
+qualification-only visible-pan and submitted-preview-close assertions pass 1/1 per backend.
+The final gesture child completes 44 actual submissions, original history/Undo/Redo, outside
+capture, wrong release, Escape/focus/revision cancellation, independent wheel/anchored zoom and
+stationary release after wheel rebase. Closing a displayed moved preview preserves source
+history and leaves no queued edit, while the independent producer remains live. Painted geometry
+respects the existing one-device-pixel snapping bound; domain/transform checks remain strict.
+Correctness Clippy, feature-off compilation, format and document checks pass. No production
+framework/runtime/render changes or new default/slot/input authority follow. Wider graph/
+Timeline, docking, full frontend/game selection and numeric budgets remain open.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

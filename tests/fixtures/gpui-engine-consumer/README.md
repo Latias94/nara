@@ -27,6 +27,20 @@ or increased submission count as proof that the source is already displayed. Pen
 refresh work may coexist with the correct submitted frame. Input remains subject to the
 original rendered handlers and exact captured-basis validation.
 
+Drag a node header with the primary button to preview its position; matching release sends one
+Move to the document owner. Escape, focus loss, pointer cancellation or a source change drops
+the preview without history. Middle drag pans the local viewport, including outside its bounds;
+ordinary wheel pans, and Ctrl/platform-wheel zooms around the pointer. Lines and pixel deltas
+retain distinct units. Wheel during a middle drag rebases its pointer baseline so release does
+not jump; wheel during a node drag cancels its uncommitted move. A wrong-button release cannot
+finish either gesture. Zoom is bounded to 0.5–2 and pan to ±15000 logical pixels per axis.
+
+`--smoke-graph-gestures` runs the separate continuous-input trajectory over the same original
+Host. It is distinct from the ordinary create/link/edit/history graph workflow. Qualification
+waits for submitted source, view transform and node preview rather than relying on source
+revision alone. The graph consumes the existing GPUI capture and targeted wheel interfaces;
+its gesture math is a finite consumer module, not another input system or generic UI runtime.
+
 ```text
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --lib --test graph_document --test-threads=1
 cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features ui-work-observation

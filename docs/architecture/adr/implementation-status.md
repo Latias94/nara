@@ -1142,9 +1142,21 @@ changing Surface Slot aggregation or adding another GPU/task/input owner. Contin
 canvas gestures, general docking, full Shader Graph, budgets and Editor/game selection remain
 open; no full Goal/R11/R12 completion follows.
 
-The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
-interaction, complete component state/effects lifecycle and component-library ergonomics
-unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate
+The [continuous graph canvas successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#continuous-canvas-qualification)
+adds pure local gestures at `3903912` and original GPUI capture/scroll integration at `77dfa4c`.
+Node previews commit one exact-basis Move on matching release; local pan/anchored zoom do not
+mutate the document. Source/focus/Escape/retirement cancellation preserves history, with exact
+submitted transform/preview observation and original default header focus. Pure/domain/public
+Host passes 46/46; the six affected native trajectories pass 6/6 per backend, and final strengthened
+gesture assertions pass 1/1 per backend. Actual visible pan, moved-preview close, curve pixels
+and original producer retirement are covered on DX12 and Vulkan. Correctness Clippy, feature-off
+checks, format and document checks pass with existing warnings. No production framework,
+runtime/render or default-selection change occurs. Full graph/Timeline, docking, Editor/game
+execution, physical input and numeric budgets retain separate acceptance.
+
+The finite custom-draw and canvas consumers above do not establish a general component
+state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
+Public semantic panel custody is now separate
 from the explicitly selected Dear reference; the bounded image attachment below has its own
 consumer scope, while the complete successor interface remains open. Finite Rect/Text/Mesh
 paint and button events alone do not close it.
