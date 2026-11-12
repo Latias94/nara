@@ -4241,6 +4241,22 @@ Use its measured work and minimal failures to feed Jellyflow; framework deficien
 in Open-GPUI and product semantics remain Nara-owned. Shader/animation tools retain their
 separate compile/execution contracts. This audit does not complete R11b, R11c or the full Goal.
 
+The November 12 [maintained Jellyflow consumer](../research/2026-11-11-open-gpui-engine-integration-layers.md#maintained-jellyflow-consumer-qualification)
+implements the user's compilation-and-integration prerequisite before the wider graph repairs.
+Open-GPUI `main` is published, with consumers pinned to code baseline `f75c10b2`; Jellyflow's
+adapter/product migration is locally committed and fast-forwarded to its original `main` at
+`8a7c2df`. The unfinished integrity worktree remains separate. Nara's optional independent
+fixture at `99c2b26` hosts two native Views over one standalone Jellyflow runtime/history through the
+original renderer. Adapter nextest passes 519/519 and existing Nara domain/public Host controls
+pass 46/46. Actual DX12 and Vulkan cohorts each pass 3/3, including original Scene/gesture
+controls, actual graph pixels/input, one drag/Undo and original host retirement.
+
+The [Nara handoff](2026-11-12-nara-ui-integration-handoff.md) records the engine's next complete
+external-domain consumer and the separate Open-GPUI framework handoff path. Independent library
+maintenance can continue from these boundaries. Complete Dialogue Graph admission/history/
+persistence, reusable behavior, docking, Editor/game execution and measured optimization remain
+in their existing R11 owners. Neither this prerequisite nor the handoff completes the full Goal.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

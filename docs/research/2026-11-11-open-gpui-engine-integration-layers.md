@@ -2018,3 +2018,54 @@ qualification is a control, not substitute evidence for Jellyflow. A proposed
 complete Dialogue Graph consumer can drive the external-domain seam and ongoing independent
 maintenance before a wider Shader Graph adoption. No default, dependency or ADR ownership
 selection changes follow from this study.
+
+## Maintained Jellyflow Consumer Qualification
+
+On November 12, Open-GPUI's maintenance branch was fast-forwarded into `main` and published.
+The code baseline is `f75c10b2a9bf7b4dcb2c8c2aa446203997601369`; the later
+`2cc8ff10304ba905ccf0d664595f3bc93c34b170` publishes its independent framework handoff.
+The fixed Zed comparison target is unchanged. Nara and Jellyflow consume the exact code
+revision from one Git source, avoiding incompatible registry/path/Git entities with equal
+package versions.
+
+Jellyflow's adapter migration is `2deeeba79c538b47fcf45c1916bc886aa28a82dd`; its separate
+native product migration is `8a7c2df55acba7f00f5465d9c97ffd8387b791f0`. Both are on local
+Jellyflow `main`, without remote publication. Stable capture handles, targeted input, wheel
+intent and accepted measurement callbacks replace the obsolete adapter interfaces. The
+independent Nara fixture uses the normal adjacent Jellyflow checkout, not the migration worktree.
+The separate integrity-repair worktree remains unfinished and unmerged.
+
+Nara implementation `99c2b26164fcc9929fc1e8224a0429cd380164c4` adds the optional
+`jellyflow-trial` feature: two native graph Views sharing one standalone
+Jellyflow runtime/history through the original Nara RenderHost/device/queue/target. Ordinary
+retained nodes contain real ports, a local native control and a drag grip. Accepted Window
+publication supplies automation geometry. The native trajectory verifies actual pixels,
+overlay input isolation from the hidden Scene, local control state, real capture, a completed
+drag with one history entry, Undo, independent pan/zoom and explicit window-aware host retirement
+before the original logical surface closes. A separate engine producer remains valid afterward.
+
+| Gate | Actual result |
+|---|---|
+| Migrated Jellyflow adapter | 519/519 passed, no skips; `25b9407c-fcc2-4729-9b2b-8c8939119dd4`. |
+| Jellyflow native product | Locked all-target/all-feature Windows compilation passed, including real-window-smoke targets; product runtime was not rerun. |
+| Existing Nara graph/domain/public Host controls | Release nextest 46/46 passed; `25c3e58e-503e-4e1c-842f-861308a607ce`. |
+| Actual DX12 native controls | 3/3 passed, four unselected tests; `d06af434-2830-4bc5-b43a-97c4cabe72aa`. |
+| Actual Vulkan native controls | 3/3 passed, four unselected tests; `fefe7d07-e079-40ce-9fbd-bc0513659039`. |
+
+The native cohorts include the new Jellyflow workflow and the original complete Scene and
+continuous graph-gesture controls. These are Windows 11/RTX 4090 executions through injected
+framework input, original Nara GPU submission and accepted-frame observation. They do not
+qualify physical input, foreign native platforms, a numeric budget or a complete Editor.
+
+Qualification corrected zero-height port composition, missing binding observation, overlay
+click-through and explicit retained-host close. It also corrected test assumptions: selection
+does not change merely on press, and a post-release frame does not prove that a deferred
+command has completed. The smoke waits for the exact source/history outcome and matching
+accepted presentation, retaining the original bounded deadline.
+
+This is a standalone Jellyflow-authoritative graph, not an implementation of Nara's external
+domain/Session/history/persistence seam. The audit's remaining integrity/layout findings,
+canonical docking, complete Shader Graph and game UI choice remain open. The two independent
+development paths, source pins, qualification limits and research map are in the
+[Nara integration handoff](../plans/2026-11-12-nara-ui-integration-handoff.md) and Open-GPUI's
+`docs/plans/2026-11-12-framework-maintenance-handoff.md`.

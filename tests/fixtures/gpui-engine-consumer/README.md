@@ -1,10 +1,41 @@
 # Nara-Owned GPUI Rendering Consumer
 
-This independently locked workspace consumes the maintained sibling `open-gpui` checkout through
-relative path dependencies. Keep the two repositories next to each other and use the framework
-revision recorded in the [integration study](../../../docs/research/2026-11-11-open-gpui-engine-integration-layers.md).
-The engine and ordinary renderer fixtures do not resolve these framework paths. This is a public
-integration consumer, not the selected full Editor frontend.
+This independently locked workspace consumes the maintained Open-GPUI Git revision
+`f75c10b2a9bf7b4dcb2c8c2aa446203997601369`, published on its `main` branch. All framework
+packages and the optional Jellyflow adapter must resolve the same Git source. The
+[integration study](../../../docs/research/2026-11-11-open-gpui-engine-integration-layers.md)
+records the qualification scope. The engine and ordinary renderer fixtures do not acquire
+this framework dependency. This is a public integration consumer, not the selected full Editor
+frontend.
+
+The optional Jellyflow packages resolve through an adjacent maintained `jellyflow` checkout.
+Cargo requires those path manifests even when `jellyflow-trial` is disabled. The handoff records
+the qualified library revision; this sibling requirement belongs only to this independent fixture.
+
+## Optional Jellyflow Consumer
+
+Enable `jellyflow-trial` to inspect two independent
+native graph Views over one Jellyflow `GraphRuntime` and history. Custom retained nodes contain
+real graph ports, native controls and drag handles. `--jellyflow` opens the interactive consumer;
+`--smoke-jellyflow` runs the finite native trajectory and closes.
+
+```text
+cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features jellyflow-trial,ui-work-observation
+```
+
+After selecting the backend as below, run `target/release/examples/gpui_view.exe --jellyflow`.
+The ignored test
+`engine_owned_gpui_hosts_real_jellyflow_nodes_and_independent_views` checks accepted native
+geometry and actual pixels, a local control, captured node drag with one history entry, Undo,
+independent pan/zoom and normal retirement. Set `NARA_GPUI_VIEW_EXE` to the absolute prebuilt
+release executable when running that test from a debug nextest build.
+
+This consumer deliberately selects Jellyflow as the graph authority. It does not mirror or
+replace Nara's authored ValueGraph, Session admission, saved-content identity or persistence.
+The [engine handoff](../../../docs/plans/2026-11-12-nara-ui-integration-handoff.md) records
+the external-domain seam and complete Dialogue Graph successor. A Shader Graph, general docking,
+game UI choice and numeric scale budgets retain their own acceptance. Executed results and
+known library defects belong in the linked studies and handoff.
 
 ## Typed Graph Consumer
 

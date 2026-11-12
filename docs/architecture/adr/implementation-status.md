@@ -1167,6 +1167,19 @@ admission and Render/Host/preview owners
 remain required. No new dependency/default, completed general node editor or full R11/R12 claim
 follows.
 
+The subsequent November 12 [maintained Jellyflow consumer](../../research/2026-11-11-open-gpui-engine-integration-layers.md#maintained-jellyflow-consumer-qualification)
+completes the compilation-and-first-integration prerequisite. Open-GPUI is published on `main`;
+both projects select exact Git code baseline `f75c10b2`. Jellyflow's adapter and independent
+native product migrate at `2deeeba`/`8a7c2df`, now on local Jellyflow `main`; its separate
+integrity draft remains unmerged. The optional Nara fixture at `99c2b26` hosts two Views over one standalone
+Jellyflow graph/history through the original Render/Host/GPU owners. Adapter tests pass 519/519,
+existing Nara domain/public Host tests 46/46, and the selected actual Windows DX12/Vulkan native
+cohorts each pass 3/3. Pixel/input, overlay exclusion, exact completed drag/Undo, independent
+navigation and window-aware retirement are covered. The [Nara handoff](../../plans/2026-11-12-nara-ui-integration-handoff.md)
+records separate engine and framework development paths. Nara Session/domain/persistence
+integration, remaining graph defects, general docking/Shader Graph and Editor/game selection
+retain their prior owners and acceptance; no full R11/R12/Goal completion follows.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate
