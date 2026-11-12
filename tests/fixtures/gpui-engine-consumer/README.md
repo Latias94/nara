@@ -37,6 +37,30 @@ the external-domain seam and complete Dialogue Graph successor. A Shader Graph, 
 game UI choice and numeric scale budgets retain their own acceptance. Executed results and
 known library defects belong in the linked studies and handoff.
 
+## Dialogue Graph Domain
+
+The public `dialogue` module is a separate `consumer.dialogue-graph` extension document.
+Line, Choice and End nodes, stable choice ports, atomic edits, one domain history and the
+versioned byte codec use Nara's original Session/file workflow. A local conversation preview
+follows one explicit transition at a time; cycles and incomplete authoring states are legal.
+The existing list-of-lines Dialogue and finite ValueGraph formats remain separate.
+
+With `jellyflow-trial`, `dialogue::jellyflow::DialogueFacts` captures an immutable core graph
+and checked ID/incarnation mappings. It creates no Jellyflow runtime or second history.
+An external-document native interface, two Dialogue Views and an ordinary property editor
+remain work in the [consumer plan](../../../docs/plans/2026-11-12-dialogue-graph-integration-plan.md).
+The `--jellyflow` mode above continues to demonstrate the standalone runtime.
+
+Run the CPU/public Session controls without opening a native window:
+
+```text
+cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --features jellyflow-trial,ui-work-observation --lib --test graph_document --test dialogue_document --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+The plan records actual results and limits. Source lifetimes are separate from saved content
+identity; adapters must retain the original document/revision and preserve unchanged choice IDs
+and outgoing targets when constructing complete choice replacements.
+
 ## Typed Graph Consumer
 
 The same executable accepts `--graph` for two independent panels over one source-built
