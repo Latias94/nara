@@ -1,5 +1,6 @@
 //! A finite scalar/vector graph owned by the ordinary Editor extension document lifecycle.
 
+pub mod canvas;
 pub mod preview;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
