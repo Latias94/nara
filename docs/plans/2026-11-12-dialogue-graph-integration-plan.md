@@ -194,3 +194,51 @@ retirement. Node/property entry points here are typed commands, not native contr
 Dialogue native trajectory ran for this prerequisite. The earlier standalone Jellyflow
 DX12/Vulkan results retain their original scope and do not qualify the missing external-domain
 interface.
+
+## Private Read-Side Extraction
+
+Jellyflow `d4125cc34247b897bacdb2e8099174dc2789cc8b` separates `GraphReadState` from the
+standalone writer's history, profile, middleware and forward allocators. The read state contains the existing
+graph `Arc`, revision, document epoch, policy, indices and node/port/edge incarnation maps.
+Snapshot capture, lifetime queries, frame facts, port-connection queries and bounded connection
+admission consume those facts directly. Original shared-state borrows and mutation/notification
+guards remain at their existing entry points; no forwarding trait, duplicate graph or new
+public interface is introduced.
+
+Document replacement prepares the complete successor read state and index before publication.
+Command execution, Noop, Undo/Redo, allocator behavior and actual query-work counters keep their
+original contracts. In particular, a profile's presence can defer connection planning without
+placing the profile callback or history inside the read state.
+
+The first production check passed. The initial Runtime test build found one private impact
+fixture still accessing the former field; moving that access to `state.read.graph` preserved
+its transaction path and all assertions. The corrected release Runtime/public suite passes
+599/599, no skips, run `cc14beff-c419-471e-8cce-30ea027a8bd7`. Independent source review found
+no concrete P1/P2 in the extraction, including snapshot identity, publication, profile entry
+and work-accounting paths.
+
+The release adapter suite also passes 519/519, no skips, across 15 binaries; run
+`30f849ce-5d10-4d58-8142-e11af7c4093c`. It preserves the existing managed edits, IME drafts,
+overlay arbitration, measurement, frame publication and retirement controls. Runtime all-target
+Clippy with `-D warnings`, root format check and whitespace checks pass. All Cargo invocations
+were serial, with Rust `1.95.0`, one build job and the existing Nara target. The adapter's
+dependency combination required a fresh build; no dependency version or lockfile changed.
+
+```text
+cargo +1.95.0 check --locked -p jellyflow-runtime --lib
+cargo +1.95.0 nextest run --locked --release -p jellyflow-runtime --lib --test public_surface --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --release -p jellyflow-open-gpui --lib --tests --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 clippy --locked -p jellyflow-runtime --all-targets -- -D warnings
+cargo +1.95.0 fmt --all -- --check
+```
+
+Run those commands from the Jellyflow checkout. This qualification covers changed headless
+owners and their existing adapter consumers. It adds no Nara native/GPU run, foreign-platform
+execution, compiler-floor or performance claim, and does not qualify the unmerged integrity
+repair draft. The source commit is local; the previously published Jellyflow baseline remains
+`8a7c2df` at this checkpoint.
+
+This is a private prerequisite within step 3. `ViewSession` still reaches its existing
+`RuntimeShared`; a public external fact publisher, external command admission/completion and
+View-local intrinsic-height path remain unimplemented. The native Dialogue consumer and its
+DX12/Vulkan acceptance remain open.

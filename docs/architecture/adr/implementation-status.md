@@ -1192,6 +1192,14 @@ Jellyflow's external-document intent/completion interface and two native Dialogu
 ordinary property editing remain unimplemented. Earlier standalone native results do not
 qualify them or complete R11c.
 
+The subsequent [private read-side extraction](../../plans/2026-11-12-dialogue-graph-integration-plan.md#private-read-side-extraction)
+at local Jellyflow `d4125cc` separates graph facts/indices/query implementation from history
+and mutation hooks without a new public API. Existing Runtime/public tests pass 599/599,
+adapter tests 519/519, and Runtime all-target Clippy, format and independent review pass.
+`ViewSession` still uses its incumbent source owner. External fact publication, asynchronous
+domain completion, View-local intrinsic size and the native Dialogue consumer remain open;
+the existing unmerged graph-integrity draft retains its separate scope.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate

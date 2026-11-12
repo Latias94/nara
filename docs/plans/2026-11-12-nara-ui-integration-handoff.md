@@ -48,12 +48,13 @@ The remote `main` was independently queried after the push:
 ```text
 origin: https://github.com/Latias94/open-gpui.git
 published code baseline: f75c10b2a9bf7b4dcb2c8c2aa446203997601369
-main including framework handoff: 2cc8ff10304ba905ccf0d664595f3bc93c34b170
+verified main including framework handoff updates: 625173c944fb32555293446405f346db7c8b17cf
 previous remote main: 689db5b49b33a5b2e64ba332bff72c98e70092bb
 ```
 
-The later `2cc8ff1` commit adds the independent framework handoff; the consumers intentionally
-retain the code baseline `f75c10b` rather than advance for a documentation-only change.
+The later `2cc8ff1` and `625173c` commits add and clarify the independent framework handoff;
+the consumers intentionally retain code baseline `f75c10b` for those documentation changes.
+The subsequent user-authorized November 12 push was verified against the remote `main`.
 The merge has no conflict or merge-specific source change: the previous main is an ancestor.
 Core/WGPU/Windows library checks pass on the published source. Earlier qualification remains
 scoped to its documented consumers; this publication does not constitute a new full-platform
@@ -107,9 +108,12 @@ resolves optional path dependencies. This applies to the independent fixture, no
 Nara workspace or its default Editor dependency closure.
 
 The library migration is `2deeeba79c538b47fcf45c1916bc886aa28a82dd`; the independent product
-migration is `8a7c2df55acba7f00f5465d9c97ffd8387b791f0`. Original Jellyflow `main` is at
-the latter revision, two local commits ahead of its unchanged remote. No Jellyflow push was
-performed. The unfinished integrity worktree still starts from the audit baseline and was not
+migration is `8a7c2df55acba7f00f5465d9c97ffd8387b791f0`. Both were subsequently
+published on Jellyflow `main` with the user's November 12 authorization; the remote was queried
+and matched `8a7c2df`. The local private read-side follow-up `d4125cc` is not yet published.
+The server accepted the publication with a rules-bypass notice for three expected required
+checks; their later CI outcome is not recorded here.
+The unfinished integrity worktree still starts from the audit baseline and was not
 merged. Read the maintained-source section of Jellyflow's
 `docs/guides/native-adapter-authoring.md` for the new capture, focus, measurement and package
 source contract.
@@ -251,7 +255,7 @@ The qualified Nara consumer implementation is
 
 | Check | Actual result and scope |
 |---|---|
-| Published Open-GPUI | `main`/`origin/main` at documentation handoff `2cc8ff1`; code consumers retain `f75c10b2`. The explicit main publication is complete. |
+| Published Open-GPUI | `main`/`origin/main` verified at documentation handoff update `625173c`; code consumers retain `f75c10b2`. The explicit main publication is complete. |
 | Migrated Jellyflow adapter | 519/519 nextest tests passed, no skips; run `25b9407c-fcc2-4729-9b2b-8c8939119dd4`. |
 | Separate Jellyflow native product | Locked Windows all-target/all-feature compilation passed, including both native binaries and real-window-smoke targets. Product runtime was not rerun. |
 | Existing Nara graph/domain/public Host controls | Release nextest 46/46 passed, no skips; run `25c3e58e-503e-4e1c-842f-861308a607ce`. |
@@ -315,9 +319,13 @@ checks pass. Independent domain and facts/public Session reviews found no concre
 The plan records the initial projection-test serialization failure and its correction.
 No new native Dialogue qualification follows from those CPU/public results.
 
-Jellyflow currently binds `ViewSession` to the object that also executes commands and history.
-The coordinated next library work separates immutable read-side facts/indices/View publication
-from standalone mutation/history, then supplies typed canvas intents and exact completions.
+Jellyflow still binds `ViewSession` to the object that also executes commands and history.
+The local [private read-side prerequisite](2026-11-12-dialogue-graph-integration-plan.md#private-read-side-extraction)
+at `d4125cc` separates graph facts, indices and query implementation from command state.
+Runtime/public tests pass 599/599 and adapter tests 519/519; Clippy, format and independent
+review pass. No public external-source or asynchronous command interface is added yet.
+The coordinated next library work separates shared read-side publication from standalone
+mutation rights, then supplies typed canvas intents and exact completions.
 Intrinsic height remains View-local. Nara retains its domain commands and Session admission;
 the library retains standalone `GraphRuntime`. Do not bridge this gap with a writable mirror,
 per-edit `replace_document`, a universal forwarding trait or a Nara dependency in Jellyflow.

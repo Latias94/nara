@@ -4264,6 +4264,13 @@ interface, two Dialogue Views and ordinary property editor remain open. Reusable
 docking, Editor/game execution and measured optimization remain in their existing R11 owners.
 Neither this prerequisite nor the handoff completes the full Goal.
 
+The same [consumer plan](2026-11-12-dialogue-graph-integration-plan.md#private-read-side-extraction)
+records the private read-side prerequisite at Jellyflow `d4125cc`. Graph facts, indices and
+query implementation are separate from command-history state; existing Runtime/public tests pass 599/599
+and adapter tests 519/519. Clippy, format and independent review pass within that scope.
+The public external-source and exact asynchronous completion interfaces remain open, as do
+View-local intrinsic size and the complete native Dialogue workflow.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can
