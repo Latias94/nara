@@ -2,6 +2,8 @@
 mod content;
 #[path = "engine.rs"]
 mod engine;
+#[path = "graph_gestures_smoke.rs"]
+mod graph_gestures_smoke;
 #[path = "graph_panel.rs"]
 mod graph_panel;
 #[path = "graph_smoke.rs"]
@@ -380,6 +382,7 @@ struct Viewer {
     graph_model: Option<Entity<GraphModel>>,
     graph_intents: Rc<RefCell<VecDeque<graph_panel::GraphIntent>>>,
     graph_smoke: Option<graph_smoke::GraphSmoke>,
+    graph_gestures_smoke: Option<graph_gestures_smoke::GraphGesturesSmoke>,
     views_mode: bool,
     views_panel: Option<Entity<views_panel::ViewsPanel>>,
     views_commands: Rc<RefCell<VecDeque<views_panel::ViewsIntent>>>,
@@ -401,6 +404,9 @@ struct Viewer {
     clicks: Rc<Cell<u64>>,
     picks: u64,
     pointer: open_gpui::Point<Pixels>,
+    pressed_buttons: [bool; 3],
+    native_geometry_events: u64,
+    expected_gesture_close_history: Option<nara_core::DocumentHistoryStatus>,
     modifiers: Modifiers,
     smoke: Option<smoke::Smoke>,
     #[cfg(feature = "ui-work-observation")]
@@ -418,7 +424,10 @@ impl Viewer {
         if self.work.is_some() {
             return true;
         }
-        self.smoke.is_some() || self.graph_smoke.is_some() || self.views_smoke.is_some()
+        self.smoke.is_some()
+            || self.graph_smoke.is_some()
+            || self.views_smoke.is_some()
+            || self.graph_gestures_smoke.is_some()
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -437,6 +446,8 @@ impl Viewer {
         if self.views_mode {
             engine.seed_graph_views()?;
             engine.open_views()?;
+        } else if self.graph_gestures_smoke.is_some() {
+            engine.seed_graph_views()?;
         }
         let graph_snapshot = (self.graph_mode && !self.views_mode)
             .then(|| engine.graph_snapshot())
@@ -768,6 +779,15 @@ impl Viewer {
             }
         }
         if !self.closing
+            && let Some(mut smoke) = self.graph_gestures_smoke.take()
+        {
+            let done = smoke.advance(self)?;
+            self.graph_gestures_smoke = Some(smoke);
+            if done {
+                self.closing = true;
+            }
+        }
+        if !self.closing
             && let Some(mut smoke) = self.views_smoke.take()
         {
             let done = smoke.advance(self)?;
@@ -796,6 +816,13 @@ impl Viewer {
             self.application.as_ref().unwrap().update(|cx| cx.quit());
             if renderer.quiesced() && self.platform.is_shutdown_complete() {
                 let mut engine = self.engine.as_ref().unwrap().borrow_mut();
+                if let Some(expected) = self.expected_gesture_close_history {
+                    ensure!(
+                        engine.graph_history()? == expected
+                            && self.graph_intents.borrow().is_empty(),
+                        "retiring a captured graph gesture committed a document edit"
+                    );
+                }
                 let output = engine.pulse_other()?;
                 ensure!(
                     output.is_current(),
@@ -825,6 +852,12 @@ impl Viewer {
                         "NARA_GPUI_GRAPH_OK ui_submissions={} diagnostics={} native_gpui_renderers=0 original_host=true independent_producer_alive=true input_delivery=injected",
                         renderer.submissions.get(),
                         renderer.diagnostics.get()
+                    );
+                }
+                if self.graph_gestures_smoke.is_some() {
+                    println!(
+                        "NARA_GPUI_GRAPH_GESTURES_OK ui_submissions={} original_host=true independent_producer_alive=true input_delivery=injected",
+                        renderer.submissions.get()
                     );
                 }
                 if self.views_smoke.is_some() {
@@ -902,6 +935,7 @@ impl Viewer {
         match event {
             WindowEvent::CloseRequested => self.closing = true,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.native_geometry_events += 1;
                 let (physical, scale) = {
                     let engine = self.engine.as_ref().unwrap().borrow();
                     (
@@ -943,8 +977,12 @@ impl Viewer {
             WindowEvent::Focused(active)
                 if self.smoke.is_none()
                     && self.graph_smoke.is_none()
+                    && self.graph_gestures_smoke.is_none()
                     && self.views_smoke.is_none() =>
             {
+                if !active {
+                    self.pressed_buttons = [false; 3];
+                }
                 surface.set_active(active)?
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -953,25 +991,31 @@ impl Viewer {
                 surface.dispatch_input(PlatformInput::MouseMove(MouseMoveEvent {
                     position: self.pointer,
                     modifiers: self.modifiers,
-                    ..Default::default()
+                    pressed_button: [MouseButton::Left, MouseButton::Middle, MouseButton::Right]
+                        .into_iter()
+                        .zip(self.pressed_buttons)
+                        .find_map(|(button, pressed)| pressed.then_some(button)),
                 }))?;
             }
-            WindowEvent::MouseInput {
-                state,
-                button: NativeButton::Left,
-                ..
-            } => {
+            WindowEvent::MouseInput { state, button, .. } => {
+                let (button, index) = match button {
+                    NativeButton::Left => (MouseButton::Left, 0),
+                    NativeButton::Middle => (MouseButton::Middle, 1),
+                    NativeButton::Right => (MouseButton::Right, 2),
+                    _ => return Ok(()),
+                };
+                self.pressed_buttons[index] = state == ElementState::Pressed;
                 let input = match state {
                     ElementState::Pressed => PlatformInput::MouseDown(MouseDownEvent {
                         position: self.pointer,
-                        button: MouseButton::Left,
+                        button,
                         modifiers: self.modifiers,
                         click_count: 1,
                         ..Default::default()
                     }),
                     ElementState::Released => PlatformInput::MouseUp(MouseUpEvent {
                         position: self.pointer,
-                        button: MouseButton::Left,
+                        button,
                         modifiers: self.modifiers,
                         click_count: 1,
                         ..Default::default()
@@ -1111,6 +1155,7 @@ impl Viewer {
         self.closing = true;
         self.smoke = None;
         self.graph_smoke = None;
+        self.graph_gestures_smoke = None;
         self.views_smoke = None;
         #[cfg(feature = "ui-work-observation")]
         {
@@ -1182,15 +1227,20 @@ pub(super) fn run() -> Result<()> {
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let measure = std::env::args().any(|arg| arg == "--measure-ui-work");
     let graph_smoke = std::env::args().any(|arg| arg == "--smoke-graph");
+    let graph_gestures_smoke = std::env::args().any(|arg| arg == "--smoke-graph-gestures");
     let views_close_pending = std::env::args().any(|arg| arg == "--smoke-views-close-pending");
     let views_smoke = views_close_pending || std::env::args().any(|arg| arg == "--smoke-views");
     let views_mode = views_smoke || std::env::args().any(|arg| arg == "--views");
-    let graph_mode = graph_smoke || views_mode || std::env::args().any(|arg| arg == "--graph");
+    let graph_mode = graph_smoke
+        || graph_gestures_smoke
+        || views_mode
+        || std::env::args().any(|arg| arg == "--graph");
     ensure!(
         usize::from(smoke)
             + usize::from(measure)
             + usize::from(graph_smoke)
             + usize::from(views_smoke)
+            + usize::from(graph_gestures_smoke)
             <= 1
             && (!graph_mode || !smoke && !measure)
             && (!views_mode || !graph_smoke),
@@ -1235,6 +1285,8 @@ pub(super) fn run() -> Result<()> {
         graph_model: None,
         graph_intents: Rc::default(),
         graph_smoke: graph_smoke.then(graph_smoke::GraphSmoke::new),
+        graph_gestures_smoke: graph_gestures_smoke
+            .then(graph_gestures_smoke::GraphGesturesSmoke::new),
         views_mode,
         views_panel: None,
         views_commands: Rc::default(),
@@ -1256,6 +1308,9 @@ pub(super) fn run() -> Result<()> {
         clicks: Rc::default(),
         picks: 0,
         pointer: point(px(0.), px(0.)),
+        pressed_buttons: [false; 3],
+        native_geometry_events: 0,
+        expected_gesture_close_history: None,
         modifiers: Modifiers::default(),
         smoke: smoke.then(smoke::Smoke::new),
         #[cfg(feature = "ui-work-observation")]

@@ -12,6 +12,17 @@ use super::super::graph_panel::{GraphIntent, GraphSnapshot};
 const SOURCE: &str = "graphs/value-graph.json";
 
 impl Engine {
+    pub fn graph_history(&self) -> Result<nara_core::DocumentHistoryStatus> {
+        let document = self.graph_document.context("the graph is not open")?;
+        Ok(self
+            .session
+            .current_frame()
+            .workspace()
+            .document(document)
+            .context("the graph tab is unavailable")?
+            .history)
+    }
+
     pub fn seed_graph_views(&mut self) -> Result<()> {
         use nara_gpui_engine_consumer::graph::{GraphCommand, Link, NodeId, NodeKind};
         for command in [

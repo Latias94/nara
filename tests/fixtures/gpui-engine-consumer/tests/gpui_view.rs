@@ -9,6 +9,30 @@ use std::{
 };
 
 #[test]
+#[ignore = "requires an actual Windows GPU and prebuilt graph gesture consumer"]
+fn engine_owned_gpui_graph_gestures_capture_cancel_and_preserve_one_history_entry() {
+    let (output, logs) = run_native_gpui(
+        "--smoke-graph-gestures",
+        Duration::from_secs(105),
+        128 * 1024,
+    );
+    for marker in [
+        "NARA_GPUI_GRAPH_GESTURES_MOVE",
+        "NARA_GPUI_GRAPH_GESTURES_CANCEL",
+        "NARA_GPUI_GRAPH_GESTURES_VIEW",
+        "NARA_GPUI_GRAPH_GESTURES_PIXELS",
+        "NARA_GPUI_GRAPH_GESTURES_CLOSE_CAPTURE admitted=true",
+        "NARA_GPUI_GRAPH_GESTURES_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires an actual Windows GPU and prebuilt dual-View consumer"]
 fn engine_owned_gpui_views_relocate_retire_and_reject_late_graph_results() {
     let (output, logs) = run_native_gpui("--smoke-views", Duration::from_secs(105), 128 * 1024);

@@ -4,13 +4,17 @@ use super::text_input::DraftInput;
 use nara_core::DocumentRevision;
 use nara_engine::tooling::EditorDocumentId;
 use nara_gpui_engine_consumer::graph::{
-    GraphCommand, GraphView, Link, Node, NodeId, NodeKind, evaluate,
+    GraphCommand, GraphView, Link, Node, NodeId, NodeKind,
+    canvas::{CanvasButton, CanvasTransform, GraphCanvas, ScrollUnit},
+    evaluate,
+    preview::GraphPreviewBasis,
 };
 use open_gpui::{
     AnyElement, App, Bounds, Context, Div, Element, ElementId, Entity, FocusHandle,
-    GlobalElementId, InspectorElementId, KeyDownEvent, LayoutId, PathBuilder, Pixels, Point,
-    PrepaintPublicationId, Render, Role, SharedString, Stateful, Subscription, Window, canvas, div,
-    point, prelude::*, px, rgb,
+    GlobalElementId, InspectorElementId, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent,
+    PathBuilder, Pixels, Point, PointerCaptureHandle, PrepaintPublicationId, Render, Role,
+    ScrollDelta, ScrollEvent, ScrollWheelIntent, SharedString, Stateful, Subscription,
+    TargetedEvent, Window, WindowMouseEvent, canvas, div, point, prelude::*, px, rgb,
 };
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
@@ -63,6 +67,7 @@ pub(super) enum GraphIntent {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphHit {
+    Canvas,
     AddScalar,
     AddVector,
     Add,
@@ -107,12 +112,21 @@ struct ControlGeometry {
 struct FrameGeometry {
     controls: Vec<ControlGeometry>,
     links: usize,
+    transform: CanvasTransform,
+    scale: f32,
+    node_preview: Option<(NodeId, [f32; 2])>,
 }
 
 #[derive(Clone)]
 struct GraphPresentation {
     basis: Basis,
     frame: Rc<RefCell<FrameGeometry>>,
+}
+
+struct CanvasCapture {
+    basis: Basis,
+    viewport: Bounds<Pixels>,
+    scale: f32,
 }
 
 impl FrameGeometry {
@@ -205,8 +219,9 @@ pub(super) struct GraphPanel {
     intents: Rc<RefCell<VecDeque<GraphIntent>>>,
     selected: Option<NodeId>,
     outgoing: Option<(Basis, NodeId)>,
-    pan: [f32; 2],
-    zoom: f32,
+    canvas: GraphCanvas,
+    capture: Option<CanvasCapture>,
+    pointer: PointerCaptureHandle,
     focus: FocusHandle,
     draft_basis: Basis,
     original: String,
@@ -217,6 +232,7 @@ pub(super) struct GraphPanel {
     presented: Rc<RefCell<Option<GraphPresentation>>>,
     publication: PrepaintPublicationId,
     _subscription: Subscription,
+    _pointer_events: Subscription,
 }
 
 impl GraphPanel {
@@ -234,6 +250,10 @@ impl GraphPanel {
             let snapshot = model.read(cx).snapshot.clone();
             let _ = weak.update(cx, |this, cx| this.synchronize(snapshot, window, cx));
         });
+        let weak = cx.weak_entity();
+        let pointer_events = window.intercept_window_mouse_events(move |event, window, cx| {
+            let _ = weak.update(cx, |this, cx| this.pointer_event(event, window, cx));
+        });
         Self {
             index,
             model,
@@ -243,8 +263,9 @@ impl GraphPanel {
             snapshot,
             selected: None,
             outgoing: None,
-            pan: [0., 0.],
-            zoom: 1.,
+            canvas: GraphCanvas::default(),
+            capture: None,
+            pointer: window.new_pointer_capture_handle(),
             focus: cx.focus_handle(),
             original: String::new(),
             submitted: None,
@@ -254,6 +275,7 @@ impl GraphPanel {
             presented: Rc::default(),
             publication: PrepaintPublicationId::new(),
             _subscription: subscription,
+            _pointer_events: pointer_events,
         }
     }
 
@@ -273,7 +295,24 @@ impl GraphPanel {
         self.selected
     }
     pub fn transform(&self) -> ([f32; 2], f32) {
-        (self.pan, self.zoom)
+        let transform = self.canvas.transform();
+        (transform.pan, transform.zoom)
+    }
+
+    pub fn canvas_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.presented
+            .borrow()
+            .as_ref()?
+            .frame
+            .borrow()
+            .controls
+            .iter()
+            .find(|control| control.hit == GraphHit::Canvas)
+            .map(|control| control.visible)
+    }
+
+    pub fn gesture_active(&self) -> bool {
+        self.canvas.is_active()
     }
     pub fn conflict(&self) -> bool {
         self.conflict
@@ -287,10 +326,18 @@ impl GraphPanel {
     }
 
     pub fn presents(&self, snapshot: &GraphSnapshot) -> bool {
-        self.presented
-            .borrow()
-            .as_ref()
-            .is_some_and(|presented| presented.basis == Basis::from(snapshot))
+        self.presented.borrow().as_ref().is_some_and(|presented| {
+            let frame = presented.frame.borrow();
+            presented.basis == Basis::from(snapshot)
+                && frame.transform == self.canvas.transform()
+                && frame.node_preview == self.node_preview()
+        })
+    }
+
+    fn node_preview(&self) -> Option<(NodeId, [f32; 2])> {
+        let node = self.canvas.active_node()?;
+        let source = self.snapshot.view.node(node)?;
+        Some((node, self.canvas.node_position(node, source.position)))
     }
 
     pub fn link_probe(&self) -> Option<Point<Pixels>> {
@@ -304,6 +351,213 @@ impl GraphPanel {
         let from = frame.port(GraphHit::OutputPort(link.from))?;
         let to = frame.port(GraphHit::InputPort(link.to, link.input))?;
         Some(point((from.x + to.x) / 2., (from.y + to.y) / 2.))
+    }
+
+    fn displayed_canvas(&self) -> Option<(Basis, Bounds<Pixels>, CanvasTransform, f32)> {
+        let presented = self.presented.borrow();
+        let presented = presented.as_ref()?;
+        let frame = presented.frame.borrow();
+        let viewport = frame
+            .controls
+            .iter()
+            .find(|control| control.hit == GraphHit::Canvas)?;
+        Some((
+            presented.basis,
+            viewport.layout,
+            frame.transform,
+            frame.scale,
+        ))
+    }
+
+    fn cancel_gesture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let changed = self.canvas.cancel();
+        self.capture = None;
+        if self.pointer.is_captured(window)
+            && let Err(error) = window.release_pointer(&self.pointer)
+        {
+            self.error = Some(error.to_string());
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    fn begin_gesture(
+        &mut self,
+        node: Option<NodeId>,
+        basis: Basis,
+        event: &TargetedEvent<MouseDownEvent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((displayed, viewport, transform, scale)) = self.displayed_canvas() else {
+            return;
+        };
+        if self.canvas.is_active()
+            || basis != displayed
+            || basis != Basis::from(&self.model.read(cx).snapshot)
+            || self.canvas.transform() != transform
+            || window.scale_factor() != scale
+        {
+            return;
+        }
+        let position = event.window_event().position;
+        let pointer = [
+            f32::from(position.x - viewport.origin.x),
+            f32::from(position.y - viewport.origin.y),
+        ];
+        if window
+            .capture_pointer(&self.pointer, event.window_event().button)
+            .is_err()
+        {
+            return;
+        }
+        let began = if let Some(node) = node {
+            let Some(position) = self.snapshot.view.node(node).map(|node| node.position) else {
+                let _ = window.release_pointer(&self.pointer);
+                return;
+            };
+            self.canvas.begin_node(
+                GraphPreviewBasis {
+                    document: basis.document,
+                    revision: basis.revision,
+                },
+                node,
+                position,
+                pointer,
+            )
+        } else {
+            self.canvas.begin_pan(pointer)
+        };
+        if !began {
+            let _ = window.release_pointer(&self.pointer);
+            return;
+        }
+        self.capture = Some(CanvasCapture {
+            basis,
+            viewport,
+            scale,
+        });
+        if let Some(node) = node
+            && self.selected != Some(node)
+        {
+            self.selected = Some(node);
+            self.reload(window, cx);
+        }
+        if node.is_none() {
+            self.focus.focus(window, cx);
+            cx.stop_propagation();
+        }
+        cx.notify();
+    }
+
+    fn pointer_event(
+        &mut self,
+        event: WindowMouseEvent<'_>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(event, WindowMouseEvent::Cancel(_)) {
+            self.cancel_gesture(window, cx);
+            return;
+        }
+        if !self.canvas.is_active() {
+            return;
+        }
+        let current = self.displayed_canvas();
+        let valid = self.capture.as_ref().is_some_and(|capture| {
+            capture.basis == Basis::from(&self.model.read(cx).snapshot)
+                && current.is_some_and(|(_, viewport, _, scale)| {
+                    viewport == capture.viewport && scale == capture.scale
+                })
+                && window.scale_factor() == capture.scale
+                && self.pointer.is_captured(window)
+        });
+        if !valid {
+            self.cancel_gesture(window, cx);
+            return;
+        }
+        let capture = self.capture.as_ref().unwrap();
+        let local = |position: Point<Pixels>| {
+            [
+                f32::from(position.x - capture.viewport.origin.x),
+                f32::from(position.y - capture.viewport.origin.y),
+            ]
+        };
+        match event {
+            WindowMouseEvent::Move(event) => {
+                if self.canvas.motion(local(event.position)) {
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }
+            WindowMouseEvent::Up(event) => {
+                let button = match event.button {
+                    MouseButton::Left => Some(CanvasButton::Primary),
+                    MouseButton::Middle => Some(CanvasButton::Middle),
+                    _ => None,
+                };
+                let movement =
+                    button.and_then(|button| self.canvas.finish(button, local(event.position)));
+                if !self.canvas.is_active() {
+                    self.capture = None;
+                    let _ = window.release_pointer(&self.pointer);
+                }
+                if let Some(movement) = movement {
+                    self.edit(
+                        Basis {
+                            document: movement.basis.document,
+                            revision: movement.basis.revision,
+                        },
+                        GraphCommand::Move {
+                            node: movement.node,
+                            position: movement.position,
+                        },
+                    );
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    fn scroll_canvas(
+        &mut self,
+        event: &TargetedEvent<ScrollEvent>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> ScrollWheelIntent {
+        let Some((basis, viewport, _, scale)) = self.displayed_canvas() else {
+            return ScrollWheelIntent::allow_default();
+        };
+        if basis != Basis::from(&self.model.read(cx).snapshot) || scale != window.scale_factor() {
+            return ScrollWheelIntent::allow_default();
+        }
+        let event = event.window_event();
+        let pointer = [
+            f32::from(event.position.x - viewport.origin.x),
+            f32::from(event.position.y - viewport.origin.y),
+        ];
+        let (delta, unit) = match event.delta {
+            ScrollDelta::Lines(delta) => ([delta.x, delta.y], ScrollUnit::Lines),
+            ScrollDelta::Pixels(delta) => {
+                ([f32::from(delta.x), f32::from(delta.y)], ScrollUnit::Pixels)
+            }
+        };
+        if self.canvas.scroll(
+            pointer,
+            delta,
+            unit,
+            event.modifiers.control || event.modifiers.platform,
+        ) {
+            if !self.canvas.is_active() {
+                self.capture = None;
+                let _ = window.release_pointer(&self.pointer);
+            }
+            cx.notify();
+        }
+        ScrollWheelIntent::handled().stop_propagation()
     }
 
     fn scalar(&self) -> Option<f64> {
@@ -343,6 +597,9 @@ impl GraphPanel {
         }
         let previous = Basis::from(&self.snapshot);
         let next = Basis::from(&snapshot);
+        if previous != next {
+            self.cancel_gesture(window, cx);
+        }
         let rebound = previous.document != next.document
             || previous.revision.source_id() != next.revision.source_id();
         let dirty = {
@@ -487,9 +744,15 @@ impl GraphPanel {
                 .borrow_mut()
                 .push_back(GraphIntent::Reopen { document, revision }),
             GraphHit::Apply => self.apply(basis, cx),
-            GraphHit::ZoomIn => self.zoom = (self.zoom * 1.25).min(2.),
-            GraphHit::ZoomOut => self.zoom = (self.zoom / 1.25).max(0.5),
-            GraphHit::PanRight => self.pan[0] += 32.,
+            GraphHit::ZoomIn | GraphHit::ZoomOut => {
+                self.cancel_gesture(window, cx);
+                self.canvas
+                    .zoom_by(if hit == GraphHit::ZoomIn { 1.25 } else { 0.8 }, [0., 0.]);
+            }
+            GraphHit::PanRight => {
+                self.cancel_gesture(window, cx);
+                self.canvas.pan_by([32., 0.]);
+            }
             GraphHit::Node(node) => {
                 if self.selected != Some(node) {
                     self.selected = Some(node);
@@ -516,7 +779,7 @@ impl GraphPanel {
                     self.error = Some("Choose an output port before an input port".into());
                 }
             }
-            GraphHit::Draft | GraphHit::Reload => {}
+            GraphHit::Canvas | GraphHit::Draft | GraphHit::Reload => {}
         }
         cx.notify();
     }
@@ -624,7 +887,8 @@ impl GraphPanel {
 
     fn node_card(&self, node: &Node, basis: Basis, cx: &Context<Self>) -> Div {
         let id = node.id;
-        let zoom = self.zoom;
+        let CanvasTransform { pan, zoom } = self.canvas.transform();
+        let position = self.canvas.node_position(id, node.position);
         let output_label = if matches!(&node.kind, NodeKind::Vector(_)) {
             "vec2"
         } else {
@@ -651,13 +915,17 @@ impl GraphPanel {
             } else {
                 0x2d4258
             }))
-            .on_key_down(
-                cx.listener(move |this, event, _, cx| this.node_key(id, basis, event, cx)),
+            .on_key_down(cx.listener(move |this, event, _, cx| this.node_key(id, basis, event, cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event, window, cx| {
+                    this.begin_gesture(Some(id), basis, event, window, cx);
+                }),
             );
         div()
             .absolute()
-            .left(px(self.pan[0] + node.position[0] * zoom))
-            .top(px(self.pan[1] + node.position[1] * zoom))
+            .left(px(pan[0] + position[0] * zoom))
+            .top(px(pan[1] + position[1] * zoom))
             .w(px(144. * zoom))
             .h(px(96. * zoom))
             .bg(rgb(0x253347))
@@ -710,7 +978,8 @@ impl GraphPanel {
     fn graph_canvas(&self) -> impl IntoElement + use<> {
         let links = self.snapshot.view.links.clone();
         let frame = self.frame.clone();
-        let zoom = self.zoom;
+        let zoom = self.canvas.transform().zoom;
+        let transform = self.canvas.transform();
         let publication = self.publication;
         let presented = self.presented.clone();
         let presentation = GraphPresentation {
@@ -719,6 +988,10 @@ impl GraphPanel {
         };
         canvas(
             move |_, window, _| {
+                let mut geometry = presentation.frame.borrow_mut();
+                geometry.transform = transform;
+                geometry.scale = window.scale_factor();
+                drop(geometry);
                 let committed = presented.clone();
                 let discarded = presented.clone();
                 let presentation = presentation.clone();
@@ -768,7 +1041,10 @@ impl GraphPanel {
 
 impl Render for GraphPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.frame = Rc::default();
+        self.frame = Rc::new(RefCell::new(FrameGeometry {
+            node_preview: self.node_preview(),
+            ..Default::default()
+        }));
         let basis = Basis::from(&self.snapshot);
         let output = match evaluate(&self.snapshot.view) {
             Ok(Some(value)) => format!("Output: {value}"),
@@ -816,12 +1092,13 @@ impl Render for GraphPanel {
                     cx.stop_propagation();
                 } else if event.keystroke.key == "escape" {
                     this.outgoing = None;
+                    this.cancel_gesture(window, cx);
                     cx.notify();
                 }
             }))
             .child(div().h(px(22.)).flex_shrink_0().child(format!(
                 "Graph {} · {} · {}% · {output}", self.index + 1,
-                if self.snapshot.dirty { "Modified" } else { "Saved" }, (self.zoom * 100.).round(),
+                if self.snapshot.dirty { "Modified" } else { "Saved" }, (self.canvas.transform().zoom * 100.).round(),
             )))
             .children(rows.into_iter().map(|buttons| {
                 div().h(px(28.)).flex_shrink_0().flex().gap_1()
@@ -834,11 +1111,20 @@ impl Render for GraphPanel {
                 .child(self.record(GraphHit::Apply, self.button(GraphHit::Apply, "Apply", basis, cx)))
                 .child(self.record(GraphHit::Reload, self.button(GraphHit::Reload, "Reload", basis, cx))))
             .child(div().h(px(36.)).flex_shrink_0().overflow_hidden().text_size(px(12.)).child(status))
-            .child(div().relative().flex_1().min_h(px(0.)).w_full().overflow_hidden().bg(rgb(0x101a26))
+            .child(self.record(GraphHit::Canvas, div().id("graph-viewport").relative().flex_1().min_h(px(0.)).w_full().overflow_hidden().bg(rgb(0x101a26))
+                .track_pointer_capture(&self.pointer)
+                .on_mouse_down(MouseButton::Middle, cx.listener(move |this, event, window, cx| {
+                    this.begin_gesture(None, basis, event, window, cx);
+                }))
+                .on_scroll_wheel({
+                    let weak = cx.weak_entity();
+                    move |event, window, cx| weak.update(cx, |this, cx| this.scroll_canvas(event, window, cx))
+                        .unwrap_or_else(|_| ScrollWheelIntent::allow_default())
+                })
                 .child(self.graph_canvas())
-                .children(self.snapshot.view.nodes.iter().map(|node| self.node_card(node, basis, cx))))
+                .children(self.snapshot.view.nodes.iter().map(|node| self.node_card(node, basis, cx)))))
             .child(div().h(px(18.)).flex_shrink_0().text_size(px(11.)).child(
-                "Tab / Enter / Space: controls · Node arrows: move · Delete: remove · Esc: cancel wire",
+                "Node drag: move · Middle drag: pan · Ctrl wheel: zoom · Esc: cancel · Arrows / Delete: node",
             ))
     }
 }
