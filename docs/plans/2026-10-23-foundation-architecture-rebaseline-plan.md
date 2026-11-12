@@ -4268,8 +4268,18 @@ The same [consumer plan](2026-11-12-dialogue-graph-integration-plan.md#private-r
 records the private read-side prerequisite at Jellyflow `d4125cc`. Graph facts, indices and
 query implementation are separate from command-history state; existing Runtime/public tests pass 599/599
 and adapter tests 519/519. Clippy, format and independent review pass within that scope.
-The public external-source and exact asynchronous completion interfaces remain open, as do
-View-local intrinsic size and the complete native Dialogue workflow.
+The subsequent [public immutable Source prerequisite](2026-11-12-dialogue-graph-integration-plan.md#public-immutable-external-source)
+at local Jellyflow `046a660` feeds existing `ViewSession`s from the original Nara Session's
+graph/incarnation facts.
+It constructs no second writable runtime or history. Version-checked publication, explicit
+Reopen reset and separate View layouts retain original document and native identity ownership.
+Refused feedback returns its original move-only packet before admission; the actual same-token
+layout retry is covered by library and Nara consumers. Runtime/public release tests pass
+620/620, retained/egui adapter controls 560/560 and the Nara domain/graph/public cohort 79/79.
+Correctness Clippy, feature-off compilation, format, document checks and independent reviews
+pass within that scope. Exact asynchronous authored
+completion, canonical ID adoption, native View-local intrinsic size and the complete Dialogue
+workflow remain open. This is a step-3 prerequisite, not complete R11c or a new native claim.
 
 ### R11d: Public observation and visible-UI operation
 

@@ -33,6 +33,10 @@ use tempfile::TempDir;
 const TIMEOUT: Duration = Duration::from_secs(10);
 const SOURCE: &str = "dialogue/conversation.json";
 
+#[cfg(feature = "jellyflow-trial")]
+#[path = "dialogue_document/external_source.rs"]
+mod external_source;
+
 struct Session(EditorProjectSession);
 
 impl Session {

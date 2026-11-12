@@ -9,6 +9,7 @@ use jellyflow_core::{
     NodeId as CoreNodeId, NodeKindKey, Port, PortCapacity, PortDirection, PortId, PortKey,
     PortKind,
 };
+use jellyflow_runtime::graph::{ExternalGraphError, ExternalGraphFacts};
 use nara_core::DocumentRevision;
 use nara_engine::tooling::{EditorDocumentId, EditorExtensionDocumentError};
 use serde_json::Value;
@@ -38,7 +39,7 @@ pub struct DialogueFactsBasis {
 pub struct DialogueFacts {
     basis: DialogueFactsBasis,
     source: Arc<DialogueView>,
-    graph: Graph,
+    graph: Arc<Graph>,
     nodes: BTreeMap<CoreNodeId, NodeId>,
     inputs: BTreeMap<PortId, NodeId>,
     outputs: BTreeMap<PortId, OutputPort>,
@@ -153,7 +154,7 @@ impl DialogueFacts {
         Ok(Self {
             basis: DialogueFactsBasis { document, revision },
             source,
-            graph,
+            graph: Arc::new(graph),
             nodes,
             inputs,
             outputs,
@@ -161,8 +162,36 @@ impl DialogueFacts {
         })
     }
 
-    pub const fn graph(&self) -> &Graph {
+    pub fn graph(&self) -> &Graph {
         &self.graph
+    }
+
+    /// Retains this exact graph allocation and its original source-owned incarnation facts.
+    ///
+    /// Publishing these facts does not acknowledge an authored edit. The caller keeps the
+    /// original Session basis and command result separately from the external View version.
+    pub fn external_facts(&self) -> Result<ExternalGraphFacts, ExternalGraphError> {
+        let graph = self.graph.graph_id();
+        let nodes = self.nodes.keys().filter_map(|node| {
+            self.node_incarnation(graph, *node)
+                .map(|serial| (*node, serial))
+        });
+        let ports = self
+            .inputs
+            .keys()
+            .filter_map(|port| {
+                self.input_incarnation(graph, *port)
+                    .map(|serial| (*port, serial))
+            })
+            .chain(self.outputs.keys().filter_map(|port| {
+                self.output_incarnation(graph, *port)
+                    .map(|serial| (*port, serial))
+            }));
+        let edges = self.edges.keys().filter_map(|edge| {
+            self.link_incarnation(graph, *edge)
+                .map(|serial| (*edge, serial))
+        });
+        ExternalGraphFacts::new(Arc::clone(&self.graph), nodes, ports, edges)
     }
 
     pub const fn source(&self) -> &Arc<DialogueView> {

@@ -1196,9 +1196,18 @@ The subsequent [private read-side extraction](../../plans/2026-11-12-dialogue-gr
 at local Jellyflow `d4125cc` separates graph facts/indices/query implementation from history
 and mutation hooks without a new public API. Existing Runtime/public tests pass 599/599,
 adapter tests 519/519, and Runtime all-target Clippy, format and independent review pass.
-`ViewSession` still uses its incumbent source owner. External fact publication, asynchronous
-domain completion, View-local intrinsic size and the native Dialogue consumer remain open;
-the existing unmerged graph-integrity draft retains its separate scope.
+At that checkpoint, `ViewSession` still used its incumbent source owner. The following
+[public immutable Source prerequisite](../../plans/2026-11-12-dialogue-graph-integration-plan.md#public-immutable-external-source)
+at local Jellyflow `046a660` separates read capability from the original writer. Nara's shared immutable facts and live
+incarnations now feed two ordinary Views with independent state/layout and one original
+Session document/history. Exact read versions, equal-value Noop publication, coalesced Undo,
+Reopen reset and pre-admission feedback custody retain their owning contracts. Actual
+same-token layout recovery is covered. Runtime/public release tests pass 620/620,
+retained/egui adapter controls 560/560 and Nara's combined cohort 79/79. Correctness Clippy,
+feature-off compilation, format, document checks and separate source reviews pass in scope.
+Asynchronous external authored completion, canonical ID adoption,
+native intrinsic size and the native Dialogue consumer remain open; the existing unmerged
+graph-integrity draft retains its separate scope.
 
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.

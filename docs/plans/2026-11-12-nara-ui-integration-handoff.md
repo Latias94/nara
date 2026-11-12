@@ -150,17 +150,18 @@ Keep the three projects independent by assigning one owner to each mutable fact:
 | Nara-authored graph content, semantic commands, inverse/history, saved content identity and compiled results | Selected domain owner behind original Workspace/Session admission. |
 | Standalone Jellyflow-authored graph content and history | Jellyflow GraphRuntime when a product deliberately selects that model. |
 
-The current ViewSession/adapter is coupled to a writable `GraphRuntime`, not an arbitrary
-read-only external document. Nara extension documents require `Send + Sync`, while the runtime
-uses `Rc`; its history depths also do not provide Nara's restorable content checkpoint identity.
-These are actual integration gaps. Adding `Arc<Mutex<_>>`, mirroring writes after execution,
-or calling `replace_document` after every edit does not resolve them.
+The original ViewSession/adapter was coupled to writable `GraphRuntime`. The public immutable
+Source prerequisite now lets existing Views read original external graph/incarnation facts
+without constructing another writable runtime or history. Keep that Source local to the UI;
+Nara's `Send + Sync` extension document retains authored commands, history and restorable
+content identity.
 
-For existing Nara domains, trial a fact/intent/completion seam driven by one complete external
-consumer. Immutable graph facts enter a local View; accepted intents execute through the original
-domain; exact outcomes reconcile the view. Preserve Jellyflow's independent runtime. Do not
-copy every runtime method into a generic forwarding trait, add Nara dependencies to Jellyflow,
-or introduce another universal UI graph. Choosing Jellyflow as the sole domain for a new tool
+The remaining native mutation interface must deliver typed canvas intents and exact original
+Session outcomes. Native managed edits still expect synchronous Jellyflow commands. Do not
+infer completion from publication, guess canonical domain IDs or forward opaque commands
+wholesale. Canonical ID adoption must belong to the original operation. Preserve Jellyflow's
+independent runtime; avoid writable mirrors, per-edit `replace_document`, universal forwarding
+traits or Nara dependencies in Jellyflow. Choosing Jellyflow as the sole domain for a new tool
 remains possible, with explicit storage/thread/checkpoint/admission work.
 
 ## Jellyflow Roadmap
@@ -199,7 +200,7 @@ Shader Graph. Keep the existing finite graph as a control.
 | Order | Work | Complete consumer and acceptance |
 |---|---|---|
 | 1 | Preserve the standalone Jellyflow integration control. | A standalone library graph has two live Views, real nodes/ports and a native operation; close retires library state while the independent engine producer remains valid. |
-| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow and immutable facts are qualified at `ddcc880`; next implement the external-document interface, two native Views and ordinary property editor over that original owner. |
+| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow and immutable facts are qualified at `ddcc880`; immutable Source publication now reaches ordinary Views. Next deliver exact external edit intent/completion, native intrinsic height, two native Views and ordinary property editing over that original owner. |
 | 3 | Complete reusable panel/component and visible-UI operation seams. | External components and agent/test consumers use presented identity, focus/text/overlay services and exact outcomes without private hooks. |
 | 4 | Advance the independent Editor composition through full workflows. | Qualified source/asset/property/custom tools, workspace/docking and original View lifetimes; the selected build has no Dear runtime dependency. Keep the reference selectable until the replacement is complete. |
 | 5 | Qualify the authored game UI choice separately. | HUD and multiple logical roots, player/gamepad focus, time/pause, cooked resources and world-space/material/depth needs; share suitable mechanisms without importing the whole Editor. |
@@ -217,7 +218,7 @@ The selected external-domain successor is the
 atomic choice/link changes, native text/popup/variable-height content, a separate property
 editor and two Views, one domain history, return-to-saved clean state, branch-safe Undo/Redo,
 Save/Reopen and a real conversation preview. Domain, file workflow and preview exist; native
-controls and the external-document interface still need implementation. Let that consumer
+controls and external edit intent/completion still need implementation. Let that consumer
 drive Jellyflow's seam rather than first designing a universal graph/compiler/plugin protocol.
 
 Editor and game UI can reuse suitable mechanisms and complete unstyled behavior, while keeping
@@ -319,13 +320,33 @@ checks pass. Independent domain and facts/public Session reviews found no concre
 The plan records the initial projection-test serialization failure and its correction.
 No new native Dialogue qualification follows from those CPU/public results.
 
-Jellyflow still binds `ViewSession` to the object that also executes commands and history.
 The local [private read-side prerequisite](2026-11-12-dialogue-graph-integration-plan.md#private-read-side-extraction)
 at `d4125cc` separates graph facts, indices and query implementation from command state.
 Runtime/public tests pass 599/599 and adapter tests 519/519; Clippy, format and independent
-review pass. No public external-source or asynchronous command interface is added yet.
-The coordinated next library work separates shared read-side publication from standalone
-mutation rights, then supplies typed canvas intents and exact completions.
-Intrinsic height remains View-local. Nara retains its domain commands and Session admission;
-the library retains standalone `GraphRuntime`. Do not bridge this gap with a writable mirror,
-per-edit `replace_document`, a universal forwarding trait or a Nara dependency in Jellyflow.
+review pass. At that checkpoint, no public external-source or asynchronous command interface
+was added.
+
+### External Source Follow-Up
+
+The subsequent [public immutable Source prerequisite](2026-11-12-dialogue-graph-integration-plan.md#public-immutable-external-source)
+at local Jellyflow `046a660` implements shared read-side publication separately from standalone mutation rights. The Source
+retains the original immutable graph allocation and complete incarnation observations. Existing
+Views receive version-checked publications and an explicit reset on original document
+replacement, keeping separate selection, navigation and accepted geometry.
+
+Nara's four additional public Session/file tests cover two Views over one original document and
+history, successful Noop, coalesced remove/Undo, equal-content Save/Reopen and View-local
+geometry. Unsupported commands preserve the valid View; the returned original feedback can
+have its commands moved out and its layouts resubmitted with that same token. Stale layouts
+cannot revive restored node identities. Runtime/public release tests pass 620/620 and Nara's
+combined domain/graph/public cohort 79/79. The retained/egui adapter controls pass 560/560.
+Correctness Clippy, feature-off compilation, format, document checks and separate source
+reviews pass within this scope. The library's published baseline remains `8a7c2df`;
+`d4125cc` and `046a660` are local follow-ups.
+
+Typed canvas intents and exact asynchronous completion remain the next library boundary.
+Associate accepted canonical IDs with their original operation: the domain owns node/choice
+allocation and derives link identities. Native intrinsic height must remain View-local.
+Nara retains its domain commands and Session admission; the library retains standalone
+`GraphRuntime`. The native two-View Dialogue consumer and its DX12/Vulkan acceptance remain
+open. Keep the unmerged integrity repair worktree and the published library baseline distinct.

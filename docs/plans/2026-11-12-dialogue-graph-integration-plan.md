@@ -96,6 +96,14 @@ Conversation preview can call the existing synchronous `Conversation::step`, `ad
 background preview scheduler or additional GPU View. Source changes invalidate or explicitly
 restart that preview without an authored edit.
 
+The remaining external mutation interface must distinguish a proposed graph identity from an
+identity allocated by the original domain. Standalone Jellyflow commands can propose node or
+edge IDs; Nara owns node/choice allocation and derives a link's graph edge ID from its output
+port. Bind canonical identity adoption to the exact original operation and its Session outcome.
+Do not forward an opaque `GraphCommand` wholesale, guess the accepted ID from equal values or
+infer acceptance from a published revision. Preserve that completion association through close,
+cancellation and later independent domain edits.
+
 ## Execution
 
 1. Implement the typed domain, atomic edits, bounded versioned byte codec, restorable content
@@ -145,8 +153,9 @@ performance budget follows from this consumer.
 
 ## Qualified Domain And Immutable Facts
 
-The November 12 prerequisite completes execution steps 1 and 2. Step 3 has an immutable facts
-projection, but no external-document native submission interface. Steps 4 and 5 remain open.
+The November 12 prerequisite completes execution steps 1 and 2. Step 3 now includes immutable
+Source publication into ordinary Jellyflow Views, as detailed below. External authored edit
+intents/completions, View-local native intrinsic height and steps 4 and 5 remain open.
 
 `consumer.dialogue-graph` implements the original `EditorExtensionDocument` contract. Schema 1
 contains only authored entry, nodes and links. Limits are 512 nodes, 4,096 total choices,
@@ -238,7 +247,78 @@ execution, compiler-floor or performance claim, and does not qualify the unmerge
 repair draft. The source commit is local; the previously published Jellyflow baseline remains
 `8a7c2df` at this checkpoint.
 
-This is a private prerequisite within step 3. `ViewSession` still reaches its existing
-`RuntimeShared`; a public external fact publisher, external command admission/completion and
-View-local intrinsic-height path remain unimplemented. The native Dialogue consumer and its
-DX12/Vulkan acceptance remain open.
+This was the private prerequisite within step 3. At that checkpoint, `ViewSession` still reached
+its existing `RuntimeShared`. The public read interface below follows that extraction;
+external command admission/completion, native intrinsic height and the complete Dialogue
+consumer retain their separate acceptance.
+
+## Public Immutable External Source
+
+Implemented in local Jellyflow `046a66084e60367101a8703c2cae7626c6e8dd7e`.
+Its previously published baseline remains `8a7c2df`; this prerequisite is not remotely published.
+
+`ExternalGraphFacts` retains the original `Arc<Graph>` and validates structure plus complete,
+unique, nonzero node/port/edge incarnation observations. `ExternalGraphDocument` publishes
+those facts to existing `ViewSession`s without creating `GraphRuntime`, history or a codec.
+Read, frame, geometry and bounded connection queries use a private source capability; authored
+mutation still requires the original standalone writer or the external domain's future
+intent/completion path.
+
+Publication checks the exact previous opaque version and GraphId before installing the complete
+successor. Equal authored values still advance its read version, accommodating a successful
+Nara Noop with a new Workspace operation revision. Callers retain the original domain basis and
+exact outcomes separately and do not republish an unchanged observation merely to read.
+Stable incarnation observations preserve native keys; coalesced removal/Undo renews affected
+keys. Explicit reset on Reopen retires every old native identity even for equal bytes and IDs.
+Publication validates, compares and reindexes complete facts with ordered maps; it is not a
+qualified incremental publication optimization.
+
+Nara's `DialogueFacts::external_facts` shares its original graph allocation and maps the actual
+domain's node, input/output-port and link incarnations. Four additional public Session/file
+tests attach two Views, exercise successful Noop, coalesced remove/Undo and equal-content
+Save/Reopen, and preserve one original source/history. Selection, navigation and accepted
+layout remain local. Closing one View preserves the other and the domain.
+
+Public testing also exposed an ownership gap in `submit_feedback`: an unsupported mixed
+command/layout packet was consumed even before command admission. The library now returns
+`FeedbackSubmissionFailure`, preserving the original cause and the original move-only feedback
+only before admission. `FrameFeedback::split_commands` moves commands out while retaining the
+original token and layout order. Both the library test and Nara consumer actually resubmit that
+same returned token and publish its layouts; they do not manufacture a replacement frame.
+After admission, no reusable packet exists and original partial receipts keep their meaning.
+
+The first Nara run passed 7/8: the new coalesced-Undo test incorrectly expected rejection of
+the entire old frame. Existing protocol deliberately classifies layouts per node. The corrected
+control asserts the restored node's old layout is `Stale`, cannot republish old geometry or
+mutate the domain, and a fresh frame publishes the new lifetime while the second View stays
+independent. It preserves that protocol rather than widening production rejection.
+
+External authored writes remain explicitly unavailable without closing a valid View.
+Asynchronous canvas intent/completion, canonical ID adoption, automatic native content height,
+multiline controls/popups and the two native Dialogue Views are still required. This public
+read prerequisite does not complete step 3, R11c or the full foundation Goal.
+
+| Verification | Actual result |
+|---|---|
+| Full Jellyflow Runtime/public release suite | 620/620, no skips; run `64c58d97-2287-4642-83b3-99a94752dabf`. Includes 15 crate-external Source and six new publication-impact tests. |
+| Final public Source replay | 15/15, no skips; run `31d09c5e-7bdc-4565-b2b6-8e2836e51968`. |
+| Retained and egui adapter regression suites | 560/560, no skips, across 23 binaries; run `4ef357f9-62d0-48df-af6e-d821b623a85f`. Retains the existing 519 retained and 41 immediate adapter controls. |
+| Nara domain, graph and public Session/file cohort | 79/79, no skips, across three binaries; run `85ca360d-49a6-43e4-80e4-c8cf0f7c0d84`. The four new external Source tests preserve the earlier 75-test scope. |
+| Conditional compilation | Nara fixture locked release all-target check without default features passed. |
+| Correctness and formatting | Release all-target Clippy with `-D clippy::correctness` passed for Runtime, both adapters and the Nara fixture. Root/fixture format, whitespace and added local documentation links passed. Existing unrelated warnings remain. |
+| Independent review | Producer and receiver source reviews found no concrete P1/P2 in publication, invalidation, notifications, feedback custody and adapter migration. All nine agents for this unit are closed. |
+
+The first library production build found two `copied()` calls on deliberately non-Copy
+incarnation wrappers; `cloned()` preserves those types. Its first full public test build also
+found a nonexistent default viewport constructor, corrected to `ViewportTransform::new`.
+Two retained Host tests also needed the same exact stale-frame cause patterns migrated to
+`failure.error()`. No original lifetime or admission assertion was relaxed. All-target
+correctness Clippy passes for Runtime and both adapters. The root command is:
+
+```text
+cargo +1.95.0 nextest run --locked --release -p jellyflow-runtime --lib --tests --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Run that command from Jellyflow. The Nara cohort uses the independent fixture manifest with
+`jellyflow-trial,ui-work-observation`, `--lib --test graph_document --test dialogue_document`
+and the same serial release nextest settings.

@@ -47,6 +47,13 @@ The existing list-of-lines Dialogue and finite ValueGraph formats remain separat
 
 With `jellyflow-trial`, `dialogue::jellyflow::DialogueFacts` captures an immutable core graph
 and checked ID/incarnation mappings. It creates no Jellyflow runtime or second history.
+`external_facts()` retains that exact graph allocation and supplies complete live-incarnation
+observations to Jellyflow's `ExternalGraphDocument`. Two ordinary `ViewSession`s now consume
+that Source through the public Session/file tests, with independent local state and geometry.
+Equal-value Noop publication, coalesced remove/Undo and explicit reset after Reopen preserve
+the original Nara document/history and prevent retired native identities from returning.
+Mixed feedback refused before admission returns its original move-only packet; layouts can
+be resubmitted using the same original token after moving its unsupported commands out.
 An external-document native interface, two Dialogue Views and an ordinary property editor
 remain work in the [consumer plan](../../../docs/plans/2026-11-12-dialogue-graph-integration-plan.md).
 The `--jellyflow` mode above continues to demonstrate the standalone runtime.
