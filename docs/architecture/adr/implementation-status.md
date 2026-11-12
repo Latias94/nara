@@ -1129,6 +1129,19 @@ all-target compilation, format and document checks pass; existing warnings remai
 leave independent engine Views, late asynchronous compilation, docking,
 budgets, full R11c and frontend/game selection open.
 
+The [independent graph-value Views successor](../../research/2026-11-11-open-gpui-engine-integration-layers.md#independent-view-qualification)
+adds exact document/revision/request admission at `34a92d7` and original Host native composition
+at `c069b74`. Its two finite Render streams share one GPUI logical surface/window submission,
+with distinct producers, outputs and exact presented input mappings. Relocation, old-route
+refusal, one producer's physically completed prefix while the other continues, passive retained
+pixels, late edit/Reopen/close results, capacity recovery and normal exit with a held Task are
+qualified. Domain/public Host passes 28/28; five complete native trajectories pass 5/5 on each
+of DX12 and Vulkan. Final correctness Clippy, feature-off compilation, format and document checks
+pass with existing warnings. This consumes existing ADR0108/0111/0118 boundaries rather than
+changing Surface Slot aggregation or adding another GPU/task/input owner. Continuous graph
+canvas gestures, general docking, full Shader Graph, budgets and Editor/game selection remain
+open; no full Goal/R11/R12 completion follows.
+
 The component/reload follow-up explicitly leaves complete custom measurement/drawing, broader canvas
 interaction, complete component state/effects lifecycle and component-library ergonomics
 unqualified beyond the bounded prerequisites below. Public semantic panel custody is now separate

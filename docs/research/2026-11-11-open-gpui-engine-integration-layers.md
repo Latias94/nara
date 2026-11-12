@@ -2,9 +2,9 @@
 
 Status: research synthesis and selected development direction; implementation remains partial.
 The implemented checkpoints qualify scoped Windows hosting, deferred submission, hosted logical
-roots, Nara-owned Host/Scene composition, shared Editor projections, variable-height collections
-and a typed graph extension consumer. Complete engine/frontend and game-specific acceptance
-remain open.
+roots, Nara-owned Host/Scene composition, shared Editor projections, variable-height collections,
+typed graph panels and finite independent preview Views. Complete engine/frontend and
+game-specific acceptance remain open.
 Date: 2026-11-11. Scope: independent framework hosting, rendering, component layers and engine use.
 
 ## Summary
@@ -1790,3 +1790,107 @@ adds only direct consumer edges to the already resolved Serde packages; package 
 sources and checksums do not change. No complete unchanged framework/Scene suite is rerun for
 this isolated consumer. Keep remaining R11c two-View/late-result, game execution and numerical
 cost acceptance separate.
+
+## Independent Graph Preview Views And Late Results
+
+This R11c successor extends the same independent engine consumer. Its pure request owner is
+committed at Nara `34a92d7` and native integration at `c069b74`. It retains the qualified
+production Open-GPUI at `f75c10b2a9bf7b4dcb2c8c2aa446203997601369` and the original Nara Host
+contracts. Two finite graph-value color previews have separate Render producers, source
+generations, View IDs, 320-by-180 targets, successful frame streams and immutable outputs.
+One GPUI logical root and the original native Host compose them. This does not install multiple
+UI Surface Slots on one presentation target or alter ADR0108 aggregation authority.
+
+The [pure preview owner](../../tests/fixtures/gpui-engine-consumer/src/graph/preview.rs) captures
+immutable graph observations with their exact document/revision and a checked request identity.
+Private owner provenance rejects another owner's same-numbered completion. Same-revision
+requests still supersede earlier ones. Observing an edit, source switch, Reopen or close retires
+prior admission before polling results. A stale success or failure changes neither current
+diagnostic nor last-good value. Failure retains labeled last-good; successful incomplete output
+is a valid `None`. This is a finite domain consumer, not a new generic engine compiler/job API.
+
+[Task execution](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/preview_jobs.rs)
+uses the installed GPUI BackgroundExecutor and retains at most four original Task handles.
+Qualification gates suspend futures through the existing async-channel dependency without
+blocking worker threads. Retirement of result admission does not drop running work. Owner
+polling physically reclaims returned Tasks; normal application close releases gates, retires
+admission and waits for those returns before logical-surface/application shutdown. The local
+Windows dependency adds one edge to the already locked async-channel package, without package
+source/version churn or another scheduler.
+
+The [native adapter](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/views_workflow.rs)
+retains the latest desired compile while all four handles are occupied. Review exposed that a
+one-shot capacity refusal could otherwise lose automatic preview for a newly accepted source
+revision. It now observes the new basis, polls old returns, then starts admitted current work;
+if full, demand survives until capacity returns. Captured UI command bases are validated before
+domain changes. No delayed control substitutes the latest source for its displayed observation.
+
+Each [View stream](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/engine/views.rs)
+publishes through the original Host and advances only its own successful render frame. Relocation
+keeps the exact pixels but admits a new occurrence. The
+[UI panel](../../tests/fixtures/gpui-engine-consumer/examples/gpui_view/views_panel.rs) freezes
+image and mapping, publishes observed geometry through the original accepted Window transaction,
+and joins that snapshot to the actual Host composite. Pointer commands carry that same snapshot;
+the original source and route are revalidated before typed graph mutation. Window geometry/DPI
+changes re-admit occurrences before new mapping. Closing A withdraws its selected image/input
+and retains its submitted prefix while B continues publishing and interacting. External old
+image leases remain passively valid in the live device epoch, without regaining input authority.
+
+Early native execution reached edit and Reopen late-result refusal, then exposed retained
+`current` selection after producer close. Closing now clears that selection as well as input.
+Independent review also corrected a qualification assertion that confused live device-epoch
+image validity with active input authority. The revised check requires retained image validity
+and separately refuses its old route. A subsequent test expansion initially ran against a
+prebuilt executable lacking the new mode/markers; that owned child was stopped and the fixed
+source rebuilt. Those intermediate runs are not final qualification.
+
+The public pure/Host cohort passes 28/28 (`3a1e849e-48a5-47a5-893e-38799e448e46`). The first
+fixed-capacity native pair passes 2/2 on Windows/DX12
+(`a2454208-e73d-4c30-a6e9-68b360346324`), including four retained jobs and application exit
+with a held original Task. Final qualification below includes the subsequent source-stable
+prefix-retirement assertion. Physical OS input, full Shader Graph compilation, general docking,
+total memory, GPU duration/scanout and numeric latency/throughput budgets remain open.
+
+### Independent View Qualification
+
+November 12 qualification uses Rust 1.95.0, serial one-job Cargo and the shared existing target.
+Both native backends select RTX 4090 and the original `Bgra8UnormSrgb` attachment.
+
+| Scope | Actual result | Nextest run |
+| --- | --- | --- |
+| Pure domain/request owner and original public Host | 28/28 | `3a1e849e-48a5-47a5-893e-38799e448e46` |
+| Windows/DX12: original graph, Scene, dual Views, held-task close and five-case work probe | 5/5 | `f64919df-c527-42e8-b147-de03b15d25cc` |
+| Windows/Vulkan: the same five complete trajectories | 5/5 | `e3622563-274b-427c-bdce-750fcad45c17` |
+
+Each dual-View trajectory completes 28 actual UI submissions and admits seven evaluation results
+while refusing seven retired results: one after a newer edit, one after Reopen, four after
+capacity recovery and one after document close. Actual same-Scene diagnostic replays in the
+original window submissions verify both distinct preview colors, both passive last-good images
+while work is held, and passive B pixels after source close. These three replays do not establish
+swapchain readback, scanout or a steady rendering cost. Actual pointer delivery edits both views;
+A relocation preserves its exact output with a fresh occurrence, refuses the retained old
+route, and a click in the withdrawn placement leaves the source unchanged. Closing A withdraws
+its selected route, leaves its external image lease valid, and observes the original retired
+prefix physically complete while B remains live, republishes and accepts another edit.
+
+Each separate held-task shutdown trajectory completes 17 actual UI submissions. It requests
+normal close with one original Task still held. The adapter releases its gate and the existing
+executor returns that work; its stale-result count advances exactly once, and zero retained Tasks remain before
+logical-surface/application shutdown and final engine retirement. No sleep stands in for task
+completion or result ordering. Input remains injected through the native adapter; this does not
+qualify physical OS keyboard/IME or device reconstruction.
+
+The prior graph trajectory still completes 48 submissions/one diagnostic replay. The Scene
+trajectory retains its complete original assertions and reports 32 submissions, 11 discarded
+candidates, two intentional paint failures and five diagnostic replays on each backend. Both
+five-case work probes retain all source/render/call checks and finish with zero retained native
+frames and no diagnostic replay. This is regression qualification, not a refreshed performance
+baseline or numerical improvement claim.
+
+Independent result/task and output/presentation reviews close the concrete findings with no
+remaining P1/P2. Final all-target/all-feature correctness Clippy, no-default-feature all-target
+compilation, package formatting, local document links/fragments, TOML/lock closure and whitespace
+checks pass. Existing warnings remain. Production framework and engine runtime/render code are
+unchanged, so their full unrelated matrices are not rerun. Graph canvas continuous pointer/
+wheel/capture ergonomics, general docking, complete frontend/game adoption, numeric budgets
+and full R11/R12 remain open.

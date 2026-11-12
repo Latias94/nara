@@ -4126,6 +4126,45 @@ This is a bounded architectural consumer, not delivery of a full Shader Graph pr
 multiple Render Views do not qualify multiple UI Surface Slots on one target; reconcile ADR0108
 and the relevant runtime adapter before changing their existing aggregation rules.
 
+#### Independent graph preview Views and late completion
+
+Continue in the same independently locked GPUI engine consumer. Two graph-value Views own
+distinct original Render producers, source generations, View IDs, image targets and output
+streams. Their images share the original native window/Host/encoder, not another UI Surface
+Slot or native GPUI renderer. Each displayed mapping joins its exact output occurrence, actual
+Host composite and original accepted Window frame before permitting a domain action. Moving or
+closing A must reject its old route while B continues publishing and interacting. Retained old
+outputs may still be sampled passively without reviving that route.
+
+Keep graph evaluation pure and its request admission in the finite domain consumer. A request
+captures exact document/revision and a checked non-reused request identity; a newer request,
+source edit, Reopen or close retires prior result admission. Preserve last-good values/output
+with their original basis and show pending/failure explicitly. Execute captured work on the
+already installed GPUI background executor, retain its original Task handles through return,
+and settle them before normal application shutdown. Do not add a worker pool, scheduler or
+universal compiler/job abstraction. Deterministic held jobs exercise out-of-order completion
+without sleeps or blocking a worker thread.
+
+The native workflow must prove distinct real GPU images, fresh mapping after relocation,
+actual pointer operations, exact stale-route refusal, independent producer retirement and
+last-good display while work is pending. Release an older job after a newer edit/request,
+after Reopen and after document close; none may replace current value, diagnostics or input.
+Keep the prior Scene, graph and work-probe trajectories unchanged. This finite numeric preview
+does not claim a shader compiler, Scene object picking, general docking, multiple native roots,
+physical input, GPU timing or a performance budget.
+
+The [qualified finite successor](../research/2026-11-11-open-gpui-engine-integration-layers.md#independent-view-qualification)
+is committed as `34a92d7` (pure request admission) and `c069b74` (native consumer). Domain/public
+Host passes 28/28. Original graph, Scene, dual Views, pending-task close and the five-case work
+probe pass 5/5 on each of DX12 and Vulkan. Actual pointer operations, exact relocated occurrence,
+old-route refusal, retained passive pixels, A's physically completed retired prefix while B
+continues, newer edit/Reopen/close result refusal and four-Task capacity recovery are exercised.
+The separate normal-close case starts with one held original Task and waits for its stale result
+and physical return before application shutdown. No production framework/runtime/render owner
+changes, and no new default, Surface Slot aggregation or performance budget follows. Remaining
+R11c continuous canvas pointer/wheel/capture ergonomics, general docking, wider workflows and
+the independent Editor/game selection retain their full acceptance requirements.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

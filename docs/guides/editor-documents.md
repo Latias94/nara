@@ -151,6 +151,16 @@ retain exact captured-basis validation even when a newer model is already availa
 This is a bounded value-graph integration consumer. It does not select the default Editor,
 deliver a complete Shader Graph or qualify independent engine Views and asynchronous compilation.
 
+The [dual preview successor](../../tests/fixtures/gpui-engine-consumer/README.md#independent-graph-preview-views)
+adds `--views` with two independent finite graph-value Render streams. Immutable evaluation work
+runs on the existing framework executor; result admission checks the captured source and latest
+request. Display and input additionally require the original exact Host composite and Window
+publication. One View can relocate or retire while the other continues. This demonstrates the
+separate domain, background-work, output and presentation lifetimes; it is not a full shader
+compiler or default frontend selection. Its
+[research record](../research/2026-11-11-open-gpui-engine-integration-layers.md#independent-graph-preview-views-and-late-results)
+keeps native qualification and remaining limits separate.
+
 ## Focused Verification
 
 From the repository root, serialize with other builds and reuse the root target:

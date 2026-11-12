@@ -40,6 +40,38 @@ the public GPUI canvas and the same original Nara WGPU encoder/submission owner.
 consumer does not qualify a complete Shader Graph, asynchronous graph compiler, two independent
 engine Views, native multi-window docking or game UI execution.
 
+## Independent Graph Preview Views
+
+The same executable accepts `--views` for two actual engine image Views over a finite graph
+evaluation. `--smoke-views` runs relocation, independent retirement and late-completion
+qualification; `--smoke-views-close-pending` closes normally while one original evaluation
+Task is still held. Each View has a distinct Render producer, source generation, View ID,
+320-by-180 target and frame stream. The original Nara Host owns both outputs and the one native
+window submission. These are finite numeric color previews, not Scene object picking or a
+shader compiler.
+
+Click A to increment the first scalar or B to increment the second. Edit graph changes the
+first scalar directly through the same document owner. Compile preview explicitly reevaluates
+the current observation. Hold next compile and Release held compile exercise asynchronous
+ordering without blocking a worker thread. Relocate A keeps its pixels but admits a fresh
+display occurrence; Close A retires only its producer. Pulse B produces a new B frame through
+its independent stream. Save/Reopen and dirty close use the original public Editor Host.
+
+Captured work executes on the installed GPUI BackgroundExecutor. At most four original Task
+handles remain in flight; newer compile demand waits for their physical return and then starts
+automatically. Latest request and exact document/revision admission are separate from execution.
+An old result after an edit, Reopen or close cannot replace last-good value or diagnostics.
+Last-good images retain their original source label while pending or closed, and no stale
+source grants domain input. Normal application shutdown releases held jobs and reclaims the
+original Task results before closing the logical surface or GPUI application.
+
+View input joins its immutable placement/output occurrence with the exact Host composite and
+original accepted Window publication. A retained image in a live device epoch stays valid for
+passive sampling after producer close; that validity does not restore the old input route.
+This consumer uses one existing HostedSurface, so it changes no one-Surface-Slot-per-target
+contract. Native multi-window docking, physical input, device reconstruction, numeric budgets
+and the complete Editor/game choice keep separate acceptance requirements.
+
 ```text
 cargo +1.95.0 build --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view
 cargo +1.95.0 nextest run --locked --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --test gpui_view --run-ignored only --test-threads=1 --no-fail-fast
