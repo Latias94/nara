@@ -4202,6 +4202,45 @@ Correctness Clippy, feature-off compilation, format and document checks pass. No
 framework/runtime/render changes or new default/slot/input authority follow. Wider graph/
 Timeline, docking, full frontend/game selection and numeric budgets remain open.
 
+#### Jellyflow node-editing reuse audit
+
+The user-owned Jellyflow project is a candidate independent owner for reusable node-editing
+mechanisms, with Nara providing real consumer feedback. The
+[source and adoption audit](../research/2026-11-12-jellyflow-node-editor-audit.md) compares
+Jellyflow `46a49c1`, its xyflow reference `1bc405c`, maintained Open-GPUI `f75c10b` and the
+qualified Nara graph consumer `c7d1e10`. It supports continuing independent maintenance of
+real-port topology, geometry, interaction, native node lifetimes and optional layout. Product
+types, resources, compilation, document admission and domain history retain their owners.
+
+This is a Trial, not replacement of the finite graph consumer. Jellyflow's current adapter
+requires its writable `GraphRuntime`/`ViewSession`; Nara extension documents have their own
+domain/history under original Session admission. Do not synchronize two writable graphs,
+replay every edit through `replace_document`, expose an executable runtime in a read-only
+projection, or add a second history to recover dirty/save checkpoints. Prefer testing an
+external-domain fact/intent/completion seam for an existing Nara domain while preserving
+Jellyflow's independent authoritative runtime. Do not turn the whole runtime into a forwarding
+trait or introduce Nara dependencies into Jellyflow. Deliberate use of Jellyflow as the sole
+domain owner remains an alternative with its own storage, checkpoint and admission work.
+
+The current core/runtime/layout/egui baseline passes 711/711. An isolated build of Jellyflow's
+original public custom-node recipe against the exact maintained framework fails in the adapter
+with 42 API errors, including pointer capture, targeted events, callbacks and clipping. Both
+sources use package version `0.2.0`; version equality does not establish source compatibility.
+The audit also identifies graph integrity, marquee/culling, layout and native-publication
+issues: four public regressions reproduce integrity, marquee, history and layout defects;
+native-publication findings remain source-only. Resolve the affected owner and migrate to
+actual accepted-publication transactions before claiming native adoption.
+These results do not reopen the qualified Nara graph/Host trajectories or imply a new default.
+
+A proposed complete next graph consumer is an independently compiled Dialogue Graph, including
+stable choice/real-port IDs, atomic choice/topology edits, custom text/popup node content,
+variable height, two views and an ordinary property editor sharing the same original domain.
+Qualify cross-entry Undo, return-to-saved clean state, Redo invalidation on a new branch, Save/Reopen, preview
+results and retirement. Keep source-derived size separate from view/font/theme measurements.
+Use its measured work and minimal failures to feed Jellyflow; framework deficiencies belong
+in Open-GPUI and product semantics remain Nara-owned. Shader/animation tools retain their
+separate compile/execution contracts. This audit does not complete R11b, R11c or the full Goal.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

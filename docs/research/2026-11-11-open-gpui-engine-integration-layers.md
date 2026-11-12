@@ -1989,3 +1989,32 @@ package formatting and changed-document link/whitespace checks pass; existing wa
 No manifest or lock changes occur. Existing Scene, graph, View/task and work-probe assertions
 remain intact. General docking, richer graph/Timeline tools, complete frontend/game execution,
 physical input and numerical allocation/upload/GPU/latency budgets remain open.
+
+## Jellyflow Node Editing And Independent Maintenance
+
+The November 12 [Jellyflow audit](2026-11-12-jellyflow-node-editor-audit.md) evaluates the
+user-owned project at `46a49c1` and its local xyflow reference at `1bc405c` against the qualified
+Nara graph consumer and unchanged maintained framework. Node editing warrants an independent
+library: real ports/topology, graph-space gestures, view-local queries/geometry and native node
+mount/draft lifetimes are reusable problems beyond the current finite card/typed-link control.
+Jellyflow's neutral core/runtime, optional layout and native adapters already express useful
+ownership. They do not establish complete feature coverage, framework compatibility or engine
+adoption.
+
+The key integration choice is document authority. The current native adapter submits through
+Jellyflow's concrete writable runtime, while Nara extensions own their domain/history behind
+original Session admission. Prefer a Trial of immutable facts, local View interaction and exact
+intent/completion against the existing domain; retain Jellyflow's standalone runtime for products
+that deliberately choose it. Preserve one authored graph and history per document. The audit
+records thread/storage, checkpoint, byte-codec and derived-size implications separately rather
+than hiding them in a proxy or repeated document replacement.
+
+Existing headless/core/layout/egui tests pass 711/711. The exact maintained-framework custom-node
+compile probe fails with 42 adapter API errors despite equal package versions. Source findings
+also identify native publication and capability retirement work; four executed public
+regressions reproduce graph validity, marquee/culling, history and layout defects. The linked
+audit records the reproduction and remaining evidence. Existing Nara DX12/Vulkan graph
+qualification is a control, not substitute evidence for Jellyflow. A proposed
+complete Dialogue Graph consumer can drive the external-domain seam and ongoing independent
+maintenance before a wider Shader Graph adoption. No default, dependency or ADR ownership
+selection changes follow from this study.

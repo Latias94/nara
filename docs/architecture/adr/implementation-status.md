@@ -1154,6 +1154,19 @@ checks, format and document checks pass with existing warnings. No production fr
 runtime/render or default-selection change occurs. Full graph/Timeline, docking, Editor/game
 execution, physical input and numeric budgets retain separate acceptance.
 
+The November 12 [Jellyflow adoption audit](../../research/2026-11-12-jellyflow-node-editor-audit.md)
+supports independently maintained node-editing mechanisms with Nara consumer feedback. It does
+not select the current authoritative Jellyflow runtime as a Nara document owner. The existing
+native adapter directly executes graph commands, so external immutable domain facts and exact
+intent/completion require a real integration seam before replacing the finite graph control.
+Core/runtime/layout/egui baseline passes 711/711; an isolated compile against maintained
+Open-GPUI reports 42 adapter API errors. Four public regressions reproduce integrity, marquee,
+history and layout defects; native-publication/lifetime findings remain source-only. The study
+proposes a complete Dialogue Graph consumer. One domain source/history, original Session
+admission and Render/Host/preview owners
+remain required. No new dependency/default, completed general node editor or full R11/R12 claim
+follows.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate
