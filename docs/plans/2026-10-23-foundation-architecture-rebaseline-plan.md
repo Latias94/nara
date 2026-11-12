@@ -4253,9 +4253,16 @@ controls, actual graph pixels/input, one drag/Undo and original host retirement.
 
 The [Nara handoff](2026-11-12-nara-ui-integration-handoff.md) records the engine's next complete
 external-domain consumer and the separate Open-GPUI framework handoff path. Independent library
-maintenance can continue from these boundaries. Complete Dialogue Graph admission/history/
-persistence, reusable behavior, docking, Editor/game execution and measured optimization remain
-in their existing R11 owners. Neither this prerequisite nor the handoff completes the full Goal.
+maintenance can continue from these boundaries. The selected
+[Dialogue Graph successor](2026-11-12-dialogue-graph-integration-plan.md) now qualifies its
+domain/public Session and immutable-facts prerequisite at `ddcc880`. Release nextest passes
+75/75, including 29 new domain/projection/public tests and 46 existing controls. Atomic dynamic
+choices/links, one original history, saved-content identity, captured Save/Reopen, fresh
+incarnations and one-step preview are covered. All-target correctness Clippy, feature-off
+compilation, format and independent reviews pass within that scope. The native external-document
+interface, two Dialogue Views and ordinary property editor remain open. Reusable behavior,
+docking, Editor/game execution and measured optimization remain in their existing R11 owners.
+Neither this prerequisite nor the handoff completes the full Goal.
 
 ### R11d: Public observation and visible-UI operation
 

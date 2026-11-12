@@ -6,6 +6,20 @@ Accepted ADRs retain architecture authority, and executable results retain their
 The separate framework roadmap belongs to Open-GPUI's
 `docs/plans/2026-11-12-framework-maintenance-handoff.md` in its own checkout.
 
+## Scope And Next Deliverable
+
+This session continues Nara's engine and product development. The Open-GPUI session maintains
+the independent framework against concrete consumer feedback; Jellyflow's session owns its
+library repairs and graph interfaces. Their source pins and qualified controls allow those
+sessions to work independently without moving Nara's selected dependency on every library edit.
+
+The next Nara deliverable is the complete
+[Dialogue Graph consumer](2026-11-12-dialogue-graph-integration-plan.md): one original Session
+document and history, two native Views, ordinary property editing and a conversation preview.
+Its domain, public Session workflow and immutable facts are qualified at `ddcc880`; native
+external-document hosting remains open. Continue from that boundary rather than repeating the
+standalone connection or treating the missing interface as a completed graph editor.
+
 ## Start Here
 
 | Project | Checkout | Maintenance responsibility |
@@ -181,7 +195,7 @@ Shader Graph. Keep the existing finite graph as a control.
 | Order | Work | Complete consumer and acceptance |
 |---|---|---|
 | 1 | Preserve the standalone Jellyflow integration control. | A standalone library graph has two live Views, real nodes/ports and a native operation; close retires library state while the independent engine producer remains valid. |
-| 2 | Integrate an external-domain graph without another history. | Dialogue Graph plus ordinary property editing share the original domain source, Session admission, checkpoints, Undo/Redo and Save/Reopen. |
+| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow and immutable facts are qualified at `ddcc880`; next implement the external-document interface, two native Views and ordinary property editor over that original owner. |
 | 3 | Complete reusable panel/component and visible-UI operation seams. | External components and agent/test consumers use presented identity, focus/text/overlay services and exact outcomes without private hooks. |
 | 4 | Advance the independent Editor composition through full workflows. | Qualified source/asset/property/custom tools, workspace/docking and original View lifetimes; the selected build has no Dear runtime dependency. Keep the reference selectable until the replacement is complete. |
 | 5 | Qualify the authored game UI choice separately. | HUD and multiple logical roots, player/gamepad focus, time/pause, cooked resources and world-space/material/depth needs; share suitable mechanisms without importing the whole Editor. |
@@ -194,11 +208,13 @@ one toolkit fit. Keep linear-light working/blending, authored/display encoding, 
 and output/tone-mapping policy explicit; an sRGB attachment alone is not the complete contract.
 The current color study and actual source/processed-image consumers are the controls.
 
-A suitable external-domain successor is a complete Dialogue Graph: stable choice/port IDs,
+The selected external-domain successor is the
+[Dialogue Graph plan](2026-11-12-dialogue-graph-integration-plan.md): stable choice/port IDs,
 atomic choice/link changes, native text/popup/variable-height content, a separate property
 editor and two Views, one domain history, return-to-saved clean state, branch-safe Undo/Redo,
-Save/Reopen and a real conversation preview. Let that consumer drive Jellyflow's seam rather
-than first designing a universal graph/compiler/plugin protocol.
+Save/Reopen and a real conversation preview. Domain, file workflow and preview exist; native
+controls and the external-document interface still need implementation. Let that consumer
+drive Jellyflow's seam rather than first designing a universal graph/compiler/plugin protocol.
 
 Editor and game UI can reuse suitable mechanisms and complete unstyled behavior, while keeping
 product roots, state, skins and adapters distinct. A game choice still needs authored HUD,
@@ -208,6 +224,7 @@ lifecycle and cost evidence. Editor success does not establish those requirement
 ## Research And Reference Map
 
 - [Jellyflow audit and executable reproductions](../research/2026-11-12-jellyflow-node-editor-audit.md).
+- [Dialogue Graph implementation, external-interface gaps and qualification](2026-11-12-dialogue-graph-integration-plan.md).
 - [Engine integration layers, shared mechanisms and hosting](../research/2026-11-11-open-gpui-engine-integration-layers.md).
 - [Compositor/cache source comparison](../research/2026-11-11-open-gpui-engine-integration-layers.md#compositor-and-cache-research-direction).
 - [GPUI critique, Entity granularity and invalidation](../research/2026-11-11-open-gpui-engine-integration-layers.md#gpui-critique-and-state-invalidation-research).
@@ -282,3 +299,25 @@ changelog nor its corrected-but-unrerun test build is release evidence. No Shade
 external Nara domain bridge, new Editor default, complete docking or numeric performance
 qualification follows from these results. Source and exact run details are consolidated in the
 [maintained consumer study](../research/2026-11-11-open-gpui-engine-integration-layers.md#maintained-jellyflow-consumer-qualification).
+
+### Dialogue Domain Follow-Up
+
+Nara `ddcc880893c0081e6ceb76be31d995e3ce7ee37b` adds the new
+`consumer.dialogue-graph` extension document, atomic dynamic choices/links, bounded versioned
+codec, immutable snapshots, live incarnation facts and one-transition conversation preview.
+The original Session owns admission, history, saved-content identity, captured Save and Reopen.
+The feature-gated Jellyflow projection is read-only; it creates no runtime or history.
+
+Release nextest passes 75/75, no skips, run `ed15941f-9ba7-4568-8bdc-b58afcda3798`.
+This combines 21 domain, four projection and four public Dialogue tests with 46 existing
+controls. All-target correctness Clippy, feature-off all-target compilation and package format
+checks pass. Independent domain and facts/public Session reviews found no concrete P1/P2.
+The plan records the initial projection-test serialization failure and its correction.
+No new native Dialogue qualification follows from those CPU/public results.
+
+Jellyflow currently binds `ViewSession` to the object that also executes commands and history.
+The coordinated next library work separates immutable read-side facts/indices/View publication
+from standalone mutation/history, then supplies typed canvas intents and exact completions.
+Intrinsic height remains View-local. Nara retains its domain commands and Session admission;
+the library retains standalone `GraphRuntime`. Do not bridge this gap with a writable mirror,
+per-edit `replace_document`, a universal forwarding trait or a Nara dependency in Jellyflow.

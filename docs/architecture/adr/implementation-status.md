@@ -1180,6 +1180,18 @@ records separate engine and framework development paths. Nara Session/domain/per
 integration, remaining graph defects, general docking/Shader Graph and Editor/game selection
 retain their prior owners and acceptance; no full R11/R12/Goal completion follows.
 
+The [Dialogue Graph successor](../../plans/2026-11-12-dialogue-graph-integration-plan.md)
+implements its domain/public Session and immutable-facts prerequisite at `ddcc880`. A new
+extension document owns atomic node/choice/link edits, one history, bounded versioned source
+and one-transition preview. Nonserialized incarnations separate restored source identity from
+native lifetime; the original Workspace still owns exact-basis admission and Reopen. The
+Jellyflow capture is immutable and adds no writable runtime/history. Release nextest passes
+75/75, including 29 new tests and 46 existing controls. All-target correctness Clippy,
+feature-off compilation, format and separate domain/facts/public reviews pass in this scope.
+Jellyflow's external-document intent/completion interface and two native Dialogue Views with
+ordinary property editing remain unimplemented. Earlier standalone native results do not
+qualify them or complete R11c.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate
