@@ -104,6 +104,16 @@ that accepted result rather than comparing before/after snapshots. A later edit 
 replace the document's current facts without changing the historical result of the original
 operation. Native input/presentation acceptance remains a separate framework observation.
 
+When an external UI needs an operation's post-command facts, let the domain's `Outcome` retain
+that exact immutable view alongside its effect. The independent Dialogue Graph consumer uses
+`DialogueCommandReceipt::{outcome, view}`. Publish from that original receipt and accepted
+revision, retaining the resulting external publication before advancing to later observations.
+Do not read a later `drive_editor_frame` result as proof of the earlier operation. A delayed
+canvas completion pairs the original request, Session command result and publication; it
+does not add another document writer or history. The
+[Dialogue consumer](../../tests/fixtures/gpui-engine-consumer/README.md#dialogue-graph-domain)
+records the implemented interface and remaining native integration.
+
 ## Save, Reopen And Close
 
 Use existing `EditorPersistenceAction::Save` and `Reopen` with frame/document revision facts.

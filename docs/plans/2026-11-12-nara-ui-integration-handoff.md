@@ -200,7 +200,7 @@ Shader Graph. Keep the existing finite graph as a control.
 | Order | Work | Complete consumer and acceptance |
 |---|---|---|
 | 1 | Preserve the standalone Jellyflow integration control. | A standalone library graph has two live Views, real nodes/ports and a native operation; close retires library state while the independent engine producer remains valid. |
-| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow and immutable facts are qualified at `ddcc880`; immutable Source publication now reaches ordinary Views. Next deliver exact external edit intent/completion, native intrinsic height, two native Views and ordinary property editing over that original owner. |
+| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow, immutable Source and renderer-neutral requests now use one original owner, exact outcomes and canonical identities. Next deliver native journal transport, View-local intrinsic height, two native Views and ordinary property editing. |
 | 3 | Complete reusable panel/component and visible-UI operation seams. | External components and agent/test consumers use presented identity, focus/text/overlay services and exact outcomes without private hooks. |
 | 4 | Advance the independent Editor composition through full workflows. | Qualified source/asset/property/custom tools, workspace/docking and original View lifetimes; the selected build has no Dear runtime dependency. Keep the reference selectable until the replacement is complete. |
 | 5 | Qualify the authored game UI choice separately. | HUD and multiple logical roots, player/gamepad focus, time/pause, cooked resources and world-space/material/depth needs; share suitable mechanisms without importing the whole Editor. |
@@ -380,3 +380,32 @@ Continue with the original Jellyflow journal/interaction owners: typed external 
 exact asynchronous completion and canonical ID adoption, followed by View-local intrinsic
 height and the two native Dialogue Views. An immutable Nara domain outcome is execution
 evidence, not the one-shot external completion capability or accepted native presentation.
+
+### External Canvas Requests And Original Publications
+
+The [request successor](2026-11-12-dialogue-graph-integration-plan.md#exact-external-canvas-requests-and-publication-receipts)
+implements the renderer-neutral external mutation path and an independent Nara Session consumer.
+Its local Jellyflow baseline is `4bcd0f2591d1f14146c56d924059a51f9aa89686`; the private
+read/Source and request successors have not been remotely published. Nara still selects
+Open-GPUI code `f75c10b2`, independently of the framework maintenance checkout.
+`DialogueCommandReceipt` retains the exact post-command source alongside its effect.
+`DialogueCanvasRequest` lowers captured semantic work into an original Session command;
+its sealed publication pairs the exact accepted outcome with the original external receipt.
+Canonical node/port/edge identities come from the domain result, with a complete creation-port
+mapping. Delayed A results retain their own evidence after B; neither projection rollback nor
+command reexecution is needed.
+
+Both reconnection directions, creation during reconnection, movement and mixed deletion retain
+one original candidate/history. External pending work survives its own publication and detached
+old-owner notifications; reset and close retire it. Canonical success still waits for the
+original View's accepted route. Unknown delivered work cannot infer success or offer speculative
+retry. The owning plan records actual tests, review corrections and qualification limits.
+Final Runtime/public controls pass 647/647, existing adapter controls 560/560 and the independent
+Nara domain/graph/Session/file cohort 110/110, with scoped correctness, feature-off, formatting
+and document checks. These are CPU/protocol/file results; they add no new native Dialogue claim.
+
+Continue in Jellyflow's existing native journal, interaction and frame/close owners. Add external
+asynchronous transport while retaining prefix order, one in-flight submission and exact admission
+dispositions. Intrinsic height must be View-local throughout layout, routing and accepted geometry;
+multiline controls must preserve the full source. These and the two native Dialogue Views remain
+the next complete consumer, not a new default Editor or completed R11c.

@@ -4,16 +4,16 @@ use super::{
 };
 
 pub(super) fn add(graph: &mut DialogueGraph, recipe: NodeRecipe) -> NodeId {
-    let DialogueCommandOutcome::Created { node, .. } = graph
+    let receipt = graph
         .apply(&DialogueCommand::Add {
             recipe,
             position: [0., 0.],
         })
-        .unwrap()
-    else {
+        .unwrap();
+    let DialogueCommandOutcome::Created { node, .. } = receipt.outcome() else {
         panic!("created node");
     };
-    node
+    *node
 }
 
 pub(super) fn story() -> DialogueGraph {

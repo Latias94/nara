@@ -4,6 +4,97 @@ use super::{
 };
 
 #[test]
+fn command_receipts_retain_installed_facts_across_deletion_undo_and_owner_replacement() {
+    let mut graph = story();
+    let before = state(&graph);
+    let port = choice_port(1);
+    let first = graph
+        .apply(&DialogueCommand::CreateFromWire {
+            recipe: NodeRecipe::Choice,
+            position: [48., -24.],
+            endpoint: WireEndpoint::Output(port),
+            reconnect: None,
+        })
+        .unwrap();
+    let DialogueCommandOutcome::Created {
+        node,
+        outputs,
+        link,
+    } = first.outcome()
+    else {
+        panic!("expected the original creation effect");
+    };
+    let node = *node;
+    assert_eq!(outputs.len(), 1);
+    let output = outputs[0];
+    assert_eq!(
+        *link,
+        Some(Link {
+            from: port,
+            to: node,
+        })
+    );
+    let observed_first = graph.view();
+    assert!(Arc::ptr_eq(first.view(), &observed_first));
+    assert!(observed_first.contains_output(output));
+    assert_eq!(observed_first.target(port), Some(node));
+    let first_bytes = graph.encode().unwrap();
+    let first_node_incarnation = first.view().node_incarnation(node).unwrap();
+    let first_link_incarnation = first.view().link_incarnation(port).unwrap();
+    let second = graph
+        .apply(&DialogueCommand::Remove {
+            nodes: vec![node],
+            links: vec![port],
+        })
+        .unwrap();
+    assert_eq!(second.outcome(), &DialogueCommandOutcome::Changed);
+    let observed_second = graph.view();
+    assert!(Arc::ptr_eq(second.view(), &observed_second));
+    assert!(!Arc::ptr_eq(first.view(), second.view()));
+    assert!(second.view().node(node).is_none());
+    assert_eq!(second.view().target(port), None);
+    assert_eq!(second.view().link_incarnation(port), None);
+    assert_eq!(codec::encode(first.view()).unwrap(), first_bytes);
+    assert_eq!(first.view().target(port), Some(node));
+    assert_eq!(graph.history_status().undo_depth, before.2.undo_depth + 2);
+    let second_bytes = graph.encode().unwrap();
+    let before_noop = state(&graph);
+    let noop = graph.apply(&DialogueCommand::Move(Vec::new())).unwrap();
+    assert_eq!(noop.outcome(), &DialogueCommandOutcome::Noop);
+    assert!(Arc::ptr_eq(noop.view(), second.view()));
+    assert_eq!(state(&graph), before_noop);
+    graph.undo().unwrap();
+    assert_eq!(graph.encode().unwrap(), first_bytes);
+    assert_ne!(
+        graph.view().node_incarnation(node),
+        Some(first_node_incarnation)
+    );
+    assert_ne!(
+        graph.view().link_incarnation(port),
+        Some(first_link_incarnation)
+    );
+    graph.redo().unwrap();
+    assert_eq!(graph.encode().unwrap(), second_bytes);
+    drop(graph);
+    let replacement = DialogueGraph::decode(&second_bytes).unwrap();
+    assert_eq!(replacement.encode().unwrap(), second_bytes);
+    assert!(!Arc::ptr_eq(second.view(), &replacement.view()));
+    assert!(Arc::ptr_eq(first.view(), &observed_first));
+    assert!(Arc::ptr_eq(second.view(), &observed_second));
+    assert!(Arc::ptr_eq(noop.view(), second.view()));
+    assert_eq!(codec::encode(first.view()).unwrap(), first_bytes);
+    assert_eq!(
+        first.view().node_incarnation(node),
+        Some(first_node_incarnation)
+    );
+    assert_eq!(
+        first.view().link_incarnation(port),
+        Some(first_link_incarnation)
+    );
+    assert_eq!(codec::encode(second.view()).unwrap(), second_bytes);
+}
+
+#[test]
 fn add_outcomes_report_allocated_outputs_without_reusing_retired_identities() {
     let mut graph = DialogueGraph::new();
     for (recipe, node, outputs) in [
@@ -28,8 +119,9 @@ fn add_outcomes_report_allocated_outputs_without_reusing_retired_identities() {
                     recipe,
                     position: [12., 24.],
                 })
-                .unwrap(),
-            DialogueCommandOutcome::Created {
+                .unwrap()
+                .outcome(),
+            &DialogueCommandOutcome::Created {
                 node,
                 outputs: outputs.clone(),
                 link: None,
@@ -49,8 +141,9 @@ fn add_outcomes_report_allocated_outputs_without_reusing_retired_identities() {
                 recipe: NodeRecipe::Choice,
                 position: [0., 0.],
             })
-            .unwrap(),
-        DialogueCommandOutcome::Created {
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Created {
             node: NodeId(4),
             outputs: vec![OutputPort::Choice {
                 node: NodeId(4),
@@ -89,8 +182,9 @@ fn choice_outcomes_report_existing_and_allocated_ids_in_authored_order() {
                     },
                 ],
             })
-            .unwrap(),
-        DialogueCommandOutcome::ChoicesChanged {
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::ChoicesChanged {
             node: NodeId(2),
             choices: vec![ChoiceId(2), ChoiceId(3), ChoiceId(1)],
         }
@@ -112,8 +206,9 @@ fn choice_outcomes_report_existing_and_allocated_ids_in_authored_order() {
                 prompt: String::new(),
                 choices: Vec::new(),
             })
-            .unwrap(),
-        DialogueCommandOutcome::ChoicesChanged {
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::ChoicesChanged {
             node: NodeId(2),
             choices: Vec::new(),
         }
@@ -150,9 +245,11 @@ fn creating_from_an_output_replaces_its_target_in_one_edit_for_every_recipe() {
                     recipe,
                     position: [48., -24.],
                     endpoint: WireEndpoint::Output(port),
+                    reconnect: None,
                 })
-                .unwrap(),
-            DialogueCommandOutcome::Created {
+                .unwrap()
+                .outcome(),
+            &DialogueCommandOutcome::Created {
                 node,
                 outputs: outputs.clone(),
                 link: Some(Link {
@@ -227,9 +324,11 @@ fn creating_into_an_input_uses_the_new_nodes_allocated_primary_output_atomically
                     recipe,
                     position: [-64., 128.],
                     endpoint: WireEndpoint::Input(NodeId(3)),
+                    reconnect: None,
                 })
-                .unwrap(),
-            DialogueCommandOutcome::Created {
+                .unwrap()
+                .outcome(),
+            &DialogueCommandOutcome::Created {
                 node,
                 outputs: vec![output],
                 link: Some(Link {
@@ -334,6 +433,7 @@ fn invalid_wire_endpoints_recipes_and_positions_preserve_allocators_and_redo() {
                 recipe,
                 position,
                 endpoint,
+                reconnect: None,
             },
         );
     }
@@ -347,9 +447,11 @@ fn invalid_wire_endpoints_recipes_and_positions_preserve_allocators_and_redo() {
                 recipe: NodeRecipe::Choice,
                 position: [0., 0.],
                 endpoint: WireEndpoint::Input(NodeId(3)),
+                reconnect: None,
             })
-            .unwrap(),
-        DialogueCommandOutcome::Created {
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Created {
             node: NodeId(5),
             outputs: vec![OutputPort::Choice {
                 node: NodeId(5),
@@ -363,6 +465,240 @@ fn invalid_wire_endpoints_recipes_and_positions_preserve_allocators_and_redo() {
                 to: NodeId(3),
             }),
         }
+    );
+}
+
+#[test]
+fn wire_source_reconnection_creates_and_removes_the_original_link_in_one_history_entry() {
+    for recipe in [NodeRecipe::Line, NodeRecipe::Choice] {
+        let mut graph = story();
+        let before = state(&graph);
+        let original = graph.view();
+        let old = choice_port(1);
+        let receipt = graph
+            .apply(&DialogueCommand::CreateFromWire {
+                recipe,
+                position: [-64., 128.],
+                endpoint: WireEndpoint::Input(NodeId(3)),
+                reconnect: Some(old),
+            })
+            .unwrap();
+        let DialogueCommandOutcome::Created {
+            node,
+            outputs,
+            link: Some(link),
+        } = receipt.outcome()
+        else {
+            panic!("expected the exact new node and primary-output identities");
+        };
+        assert_eq!(*node, NodeId(4));
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(
+            *link,
+            Link {
+                from: outputs[0],
+                to: NodeId(3)
+            }
+        );
+        assert_eq!(graph.view().target(old), None);
+        assert_eq!(graph.view().link_incarnation(old), None);
+        assert_eq!(graph.view().target(outputs[0]), Some(NodeId(3)));
+        assert_eq!(
+            graph.view().target(choice_port(2)),
+            original.target(choice_port(2))
+        );
+        assert_eq!(
+            graph.view().link_incarnation(choice_port(2)),
+            original.link_incarnation(choice_port(2)),
+        );
+        assert!(Arc::ptr_eq(receipt.view(), &graph.view()));
+        let after = state(&graph);
+        assert_eq!(after.2.undo_depth, before.2.undo_depth + 1);
+        graph.undo().unwrap();
+        assert_eq!(graph.encode().unwrap(), before.0);
+        assert_eq!(graph.content_state(), before.1);
+        assert_eq!(graph.view().target(old), Some(NodeId(3)));
+        assert_ne!(
+            graph.view().link_incarnation(old),
+            original.link_incarnation(old)
+        );
+        assert!(graph.view().node(*node).is_none());
+        graph.redo().unwrap();
+        assert_eq!(graph.encode().unwrap(), after.0);
+        assert_eq!(graph.content_state(), after.1);
+        assert_eq!(graph.view().target(old), None);
+        assert_eq!(graph.view().target(outputs[0]), Some(NodeId(3)));
+        assert_ne!(
+            graph.view().node_incarnation(*node),
+            receipt.view().node_incarnation(*node)
+        );
+    }
+}
+
+#[test]
+fn wire_target_reconnection_preserves_only_its_original_output_and_one_history_entry() {
+    for recipe in [NodeRecipe::Line, NodeRecipe::Choice, NodeRecipe::End] {
+        let mut graph = story();
+        let before = state(&graph);
+        let original = graph.view();
+        let port = choice_port(1);
+        let receipt = graph
+            .apply(&DialogueCommand::CreateFromWire {
+                recipe,
+                position: [300., 100.],
+                endpoint: WireEndpoint::Output(port),
+                reconnect: Some(port),
+            })
+            .unwrap();
+        let DialogueCommandOutcome::Created {
+            node,
+            link: Some(link),
+            ..
+        } = receipt.outcome()
+        else {
+            panic!("expected the exact replacement link");
+        };
+        assert_eq!(
+            *link,
+            Link {
+                from: port,
+                to: *node
+            }
+        );
+        assert_eq!(graph.view().target(port), Some(*node));
+        assert_eq!(
+            graph.view().link_incarnation(port),
+            original.link_incarnation(port)
+        );
+        assert_eq!(
+            graph.view().target(choice_port(2)),
+            original.target(choice_port(2))
+        );
+        assert_eq!(graph.history_status().undo_depth, before.2.undo_depth + 1);
+        let after = state(&graph);
+        graph.undo().unwrap();
+        assert_eq!(graph.encode().unwrap(), before.0);
+        assert_eq!(graph.content_state(), before.1);
+        assert_eq!(
+            graph.view().link_incarnation(port),
+            original.link_incarnation(port)
+        );
+        graph.redo().unwrap();
+        assert_eq!(graph.encode().unwrap(), after.0);
+        assert_eq!(graph.content_state(), after.1);
+    }
+}
+
+#[test]
+fn invalid_wire_reconnection_preserves_both_allocators_original_history_and_redo() {
+    let mut graph = story();
+    let unlinked = add(&mut graph, NodeRecipe::Line);
+    add(&mut graph, NodeRecipe::Choice);
+    let redo = state(&graph);
+    graph.undo().unwrap();
+    for (endpoint, reconnect, recipe, position) in [
+        (
+            WireEndpoint::Input(NodeId(3)),
+            OutputPort::Next { node: NodeId(404) },
+            NodeRecipe::Choice,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(3)),
+            OutputPort::Next { node: unlinked },
+            NodeRecipe::Choice,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Output(OutputPort::Next { node: unlinked }),
+            OutputPort::Next { node: unlinked },
+            NodeRecipe::Line,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(3)),
+            OutputPort::Choice {
+                node: NodeId(1),
+                choice: ChoiceId(1),
+            },
+            NodeRecipe::Choice,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(1)),
+            choice_port(1),
+            NodeRecipe::Choice,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Output(choice_port(2)),
+            choice_port(1),
+            NodeRecipe::Choice,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(3)),
+            choice_port(2),
+            NodeRecipe::Line,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(404)),
+            choice_port(1),
+            NodeRecipe::Line,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(3)),
+            choice_port(1),
+            NodeRecipe::End,
+            [0., 0.],
+        ),
+        (
+            WireEndpoint::Input(NodeId(3)),
+            choice_port(1),
+            NodeRecipe::Choice,
+            [f32::NAN, 0.],
+        ),
+    ] {
+        refuses(
+            &mut graph,
+            DialogueCommand::CreateFromWire {
+                recipe,
+                position,
+                endpoint,
+                reconnect: Some(reconnect),
+            },
+        );
+    }
+    graph.redo().unwrap();
+    assert_eq!(graph.encode().unwrap(), redo.0);
+    assert_eq!(graph.content_state(), redo.1);
+    graph.undo().unwrap();
+    let receipt = graph
+        .apply(&DialogueCommand::CreateFromWire {
+            recipe: NodeRecipe::Choice,
+            position: [0., 0.],
+            endpoint: WireEndpoint::Input(NodeId(3)),
+            reconnect: Some(choice_port(1)),
+        })
+        .unwrap();
+    assert_eq!(
+        receipt.outcome(),
+        &DialogueCommandOutcome::Created {
+            node: NodeId(6),
+            outputs: vec![OutputPort::Choice {
+                node: NodeId(6),
+                choice: ChoiceId(4)
+            }],
+            link: Some(Link {
+                from: OutputPort::Choice {
+                    node: NodeId(6),
+                    choice: ChoiceId(4)
+                },
+                to: NodeId(3),
+            }),
+        },
     );
 }
 
@@ -381,11 +717,19 @@ fn incarnation_exhaustion_refuses_allocated_results_before_commit() {
             recipe: NodeRecipe::Choice,
             position: [0., 0.],
             endpoint: WireEndpoint::Output(choice_port(1)),
+            reconnect: None,
         },
         DialogueCommand::CreateFromWire {
             recipe: NodeRecipe::Choice,
             position: [0., 0.],
             endpoint: WireEndpoint::Input(NodeId(3)),
+            reconnect: None,
+        },
+        DialogueCommand::CreateFromWire {
+            recipe: NodeRecipe::Choice,
+            position: [0., 0.],
+            endpoint: WireEndpoint::Input(NodeId(3)),
+            reconnect: Some(choice_port(1)),
         },
         DialogueCommand::SetChoices {
             node: NodeId(2),
@@ -416,8 +760,9 @@ fn reconnect_changes_both_endpoints_with_one_undo_and_redo_and_fresh_link_lifeti
                 to,
                 target: NodeId(1),
             })
-            .unwrap(),
-        DialogueCommandOutcome::Changed
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Changed
     );
     let after = state(&graph);
     let moved = graph.view();
@@ -477,8 +822,9 @@ fn reconnect_on_the_same_output_retargets_without_retiring_the_link() {
                 to: port,
                 target: NodeId(1),
             })
-            .unwrap(),
-        DialogueCommandOutcome::Changed
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Changed
     );
     let after = state(&graph);
     assert_eq!(after.2.undo_depth, before.2.undo_depth + 1);
@@ -563,8 +909,9 @@ fn mixed_removal_validates_incident_selections_before_one_atomic_deletion() {
                 nodes: vec![NodeId(1)],
                 links: vec![incident, choice_port(1), choice_port(2)],
             })
-            .unwrap(),
-        DialogueCommandOutcome::Changed
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Changed
     );
     let after = state(&graph);
     let removed = graph.view();
@@ -623,8 +970,9 @@ fn links_only_removal_keeps_nodes_outputs_and_unselected_links_alive() {
                 nodes: Vec::new(),
                 links: vec![port],
             })
-            .unwrap(),
-        DialogueCommandOutcome::Changed
+            .unwrap()
+            .outcome(),
+        &DialogueCommandOutcome::Changed
     );
     let after = graph.view();
     assert_eq!(graph.history_status().undo_depth, before.2.undo_depth + 1);
@@ -771,7 +1119,9 @@ fn semantic_noops_preserve_source_arc_both_allocators_clock_and_pending_redo() {
             links: Vec::new(),
         },
     ] {
-        assert_eq!(graph.apply(&command).unwrap(), DialogueCommandOutcome::Noop);
+        let receipt = graph.apply(&command).unwrap();
+        assert_eq!(receipt.outcome(), &DialogueCommandOutcome::Noop);
+        assert!(Arc::ptr_eq(receipt.view(), &view));
         assert_eq!(state(&graph), before);
         assert!(Arc::ptr_eq(&view, &graph.view()));
         assert_eq!(graph.undo, undo);

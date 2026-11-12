@@ -4297,6 +4297,18 @@ The external interaction transport still has to consume its own exact pending/co
 authority and adopt canonical domain IDs. No full step-3, Dialogue native, R11c or foundation
 completion follows from this original-owner prerequisite.
 
+The subsequent [external request consumer](2026-11-12-dialogue-graph-integration-plan.md#exact-external-canvas-requests-and-publication-receipts)
+implements typed renderer-neutral work through Jellyflow's existing interaction ticket and lease.
+Nara retains the original domain basis, command outcome and exact post-command source;
+a sealed external publication supplies canonical allocation/port mappings and late completion.
+Standalone commands lower the same normalized intent. Creation during either-end reconnection
+now shares one original domain candidate and history. Same-incarnation publication cannot
+revoke an already bound request; reset/close still retire it, and successful canonical geometry
+waits on the original View. Unknown work neither infers success nor retries speculatively.
+The owning consumer plan records actual qualification and corrected ownership/retirement cases.
+Native journal transport, intrinsic height, multiline controls and two native Dialogue Views
+remain the next integration, with no new Editor default or complete R11c/R12 claim.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

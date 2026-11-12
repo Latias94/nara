@@ -21,7 +21,7 @@ fn exact_result(
 }
 
 fn created(result: &EditorExtensionCommandOutcome) -> (NodeId, Vec<OutputPort>, Option<Link>) {
-    match result.get::<DialogueGraph>().unwrap() {
+    match result.get::<DialogueGraph>().unwrap().outcome() {
         DialogueCommandOutcome::Created {
             node,
             outputs,
@@ -101,7 +101,9 @@ fn ordered_results_retain_original_allocations_across_stale_and_noop_actions() -
     let (after_noop, noop_result) =
         edit_with_outcome(editor, document, DialogueCommand::SetEntry(Some(line)));
     assert_eq!(
-        noop_result.get::<DialogueGraph>(),
+        noop_result
+            .get::<DialogueGraph>()
+            .map(|receipt| receipt.outcome()),
         Some(&DialogueCommandOutcome::Noop)
     );
     assert!(Arc::ptr_eq(&before_noop, &view(editor, document)));
@@ -140,6 +142,7 @@ fn atomic_canvas_edits_share_original_history_file_and_reopen_admission() -> Res
             recipe: NodeRecipe::Choice,
             position: [240.0, 24.0],
             endpoint: WireEndpoint::Output(line_output),
+            reconnect: None,
         },
     );
     let (choice_node, choice_outputs, link) = created(&choice_result);
@@ -195,7 +198,7 @@ fn atomic_canvas_edits_share_original_history_file_and_reopen_admission() -> Res
     let DialogueCommandOutcome::ChoicesChanged {
         node,
         choices: allocated_choices,
-    } = choices_result.get::<DialogueGraph>().unwrap()
+    } = choices_result.get::<DialogueGraph>().unwrap().outcome()
     else {
         panic!("expected the domain's complete choice identity result");
     };
@@ -234,7 +237,9 @@ fn atomic_canvas_edits_share_original_history_file_and_reopen_admission() -> Res
         },
     );
     assert_eq!(
-        reconnect_result.get::<DialogueGraph>(),
+        reconnect_result
+            .get::<DialogueGraph>()
+            .map(|receipt| receipt.outcome()),
         Some(&DialogueCommandOutcome::Changed)
     );
     assert_eq!(
@@ -269,6 +274,7 @@ fn atomic_canvas_edits_share_original_history_file_and_reopen_admission() -> Res
             recipe: NodeRecipe::Line,
             position: [440.0, 180.0],
             endpoint: WireEndpoint::Input(ending),
+            reconnect: None,
         },
     );
     let (new_line, new_outputs, new_link) = created(&input_result);
@@ -297,7 +303,9 @@ fn atomic_canvas_edits_share_original_history_file_and_reopen_admission() -> Res
         },
     );
     assert_eq!(
-        remove_result.get::<DialogueGraph>(),
+        remove_result
+            .get::<DialogueGraph>()
+            .map(|receipt| receipt.outcome()),
         Some(&DialogueCommandOutcome::Changed)
     );
     assert_eq!(

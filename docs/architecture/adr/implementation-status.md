@@ -1224,6 +1224,20 @@ behavior-language trial compilation, feature-off compilation, format and documen
 within the unit's recorded scope; existing unrelated warnings remain.
 External typed transport, canonical native ID adoption and the complete Dialogue UI remain open.
 
+The following [external request successor](../../plans/2026-11-12-dialogue-graph-integration-plan.md#exact-external-canvas-requests-and-publication-receipts)
+implements renderer-neutral typed mutation binding and exact asynchronous settlement through
+the existing Jellyflow interaction session and lease at local Jellyflow `4bcd0f2`.
+Runtime/public controls pass 647/647, existing adapter controls 560/560 and the independent
+Nara domain/graph/Session/file cohort 110/110. The independent Nara consumer retains
+original document basis, domain result and post-command source, pairing them with a sealed
+publication. It adopts actual canonical IDs and complete creation-port mappings without
+another writable graph or history. Creation during reconnection is one atomic domain operation.
+Pending work survives its own publication, canonical projection uses current owners and a
+delayed A result reconciles B before returning. Reset, close and unknown outcomes preserve
+their distinct authority. The linked plan records public Session and source/interaction
+verification; native journal transport, View-local intrinsic sizing and the complete two-View
+Dialogue UI remain open. Full R11/R12 and the foundation Goal remain active.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate

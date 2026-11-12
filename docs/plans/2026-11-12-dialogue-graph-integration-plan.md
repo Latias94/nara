@@ -428,3 +428,123 @@ This closes the domain outcome/atomic-operation prerequisite. Original external 
 binding, asynchronous admission/completion, canonical native identity adoption, View-local
 intrinsic height and the complete two-View Dialogue product remain within step 3 and the
 following native consumer. The full foundation Goal stays active.
+
+## Exact External Canvas Requests And Publication Receipts
+
+Status: renderer-neutral request and public Session consumer qualified; native integration open.
+
+Normalize the existing fresh connection, movement and deletion intents into typed semantic
+data before choosing the writer. The standalone runtime lowers that same validated data into
+its existing commands. An external document receives a move-only request bound to the original
+interaction ticket, snapshot, source incarnation and immutable domain basis. Keep request
+binding and terminal settlement in the existing interaction session and submission lease.
+Standalone and external transport entry points must refuse the wrong writer explicitly.
+
+Retain one optional immutable owner observation with each external fact publication. Capture
+that observation and the graph snapshot under the same original read borrow when binding a
+request. This is not a metadata bag, domain callback, writer or replacement history. The Nara
+consumer retains its exact document/revision and identity mapping there; it must not reconstruct
+an old domain basis from the latest graph revision.
+
+An accepted external result consumes its original request and an exact original incremental
+publication receipt. Validate source, predecessor version, document epoch and the requested
+effects against that receipt's retained snapshot. A connection additionally adopts the actual
+canonical node, port and edge identities allocated or derived by the domain. Invalid evidence
+returns the original request and supplied result for repair; it cannot consume or recreate an
+operation. Explicit rejection, undispatched work and an unknown delivered outcome remain
+different dispositions. Publications alone never acknowledge an edit.
+
+Dialogue's associated command result retains its exact post-command immutable source as well
+as the existing effect/allocated identities. Publish A from that result even when B has already
+executed. A delayed completion can retain A's receipt after B is published without rolling the
+current projection backward. Reopen/reset and close retire native authority while preserving
+historical domain observations. Successful Noop retains its original source allocation and
+still has an exact accepted Workspace revision.
+
+Definite connection success uses an explicit canonical publication proof and still waits for
+the original accepted route/geometry. Preserve standalone reconciliation controls, but disable
+proposed-ID/next-revision success inference and speculative retry for unknown external work.
+Exercise canonical IDs different from proposals, two Views, ordered and delayed results,
+rejection/Noop, reset, close and complete Session/history/file behavior through public consumers.
+Native journal admission, asynchronous delivery, intrinsic height, multiline controls and
+actual two-View Dialogue pixels remain subsequent work in this same complete consumer.
+
+### Implemented Request And Domain Consumer
+
+The renderer-neutral request path and the independent Nara consumer are implemented.
+The local Jellyflow implementation is `4bcd0f2591d1f14146c56d924059a51f9aa89686`;
+it is not remotely published. Open-GPUI remains pinned to `f75c10b2`.
+`GraphMutationIntent` contains validated semantic data; standalone commands and external
+requests share its normalization. Explicit writer-specific binding uses the original
+interaction ticket, pending state and drop lease. The bound request atomically retains the
+original graph observation and one immutable owner basis. Installed external facts are shared
+by `Arc`, so binding does not clone all incarnation maps.
+
+`ExternalGraphRequest::accept` consumes the original incremental publication and validates
+source, predecessor, epoch and requested effects. Creation requires a complete bijection
+between proposed and canonical ports, including the selected target; equal direction/kind
+cannot distinguish two semantic outputs. Dynamic keys remain domain-owned. Actual canonical
+identities enter the original connection publication owner and still wait for that View's
+accepted geometry. Unknown external work disables standalone proposed-ID inference and retry.
+
+The original Dialogue result is now `DialogueCommandReceipt`: its effect retains actual
+allocations, while its `Arc<DialogueView>` retains the exact post-command source. The
+`DialogueCanvasRequest` consumer lowers moves, connections, both reconnection directions,
+creation from either wire end and deletion into original Session commands.
+`DialogueCanvasPublication` is sealed around the matching accepted command outcome and the
+publication made from that exact view. Wrong evidence returns the request and publication
+intact. Source or domain refusal never reexecutes an accepted operation.
+
+Creation during source reconnection exposed another original-domain requirement.
+`CreateFromWire { reconnect }` now validates the original linked output against the fixed
+endpoint before allocation, then creates and replaces the link in one candidate and history
+entry. Invalid relation, missing link, incompatible recipe or capacity failure preserves both
+allocators, source, clock and complete Undo/Redo. The public consumer covers both endpoints
+and persistence rather than reducing this interaction to an unsupported bridge operation.
+
+Independent review found and corrected three integration defects: a normal reconnect
+publication retired its old binding before the exact ACK; a successful canonical projection
+still referenced detached old owners; and creation could confuse same-kind outputs.
+Pending external work now survives same-incarnation graph updates until exact settlement,
+while reset/close retires it. A proven projection uses only canonical owners. A delayed ACK
+also reconciles current B before returning, so an already-retired A route cannot reappear
+without another UI tick.
+
+An additional owner review found that an arbitrary old basis destructor could panic between
+source-state assignments. Publication now retains old facts outside the mutable borrow,
+installs the complete state and View fanout, catches retirement panic, drains existing
+notifications and then propagates the first panic. The regression covers publish/reset,
+both Views, exact new basis, subsequent allocation and later admission.
+
+The Runtime library plus public Source/interaction cohort passes 647/647 without skips, run
+`66e1e4b8-89ff-4379-9c82-4b6e867683cd`. This includes 16 actual public interaction tests,
+eight canonical-settlement controls, five normalization controls and four owner-basis tests.
+These are CPU/protocol and filesystem results. No new native Dialogue, physical input,
+numeric performance budget or complete R11c qualification follows.
+
+Qualification completed November 13, 2026 on Windows 11 with Rust 1.95.0, one build job and
+the shared Nara target. The final serial results are:
+
+| Scope | Actual result |
+|---|---|
+| Runtime library and public Source/interaction consumers | 647/647, no skips, three binaries; run `66e1e4b8-89ff-4379-9c82-4b6e867683cd`. |
+| Existing Open-GPUI and egui adapter libraries/integrations | 560/560, no skips, 23 binaries; run `ea4e72b4-910e-4cb0-a295-1b7a3ea90154`. |
+| Independent Nara domain, graph and public Session/file consumer | Release 110/110, no skips, three binaries; run `644140b2-b3e8-4ed1-a57a-3506e9de829e`. Includes 11 new external Session trajectories, three reconnect-creation domain controls and two exact-source receipt controls. |
+| Correctness | All-target Clippy with `-D clippy::correctness` passed for Runtime/both adapters and the feature-enabled independent Nara consumer. Nonblocking enum-size and existing project warnings remain. |
+| Conditional compilation | Independently locked Nara consumer release all-target check without default features passed. |
+| Supporting checks | Jellyflow workspace and Nara fixture formatting, whitespace and added local document links passed. |
+| Independent review | Shared request/settlement and domain/bridge reviews found no remaining concrete P1/P2 after fixes; all eight scoped agents are closed. |
+
+The initial production build attempted direct `Graph` equality, which that type deliberately
+does not expose. Noop validation now uses the original owner's complete publication deltas and
+graph version. Two public test assertions use complete serialized authored records instead of
+weakening source equality to counts. The runtime/public cohort and adapter controls were rerun
+after the ownership corrections and basis-retirement change. Unchanged official GPUI mechanisms
+were not given another framework test matrix.
+
+Source publication still compares complete facts and rebuilds its read index. Requests retain
+their original source/basis until settlement or disposal; these results establish no total
+memory, incremental-layout, native latency or frame-time budget. The native journal, managed
+mutation and close paths still need external asynchronous transport. View-local intrinsic
+height, full multiline controls and the two native Dialogue Views remain the next complete
+consumer. The full foundation Goal stays active.

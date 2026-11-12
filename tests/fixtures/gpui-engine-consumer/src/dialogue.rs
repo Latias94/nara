@@ -213,6 +213,26 @@ pub enum DialogueCommandOutcome {
     },
 }
 
+/// A successful command's effect and the exact immutable view installed by that command.
+///
+/// The retained facts remain readable after later edits or document retirement. They do not
+/// authorize another command against the current document.
+#[derive(Debug, Clone)]
+pub struct DialogueCommandReceipt {
+    outcome: DialogueCommandOutcome,
+    view: Arc<DialogueView>,
+}
+
+impl DialogueCommandReceipt {
+    pub fn outcome(&self) -> &DialogueCommandOutcome {
+        &self.outcome
+    }
+
+    pub fn view(&self) -> &Arc<DialogueView> {
+        &self.view
+    }
+}
+
 /// Existing IDs preserve identity; the document allocates an ID for each new choice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChoiceDraft {
@@ -237,6 +257,7 @@ pub enum DialogueCommand {
         recipe: NodeRecipe,
         position: [f32; 2],
         endpoint: WireEndpoint,
+        reconnect: Option<OutputPort>,
     },
     SetEntry(Option<NodeId>),
     SetLine {
@@ -555,7 +576,7 @@ fn replace_choices(
 
 impl EditorExtensionDocument for DialogueGraph {
     type Command = DialogueCommand;
-    type Outcome = DialogueCommandOutcome;
+    type Outcome = DialogueCommandReceipt;
     type View = Arc<DialogueView>;
     const TYPE_ID: &'static str = "consumer.dialogue-graph";
 
@@ -604,6 +625,7 @@ impl EditorExtensionDocument for DialogueGraph {
                 recipe,
                 position,
                 endpoint,
+                reconnect,
             } => {
                 match endpoint {
                     WireEndpoint::Output(port) => validate_output(&candidate, *port)?,
@@ -615,6 +637,25 @@ impl EditorExtensionDocument for DialogueGraph {
                                 "A dialogue node created from an input wire must have an output",
                             ));
                         }
+                    }
+                }
+                if let Some(original) = reconnect {
+                    validate_output(&candidate, *original)?;
+                    let previous_target = candidate.target(*original).ok_or_else(|| {
+                        error(
+                            "dialogue.link-missing",
+                            "The selected dialogue link does not exist",
+                        )
+                    })?;
+                    let matches = match endpoint {
+                        WireEndpoint::Output(port) => port == original,
+                        WireEndpoint::Input(target) => *target == previous_target,
+                    };
+                    if !matches {
+                        return Err(error(
+                            "dialogue.wire-reconnect",
+                            "The original dialogue link does not match the fixed wire endpoint",
+                        ));
                     }
                 }
                 let (node, outputs) = create_node(
@@ -634,6 +675,11 @@ impl EditorExtensionDocument for DialogueGraph {
                         to: *target,
                     },
                 };
+                if let Some(original) = reconnect
+                    && *original != link.from
+                {
+                    candidate.links.remove(original);
+                }
                 set_target(&mut candidate, link.from, Some(link.to))?;
                 DialogueCommandOutcome::Created {
                     node,
@@ -730,7 +776,10 @@ impl EditorExtensionDocument for DialogueGraph {
         };
         let _ = codec::encode(&candidate)?;
         if candidate == *self.view {
-            return Ok(DialogueCommandOutcome::Noop);
+            return Ok(DialogueCommandReceipt {
+                outcome: DialogueCommandOutcome::Noop,
+                view: Arc::clone(&self.view),
+            });
         }
         if self.clock.generation() == u64::MAX {
             return Err(error(
@@ -751,7 +800,10 @@ impl EditorExtensionDocument for DialogueGraph {
         self.next_incarnation = next_incarnation;
         self.clock = clock;
         self.state = clock.content_state();
-        Ok(outcome)
+        Ok(DialogueCommandReceipt {
+            outcome,
+            view: Arc::clone(&self.view),
+        })
     }
 
     fn undo(&mut self) -> Result<(), EditorExtensionDocumentError> {

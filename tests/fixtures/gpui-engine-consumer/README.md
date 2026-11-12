@@ -47,11 +47,12 @@ The existing list-of-lines Dialogue and finite ValueGraph formats remain separat
 
 With `jellyflow-trial`, `dialogue::jellyflow::DialogueFacts` captures an immutable core graph
 and checked ID/incarnation mappings. It creates no Jellyflow runtime or second history.
-The original extension command result now carries the domain's typed `DialogueCommandOutcome`,
-bound to that exact command and accepted Workspace revision. Creation and choice edits return
-their actual allocated IDs. `CreateFromWire`, endpoint reconnection and mixed node/link removal
-each validate and commit one candidate with one Undo boundary. A successful semantic Noop
-retains source/history while still returning its precise operation result.
+The original extension command result carries a typed `DialogueCommandReceipt`, bound to that
+exact command and accepted Workspace revision. Its `outcome()` supplies the domain effect and
+actual allocated IDs; `view()` retains the exact post-command immutable source. `CreateFromWire`,
+including creation while reconnecting either endpoint, ordinary reconnection and mixed node/link
+removal each validate and commit one candidate with one Undo boundary. A successful semantic
+Noop shares the original source allocation and preserves history.
 `external_facts()` retains that exact graph allocation and supplies complete live-incarnation
 observations to Jellyflow's `ExternalGraphDocument`. Two ordinary `ViewSession`s now consume
 that Source through the public Session/file tests, with independent local state and geometry.
@@ -59,7 +60,12 @@ Equal-value Noop publication, coalesced remove/Undo and explicit reset after Reo
 the original Nara document/history and prevent retired native identities from returning.
 Mixed feedback refused before admission returns its original move-only packet; layouts can
 be resubmitted using the same original token after moving its unsupported commands out.
-An external-document native interface, two Dialogue Views and an ordinary property editor
+`DialogueCanvasRequest` lowers typed Jellyflow interactions through their captured domain
+basis into an original Session command. `publish` pairs its exact accepted outcome and retained
+source with a sealed `DialogueCanvasPublication`; `complete` adopts the actual canonical
+identities from that receipt. Invalid evidence retains the original authorities for repair.
+An original A receipt can settle after B without rolling either View backward or reexecuting
+the command. External native journal transport, two native Dialogue Views and a property editor
 remain work in the [consumer plan](../../../docs/plans/2026-11-12-dialogue-graph-integration-plan.md).
 The `--jellyflow` mode above continues to demonstrate the standalone runtime.
 

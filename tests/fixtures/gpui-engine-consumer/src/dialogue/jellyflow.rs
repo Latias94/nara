@@ -1,6 +1,6 @@
 //! Immutable Dialogue Graph facts for Jellyflow's core graph model.
 //!
-//! This is a prerequisite for an external-document native interface, not a native Host adapter.
+//! Typed external requests use the original Session command and publication receipts.
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -15,6 +15,8 @@ use nara_engine::tooling::{EditorDocumentId, EditorExtensionDocumentError};
 use serde_json::Value;
 
 use super::{DialogueView, NodeBody, NodeId, OutputPort, error, validation};
+
+pub mod requests;
 
 const GRAPH_NAMESPACE: u64 = 0x6e61_7261_2e64_6c67;
 const INPUT_NAMESPACE: u64 = 0x6e61_7261_2e69_6e70;
@@ -35,15 +37,15 @@ pub struct DialogueFactsBasis {
 /// equal domain IDs in different documents deliberately produce equal element UUIDs. Every
 /// mapping therefore requires the captured graph ID, while the basis and live incarnations
 /// distinguish revisions, Reopen, and removal followed by Undo.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DialogueFacts {
     basis: DialogueFactsBasis,
     source: Arc<DialogueView>,
     graph: Arc<Graph>,
-    nodes: BTreeMap<CoreNodeId, NodeId>,
-    inputs: BTreeMap<PortId, NodeId>,
-    outputs: BTreeMap<PortId, OutputPort>,
-    edges: BTreeMap<EdgeId, OutputPort>,
+    nodes: Arc<BTreeMap<CoreNodeId, NodeId>>,
+    inputs: Arc<BTreeMap<PortId, NodeId>>,
+    outputs: Arc<BTreeMap<PortId, OutputPort>>,
+    edges: Arc<BTreeMap<EdgeId, OutputPort>>,
 }
 
 impl DialogueFacts {
@@ -155,10 +157,10 @@ impl DialogueFacts {
             basis: DialogueFactsBasis { document, revision },
             source,
             graph: Arc::new(graph),
-            nodes,
-            inputs,
-            outputs,
-            edges,
+            nodes: Arc::new(nodes),
+            inputs: Arc::new(inputs),
+            outputs: Arc::new(outputs),
+            edges: Arc::new(edges),
         })
     }
 
@@ -168,8 +170,8 @@ impl DialogueFacts {
 
     /// Retains this exact graph allocation and its original source-owned incarnation facts.
     ///
-    /// Publishing these facts does not acknowledge an authored edit. The caller keeps the
-    /// original Session basis and command result separately from the external View version.
+    /// The captured domain basis travels with these facts. Publishing alone does not acknowledge
+    /// an authored edit; the original Session result remains distinct from the View version.
     pub fn external_facts(&self) -> Result<ExternalGraphFacts, ExternalGraphError> {
         let graph = self.graph.graph_id();
         let nodes = self.nodes.keys().filter_map(|node| {
@@ -192,6 +194,7 @@ impl DialogueFacts {
                 .map(|serial| (*edge, serial))
         });
         ExternalGraphFacts::new(Arc::clone(&self.graph), nodes, ports, edges)
+            .map(|facts| facts.with_owner_basis(Arc::new(self.clone())))
     }
 
     pub const fn source(&self) -> &Arc<DialogueView> {

@@ -208,6 +208,15 @@ Command and outcome erasure remains local to this document interface. Outcomes a
 `Send + Sync` Rust values, with no mandatory serialization, `Clone` or `Debug` requirement and no
 new service invocation, callback registry or cross-document transaction owner.
 
+A domain may retain its exact post-command immutable view in that associated outcome.
+Adapters publish that original observation before later operations and retain its publication
+receipt; a later current snapshot is not evidence of an earlier command's allocation or result.
+External canvas requests carry their captured document/revision and identity mapping into
+Session admission. Completion pairs the original command outcome with that original publication
+and adopts the domain's canonical identities. It does not construct a second writable graph,
+history or mutation owner. Native interaction and accepted geometry retain their own authority;
+unknown delivered work is not retried or inferred successful from equal values.
+
 Source namespaces remain explicit: extension locators are project-relative, while Scene/Prefab
 locators retain their configured source scopes. The Host excludes duplicate publication ownership
 by reserved path and actual current file identity across these namespaces, including filesystem

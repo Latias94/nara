@@ -36,6 +36,13 @@ const SOURCE: &str = "dialogue/conversation.json";
 #[path = "dialogue_document/atomic_edits.rs"]
 mod atomic_edits;
 
+#[path = "dialogue_document/command_receipts.rs"]
+mod command_receipts;
+
+#[cfg(feature = "jellyflow-trial")]
+#[path = "dialogue_document/canvas_requests.rs"]
+mod canvas_requests;
+
 #[cfg(feature = "jellyflow-trial")]
 #[path = "dialogue_document/external_source.rs"]
 mod external_source;
@@ -270,7 +277,7 @@ fn add(
         node,
         outputs,
         link,
-    } = outcome.get::<DialogueGraph>().unwrap()
+    } = outcome.get::<DialogueGraph>().unwrap().outcome()
     else {
         panic!("expected the original allocator's creation outcome");
     };
