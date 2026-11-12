@@ -53,6 +53,49 @@ a View-owned path: the current content-height owner emits a history-free geometr
 These are implementation requirements of step 3 below, not existing library capabilities or
 a newly selected universal protocol.
 
+### Native Integration Audit
+
+The subsequent source audit at Nara `b54229f` and Jellyflow `8a7c2df` identifies the actual
+integration points. It changes implementation order without qualifying a new native consumer:
+
+- `OpenGpuiSceneHost::new` already accepts `ViewSession`. Keep that Host and the existing
+  Nara `Viewer::open` / `cx.open_surface` composition. External read-side publication must
+  preserve snapshot equality, graph version and full node/port/edge lifetimes for the existing
+  mount and authoring checks; rebuilding a fresh snapshot on every query is insufficient.
+- Canvas interaction converges in `host/interaction_session.rs::bind_and_enqueue_interaction`.
+  The command journal, `host/frame_feedback.rs::submit`, managed mutations and retained fields
+  currently require synchronous `GraphCommand` completions. Give submitted external edits an
+  exact pending/result path. The original Session outcome, rather than graph publication,
+  value equality or an inferred next revision, settles the originating request once.
+- `host/lifecycle.rs::close_with_request_in_app` is another command submission path. Closing
+  must distinguish work not submitted from work already admitted by Nara. It must not execute
+  an external command again or report admitted work as definitely unexecuted. Closing one View
+  does not close the shared domain document.
+- `content_size_submission_owner.rs::dispatch_prefix` currently commits geometry with
+  `without_history()`. That remains a document write. External intrinsic size belongs to each
+  View and must consistently feed semantic zoom, placement, complete real-port measurement,
+  routing and accepted-geometry checks. A native wrapper's height alone does not update those
+  consumers. Retain the existing prepaint-commit and layout-admission boundaries.
+
+Use one original `Engine` / `EditorProjectSession`; process captured requests in the existing
+`Viewer::drive`, release the Session borrow, then publish facts and settle the exact originating
+request. Two graph Views, the property editor and preview remain independent local consumers.
+Reopen retains the document slot but changes `revision.source_id()`, so document ID or GraphId
+alone cannot keep old drafts, captures, popups or preview operations valid.
+
+The current fixture's `DraftInput` deliberately replaces CR/LF with spaces. It can serve fields
+whose policy is single-line, but cannot edit arbitrary Dialogue text/prompt without preserving
+line breaks. Add a genuine multiline path with corresponding layout, caret/selection, IME and
+accepted hit geometry; the existing full-byte domain tests do not establish native text fidelity.
+Popup content likewise needs the existing overlay/focus/activity boundaries, outside-click and
+Escape behavior, mount retirement and input isolation. Do not reduce the authored text contract
+or substitute a bare canvas click for those controls.
+
+Conversation preview can call the existing synchronous `Conversation::step`, `advance` and
+`choose` after checking its captured document/revision. It needs no ValueGraph compiler,
+background preview scheduler or additional GPU View. Source changes invalidate or explicitly
+restart that preview without an authored edit.
+
 ## Execution
 
 1. Implement the typed domain, atomic edits, bounded versioned byte codec, restorable content
