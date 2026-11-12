@@ -200,7 +200,7 @@ Shader Graph. Keep the existing finite graph as a control.
 | Order | Work | Complete consumer and acceptance |
 |---|---|---|
 | 1 | Preserve the standalone Jellyflow integration control. | A standalone library graph has two live Views, real nodes/ports and a native operation; close retires library state while the independent engine producer remains valid. |
-| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow, immutable Source and renderer-neutral requests now use one original owner, exact outcomes and canonical identities. Next deliver native journal transport, View-local intrinsic height, two native Views and ordinary property editing. |
+| 2 | Complete the external-domain graph consumer without another history. | Domain, public Session/file workflow, immutable Source, renderer-neutral requests and Open-GPUI journal transport now use one original owner and exact outcomes. Next deliver View-local intrinsic height, two native Dialogue Views and ordinary property editing. |
 | 3 | Complete reusable panel/component and visible-UI operation seams. | External components and agent/test consumers use presented identity, focus/text/overlay services and exact outcomes without private hooks. |
 | 4 | Advance the independent Editor composition through full workflows. | Qualified source/asset/property/custom tools, workspace/docking and original View lifetimes; the selected build has no Dear runtime dependency. Keep the reference selectable until the replacement is complete. |
 | 5 | Qualify the authored game UI choice separately. | HUD and multiple logical roots, player/gamepad focus, time/pause, cooked resources and world-space/material/depth needs; share suitable mechanisms without importing the whole Editor. |
@@ -409,3 +409,35 @@ asynchronous transport while retaining prefix order, one in-flight submission an
 dispositions. Intrinsic height must be View-local throughout layout, routing and accepted geometry;
 multiline controls must preserve the full source. These and the two native Dialogue Views remain
 the next complete consumer, not a new default Editor or completed R11c.
+
+### Native External Journal Follow-Up
+
+Local Jellyflow implementation: `3a430b906d8b902bee6a682c436dcdede1de7cd5`. The source,
+request and native-transport successors remain local; Open-GPUI stays pinned to `f75c10b2`.
+
+The [native transport successor](2026-11-12-dialogue-graph-integration-plan.md#implemented-native-external-transport)
+now extends Jellyflow's original native-adapter journal and interaction owner. An explicit
+application handler receives each external request after its original frame feedback and outside the
+Host borrow. Its completion port retains the exact original slot. Source retirement preserves
+already received results; close never replays delivered work; pure completion waiting stops
+interaction ticks. Standalone and external bindings refuse the wrong writer explicitly.
+
+Runtime/public Source controls pass 647/647 and the journal cohort 45/45. The complete
+Open-GPUI/egui adapter library/integration cohort passes 583/583, no skips, across 24 binaries,
+including nine new public TestApp/Visual external-command trajectories. Two independent reviews
+closed the corrected frame-association, panic-custody, source-retirement and idle-scheduling
+findings. The linked plan records actual run identities, the real-clock VRR test correction
+and the distinction between framework tests and desktop/GPU acceptance.
+
+The independently locked Nara domain/graph/Session/file consumer passes 110/110. Its release
+native example was rebuilt; the existing Scene, captured graph gestures and standalone
+Jellyflow/two-View controls pass 3/3 on DX12 and 3/3 on Vulkan. These retain the original engine
+renderer and ordinary-writer regression scope, with three unselected tests per native run;
+they do not qualify a new external Dialogue UI.
+
+Continue with View-local canonical size through the existing complete geometry publication,
+then the two native Dialogue Views, ordinary multiline/property/popup controls and the original
+Session/file/preview workflow. Canonical size is distinct from displayed canvas bounds at
+non-unit zoom. The audit identified consumers in semantic zoom, placement, port/root measurement,
+mount restoration, Fit, admission and routing; do not introduce a second geometry owner.
+This remains a product integration prerequisite, with no new Editor default or complete R11c.

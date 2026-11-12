@@ -217,6 +217,15 @@ and adopts the domain's canonical identities. It does not construct a second wri
 history or mutation owner. Native interaction and accepted geometry retain their own authority;
 unknown delivered work is not retried or inferred successful from equal values.
 
+Native graph delivery retains the adapter's original command journal, prefix ordering and
+interaction ticket. An application handler receives external work after the original frame
+feedback is accepted and the native Host borrow ends. Its completion port carries no Window
+or domain writer and settles that same original slot. Empty command-completion lists do not
+identify a frame; the accepted receipt must match the captured feedback observation. Closing
+a View cannot replay delivered work or discard an already received exact result merely because
+source retirement precedes the completion task. Pure waiting for a domain completion does not
+by itself require continuous interaction frames.
+
 Source namespaces remain explicit: extension locators are project-relative, while Scene/Prefab
 locators retain their configured source scopes. The Host excludes duplicate publication ownership
 by reserved path and actual current file identity across these namespaces, including filesystem

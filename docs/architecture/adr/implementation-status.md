@@ -1238,6 +1238,21 @@ their distinct authority. The linked plan records public Session and source/inte
 verification; native journal transport, View-local intrinsic sizing and the complete two-View
 Dialogue UI remain open. Full R11/R12 and the foundation Goal remain active.
 
+The [native journal successor](../../plans/2026-11-12-dialogue-graph-integration-plan.md#implemented-native-external-transport)
+at local Jellyflow `3a430b9` implements external delivery through the original adapter journal
+and interaction ticket.
+Its handler runs after exact original feedback and outside the Host borrow; one-shot completion
+retains the original domain result through source retirement and never authorizes replay.
+Pure waiting stops interaction ticks. Runtime/public controls pass 647/647; the affected
+Open-GPUI/egui adapter cohort passes 583/583, including nine public TestApp/Visual trajectories.
+Independent journal and Host reviews closed the corrected association, panic, retirement and
+scheduling findings. The linked plan retains exact runs and test-clock limitations. View-local
+canonical size and the complete native Dialogue product remain open; no new external Dialogue
+GPU, physical-input or numeric-budget claim follows.
+The independently locked Nara domain/graph/Session/file cohort passes 110/110; existing Scene,
+captured graph gesture and standalone Jellyflow/two-View native controls pass 3/3 each on DX12
+and Vulkan after rebuilding the release consumer.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate

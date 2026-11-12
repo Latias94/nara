@@ -548,3 +548,125 @@ memory, incremental-layout, native latency or frame-time budget. The native jour
 mutation and close paths still need external asynchronous transport. View-local intrinsic
 height, full multiline controls and the two native Dialogue Views remain the next complete
 consumer. The full foundation Goal stays active.
+
+### Native External Request Transport Successor
+
+Extend the existing Open-GPUI command journal with a closed runtime/external payload. Preserve
+its sequence, prefix reservation, capacity, single in-flight batch and close transaction.
+Runtime commands still use original feedback completions. Each external operation occupies
+one original journal slot and becomes deliverable only after its native frame's original
+layout feedback is accepted. Preparing that feedback does not admit the domain operation.
+
+An explicit application handler receives the move-only request and an identity-bound completion
+port after the Host borrow returns. It can enqueue the request for the existing `Viewer::drive`
+and Nara Session. The original foreground task awaits the one-shot result and settles the
+original journal and interaction ticket. Wrong completion evidence retains both the port and
+evidence for repair. Dropping delivered work is execution-unknown, never evidence of refusal.
+Layout-only frames remain available while the domain result is pending; no polling redraw loop
+or second command journal is introduced.
+
+Close extracts the same journal prefix. Undelivered external requests are not executed, while
+delivered requests retain unknown/exact outcome classification and are never replayed through
+`ViewCloseRequest`. Closing the originating View retires its UI authority without canceling or
+reexecuting an operation already admitted by the original Session. The other View and the domain
+remain independent. Public protocol and native-adapter tests must cover ordering, late/wrong
+results, preparation refusal, provider drop, close and standalone controls before the two-View
+Dialogue consumer qualifies this mechanism on the actual engine renderer.
+
+### View-Local Intrinsic Size Successor
+
+The follow-up geometry audit confirms that `DerivedGeometry` already owns accepted node
+layouts, spatial queries and incident routing. Reuse the complete `NodeLayout` publication;
+do not create a second size index or issue external authored geometry commands. A complete
+layout needs to distinguish its canonical, unscaled size from its displayed canvas bounds.
+Pinned native detail at non-unit zoom makes those quantities different, so deriving canonical
+size from the accepted canvas bounds would repeatedly shrink or enlarge the node.
+
+Carry the actual canonical size through the existing layout builder, accepted node geometry
+and materialized `FrameNode`. Validate it with the original complete node/real-port report and
+retain it in that View's geometry owner. Reuse the existing content-size reducer, stable
+samples, bounded attempts and environment/mount epochs. External content-size satisfaction
+comes from the matching accepted layout. Use the standalone history-free geometry path as a
+regression control, then test whether automatic intrinsic measurement should be View-local for
+both source kinds. Existing tests alone do not justify preserving an authored-write branch.
+Separate explicit authored resize from automatic measurement, and qualify standalone layout,
+multi-View behavior and persistence before replacing that path. `Document`, `ContentHeight`
+and `Content` policies must retain their supported sizing behavior.
+
+The next implementation must connect semantic zoom, node/root/port placement, mount restoration,
+Fit including measured offscreen nodes, admission and routing. Existing measured spatial
+admission and endpoint routing already consume published geometry; retain those algorithms.
+Exercise two external Views with different heights, non-unit zoom and origins, grow/shrink,
+incomplete-port refusal, stale generations, eviction/remount and stable idle behavior. Confirm
+unchanged domain source, revision, Undo/Redo and saved identity. This audit is source evidence
+and an implementation requirement, not completed geometry support or new native qualification.
+
+### Implemented Native External Transport
+
+Implemented locally in Jellyflow `3a430b906d8b902bee6a682c436dcdede1de7cd5`.
+
+The Open-GPUI adapter now delivers external canvas work through its original command journal.
+`with_external_graph_handler` selects external interaction binding. Its foreground task takes
+the prepared request after original frame feedback and returns the Host borrow before invoking
+the application handler. The request and completion port can enter the original application
+queue. Exact completion settles the original slot and interaction ticket; publication alone
+does not acknowledge execution, and canonical geometry retains its existing handoff.
+
+Independent review identified and corrected four ownership/scheduling boundaries. An external
+slot must match its original feedback receipt even when runtime command completions are empty,
+and a numerically equal batch from another journal is insufficient. Terminal outcomes must
+enter protected completion custody before waking prefix waiters; a waker panic retains those
+outcomes, including an abandoned request whose last immutable owner basis also panics on
+retirement. Source retirement before waiter delivery must not discard already received exact
+acceptance/refusal. Finally, pure external waiting stops semantic/native interaction ticks;
+actual input, query and post-ACK geometry work retain their original scheduling paths.
+
+Three review regressions first failed at run `d02aeb8a-6ac9-438d-a019-032d633d6279`.
+The corrected journal cohort passes 45/45, run `d23adff9-e2b4-44cb-8f32-95c4cdc8c281`,
+including both panic boundaries, foreign/same-View frame receipts and journal identity.
+The Runtime library and public Source/interaction cohort passes 647/647, no skips, run
+`7f556dd4-92ee-4873-a0c0-0dd3307f5ec1`.
+
+Nine crate-external Open-GPUI TestApp/Visual consumers pass 9/9, no skips, run
+`12844457-0b5e-428e-90b3-1e9bdfb14ba6`. They exercise actual keyboard nudge and captured
+pointer drag, delayed refusal, actual publication/ACK and a subsequent gesture, two independent
+Views, wrong completion repair, provider drop, close and synchronous acceptance/refusal followed
+by source retirement. The first test build required the existing `AppContext` trait and
+public weak-View query APIs. The captured-drag idle assertion then exposed a fixture clock
+assumption: pinned GPUI `InputRateTracker` retains real-monotonic VRR input for one second;
+advancing the dispatcher clock only makes timers ready. The corrected test asserts immediate
+Jellyflow tick retirement, waits a bounded 1,100 ms for that platform tail, then checks scheduled
+frame drain and no further renders/redelivery. No framework clock or VRR policy was replaced.
+
+These are protocol and native-adapter framework results. View-local canonical size, full native
+multiline/popup controls and the complete two-View Nara Dialogue product remain open. They do
+not establish a new external Dialogue GPU trajectory, physical input or numeric cost budget.
+
+The final affected Open-GPUI/egui library/integration cohort passes 583/583, no skips, across
+24 binaries, run `1fa23580-f44e-4844-8e9d-bfba1781460c`. It retains the existing standalone
+authoring, measurement, input, lifecycle and resource controls alongside the new external tests.
+The independently locked Nara consumer and rebuilt release example use the same changed
+library and original engine renderer:
+
+| Scope | Actual result |
+|---|---|
+| Nara domain, graph and public Session/file consumer | Release 110/110, no skips, three binaries; run `43bd8276-35b4-4471-84cb-e9da6c13abb4`. |
+| Existing Windows/DX12 native controls | 3/3, three unselected tests; run `92159a0c-c34f-4fc6-9ad0-09d50f9d9957`. |
+| Existing Windows/Vulkan native controls | 3/3, three unselected tests; run `8d7e0068-a1c1-40e9-bc0e-5ab8c5c240b4`. |
+
+Both native cohorts preserve the complete original Scene/render-output workflow, captured graph
+gestures and standalone Jellyflow nodes/two-View workflow. They test the existing engine-owned
+renderer/Host and ordinary writer after the shared adapter changes. They do not substitute for
+the still-unimplemented native external Dialogue consumer.
+
+Final correctness Clippy identified an oversized new completion-failure value. The failure
+now boxes its retained port/evidence pair only on failure; `into_parts` still returns both
+original capabilities. The directly affected journal/public cohort was rerun on that final
+storage representation: 54/54, 400 unselected tests, run
+`0d9c4332-876a-403c-97f5-9ee9de0ea5d3`. All-target/all-feature correctness Clippy passes
+for Runtime and both adapters without the new adapter warning. Existing Runtime enum-size
+warnings remain. The independently locked Nara consumer's all-target correctness Clippy and
+formatting also pass, with existing project/style warnings. Workspace formatting and added
+local document links pass. All six scoped
+research, implementation/test and independent-review agents are closed. No remote publication
+or default frontend change is part of this unit.

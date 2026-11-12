@@ -4306,8 +4306,19 @@ now shares one original domain candidate and history. Same-incarnation publicati
 revoke an already bound request; reset/close still retire it, and successful canonical geometry
 waits on the original View. Unknown work neither infers success nor retries speculatively.
 The owning consumer plan records actual qualification and corrected ownership/retirement cases.
-Native journal transport, intrinsic height, multiline controls and two native Dialogue Views
-remain the next integration, with no new Editor default or complete R11c/R12 claim.
+The [native journal successor](2026-11-12-dialogue-graph-integration-plan.md#implemented-native-external-transport)
+at local Jellyflow `3a430b9` now carries external requests through the original sequence,
+prefix ordering and in-flight slot.
+Delivery follows exact original frame feedback and ends the Host borrow before application work.
+Exact completion survives source retirement; close never replays an external operation, and
+pure completion waiting retires interaction ticks. Runtime/public controls pass 647/647 and
+the full affected Open-GPUI/egui adapter cohort 583/583, including nine public framework
+trajectories. Independent reviews closed the corrected receipt-association, panic-custody,
+retirement and scheduling findings. View-local canonical size, full multiline/popup controls
+and two native Dialogue Views remain the next integration, with no new Editor default or
+complete R11c/R12 claim. Existing standalone GPU controls retain their own qualification scope.
+The rebuilt independent consumer passes its 110-test public domain/Session/file cohort and
+the existing three-control native cohort on both DX12 and Vulkan.
 
 ### R11d: Public observation and visible-UI operation
 

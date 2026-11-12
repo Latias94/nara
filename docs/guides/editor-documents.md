@@ -114,6 +114,15 @@ does not add another document writer or history. The
 [Dialogue consumer](../../tests/fixtures/gpui-engine-consumer/README.md#dialogue-graph-domain)
 records the implemented interface and remaining native integration.
 
+For native Jellyflow canvas edits, its Open-GPUI Host can deliver the captured request through
+`with_external_graph_handler`. Enqueue the request and completion port for the application's
+original Session processing, then complete that exact port from the original result and
+publication. Delivery preserves native journal ordering and ends the Host borrow first.
+Closing the originating View does not replay an admitted domain command. The
+[native transport record](../plans/2026-11-12-dialogue-graph-integration-plan.md#implemented-native-external-transport)
+distinguishes the qualified adapter protocol from the remaining variable-height, multiline and
+two-View Dialogue product.
+
 ## Save, Reopen And Close
 
 Use existing `EditorPersistenceAction::Save` and `Reopen` with frame/document revision facts.
