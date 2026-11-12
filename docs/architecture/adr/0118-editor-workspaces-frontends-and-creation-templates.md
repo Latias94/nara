@@ -226,6 +226,14 @@ a View cannot replay delivered work or discard an already received exact result 
 source retirement precedes the completion task. Pure waiting for a domain completion does not
 by itself require continuous interaction frames.
 
+Automatic native graph measurement belongs to each View's accepted geometry, for standalone
+and externally owned documents alike. A complete node layout retains its canonical unscaled
+size alongside displayed bounds and every real port. Content measurement must not issue a
+history-free authored size command. Explicit authored resize remains a domain command with
+history and persistence; existing stored sizes are preserved without inferring their origin.
+Auto-layout may consume one View's accepted canonical sizes while committing authored positions
+through the original document owner.
+
 Source namespaces remain explicit: extension locators are project-relative, while Scene/Prefab
 locators retain their configured source scopes. The Host excludes duplicate publication ownership
 by reserved path and actual current file identity across these namespaces, including filesystem

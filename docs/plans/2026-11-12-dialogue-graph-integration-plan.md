@@ -587,11 +587,14 @@ and materialized `FrameNode`. Validate it with the original complete node/real-p
 retain it in that View's geometry owner. Reuse the existing content-size reducer, stable
 samples, bounded attempts and environment/mount epochs. External content-size satisfaction
 comes from the matching accepted layout. Use the standalone history-free geometry path as a
-regression control, then test whether automatic intrinsic measurement should be View-local for
-both source kinds. Existing tests alone do not justify preserving an authored-write branch.
-Separate explicit authored resize from automatic measurement, and qualify standalone layout,
-multi-View behavior and persistence before replacing that path. `Document`, `ContentHeight`
-and `Content` policies must retain their supported sizing behavior.
+regression control. The standalone audit now selects View-local automatic measurement for both
+source kinds: the only production history-free size writer is the native sizing supervisor,
+and no graph format distinguishes its writes from explicit authored resize. Replace that
+supervisor with complete View layout publication rather than retaining two automatic sizing
+authorities. Existing graph sizes remain unchanged; historical values cannot be classified or
+migrated by inference. Explicit authored resize remains a recorded, savable domain operation.
+Qualify standalone layout, multi-View behavior and persistence with that replacement.
+`Document`, `ContentHeight` and `Content` policies must retain their supported sizing behavior.
 
 The next implementation must connect semantic zoom, node/root/port placement, mount restoration,
 Fit including measured offscreen nodes, admission and routing. Existing measured spatial
@@ -670,3 +673,90 @@ formatting also pass, with existing project/style warnings. Workspace formatting
 local document links pass. All six scoped
 research, implementation/test and independent-review agents are closed. No remote publication
 or default frontend change is part of this unit.
+
+### Implemented View-Local Intrinsic Geometry
+
+The November 13 successor is locally committed in Jellyflow:
+
+- `8d9c0a8`: original Runtime geometry retains optional canonical size with the complete layout.
+- `994cb17`: optional layout consumes resolved View sizes through `LayoutContext::node_sizes`.
+- `93dd41c`: the native example observes maintained Select option identities.
+- `74f7f54ab1b6858ba177f0973aa05800ee72b906`: the native adapter replaces automatic document
+  size commands with accepted View geometry.
+
+These are Jellyflow-owned consumer and library changes. Open-GPUI remains pinned to
+`f75c10b2`; the fixed Zed comparison target is unchanged and this unit adds no upstream
+adoption credit.
+
+`NodeLayoutBuilder::with_canonical_size` carries the actual unscaled size alongside root and
+all real ports. Accepted metadata remains in the original `DerivedGeometry`; stale content,
+environment or mount geometry may retain a layout seed while withdrawing hit and route
+authority. Authored size changes clear obsolete seeds, and renderer/lifetime/reset changes
+cannot revive them. `GeometrySnapshot::retained_node` supports remount and offscreen Fit without
+making culled or stale ports interactive. Semantic zoom keeps graph and pinned native surfaces
+on the authored anchor rather than deriving canonical size from displayed bounds.
+
+Both standalone and external automatic sizing now use this same path. The old history-free
+size command supervisor, its private reserved admission and survivor-draining policy are
+removed. Stable samples, epsilon, coalescing, attempt bounds and mount/content/environment
+identity remain. A target is satisfied only by original complete accepted geometry. Missing
+publication or samples receive bounded recovery; paused work releases retention protection.
+Hidden nodes retire sizing targets while retaining legitimate native mounts. Original View
+observer panics preserve the target and lease before restoring the same panic.
+
+Pointer preview, keyboard nudge and final binding resolve their movement constraints against
+the original View's current effective canvas bounds. Explicit geometry commands still commit
+the domain's exact positions/sizes; they do not turn View extents into document invariants.
+Registered layout resolves canonical Context size before authored size, raw request hints and
+default, and submits positions only. The public headless consumer exercises two Views,
+Undo/Redo, measurement with a nonempty Redo stack, canonical Save/Reopen and explicit resize.
+Existing stored sizes remain untouched; Graph V2 has no origin marker from which to infer
+historical automatic versus authored values. Context serialization explicitly rejects the old
+size-map field; graph and View-seed formats do not change.
+
+| Scope | Actual result |
+|---|---|
+| Runtime/layout libraries and public consumers | Release 715/715, no skips; run `cb61ac9f-2f0e-4c3b-9063-f475f2ac18ca`. |
+| Open-GPUI/egui libraries and integrations | Release 585/585, no skips; run `92480ab5-b7ed-4544-acb0-b0037a089a8b`. |
+| Focused native-component public consumers, included above | 17/17; run `0579251e-110d-4fc0-a57b-b912f386e4d1`. The external dual-View trajectory includes growth/shrink, zoom/origin, real ports/routes, eviction/remount, Fit, authored width replacement and incomplete-port recovery. |
+| Independent Nara domain/graph/Session/file consumer | Release 110/110, no skips; run `2bf7ad43-ee3b-44c3-8186-83e199d9746b`. |
+| Rebuilt existing Windows/DX12 controls | 3/3, four unselected; run `7a0bc250-9aba-45ad-926e-725f7f3fbc46`. |
+| Rebuilt existing Windows/Vulkan controls | 3/3, four unselected; run `64b8d4a3-ceee-4895-b350-548b9f4fe814`. |
+
+The final root all-target/all-feature correctness Clippy and root/independent-product formatting
+pass. Existing Runtime/Nara warnings remain. Seven scoped implementation/review agents are
+closed. Qualification corrected fixture API assumptions and a diagnostic assertion: later
+missing-port feedback legitimately replaces an earlier recovery message in the single last
+diagnostic. Lease release, bounded scheduling, accepted geometry and source assertions remain.
+
+#### Existing Native Product Gate
+
+The separate Workflow sample is **not fully green**. After repairing stale Model/Field option
+selectors, its two public binaries pass 22/25, run `a03ede78-f08a-493c-9478-a8dc848c63e8`.
+Actual LLM conflict growth/shrink, Condition growth/deletion, model providers and measured Fit
+pass. Three original assertions remain failing:
+
+1. An open model Select crossing semantic zoom raises `DuplicateLayer`.
+2. The model popup does not complete the expected close after culling/restoration.
+3. At zoom `0.5`, a native press 0.5 px inside published port bounds does not acquire that port.
+
+An isolated detached checkout of exact parent `3a430b9` first reproduces eight failures in 23
+tests, run `74448a19-dc39-45fe-ab9d-96d43e2fd622`. Applying only the two automation-selector
+repairs reaches 20/23 with the same three failures, run
+`38577a28-759f-46ea-986c-2823064f51a1`. These are pre-existing product integration gaps;
+neither the passing library cohort nor the new geometry unit closes that sample gate.
+The selectors currently mirror a private encoding in the fixed fork; a supported typed
+observation/selector interface belongs to framework maintenance.
+
+Continue in the original Select overlay/presentation lifetime and native port input owners.
+The first port diagnostic should observe Bubble target/rank, actual hit containment, capture,
+mount validity and the exact connection-admission result. Source review confirms the 22px
+native hitbox exists and MouseDown/Up update hit coordinates. An extra settled frame after
+release did not fix the failure. Its cause remains unproven; do not infer that it needs a GPUI
+change or another hit index. Preserve these tests while resolving the owner.
+
+The actual GPU controls retain the existing Scene, graph gesture and standalone Jellyflow
+scope through Nara's original renderer/Host. They do not qualify a new external Dialogue GPU
+workflow, physical input, foreign platforms or a numeric budget. Full native Dialogue
+multiline/property/popup editing, two Views and the original Session/file/preview trajectory
+remain open, along with R11c/R11/R12 and the foundation Goal.

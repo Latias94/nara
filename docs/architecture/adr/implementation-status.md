@@ -1253,6 +1253,16 @@ The independently locked Nara domain/graph/Session/file cohort passes 110/110; e
 captured graph gesture and standalone Jellyflow/two-View native controls pass 3/3 each on DX12
 and Vulkan after rebuilding the release consumer.
 
+The November 13 [View geometry successor](../../plans/2026-11-12-dialogue-graph-integration-plan.md#implemented-view-local-intrinsic-geometry)
+at local Jellyflow `74f7f54` replaces automatic size commands with complete accepted canonical
+geometry for both source kinds. Explicit authored resize and persistence stay with the original
+document. Measured extents, semantic zoom, real ports/routes, remount and offscreen Fit use that
+View's original geometry. Runtime/layout pass 715/715, adapters 585/585, the independent Nara
+consumer 110/110 and existing DX12/Vulkan controls 3/3 each. The separate Workflow sample is
+22/25 with the same three parent-reproduced popup/port failures; its full gate and native
+Dialogue remain open. The linked plan records exact runs, reviews and scope. No full R11/R12
+or foundation completion follows.
+
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.
 Public semantic panel custody is now separate

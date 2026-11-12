@@ -270,6 +270,37 @@ performed. The default-size overlap and actual save/load mismatch are current ad
 the extreme-coordinate replay is a lower-priority robustness issue. None requires merging
 node-editor responsibilities into the engine or keeping a known defect as compatibility.
 
+## November 13: View-Local Intrinsic Geometry
+
+The [intrinsic geometry successor](../plans/2026-11-12-dialogue-graph-integration-plan.md#implemented-view-local-intrinsic-geometry)
+implements the size-ownership correction through local Jellyflow
+`74f7f54ab1b6858ba177f0973aa05800ee72b906`. It follows Runtime `8d9c0a8`, layout `994cb17`
+and the fixed-framework option-selector repair `93dd41c`.
+
+Automatic standalone and external measurements now share one View-local path. The original
+complete layout carries actual unscaled canonical size, root and real ports; the source graph,
+revision, history and saved size remain unchanged. Explicit authored resize remains a domain
+operation. Runtime geometry, semantic zoom, node/port placement, remount, Fit and current View
+movement constraints consume this metadata without another accepted-size index. Layout Context
+accepts resolved canonical sizes ahead of authored size and raw hints, then commits positions
+through the original owner. Old stored sizes are not classified or deleted by inference.
+
+Runtime/layout public cohorts pass 715/715 and Open-GPUI/egui consumers 585/585. The independent
+Nara domain/Session/file cohort passes 110/110, with existing rebuilt DX12/Vulkan controls 3/3
+each. Exact runs and corrected hidden/pending/sampling/panic boundaries belong to the linked
+plan. The new public native-component workflow actually exercises two external Views with
+different natural dimensions, non-unit zoom/origins, grow/shrink, eviction/remount, Fit, authored
+width replacement and incomplete-port refusal/recovery.
+
+The complete native Workflow sample remains partially qualified: 22/25 after selector repairs,
+with two popup lifecycle failures and a zoomed port hit-boundary failure. An exact-parent
+checkout plus only the same selector repairs reproduces those three failures. LLM conflict
+growth/shrink and Condition growth/deletion pass. This supports the canonical mechanism while
+preserving concrete product gaps; it does not establish complete node-editor maturity, fix
+every original audit finding, qualify native external Dialogue or select a game UI stack.
+Resolve the original overlay/presentation/input owners before closing the corresponding
+product gate. These are fork/consumer changes, not additional Zed synchronization.
+
 ## Sources
 
 - [J1] [Jellyflow context and current ownership](https://github.com/Latias94/jellyflow/blob/46a49c1db1eb4718d75bddf38803e1775d2e9fca/CONTEXT.md), [adapter authoring guide](https://github.com/Latias94/jellyflow/blob/46a49c1db1eb4718d75bddf38803e1775d2e9fca/docs/guides/native-adapter-authoring.md).

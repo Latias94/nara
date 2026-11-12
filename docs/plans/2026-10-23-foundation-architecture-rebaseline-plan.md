@@ -4320,6 +4320,17 @@ complete R11c/R12 claim. Existing standalone GPU controls retain their own quali
 The rebuilt independent consumer passes its 110-test public domain/Session/file cohort and
 the existing three-control native cohort on both DX12 and Vulkan.
 
+The November 13 [intrinsic geometry successor](2026-11-12-dialogue-graph-integration-plan.md#implemented-view-local-intrinsic-geometry)
+at local Jellyflow `74f7f54` now publishes automatic canonical sizes through each original
+View for both standalone and external documents. It removes the history-free size writer,
+preserves explicit resize/persistence, and connects semantic zoom, real ports/routes, remount,
+offscreen Fit and measured movement constraints. Runtime/layout pass 715/715, adapters 585/585
+and the independent Nara cohort 110/110; rebuilt existing DX12/Vulkan controls pass 3/3 each.
+The separate Workflow product remains 22/25: two Select overlay/culling cases and the zoomed
+port boundary also fail on the exact parent after selector-only migration repairs. Close those
+owner-local product gaps, then complete native Dialogue editing and preview. This is scoped
+library readiness, without a new Editor default or complete R11c/R12 claim.
+
 ### R11d: Public observation and visible-UI operation
 
 **Dependencies:** R11b and the existing exact semantic action/operation outcomes. Graph cases can

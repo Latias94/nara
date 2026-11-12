@@ -1,6 +1,7 @@
 # Nara UI Integration And Product Development Handoff
 
 Prepared November 12, 2026 for the Nara development session.
+Updated November 13, 2026 with qualified intrinsic geometry and reproduced native sample gaps.
 The Nara foundation rebaseline remains active. This document is a navigation and handoff record;
 Accepted ADRs retain architecture authority, and executable results retain their stated scope.
 The separate framework roadmap belongs to Open-GPUI's
@@ -16,9 +17,11 @@ sessions to work independently without moving Nara's selected dependency on ever
 The next Nara deliverable is the complete
 [Dialogue Graph consumer](2026-11-12-dialogue-graph-integration-plan.md): one original Session
 document and history, two native Views, ordinary property editing and a conversation preview.
-Its domain, public Session workflow and immutable facts are qualified at `ddcc880`; native
-external-document hosting remains open. Continue from that boundary rather than repeating the
-standalone connection or treating the missing interface as a completed graph editor.
+Its domain, public Session workflow and immutable facts are qualified at `ddcc880`. The later
+external native transport and View-local intrinsic-size prerequisites are implemented through
+local Jellyflow `74f7f54`; their exact scope and three existing sample failures are recorded
+below. The complete native Dialogue product remains open. Continue from those boundaries
+without repeating the standalone connection or treating library readiness as a completed editor.
 
 ## Start Here
 
@@ -441,3 +444,35 @@ Session/file/preview workflow. Canonical size is distinct from displayed canvas 
 non-unit zoom. The audit identified consumers in semantic zoom, placement, port/root measurement,
 mount restoration, Fit, admission and routing; do not introduce a second geometry owner.
 This remains a product integration prerequisite, with no new Editor default or complete R11c.
+
+### View-Local Intrinsic Geometry Follow-Up
+
+Local Jellyflow baseline: `74f7f54ab1b6858ba177f0973aa05800ee72b906`. Runtime geometry
+`8d9c0a8`, optional layout `994cb17` and Model selector repair `93dd41c` are its predecessors.
+These commits remain local; the Open-GPUI selection remains `f75c10b2`.
+
+The [qualified intrinsic unit](2026-11-12-dialogue-graph-integration-plan.md#implemented-view-local-intrinsic-geometry)
+keeps automatic node dimensions in each original View's complete accepted layout. Both source
+kinds retain their original document/history/persistence; explicit authored resize remains
+recorded and savable. The existing reducer now stages layouts instead of graph commands.
+Renderer/lifetime/reset and authored-size changes retire invalid seeds. Semantic zoom, real
+ports/routes, remount, offscreen Fit and movement constraints consume the correct canonical or
+actual canvas geometry. Layout Context uses `node_sizes` / `with_node_sizes`; the obsolete
+serialized Context field refuses explicitly, with no graph-file migration.
+
+Runtime/layout pass 715/715, adapters 585/585 and the independent Nara consumer 110/110.
+Rebuilt existing Scene, graph-gesture and standalone Jellyflow/two-View controls pass 3/3 on
+DX12 and 3/3 on Vulkan. These do not qualify an actual external Dialogue desktop workflow.
+
+The next consumer gate retains three original Workflow sample failures: Select overlay
+registration across semantic zoom, popup close after culling/restoration, and the zoom=0.5
+port hit boundary. Current native product tests pass 22/25; exact parent plus selector-only
+repairs passes 20/23 with the same failures. Do not remove the assertions, recreate graph size
+writes or infer an upstream GPUI defect. Continue in the original presentation/overlay/input
+owner, using the diagnostic entry points in the linked plan. A public framework observation
+interface should eventually replace the sample's private debug-selector encoding.
+
+The library mechanism can be maintained independently from this fixed baseline. Full native
+Dialogue multiline/property/popup editing, its two Views and original Session Save/Reopen/
+preview still belong to Nara's next product deliverable. Canonical docking, full Editor/game
+UI choice and the foundation Goal remain open.
