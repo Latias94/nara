@@ -8,12 +8,20 @@ mod graph_panel;
 mod graph_smoke;
 #[path = "panels.rs"]
 mod panels;
+#[path = "preview_jobs.rs"]
+mod preview_jobs;
 #[path = "renderer.rs"]
 mod renderer;
 #[path = "smoke.rs"]
 mod smoke;
 #[path = "text_input.rs"]
 mod text_input;
+#[path = "views_panel.rs"]
+mod views_panel;
+#[path = "views_smoke.rs"]
+mod views_smoke;
+#[path = "views_workflow.rs"]
+mod views_workflow;
 #[cfg(feature = "ui-work-observation")]
 #[path = "work.rs"]
 mod work;
@@ -284,10 +292,14 @@ struct Root {
     hierarchy: Entity<Hierarchy>,
     inspectors: [Entity<Inspector>; 2],
     graph_panels: Option<[Entity<GraphPanel>; 2]>,
+    preview_views: Option<Entity<views_panel::ViewsPanel>>,
 }
 
 impl Render for Root {
     fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+        if let Some(views) = &self.preview_views {
+            return views.clone().into_any_element();
+        }
         let base = div().size_full().relative().child(
             self.scene_view
                 .clone()
@@ -368,6 +380,17 @@ struct Viewer {
     graph_model: Option<Entity<GraphModel>>,
     graph_intents: Rc<RefCell<VecDeque<graph_panel::GraphIntent>>>,
     graph_smoke: Option<graph_smoke::GraphSmoke>,
+    views_mode: bool,
+    views_panel: Option<Entity<views_panel::ViewsPanel>>,
+    views_commands: Rc<RefCell<VecDeque<views_panel::ViewsIntent>>>,
+    views_smoke: Option<views_smoke::ViewsSmoke>,
+    preview_jobs: Option<preview_jobs::PreviewJobs>,
+    view_refusals: u64,
+    view_imports: [Option<(Rc<engine::views::EngineViewImage>, ImageTexture)>; 2],
+    published_preview: Option<nara_gpui_engine_consumer::graph::preview::GraphPreviewRequestId>,
+    views_status: Option<String>,
+    compile_requested: bool,
+    expected_shutdown_stale: Option<u64>,
     panel_work: Rc<PanelWork>,
     panel_refusals: u64,
     application: Option<ApplicationHandle>,
@@ -395,7 +418,7 @@ impl Viewer {
         if self.work.is_some() {
             return true;
         }
-        self.smoke.is_some() || self.graph_smoke.is_some()
+        self.smoke.is_some() || self.graph_smoke.is_some() || self.views_smoke.is_some()
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -411,8 +434,11 @@ impl Viewer {
         if self.graph_mode {
             engine.open_graph()?;
         }
-        let graph_snapshot = self
-            .graph_mode
+        if self.views_mode {
+            engine.seed_graph_views()?;
+            engine.open_views()?;
+        }
+        let graph_snapshot = (self.graph_mode && !self.views_mode)
             .then(|| engine.graph_snapshot())
             .transpose()?;
         let engine = Rc::new(RefCell::new(engine));
@@ -460,12 +486,15 @@ impl Viewer {
         let render = renderer.clone();
         let panel_work = self.panel_work.clone();
         let graph_intents = self.graph_intents.clone();
+        let views_mode = self.views_mode;
+        let views_commands = self.views_commands.clone();
         let application =
             Application::with_platform(self.platform.clone()).run_embedded(move |cx| {
                 DraftInput::bind_keys(cx);
                 let mut draft = None;
                 let mut model_output = None;
                 let mut graph_model_output = None;
+                let mut views_panel_output = None;
                 let root = cx.open_surface(&hosted, |window, cx| {
                     let input = cx.new(|cx| DraftInput::new(window, cx));
                     input.read(cx).focus_handle(cx).focus(window, cx);
@@ -512,12 +541,26 @@ impl Viewer {
                         graph_model_output = Some(model);
                         panels
                     });
+                    let preview_views = views_mode.then(|| {
+                        let panel = cx.new(|cx| {
+                            views_panel::ViewsPanel::new(
+                                views_commands.clone(),
+                                render.candidate_views.clone(),
+                                render.view_publications.clone(),
+                                window,
+                                cx,
+                            )
+                        });
+                        views_panel_output = Some(panel.clone());
+                        panel
+                    });
                     cx.new(|_| Root {
                         scene_view,
                         draft: input,
                         hierarchy,
                         inspectors,
                         graph_panels,
+                        preview_views,
                     })
                 });
                 *output.borrow_mut() = Some(root.map(|root| {
@@ -526,10 +569,11 @@ impl Viewer {
                         draft.unwrap(),
                         model_output.unwrap(),
                         graph_model_output,
+                        views_panel_output,
                     )
                 }));
             });
-        let (root, draft, model, graph_model) = initialized
+        let (root, draft, model, graph_model, views_panel) = initialized
             .borrow_mut()
             .take()
             .context("external GPUI launch did not run")??;
@@ -545,6 +589,8 @@ impl Viewer {
         self.draft = Some(draft);
         self.model = Some(model);
         self.graph_model = graph_model;
+        self.views_panel = views_panel;
+        self.preview_jobs = self.views_mode.then(preview_jobs::PreviewJobs::default);
         window.set_ime_allowed(true);
         Ok(())
     }
@@ -600,6 +646,12 @@ impl Viewer {
             self.closing || Instant::now() < self.deadline || !self.automated(),
             "GPUI engine automation exceeded its deadline"
         );
+        if self.closing
+            && let Some(jobs) = &mut self.preview_jobs
+            && !jobs.close()?
+        {
+            return Ok(());
+        }
         let mut changed = false;
         let mut panels_changed = false;
         while let Some(command) = self.commands.borrow_mut().pop_front() {
@@ -673,6 +725,9 @@ impl Viewer {
                 model.update(cx, |model, cx| model.publish(snapshot, cx));
             });
         }
+        if self.views_mode && !self.closing {
+            self.drive_views()?;
+        }
         self.application.as_ref().unwrap().update(|_| {});
         let renderer = self.renderer.as_ref().unwrap().clone();
         renderer.promote()?;
@@ -712,6 +767,15 @@ impl Viewer {
                 self.closing = true;
             }
         }
+        if !self.closing
+            && let Some(mut smoke) = self.views_smoke.take()
+        {
+            let done = smoke.advance(self)?;
+            self.views_smoke = Some(smoke);
+            if done {
+                self.closing = true;
+            }
+        }
         #[cfg(feature = "ui-work-observation")]
         if !self.closing
             && let Some(mut work) = self.work.take()
@@ -723,6 +787,11 @@ impl Viewer {
             }
         }
         if self.closing {
+            if let Some(jobs) = &mut self.preview_jobs
+                && !jobs.close()?
+            {
+                return Ok(());
+            }
             self.surface.as_ref().unwrap().close()?;
             self.application.as_ref().unwrap().update(|cx| cx.quit());
             if renderer.quiesced() && self.platform.is_shutdown_complete() {
@@ -756,6 +825,25 @@ impl Viewer {
                         "NARA_GPUI_GRAPH_OK ui_submissions={} diagnostics={} native_gpui_renderers=0 original_host=true independent_producer_alive=true input_delivery=injected",
                         renderer.submissions.get(),
                         renderer.diagnostics.get()
+                    );
+                }
+                if self.views_smoke.is_some() {
+                    let jobs = self.preview_jobs.as_ref().unwrap();
+                    ensure!(
+                        jobs.pending_jobs() == 0,
+                        "a graph task outlived application shutdown"
+                    );
+                    if let Some(expected) = self.expected_shutdown_stale {
+                        ensure!(
+                            jobs.stale == expected,
+                            "the pending shutdown job did not physically return as retired work"
+                        );
+                    }
+                    println!(
+                        "NARA_GPUI_VIEWS_OK ui_submissions={} accepted={} stale={} pending_jobs=0 original_host=true independent_producer_alive=true input_delivery=injected",
+                        renderer.submissions.get(),
+                        jobs.accepted,
+                        jobs.stale,
                     );
                 }
                 event_loop.exit();
@@ -832,12 +920,31 @@ impl Viewer {
                     return Ok(());
                 }
                 self.engine.as_ref().unwrap().borrow_mut().invalidate();
-                if physical.width > 0 && physical.height > 0 {
+                if self.views_mode {
+                    let images = self.engine.as_ref().unwrap().borrow().view_images();
+                    for (key, image) in [engine::views::ViewKey::A, engine::views::ViewKey::B]
+                        .into_iter()
+                        .zip(images)
+                    {
+                        if image.is_some() {
+                            self.engine
+                                .as_ref()
+                                .unwrap()
+                                .borrow_mut()
+                                .redisplay_view(key)?;
+                        }
+                    }
+                }
+                if !self.views_mode && physical.width > 0 && physical.height > 0 {
                     self.refresh_preview()?;
                 }
                 surface.set_geometry(geometry.size(), geometry.scale_factor())?;
             }
-            WindowEvent::Focused(active) if self.smoke.is_none() && self.graph_smoke.is_none() => {
+            WindowEvent::Focused(active)
+                if self.smoke.is_none()
+                    && self.graph_smoke.is_none()
+                    && self.views_smoke.is_none() =>
+            {
                 surface.set_active(active)?
             }
             WindowEvent::CursorMoved { position, .. } => {
@@ -1004,15 +1111,20 @@ impl Viewer {
         self.closing = true;
         self.smoke = None;
         self.graph_smoke = None;
+        self.views_smoke = None;
         #[cfg(feature = "ui-work-observation")]
         {
             self.work = None;
         }
         let failed_at = *self.failed_at.get_or_insert_with(Instant::now);
-        if let Some(surface) = &self.surface {
+        let jobs_done = self
+            .preview_jobs
+            .as_mut()
+            .is_none_or(|jobs| jobs.close().unwrap_or(false));
+        if jobs_done && let Some(surface) = &self.surface {
             let _ = surface.close();
         }
-        if let Some(application) = &self.application {
+        if jobs_done && let Some(application) = &self.application {
             application.update(|cx| cx.quit());
         }
         if self.engine.is_none() || failed_at.elapsed() > Duration::from_secs(10) {
@@ -1046,7 +1158,13 @@ impl ApplicationHandler<Wake> for Viewer {
             self.fail(error, event_loop);
             return;
         }
-        if self.automated() || self.closing {
+        if self.automated()
+            || self.closing
+            || self
+                .preview_jobs
+                .as_ref()
+                .is_some_and(|jobs| jobs.pending_jobs() > 0)
+        {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(10),
             ));
@@ -1064,10 +1182,18 @@ pub(super) fn run() -> Result<()> {
     let smoke = std::env::args().any(|arg| arg == "--smoke");
     let measure = std::env::args().any(|arg| arg == "--measure-ui-work");
     let graph_smoke = std::env::args().any(|arg| arg == "--smoke-graph");
-    let graph_mode = graph_smoke || std::env::args().any(|arg| arg == "--graph");
+    let views_close_pending = std::env::args().any(|arg| arg == "--smoke-views-close-pending");
+    let views_smoke = views_close_pending || std::env::args().any(|arg| arg == "--smoke-views");
+    let views_mode = views_smoke || std::env::args().any(|arg| arg == "--views");
+    let graph_mode = graph_smoke || views_mode || std::env::args().any(|arg| arg == "--graph");
     ensure!(
-        usize::from(smoke) + usize::from(measure) + usize::from(graph_smoke) <= 1
-            && (!graph_mode || !smoke && !measure),
+        usize::from(smoke)
+            + usize::from(measure)
+            + usize::from(graph_smoke)
+            + usize::from(views_smoke)
+            <= 1
+            && (!graph_mode || !smoke && !measure)
+            && (!views_mode || !graph_smoke),
         "select one consumer mode"
     );
     ensure!(
@@ -1109,6 +1235,17 @@ pub(super) fn run() -> Result<()> {
         graph_model: None,
         graph_intents: Rc::default(),
         graph_smoke: graph_smoke.then(graph_smoke::GraphSmoke::new),
+        views_mode,
+        views_panel: None,
+        views_commands: Rc::default(),
+        views_smoke: views_smoke.then(|| views_smoke::ViewsSmoke::new(views_close_pending)),
+        preview_jobs: None,
+        view_refusals: 0,
+        view_imports: [None, None],
+        published_preview: None,
+        views_status: None,
+        compile_requested: false,
+        expected_shutdown_stale: None,
         panel_work: Rc::default(),
         panel_refusals: 0,
         application: None,

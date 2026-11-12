@@ -12,6 +12,112 @@ use super::super::graph_panel::{GraphIntent, GraphSnapshot};
 const SOURCE: &str = "graphs/value-graph.json";
 
 impl Engine {
+    pub fn seed_graph_views(&mut self) -> Result<()> {
+        use nara_gpui_engine_consumer::graph::{GraphCommand, Link, NodeId, NodeKind};
+        for command in [
+            GraphCommand::Add {
+                kind: NodeKind::Scalar(2.),
+                position: [24., 24.],
+            },
+            GraphCommand::Add {
+                kind: NodeKind::Scalar(3.),
+                position: [24., 144.],
+            },
+            GraphCommand::Add {
+                kind: NodeKind::Add,
+                position: [208., 24.],
+            },
+            GraphCommand::Add {
+                kind: NodeKind::Output,
+                position: [392., 24.],
+            },
+            GraphCommand::Connect(Link {
+                from: NodeId(1),
+                to: NodeId(3),
+                input: 0,
+            }),
+            GraphCommand::Connect(Link {
+                from: NodeId(2),
+                to: NodeId(3),
+                input: 1,
+            }),
+            GraphCommand::Connect(Link {
+                from: NodeId(3),
+                to: NodeId(4),
+                input: 0,
+            }),
+        ] {
+            let snapshot = self.graph_snapshot()?;
+            self.graph_intent(GraphIntent::Edit {
+                document: snapshot.document,
+                revision: snapshot.revision,
+                command,
+            })?;
+        }
+        Ok(())
+    }
+
+    pub fn increment_graph(&mut self) -> Result<()> {
+        use nara_gpui_engine_consumer::graph::{GraphCommand, NodeKind};
+        let snapshot = self.graph_snapshot()?;
+        let node = snapshot
+            .view
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, NodeKind::Scalar(_)))
+            .context("the graph has no scalar")?;
+        let NodeKind::Scalar(value) = node.kind else {
+            unreachable!()
+        };
+        self.graph_intent(GraphIntent::Edit {
+            document: snapshot.document,
+            revision: snapshot.revision,
+            command: GraphCommand::SetScalar {
+                node: node.id,
+                value: value + 1.,
+            },
+        })
+    }
+
+    pub fn close_graph_document(&mut self) -> Result<()> {
+        use nara_engine::tooling::{
+            EditorCloseDecision, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+            EditorWorkspaceIntentRequestResult,
+        };
+        let document = self.graph_document.context("the graph is not open")?;
+        let report = dispatch_without_drive(
+            &mut self.session,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                EditorWorkspaceIntent::CloseDocument { document },
+            )),
+        )?;
+        ensure!(
+            matches!(
+                report.outcomes().first(),
+                Some(EditorActionOutcome::WorkspaceIntent(
+                    EditorWorkspaceIntentRequestResult::Accepted
+                ))
+            ),
+            "the original Host refused graph close"
+        );
+        self.session.drive_editor_frame(Duration::ZERO);
+        if let Some(prompt) = self
+            .session
+            .current_frame()
+            .workspace_intent()
+            .decision_prompt()
+        {
+            ensure!(
+                prompt.document() == document,
+                "another document owns the close prompt"
+            );
+            let action =
+                EditorAction::WorkspaceIntent(prompt.resolve(EditorCloseDecision::Discard));
+            dispatch_without_drive(&mut self.session, action)?;
+        }
+        self.poll_graph()
+    }
+
     pub fn open_graph(&mut self) -> Result<()> {
         ensure!(self.graph_document.is_none(), "the graph is already open");
         let directory = self._project.path().join("graphs");
@@ -121,6 +227,14 @@ impl Engine {
             return Ok(());
         }
         let frame = self.session.drive_editor_frame(Duration::ZERO);
+        if self
+            .graph_document
+            .is_some_and(|document| frame.workspace().document(document).is_none())
+        {
+            self.graph_document = None;
+            self.graph_status = Some("Graph closed".into());
+            return Ok(());
+        }
         if let EditorPersistenceView::Terminal { attempt, result } = frame.persistence()
             && self.graph_persistence == Some(attempt)
         {

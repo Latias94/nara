@@ -2909,6 +2909,7 @@ name = "nara-gpui-engine-consumer"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "criterion",
  "log",
  "nara",

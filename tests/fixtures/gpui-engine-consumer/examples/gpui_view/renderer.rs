@@ -1,4 +1,5 @@
 use super::engine::{Engine, Preview};
+use super::views_panel::{ViewPublication, ViewSnapshot};
 use anyhow::{Context as _, Result, ensure};
 use nara_render::DisplayMapping2d;
 use nara_render_wgpu::{
@@ -39,6 +40,7 @@ struct Candidate {
     submission: PlatformFrameSubmission,
     snapshot: Option<Rc<Snapshot>>,
     content: Vec<WgpuImageDisplay>,
+    views: Vec<Rc<ViewSnapshot>>,
 }
 
 struct InFlight {
@@ -80,11 +82,18 @@ struct Submitted {
     composite: WgpuImageCompositeReceipt,
 }
 
+struct SubmittedView {
+    submission: PlatformFrameSubmission,
+    snapshot: Rc<ViewSnapshot>,
+    composite: WgpuImageCompositeReceipt,
+}
+
 #[derive(Default)]
 struct Delivery {
     pending: Option<Candidate>,
     in_flight: Vec<InFlight>,
     submitted: VecDeque<Submitted>,
+    submitted_views: VecDeque<SubmittedView>,
     quiesced: bool,
     error: Option<String>,
 }
@@ -104,6 +113,8 @@ pub(super) struct Renderer {
     pub candidate_snapshot: Rc<RefCell<Option<Rc<Snapshot>>>>,
     pub candidate_content: Rc<RefCell<Vec<WgpuImageDisplay>>>,
     pub publications: Rc<RefCell<VecDeque<Publication>>>,
+    pub candidate_views: Rc<RefCell<Vec<Rc<ViewSnapshot>>>>,
+    pub view_publications: Rc<RefCell<VecDeque<ViewPublication>>>,
     pub presented: RefCell<Option<Rc<Snapshot>>>,
     pub paused: Cell<bool>,
     pub failure: Cell<Option<Failure>>,
@@ -147,6 +158,8 @@ impl Renderer {
             candidate_snapshot: Rc::default(),
             candidate_content: Rc::default(),
             publications: Rc::default(),
+            candidate_views: Rc::default(),
+            view_publications: Rc::default(),
             presented: RefCell::new(None),
             paused: Cell::new(false),
             failure: Cell::new(None),
@@ -269,6 +282,12 @@ impl Renderer {
             .iter()
             .map(|snapshot| snapshot.preview.display.clone())
             .chain(candidate.content.iter().cloned())
+            .chain(
+                candidate
+                    .views
+                    .iter()
+                    .map(|view| view.image.display.clone()),
+            )
             .collect::<Vec<_>>();
         let failure = self.failure.take();
         let mut prefix = None;
@@ -366,6 +385,7 @@ impl Renderer {
         );
         let submission = candidate.submission.clone();
         let snapshot = candidate.snapshot.clone();
+        let view_snapshots = candidate.views.clone();
         if let Some(prefix) = prefix {
             if let Some((buffer, width, height, stride, format)) = readback {
                 self.readbacks.borrow_mut().push_back(Readback {
@@ -410,6 +430,27 @@ impl Renderer {
                         snapshot,
                         composite,
                     });
+                }
+                for snapshot in view_snapshots {
+                    let display = &snapshot.image.display;
+                    let composite = outcome
+                        .composites()
+                        .iter()
+                        .copied()
+                        .find(|receipt| {
+                            receipt.image() == display.receipt()
+                                && receipt.occurrence() == display.occurrence()
+                                && Some(receipt.window()) == outcome.window()
+                        })
+                        .context("the original Host did not sample the exact graph View")?;
+                    self.delivery
+                        .borrow_mut()
+                        .submitted_views
+                        .push_back(SubmittedView {
+                            submission: submission.clone(),
+                            snapshot,
+                            composite,
+                        });
                 }
                 ensure!(
                     submission.complete(PlatformWindowPresentOutcome::Submitted),
@@ -490,6 +531,37 @@ impl Renderer {
     }
 
     pub fn promote(&self) -> Result<()> {
+        let mut accepted_view_generation = None;
+        while let Some(publication) = self.view_publications.borrow_mut().pop_front() {
+            accepted_view_generation = Some(publication.generation);
+            let submitted = {
+                let mut delivery = self.delivery.borrow_mut();
+                let Some(index) = delivery.submitted_views.iter().position(|submitted| {
+                    submitted.submission.frame_generation() == publication.generation
+                        && Rc::ptr_eq(&submitted.snapshot, &publication.snapshot)
+                }) else {
+                    continue;
+                };
+                delivery.submitted_views.remove(index).unwrap()
+            };
+            if self.engine.borrow().accepts_view(&submitted.snapshot.image) {
+                let presented = self.engine.borrow_mut().complete_view(
+                    submitted.snapshot.image.clone(),
+                    submitted.composite,
+                    submitted.snapshot.mapping,
+                )?;
+                *submitted.snapshot.presented.borrow_mut() = Some(presented);
+            }
+        }
+        self.delivery
+            .borrow_mut()
+            .submitted_views
+            .retain(|submitted| {
+                submitted.submission.status() == open_gpui::PlatformFrameSubmissionStatus::Submitted
+                    && accepted_view_generation.is_none_or(|generation| {
+                        submitted.submission.frame_generation() >= generation
+                    })
+            });
         while let Some(publication) = self.publications.borrow_mut().pop_front() {
             let submitted = {
                 let mut delivery = self.delivery.borrow_mut();
@@ -558,6 +630,7 @@ impl HostedSurfaceRenderer for Renderer {
                 submission: submission.clone(),
                 snapshot: self.candidate_snapshot.borrow().clone(),
                 content: self.candidate_content.borrow().clone(),
+                views: self.candidate_views.borrow().clone(),
             });
             Ok(())
         })();
@@ -598,6 +671,7 @@ impl HostedSurfaceRenderer for Renderer {
                 }
                 delivery.in_flight.clear();
                 delivery.submitted.clear();
+                delivery.submitted_views.clear();
                 ensure!(
                     ticket.acknowledge_quiesced(),
                     "logical root rejected original quiescence"

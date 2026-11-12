@@ -9,6 +9,48 @@ use std::{
 };
 
 #[test]
+#[ignore = "requires an actual Windows GPU and prebuilt dual-View consumer"]
+fn engine_owned_gpui_views_relocate_retire_and_reject_late_graph_results() {
+    let (output, logs) = run_native_gpui("--smoke-views", Duration::from_secs(105), 128 * 1024);
+    for marker in [
+        "NARA_GPUI_VIEWS_PIXELS",
+        "NARA_GPUI_VIEWS_ROUTES",
+        "NARA_GPUI_VIEWS_LATE_EDIT",
+        "NARA_GPUI_VIEWS_LATE_REOPEN",
+        "NARA_GPUI_VIEWS_CAPACITY",
+        "NARA_GPUI_VIEWS_RETIRE",
+        "NARA_GPUI_VIEWS_LATE_CLOSE",
+        "NARA_GPUI_VIEWS_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires an actual Windows GPU and prebuilt dual-View consumer"]
+fn engine_owned_gpui_views_shutdown_waits_for_the_held_original_task() {
+    let (output, logs) = run_native_gpui(
+        "--smoke-views-close-pending",
+        Duration::from_secs(105),
+        128 * 1024,
+    );
+    for marker in [
+        "NARA_GPUI_VIEWS_CLOSE_PENDING pending_jobs=1",
+        "NARA_GPUI_VIEWS_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires an actual Windows GPU and the prebuilt gpui_view graph consumer"]
 fn engine_owned_gpui_graph_edits_connects_and_reopens_through_original_host() {
     let (output, logs) = run_native_gpui("--smoke-graph", Duration::from_secs(105), 128 * 1024);

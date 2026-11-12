@@ -53,6 +53,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[path = "engine/graph.rs"]
 mod graph;
+#[path = "engine/views.rs"]
+pub(super) mod views;
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const SPRITE: &str = "nara.sprite.Sprite";
 pub(super) const SOURCE_ROWS: usize = 10_000;
@@ -135,6 +137,7 @@ pub(super) struct Engine {
     pub graph_refusals: u64,
     graph_status: Option<String>,
     graph_persistence: Option<nara_engine::tooling::EditorPersistenceAttemptId>,
+    view_streams: Option<views::ViewStreams>,
     _project: TempDir,
 }
 
@@ -233,6 +236,7 @@ impl Engine {
             graph_refusals: 0,
             graph_status: None,
             graph_persistence: None,
+            view_streams: None,
             _project: project,
         };
         if let Err(error) = engine.load_content() {
@@ -659,6 +663,7 @@ impl Engine {
 
     pub fn close(&mut self) -> Result<()> {
         if !self.closing {
+            self.close_views()?;
             self.closing = true;
             self.invalidate();
             for producer in [&self.scene_producer, &self.other_producer] {
