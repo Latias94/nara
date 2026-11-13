@@ -2625,6 +2625,17 @@ actual headless builds 2/2 and original paused desktop adoption 1/1 pass. The li
 hardware/backend and cost scopes explicit. UI, full R12 and broader measured product completion
 remain open.
 
+The November 14 [development/runtime cost attribution](../../benchmarks/2026-11-14-development-runtime-costs.md)
+at `f1c2256`/`f79c7da` adds opt-in fixed Host phase aggregates without a new lifecycle or tracing
+owner. All 18 complete native no-edit/body/private-structure rebuild workflows pass; retained
+correct-running medians are 14.7706/23.7901/25.4273 seconds. Six matched ordinary/witness runs
+retain 120 exact frames each with original receipt, telemetry and physical cleanup. Quantized
+whole-process CPU ranges overlap and do not establish a witness regression. Final ordinary/
+desktop CPU 107/107 and 80/80, original headless actual builds/adoption 2/2 and continuous native
+adoption 1/1 pass. The linked report retains raw data/digests, inclusive-phase endpoints,
+independent review, actual platform scope and remaining numeric/Editor limits. No performance
+change or full R12 completion is selected from these observations.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

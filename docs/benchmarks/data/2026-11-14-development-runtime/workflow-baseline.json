@@ -1,0 +1,1980 @@
+{
+  "build_jobs": 1,
+  "child_profile": "dev",
+  "correct_running_endpoint": "complete-probe/fresh-adopter/presentation/adoption/new-logic-step/activation/Resume-and-two-naturally-completed-ticks",
+  "format": 1,
+  "initial_build_ns": 19487058300,
+  "native_cleanup": "all original game/exit/containment/readers/output reports normal",
+  "offline": true,
+  "outer_debug_assertions": false,
+  "phase_spans": "inclusive; nested phases overlap; cumulative maxima are not per-attempt maxima",
+  "platform": "windows-x86_64",
+  "retained_per_class": 5,
+  "samples": [
+    {
+      "activation_ns": 567681800,
+      "adopt_ns": 979144700,
+      "attempt": 0,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 22742648000,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 358222700,
+      "prepare_ns": 20105416100,
+      "prepared_generation": 3,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 347737900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 347737900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": true,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 221041300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 649048500,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 11609653900,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 142980300,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3034615000,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 563721600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1115975900,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 767458900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2227988600,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 194353600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1853274400,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 337350900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1967316200,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 979144100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 979144100,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 567681300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 567681300,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 209613100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 209613100,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 316466000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 316466000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 491327600,
+      "adopt_ns": 1083915000,
+      "attempt": 1,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 15002020300,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 382890400,
+      "prepare_ns": 12325295100,
+      "prepared_generation": 5,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 371035500,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 221041300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 606857600,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3925668500,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 138956100,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3059060900,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 563721600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1103275100,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 767458900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2230075500,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 199238300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1866526600,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 391366300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2033410700,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1083914300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1083914300,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 567681300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 491327100,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 209613100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 193330000,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 347737900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 302516800,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 599643400,
+      "adopt_ns": 1112544100,
+      "attempt": 2,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 14956986500,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 323932800,
+      "prepare_ns": 12158229200,
+      "prepared_generation": 7,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 311833600,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 221041300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 717207100,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3641737700,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 93785400,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3181439400,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 567127800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1127826600,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 770445500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2239007600,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 199238300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1851385200,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 391366300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2033238300,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1112543700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1112543700,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 599642800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 599642800,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 209613100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 189956600,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 284921900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 500888900,
+      "adopt_ns": 972246600,
+      "attempt": 3,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 14770590100,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 368024100,
+      "prepare_ns": 12240660500,
+      "prepared_generation": 9,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 355904900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 242676700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 610592900,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3775051600,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 137480200,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3160649500,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 567127800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1089150300,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 770445500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2225887200,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 199238300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1718647600,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 391366300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1973851400,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1112543700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 972245900,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 599642800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 500888400,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 210585600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 210585600,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 304464300,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 600413200,
+      "adopt_ns": 977030700,
+      "attempt": 4,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 14766693400,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 390119400,
+      "prepare_ns": 12103090100,
+      "prepared_generation": 11,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 378005900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 378005900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 242676700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 569475100,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3615491600,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 108305700,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3151571700,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 567127800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1113379800,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 771576500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2232370600,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 199238300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1813171800,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 391366300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1987075700,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1112543700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 977030300,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 600412800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 600412800,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 210585600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 196226200,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 371035500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 314370800,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 491045800,
+      "adopt_ns": 973321300,
+      "attempt": 5,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 95159a3b4cdeb7fc9cf4c5dc21cab21f00f00198892a1dba86d21e2d41f4779c)",
+      "class": "no_edit",
+      "correct_running_ns": 14490021900,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 390179500,
+      "prepare_ns": 11957186900,
+      "prepared_generation": 13,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 378005900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 377576700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 242676700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 530135800,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11609653900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3728010500,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 188486800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 108172700,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1657281500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3060830300,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 567127800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1089181400,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 773987900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2232423000,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 207754200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1754800800,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 391366300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1973071900,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1112543700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 973320900,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 600412800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 491045500,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 210585600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 195348200,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 378005900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 305317000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 556317000,
+      "adopt_ns": 1032334200,
+      "attempt": 0,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 1965387844c509388782ecf078803477fa2f2a7199bc25d4cf7865cd94786bae)",
+      "class": "body",
+      "correct_running_ns": 21738568400,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 285702100,
+      "prepare_ns": 18959948300,
+      "prepared_generation": 3,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 321481800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 275004400,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": true,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 148175500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 531936000,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 10569152400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 10569152400,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 91476300,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1669906100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3105090100,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 555133800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1088373700,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 770364200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2239930300,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 210018200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1953999400,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 355553100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2017512400,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1032333700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1032333700,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 556316300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 556316300,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 199977600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 199977600,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 321481800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 321481800,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 503346400,
+      "adopt_ns": 994867400,
+      "attempt": 1,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, b2d664acc362979b74761bcaced06c73ba6b88c1d491e80829844b846b961a30)",
+      "class": "body",
+      "correct_running_ns": 22933102300,
+      "movement_speed": 80.0,
+      "predecessor_retirement_ns": 345401200,
+      "prepare_ns": 20269338000,
+      "prepared_generation": 5,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 328815700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 328815700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 189009500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 609102200,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11589482400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 11589482400,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 111500100,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1692922000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3237824200,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 555133800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1091255900,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 781147900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2238274100,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 212745000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2005080400,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 355553100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2005093700,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1032333700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 994866900,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 556316300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 503345600,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 205946400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 205946400,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 325057000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 325057000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 588271300,
+      "adopt_ns": 1115263000,
+      "attempt": 2,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 953bfdde2525217f798afc128bba9ab135b0c8a6d07677a6999af0ac7b3d03e9)",
+      "class": "body",
+      "correct_running_ns": 23790082600,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 403420300,
+      "prepare_ns": 20995235000,
+      "prepared_generation": 7,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 387472100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 387472100,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 286864600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 837715100,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 12157252200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 12157252200,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 131918700,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1692922000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3192309200,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 555133800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1079400100,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 781147900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2238001900,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 212745000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1935383800,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 398960100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2071754700,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1115262300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1115262300,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 588270700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 588270700,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 205946400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 202129900,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 328815700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 314159900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 497096100,
+      "adopt_ns": 968328300,
+      "attempt": 3,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 78783c7a7be20e43f3292654edde70122dd30d41057db23f9675232c56e6a348)",
+      "class": "body",
+      "correct_running_ns": 24367257700,
+      "movement_speed": 80.0,
+      "predecessor_retirement_ns": 359462300,
+      "prepare_ns": 21838941600,
+      "prepared_generation": 9,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 387472100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 343298700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 286864600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 704308400,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 13449702700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 13449702700,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 97662100,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1692922000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2971331700,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 555133800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1061726200,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 781147900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2241524700,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 212745000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1845679100,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 398960100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1939405500,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1115262300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 968327800,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 588270700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 497095500,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 205946400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 196446600,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 387472100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 300813200,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 590509900,
+      "adopt_ns": 1141437800,
+      "attempt": 4,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 6361fcf9827b22945fcb9c3eafc02bba3b1c0f3312bb6c7ae7fced88f8d81a4d)",
+      "class": "body",
+      "correct_running_ns": 24471463100,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 421285300,
+      "prepare_ns": 21658775600,
+      "prepared_generation": 11,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 404767100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 404767100,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 286864600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 822168600,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 13449702700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 12897039400,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 97335400,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1745999900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3254211800,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 562855400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1109372800,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 781147900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2247145900,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 212745000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1862186400,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 398960100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2054087300,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1141437300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1141437300,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 590509400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 590509400,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 205946400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 196124400,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 387472100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 293686200,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 512516300,
+      "adopt_ns": 1161632500,
+      "attempt": 5,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, a9be0c0fa1d2cb145bb4aa18c7437b1d004d3c1ecbc3e6d048025fbf8d8c45f2)",
+      "class": "body",
+      "correct_running_ns": 23335486500,
+      "movement_speed": 80.0,
+      "predecessor_retirement_ns": 343149500,
+      "prepare_ns": 20541727800,
+      "prepared_generation": 13,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 404767100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 327177000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 286864600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 702784600,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 13449702700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 12137551700,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 175740700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 96293400,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1745999900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3085618200,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 562855400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1077558300,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 781147900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2233082300,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 212745000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1930473000,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 398960100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2008809500,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1161632000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1161632000,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 590509400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 512515800,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 205946400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 191836400,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 404767100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 310260300,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 563475600,
+      "adopt_ns": 1125440400,
+      "attempt": 0,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, d94cb52f12c9427f534590507975cb90c9202e1f023bd59ffb619cc6d0ef043d)",
+      "class": "structure",
+      "correct_running_ns": 23193747600,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 406054400,
+      "prepare_ns": 20424074400,
+      "prepared_generation": 3,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 395592100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 395592100,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": true,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 728677400,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 11760098600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 11760098600,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 138869000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 138869000,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1702835200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3174600400,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 556891600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1091899500,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 771445700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2233539800,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209082300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1899831400,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2073812200,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1125439900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1125439900,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 563467000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 563467000,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 186784000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 186784000,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 347171000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 347171000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 496655200,
+      "adopt_ns": 1005685000,
+      "attempt": 1,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 594eb62e0527396b42f7654a195074d669b3bae4b3acd46b44c9385227022c3d)",
+      "class": "structure",
+      "correct_running_ns": 25012784100,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 328346500,
+      "prepare_ns": 22342481500,
+      "prepared_generation": 5,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 395592100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 312445200,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 536425500,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 13865232600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 13865232600,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 138869000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 103329900,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1702835200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3143110600,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 556891600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1084310000,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 772251500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2235791400,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209082300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1957269100,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1979905800,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1125439900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1005684200,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 563467000,
+          "failures": 0,
+          "inclusive_elapsed_ns": 496654500,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 197757300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 197757300,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 395592100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 282590300,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 597420600,
+      "adopt_ns": 1151652000,
+      "attempt": 2,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 4be870aa4f55d45951edc673bb25ba3850b5f09b184c4ea2cfd73f36fceb2e25)",
+      "class": "structure",
+      "correct_running_ns": 27895193200,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 429756700,
+      "prepare_ns": 25094501300,
+      "prepared_generation": 7,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 413395900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 643380000,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 16485651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 16485651400,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 179196200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 179196200,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1721946800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3238832800,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 559512500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1083061700,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 772251500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2234280600,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209082300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1857029200,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2048094000,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1151651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1151651400,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 597420100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 597420100,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 197757300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 190345400,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 395592100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 321372000,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 507081600,
+      "adopt_ns": 1072387900,
+      "attempt": 3,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 5ff0e26905e5b798914148f3b5da2c7c08e199d83cb92cb2c18672d0973c24f5)",
+      "class": "structure",
+      "correct_running_ns": 25086199800,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 396052300,
+      "prepare_ns": 22398617300,
+      "prepared_generation": 9,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 380421700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 569689800,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 16485651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 13737133700,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 179196200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 139084400,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1721946800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3197384200,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 559512500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1095980000,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 772251500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2230016500,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209898500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1935514600,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2062342300,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1151651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1072387400,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 597420100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 507081100,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 197757300,
+          "failures": 0,
+          "inclusive_elapsed_ns": 193704100,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 318506700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 597028800,
+      "adopt_ns": 1065102600,
+      "attempt": 4,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 802dc3f223495fc2cd9b45d97e8f287d59e7efa21eaf76b94e259023fc074504)",
+      "class": "structure",
+      "correct_running_ns": 30804483600,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 377068600,
+      "prepare_ns": 28000334600,
+      "prepared_generation": 11,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 361147800,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 504997400,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 19599780900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 19599780900,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 179196200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 88385600,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1721946800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3072756400,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 559512500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1065959200,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 772251500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2234124000,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209898500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1975987500,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2050564100,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1151651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1065102000,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 597420100,
+          "failures": 0,
+          "inclusive_elapsed_ns": 597028300,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 201069200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 201069200,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 322391700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    },
+    {
+      "activation_ns": 601403000,
+      "adopt_ns": 1027359400,
+      "attempt": 5,
+      "backend": "vulkan",
+      "captured_executable": "ContentDigest(len=57825280, 33c0576f756e27345cc291dc273efc3e17ef6439fe875ee105e70e15c9c019d8)",
+      "class": "structure",
+      "correct_running_ns": 25427339800,
+      "movement_speed": 160.0,
+      "predecessor_retirement_ns": 408867900,
+      "prepare_ns": 22619884800,
+      "prepared_generation": 13,
+      "retirement_phases": [
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 391705900,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ],
+      "warmup": false,
+      "workflow_phases": [
+        {
+          "cumulative_maximum_ns": 190550400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 528854800,
+          "operations": 6,
+          "phase": "SourceCheck"
+        },
+        {
+          "cumulative_maximum_ns": 19599780900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 14034662400,
+          "operations": 1,
+          "phase": "CargoBuild"
+        },
+        {
+          "cumulative_maximum_ns": 179196200,
+          "failures": 0,
+          "inclusive_elapsed_ns": 113531300,
+          "operations": 1,
+          "phase": "ExecutableInstall"
+        },
+        {
+          "cumulative_maximum_ns": 1721946800,
+          "failures": 0,
+          "inclusive_elapsed_ns": 3176016800,
+          "operations": 2,
+          "phase": "ChildStartup"
+        },
+        {
+          "cumulative_maximum_ns": 559512500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1105700700,
+          "operations": 2,
+          "phase": "StateRestore"
+        },
+        {
+          "cumulative_maximum_ns": 782201700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2240798600,
+          "operations": 3,
+          "phase": "ProbeStep"
+        },
+        {
+          "cumulative_maximum_ns": 209898500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2001688200,
+          "operations": 13,
+          "phase": "StateCapture"
+        },
+        {
+          "cumulative_maximum_ns": 406321700,
+          "failures": 0,
+          "inclusive_elapsed_ns": 2044829200,
+          "operations": 6,
+          "phase": "Presentation"
+        },
+        {
+          "cumulative_maximum_ns": 1151651400,
+          "failures": 0,
+          "inclusive_elapsed_ns": 1027358800,
+          "operations": 1,
+          "phase": "Adoption"
+        },
+        {
+          "cumulative_maximum_ns": 601402600,
+          "failures": 0,
+          "inclusive_elapsed_ns": 601402600,
+          "operations": 1,
+          "phase": "Activation"
+        },
+        {
+          "cumulative_maximum_ns": 204796500,
+          "failures": 0,
+          "inclusive_elapsed_ns": 204796500,
+          "operations": 1,
+          "phase": "Resume"
+        },
+        {
+          "cumulative_maximum_ns": 413395900,
+          "failures": 0,
+          "inclusive_elapsed_ns": 315408700,
+          "operations": 1,
+          "phase": "Retirement"
+        }
+      ]
+    }
+  ],
+  "source_write_included": false,
+  "toolchain": "1.95.0",
+  "warmups_per_class": 1
+}

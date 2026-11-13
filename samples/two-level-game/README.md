@@ -322,6 +322,48 @@ Keep the desktop available and physical D initially Up. Its bounded native input
 an injected hold during failure cleanup. Actual results and limits belong to the
 [continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
 
+## Development Cost Observations
+
+`DevelopmentHost::enable_timings()` enables fixed cumulative elapsed observations. The default
+is disabled and performs no instrumentation clock reads. `timing_snapshot()` returns counts,
+returned failures, total elapsed and lifetime maximum for the fixed `DevelopmentTimingPhase::ALL`
+boundaries. Subtract counts/totals across an attempt while unsaturated; a difference of maxima is
+not an attempt maximum. Restore/probe/adoption spans include child phases, so never add phase
+totals as disjoint work. These observations contain no authority and change no result or cleanup.
+
+The ignored `development_cost` test measures one excluded warmup plus five retained no-edit,
+actual body-edit and private-structure-edit attempts per class, through the complete production
+desktop workflow. Set an explicit absolute **new** `NARA_DEVELOPMENT_COST_OUTPUT` JSON path,
+Rust 1.95.0, offline mode, jobs one and the shared root target, then run serially:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_cost --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+The separate `runtime_cost` executable compares three alternating pairs of ordinary desktop
+execution and the same game with `DevelopmentPresentationPlugin`. Both groups use identical
+native pacing, neutral input and original telemetry. Each excludes 30 successful frames and
+retains 120, then observes paused idle and physical retirement before reusing the same event
+loop. Keep the desktop available and do not manipulate its input or windows during the run.
+
+```text
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop,cost-measurement --bin runtime_cost
+```
+
+`--pairs`, `--frames` and `--warmup` accept bounded positive counts; defaults are 3, 120 and 30.
+One frame contains zero between-frame CPU intervals and is unsuitable for sustained-cost
+comparison. Set `WGPU_BACKEND=dx12` and `NARA_WGPU_FORCE_FALLBACK=0` for the recorded Windows
+hardware scope. Optional `NARA_RUNTIME_COST_OUTPUT` writes the structured report to an explicit
+absolute new file; ordinary game startup text still goes to stdout. Without it, stdout ends
+with one `two-level-runtime-cost/v2` JSON record after those startup messages.
+
+The opt-in `cost-measurement` feature enables read-only Windows current-process counters through
+the already locked SDK dependency. It does not enter normal desktop or reconstructed-child
+features. Whole-process CPU/working-set/private observations are separate from frame wall
+and original GPU-completion spans; they are not per-frame CPU execution, GPU execution, scanout,
+UI-exclusive memory or a leak proof. See the [measured report](../../docs/benchmarks/2026-11-14-development-runtime-costs.md)
+for raw observations, complete endpoints, finite sample limits and the next attribution.
+
 ## Ownership And Limits
 
 - `CurrentScene` is the only source/Scene-instance authority. Gameplay retains a logical `LevelKey`

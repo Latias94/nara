@@ -1136,3 +1136,103 @@ Measure that work, native polling and finite file-protocol traffic before choosi
 notification optimization. Retaining complete source/state/presentation checks is part of any
 accepted optimization. No full service serializer, replacement native transport or new scheduler
 is implied by this measurement follow-up.
+
+## Development Cost Attribution And Measured Optimization
+
+Status: attribution qualified within the finite Windows scope below; no performance change is
+selected without further locating evidence. Keep the qualified continuous reconstruction workflow and its complete state,
+source, input, presentation and physical-cleanup checks. Add default-disabled concrete Host
+timing observations at original stage boundaries. Fixed phase aggregates retain counts, failed
+operations, inclusive total and maximum elapsed spans without callbacks, an event stream or a new
+tracing authority. Nested phases overlap and cannot be added into a total latency. Disabled
+timing must not read a clock for each observed operation or change admission and cleanup.
+
+Measure actual no-edit, movement-body and private-state-structure changes in an external copy of
+Two-Level Game through the existing production desktop Host and native Cargo owner. For each
+class use one excluded warmup and five retained attempts; keep each Host below its existing eight
+rebuild allowance. Each attempt qualifies complete probes, disposes the probe, restores a fresh
+adopter, revalidates final source/state/presentation, exchanges the route, activates and executes
+new logic while predecessor cleanup is Pending, then observes normal cleanup. Record actual
+compiler/profile/target/source/hardware and exact timing endpoints. Raw per-attempt phases and
+outer operation spans accompany the report. Five samples give a finite median/range comparison,
+not a stable P95 or cross-platform budget.
+
+Compare ordinary running and paused idle game execution with the development presentation
+observer under the same scene, actual native backend, window size and pacing. Alternate pair
+order, exclude fixed warmup frames, collect bounded accepted-frame observations and actual
+semantic/tick facts, and retire original native owners before reusing the physical loop. The
+frame-start-to-post-Host wall spans and optional original GPU-completion observations have
+different endpoints; neither is GPU execution time or scanout. No synthetic Step or fabricated
+delta may stand in for naturally completed running frames. Invalid input, changed scene, lost
+receipts or incomplete cleanup invalidate that run.
+
+Paced wall spans can hide CPU differences. The measurement-only `cost-measurement` feature adds
+read-only current-process CPU and memory counters through the already locked Windows SDK package.
+Sample counters at the first and last measured post-Host callback, outside startup/warmup. Their
+CPU difference covers all process threads, observer/polling/background/driver work over the
+reported frame intervals, not one individual frame or GPU execution. Working-set and private
+memory values are whole-process point observations; sequential runs share loaded code/driver
+allocations, so these cannot prove a per-UI footprint or a leak. Normal game and child feature
+selections do not enable this measurement dependency.
+
+Choose an optimization only after baseline attribution identifies material repeated work. Any
+change must preserve complete canonical and exact Seal/receipt association, remain within the
+original game/native/GPU owners and pass before/after correctness and matched cost observations.
+Do not introduce generic cache, snapshot, process, scheduler or performance-management layers.
+Keep uncertain measurements and remaining numerical/foreign-platform/Editor integration limits
+explicit. UI and physical mixed-DPI stay paused.
+
+### Cost Attribution Qualification
+
+Date: 2026-11-14. Actual endpoints, raw samples, machine scope and overlap/quantization limits
+belong to the [measured report](../benchmarks/2026-11-14-development-runtime-costs.md). The production
+Host adds default-disabled fixed cumulative stages without callbacks or a new lifecycle owner.
+Elapsed completed calls retain returned failure counts and original results; panic/unfinished
+calls are not recorded. Disabled observation performs no instrumentation clock reads.
+Implementation revisions are `f1c2256` for Host timings and `f79c7da` for the complete measurement
+consumers and structural-fixture correction. Final qualification covers the same source measured
+before those local commits; the raw metadata preserves that chronology.
+
+The first actual rebuild run `7f173559-fe78-427a-8d69-d10773064080` fails in the structure cohort
+after 341.663 seconds because the reused structural fixture required a prior 80-speed edit.
+That run is not accepted as the baseline. The owning helper now checks preservation of the
+original movement implementation, so structure-only experiments stay at speed 160 and existing
+80-speed structure regressions retain their oracle. A second measurement-label finding removes
+the unconditional release string in favor of actual `debug_assertions`, with execution profile
+recorded in the external command metadata. Independent bounded rereview closes both P2 findings.
+
+| Scope | Actual result |
+| --- | --- |
+| Timing opt-in, results, failures, missing phases and saturation | 4/4, 66 outside this filter, run `723c5d41-4e4f-423d-9116-0c88e0d4c1cd`, 0.132 seconds. |
+| Complete measured actual desktop rebuild/adoption | 1/1, run `9d957f4c-11f9-48e3-8d26-bfb83a2feddc`, 469.399 seconds. Three warmups plus fifteen retained no-edit/body/structure workflows preserve complete probe/state/source/presentation/native activation and clean original process receipts. |
+| Final ordinary package | 107/107, two actual-build cases kept separate, run `f497ce8a-b3ee-49fb-b072-55240553b71f`, 10.644 seconds. |
+| Final desktop-feature library, child and CLI CPU targets | 80/80, run `3d76ee66-b791-4c45-835b-1ff35b86dc65`, 7.290 seconds. |
+| Existing default-disabled headless actual builds/adoption | 2/2, two ordinary cases outside ignored-only filter, run `6947afa2-efe6-4762-a439-2dfa11ec540b`, 128.138 seconds. Original A/B/C takes 52.615 seconds; production Host adoption takes 75.521 seconds. |
+| Existing default-disabled continuous native gameplay/adoption | 1/1, run `d8d55286-601b-43ba-8c76-56447a931271`, 100.894 seconds. All original real input, modified logic, source/state/presentation, Pending-time execution and Running Close assertions remain. |
+
+Retained complete correct-running medians are 14.7706 seconds without edits, 23.7901 for actual
+body edits and 25.4273 for private structure edits. Cargo-adapter stage medians are 3.7280,
+12.1573 and 14.0347 seconds. Installation is about 0.1 second; original two-child startup is
+about 3.2 seconds and six exact presentation checks about 2.0 seconds. These stage observations
+overlap their parent operations and do not form an additive partition.
+
+The ordinary/witness comparison completes six real native runs per recorded comparison with
+120 exact accepted frames after 30 warmups, explicit canonical-witness coverage, final original
+GPU-completion seals and physical event-loop recovery. Paced frame wall spans overlap around
+33.3 ms. Subsequent whole-process CPU observations are quantized and overlap substantially;
+working-set/private observations are not per-UI footprint or leak proof. No witness cache,
+installation cache, weakened qualification, alternate transport or performance improvement is
+selected from these inconclusive or low-cost dimensions. Further attribution should focus on
+Cargo admission/commands/capture and original child/control turnaround while keeping the same
+complete endpoint. Representative numeric budgets and full R12 remain active.
+
+Final all-feature/default correctness Clippy, root/sample formatting, affected manifest/lock,
+raw-record consistency/digests, local documentation links and whitespace checks pass. The opt-in
+measurement executable writes a new explicit result file after full cleanup; ordinary startup
+text is not mistaken for its structured JSON. It records actual Schema/content/time-policy
+agreement while leaving the deliberately different recipe configurations separately visible.
+Windows process counter ABI/arithmetic and native measurement cleanup receive independent
+read-only review; no remaining P1/P2 is found. All five scoped threads close and all owned
+Cargo/native processes reach terminal observations. Whole-process CPU quantization, sequential
+driver/cache memory carryover, small workloads, sample count and unchanged foreign/Editor scope
+remain limitations, not performance budgets.

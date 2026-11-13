@@ -467,6 +467,13 @@ manufacture an extra simulation tick to make capture pass. A failure after contr
 retains its original outcome and cleanup owner; a pre-admission refusal remains recoverable.
 These game-owned controls do not extend the separate supervised Editor Play launch protocol.
 
+Concrete development cost observations remain Host-local and explicitly enabled. Fixed elapsed
+phase aggregates describe original calls, including their existing waits and failures; they do
+not create an event stream, callback, Runtime permission or cross-process identity. Disabled
+observations cannot change admission, operation results, candidate custody or physical cleanup.
+Nested restore/probe/adoption totals are inclusive and cannot be summed as disjoint work. These
+diagnostics do not enter canonical game state, configuration compatibility or the child protocol.
+
 ### Proposed Ownership Refinement
 
 The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial

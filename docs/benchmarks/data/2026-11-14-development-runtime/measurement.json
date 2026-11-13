@@ -1,0 +1,46 @@
+{
+  "observed_date": "2026-11-14",
+  "base_revision": "9e42efa",
+  "source_state": "cost-attribution changes uncommitted during measurement; owning report records qualified implementation revision after commit",
+  "qualified_timing_revision": "f1c2256a50a2e3b8e33b19e6db3b006ec346d5bd",
+  "qualified_consumer_revision": "f79c7da38178138dcb7dc3b68df36b887aa9d684",
+  "machine": {
+    "os_build": "10.0.26300",
+    "architecture": "x86_64",
+    "cpu": "Intel Core i9-13900KF",
+    "logical_processors": 32,
+    "gpu": "NVIDIA GeForce RTX 4090"
+  },
+  "toolchain": "1.95.0",
+  "build_jobs": 1,
+  "offline": true,
+  "workflow": {
+    "nextest_run": "9d957f4c-11f9-48e3-8d26-bfb83a2feddc",
+    "outer_profile": "release",
+    "child_profile": "dev",
+    "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_cost --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate"
+  },
+  "runtime": {
+    "profile": "release",
+    "features": [
+      "desktop",
+      "cost-measurement"
+    ],
+    "command": "target/release/runtime_cost.exe",
+    "environment": {
+      "WGPU_BACKEND": "dx12",
+      "NARA_WGPU_FORCE_FALLBACK": "0"
+    },
+    "normalization": "final rerun writes one complete v2 JSON directly through explicit new NARA_RUNTIME_COST_OUTPUT; original native run exit=0; same schema/level stamps/time policy additionally validated"
+  },
+  "initial_exploration": {
+    "file": "runtime-wall-exploratory.json",
+    "scope": "earlier same-pacing whole-frame span diagnostic before process-counter instrumentation; not a before/after optimization comparison"
+  },
+  "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
+  "data_sha256": {
+    "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
+    "runtime-process-baseline.json": "a864bfe2290481c8c698d9ca5444df83b09e4eba9f47d7743166c43ada4a6a9c",
+    "runtime-wall-exploratory.json": "01cb28de7a89d748e6de60ee2d24b56c31a7110638662285b3aaf618cf9facc7"
+  }
+}

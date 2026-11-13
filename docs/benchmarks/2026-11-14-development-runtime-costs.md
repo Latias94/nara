@@ -1,0 +1,185 @@
+# Desktop Development And Runtime Cost Attribution
+
+Status: measured and qualified within the finite Windows scope below. The owning
+[runtime reconstruction plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#development-cost-attribution-and-measured-optimization)
+retains the complete workflow and qualification limits. These observations extend the
+continuous-game implementation at `a1490b9`/`ec57133`; they do not qualify complete R12.
+
+The qualified implementation is `f1c2256a50a2e3b8e33b19e6db3b006ec346d5bd` for opt-in Host
+timings and `f79c7da38178138dcb7dc3b68df36b887aa9d684` for the complete measurement consumers
+and structural-fixture correction. Measurements were taken before those commits, from the same
+implementation on base `9e42efa`; no production source changed after final qualification.
+
+## Machine And Execution
+
+The observed machine is Windows x64, OS build `10.0.26300`, Intel Core i9-13900KF with 32 logical
+processors and NVIDIA GeForce RTX 4090. Adapter identity and actual surface extent are retained
+per native run. The machine also exposes virtual-display adapters; it is not an isolated hardware
+lab. No other workload, power or display configuration is controlled or changed.
+
+Builds use Rust 1.95.0, locked/offline resolution, one Cargo build job and the existing root
+`target`. Outer executables/tests use release; explicitly selected reconstructed children use dev.
+The child's reviewed environment projection does not inherit parent graphics hints. Runtime
+comparison uses hardware DX12 selected explicitly in the parent process; contained child backend
+selection is reported separately. No Rust 1.100, cross-platform or clean-machine claim follows.
+
+## Complete Rebuild Endpoint
+
+An external source copy supplies actual no-edit, movement-body and private-Session-representation
+cohorts. Each uses one excluded warmup and five retained samples in a separate Host, below the
+existing eight-rebuild allowance. No-edit retained samples do not rewrite source. Body edits
+alternate actual 160/80 movement implementations. Structural edits preserve speed 160 and
+alternate the private held-intent representation, keeping public DTOs and the original movement
+law unchanged.
+
+The measured outer interval starts after source writes, before request/preparation. It includes
+complete-source checks, public Cargo build and captured executable validation, installation,
+probe startup, full-state restoration, three semantic probe steps with complete comparisons
+and presentation checks, actual probe retirement, fresh-adopter restoration/presentation, final
+source/dual-state/presentation revalidation, route adoption, a new-logic exact Step while predecessor
+cleanup is Pending, native activation and Resume through two naturally completed ticks.
+Predecessor retirement is timed separately. Setup, source writes, later re-isolation/reset and
+final experiment shutdown are outside the outer interval; their original cleanup checks remain.
+
+This endpoint includes deliberate qualification and input reconciliation. It is not compiler time
+alone, arbitrary Rust hot patching, first photons, or a zero-interruption Editor Play loop.
+Fixed per-Host stage aggregates are opt-in. Their counts and total elapsed durations are differenced
+between attempt boundaries; lifetime maxima are labeled cumulative. Restore, probe and adoption
+spans include child phases, so stage totals overlap and cannot be summed or percentile-subtracted
+to infer an unmeasured cost. No generic trace callback or scheduler is added.
+
+Nextest `9d957f4c-11f9-48e3-8d26-bfb83a2feddc` passes all 18 complete workflows in 469.399 seconds,
+including warmups, nested builds, setup and final cleanup. The three excluded warmups and fifteen
+retained samples remain in the raw record. Retained seconds:
+
+| Workflow | Complete correct-running median | Range | Prepare median | Adopt median | Predecessor cleanup median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No edit | 14.7706 | 14.4900–15.0020 | 12.1582 | 0.9770 | 0.3829 |
+| Body edit | 23.7901 | 22.9331–24.4715 | 20.9952 | 1.1153 | 0.3595 |
+| Private structure edit | 25.4273 | 25.0128–30.8045 | 22.6199 | 1.0651 | 0.3961 |
+
+Prepare and Adopt are contained in the complete outer interval. Predecessor cleanup follows that
+endpoint and is separate. The recorded original process receipts require normal game Close,
+successful native exit, empty containment, stopped readers, drained output and no fallback kill.
+This is independent of whether timing is enabled.
+
+Selected inclusive per-attempt phase medians, in seconds:
+
+| Host phase | Calls per attempt | No edit | Body | Structure |
+| --- | ---: | ---: | ---: | ---: |
+| Cargo adapter, including capture/validation | 1 | 3.7280 | 12.1573 | 14.0347 |
+| Original child startup through READY | 2 | 3.1516 | 3.1923 | 3.1760 |
+| Three complete probe steps | 3 | 2.2324 | 2.2383 | 2.2343 |
+| Exact canonical presentation confirmations | 6 | 1.9871 | 2.0088 | 2.0481 |
+| Complete state capture | 13 | 1.8132 | 1.9305 | 1.9573 |
+| Fresh candidate state restoration | 2 | 1.1033 | 1.0794 | 1.0843 |
+| Source fence capture/bind/revalidation | 6 | 0.6069 | 0.7043 | 0.5364 |
+| Executable installation | 1 | 0.1083 | 0.0977 | 0.1135 |
+
+Probe/restore/adoption contain some capture/presentation work: these rows cannot be added as a
+partition of the outer interval. In particular, this table does not subtract medians to claim an
+unmeasured residual or identify raw compiler execution time from the Cargo adapter's elapsed call.
+Installation is consistently a small fraction of the complete workflow, so an installation cache
+is not selected from this evidence. The meaningful next attribution is inside Cargo admission/
+commands/capture and native child/control turnaround, retaining the complete qualification endpoint.
+
+## Runtime Observer Comparison
+
+`runtime_cost` alternates plain/witness, witness/plain, plain/witness using the same ordinary
+game, backend, actual window size, native pacing, neutral input, telemetry and measurement observer.
+Each original Runtime/window/device is physically retired before the original event loop is
+recovered for the next run. Warmup excludes 30 successful presented frames per run; each run then
+retains 120 exact successful frames. Both groups validate unchanged game semantics. Every witness
+sample must additionally match its exact canonical Seal and original receipt.
+
+Frame wall time is original `FrameExecutionStart.started_at` through post-Host observation time.
+It includes App, driver/native Host and submission waits; measurement-observer work after that
+endpoint is excluded. GPU-completion spans independently retain original App/render/device
+identity and a complete telemetry seal. Neither metric is pure CPU execution, GPU execution or
+scanout. The three run medians, rather than 360 correlated frames treated as independent trials,
+are the comparison unit.
+
+The initial comparison completes all six runs and native cleanups. Plain run medians are
+33.2443, 33.2638 and 33.2776 ms; witness run medians are 33.2772, 33.2749 and 33.2447 ms. Their
+median-of-run-medians is 33.2638 versus 33.2749 ms, with overlapping ranges. This paced wall metric
+does not establish a CPU regression or justify replacing the complete state witness.
+
+A measurement-only `cost-measurement` feature therefore adds read-only current-process CPU and
+memory observations through the already locked Windows SDK package. Counters are sampled at the
+first and last measured post-Host callbacks: 120 frames produce 119 observed intervals. Whole-
+process CPU includes all threads, observer/poll/background/driver work; it can differ from elapsed
+wall time and is not attributable to a single UI subsystem. Working-set/private values are
+whole-process point observations. Sequential runs share loaded code and driver allocations, so
+their memory values are not per-UI retained bytes or evidence of a leak.
+
+The final six-run comparison additionally compares actual Schema, level source/content stamps
+and initial time policy. The recipe configuration fingerprints are recorded separately because
+adding the witness is the intended recipe difference. Its read-only process observations report:
+
+| Run | Recipe | Process CPU | Process observation wall | Final private committed memory |
+| --- | --- | ---: | ---: | ---: |
+| 1 | Plain | 140.625 ms | 3.9667291 s | 489.30 MiB |
+| 2 | Witness | 140.625 ms | 3.9671069 s | 484.11 MiB |
+| 3 | Witness | 140.625 ms | 3.9665315 s | 484.63 MiB |
+| 4 | Plain | 140.625 ms | 3.9665684 s | 496.82 MiB |
+| 5 | Plain | 109.375 ms | 3.9665457 s | 499.57 MiB |
+| 6 | Witness | 125.000 ms | 3.9666361 s | 486.42 MiB |
+
+Plain CPU median/range is 140.625 / 109.375–140.625 ms. Witness is
+140.625 / 125.000–140.625 ms. Values occur in 15.625 ms increments on this run; overlapping
+variation and that quantization prevent claiming a stable additional witness cost. The observation
+contains telemetry and the measuring consumer in both recipes; it is not a measurement of an
+uninstrumented shipping process.
+
+Each 300 ms paused-idle window records actual poll calls and App frames without requesting Step,
+maintenance or manual delta. The initial comparison observes ten App frames, five poll calls
+and zero simulation/logical ticks in every run. This establishes retained paused execution with
+render/presentation work, not a CPU-free or no-redraw idle policy. Changing idle cadence needs
+its own original-owner demand/resize/input/telemetry acceptance.
+
+## Qualification, Integrity And Remaining Scope
+
+The timing controls pass 4/4 in run `723c5d41-4e4f-423d-9116-0c88e0d4c1cd`. Final ordinary
+package tests pass 107/107 in `f497ce8a-b3ee-49fb-b072-55240553b71f`, with the two actual-build
+cases kept separate. Desktop-feature library/child/CLI CPU targets pass 80/80 in
+`3d76ee66-b791-4c45-835b-1ff35b86dc65`. Existing default-disabled headless A/B/C and production
+adoption pass 2/2 in `6947afa2-efe6-4762-a439-2dfa11ec540b`; complete continuous native
+gameplay/adoption passes 1/1 in `d8d55286-601b-43ba-8c76-56447a931271`.
+
+Correctness Clippy passes all default and all-feature sample targets, including the opt-in
+measurement executable. Root/sample formatting, affected manifest/lock parsing, raw-record
+validation and local document link checks pass. Existing style/dead-code warnings remain outside
+that gate. These cohorts overlap and are not an additive independent test count. Independent
+timing/measurement, native comparison and Windows counter reviews find no remaining P1/P2; all
+five scoped threads are closed. Actual success paths and original cleanup are exercised, not
+injected external focus theft, counter API failure or native cleanup timeout.
+
+An initial rebuild run reaches the structural cohort and fails an inherited helper assertion
+that required a prior 80-speed body edit. It is excluded from final cost evidence. The owning
+helper now checks preservation of either original movement implementation, allowing structure-
+only changes without mixing in a body edit. Independent review confirms the correction. The
+consumer also records actual `debug_assertions` rather than mislabeling any arbitrary test build
+as release.
+
+The runtime executable includes ordinary game startup messages on stdout before its single
+structured result. Raw stdout remains distinct from the normalized, uniquely selected JSON
+record for the early exploration. The final runner supports an explicit absolute **new**
+`NARA_RUNTIME_COST_OUTPUT` file and writes its structured record directly after all original
+cleanup, without overwriting an existing file. Parsing failure of the earlier whole stdout
+stream is not a native comparison failure or grounds to discard a successful receipt/cleanup
+observation.
+
+Raw observations are [workflow samples](data/2026-11-14-development-runtime/workflow-baseline.json),
+[final runtime/process samples](data/2026-11-14-development-runtime/runtime-process-baseline.json)
+and the clearly labeled [earlier wall-span exploration](data/2026-11-14-development-runtime/runtime-wall-exploratory.json).
+[Measurement metadata](data/2026-11-14-development-runtime/measurement.json) retains commands,
+feature/profile scope and data digests. Digests cover repository blob bytes with LF line endings,
+following the existing root `.gitattributes`; this newline normalization changes no JSON values.
+Final integrity checks compare the staged blobs as well as decoded observations, so Windows
+working-copy newline conversion cannot silently invalidate the published digests.
+No result is a before/after optimization speedup claim.
+
+Representative larger content, uninstrumented production CPU costs, controlled memory retention,
+other graphics backends/platforms, measured idle-policy improvements and reliable latency tails
+remain open. Complete state/source/presentation checks, physical retirement and the separate
+supervised Editor Play protocol are preserved. UI and mixed-DPI work remain paused.

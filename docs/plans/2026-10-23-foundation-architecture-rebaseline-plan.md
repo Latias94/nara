@@ -4727,6 +4727,19 @@ physical cleanup. Final ordinary/desktop CPU 103/103 and 76/76, original actual 
 independent review, platform and cost limits.
 Protocol four is game-owned; supervised Editor Play and paused UI remain separate. Full R12 and
 representative edit-to-correct-result/steady-state cost measurements remain open.
+The subsequent [development/runtime cost attribution](../benchmarks/2026-11-14-development-runtime-costs.md)
+at `f1c2256`/`f79c7da` adds default-disabled concrete Host phase observations and measures 18
+complete native rebuild/adoption workflows. Five retained samples per class have correct-running
+medians of 14.7706 seconds without edits, 23.7901 for movement-body edits and 25.4273 for private
+structure edits. Source/state/presentation checks, naturally resumed ticks and normal physical
+retirement remain in the endpoint. Six matched plain/witness native runs retain 120 exact frames
+each; quantized whole-process CPU ranges overlap, so no witness regression or optimization is
+claimed. Final ordinary/desktop CPU 107/107 and 80/80, existing headless actual builds/adoption
+2/2 and continuous native adoption 1/1 pass, alongside correctness Clippy and formatting.
+Inclusive phases are not additive; further attribution targets Cargo and child/control
+turnaround. Larger workloads, reliable tails, foreign execution, numeric budgets and full R12
+remain open. Editor UI and physical mixed-DPI work remain paused.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
