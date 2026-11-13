@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+#[cfg(feature = "desktop")]
+use nara::project_host::DesktopRun;
 use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedTime, RuntimeTimeSettings},
@@ -85,6 +87,17 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 /// sources, pending commands/travel/tasks, scripted verification and unrepresented time policy
 /// refuse capture. This value contains no World identity or native-service authority.
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
+    let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
+    session.capture(|world| capture_world(world, runtime_time))?
+}
+
+/// Captures the same game-owned state through a real healthy paused desktop Runtime.
+///
+/// Native handles, WGPU resources and presentation receipts remain owned by `DesktopRun`; only
+/// the game-owned logical state crosses this boundary. A fresh desktop candidate must reconstruct
+/// those native services before a caller can use this value for restore.
+#[cfg(feature = "desktop")]
+pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
     session.capture(|world| capture_world(world, runtime_time))?
 }

@@ -321,12 +321,22 @@ impl Game {
         .map_err(|error| error.to_string())?;
         let expected =
             visual_expectation(&final_snapshot, meadow_marker, meadow, cavern, runtime_time);
+        let captured =
+            two_level_game::capture_desktop_resume(&self.run).map_err(|error| error.to_string())?;
+        assert_eq!(captured.progress, expected.progress);
+        assert_eq!(captured.player, expected.player);
+        assert_eq!(captured.held, expected.held);
+        assert_eq!(captured.clock, expected.clock);
+        assert_eq!(captured.runtime_time, expected.runtime_time);
+        assert_eq!(captured.counters, expected.counters);
+        assert_eq!(captured.compatibility.schema, expected.compatibility.schema);
+        assert_eq!(captured.compatibility.levels, expected.compatibility.levels);
         self.presented
             .borrow()
             .frame
             .as_ref()
             .unwrap()
-            .assert_expected(&expected)
+            .assert_expected(&captured)
             .map_err(|error| error.to_string())?;
         self.expected = Some(expected);
         assert!(self.run.capture(|_| ()).is_ok());

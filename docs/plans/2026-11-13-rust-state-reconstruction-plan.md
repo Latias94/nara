@@ -856,8 +856,10 @@ and actual rebuilt-game trajectories must retain their separate execution eviden
 ### Desktop Service Inventory And Placement
 
 The ordinary desktop profile adds the following ten plugins to the supported headless inventory.
-All ten are currently outside the game's resume allowlist and therefore refused. The following
-classification describes the required successor; support is not implemented by this source study.
+The desktop successor now records these exact IDs as explicitly reconstructible services for the
+game-owned capture boundary. This classification does not serialize their handles or declare
+their fresh candidate ready; each service must be rebuilt by the new Runtime and its presentation
+must still be qualified separately.
 
 | Plugin | Required continuation classification |
 | --- | --- |
@@ -875,15 +877,26 @@ classification describes the required successor; support is not implemented by t
 There is no separate `nara.winit` plugin in this inventory; `nara.render-components` already
 belongs to the shared inventory. Compilation features and actual placement remain distinct:
 `configured_recipe` currently installs desktop-input whenever compiled with the `desktop`
-feature, even for a selected headless profile. That combination adds only desktop-input and is
-also refused by the current explicit inventory. The development Host currently requires empty
-features. Classifying desktop-input must explicitly resolve this combination rather than
-accidentally changing its eligibility through an expanded allowlist.
+feature, even for a selected headless profile. The explicit inventory now admits the known
+desktop-input declaration while unknown custom services still refuse capture. The qualification
+observer `two-level-game.test.desktop-capture` is separately named as evidence-only; it retains
+sealed WGPU inputs but owns no game state or native authority. The development Host still requires
+empty features, and this classification does not silently widen that source/headless Host.
 
 The concrete game successor should share private eligibility, canonical World capture,
 fresh-candidate checks and restore-command construction between its two public placements.
-Desktop restoration submits through `DesktopRun`, polls the original Step ticket and completes
-paused maintenance through the existing game `begin_from_command`, travel and finish owners.
+The game now exposes a desktop capture adapter that uses the same canonical capture routine through
+`DesktopRun`'s healthy paused boundary. It retains the actual configuration fingerprint, Schema,
+level stamps, time phase, counters and semantic state; native handles, WGPU resources and
+presentation receipts remain with `DesktopRun`. The real desktop control trajectory captures this
+value and compares every game-owned field against its visual oracle before replaying the captured
+state through the presentation evidence path. A first RED run correctly refused the evidence-only
+observer as an unknown service; the explicit classification fixed that without admitting an
+unrelated custom service.
+
+Desktop restoration still submits through `DesktopRun`, polls the original Step ticket and
+completes paused maintenance through the existing game `begin_from_command`, travel and finish
+owners.
 Extend the finite continuity child/protocol, process client, development Host and CLI with
 explicit placement, restored-presentation confirmation and separate adoption/activation/
 retirement results. Preserve the current executable/source envelope, disposable probe, fresh

@@ -430,6 +430,15 @@ The [development Host successor](../../plans/2026-11-13-rust-state-reconstructio
 owns implementation and qualification. The desktop placement and post-start protocol remain
 separate ADR0116 work, and synchronous Cargo retains its cooperative cancellation limits.
 
+The desktop game placement now shares the game-owned canonical capture routine through a concrete
+`DesktopRun` adapter. It requires the same healthy paused App boundary and preserves the actual
+configuration fingerprint, Schema, content stamps, scheduling phase, counters and logical state.
+Window, WGPU, presentation and input handles stay with the original DesktopRun owner; the adapter
+does not serialize or transfer them. The explicit desktop inventory admits only the known fresh-
+Runtime services, while the qualification-only sealed-frame observer is named separately. An
+unknown custom plugin still refuses capture. This is a capture prerequisite and a real desktop
+state comparison, not post-start candidate adoption or a second native owner.
+
 ### Proposed Ownership Refinement
 
 The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial

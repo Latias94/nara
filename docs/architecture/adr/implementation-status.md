@@ -2584,6 +2584,17 @@ record retains final CPU/public checks and the narrower physical/GPU evidence. C
 canonical capture, service eligibility, rebuilt-game adoption and full R12 remain open; UI and
 physical mixed-DPI remain paused.
 
+The follow-up [desktop capture boundary](../../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-service-inventory-and-placement)
+now routes the same game-owned canonical capture through a healthy paused `DesktopRun`. The
+explicit service inventory admits the known fresh-Runtime window/render/WGPU/image/sprite/input
+services and names the qualification-only sealed-frame observer separately; unknown custom
+services remain refused. The actual desktop/GPU consumer captures the full state, compares its
+semantic fields against the visual trajectory and uses the authoritative configuration fingerprint
+for the presentation oracle. Final run `20c77f33-efb2-499b-ba9e-1ebb4d2a815a` passes 1/1 after
+the first RED run correctly exposed the unclassified evidence observer. This advances desktop
+canonical capture only; restored desktop candidate presentation, route adoption and predecessor
+retirement remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

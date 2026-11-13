@@ -5,6 +5,8 @@ mod capture;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(feature = "desktop")]
+use nara::project_host::DesktopControlError;
 use nara::{
     advanced_prelude::CurrentScene,
     app::{FixedTime, RuntimeState, RuntimeTimeContinuation, RuntimeTimeSettings},
@@ -25,6 +27,8 @@ use crate::{
     resume::{LevelContentStamp, ResumeError, ResumeState, decode_resume, encode_resume},
 };
 
+#[cfg(feature = "desktop")]
+pub use capture::capture_desktop_resume;
 pub use capture::capture_resume;
 pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
 
@@ -33,6 +37,9 @@ pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
 pub enum GameResumeError {
     #[error(transparent)]
     Session(#[from] HeadlessSessionError),
+    #[cfg(feature = "desktop")]
+    #[error(transparent)]
+    Desktop(#[from] DesktopControlError),
     #[error(transparent)]
     Format(#[from] ResumeError),
     #[error("game state is not eligible for reconstruction: {0}")]
@@ -84,11 +91,22 @@ fn supported_service(id: &str) -> bool {
             | "nara.input"
             | "nara.gameplay.commands"
             | "nara.render-components"
+            | "nara.window"
+            | "nara.render"
+            | "nara.render-wgpu.capture"
+            | "nara.render-wgpu.window-presentation"
+            | "nara.render-wgpu.stock-capture"
+            | "nara.render-wgpu.stock-policy"
+            | "nara.render-wgpu.stock-sprite"
+            | "nara.sprite-render"
+            | "nara.image.prepare"
             | "nara.sprite"
             | "nara.tilemap"
             | "nara.tilemap.assets"
             | "nara.image"
             | "nara.startup-scene-activation"
+            | "two-level-game.desktop-input"
+            | "two-level-game.test.desktop-capture"
     )
 }
 
@@ -371,4 +389,35 @@ pub(super) fn finish(world: &mut World) {
     session.saves = state.counters.saves;
     session.restores = state.counters.restores;
     world.resource_mut::<ResumeControl>().restored = true;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supported_service;
+
+    #[test]
+    fn desktop_inventory_contains_only_explicitly_reconstructible_services() {
+        for id in [
+            "nara.window",
+            "nara.render",
+            "nara.render-wgpu.capture",
+            "nara.render-wgpu.window-presentation",
+            "nara.render-wgpu.stock-capture",
+            "nara.render-wgpu.stock-policy",
+            "nara.render-wgpu.stock-sprite",
+            "nara.sprite-render",
+            "nara.image.prepare",
+            "two-level-game.desktop-input",
+            "two-level-game.test.desktop-capture",
+        ] {
+            assert!(
+                supported_service(id),
+                "missing desktop service classification: {id}"
+            );
+        }
+        assert!(!supported_service(
+            "two-level-game.test.unknown-resume-service"
+        ));
+        assert!(!supported_service("nara.render-wgpu.device-private-state"));
+    }
 }

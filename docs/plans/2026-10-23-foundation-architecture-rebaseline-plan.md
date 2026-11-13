@@ -4689,6 +4689,14 @@ All previous game/presentation assertions remain. Original endpoint refocus and 
 Platform-release reactivation regressions are covered separately. Full desktop canonical state,
 service eligibility, rebuilt candidate presentation/adoption and predecessor retirement still
 need their integrated consumer; this does not complete R12 or resume UI/mixed-DPI work.
+The [desktop capture boundary](2026-11-13-rust-state-reconstruction-plan.md#desktop-service-inventory-and-placement)
+now shares the game-owned canonical capture routine with `DesktopRun`, including the actual
+configuration fingerprint and fresh-Runtime service classification. The real desktop/GPU consumer
+passes 1/1 after comparing the authoritative capture's semantic fields against the visual
+trajectory; the first RED run exposed and then explicitly classified the evidence-only capture
+observer. This advances canonical desktop capture and retains native owners separately, but does
+not yet restore a rebuilt desktop candidate, confirm its first restored presentation, exchange the
+sole route or retire a predecessor.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
