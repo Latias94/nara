@@ -121,14 +121,6 @@ struct RecordedControl {
     window_id: WindowId,
 }
 
-impl IntoElement for RecordedControl {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for RecordedControl {
     type RequestLayoutState = ();
     type PrepaintState = ();

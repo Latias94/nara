@@ -8,6 +8,50 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(feature = "dialogue-workflow")]
+#[test]
+#[ignore = "requires an actual Windows GPU and gpui_view prebuilt with dialogue-workflow"]
+fn engine_owned_gpui_dialogue_edits_two_views_saves_reopens_and_previews() {
+    let (output, logs) = run_native_gpui("--smoke-dialogue", Duration::from_secs(105), 256 * 1024);
+    for marker in [
+        "NARA_GPUI_DIALOGUE_FIRST_FRAME",
+        "NARA_GPUI_DIALOGUE_PIXELS",
+        "NARA_GPUI_DIALOGUE_RESOURCES",
+        "NARA_GPUI_DIALOGUE_CANCEL",
+        "NARA_GPUI_DIALOGUE_APPLY",
+        "NARA_GPUI_DIALOGUE_HISTORY",
+        "NARA_GPUI_DIALOGUE_STATES",
+        "NARA_GPUI_DIALOGUE_POPUP",
+        "NARA_GPUI_DIALOGUE_PERSISTENCE",
+        "NARA_GPUI_DIALOGUE_PREVIEW",
+        "NARA_GPUI_DIALOGUE_VIEWS",
+        "NARA_GPUI_DIALOGUE_POSITION",
+        "NARA_GPUI_DIALOGUE_CHOICES",
+        "NARA_GPUI_DIALOGUE_STRUCTURE",
+        "NARA_GPUI_DIALOGUE_OLD_CALLBACKS",
+        "NARA_GPUI_DIALOGUE_RETIRE",
+        "NARA_GPUI_DIALOGUE_OK",
+    ] {
+        assert!(
+            output.lines().any(|line| line.starts_with(marker)),
+            "missing {marker}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+    for evidence in [
+        "queued_before_close_edit=true",
+        "queued_before_close_action=true",
+        "peer_remained_editable=true",
+        "cancel_restored_text=true",
+    ] {
+        assert!(
+            output.contains(evidence),
+            "missing {evidence}; logs: {}\n{output}",
+            logs.display()
+        );
+    }
+}
+
 #[cfg(feature = "jellyflow-trial")]
 #[test]
 #[ignore = "requires an actual Windows GPU and gpui_view prebuilt with jellyflow-trial"]

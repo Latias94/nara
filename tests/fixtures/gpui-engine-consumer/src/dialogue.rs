@@ -5,6 +5,7 @@ mod codec;
 pub mod jellyflow;
 pub mod preview;
 mod validation;
+pub mod workflow;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},

@@ -1,12 +1,22 @@
 # Nara-Owned GPUI Rendering Consumer
 
-This independently locked workspace consumes the maintained Open-GPUI Git revision
-`f75c10b2a9bf7b4dcb2c8c2aa446203997601369`, published on its `main` branch. All framework
+This independently locked workspace selects maintained Open-GPUI Git revision
+`68d52b009dde3c784b01268208cb1d0ed690e99c`. This is a local, unpublished development
+checkpoint on `refactor/editor-framework-evolution`, including the current API,
+controls and reviewed shared Dockspace adapter. All framework
 packages and the optional Jellyflow adapter must resolve the same Git source. The
 [integration study](../../../docs/research/2026-11-11-open-gpui-engine-integration-layers.md)
 records the qualification scope. The engine and ordinary renderer fixtures do not acquire
 this framework dependency. This is a public integration consumer, not the selected full Editor
 frontend.
+
+The canonical manifest and lock now select that one immutable source. Registry
+patches for GPUI/components prevent the optional Jellyflow manifest from introducing
+an older registry GPUI; the EGL correction is pinned separately. No temporary path
+patch is needed for this source selection. The older published `f75c10b` native
+receipts retain their historical scope. This new source has no remote publication
+claim: another machine needs the exact local Git objects (checkout or transferred
+bundle), or a separately authorized publication, before fetching it.
 
 The optional Jellyflow packages resolve through an adjacent maintained `jellyflow` checkout.
 Cargo requires those path manifests even when `jellyflow-trial` is disabled. The handoff records
@@ -80,11 +90,13 @@ basis into an original Session command. `publish` pairs its exact accepted outco
 source with a sealed `DialogueCanvasPublication`; `complete` adopts the actual canonical
 identities from that receipt. Invalid evidence retains the original authorities for repair.
 An original A receipt can settle after B without rolling either View backward or reexecuting
-the command. External native journal transport, two native Dialogue Views and a property editor
-remain work in the [consumer plan](../../../docs/plans/2026-11-12-dialogue-graph-integration-plan.md).
+the command. The external native journal prerequisite belongs to Jellyflow. The two-View
+Dialogue controls below use Session snapshots independently; external graph integration and native qualification remain open
+in the [consumer plan](../../../docs/plans/2026-11-12-dialogue-graph-integration-plan.md).
 The `--jellyflow` mode above continues to demonstrate the standalone runtime.
 
-Run the CPU/public Session controls without opening a native window:
+The following external-source command requires the missing Jellyflow prerequisite documented
+below. For the independent portable workflow, use the command in the next section instead:
 
 ```text
 cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --features jellyflow-trial,ui-work-observation --lib --test graph_document --test dialogue_document --test-threads=1 --no-fail-fast --no-tests fail
@@ -93,6 +105,244 @@ cargo +1.95.0 nextest run --locked --release --manifest-path tests/fixtures/gpui
 The plan records actual results and limits. Source lifetimes are separate from saved content
 identity; adapters must retain the original document/revision and preserve unchanged choice IDs
 and outgoing targets when constructing complete choice replacements.
+
+### Two-View Dialogue Workflow (Not Yet Qualified)
+
+Enable `dialogue-workflow` for `--dialogue` and `--smoke-dialogue`. This feature selects GPUI
+controls over the original immutable Session snapshots and does not enable `jellyflow-trial`.
+Each View has independent node selection, node/property drafts, scrolling, popup state and
+conversation preview. The editors queue exact actions through the existing `Viewer::drive`
+and original `EditorProjectSession`. No second writable graph, history or runtime is created.
+The page explicitly marks the graph canvas and drag as unavailable. Positions remain editable
+through fields; Line links use a next-target selector whose selection applies immediately.
+Choice text, labels, targets and order use one atomic Apply. Node creation, deletion, entry,
+Cancel/Apply, shared Undo/Redo and original Save/Reopen remain available through controls.
+Dirty drafts retain their original basis until explicit Review or Cancel. Review performs a
+three-way field merge: unchanged local fields adopt accepted peer values, while overlapping
+changes display Current and Draft and require an explicit choice before Apply. Choice labels,
+targets, removal and ordering merge by stable choice identity. Keeping a locally edited choice
+after its accepted removal requests a fresh allocation rather than resurrecting the retired ID.
+Reopen retires old drafts and node actions until a live node is explicitly selected. Each View
+has a bounded, independent preview scroll region. Closing either or both Views leaves the
+document open and retires that View's callbacks and queued work.
+
+The portable `dialogue::workflow` module has public Session/file regressions in
+`tests/dialogue_document/workflow.rs`. The Windows smoke target uses accepted Window geometry,
+the original Winit input converter, injected text/IME, same-Scene GPU readback and original
+Host retirement. Optional `NARA_GPUI_DIALOGUE_CAPTURE_DIR` writes the readback as a PPM file.
+These are test implementations, not passing test receipts.
+
+The initial API audit inspected local Open-GPUI
+`f2407cdae92e9412a44b3b3979c595139d369902`; subsequent verification uses the
+coordinating Open-GPUI branch and the exact source boundary recorded below.
+The controls target its GPUI `Element` blanket `IntoElement` implementation. The four
+consumer wrappers no longer implement `IntoElement` explicitly. ValueGraph path painting now
+uses `Window::paint_path` clipping instead of the removed public `Path.bounds` field. The
+accepted-frame transaction retains reusable `Fn` callbacks rather than consuming captured facts.
+The manifest now records Open-GPUI `68d52b009dde3c784b01268208cb1d0ed690e99c`
+for all five direct packages and both registry overrides. Cargo metadata resolves
+all 23 GPUI packages to that same exact Git identity; Nara's own Taffy 0.10.0 and
+GPUI's 0.15.1 remain independent dependencies. The coordinating verification fetched
+the immutable source from the adjacent Git checkout using a per-process URL
+rewrite; no global or repository Git configuration changed. The committed URL
+remains the canonical GitHub source, and no push occurred. After providing those
+exact source objects on the runner, run serially:
+
+```text
+cargo +1.95.0 nextest run --locked --release --target-dir target --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --test dialogue_document -E 'test(workflow::)' --test-threads=1 --no-tests fail
+cargo +1.95.0 build --locked --release --target-dir target --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features dialogue-workflow,ui-work-observation
+cargo +1.95.0 nextest run --locked --release --target-dir target --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --features dialogue-workflow,ui-work-observation --test gpui_view -E 'test(engine_owned_gpui_dialogue_edits_two_views_saves_reopens_and_previews)' --run-ignored ignored-only --test-threads=1 --no-tests fail
+```
+
+The first command compiles portable Session/file tests; their real Host Open currently needs
+the Windows/Linux filesystem guarantees described below. The latter commands need Windows
+to compile and exercise the native page. Set `CARGO_BUILD_JOBS=1`, the prebuilt absolute
+`NARA_GPUI_VIEW_EXE`, `NARA_WGPU_FORCE_FALLBACK=0` and run separately with `WGPU_BACKEND=dx12`
+and `vulkan`. On macOS, `gpui_view` compiles only its unsupported-platform entry, and its native
+test binary has no tests. The smoke trajectory checks actual control input, multiline/CJK,
+independent drafts and preview cursors, popup Escape/outside closure, original persistence,
+position edits, atomic choice edits, node creation/entry/deletion and shared history. Preview
+assertions consume the page's accepted Line/Choice/End publication. Retained Text/Apply callbacks
+from accepted frames are replayed after Cancel, Reopen and View close. The surviving View is
+edited and cancelled after its peer closes. The added deletion-recovery trajectory selects
+another live property target without Undo, then replays the deleted target's old Text/Apply
+callbacks and checks that they stay retired. The ordinary keyboard trajectory uses the Winit
+converter for character input, Enter, Backspace and all four arrows, checks the original
+UTF-16 caret and commits one history entry. Clipboard interoperability has no fixture receipt.
+These are unexecuted native regressions. Graph gestures,
+physical input, OS IME and performance remain unqualified.
+
+### Review Follow-Up Verification
+
+The existing six-reviewer run completed against the frozen consumer snapshot
+`1e2dc6be47bfbe5b34d7e8b5271de779fd3fc3d7`. Its independent merge, validator and report
+record four confirmed findings: cross-View overwrite during Review, retired node actions,
+unreachable long preview content, and missing resource lookup. The original receipt remains
+under `/tmp/compound-engineering-502/ce-code-review/20261113-165020-dff6809b/review.json`.
+It describes the frozen predecessor, not a successful review of the following edits.
+
+All four have source corrections and new regressions. Pure workflow tests exercise
+field and stable-choice merges, explicit overlapping resolution, accepted removal versus
+local editing, conflicting order and source/incarnation gates. A public Session regression
+joins peer preservation, explicit resolution, original history and Save. The native trajectory
+now requires the surviving View to contain the injected text in Editing state, then return to
+the original text and Clean state after Cancel. It queues accepted Apply and ordinary Undo
+before closing each View, drains the original queue, and checks unchanged document, revision
+and history. The native driver and smoke helpers were separated without changing the original
+phase order; phase 99 checks the last closed View's drained work. A separate resource prelude
+uses accepted controls to query and select a full Chinese/long project path in one View,
+independently find a Scene in the other View, receive its original asynchronous Open terminal result,
+reject a stale index generation, and retain both local queries and selections after collapse.
+
+An independent follow-up found that removing a conflicting choice after Review could make
+Use Current silently clear the conflict without restoring the choice. Choice-label and
+choice-target resolution now restore the complete current member when it was locally removed.
+If the current member is also absent, resolution returns false and retains the conflict;
+Apply keeps its original refusal. Pure regressions cover both fields through Review, Remove,
+Use Current and domain Apply, plus failed field resolution after accepted removal. The public
+Session regression also checks the restored stable ID, label, target and original Undo/Redo.
+
+On 2026-11-13, the final source passes **93/93** portable library cases, no skips, nextest
+`1073d26e-99ec-4cea-8aab-349548b46eb9`. This includes the resource-owner query test and both
+new choice-resolution regressions. The earlier 91-case run
+`6c75d87e-0f8d-401d-82ef-0d9cb060682c` predates the last correction. Final verification used
+Rust 1.95.0, `--locked --lib --test-threads=1`, the unoptimized test profile, one Cargo build
+job and the existing root `target`; its log is `/tmp/nara-editor-dialogue-final-library-tests.log`.
+Task-scoped formatting passed without changing other Rust files; the initial 19-file pass
+and final four-file pass are recorded in `/tmp/nara-editor-dialogue-followup-fmt.log` and
+`/tmp/nara-editor-dialogue-final-fmt.log`.
+
+The updated `dialogue_document` Session test target compiles with `--no-run`, recorded in
+`/tmp/nara-editor-dialogue-final-session-compile.log`. The final actual Windows example,
+including resource UI, native driver and smoke sources, passes the locked Rust 1.95.0 Windows
+SDK check at the unchanged canonical GPUI pin. Its log is
+`/tmp/nara-editor-dialogue-final-windows-msrv.log`; the command is:
+
+```text
+CARGO_BUILD_JOBS=1 cargo +1.95.0 xwin check --cross-compiler clang-cl --locked --target x86_64-pc-windows-msvc --target-dir target --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features dialogue-workflow,ui-work-observation
+```
+
+These receipts cover the final corrections; the 83-case library and Windows SDK receipts
+below retain their predecessor scope. The historical macOS Session result remains **0/12**
+at `project.editor.prefabs-open-failed`; the updated Session cases were compiled, not run.
+Windows DX12/Vulkan native execution remains pending.
+
+The coordinator independently repeats the final library cohort on actual Rust 1.95.0,
+**93/93**, `734e2acd-0b1b-43d0-ada7-745f76cc9eb4`, and on the updated development
+Rust 1.100.0, **93/93**, `358ed07d-bd75-471e-b2ce-2e1034af87fb`. The latter uses
+task-local nextest 0.9.151. The final Windows SDK check is repeated successfully in
+22.75 seconds, and the current Session target again compiles without execution. Logs
+are `/tmp/nara-editor-dialogue-final-consumer-library.log`,
+`/tmp/nara-editor-dialogue-final-rust1100-library.log` and the Windows/Session paths
+above. Final independent source recheck closes the Review/Remove/Current finding;
+the four-file workflow/Session scope fingerprint is
+`1e338b40e9d16198204e984180119c7a3361130dc0905a221dde52602498c082`.
+This bounded recheck does not rewrite the original six-reviewer report or grant
+unexecuted native qualification.
+
+### Project Resource Lookup
+
+Each View has a collapsible Project resources / documents entry. It shares the original
+Session Project Browser's immutable source index and reuses `EditorProjectBrowserState` for
+its own query, expansion and selection. `EditorProjectBrowserView::shared_snapshot` is the
+only new original-owner seam: it shares the existing Arc without copying entries or file
+authority. Query work advances at most 256 entries per render; the page shows at most 48
+matching rows and asks for a narrower query when more match. The selected project path
+remains complete, including Chinese text and long names, when the finder is collapsed.
+
+The original TrustedCompiled lane deliberately has no generic source index. Dialogue mode
+therefore opens its one Session through the existing `EditorProjectOpenHost` authoring route;
+other native modes retain their compiled route and original source benchmark. The Dialogue
+fixture seeds its read-only resource before authoring Open, so the original scan observes it.
+Its background Scene starts empty and still uses the same sprite construction and RenderHost.
+There is no second index, filesystem enumeration, writable document owner or resource property
+added to the Dialogue schema.
+
+Assets remain inspect-only. Open document is enabled only for indexed Scene/Prefab entries
+and queues the original `EditorAction::ProjectBrowser` intent. A captured index generation
+is checked before dispatch, and the original Session retains exact file admission, pending
+Open, activation, terminal result and acknowledgement. Dialogue itself continues using its
+existing extension-document Open/Save/Reopen owner. This bounded finder does not add a new
+Dialogue-source Browser capability. Pure tests cover shared index identity, independent
+Chinese/long-path query and selection, refresh preservation and removal retirement and pass
+in the final 93-case library run. The compiled native prelude checks the actual finder and
+original asynchronous Open terminal result; native execution remains pending.
+
+### Windows SDK Compile Receipt
+
+On 2026-11-13, Rust 1.100 `cargo xwin check --cross-compiler clang-cl --locked`
+against `x86_64-pc-windows-msvc`, the actual `gpui_view` example and
+`dialogue-workflow,ui-work-observation` passes through the real Windows SDK.
+The temporary current-source manifest retains the original fixture source files
+and reuses the Nara `target`. The first run exposed an incorrect root import of
+`ListboxOption` and an untyped keyboard callback. The corrected run, including the
+deleted-target recovery and ordinary-keyboard smoke source, passes in
+`/tmp/nara-editor-dialogue-workflow-windows-fixed-check.log`.
+This compiles the Windows page that the Mac unsupported-platform entry excludes;
+it does not execute Session/file, DX12, Vulkan or the native trajectory.
+The same Windows SDK command also passes with the fixture's declared Rust 1.95.0
+compiler, recorded in `/tmp/nara-editor-dialogue-workflow-windows-msrv.log`.
+
+The final canonical manifest/lock then passes the same **locked Rust 1.95 Windows
+SDK check** at `68d52b009dde3c784b01268208cb1d0ed690e99c`, with no path overrides,
+in `/tmp/nara-editor-dialogue-canonical-windows-msrv.log`. Its locked library
+cohort passes **83/83**, no skips, nextest
+`d608554f-2dd5-4f6d-838e-7938c008673f`. Cargo metadata confirms 23 GPUI packages
+from one exact Git source, the selected WGPU Git revision and the pinned EGL
+correction. This replaces temporary-source compilation evidence for the selected
+development source; the failed Mac Session/file run and missing Windows native
+execution retain their distinct limits.
+
+### Initial Canonical Dependency Resolution Failure
+
+The coordinating lane attempted the portable canonical `--locked` run on 2026-11-13.
+`/tmp/nara-editor-dialogue-workflow-tests.log` records failure before compilation: Nara's
+`nara_ui_kernel` requires `taffy =0.10.0`, while the adjacent `jellyflow-open-gpui 0.4.0`
+requires registry `open-gpui =0.2.0`, which requires `taffy =0.10.1`. The nextest metadata
+invocation used `--all-features --filter-platform=aarch64-apple-darwin --locked`; optional
+dependencies still participate in resolution even when the selected test does not use them.
+No workflow test result follows from that failed resolution. The coordinating lane then
+built a temporary consumer with both registry and Git GPUI sources patched to the current
+local workspace. That temporary source selection does not publish a new Git revision or
+qualify the canonical old pin. The final selected Git source and registry overrides above
+subsequently close this resolution conflict without changing sibling Jellyflow sources.
+
+### macOS Session Host Blocker
+
+`/tmp/nara-editor-dialogue-workflow-local-tests.log` records that the temporary local-patched
+test consumer compiled. Its macOS `dialogue_document` run executed 12 tests: 0 passed,
+12 failed, 0 skipped. All failures occur during real project Open with
+`project.editor.prefabs-open-failed`, before the intended editing assertions. This includes
+the five new `workflow` tests and seven existing Session/file regressions.
+
+`nara_fs::DirectoryCapability::open_directory_exact` calls `preflight_exact_spelling` before
+opening descendants. `crates/nara_fs/src/platform/mod.rs` returns `FsError::Unsupported`
+outside Windows/Linux. Independently, `platform/unix.rs` returns false from
+`local_identity_semantics_proven` outside Linux. These existing platform guarantees were
+not bypassed or changed. Session/file execution remains pending on a supported Windows/Linux
+runner. A successful macOS test-binary build does not compile the `cfg(windows)` native page
+and does not qualify its controls or GPU trajectory.
+
+The same temporary current-source consumer separately passes **83/83** portable
+library tests, no skips, nextest `b82a860b-2faf-461c-aec3-b931e2d7d2ac` on Rust
+1.100. Those pure Dialogue/ValueGraph cases do not open the Session/file Host and
+do not change the twelve failed Session cases above.
+
+### External Graph Source Blocker
+
+The local Jellyflow checkout observed at `83ccc07` lacks `ExternalGraphDocument` and
+`with_external_graph_handler`. A subsequent source audit checked all twelve local refs and
+all advertised remote refs, including both pull-request heads. The remote publishes
+`main=8a7c2df55acba7f00f5465d9c97ffd8387b791f0`; fetching that exact commit succeeds. Its
+`OpenGpuiSceneHost::new_measured_surface(ViewSession, OpenGpuiNodeRegistry)` exists, but
+`ExternalGraphDocument`, `ExternalGraphRequest` and `with_external_graph_handler` are absent.
+Fetching both documented prerequisite commits `0a9453a6df5483d30ad05195bd62fdbdab38a97e` and
+`3a430b906d8b902bee6a682c436dcdede1de7cd5` by full SHA fails with `upload-pack: not our ref`.
+No checkout, reset, source edit or ref update was performed in Jellyflow. The guessed native
+handler/completion call was removed. A bundle, source archive or reachable ref containing the
+actual prerequisite is required before its exact native graph binding can be implemented.
+Selecting the published source would also break the pre-existing optional external-source
+consumers under `jellyflow-trial`. This missing contract does not enter `dialogue-workflow`.
 
 ## Typed Graph Consumer
 

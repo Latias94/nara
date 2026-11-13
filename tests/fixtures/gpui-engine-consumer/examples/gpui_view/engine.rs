@@ -51,6 +51,9 @@ use winit::window::Window;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+#[cfg(feature = "dialogue-workflow")]
+#[path = "engine/dialogue.rs"]
+mod dialogue;
 #[path = "engine/graph.rs"]
 mod graph;
 #[path = "engine/views.rs"]
@@ -58,6 +61,8 @@ pub(super) mod views;
 const TRANSFORM: &str = "nara.transform.Transform2d";
 const SPRITE: &str = "nara.sprite.Sprite";
 pub(super) const SOURCE_ROWS: usize = 10_000;
+pub(super) const DIALOGUE_RESOURCE_PATH: &str = "assets/对话参考/森林与旅程/long-project-resource-path-preserved-without-truncating-the-original-source-index-identity-or-query-selection-旅程说明.txt";
+pub(super) const DIALOGUE_RESOURCE_SCENE: &str = "scenes/查找文档.scene.json";
 
 macro_rules! source_step {
     ($engine:ident, $index:literal, $operation:expr) => {{
@@ -137,12 +142,14 @@ pub(super) struct Engine {
     pub graph_refusals: u64,
     graph_status: Option<String>,
     graph_persistence: Option<nara_engine::tooling::EditorPersistenceAttemptId>,
+    #[cfg(feature = "dialogue-workflow")]
+    pub dialogue: Option<dialogue::DialogueDocument>,
     view_streams: Option<views::ViewStreams>,
     _project: TempDir,
 }
 
 impl Engine {
-    pub fn new(window: Arc<Window>) -> Result<Self> {
+    pub fn new(window: Arc<Window>, dialogue_mode: bool) -> Result<Self> {
         let mut host = WgpuRenderHost::new(
             WindowId::PRIMARY,
             WindowHandleProvider::new(Arc::clone(&window)),
@@ -166,29 +173,9 @@ impl Engine {
             Extent2d::new(32, 32).context("the control extent must be nonempty")?,
         )?;
         let other_policy = WgpuPolicyDefinition::new(WgpuStockPolicy::new()).install()?;
-        let project = create_project()?;
+        let project = create_project(dialogue_mode)?;
         let capability = open_directory(project.path())?;
-        let mut session = match EditorProjectSession::open_trusted_compiled(
-            capability,
-            TrustedCompiledEditorProjectIntent::new().with_recipe(ProductRecipe::new()),
-        ) {
-            Ok(session) => session,
-            Err(mut error) => {
-                let deadline = Instant::now() + TIMEOUT;
-                while error.advance_retirement() != RuntimeCandidateRetirementState::Retired {
-                    ensure!(
-                        Instant::now() < deadline,
-                        "failed Editor Open did not retire: {:?}",
-                        error.diagnostics()
-                    );
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                bail!(
-                    "open the compiled Editor project: {:?}",
-                    error.diagnostics()
-                );
-            }
-        };
+        let mut session = open_session(capability, dialogue_mode)?;
         let initialized = initialize_sprite(&mut session);
         let (document, sprite) = match initialized {
             Ok(initialized) => initialized,
@@ -236,6 +223,8 @@ impl Engine {
             graph_refusals: 0,
             graph_status: None,
             graph_persistence: None,
+            #[cfg(feature = "dialogue-workflow")]
+            dialogue: None,
             view_streams: None,
             _project: project,
         };
@@ -783,6 +772,38 @@ fn set_field(
     dispatch(session, EditorAction::CommitAuthoringEdit(prepared))
 }
 
+fn open_session(
+    capability: DirectoryCapability,
+    dialogue_mode: bool,
+) -> Result<EditorProjectSession> {
+    #[cfg(feature = "dialogue-workflow")]
+    if dialogue_mode {
+        return dialogue::open_authoring_session(capability);
+    }
+    let _ = dialogue_mode;
+    match EditorProjectSession::open_trusted_compiled(
+        capability,
+        TrustedCompiledEditorProjectIntent::new().with_recipe(ProductRecipe::new()),
+    ) {
+        Ok(session) => Ok(session),
+        Err(mut error) => {
+            let deadline = Instant::now() + TIMEOUT;
+            while error.advance_retirement() != RuntimeCandidateRetirementState::Retired {
+                ensure!(
+                    Instant::now() < deadline,
+                    "failed Editor Open did not retire: {:?}",
+                    error.diagnostics()
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            bail!(
+                "open the compiled Editor project: {:?}",
+                error.diagnostics()
+            );
+        }
+    }
+}
+
 fn initialize_sprite(
     session: &mut EditorProjectSession,
 ) -> Result<(EditorDocumentId, SceneEntityId)> {
@@ -830,12 +851,25 @@ fn initialize_sprite(
     Ok((document, sprite))
 }
 
-fn create_project() -> Result<TempDir> {
+fn create_project(dialogue_mode: bool) -> Result<TempDir> {
     let project = tempfile::Builder::new()
         .prefix("nara-gpui-scene-")
         .tempdir()?;
     for directory in ["assets", "scenes", "prefabs", "schema"] {
         fs::create_dir(project.path().join(directory))?;
+    }
+    if dialogue_mode {
+        let resource = project.path().join(DIALOGUE_RESOURCE_PATH);
+        fs::create_dir_all(
+            resource
+                .parent()
+                .context("resource fixture has no directory")?,
+        )?;
+        fs::write(resource, "Read-only source-index resource / 旅程说明")?;
+        fs::write(
+            project.path().join(DIALOGUE_RESOURCE_SCENE),
+            SceneDocument::default().to_json_string()?,
+        )?;
     }
     fs::write(
         project.path().join("nara.toml"),
@@ -865,9 +899,10 @@ requested = ["runtime-2d"]
         project.path().join("schema/authoring.bundle.json"),
         bundle.to_json_string()?,
     )?;
+    let source_rows = if dialogue_mode { 0 } else { SOURCE_ROWS };
     fs::write(
         project.path().join("scenes/startup.scene.json"),
-        SceneDocument::from_ordered_roots((0..SOURCE_ROWS).map(|index| {
+        SceneDocument::from_ordered_roots((0..source_rows).map(|index| {
             SceneEntityRecord::new(
                 SceneEntityId::new(format!("item-{index:05}"))
                     .expect("finite source IDs are valid"),

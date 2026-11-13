@@ -108,14 +108,6 @@ impl ProbeElement {
     }
 }
 
-impl IntoElement for ProbeElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for ProbeElement {
     type RequestLayoutState = ();
     type PrepaintState = ();

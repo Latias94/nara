@@ -1,5 +1,11 @@
 #[path = "content.rs"]
 mod content;
+#[cfg(feature = "dialogue-workflow")]
+#[path = "dialogue_panel.rs"]
+mod dialogue_panel;
+#[cfg(feature = "dialogue-workflow")]
+#[path = "dialogue_smoke.rs"]
+mod dialogue_smoke;
 #[path = "engine.rs"]
 mod engine;
 #[path = "graph_gestures_smoke.rs"]
@@ -14,6 +20,9 @@ mod jellyflow_panel;
 #[cfg(feature = "jellyflow-trial")]
 #[path = "jellyflow_smoke.rs"]
 mod jellyflow_smoke;
+#[cfg(feature = "dialogue-workflow")]
+#[path = "native_dialogue.rs"]
+mod native_dialogue;
 #[path = "panels.rs"]
 mod panels;
 #[path = "preview_jobs.rs"]
@@ -303,12 +312,18 @@ struct Root {
     preview_views: Option<Entity<views_panel::ViewsPanel>>,
     #[cfg(feature = "jellyflow-trial")]
     jellyflow: Option<Entity<jellyflow_panel::JellyflowPanel>>,
+    #[cfg(feature = "dialogue-workflow")]
+    dialogue: Option<Entity<dialogue_panel::DialoguePanel>>,
 }
 
 impl Render for Root {
     fn render(&mut self, _: &mut open_gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
         if let Some(views) = &self.preview_views {
             return views.clone().into_any_element();
+        }
+        #[cfg(feature = "dialogue-workflow")]
+        if let Some(dialogue) = &self.dialogue {
+            return dialogue.clone().into_any_element();
         }
         let base = div().size_full().relative().child(
             self.scene_view
@@ -414,6 +429,15 @@ struct Viewer {
     jellyflow_smoke: Option<jellyflow_smoke::JellyflowSmoke>,
     #[cfg(feature = "jellyflow-trial")]
     expected_jellyflow_history: Option<jellyflow_runtime::graph::HistoryState>,
+    dialogue_mode: bool,
+    dialogue_smoke_mode: bool,
+    dialogue_composing: Rc<Cell<bool>>,
+    #[cfg(feature = "dialogue-workflow")]
+    dialogue_panel: Option<Entity<dialogue_panel::DialoguePanel>>,
+    #[cfg(feature = "dialogue-workflow")]
+    dialogue_queue: dialogue_panel::Queue,
+    #[cfg(feature = "dialogue-workflow")]
+    dialogue_smoke: Option<dialogue_smoke::DialogueSmoke>,
     views_mode: bool,
     views_panel: Option<Entity<views_panel::ViewsPanel>>,
     views_commands: Rc<RefCell<VecDeque<views_panel::ViewsIntent>>>,
@@ -460,6 +484,7 @@ impl Viewer {
             || self.views_smoke.is_some()
             || self.graph_gestures_smoke.is_some()
             || self.jellyflow_smoke_mode
+            || self.dialogue_smoke_mode
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<()> {
@@ -467,11 +492,23 @@ impl Viewer {
             event_loop.create_window(
                 Window::default_attributes()
                     .with_title("Nara · GPUI Scene View")
-                    .with_inner_size(LogicalSize::new(1280., 640.))
+                    .with_inner_size(if self.dialogue_mode {
+                        LogicalSize::new(1520., 1200.)
+                    } else {
+                        LogicalSize::new(1280., 640.)
+                    })
                     .with_visible(!self.automated()),
             )?,
         );
-        let mut engine = Engine::new(window.clone())?;
+        let mut engine = Engine::new(window.clone(), self.dialogue_mode)?;
+        #[cfg(feature = "dialogue-workflow")]
+        let dialogue_snapshot = self
+            .dialogue_mode
+            .then(|| {
+                let snapshot = engine.open_dialogue()?;
+                Ok::<_, anyhow::Error>((snapshot, engine.dialogue_browser()))
+            })
+            .transpose()?;
         if self.graph_mode {
             engine.open_graph()?;
         }
@@ -540,9 +577,18 @@ impl Viewer {
         let jellyflow_initialized = Rc::new(RefCell::new(None));
         #[cfg(feature = "jellyflow-trial")]
         let jellyflow_output = jellyflow_initialized.clone();
+        #[cfg(feature = "dialogue-workflow")]
+        let dialogue_initialized = Rc::new(RefCell::new(None));
+        #[cfg(feature = "dialogue-workflow")]
+        let dialogue_output = dialogue_initialized.clone();
+        #[cfg(feature = "dialogue-workflow")]
+        let dialogue_queue = self.dialogue_queue.clone();
+        let dialogue_composing = self.dialogue_composing.clone();
         let application =
             Application::with_platform(self.platform.clone()).run_embedded(move |cx| {
                 DraftInput::bind_keys(cx);
+                #[cfg(feature = "dialogue-workflow")]
+                open_gpui_ui_components::gpui_adapter::init_text_input(cx);
                 let mut draft = None;
                 let mut model_output = None;
                 let mut graph_model_output = None;
@@ -613,6 +659,15 @@ impl Viewer {
                     {
                         *jellyflow_output.borrow_mut() = jellyflow.clone();
                     }
+                    #[cfg(feature = "dialogue-workflow")]
+                    let dialogue = native_dialogue::mount(
+                        dialogue_snapshot,
+                        dialogue_queue,
+                        dialogue_composing,
+                        &dialogue_output,
+                        window,
+                        cx,
+                    );
                     cx.new(|_| Root {
                         scene_view,
                         draft: input,
@@ -622,6 +677,8 @@ impl Viewer {
                         preview_views,
                         #[cfg(feature = "jellyflow-trial")]
                         jellyflow,
+                        #[cfg(feature = "dialogue-workflow")]
+                        dialogue,
                     })
                 });
                 *output.borrow_mut() = Some(root.map(|root| {
@@ -654,6 +711,10 @@ impl Viewer {
         #[cfg(feature = "jellyflow-trial")]
         {
             self.jellyflow_panel = jellyflow_initialized.borrow_mut().take();
+        }
+        #[cfg(feature = "dialogue-workflow")]
+        {
+            self.dialogue_panel = dialogue_initialized.borrow_mut().take().transpose()?;
         }
         self.preview_jobs = self.views_mode.then(preview_jobs::PreviewJobs::default);
         window.set_ime_allowed(true);
@@ -793,6 +854,10 @@ impl Viewer {
         if self.views_mode && !self.closing {
             self.drive_views()?;
         }
+        #[cfg(feature = "dialogue-workflow")]
+        if self.dialogue_panel.is_some() {
+            self.drive_dialogue()?;
+        }
         self.application.as_ref().unwrap().update(|_| {});
         let renderer = self.renderer.as_ref().unwrap().clone();
         renderer.promote()?;
@@ -860,6 +925,8 @@ impl Viewer {
                 self.closing = true;
             }
         }
+        #[cfg(feature = "dialogue-workflow")]
+        self.advance_dialogue_smoke()?;
         #[cfg(feature = "ui-work-observation")]
         if !self.closing
             && let Some(mut work) = self.work.take()
@@ -876,6 +943,8 @@ impl Viewer {
             {
                 return Ok(());
             }
+            #[cfg(feature = "dialogue-workflow")]
+            self.close_dialogue_views()?;
             #[cfg(feature = "jellyflow-trial")]
             if let Some(panel) = &self.jellyflow_panel
                 && self
@@ -893,6 +962,8 @@ impl Viewer {
             self.surface.as_ref().unwrap().close()?;
             self.application.as_ref().unwrap().update(|cx| cx.quit());
             if renderer.quiesced() && self.platform.is_shutdown_complete() {
+                #[cfg(feature = "dialogue-workflow")]
+                self.verify_dialogue_retired()?;
                 #[cfg(feature = "jellyflow-trial")]
                 if let Some(panel) = &self.jellyflow_panel {
                     self.application.as_ref().unwrap().update(|cx| {
@@ -982,6 +1053,12 @@ impl Viewer {
                         renderer.diagnostics.get()
                     );
                 }
+                if self.dialogue_smoke_mode && self.error.is_none() {
+                    println!(
+                        "NARA_GPUI_DIALOGUE_OK ui_submissions={} original_host=true independent_producer_alive=true input_delivery=injected",
+                        renderer.submissions.get()
+                    );
+                }
                 event_loop.exit();
             }
         }
@@ -1029,6 +1106,15 @@ impl Viewer {
     }
 
     fn input(&mut self, event: WindowEvent) -> Result<()> {
+        match &event {
+            WindowEvent::Ime(Ime::Preedit(text, _)) => {
+                self.dialogue_composing.set(!text.is_empty())
+            }
+            WindowEvent::Ime(Ime::Commit(_) | Ime::Disabled) | WindowEvent::Focused(false) => {
+                self.dialogue_composing.set(false)
+            }
+            _ => {}
+        }
         if self.closing || self.finished {
             return Ok(());
         }
@@ -1260,6 +1346,10 @@ impl Viewer {
         {
             self.jellyflow_smoke = None;
         }
+        #[cfg(feature = "dialogue-workflow")]
+        {
+            self.dialogue_smoke = None;
+        }
         #[cfg(feature = "ui-work-observation")]
         {
             self.work = None;
@@ -1302,7 +1392,8 @@ impl ApplicationHandler<Wake> for Viewer {
                 || self.graph_smoke.is_some()
                 || self.graph_gestures_smoke.is_some()
                 || self.views_smoke.is_some()
-                || self.jellyflow_smoke_mode)
+                || self.jellyflow_smoke_mode
+                || self.dialogue_smoke_mode)
         {
             return;
         }
@@ -1317,6 +1408,18 @@ impl ApplicationHandler<Wake> for Viewer {
         }
         if self.automated()
             || self.closing
+            || (self.dialogue_mode
+                && self.engine.as_ref().is_some_and(|engine| {
+                    #[cfg(feature = "dialogue-workflow")]
+                    {
+                        engine.borrow().dialogue_work_pending()
+                    }
+                    #[cfg(not(feature = "dialogue-workflow"))]
+                    {
+                        let _ = engine;
+                        false
+                    }
+                }))
             || self
                 .preview_jobs
                 .as_ref()
@@ -1345,6 +1448,8 @@ pub(super) fn run() -> Result<()> {
     let views_mode = views_smoke || std::env::args().any(|arg| arg == "--views");
     let jellyflow_smoke = std::env::args().any(|arg| arg == "--smoke-jellyflow");
     let jellyflow_mode = jellyflow_smoke || std::env::args().any(|arg| arg == "--jellyflow");
+    let dialogue_smoke = std::env::args().any(|arg| arg == "--smoke-dialogue");
+    let dialogue_mode = dialogue_smoke || std::env::args().any(|arg| arg == "--dialogue");
     let graph_mode = graph_smoke
         || graph_gestures_smoke
         || views_mode
@@ -1356,15 +1461,21 @@ pub(super) fn run() -> Result<()> {
             + usize::from(views_smoke)
             + usize::from(graph_gestures_smoke)
             + usize::from(jellyflow_smoke)
+            + usize::from(dialogue_smoke)
             <= 1
             && (!graph_mode || !smoke && !measure)
             && (!views_mode || !graph_smoke)
-            && (!jellyflow_mode || !graph_mode && !smoke && !measure),
+            && (!jellyflow_mode || !graph_mode && !smoke && !measure && !dialogue_mode)
+            && (!dialogue_mode || !graph_mode && !smoke && !measure && !jellyflow_mode),
         "select one consumer mode"
     );
     ensure!(
         !jellyflow_mode || cfg!(feature = "jellyflow-trial"),
-        "--jellyflow and --smoke-jellyflow are unsupported without the jellyflow-trial feature"
+        "Jellyflow mode requires the jellyflow-trial feature"
+    );
+    ensure!(
+        !dialogue_mode || cfg!(feature = "dialogue-workflow"),
+        "Dialogue mode requires the dialogue-workflow feature"
     );
     ensure!(
         !measure || cfg!(feature = "ui-work-observation"),
@@ -1416,6 +1527,15 @@ pub(super) fn run() -> Result<()> {
         jellyflow_smoke: jellyflow_smoke.then(jellyflow_smoke::JellyflowSmoke::new),
         #[cfg(feature = "jellyflow-trial")]
         expected_jellyflow_history: None,
+        dialogue_mode,
+        dialogue_smoke_mode: dialogue_smoke,
+        dialogue_composing: Rc::new(Cell::new(false)),
+        #[cfg(feature = "dialogue-workflow")]
+        dialogue_panel: None,
+        #[cfg(feature = "dialogue-workflow")]
+        dialogue_queue: Rc::default(),
+        #[cfg(feature = "dialogue-workflow")]
+        dialogue_smoke: dialogue_smoke.then(dialogue_smoke::DialogueSmoke::new),
         views_mode,
         views_panel: None,
         views_commands: Rc::default(),

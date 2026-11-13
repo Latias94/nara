@@ -144,13 +144,6 @@ struct RecordedControl {
     frame: Rc<RefCell<FrameGeometry>>,
 }
 
-impl IntoElement for RecordedControl {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 impl Element for RecordedControl {
     type RequestLayoutState = ();
     type PrepaintState = ();
@@ -1005,7 +998,7 @@ impl GraphPanel {
                     },
                 );
             },
-            move |bounds, _, window, _| {
+            move |_, _, window, _| {
                 let mut frame = frame.borrow_mut();
                 frame.links = 0;
                 for link in links {
@@ -1024,12 +1017,11 @@ impl GraphPanel {
                         point(to.x - bend, to.y),
                     );
                     match path.build() {
-                        Ok(path) if path.bounds.intersects(&bounds) => {
+                        Ok(path) => {
                             window.paint_path(path, rgb(0x89c4e8));
                             frame.links += 1;
                         }
                         Err(error) => log::error!("graph link path failed: {error}"),
-                        _ => {}
                     }
                 }
             },

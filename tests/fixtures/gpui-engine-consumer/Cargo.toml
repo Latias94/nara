@@ -10,6 +10,7 @@ publish = false
 resolver = "3"
 
 [features]
+dialogue-workflow = ["dep:open_gpui_ui_components"]
 jellyflow-trial = ["dep:jellyflow_core", "dep:jellyflow_runtime", "dep:jellyflow_open_gpui"]
 ui-work-observation = ["open_gpui/profiler", "nara_engine/editor-work-observation", "dep:tracing", "dep:tracing-subscriber"]
 ui-work-allocations = ["ui-work-observation", "dep:open_gpui_bench_metrics", "dep:criterion"]
@@ -37,10 +38,11 @@ async-channel = "2.5"
 criterion = { version = "0.8.2", default-features = false, optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"], optional = true }
-open_gpui_bench_metrics = { package = "open-gpui-bench-metrics", git = "https://github.com/Latias94/open-gpui", rev = "f75c10b2a9bf7b4dcb2c8c2aa446203997601369", optional = true }
-open_gpui = { package = "open-gpui", git = "https://github.com/Latias94/open-gpui", rev = "f75c10b2a9bf7b4dcb2c8c2aa446203997601369", default-features = false, features = ["windows-manifest"] }
-open_gpui_wgpu = { package = "open-gpui-wgpu", git = "https://github.com/Latias94/open-gpui", rev = "f75c10b2a9bf7b4dcb2c8c2aa446203997601369", default-features = false }
-open_gpui_windows = { package = "open-gpui-windows", git = "https://github.com/Latias94/open-gpui", rev = "f75c10b2a9bf7b4dcb2c8c2aa446203997601369", default-features = false }
+open_gpui_bench_metrics = { package = "open-gpui-bench-metrics", git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c", optional = true }
+open_gpui = { package = "open-gpui", git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c", default-features = false, features = ["windows-manifest"] }
+open_gpui_wgpu = { package = "open-gpui-wgpu", git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c", default-features = false }
+open_gpui_windows = { package = "open-gpui-windows", git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c", default-features = false }
+open_gpui_ui_components = { package = "open-gpui-ui-components", git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c", optional = true }
 jellyflow_open_gpui = { package = "jellyflow-open-gpui", path = "../../../../jellyflow/crates/jellyflow-open-gpui", optional = true }
 windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }
 
@@ -49,3 +51,8 @@ name = "gpui_view"
 
 [[test]]
 name = "gpui_view"
+
+[patch.crates-io]
+open-gpui = { git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c" }
+open-gpui-ui-components = { git = "https://github.com/Latias94/open-gpui", rev = "68d52b009dde3c784b01268208cb1d0ed690e99c" }
+khronos-egl = { git = "https://github.com/zed-industries/khronos-egl", rev = "42214b36347b108fd9630ca6254b96dde59e04fe" }

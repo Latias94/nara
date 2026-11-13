@@ -39,6 +39,9 @@ mod atomic_edits;
 #[path = "dialogue_document/command_receipts.rs"]
 mod command_receipts;
 
+#[path = "dialogue_document/workflow.rs"]
+mod workflow;
+
 #[cfg(feature = "jellyflow-trial")]
 #[path = "dialogue_document/canvas_requests.rs"]
 mod canvas_requests;
