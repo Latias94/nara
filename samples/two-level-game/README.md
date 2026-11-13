@@ -114,6 +114,81 @@ exercises build/startup/compatibility failure, stale requests/replies and incumb
 package tests keep this nested-build case ignored. Execution results and limits belong to the
 [reconstruction plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md).
 
+## Source/Headless Development Host
+
+The ordinary [development Host](src/development/mod.rs) owns candidate preparation and the single
+active command route. The lower-level A/B/C test above remains an independent regression. This
+workflow supports the shipped source/headless game inventory; it does not extend desktop Play,
+restore native GPU/audio/physics services or patch Rust code inside a running process.
+
+Construct `DevelopmentHost` with the explicit absolute project root and an existing trusted work
+parent outside that project. `start` consumes a `CapturedCargoExecutable` selecting this game's
+native `continuity` binary with default features disabled and no requested/resolved features.
+`capture` and `step` always target the active game. Supply an explicit public `CargoBuildRequest`,
+the expected initial complete `ResumeState` and finite `ProbeStep` expectations to
+`prepare_rebuild`. The Host builds the edited source and compares complete canonical state after
+each probe step. It closes that probe through the game and native owners, then restores the
+original basis in another fresh process. Probe progress is discarded.
+
+The returned `PreparedRebuild` is a nominal ticket retained by its original Host. `adopt` checks
+the prospective source envelope and both complete states before exchanging the command route.
+The incumbent may keep stepping while a candidate is retained; if its basis changes, adoption
+refuses and the ticket remains available for explicit `cancel`. Foreign, cancelled or consumed
+tickets cannot select a candidate. After adoption, all ordinary commands target the new active game.
+
+`AdoptionOutcome` reports committed adoption separately from predecessor retirement. Retirement
+initially remains `Pending` until `retry_retirement` drives the original native owner. The new
+active game can step/capture during that wait; another rebuild refuses until cleanup completes.
+`close` fences new commands and retains all original owners and storage until physical cleanup.
+Call it again if Pending. Each retained child gets its own ten-second cleanup drive; a batch may
+take several drives. Drop is fallback cleanup, not evidence of successful Close.
+
+The ordinary [`develop`](src/bin/develop.rs) binary exposes this workflow through newline-delimited
+JSON. From the engine root, with absolute paths substituted:
+
+```text
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --bin develop -- --project-root ABS_GAME_ROOT --work-parent ABS_EXISTING_PARENT --target-dir ABS_ENGINE_TARGET --target x86_64-pc-windows-msvc --profile dev
+```
+
+Set the same toolchain, jobs and target environment as the actual-build test above. The explicit
+target must match the build compiler's native host. This project authorizes execution of trusted
+Rust/Cargo build inputs. The CLI emits one `ready` record, then one result for each command:
+
+| JSON operation | Result |
+| --- | --- |
+| `{"operation":"observe"}` | Complete current `capture`. |
+| `{"operation":"step","commands":[]}` | One ordinary fixed tick and its complete capture. Semantic movement commands use `{"operation":"move","direction":1,"pressed":true}`; directions are left/right/up/down = 0/1/2/3. |
+| `{"operation":"prepare","basis":STATE,"probes":[{"commands":[],"expected":NEXT_STATE}]}` | Actual build, complete-state probe qualification and one retained candidate. Replace `STATE`/`NEXT_STATE` with full objects; expected state is supplied by the caller. |
+| `{"operation":"adopt"}` | `committed:true`, new active generation and independent `retirement:"pending"`. Uses the CLI's retained ticket; generation observations grant no selection authority. |
+| `{"operation":"cancel"}` | Cancel the CLI's exact retained candidate. |
+| `{"operation":"retry_cleanup"}` | Retry retained physical cleanup without changing the active command route. |
+| `{"operation":"close"}` | Fence commands and close the session. EOF also closes it. |
+
+Operation refusals produce `ok:false` while retaining the active game. Malformed input ends the
+session through Close and exits unsuccessfully. Unknown fields on no-argument commands are
+refused, including invented generation/candidate selectors. Responses preserve bounded structured
+Cargo diagnostics and distinguish adoption from cleanup. `retirements` reports each original
+generation's game Close, fallback termination and native exit/containment/readers/output facts.
+Physical cleanup completion alone does not claim graceful game Close. The CLI accepts at most
+128 commands, 256 KiB per input line and 64 probe steps. Host rebuilds are limited to eight attempts
+and 1 GiB of cumulative captured executable bytes. These allowances do not establish RSS or latency limits.
+Session/idle checks occur between operations and after stdin reads; they do not interrupt blocked
+stdin or the synchronous Cargo adapter's compiler/build-script calls.
+
+The prospective source envelope covers the exact project directory and complete finite source,
+assets, scenes, prefabs and schema trees, plus declared build inputs. It is checked before/after
+build and before adoption. This trusted-local per-file envelope is not an atomic filesystem
+snapshot, dependency discovery or rollback of arbitrary native/build-script side effects.
+
+Run the production Host's actual-edit/adoption qualification separately and serially:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --test development_host --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+Actual results and platform limits belong to the
+[current plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#game-owned-development-host-and-adoption).
+
 ## Ownership And Limits
 
 - `CurrentScene` is the only source/Scene-instance authority. Gameplay retains a logical `LevelKey`

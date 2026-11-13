@@ -39,3 +39,9 @@ name = "continuity"
 path = "src/bin/continuity.rs"
 test = true
 bench = false
+
+[[bin]]
+name = "develop"
+path = "src/bin/develop.rs"
+test = true
+bench = false
