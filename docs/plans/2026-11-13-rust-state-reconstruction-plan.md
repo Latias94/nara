@@ -639,15 +639,110 @@ an activation result with retained paused owners, not a false adoption rollback.
 intent, real focus acquisition, activation and cancellation need their own exact original-owner
 observations. `with_initial_visibility(false)` alone does not prove those semantics.
 
-The public implementation and bounded record/token shapes remain unimplemented design work;
-do not reserve a generic continuity framework or accept a proposed signature from source study
-alone. The concrete four-key game must drive the interface, with typed driver, native dispatch
-and actual rebuilt-game acceptance. Capture must also reject an unconsumed/staged release;
+The concrete four-key game drives the bounded public interface and original-owner operations;
+do not infer a generic continuity framework or complete desktop reconstruction from this input
+prerequisite. Acceptance needs typed driver, native dispatch and actual rebuilt-game evidence.
+Capture must also reject an unconsumed/staged release;
 comparing only the game's held bits or one input scan cursor is insufficient. Bevy's pinned
 keyboard focus cleanup/synthetic filtering and Godot's `release_pressed_events` provide related
 focus policy evidence, not this cross-Runtime transfer. Version one separately refused nonzero
 time remainder/debt and scaling. The time successor below addresses phase through its original
 owner; it does not make desktop input continuation eligible.
+
+The current successor implements finite declared keyboard Button holds in the original Input
+owner. `KeyRestored` records allocate fresh local member identities and original terminal credits,
+establish semantic held values without Started, and project buttons without transient Press.
+Capture validates complete consumer quiescence, exact binding/context lifetime and both held
+projections. Batch refusal leaves members and capacity unchanged. Admission provenance remains
+distinct from the terminal trigger; native activation mismatch uses its own invalidation reason.
+
+Source study also identifies the exact-step input gap: projection alone is insufficient because
+semantic resolution and action-command mapping previously ran only in PreUpdate. Prepare the
+same original operations before fixed command admission, with once-per-App-frame cursors so
+ordinary frames and multiple ticks do not repeat edges. Unresolved UI decisions stay pending.
+This is a required original-owner correction, not a separate Stop-command path. Acceptance
+includes restored D, staged native Release, one exact tick with no further movement and one stop.
+
+Native activation needs explicit isolation, focus acknowledgement and physical reconciliation.
+Windows focus synthesis has no complete public snapshot marker; a synthetic Down cannot prove
+that an old held member should continue. The original native owner queries declared physical
+keys after actual focus acknowledgement, stages mismatch releases and remains paused until
+the original input/gameplay consumers settle them. Unsupported keys/backends or denied focus
+retain an unavailable/waiting result. Posted WM_KEYUP proves message dispatch; only separate
+OS input/state observations can establish the physical hold. Keep these evidence scopes distinct.
+
+### Keyboard Continuation And Native Activation Qualification
+
+The November 14 implementation keeps keyboard membership in the original `nara_input` timeline,
+Button projection and semantic contribution owner. A finite `KeyboardActionBinding` inventory
+captures exact held values. Paused restoration validates the complete map/context lifetime,
+original endpoint and available batch/terminal capacity before creating new local members.
+`KeyRestored` emits neither transient Press nor Started. Capture refuses retained or deferred
+consumer work, extra held members and mismatched projections. Member admission origin remains
+separate from a later terminal trigger; reserved termination works under ordinary storage pressure.
+
+Exact fixed steps now reuse the original Input projection/staging/resolution and gameplay command
+mapper before command admission. Per-App-frame cursors preserve ordinary PreUpdate and catch-up
+semantics. Independent review finds a late-input regression: staging in catch-up tick two retained
+an old mapping even though resolution had already run. The added public regression first fails
+at the action cursor assertion, run `12d49cd2-7360-41c9-bb77-bdbb326fe9f5`; applying the same frame
+condition to staging and resolution leaves that input for the next First mapping boundary.
+The final public exact-input cohort passes 6/6, run `8e94a072-076c-4768-8515-478feab2d189`.
+Another review correction preserves Synthetic/Platform ReleaseAll trigger origin independently
+of Restored membership; the public tests compare both paths.
+
+`WinitSession` and `DesktopRun` expose capture/restore plus explicit input isolation and activation.
+Dormant native focus/lifecycle facts still reach the original session while ordinary keyboard,
+mouse and pointer ingress stays isolated. Actual original-window focus acknowledgement precedes
+a Windows physical A/D/W/S query, with focus and keyboard-layout checks around it. Missing holds
+produce original `ActivationMismatch` releases. `ReconciliationPending` admits one exact original
+Step to consume Stop before movement; ordinary input and Resume remain gated until maintenance
+and physical reconciliation finish. Repeated/synthetic Down cannot manufacture held intent.
+Denied focus remains waiting; unsupported keys/backends remain unavailable with the paused owner.
+
+Independent native-path review also closes two paused reactivation cases. Active-to-unfocused-to-
+focused transitions restore focus in the original Input endpoint, and pending releases from
+ordinary Platform members receive the same original Step opportunity as Restored members. Two
+CPU regressions retain the exact endpoint/generation, one Stop, no extra movement and a single
+accepted reconciliation ticket. They explicitly do not establish native focus.
+
+| Final ordinary scope | Actual result |
+| --- | --- |
+| All-feature Input, Gameplay and Winit | 336/336, 18 native cases intentionally skipped, run `2a729efd-aa39-4388-b228-a271a61b9495`. Includes all 13 public keyboard-continuation cases and the eight native-session CPU cases. |
+| Public exact-input consumer | 6/6, run `8e94a072-076c-4768-8515-478feab2d189`; restored Release/context loss stops before movement, ordinary catch-up emits no duplicate commands, and late input uses the next First mapping. |
+| Default source/headless sample | 97/97, two unchanged actual-build cases skipped, run `e04a9e24-efe7-4998-95b4-6491f71ddd2d`. Original development Host, JSON CLI, canonical state, time and gameplay regressions pass. |
+| Desktop-feature sample library | 66/66, run `84274391-813b-4408-9421-6a61cfabd416`. Actual installed movement/command maps retain the four key/action/context declarations, payload direction order and all prior bindings. |
+
+The first final CPU run passes 335/336 because the new refocus fixture reads `ButtonInput` before
+the admitted ordinary Press reaches its projection boundary. Completing original paused
+maintenance fixes the fixture without changing production code or weakening the observation.
+The final 336-test run above includes that exact path. Earlier 334/334 results predate the two
+reactivation regressions and are not substituted for this final source qualification.
+
+Actual Windows native reusable qualification passes 7/7, run
+`3b3cd675-150d-4578-8c0b-7ca32d7d94e3`, including the original hidden/reveal/fullscreen/retirement
+controls. One new trajectory confirms the release gap; another pairs SendInput Down/Up with an
+independent OS held-state observation, then dispatches WM_KEYUP through the same original HWND
+and observes one original release/Stop. Posted messages alone do not establish physical state.
+The third new native case refuses unsupported activation while retaining the paused candidate.
+Physical mixed-DPI tests are not selected.
+
+The independently compiled game's actual desktop/GPU consumer passes 1/1, run
+`a50073ba-1feb-46b1-b5ba-9f1f22b2f357`, 5.713 seconds after a 4m13s release build. The game derives
+its four declarations from the actual movement map, restores D without Started, rejects early
+capture/Resume and acquires real focus. Physically Up D requires reconciliation; one original
+Step clears game held intent without changing player position. All prior movement, pickup,
+marker, travel, scheduling-phase, original presentation/retirement and finite GPU replay checks
+remain. The replay is independent image rendering after original native retirement, not swapchain
+capture or scanout. The existing contained child exit/readers/output checks still apply.
+
+This scope is Windows x64, Rust 1.95.0, release/locked/offline, one Cargo job and the shared root
+target; the game uses hardware DX12 without forced fallback. Only an existing Windows API package
+edge is required in the root/sample locks; no dependency versions change. Full desktop canonical
+capture, service eligibility, actual rebuilt-candidate restoration/presentation, route adoption
+and predecessor retirement remain the next integrated outcome. No desktop service is silently
+added to the game's resume allowlist. Foreign native execution, gamepad/mouse continuation,
+arbitrary services, latency budgets and full R12 remain open. UI and physical mixed-DPI stay paused.
 
 ### Desktop Time Continuity Findings
 

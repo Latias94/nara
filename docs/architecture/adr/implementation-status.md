@@ -2572,6 +2572,18 @@ report a fault while returning success, with before/after application regression
 retains actual rebuild evidence and platform limits. Complete desktop reconstruction, input/service eligibility,
 adoption, foreign execution, costs and full R12 remain open.
 
+The November 14 [keyboard continuation successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#keyboard-continuation-and-native-activation-qualification)
+restores finite declared Button holds through the original Input owner with fresh local members,
+silent held projections and separate admission/terminal provenance. Exact steps reuse the original
+Input-to-command preparation; a late-input mapping regression passes after staging shares the
+resolver's frame guard. Native isolation, real focus and Windows physical A/D/W/S reconciliation
+remain separate from logical restoration. Seven selected native trajectories and the actual
+desktop game/GPU consumer pass 7/7 and 1/1 respectively. Independent review also closes original
+endpoint focus restoration and ordinary Platform-release reactivation deadlocks. The linked
+record retains final CPU/public checks and the narrower physical/GPU evidence. Complete desktop
+canonical capture, service eligibility, rebuilt-game adoption and full R12 remain open; UI and
+physical mixed-DPI remain paused.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

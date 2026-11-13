@@ -3563,6 +3563,11 @@ Winit and the earlier Nara controls, while the GPUI graph uses Nara's external W
 neither is the upstream Zed native window implementation. Keep physical reports distinct from
 injected input qualification.
 
+The [platform maintenance recommendation](2026-11-12-nara-ui-integration-handoff.md#platform-ownership-and-dependency-maintenance)
+keeps Nara's platform and Render/Host contracts independent of Winit while retaining the mature
+desktop adapter. A small dependency fork may carry a demonstrated native repair; the current
+mixed-DPI source gap alone does not justify replacing the cross-platform window system.
+
 The [component responsibility and quality sequence](2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development)
 builds on existing `open-gpui-ui-core`/`open-gpui-ui-components`, then Nara theme and Editor
 composites. Those generic components are fork-owned implementations and need focused acceptance
@@ -4675,6 +4680,15 @@ explicit headless delta semantics. Complete App, ordinary game, Winit CPU and se
 Winit pass 178/178, 97/97, 67/67 and 5/5. The actual desktop game/GPU consumer passes 1/1 through
 the new time operation and all previous assertions. The linked record retains review corrections,
 separate actual-build evidence and the remaining desktop input/service/adoption gates.
+The [keyboard continuity successor](2026-11-13-rust-state-reconstruction-plan.md#keyboard-continuation-and-native-activation-qualification)
+now restores finite declared Button holds without Press/Started through the original Input
+owner. Exact steps run the original input-to-command preparation; native isolation, actual focus
+and Windows physical A/D/W/S reconciliation gate activation separately. Public exact-input
+controls pass 6/6, selected native trajectories 7/7 and the ordinary desktop game/GPU consumer 1/1.
+All previous game/presentation assertions remain. Original endpoint refocus and ordinary
+Platform-release reactivation regressions are covered separately. Full desktop canonical state,
+service eligibility, rebuilt candidate presentation/adoption and predecessor retirement still
+need their integrated consumer; this does not complete R12 or resume UI/mixed-DPI work.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
