@@ -4326,10 +4326,19 @@ View for both standalone and external documents. It removes the history-free siz
 preserves explicit resize/persistence, and connects semantic zoom, real ports/routes, remount,
 offscreen Fit and measured movement constraints. Runtime/layout pass 715/715, adapters 585/585
 and the independent Nara cohort 110/110; rebuilt existing DX12/Vulkan controls pass 3/3 each.
-The separate Workflow product remains 22/25: two Select overlay/culling cases and the zoomed
-port boundary also fail on the exact parent after selector-only migration repairs. Close those
-owner-local product gaps, then complete native Dialogue editing and preview. This is scoped
+That separate Workflow product checkpoint was 22/25: two Select overlay/culling cases and the
+zoomed port boundary also failed on the exact parent after selector-only migration repairs. These were
+owner-local product gaps preceding complete native Dialogue editing and preview. This is scoped
 library readiness, without a new Editor default or complete R11c/R12 claim.
+
+The subsequent [Workflow native-control repair](2026-11-12-dialogue-graph-integration-plan.md#qualified-workflow-repair)
+at local Jellyflow `0a9453a` closes those three original failures. Complete Workflow/model-provider
+tests pass 25/25, focused admission/port/capture owners 24/24 and complete adapter controls 588/588.
+Native widget ancestry stays stable across semantic zoom; accepted graph admission replaces
+the blanket hit blocker. The port failure is an inactive test-window refusal, corrected in the
+fixture. Rebuilt existing standalone
+Jellyflow/two-View GPU controls pass 1/1 each on DX12 and Vulkan. Full external Dialogue editing,
+its two Views and original Session Save/Reopen/preview remain the next product gate.
 
 ### R11d: Public observation and visible-UI operation
 

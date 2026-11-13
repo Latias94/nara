@@ -1258,10 +1258,19 @@ at local Jellyflow `74f7f54` replaces automatic size commands with complete acce
 geometry for both source kinds. Explicit authored resize and persistence stay with the original
 document. Measured extents, semantic zoom, real ports/routes, remount and offscreen Fit use that
 View's original geometry. Runtime/layout pass 715/715, adapters 585/585, the independent Nara
-consumer 110/110 and existing DX12/Vulkan controls 3/3 each. The separate Workflow sample is
-22/25 with the same three parent-reproduced popup/port failures; its full gate and native
-Dialogue remain open. The linked plan records exact runs, reviews and scope. No full R11/R12
-or foundation completion follows.
+consumer 110/110 and existing DX12/Vulkan controls 3/3 each. That separate Workflow sample
+checkpoint was 22/25 with the same three parent-reproduced popup/port failures; its full gate
+and native Dialogue remained open. The linked plan records exact runs, reviews and scope.
+No full R11/R12 or foundation completion follows.
+
+The [Workflow repair](../../plans/2026-11-12-dialogue-graph-integration-plan.md#qualified-workflow-repair)
+at local Jellyflow `0a9453a` subsequently closes those three parent-reproduced sample failures
+with stable widget ancestry, accepted graph modal admission and an activated pointer-capture
+fixture. Complete Workflow and model-provider consumers pass 25/25, focused owner tests
+24/24 and complete adapter
+controls 588/588. The rebuilt existing standalone Jellyflow/two-View GPU consumer passes
+1/1 on each of DX12 and Vulkan. The complete external Dialogue desktop workflow and R11c
+remain open.
 
 The finite custom-draw and canvas consumers above do not establish a general component
 state/effects lifecycle, a complete reusable component library or all complex-editor behavior.

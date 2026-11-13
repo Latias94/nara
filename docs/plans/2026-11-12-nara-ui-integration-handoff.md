@@ -19,8 +19,9 @@ The next Nara deliverable is the complete
 document and history, two native Views, ordinary property editing and a conversation preview.
 Its domain, public Session workflow and immutable facts are qualified at `ddcc880`. The later
 external native transport and View-local intrinsic-size prerequisites are implemented through
-local Jellyflow `74f7f54`; their exact scope and three existing sample failures are recorded
-below. The complete native Dialogue product remains open. Continue from those boundaries
+local Jellyflow `74f7f54`; the subsequent `0a9453a` Workflow repair closes its three reproduced
+sample failures. Exact qualification and remaining scope are recorded below.
+The complete native Dialogue product remains open. Continue from those boundaries
 without repeating the standalone connection or treating library readiness as a completed editor.
 
 ## Start Here
@@ -464,15 +465,37 @@ Runtime/layout pass 715/715, adapters 585/585 and the independent Nara consumer 
 Rebuilt existing Scene, graph-gesture and standalone Jellyflow/two-View controls pass 3/3 on
 DX12 and 3/3 on Vulkan. These do not qualify an actual external Dialogue desktop workflow.
 
-The next consumer gate retains three original Workflow sample failures: Select overlay
-registration across semantic zoom, popup close after culling/restoration, and the zoom=0.5
-port hit boundary. Current native product tests pass 22/25; exact parent plus selector-only
-repairs passes 20/23 with the same failures. Do not remove the assertions, recreate graph size
-writes or infer an upstream GPUI defect. Continue in the original presentation/overlay/input
-owner, using the diagnostic entry points in the linked plan. A public framework observation
-interface should eventually replace the sample's private debug-selector encoding.
+At the intrinsic geometry checkpoint, the consumer gate retained three original Workflow
+sample failures: Select overlay registration across semantic zoom, popup close after
+culling/restoration, and the zoom=0.5
+port hit boundary. That product checkpoint passed 22/25; exact parent plus selector-only
+repairs reached 20/23 with the same failures. The repair below preserves those assertions and
+resolves the original presentation/overlay/input owners without recreating graph size writes.
+A public framework observation interface should eventually replace the sample's private
+debug-selector encoding.
 
 The library mechanism can be maintained independently from this fixed baseline. Full native
 Dialogue multiline/property/popup editing, its two Views and original Session Save/Reopen/
 preview still belong to Nara's next product deliverable. Canonical docking, full Editor/game
 UI choice and the foundation Goal remain open.
+
+### Workflow Native Control Repair
+
+Local Jellyflow baseline: `0a9453a6df5483d30ad05195bd62fdbdab38a97e`. The source selection
+remains Open-GPUI `f75c10b2`; this local successor has not been remotely published.
+
+The [qualified Workflow successor](2026-11-12-dialogue-graph-integration-plan.md#qualified-workflow-repair)
+closes all three original sample failures without removing their assertions. Complete Workflow
+and model-provider component tests pass 25/25; focused admission/port/capture owners pass 24/24.
+The complete Open-GPUI/egui adapter library and integration cohort passes 588/588.
+Stable native component ancestry preserves Select state across semantic zoom. Accepted
+scene admission restricts new graph actions without a full-canvas hit blocker; native controls
+keep both event phases, existing capture settles normally and Focus-only pinning remains local.
+The port diagnostic proves a fixture `WindowInactive` refusal, corrected by real window
+activation rather than changing hit bounds or connection policy.
+
+The rebuilt original Nara standalone Jellyflow/two-View native trajectory passes 1/1 on DX12
+and 1/1 on Vulkan, six unselected per run. These actual GPU controls retain pixels, local
+controls, captured movement, Undo, independent navigation and retirement. They do not qualify
+the complete external-domain Dialogue desktop product. The linked plan owns exact runs,
+review scope and the still-open multiline/property/popup, Session/file and preview acceptance.

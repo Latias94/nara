@@ -731,8 +731,9 @@ diagnostic. Lease release, bounded scheduling, accepted geometry and source asse
 
 #### Existing Native Product Gate
 
-The separate Workflow sample is **not fully green**. After repairing stale Model/Field option
-selectors, its two public binaries pass 22/25, run `a03ede78-f08a-493c-9478-a8dc848c63e8`.
+At the intrinsic geometry checkpoint, the separate Workflow sample was **not fully green**.
+After repairing stale Model/Field option selectors, its two public binaries passed 22/25,
+run `a03ede78-f08a-493c-9478-a8dc848c63e8`.
 Actual LLM conflict growth/shrink, Condition growth/deletion, model providers and measured Fit
 pass. Three original assertions remain failing:
 
@@ -748,15 +749,88 @@ neither the passing library cohort nor the new geometry unit closes that sample 
 The selectors currently mirror a private encoding in the fixed fork; a supported typed
 observation/selector interface belongs to framework maintenance.
 
-Continue in the original Select overlay/presentation lifetime and native port input owners.
-The first port diagnostic should observe Bubble target/rank, actual hit containment, capture,
-mount validity and the exact connection-admission result. Source review confirms the 22px
-native hitbox exists and MouseDown/Up update hit coordinates. An extra settled frame after
-release did not fix the failure. Its cause remains unproven; do not infer that it needs a GPUI
-change or another hit index. Preserve these tests while resolving the owner.
+The required successor stays in the original Select overlay/presentation lifetime and native
+port input owners. Its port diagnostic must observe Bubble target/rank, actual hit containment,
+capture, mount validity and exact connection admission. The initial source review confirmed
+the 22px native hitbox and MouseDown/Up hit-coordinate updates. An extra settled frame after
+release did not fix the failure. Its cause was unproven at that checkpoint. The repair below
+resolves the owners while preserving these tests.
 
 The actual GPU controls retain the existing Scene, graph gesture and standalone Jellyflow
 scope through Nara's original renderer/Host. They do not qualify a new external Dialogue GPU
 workflow, physical input, foreign platforms or a numeric budget. Full native Dialogue
 multiline/property/popup editing, two Views and the original Session/file/preview trajectory
 remain open, along with R11c/R11/R12 and the foundation Goal.
+
+#### Workflow Presentation And Native Input Successor
+
+Resolve the three reproduced product failures in the existing native presentation and
+interaction owners before composing the external Dialogue editor. Preserve an identified
+native component ancestry while changing detail/overview layout: a retained entity alone
+does not retain framework state keyed by its complete element ancestry. Keep one native
+component occurrence and the original canonical anchor, measurement and activity lease.
+
+Diagnose popup close through its original intent, controlled open value and lease release.
+Framework-native widgets retain their own hit routing, portal dismissal and keyboard behavior.
+If graph modal protection requires a correction, commit the activity-derived admission fact
+at the original accepted prepaint boundary. Prevent new graph gestures without covering native
+controls with a full-canvas hit blocker or canceling an already owned interaction. Focus-only
+retention must not become a modal graph-input lock.
+
+The current port trace proves that the half-pixel inside point reaches the original Bubble
+listener, is contained by the real 22 px native hitbox, ranks first and has a live mount.
+The missing capture therefore requires exact interaction-admission/capture/cancellation
+evidence rather than another coordinate conversion or hit index. Preserve full hit extents,
+outside rejection, accepted geometry and unchanged source/history throughout the regression.
+
+Acceptance includes the original complete Workflow and model-provider trajectories, focused
+adapter tests for corrected owners, and affected independent/native controls. Temporary
+diagnostics must be removed before the local implementation commit. Record actual results
+and remaining product scope here; neither this repair nor its tests complete Dialogue or R11c.
+
+#### Qualified Workflow Repair
+
+The November 13 local Jellyflow successor
+`0a9453a6df5483d30ad05195bd62fdbdab38a97e` closes the three original sample failures while
+retaining their assertions. It is consumer/adapter work against the same Open-GPUI `f75c10b2`
+selection, without another framework modification or upstream-adoption claim.
+
+Detail and pinned native components now share their identified node/measurement ancestry and
+one `native-surface` slot. This removes the duplicate Select runtime caused by changing its
+complete element path. Exact diagnostic run `ee950a75-0e78-4997-911b-dc4e695c0467` then proves
+that the original full-scene `BlockMouse` underlay prevents the trigger from receiving its close
+intent. The underlay is removed. The original native interaction owner commits node Overlay
+admission through `record_prepaint_commit`, refusing new graph pointer, keyboard, accessibility
+and viewport actions while native controls retain their own Capture/Bubble handlers.
+Existing captures keep Move/Release/Cancel and terminal cleanup; Focus-only pinned surfaces
+retain local occlusion without declaring a global Overlay.
+
+The same trace identifies `WindowInactive` as the port capture refusal: the complete native
+hitbox contains the point, ranks first and has a live mount. The product fixture now activates
+its test window before expecting pointer capture. Neither coordinates nor hit extents change.
+Temporary production traces and the one-off test diagnostic collector are removed.
+
+| Scope | Actual result |
+|---|---|
+| Original three product failures | 3/3, 20 unselected; run `7c968dde-6a01-4d41-94f5-05ccc4ecdddc`. |
+| Complete Workflow and model-provider component consumers, final formatted source | 25/25, no skips; run `e13b4846-cb56-426a-bc41-02462f4b9ab8`. |
+| Focused admission, port boundary and capture owners | 24/24, 425 unselected; run `780824ee-d0ec-40f0-9132-f7e741a7fa9e`. |
+| Complete Open-GPUI/egui adapter libraries and integrations | 588/588, no skips; run `6d396f0c-5567-454a-ac62-0bf55e130bba`. |
+| Rebuilt Nara standalone Jellyflow/two-View native consumer, DX12 | 1/1, six unselected; run `bab01c7f-83c8-4d1e-a290-9f4492b43cb4`. |
+| Same native consumer, Vulkan | 1/1, six unselected; run `0781da95-b006-404a-82b7-7e8becb81f0c`. |
+
+The owner regressions execute native Capture/Bubble, refuse new graph actions without changing
+selection/viewport/source/history, then prove recovery after close. Focus-only low-zoom pinning
+keeps the exact keyed component identity and allows actual pan/capture. Independent production
+review finds no concrete new P1/P2 in accepted admission, original capture cleanup, controlled
+widget ancestry, accessibility and delayed context delivery. The accepted callback fence is
+reused; no new refused/deferred candidate trajectory is claimed by these tests.
+
+Adapter all-target/all-feature correctness Clippy and root/independent-product format checks
+pass. Existing Runtime/Nara warnings remain. All four scoped implementation/review agents are
+closed; verification reuses the shared target and serial Cargo.
+
+The native GPU runs retain the existing standalone graph, pixels, local control, captured move,
+Undo, independent navigation and retirement scope. The complete external-domain Dialogue
+desktop workflow, physical IME and numeric budgets remain open. Continue with its two native
+Views, multiline/property/popup editing and the original Session Save/Reopen/preview trajectory.
