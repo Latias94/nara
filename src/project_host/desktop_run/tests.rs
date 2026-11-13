@@ -10,6 +10,34 @@ use nara_app::{
     RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger,
 };
 
+#[test]
+fn initial_pause_refuses_pending_resume_and_other_controls_before_any_frame() {
+    for initially_paused in [false, true] {
+        let mut runtime = RuntimeInstance::start(App::new()).unwrap();
+        if initially_paused {
+            runtime.request_control(RuntimeControl::Pause);
+            runtime.drive(Duration::ZERO).unwrap();
+            assert_eq!(runtime.state(), RuntimeState::Paused);
+            runtime.request_control(RuntimeControl::Resume);
+        } else {
+            runtime.request_control(RuntimeControl::Pause);
+        }
+        assert_eq!(
+            request_initial_pause(&mut runtime),
+            Err(nara_app::RuntimeControlRejection::Busy)
+        );
+        assert_eq!(runtime.world().resource::<nara_app::FixedTime>().tick(), 0);
+        runtime.finish().unwrap();
+    }
+    let mut runtime = RuntimeInstance::start(App::new()).unwrap();
+    assert!(request_initial_pause(&mut runtime).is_ok());
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Paused);
+    assert!(request_initial_pause(&mut runtime).is_ok());
+    assert_eq!(runtime.world().resource::<nara_app::FixedTime>().tick(), 0);
+    runtime.finish().unwrap();
+}
+
 #[derive(Clone, Copy)]
 enum CloseFailureMode {
     Pending,
@@ -182,6 +210,7 @@ fn deadline_close_incomplete_reports_shutdown_timeout() {
             presentation_verification: None,
             telemetry_seal: None,
             event_loop: None,
+            close_requested: false,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -223,6 +252,7 @@ fn participant_close_incomplete_is_not_misclassified_as_timeout() {
         presentation_verification: None,
         telemetry_seal: None,
         event_loop: None,
+        close_requested: false,
     }
     .report();
     assert_eq!(report.outcome(), DesktopRunOutcome::Failed);

@@ -291,6 +291,13 @@ The following constraints are fixed now:
   fixed-frame accounting and all later Core stages complete. A completed-tick publication never
   clears `World` trackers; zero, one, or many fixed ticks in one app frame share one tracker
   retention window, so per-tick history must not be inferred from Bevy change/removal trackers.
+  Managed drive outcomes explicitly distinguish a full App frame from an exact-fixed-tick-only
+  transaction. A desktop owner cannot infer capture eligibility from elapsed time, a fixed-step
+  count, a returned control ticket or a presentation receipt. Caller-driven and blocking native
+  execution share the original Runtime/event-loop/presentation owners. Accepted controls,
+  gameplay admission and native driver input invalidate the paused boundary until its next
+  healthy full frame. The public operation exposes only managed controls, typed gameplay input
+  and read-only capture; it does not grant another owner mutable World or GPU authority.
 - A checkpoint is rejected while the gameplay queue is poisoned or quarantined, a batch is active,
   or its closed/acknowledged watermarks do not prove completion for the target tick. Any retained
   future commands and queue sequence/watermark state that affect later admission must participate

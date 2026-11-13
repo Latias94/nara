@@ -385,6 +385,7 @@ impl DesktopRun {
             presentation_verification: None,
             telemetry_seal: None,
             event_loop,
+            close_requested: false,
         }
     }
 
@@ -405,6 +406,7 @@ impl DesktopRun {
             presentation_verification: None,
             telemetry_seal: None,
             event_loop,
+            close_requested: false,
         }
     }
 
@@ -419,12 +421,21 @@ impl DesktopRun {
     pub(in crate::project_host) fn drive_cleanup(
         &mut self,
         hosts: Vec<ProjectHost>,
-        terminal: PendingDesktopTerminal,
+        mut terminal: PendingDesktopTerminal,
+        mode: crate::project_host::desktop_run::DesktopDriveMode,
     ) -> DesktopRunState {
         let mut incomplete = Vec::with_capacity(hosts.len());
         let mut cleanup_failed = false;
         for mut host in hosts {
-            match host.drive_cleanup_once() {
+            let progress = match mode {
+                crate::project_host::desktop_run::DesktopDriveMode::Blocking => {
+                    host.drive_cleanup_once()
+                }
+                crate::project_host::desktop_run::DesktopDriveMode::Poll(_) => {
+                    host.poll_cleanup_once()
+                }
+            };
+            match progress {
                 CleanupDriveOutcome::Complete {
                     failed,
                     diagnostics,
@@ -437,6 +448,9 @@ impl DesktopRun {
                     incomplete.push(host);
                 }
             }
+        }
+        if cleanup_failed {
+            terminal = PendingDesktopTerminal::Failed;
         }
         if !incomplete.is_empty() {
             DesktopRunState::Cleaning {
@@ -453,6 +467,7 @@ impl DesktopRun {
     pub(in crate::project_host) fn execute_fresh(
         &mut self,
         inputs: DesktopRunInputs,
+        mode: crate::project_host::desktop_run::DesktopDriveMode,
     ) -> DesktopRunState {
         let (prepared, execution, verification) = match inputs {
             DesktopRunInputs::Source {
@@ -535,7 +550,7 @@ impl DesktopRun {
 
         match host.take_desktop_runtime() {
             Ok((runtime, context)) => {
-                self.start_native(runtime, Some(context), execution, verification)
+                self.start_native(runtime, Some(context), execution, verification, mode)
             }
             Err(fault) => {
                 self.diagnostics.extend(fault.diagnostics);

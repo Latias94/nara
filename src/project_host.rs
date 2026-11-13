@@ -11,8 +11,9 @@ mod runtime_diagnostics;
 mod desktop_run;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_run::{
-    DesktopPresentationControl, DesktopPresentationObservation, DesktopRun, DesktopRunOptions,
-    DesktopRunOutcome, DesktopRunReport, DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
+    DesktopControlError, DesktopPresentationControl, DesktopPresentationObservation, DesktopRun,
+    DesktopRunOptions, DesktopRunOutcome, DesktopRunProgress, DesktopRunReport,
+    DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use nara_winit::WinitEventLoop;

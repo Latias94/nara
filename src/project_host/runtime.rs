@@ -50,6 +50,8 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 mod action;
 mod content;
 mod content_residency;
+#[cfg(all(test, feature = "desktop-winit", feature = "render-wgpu"))]
+mod desktop_poll_tests;
 mod scene_requests;
 pub use scene_requests::domains::{
     ManagedSceneDomain, ManagedSceneDomainAttempt, ManagedSceneDomainError, ManagedSceneDomainId,
@@ -448,6 +450,22 @@ pub(super) struct DesktopRuntimeContext {
     _epoch: u64,
     _content: PublishedRuntimeContent,
     _configuration: RuntimeConfigurationPlan,
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+impl DesktopRuntimeContext {
+    pub(super) fn observe<R>(
+        &self,
+        runtime: &RuntimeInstance,
+        operation: impl FnOnce(&World) -> R,
+    ) -> Result<R, DiagnosticReport> {
+        let world = runtime.world();
+        let expected = self._configuration.schema_validation().bindings();
+        verify_published_runtime_registry(world, expected).map_err(|fault| fault.diagnostics)?;
+        let output = operation(world);
+        verify_published_runtime_registry(world, expected).map_err(|fault| fault.diagnostics)?;
+        Ok(output)
+    }
 }
 
 impl PublishedProjectRuntime {
@@ -1642,6 +1660,21 @@ impl ProjectHost {
 
     fn has_cleanup_owner(&self) -> bool {
         matches!(self.slot, ProjectHostSlot::Cleaning { .. })
+    }
+
+    pub(in crate::project_host) fn cleanup_state(&self) -> Option<RuntimeCandidateRetirementState> {
+        match &self.slot {
+            ProjectHostSlot::Cleaning { owner, .. } => Some(owner.state()),
+            _ => None,
+        }
+    }
+
+    fn poll_cleanup_once(&mut self) -> CleanupDriveOutcome {
+        if self.cleanup_state() == Some(RuntimeCandidateRetirementState::RetirementIncomplete) {
+            CleanupDriveOutcome::RetirementIncomplete
+        } else {
+            self.drive_cleanup_once()
+        }
     }
 
     fn drive_cleanup_once(&mut self) -> CleanupDriveOutcome {

@@ -9,8 +9,10 @@ use nara_app::{
     RuntimeState,
 };
 use nara_diagnostic::DiagnosticReport;
-use nara_winit::{WinitControlFlow, WinitEventLoop, WinitRunner, WinitSession};
+use nara_winit::{WinitControlFlow, WinitEventLoop, WinitRunProgress, WinitRunner, WinitSession};
 
+mod control;
+mod poll;
 mod presentation;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(super) mod verification;
@@ -27,6 +29,9 @@ use super::{
     StartupContentClosureReceipt,
     runtime::{DesktopRunInputs, DesktopRuntimeContext, ProjectHost},
 };
+pub use control::DesktopControlError;
+pub(super) use poll::DesktopDriveMode;
+pub use poll::DesktopRunProgress;
 pub use presentation::{
     DesktopPresentationControl, DesktopPresentationObservation, DesktopTelemetrySealOutcome,
     DesktopTelemetrySealReport,
@@ -50,6 +55,7 @@ pub struct DesktopRunOptions {
     pub(super) event_loop: Option<WinitEventLoop>,
     runner: WinitRunner,
     presentation: DesktopPresentationOptions,
+    initially_paused: bool,
 }
 
 impl Default for DesktopRunOptions {
@@ -61,6 +67,7 @@ impl Default for DesktopRunOptions {
             event_loop: None,
             runner: WinitRunner::default(),
             presentation: DesktopPresentationOptions::default(),
+            initially_paused: false,
         }
     }
 }
@@ -116,7 +123,21 @@ impl DesktopRunOptions {
 
     #[must_use]
     pub fn with_control_flow(mut self, control_flow: WinitControlFlow) -> Self {
-        self.runner = WinitRunner::new(control_flow);
+        self.runner.control_flow = control_flow;
+        self
+    }
+
+    /// Requests the original managed Pause before the first native App frame.
+    #[must_use]
+    pub fn with_initial_pause(mut self) -> Self {
+        self.initially_paused = true;
+        self
+    }
+
+    /// Keeps the original native window hidden and non-activating until explicit reveal.
+    #[must_use]
+    pub fn with_initial_visibility(mut self, visible: bool) -> Self {
+        self.runner = self.runner.with_initial_visibility(visible);
         self
     }
 }
@@ -186,6 +207,7 @@ pub struct DesktopRun {
     pub(super) presentation_verification: Option<DesktopPresentationVerificationReceipt>,
     pub(super) telemetry_seal: Option<DesktopTelemetrySealReport>,
     pub(super) event_loop: Option<WinitEventLoop>,
+    pub(super) close_requested: bool,
 }
 
 impl fmt::Debug for DesktopRun {
@@ -230,6 +252,7 @@ impl DesktopRun {
             presentation_verification: None,
             telemetry_seal: None,
             event_loop,
+            close_requested: false,
         }
     }
 
@@ -250,6 +273,11 @@ impl DesktopRun {
 
     /// Runs the event loop once, or advances only retained cleanup after an incomplete close.
     pub fn execute(&mut self) -> DesktopRunReport {
+        self.advance(DesktopDriveMode::Blocking);
+        self.report()
+    }
+
+    fn advance(&mut self, mode: DesktopDriveMode) {
         let state = std::mem::replace(&mut self.state, DesktopRunState::Executing);
         self.state = match state {
             DesktopRunState::FreshRuntime { runtime, execution } => self.start_native(
@@ -259,13 +287,20 @@ impl DesktopRun {
                 execution,
                 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                 None,
+                mode,
             ),
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            DesktopRunState::Fresh(inputs) => self.execute_fresh(inputs),
+            DesktopRunState::Fresh(_) if self.close_requested => {
+                DesktopRunState::Completed(AppExit::Requested)
+            }
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-            DesktopRunState::Cleaning { hosts, terminal } => self.drive_cleanup(hosts, terminal),
+            DesktopRunState::Fresh(inputs) => self.execute_fresh(inputs, mode),
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            DesktopRunState::Cleaning { hosts, terminal } => {
+                self.drive_cleanup(hosts, terminal, mode)
+            }
             DesktopRunState::Native(mut native) => {
-                native.session.execute();
+                native.progress = mode.drive(&mut native.session);
                 self.finish_native(*native)
             }
             DesktopRunState::Completed(exit) => DesktopRunState::Completed(exit),
@@ -278,12 +313,11 @@ impl DesktopRun {
                 DesktopRunState::Failed
             }
         };
-        self.report()
     }
 
     pub(super) fn start_native(
         &mut self,
-        runtime: nara_app::RuntimeInstance,
+        mut runtime: nara_app::RuntimeInstance,
         #[cfg(all(feature = "runtime-2d", feature = "serde"))] context: Option<
             DesktopRuntimeContext,
         >,
@@ -291,7 +325,16 @@ impl DesktopRun {
         #[cfg(all(feature = "runtime-2d", feature = "serde"))] verification: Option<
             DesktopFirstPresentVerification,
         >,
+        mode: DesktopDriveMode,
     ) -> DesktopRunState {
+        let startup_failed =
+            execution.initially_paused && request_initial_pause(&mut runtime).is_err();
+        if startup_failed {
+            self.diagnostics.extend(single_error(
+                "project.desktop.initial-pause-rejected",
+                "Desktop Runtime refused the selected initial Pause",
+            ));
+        }
         let reports = DesktopPresentationReports::default();
         let driver = DesktopPresentationDriver::new(
             &runtime,
@@ -301,14 +344,20 @@ impl DesktopRun {
             reports.clone(),
         );
         // This consumes the one published Runtime. Its publication slot is never refilled.
-        let session = execution.runner.__run_with_presentation_on(
+        let mut session = execution.runner.__start_with_presentation_on(
             runtime,
             Box::new(driver),
             execution.native_retirement_budget,
             self.event_loop.take(),
         );
+        if self.close_requested || startup_failed {
+            session.request_close();
+        }
+        let progress = mode.drive(&mut session);
         self.finish_native(DesktopNativeRun {
             session,
+            progress,
+            startup_failed,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             _context: context,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -324,6 +373,8 @@ impl DesktopRun {
         }
         let DesktopNativeRun {
             session,
+            progress,
+            startup_failed,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             _context,
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -335,6 +386,8 @@ impl DesktopRun {
             Err(session) => {
                 return DesktopRunState::Native(Box::new(DesktopNativeRun {
                     session,
+                    progress,
+                    startup_failed,
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
                     _context,
                     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -351,6 +404,9 @@ impl DesktopRun {
             runtime.fault(),
             &mut self.diagnostics,
         );
+        if startup_failed {
+            terminal = PendingDesktopTerminal::Failed;
+        }
         if runtime.close_evidence().has_terminal_failure() {
             self.diagnostics.extend(cleanup_failed_report(
                 runtime.close_evidence(),
@@ -505,11 +561,27 @@ pub(super) enum DesktopRunState {
 
 pub(super) struct DesktopNativeRun {
     session: WinitSession,
+    progress: WinitRunProgress,
+    startup_failed: bool,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     _context: Option<DesktopRuntimeContext>,
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     verification: Option<DesktopFirstPresentVerification>,
     reports: DesktopPresentationReports,
+}
+
+fn request_initial_pause(
+    runtime: &mut nara_app::RuntimeInstance,
+) -> Result<(), nara_app::RuntimeControlRejection> {
+    use nara_app::{RuntimeControl, RuntimeControlRejection, RuntimeControlRequestResult};
+    match runtime.request_control(RuntimeControl::Pause) {
+        RuntimeControlRequestResult::Accepted(_) => Ok(()),
+        RuntimeControlRequestResult::Rejected(RuntimeControlRejection::InvalidState {
+            state: RuntimeState::Paused,
+            control: RuntimeControl::Pause,
+        }) => Ok(()),
+        RuntimeControlRequestResult::Rejected(reason) => Err(reason),
+    }
 }
 
 impl DesktopRunState {
