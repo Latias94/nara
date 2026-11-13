@@ -17,6 +17,7 @@ fn engine_owned_gpui_hosts_real_jellyflow_nodes_and_independent_views() {
         "NARA_GPUI_JELLYFLOW_FIRST_FRAME",
         "NARA_GPUI_JELLYFLOW_OVERLAY",
         "NARA_GPUI_JELLYFLOW_NATIVE_CONTROL",
+        "NARA_GPUI_JELLYFLOW_INPUT route=winit_event focus_edges=2",
         "NARA_GPUI_JELLYFLOW_CAPTURE",
         "NARA_GPUI_JELLYFLOW_DRAG",
         "NARA_GPUI_JELLYFLOW_UNDO",

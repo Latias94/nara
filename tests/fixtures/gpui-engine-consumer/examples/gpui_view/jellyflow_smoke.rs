@@ -10,8 +10,12 @@ use jellyflow_runtime::{
 };
 use nara_engine::scene::SceneAuthoringRevision;
 use open_gpui::{
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    ScrollDelta, ScrollEvent, TouchPhase, point, px,
+    MouseButton, MouseMoveEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollEvent,
+    TouchPhase, point, px,
+};
+use winit::{
+    dpi::PhysicalPosition,
+    event::{DeviceId, ElementState, MouseButton as NativeButton, WindowEvent},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -236,6 +240,12 @@ impl JellyflowSmoke {
                 );
                 println!(
                     "NARA_GPUI_JELLYFLOW_NATIVE_CONTROL accepted_taps=1 other_view_taps=0 domain_history_unchanged=true"
+                );
+                viewer.input(WindowEvent::Focused(false))?;
+                viewer.input(WindowEvent::Focused(true))?;
+                println!(
+                    "NARA_GPUI_JELLYFLOW_INPUT route=winit_event focus_edges=2 scale={}",
+                    surface.geometry().scale_factor(),
                 );
                 self.anchor = frames[0].center(Hit::Grip(source()))?;
                 self.pointer = self.anchor;
@@ -499,9 +509,10 @@ fn near(actual: Point<Pixels>, expected: Point<Pixels>) -> Result<()> {
     Ok(())
 }
 
-fn click(viewer: &Viewer, frame: &AcceptedFrame, hit: Hit) -> Result<()> {
+fn click(viewer: &mut Viewer, frame: &AcceptedFrame, hit: Hit) -> Result<()> {
     let at = frame.center(hit)?;
-    viewer.click(f32::from(at.x), f32::from(at.y))
+    mouse(viewer, at, MouseButton::Left, Pointer::Down)?;
+    mouse(viewer, at, MouseButton::Left, Pointer::Up)
 }
 
 enum Pointer {
@@ -511,40 +522,33 @@ enum Pointer {
 }
 
 fn mouse(
-    viewer: &Viewer,
+    viewer: &mut Viewer,
     position: Point<Pixels>,
     button: MouseButton,
     phase: Pointer,
 ) -> Result<()> {
-    if matches!(phase, Pointer::Down) {
-        viewer
-            .surface
-            .as_ref()
-            .unwrap()
-            .dispatch_input(PlatformInput::MouseMove(MouseMoveEvent {
-                position,
-                ..Default::default()
-            }))?;
-    }
-    let input = match phase {
-        Pointer::Down => PlatformInput::MouseDown(MouseDownEvent {
-            position,
-            button,
-            click_count: 1,
-            ..Default::default()
-        }),
-        Pointer::Move => PlatformInput::MouseMove(MouseMoveEvent {
-            position,
-            pressed_button: Some(button),
-            ..Default::default()
-        }),
-        Pointer::Up => PlatformInput::MouseUp(MouseUpEvent {
-            position,
-            button,
-            click_count: 1,
-            ..Default::default()
-        }),
+    let scale = f64::from(viewer.surface.as_ref().unwrap().geometry().scale_factor());
+    viewer.input(WindowEvent::CursorMoved {
+        device_id: DeviceId::dummy(),
+        position: PhysicalPosition::new(
+            f64::from(f32::from(position.x)) * scale,
+            f64::from(f32::from(position.y)) * scale,
+        ),
+    })?;
+    let state = match phase {
+        Pointer::Down => ElementState::Pressed,
+        Pointer::Move => return Ok(()),
+        Pointer::Up => ElementState::Released,
     };
-    viewer.surface.as_ref().unwrap().dispatch_input(input)?;
-    Ok(())
+    let button = match button {
+        MouseButton::Left => NativeButton::Left,
+        MouseButton::Middle => NativeButton::Middle,
+        MouseButton::Right => NativeButton::Right,
+        _ => anyhow::bail!("unsupported Jellyflow smoke pointer button"),
+    };
+    viewer.input(WindowEvent::MouseInput {
+        device_id: DeviceId::dummy(),
+        state,
+        button,
+    })
 }

@@ -19,6 +19,10 @@ native graph Views over one Jellyflow `GraphRuntime` and history. Custom retaine
 real graph ports, native controls and drag handles. `--jellyflow` opens the interactive consumer;
 `--smoke-jellyflow` runs the finite native trajectory and closes.
 
+Drag the node's `Drag title` header to move it. The node body contains independent native
+controls; `Local label` is a button. Middle-drag on empty canvas pans, and the wheel zooms.
+Both Views share graph edits and Undo while retaining separate navigation and local controls.
+
 ```text
 cargo +1.95.0 build --locked --release --manifest-path tests/fixtures/gpui-engine-consumer/Cargo.toml --example gpui_view --features jellyflow-trial,ui-work-observation
 ```
@@ -29,6 +33,17 @@ The ignored test
 geometry and actual pixels, a local control, captured node drag with one history entry, Undo,
 independent pan/zoom and normal retirement. Set `NARA_GPUI_VIEW_EXE` to the absolute prebuilt
 release executable when running that test from a debug nextest build.
+
+The node/control clicks, captured node drag and middle-button pan use injected Winit
+cursor/button events through the same `Viewer::input` entry as the interactive window,
+including physical-to-logical coordinates, pressed-button tracking and explicit focus
+loss/regain. The hidden Scene-isolation click and final wheel zoom retain direct platform
+input. The actual scale is reported in the input marker. This does not prove physical mouse
+delivery from the desktop.
+
+This window is a graph integration consumer. The existing independent source Editor is
+`nara-editor-drawn`; see the [Editor panel guide](../../../docs/guides/editor-panels.md) for
+its build command, current workspace/Inspector features and remaining frontend work.
 
 This consumer deliberately selects Jellyflow as the graph authority. It does not mirror or
 replace Nara's authored ValueGraph, Session admission, saved-content identity or persistence.

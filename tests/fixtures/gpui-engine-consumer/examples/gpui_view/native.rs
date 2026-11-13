@@ -1077,13 +1077,7 @@ impl Viewer {
                 }
                 surface.set_geometry(geometry.size(), geometry.scale_factor())?;
             }
-            WindowEvent::Focused(active)
-                if self.smoke.is_none()
-                    && self.graph_smoke.is_none()
-                    && self.graph_gestures_smoke.is_none()
-                    && self.views_smoke.is_none()
-                    && !self.jellyflow_smoke_mode =>
-            {
+            WindowEvent::Focused(active) => {
                 if !active {
                     self.pressed_buttons = [false; 3];
                 }
@@ -1303,6 +1297,15 @@ impl ApplicationHandler<Wake> for Viewer {
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        if matches!(event, WindowEvent::Focused(_))
+            && (self.smoke.is_some()
+                || self.graph_smoke.is_some()
+                || self.graph_gestures_smoke.is_some()
+                || self.views_smoke.is_some()
+                || self.jellyflow_smoke_mode)
+        {
+            return;
+        }
         if let Err(error) = self.input(event).and_then(|_| self.drive(event_loop)) {
             self.fail(error, event_loop);
         }

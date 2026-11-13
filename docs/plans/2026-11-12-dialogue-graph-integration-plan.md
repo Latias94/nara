@@ -834,3 +834,28 @@ The native GPU runs retain the existing standalone graph, pixels, local control,
 Undo, independent navigation and retirement scope. The complete external-domain Dialogue
 desktop workflow, physical IME and numeric budgets remain open. Continue with its two native
 Views, multiline/property/popup editing and the original Session Save/Reopen/preview trajectory.
+
+#### Interactive Entry Follow-Up
+
+The user reports that the visible standalone node example does not drag. Preserve this as an
+unresolved physical-input observation until stronger evidence exists. The adapter component
+and earlier GPU smoke results do not prove ordinary Winit mouse delivery.
+
+The existing complete native trajectory now feeds accepted title geometry through
+`Viewer::input(WindowEvent)`: focus loss/regain, physical cursor coordinates, pressed-button
+tracking, node/control clicks, captured movement, release and middle-button pan. The original
+pixel, control-isolation, three-preview/one-history-entry, Undo, two-View navigation and
+retirement assertions remain. Deterministic hidden-test focus filtering moves to the native
+event-loop boundary, preserving its original five conditions; the ordinary input implementation
+is directly exercised. The hidden Scene-isolation click and final wheel zoom still use direct
+platform input. The title now says `Drag title` and presents an open-hand cursor; native controls
+retain their independent interaction region.
+
+The rebuilt release example passes the complete ignored native test on DX12 **1/1**
+(`bf927624-a7fe-44da-80e8-7a647cb45d51`) and Vulkan **1/1**
+(`eb8f0dbd-9633-40fd-92d9-cc133e905fc5`), with six unselected cases per run. Both actual child
+logs report `route=winit_event focus_edges=2 scale=1.5`. Correctness Clippy and fixture formatting
+pass. Independent source review finds no P1/P2 in the entry/filter migration or retained
+assertions. These are injected events through the production conversion path, not physical
+desktop input or proof that the user's original observation is resolved. Other native scales,
+the complete Dialogue desktop and numeric performance budgets remain open.

@@ -18,7 +18,7 @@ use jellyflow_runtime::{
     viewport::ViewportTransform,
 };
 use open_gpui::{
-    AnyElement, App, Bounds, Context, Element, ElementId, Entity, GlobalElementId,
+    AnyElement, App, Bounds, Context, CursorStyle, Element, ElementId, Entity, GlobalElementId,
     InspectorElementId, LayoutId, MouseButton, Pixels, Point, PrepaintPublicationId, Render,
     Subscription, Window, div, prelude::*, px, rgb,
 };
@@ -246,8 +246,9 @@ impl Render for TrialNode {
                 .px(px(10.))
                 .flex()
                 .items_center()
+                .cursor(CursorStyle::OpenHand)
                 .bg(rgb(0x2d4258))
-                .child(format!("⠿ {label}")),
+                .child(format!("Drag title · {label}")),
         );
         let ports = authoring.ports().map(|port| {
             let marker = div().w(px(22.)).h(px(22.)).rounded_full().bg(rgb(0x80d4ee));
@@ -604,7 +605,7 @@ impl Render for JellyflowPanel {
                 ),
             )
             .child(div().absolute().left(px(16.)).top(px(40.)).child(
-                "Drag a node grip, use its native label button, middle-drag to pan, or Undo.",
+                "Drag a node title to move it. Local label is a button. Middle-drag pans; wheel zooms.",
             ))
             .children(panels)
     }
