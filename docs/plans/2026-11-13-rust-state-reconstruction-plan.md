@@ -1,6 +1,7 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Status: in progress. Owner: the foundation rebaseline R12 runtime lane.
+Date: 2026-11-13. Status: qualified for the shipped Windows source/headless workflow;
+complete R12 remains open. Owner: the foundation rebaseline R12 runtime lane.
 Editor UI and physical mixed-DPI work remain paused.
 
 ## Complete Outcome
@@ -42,6 +43,22 @@ timeouts and physical retirement remain in the executable/test Host. The game li
 typed state, validation and reconstruction. This does not change the existing supervised desktop
 one-READY protocol. Any later integration with supervised Editor Play must amend ADR0116 and
 use its actual generation and containment owners.
+
+The selected game path keeps the ordinary product recipe identical between original and candidate.
+A fresh paused candidate admits one finite resume command through its original gameplay queue;
+the first exact transaction starts preparation, and paused TaskUpdate maintenance completes the
+existing Scene request/commit and derived reconstruction. Capture checks the actual App
+configuration as well as Schema/content facts. The game explicitly classifies its shipped
+headless services; extra plugins, source watchers, scripted verification and unsupported native
+services do not silently become checkpointable. Nonzero time remainder/debt and unsupported time
+scale refuse the first format rather than being omitted.
+
+The concrete `continuity` binary uses an explicitly supplied trusted Host-owned temporary control
+directory. Bounded versioned request/reply files carry the original session/generation and strictly
+increasing operation ID, separately from stdout/stderr diagnostics and project source. One
+outstanding request, finite message/operation/lifetime limits and explicit Close keep this a game
+consumer, not a new process framework. The actual-build test Host owns the child, captured bytes,
+request deadlines and fallback kill/wait; a clean-close reply requires physical Runtime retirement.
 
 ## Implementation Order
 
@@ -88,14 +105,23 @@ the fixture must not silently discard authoritative state or modify the user's s
 | Session counters | Inventory and preserve reported travel/restart/save/restore counts when included in the semantic oracle. Capture refuses error/degraded/reconstruction states; no implicit retry or anchor reset substitutes for restoration. |
 | `Travel::pending`, local and authoritative command queues | Capture refuses pending travel, unconsumed local commands, future commands, active/quarantined batches or incomplete acknowledgement. New-runtime commands use its fresh queue/time/source authority; the capture does not revive old keys. |
 | Current Scene, dynamic marker tokens and sprite visibility | Rebuild from validated semantic IDs/progress through the existing Scene transaction and marker owner. Prove fresh runtime identities and matching derived values, not equal ECS handles. |
-| Verification driver and SaveSlot | Automated script cursor is not an interactive-game resume format. The finite process workflow uses ordinary semantic commands. Storage retains its original explicit close owner; no live file handle or pending publication is captured. |
+| Verification driver and SaveSlot | Automated script cursor is not an interactive-game resume format. The finite process workflow uses ordinary semantic commands. The first format refuses an open/locked SaveSlot, whose concurrent candidate ownership has no selected policy. Storage retains its original explicit close owner; no live file handle or pending publication is captured. |
 
 The persisted compatibility record must include the admitted Schema and content closure relevant
 to every restored level, not only a source pathname or the startup Scene. Executable provenance is
 tracked separately so an explicitly compatible body/private-structure edit can change code while
 unsupported content or schema changes fail before replacing the original. The exact bounded DTO,
-canonical encoding and validation errors follow implementation of this inventory; they are not
-yet a general engine checkpoint Interface.
+canonical encoding and validation errors belong to the game's `resume` module. They establish
+this game's semantic format; no general engine checkpoint Interface is selected.
+
+Per-level compatibility projects the original admitted manifest and runtime-content digest;
+Schema and actual App configuration remain separate mandatory comparisons. Startup admission
+additionally records an authoring Schema-bundle attestation that ordinary travel does not include.
+The full `closure_plan_digest` therefore remains an original admission observation and is not a
+cross-path level identity. Initial public tests exposed that mistaken comparison (6/8 passed,
+run `9b06f78b-fe80-4964-8c0f-e2657b4baab6`); the game format removes that redundant field rather
+than changing the content owner's digest meaning. A dedicated regression restores initial Meadow,
+first Cavern and returned Meadow through the same complete candidate path.
 
 ## Qualification
 
@@ -150,11 +176,82 @@ exercise diagnostic and physical cleanup custody. Its 12/12 run and repeated str
 include that case. Existing feature-specific unused/dead-code warnings remain and are not new
 runtime failures. Changed-document links and whitespace checks pass. The existing
 root runtime-runner contract executes the renamed package's tests, so no new CI entry or verifier
-script is needed. No native UI/GPU test is needed for this CPU lifecycle change; physical OS
-process exchange and actual rebuilt game remain unimplemented.
+script is needed. That prerequisite qualified CPU lifecycle only; the game/process successor has
+separate evidence below.
+
+### Game Reconstruction And Actual Rust Builds
+
+Implementation revisions: source-content stamps `0762e9c`, game state/reconstruction `57bc267`,
+and finite process/actual-build consumer `1ae8f59`.
+
+The source/headless game now owns `ResumeState`, separate from its progress-save format and v1
+migration. It captures complete progress across semantic level instances, the active player's
+finite local transform, four held movement intentions, logical game time, reported counters and
+compatibility. The bounded versioned encoding contains no World, Scene, command, file, task or
+native authority. The fresh candidate keeps its own Runtime tick and reconstructs through one
+command in its original queue, original Scene preparation/commit and paused maintenance frames.
+
+`ProjectSceneContentStamp` copies the original admitted Schema/manifest/runtime-content/full-plan
+observations without retaining source content or budget. Prepared and committed saved-source
+Scenes expose that stamp. Direct, processed and Editor working-copy Scenes return `None`, so an
+unsaved projection cannot attest original disk bytes. Game compatibility selects per-level
+manifest/runtime-content digests plus global Schema and actual App configuration; it does not
+reinterpret the admission-specific full-plan digest.
+
+The finite `continuity` binary retains one ordinary source `HeadlessSession`. The actual-build
+fixture copies the game into an exclusive verified temporary directory, uses public Cargo build
+selection/capture and installs immutable executable bytes. It performs an actual movement-body
+edit from 160 to 80 units per second, then moves private held-state storage into `MovementIntent`.
+The semantic DTO and ordinary product recipe stay unchanged. Independently created native
+processes restore exact state before continuing; the original process retains its old movement
+law after Cargo output has changed twice.
+The outer qualification binary uses release mode; the public adapter selects the inner game's
+`dev` profile and explicit `x86_64-pc-windows-msvc` target in the existing root `target`. Compiler,
+lockfile and offline policy remain fixed across A/B/C.
+
+| Scope | Actual result |
+| --- | --- |
+| Affected Engine content/Scene owners | 60/60, run `087175c1-d399-4fd6-b963-ee3f4b47210e`; 790 unrelated tests filtered. Covers original admitted stamp facts and budget release, frozen prepared/committed source through disk changes, Source/Direct/processed/working-copy distinction and the existing Scene request/retirement controls. |
+| Complete ordinary sample package | 65/65, run `075f5cb0-134b-4173-aae9-14badc53bace`; the nested-build test is the one explicit skip. Includes bounded format/save migration, all nine public resume workflows, ordinary travel/recovery and binary timeout/close regressions. |
+| Actual Rust build and native-process workflow | 1/1, run `26250a18-aad4-41da-b158-7bfd39f52ea2`; the ignored test is explicitly selected. Actual A/B/C executables, meaningful three-instance capture, body/private-structure edits, exact state, continued movement/pickups/marker identity/travel/Retry, build/startup/configuration/Schema/content rejection, stale requests/replies, immutable incumbent bytes and physical Close all pass. |
+
+The first actual-build run `df956b44-4b08-40ed-9884-ad5567fcff99` reached the intentional
+`compile_error!` case, then failed its test oracle: the public adapter correctly returned both
+non-success exit and `Some(CargoBuildError::BuildFailed)`, while the fixture incorrectly required
+no protocol error. The corrected assertion requires that exact failure variant and the distinctive
+structured compiler diagnostic. It changes no build-owner behavior or game-state assertion. The
+successful successor takes 44.970 seconds in this warm uncontrolled run; this includes several
+builds and process trajectories, and is not an edit-to-result distribution or performance budget.
+
+Independent game/content and adversarial process reviews are closed with no remaining P1/P2.
+The content review removed the startup/travel full-plan mismatch described above and corrected
+the test's cross-World identity oracle to compare `WorldIdentityDomainId` together with the
+World-local Scene number. The adversarial review corrected three issues: Close now retries the
+same retained owner after timeout; a failed post-admission operation fences successor execution;
+and a Host observing child exit rechecks the already published final reply before reporting an
+early-exit error. Actual binary regressions exercise the first two; the complete process workflow
+retains exact Close and request/reply identity checks.
+
+The final root all-feature production-library check passes. Root all-feature library Clippy
+and the sample's no-default-feature all-target Clippy pass with `-D clippy::correctness`;
+root and sample `cargo fmt --all -- --check` also pass. This is a correctness gate, not a
+warning-free claim: existing feature-specific warnings and advisory error/enum-size and style
+warnings remain. Changed-document links/headings and whitespace checks pass. Existing CI already
+compiles and executes the ordinary sample package; the real nested build remains an explicit
+serial qualification command in its README. No unrelated Editor/native/component matrix is
+repeated for this CPU and process workflow.
+
+### Remaining Scope
+
+This unit supports the shipped source/headless recipe on Windows x64 with Rust 1.95.0. It refuses
+open SaveSlots, unknown plugin services, pending authoritative tasks/commands/travel, unsupported
+Runtime time policy and direct/processed content rather than omitting their state. It does not
+implement general service migration, arbitrary World snapshots, historical tick-log replay,
+dynamic-library replacement or a generic process supervisor. Existing supervised desktop Play
+retains ADR0116's one-READY protocol; a production UI action or automatic process adoption needs
+that owner's integration and qualification. Native UI/GPU, Linux/macOS execution and latency or
+memory distributions remain unqualified. Editor UI and physical mixed-DPI work stay paused.
 
 Existing R6 automatic source refresh and R10 input/replay evidence remain under their owning
-plans. Game-owned resume format, compatibility, fresh reconstruction, actual Rust body/structural
-rebuild, finite process exchange and candidate adoption are the remaining work in this plan.
-No exact rebuild/restore, native Editor iteration, universal replay, arbitrary World snapshot or
-whole-foundation completion is claimed.
+plans. The complete R12 and foundation Goal remain active; this source/headless rebuild/restore
+evidence does not substitute for those broader production and platform outcomes.

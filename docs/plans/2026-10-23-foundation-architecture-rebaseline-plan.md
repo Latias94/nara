@@ -4629,8 +4629,14 @@ Name the Rust capture/rebuild/restore successor explicitly. The game owns checkp
 compatibility; supervised Play owns build, immutable executable generation and process lifecycle.
 The [November 13 runtime reconstruction plan](2026-11-13-rust-state-reconstruction-plan.md)
 selects Two-Level Game and a retained public Headless Host as the first complete consumer path.
-Its lifecycle prerequisite does not complete the game-state, real Rust rebuild or candidate
-adoption requirements below; supervised desktop integration keeps its existing protocol owner.
+Its qualified source/headless successor now captures bounded game semantics and frozen admitted
+source facts, then reconstructs a fresh Runtime through the original gameplay and Scene owners.
+The ordinary sample passes 65/65, and the explicitly selected actual-build/native-process test
+passes 1/1 after real movement-body and private-state-structure edits. Exact restoration and
+continued gameplay preserve the incumbent across compile/startup/compatibility failures and stale
+messages. The linked plan records actual run IDs, review corrections and Windows scope. This
+does not complete supervised desktop adoption, unsupported service migration, measured costs or
+the full R12 outcome; supervised desktop integration keeps its existing protocol owner.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve
@@ -4639,10 +4645,12 @@ successful launch is not the correct playable-result endpoint.
 R11f separately owns Editor extension reconstruction and its document/UI recovery oracle; neither
 workflow can substitute for the other one's compatibility or correct-result evidence.
 
-Name the game-owned checkpoint DTO and exact restored-state oracle. The current Two Level
-checkpoint reconstructs live position, velocity, input and simulation tick; restoring an authored
-anchor does not qualify restoration of those values. Select the capture-consistency boundary and
-compatibility rule for the new build, Schema and content. Reconcile ADR 0076 where applicable and
+The selected game-owned `ResumeState` restores live transform, held semantic movement intent,
+logical game time and reported counters alongside complete cross-instance progress. This game
+has no independent velocity state. The candidate keeps its own Runtime clock and authority;
+restoring an authored anchor alone cannot satisfy that oracle. Stable paused full-frame capture
+and Schema/App/per-level manifest/runtime-content comparisons define this first format's
+consistency and compatibility. Reconcile ADR 0076 where applicable and
 ADR 0116's one-shot READY contract before introducing a finite opt-in capture/restore exchange.
 Exercise stale replies from a replaced generation and restore failure without promoting an
 unqualified candidate. Build success or startup READY alone cannot satisfy that state oracle.

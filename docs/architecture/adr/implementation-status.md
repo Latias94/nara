@@ -2506,8 +2506,19 @@ The affected Host/public boot cohort passes 111/111 and an independently locked 
 passes 12/12 on Windows CPU, including failed-candidate isolation, execution fault and
 pending/completed-error close.
 The linked plan records initial review defects and fixes, exact verification revisions and limits.
-Game-owned resume state, actual Rust body/structural rebuild, finite process exchange and candidate
-adoption remain open; this prerequisite does not complete R12 or the foundation rebaseline.
+This prerequisite does not complete R12 or the foundation rebaseline.
+
+The same day's [game reconstruction successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#game-reconstruction-and-actual-rust-builds)
+adds bounded game-owned semantic state, original admitted source-content stamps, fresh-runtime
+reconstruction through the original gameplay/Scene owners and a finite game-owned process consumer.
+The affected Engine content/Scene cohort passes 60/60, the ordinary sample passes 65/65, and an
+explicitly selected actual-build test passes 1/1 after real movement-body and private-state-structure
+edits. It compares exact restored state and subsequent
+movement/pickups/markers/travel, retains the original executable/process across failures and
+rejects incompatible or stale operations before candidate acceptance. The linked plan records
+review corrections, actual run IDs and Windows source/headless limits. Supervised desktop adoption,
+unsupported native services, general replay and measured latency/memory remain open; Editor UI
+and physical mixed-DPI work stay paused. Complete R12 and the foundation rebaseline remain active.
 
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:

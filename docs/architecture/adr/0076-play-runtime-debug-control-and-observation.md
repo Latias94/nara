@@ -370,16 +370,41 @@ machine-code hot replacement or automatic runtime-state migration.
 
 The preferred near-term code iteration path is:
 
-1. compile a complete new build;
-2. stop or discard the isolated Play host;
-3. construct a fresh host from the validated edit snapshot/profile;
-4. when a compatible checkpoint contract exists, restore supported semantic state and replay
-   forward.
+1. pause the incumbent at its declared complete capture boundary and retain supported semantic
+   state when a compatible game-owned contract exists;
+2. compile a complete new build while retaining the last-good executable and incumbent;
+3. construct an isolated fresh host from the validated source/content and profile;
+4. restore the declared semantic state, replay forward only where a replay contract applies, and
+   compare the required state and continued-execution outcome;
+5. accept the qualified candidate, then retire the incumbent through its original close owner.
+
+Capture, build, startup or candidate validation failure preserves the usable incumbent. A fresh
+restart without a compatible state contract remains a restart and cannot claim game continuity.
 
 Native dynamic-library or function hot patching requires a separate ADR after a real workflow
 demonstrates that rebuild-and-restart misses its latency target. That decision must own ABI
 stability, code quiescence, worker/thread and callback retirement, native-handle ownership,
 versioned state extraction/migration, two-phase publication, and failure rollback.
+
+The first concrete Rust reconstruction consumer is the source/headless Two-Level Game under its
+[R12 plan](../../plans/2026-11-13-rust-state-reconstruction-plan.md). It retains an incumbent paused
+game while a separate fresh candidate is validated, with no concurrent project-source publication
+rights. The game owns a bounded semantic resume format and an explicit shipped-service inventory.
+Pending commands/travel, unsupported services, open native save storage and unrepresented time
+policy refuse capture. The original gameplay queue admits one fresh-candidate reconstruction
+transaction, and ordinary paused maintenance completes Scene preparation and derived rebuilding.
+
+This code-iteration format preserves the game's logical time and semantic intent. It deliberately
+keeps the candidate's Runtime clock, command namespace, World/Scene identities and native services
+fresh; it is not the historical tick-log checkpoint format described above. No predecessor command
+or input-route authority is revived. Actual App configuration, Schema and every referenced level's
+admitted manifest/runtime content must agree before exact-state comparison and continued gameplay.
+Full startup closure observations retain their admission-specific meaning; they are not substituted
+for a cross-path level-content identity. The game executable's finite private-directory protocol
+binds original session, executable generation and operation IDs independently of stdout diagnostics.
+The desktop supervised one-READY protocol remains under ADR0116. This adds no universal World
+serializer, process supervisor or native code ABI; physical incumbent retirement follows successful
+candidate qualification through the original owners.
 
 ### Proposed Ownership Refinement
 

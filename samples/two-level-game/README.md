@@ -61,6 +61,54 @@ checks, interruption before publication, and pure bounded format/migration cases
 `--verify-first-present` proves presentation only; it does not prove that a human exercised every
 key or that a particular platform has passed the full interactive trajectory.
 
+## Exact Game Reconstruction
+
+The separate `resume` format preserves the complete supported game semantics: progress across
+level instances, the live player transform, held movement intent, logical game time, counters and
+admitted configuration/Schema/content identities. The progress-save slot above retains its original
+anchor-based behavior and version-one migration.
+
+Use `capture_resume(&session)` after the original `HeadlessSession` has completed a paused frame.
+Capture refuses pending commands, travel or authoritative tasks, scripted verification, unknown
+plugin services, an open save slot and unrepresented Runtime time policy. The shipped source/headless
+recipe is the first supported inventory. Extend that explicit inventory and compatibility policy
+when adding authoritative gameplay state or services.
+
+Start and pause a fresh candidate with the same ordinary product recipe, then call
+`request_resume(&mut candidate, &state)`. It admits one command through the existing gameplay
+queue. Drive complete paused maintenance frames, with an explicit deadline, until
+`GameSnapshot::restoring` clears or an error occurs. Compare `capture_resume(&candidate)` with
+the original state before allowing gameplay to continue. Rejected reconstruction remains
+ineligible even if an ordinary command later clears the displayed game error. Retain the original
+paused session and captured executable until the candidate passes state and continued-play checks.
+
+The fresh Runtime keeps its own clock, command authority and World identity. Logical game time
+is restored separately. Scene numbers are local to a World; compare scoped identities when
+proving fresh construction. Current Scene and dynamic markers rebuild through their existing
+owners, with no old ECS entity, input connection or native handle in the format.
+
+The Host-driven `continuity` binary exchanges bounded versioned files in an explicitly supplied
+private temporary directory outside project source. Its arguments are `--project-root ABS`,
+`--control-dir ABS`, `--session STRING` and `--generation STRING`. The process starts paused and
+accepts finite Observe/Step/Frame/Capture/Restore/Close operations. Session, generation and request
+IDs are validated before effects; stdout/stderr carry diagnostics. The test Host owns child
+creation, deadlines, immutable executable installations and physical retirement.
+
+From the engine root, the actual Rust-edit qualification uses the existing shared target and
+installed Rust 1.95 baseline:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --test continuity --run-ignored only --test-threads=1
+```
+
+Set `RUSTUP_TOOLCHAIN=1.95.0`, `CARGO_BUILD_JOBS=1`, `CARGO_NET_OFFLINE=true` and an absolute
+`CARGO_TARGET_DIR` pointing to the engine's `target` before that command. The test copies source
+into its own temporary tree and uses public Cargo executable capture. It performs real movement-body
+and private Rust-structure edits, then checks fresh-process state and continued gameplay. It also
+exercises build/startup/compatibility failure, stale requests/replies and incumbent retention. Run it serially; normal
+package tests keep this nested-build case ignored. Execution results and limits belong to the
+[reconstruction plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md).
+
 ## Ownership And Limits
 
 - `CurrentScene` is the only source/Scene-instance authority. Gameplay retains a logical `LevelKey`
