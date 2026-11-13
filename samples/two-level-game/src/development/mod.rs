@@ -9,6 +9,7 @@ pub mod presentation;
 mod process;
 pub mod protocol;
 mod source;
+mod timing;
 
 use std::{
     path::{Path, PathBuf},
@@ -33,6 +34,7 @@ pub use protocol::{
 };
 use protocol::{MAX_STEP_COMMANDS, Observation, SemanticCommand};
 use source::SourceFence;
+pub use timing::{DevelopmentPhaseTiming, DevelopmentTimingPhase, DevelopmentTimingSnapshot};
 
 const MAX_REBUILDS: usize = 8;
 const MAX_PROBE_STEPS: usize = 64;
@@ -184,6 +186,7 @@ pub struct DevelopmentHost {
     closing: bool,
     closed: bool,
     cleanup_error: Option<String>,
+    timings: Option<DevelopmentTimingSnapshot>,
 }
 
 impl DevelopmentHost {
@@ -243,7 +246,22 @@ impl DevelopmentHost {
             closing: false,
             closed: false,
             cleanup_error: None,
+            timings: None,
         })
+    }
+
+    /// Enables fixed cumulative Host timings without changing execution or cleanup policy.
+    /// Calling this again preserves earlier observations; disabled Hosts do not read a clock for
+    /// instrumentation. Snapshots contain inclusive elapsed calls, not additive phase or GPU costs.
+    pub fn enable_timings(&mut self) {
+        self.timings
+            .get_or_insert_with(DevelopmentTimingSnapshot::default);
+    }
+
+    /// Copies completed timing observations, or returns `None` if timing has never been enabled.
+    #[must_use]
+    pub fn timing_snapshot(&self) -> Option<DevelopmentTimingSnapshot> {
+        self.timings
     }
 
     pub fn start(
@@ -297,31 +315,35 @@ impl DevelopmentHost {
     /// Pauses the adopted desktop child through its original managed Runtime.
     /// A predecessor awaiting retirement does not prevent controlling the current active child.
     pub fn pause_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
-            return Err(DevelopmentError::at(
-                DevelopmentStage::State,
-                "continuous execution controls require the explicit desktop placement",
-            ));
-        }
-        self.active_mut()?
-            .process
-            .pause()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+        self.measure(DevelopmentTimingPhase::Pause, |host| {
+            if host.placement != DevelopmentPlacement::SourceDesktop {
+                return Err(DevelopmentError::at(
+                    DevelopmentStage::State,
+                    "continuous execution controls require the explicit desktop placement",
+                ));
+            }
+            host.active_mut()?
+                .process
+                .pause()
+                .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+        })
     }
 
     /// Resumes the adopted desktop child after its original native activation.
     /// Admission refusal preserves the adopted route and all retained cleanup owners.
     pub fn resume_active(&mut self) -> Result<ExecutionStatus, DevelopmentError> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
-            return Err(DevelopmentError::at(
-                DevelopmentStage::State,
-                "continuous execution controls require the explicit desktop placement",
-            ));
-        }
-        self.active_mut()?
-            .process
-            .resume()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+        self.measure(DevelopmentTimingPhase::Resume, |host| {
+            if host.placement != DevelopmentPlacement::SourceDesktop {
+                return Err(DevelopmentError::at(
+                    DevelopmentStage::State,
+                    "continuous execution controls require the explicit desktop placement",
+                ));
+            }
+            host.active_mut()?
+                .process
+                .resume()
+                .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+        })
     }
 
     /// Freezes native ingress through the active child's original owner before handoff capture.
@@ -336,21 +358,23 @@ impl DevelopmentHost {
 
     /// Reveals and activates the already adopted child. A failure does not undo route adoption.
     pub fn activate_active(&mut self) -> Result<ActivationOutcome, DevelopmentError> {
-        if self.placement != DevelopmentPlacement::SourceDesktop {
-            return Err(DevelopmentError::at(
-                DevelopmentStage::State,
-                "native activation requires the explicit desktop placement",
-            ));
-        }
-        let live = self.active_mut()?;
-        let (activation, error) = live
-            .process
-            .activate_input()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))?;
-        Ok(ActivationOutcome {
-            active: live.generation,
-            activation,
-            error,
+        self.measure(DevelopmentTimingPhase::Activation, |host| {
+            if host.placement != DevelopmentPlacement::SourceDesktop {
+                return Err(DevelopmentError::at(
+                    DevelopmentStage::State,
+                    "native activation requires the explicit desktop placement",
+                ));
+            }
+            let live = host.active_mut()?;
+            let (activation, error) = live
+                .process
+                .activate_input()
+                .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))?;
+            Ok(ActivationOutcome {
+                active: live.generation,
+                activation,
+                error,
+            })
         })
     }
 
@@ -361,12 +385,9 @@ impl DevelopmentHost {
                 "native presentation requires the explicit desktop placement",
             ));
         }
-        let live = self.active_mut()?;
-        let state = live
-            .process
-            .capture()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error))?;
-        qualify_presentation(&mut live.process, &state)
+        let state = self.capture()?;
+        let live = self.active.as_mut().unwrap();
+        qualify_presentation(&mut live.process, &state, &mut self.timings)
     }
 
     #[must_use]
@@ -385,10 +406,12 @@ impl DevelopmentHost {
     }
 
     pub fn capture(&mut self) -> Result<ResumeState, DevelopmentError> {
-        self.active_mut()?
-            .process
-            .capture()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error))
+        self.measure(DevelopmentTimingPhase::StateCapture, |host| {
+            host.active_mut()?
+                .process
+                .capture()
+                .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error))
+        })
     }
 
     /// Drives only the adopted incumbent. A prepared candidate is never an ordinary input target.
@@ -451,11 +474,16 @@ impl DevelopmentHost {
                 "the supplied probe does not describe the current incumbent capture",
             ));
         }
-        let mut source = SourceFence::capture(&self.project)
+        let mut source = self
+            .measure(DevelopmentTimingPhase::SourceCheck, |host| {
+                SourceFence::capture(&host.project)
+            })
             .map_err(|error| DevelopmentError::at(DevelopmentStage::Build, error))?;
         self.rebuilds += 1;
         self.last_build_failure = None;
-        let captured = match build_executable(request, |_| Ok(())) {
+        let captured = match self.measure(DevelopmentTimingPhase::CargoBuild, |_| {
+            build_executable(request, |_| Ok(()))
+        }) {
             Ok(captured) => captured,
             Err(failure) => {
                 let message = failure.to_string();
@@ -463,34 +491,40 @@ impl DevelopmentHost {
                 return Err(DevelopmentError::at(DevelopmentStage::Build, message));
             }
         };
-        source
-            .bind_build(&captured)
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Build, error))?;
+        self.measure(DevelopmentTimingPhase::SourceCheck, |_| {
+            source.bind_build(&captured)
+        })
+        .map_err(|error| DevelopmentError::at(DevelopmentStage::Build, error))?;
         let executable = self.install(captured)?;
         let mut probe = self.launch(Arc::clone(&executable))?;
         let qualification = (|| {
-            restore_exact(&mut probe.process, &basis)?;
+            restore_exact(&mut probe.process, &basis, &mut self.timings)?;
             if self.placement == DevelopmentPlacement::SourceDesktop {
-                qualify_presentation(&mut probe.process, &basis)?;
+                qualify_presentation(&mut probe.process, &basis, &mut self.timings)?;
             }
             for step in probes {
-                probe
-                    .process
-                    .step(step.commands.clone())
+                self.measure(DevelopmentTimingPhase::ProbeStep, |host| {
+                    probe
+                        .process
+                        .step(step.commands.clone())
+                        .map_err(|error| DevelopmentError::at(DevelopmentStage::Probe, error))?;
+                    let actual = timing::measure(
+                        &mut host.timings,
+                        DevelopmentTimingPhase::StateCapture,
+                        |_| probe.process.capture(),
+                    )
                     .map_err(|error| DevelopmentError::at(DevelopmentStage::Probe, error))?;
-                let actual = probe
-                    .process
-                    .capture()
-                    .map_err(|error| DevelopmentError::at(DevelopmentStage::Probe, error))?;
-                if !exact_state(&actual, &step.expected)? {
-                    return Err(DevelopmentError::at(
-                        DevelopmentStage::Probe,
-                        "the candidate did not match the complete expected game state",
-                    ));
-                }
-                if self.placement == DevelopmentPlacement::SourceDesktop {
-                    qualify_presentation(&mut probe.process, &actual)?;
-                }
+                    if !exact_state(&actual, &step.expected)? {
+                        return Err(DevelopmentError::at(
+                            DevelopmentStage::Probe,
+                            "the candidate did not match the complete expected game state",
+                        ));
+                    }
+                    if host.placement == DevelopmentPlacement::SourceDesktop {
+                        qualify_presentation(&mut probe.process, &actual, &mut host.timings)?;
+                    }
+                    Ok(())
+                })?;
             }
             Ok(())
         })();
@@ -507,28 +541,27 @@ impl DevelopmentHost {
                 "the qualified probe has not completed normal game and native retirement",
             ));
         }
-        source
-            .verify()
+        self.measure(DevelopmentTimingPhase::SourceCheck, |_| source.verify())
             .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
         let mut candidate = self.launch(executable)?;
-        let restored = restore_exact(&mut candidate.process, &basis).and_then(|()| {
-            source
-                .verify()
-                .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
-            if !exact_state(&self.capture()?, &basis)? {
-                return Err(DevelopmentError::at(
-                    DevelopmentStage::Adopt,
-                    "the incumbent changed while its candidate was prepared",
-                ));
-            }
-            Ok(())
-        });
+        let restored =
+            restore_exact(&mut candidate.process, &basis, &mut self.timings).and_then(|()| {
+                self.measure(DevelopmentTimingPhase::SourceCheck, |_| source.verify())
+                    .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+                if !exact_state(&self.capture()?, &basis)? {
+                    return Err(DevelopmentError::at(
+                        DevelopmentStage::Adopt,
+                        "the incumbent changed while its candidate was prepared",
+                    ));
+                }
+                Ok(())
+            });
         if let Err(error) = restored {
             self.retire(candidate, RetirementRole::Candidate);
             return Err(error);
         }
         let presentation = if self.placement == DevelopmentPlacement::SourceDesktop {
-            match qualify_presentation(&mut candidate.process, &basis) {
+            match qualify_presentation(&mut candidate.process, &basis, &mut self.timings) {
                 Ok(presentation) => Some(presentation),
                 Err(error) => {
                     self.retire(candidate, RetirementRole::Candidate);
@@ -556,16 +589,23 @@ impl DevelopmentHost {
     /// Once switched, predecessor cleanup remains a separate pending outcome and cannot roll back
     /// the adopted game or authorize a second active input route.
     pub fn adopt(&mut self, ticket: &PreparedRebuild) -> Result<AdoptionOutcome, DevelopmentError> {
+        self.measure(DevelopmentTimingPhase::Adoption, |host| {
+            host.adopt_inner(ticket)
+        })
+    }
+
+    fn adopt_inner(
+        &mut self,
+        ticket: &PreparedRebuild,
+    ) -> Result<AdoptionOutcome, DevelopmentError> {
         self.check_ticket(ticket)?;
         if self.placement == DevelopmentPlacement::SourceDesktop {
             self.isolate_active_input()?;
         }
-        self.candidate
-            .as_ref()
-            .unwrap()
-            .source
-            .verify()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?;
+        self.measure(DevelopmentTimingPhase::SourceCheck, |host| {
+            host.candidate.as_ref().unwrap().source.verify()
+        })
+        .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?;
         let basis = self.candidate.as_ref().unwrap().basis.clone();
         if !exact_state(&self.capture()?, &basis)? {
             return Err(DevelopmentError::at(
@@ -575,11 +615,12 @@ impl DevelopmentHost {
         }
         let candidate = self.candidate.as_mut().unwrap();
         if !exact_state(
-            &candidate
-                .live
-                .process
-                .capture()
-                .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?,
+            &timing::measure(
+                &mut self.timings,
+                DevelopmentTimingPhase::StateCapture,
+                |_| candidate.live.process.capture(),
+            )
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?,
             &basis,
         )? {
             return Err(DevelopmentError::at(
@@ -588,12 +629,14 @@ impl DevelopmentHost {
             ));
         }
         if self.placement == DevelopmentPlacement::SourceDesktop {
-            qualify_presentation(&mut candidate.live.process, &basis)?;
+            qualify_presentation(&mut candidate.live.process, &basis, &mut self.timings)?;
         }
-        candidate
-            .source
-            .verify()
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?;
+        timing::measure(
+            &mut self.timings,
+            DevelopmentTimingPhase::SourceCheck,
+            |_| candidate.source.verify(),
+        )
+        .map_err(|error| DevelopmentError::at(DevelopmentStage::Adopt, error))?;
         let candidate = self.candidate.take().unwrap();
         let predecessor = self.active.replace(candidate.live).unwrap();
         let prior_generation = predecessor.generation;
@@ -627,7 +670,11 @@ impl DevelopmentHost {
         let mut remaining = Vec::new();
         for mut retiring in self.retiring.drain(..) {
             let deadline = Instant::now() + CLEANUP_OWNER_BUDGET;
-            match retiring.live.process.close(deadline) {
+            match timing::measure(
+                &mut self.timings,
+                DevelopmentTimingPhase::Retirement,
+                |_| retiring.live.process.close(deadline),
+            ) {
                 Ok(retired) => self.reports.push(RetirementReport {
                     generation: retiring.live.generation,
                     role: retiring.role,
@@ -644,7 +691,11 @@ impl DevelopmentHost {
         self.retiring = remaining;
         if let Some(CargoBuildFailure::CleanupIncomplete(custody)) =
             self.last_build_failure.as_mut()
-            && let Err(error) = custody.retry_cleanup()
+            && let Err(error) = timing::measure(
+                &mut self.timings,
+                DevelopmentTimingPhase::Retirement,
+                |_| custody.retry_cleanup(),
+            )
         {
             self.cleanup_error = Some(error.to_string());
         }
@@ -672,7 +723,9 @@ impl DevelopmentHost {
         if self.retry_retirement() == RetirementStatus::Pending {
             return RetirementStatus::Pending;
         }
-        match self.store.close() {
+        match self.measure(DevelopmentTimingPhase::Retirement, |host| {
+            host.store.close()
+        }) {
             Ok(()) => {
                 self.closed = true;
                 RetirementStatus::Complete
@@ -757,7 +810,10 @@ impl DevelopmentHost {
                     "the finite captured executable allowance was exceeded",
                 )
             })?;
-        let installed = Executable::install(&mut self.store, captured)
+        let installed = self
+            .measure(DevelopmentTimingPhase::ExecutableInstall, |host| {
+                Executable::install(&mut host.store, captured)
+            })
             .map_err(|error| DevelopmentError::at(DevelopmentStage::Start, error))?;
         self.captured_bytes = total;
         Ok(installed)
@@ -773,7 +829,9 @@ impl DevelopmentHost {
         })?;
         let digest = executable.captured().digest();
         let provenance = executable.captured().provenance().digest();
-        match Process::start(&self.project, &mut self.store, executable, self.placement) {
+        match self.measure(DevelopmentTimingPhase::ChildStartup, |host| {
+            Process::start(&host.project, &mut host.store, executable, host.placement)
+        }) {
             Ok(process) => {
                 let generation = ActiveGeneration {
                     sequence,
@@ -814,6 +872,17 @@ impl DevelopmentHost {
         self.retiring.push(Retiring { live, role });
         self.retry_retirement();
     }
+
+    fn measure<T, E>(
+        &mut self,
+        phase: DevelopmentTimingPhase,
+        operation: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let timer = timing::Timer::start(self.timings.is_some());
+        let result = operation(self);
+        timer.finish(&mut self.timings, phase, result.is_err());
+        result
+    }
 }
 
 impl Drop for DevelopmentHost {
@@ -853,47 +922,57 @@ fn eligible_features(features: &[String], placement: DevelopmentPlacement) -> bo
 fn qualify_presentation(
     process: &mut Process,
     state: &ResumeState,
+    timings: &mut Option<DevelopmentTimingSnapshot>,
 ) -> Result<DesktopPresentation, DevelopmentError> {
-    let expected = ContentDigest::of_bytes(
-        &encode_resume(state)
-            .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error.to_string()))?,
-    );
-    let receipt = process
-        .confirm_presentation()
-        .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
-    let current = process
-        .observation()
-        .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
-    if receipt.state_digest != *expected.as_bytes()
-        || receipt.runtime_generation != current.runtime_generation
-        || receipt.app_frame == 0
-        || receipt.render_frame == 0
-        || receipt.surface_generation == 0
-        || receipt.backend_instance == 0
-        || receipt.device_epoch == 0
-    {
-        return Err(DevelopmentError::at(
-            DevelopmentStage::Restore,
-            "desktop presentation does not match the original child's exact canonical state",
-        ));
-    }
-    Ok(receipt)
+    timing::measure(timings, DevelopmentTimingPhase::Presentation, |_| {
+        let expected =
+            ContentDigest::of_bytes(&encode_resume(state).map_err(|error| {
+                DevelopmentError::at(DevelopmentStage::Capture, error.to_string())
+            })?);
+        let receipt = process
+            .confirm_presentation()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+        let current = process
+            .observation()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+        if receipt.state_digest != *expected.as_bytes()
+            || receipt.runtime_generation != current.runtime_generation
+            || receipt.app_frame == 0
+            || receipt.render_frame == 0
+            || receipt.surface_generation == 0
+            || receipt.backend_instance == 0
+            || receipt.device_epoch == 0
+        {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::Restore,
+                "desktop presentation does not match the original child's exact canonical state",
+            ));
+        }
+        Ok(receipt)
+    })
 }
 
-fn restore_exact(process: &mut Process, basis: &ResumeState) -> Result<(), DevelopmentError> {
-    process
-        .restore(basis)
+fn restore_exact(
+    process: &mut Process,
+    basis: &ResumeState,
+    timings: &mut Option<DevelopmentTimingSnapshot>,
+) -> Result<(), DevelopmentError> {
+    timing::measure(timings, DevelopmentTimingPhase::StateRestore, |timings| {
+        process
+            .restore(basis)
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+        let actual = timing::measure(timings, DevelopmentTimingPhase::StateCapture, |_| {
+            process.capture()
+        })
         .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
-    let actual = process
-        .capture()
-        .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
-    if !exact_state(&actual, basis)? {
-        return Err(DevelopmentError::at(
-            DevelopmentStage::Restore,
-            "the complete restored state differs from the original capture",
-        ));
-    }
-    Ok(())
+        if !exact_state(&actual, basis)? {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::Restore,
+                "the complete restored state differs from the original capture",
+            ));
+        }
+        Ok(())
+    })
 }
 
 fn exact_state(actual: &ResumeState, expected: &ResumeState) -> Result<bool, DevelopmentError> {
