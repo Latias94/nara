@@ -156,7 +156,7 @@ impl Fixture {
             fixture
                 .inputs
                 .iter()
-                .any(|path| path == "src/bin/continuity/protocol.rs")
+                .any(|path| path == "src/development/protocol.rs")
         );
         fixture
     }

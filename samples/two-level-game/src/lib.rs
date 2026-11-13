@@ -1,5 +1,6 @@
 //! A complete small exploration product: authored levels, finite travel and explicit checkpoints.
 
+pub mod development;
 mod gameplay;
 mod host;
 pub mod levels;

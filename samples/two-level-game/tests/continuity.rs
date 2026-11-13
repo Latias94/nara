@@ -11,9 +11,7 @@ use two_level_game::{
     resume::ResumeState,
 };
 
-#[path = "../src/bin/continuity/protocol.rs"]
-#[allow(dead_code)]
-mod protocol;
+use two_level_game::development::protocol;
 #[path = "../../../tests/support/continuity.rs"]
 mod support;
 

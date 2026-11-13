@@ -1,4 +1,4 @@
-//! Finite source-game packets shared with the actual-build test Host via `#[path]`.
+//! Finite source-game packets shared by the development Host and standalone game.
 //!
 //! The Host privately owns the control directory and process/build identities. Runtime
 //! generations below are process-local observations, never cross-process authority.
@@ -6,8 +6,8 @@
 //! Replies use Serde's ordinary `Result` representation: `{"Ok": reply}` or `{"Err": message}`.
 //! The Host consumes replies before retrying their filenames; the child never overwrites one.
 
+use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
-use two_level_game::resume::ResumeState;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;

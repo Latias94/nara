@@ -6,8 +6,7 @@
 
 #[path = "continuity/control.rs"]
 mod control;
-#[path = "continuity/protocol.rs"]
-mod protocol;
+use two_level_game::development::protocol;
 
 #[cfg(test)]
 #[path = "continuity/tests.rs"]

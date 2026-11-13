@@ -55,6 +55,8 @@ let captured = build_executable(&request, |_| Ok(()))?;
 `with_target_directory` requires an absolute path. Otherwise the adapter uses `CARGO_TARGET_DIR`
 or the workspace's `target`. Cooperating build calls retain an exclusive directory lease through
 capture. Reentrant calls using that directory return `TargetBusy`.
+`CargoBuildRequest::workspace()` returns the original canonical admitted workspace for a concrete
+Host's project comparison; it does not attest to current source freshness.
 
 `CargoBuildTools::discover_in` resolves tools in the selected workspace's rustup context without
 installing a toolchain. Absolute `CARGO` and `RUSTC` overrides take precedence over absolute `PATH`

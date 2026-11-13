@@ -118,6 +118,12 @@ impl CargoBuildRequest {
         &self.selection
     }
 
+    /// Returns the canonical workspace selected when this request was admitted.
+    #[must_use]
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
     #[must_use]
     pub const fn limits(&self) -> CargoBuildLimits {
         self.limits

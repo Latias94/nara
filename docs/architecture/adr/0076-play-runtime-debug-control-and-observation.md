@@ -406,6 +406,18 @@ The desktop supervised one-READY protocol remains under ADR0116. This adds no un
 serializer, process supervisor or native code ABI; physical incumbent retirement follows successful
 candidate qualification through the original owners.
 
+The game's concrete development Host serializes this supported source/headless workflow. Probe
+steps compare complete canonical state against an explicit initial capture and finite expected
+sequence. A passing probe is physically retired, and a fresh adopter restores the original capture
+before it can become an ordinary command target. Probe side effects are disposable only within
+the supported game inventory; this is not rollback of arbitrary external effects. The final route
+exchange requires original incumbent/candidate state and prospective source revalidation.
+After that exchange, predecessor retirement remains a separate pending or failed cleanup fact;
+it cannot report that the already committed adoption failed or restore an old input route.
+The [development Host successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#game-owned-development-host-and-adoption)
+owns implementation and qualification. The desktop placement and post-start protocol remain
+separate ADR0116 work, and synchronous Cargo retains its cooperative cancellation limits.
+
 ### Proposed Ownership Refinement
 
 The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial
