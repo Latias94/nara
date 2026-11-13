@@ -4684,9 +4684,10 @@ R11f separately owns Editor extension reconstruction and its document/UI recover
 workflow can substitute for the other one's compatibility or correct-result evidence.
 
 The selected game-owned `ResumeState` restores live transform, held semantic movement intent,
-logical game time and reported counters alongside complete cross-instance progress. This game
-has no independent velocity state. The candidate keeps its own Runtime clock and authority;
-restoring an authored anchor alone cannot satisfy that oracle. Stable paused full-frame capture
+logical game time, version-two scheduling continuation and reported counters alongside complete
+cross-instance progress. This game has no independent velocity state. The candidate keeps its own
+Runtime clock and authority; restoring an authored anchor alone cannot satisfy that oracle.
+Stable paused full-frame capture
 and Schema/App/per-level manifest/runtime-content comparisons define this first format's
 consistency and compatibility. Reconcile ADR 0076 where applicable and
 ADR 0116's one-shot READY contract before introducing a finite opt-in capture/restore exchange.
