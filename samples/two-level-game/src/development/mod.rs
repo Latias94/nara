@@ -481,8 +481,13 @@ impl DevelopmentHost {
             .map_err(|error| DevelopmentError::at(DevelopmentStage::Build, error))?;
         self.rebuilds += 1;
         self.last_build_failure = None;
-        let captured = match self.measure(DevelopmentTimingPhase::CargoBuild, |_| {
-            build_executable(request, |_| Ok(()))
+        let captured = match self.measure(DevelopmentTimingPhase::CargoBuild, |host| {
+            timing::measure_cargo(&mut host.timings, |checkpoint| {
+                build_executable(request, |point| {
+                    checkpoint(point);
+                    Ok(())
+                })
+            })
         }) {
             Ok(captured) => captured,
             Err(failure) => {

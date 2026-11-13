@@ -1,18 +1,33 @@
 use std::time::{Duration, Instant};
 
+use nara::project_tooling::cargo_build::CargoBuildPoint;
+
 /// Fixed Host operation boundaries, measured only after timing is explicitly enabled.
 ///
 /// These are elapsed Host calls, including IPC, native polling and waiting performed by the
 /// original operation. They do not measure GPU duration or scanout. `StateRestore` includes its
 /// verification capture, `ProbeStep` includes its capture and optional presentation check, and
-/// `Adoption` includes its source, capture and presentation checks. Parent totals are inclusive;
-/// adding phase totals would count overlapping work more than once.
+/// `Adoption` includes its source, capture and presentation checks. `CargoBuild` includes its six
+/// disjoint checkpoint intervals. Parent totals are inclusive; adding phase totals would count
+/// overlapping work more than once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevelopmentTimingPhase {
     /// Source fence capture, build binding and each later source verification call.
     SourceCheck,
     /// The existing Cargo adapter call, including its executable capture and validation.
     CargoBuild,
+    /// Adapter entry through BeforeMetadata, including input admission and tool observation.
+    CargoAdmissionAndToolObservation,
+    /// BeforeMetadata through BeforeBuild, including metadata and input/tool rechecks.
+    CargoMetadataAndRechecks,
+    /// BeforeBuild through AfterBuild, including compilation, checks, decoding and artifact hash.
+    CargoCompilationAndArtifactChecks,
+    /// AfterBuild through BeforeCapture, including source/tool/lease and capture limit checks.
+    CargoCaptureAdmission,
+    /// BeforeCapture through BeforeReturn, including tool rechecks, captured bytes and provenance.
+    CargoCapturedBytesAndProvenance,
+    /// BeforeReturn through adapter return, including final source/tool/lease/artifact validation.
+    CargoFinalValidation,
     ExecutableInstall,
     /// Original process startup through its READY handshake, before the Host's later observation.
     ChildStartup,
@@ -30,9 +45,15 @@ pub enum DevelopmentTimingPhase {
 
 impl DevelopmentTimingPhase {
     /// Every fixed phase, including phases that have not been reached in this Host.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 19] = [
         Self::SourceCheck,
         Self::CargoBuild,
+        Self::CargoAdmissionAndToolObservation,
+        Self::CargoMetadataAndRechecks,
+        Self::CargoCompilationAndArtifactChecks,
+        Self::CargoCaptureAdmission,
+        Self::CargoCapturedBytesAndProvenance,
+        Self::CargoFinalValidation,
         Self::ExecutableInstall,
         Self::ChildStartup,
         Self::StateRestore,
@@ -47,12 +68,13 @@ impl DevelopmentTimingPhase {
     ];
 }
 
-/// Cumulative observations for completed calls at one boundary.
+/// Cumulative observations for completed calls or elapsed Cargo segments at one boundary.
 ///
 /// `count` includes successes and failures. `failures` counts returned `Err` values, including
 /// incomplete cleanup drives; it does not reinterpret a successful result's embedded status.
-/// Unwinding or unfinished calls are not recorded. Counters and total elapsed time saturate at
-/// their type's maximum rather than wrapping or changing the original operation's result.
+/// A Cargo error belongs to its current segment; earlier completed segments remain successful.
+/// Unwinding does not complete the current call or segment. Counters and total elapsed time
+/// saturate at their type's maximum rather than wrapping or changing the original result.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DevelopmentPhaseTiming {
     pub count: u64,
@@ -117,12 +139,66 @@ pub(super) fn measure<T, E>(
     result
 }
 
+pub(super) fn measure_cargo<T, E>(
+    timings: &mut Option<DevelopmentTimingSnapshot>,
+    operation: impl FnOnce(&mut dyn FnMut(CargoBuildPoint)) -> Result<T, E>,
+) -> Result<T, E> {
+    measure_cargo_with_clock(timings, operation, Instant::now)
+}
+
+fn measure_cargo_with_clock<T, E>(
+    timings: &mut Option<DevelopmentTimingSnapshot>,
+    operation: impl FnOnce(&mut dyn FnMut(CargoBuildPoint)) -> Result<T, E>,
+    mut now: impl FnMut() -> Instant,
+) -> Result<T, E> {
+    let mut started = timings.is_some().then(&mut now);
+    let mut phase = DevelopmentTimingPhase::CargoAdmissionAndToolObservation;
+    let result = operation(&mut |point| {
+        if let (Some(started), Some(timings)) = (started.as_mut(), timings.as_mut()) {
+            let finished = now();
+            timings.record(phase, finished.duration_since(*started), false);
+            *started = finished;
+            phase = match point {
+                CargoBuildPoint::BeforeMetadata => DevelopmentTimingPhase::CargoMetadataAndRechecks,
+                CargoBuildPoint::BeforeBuild => {
+                    DevelopmentTimingPhase::CargoCompilationAndArtifactChecks
+                }
+                CargoBuildPoint::AfterBuild => DevelopmentTimingPhase::CargoCaptureAdmission,
+                CargoBuildPoint::BeforeCapture => {
+                    DevelopmentTimingPhase::CargoCapturedBytesAndProvenance
+                }
+                CargoBuildPoint::BeforeReturn => DevelopmentTimingPhase::CargoFinalValidation,
+            };
+        }
+    });
+    if let (Some(started), Some(timings)) = (started, timings.as_mut()) {
+        timings.record(phase, now().duration_since(started), result.is_err());
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
     use crate::development::{DevelopmentHost, RetirementStatus};
+
+    const CARGO_POINTS: [CargoBuildPoint; 5] = [
+        CargoBuildPoint::BeforeMetadata,
+        CargoBuildPoint::BeforeBuild,
+        CargoBuildPoint::AfterBuild,
+        CargoBuildPoint::BeforeCapture,
+        CargoBuildPoint::BeforeReturn,
+    ];
+    const CARGO_SEGMENTS: [DevelopmentTimingPhase; 6] = [
+        DevelopmentTimingPhase::CargoAdmissionAndToolObservation,
+        DevelopmentTimingPhase::CargoMetadataAndRechecks,
+        DevelopmentTimingPhase::CargoCompilationAndArtifactChecks,
+        DevelopmentTimingPhase::CargoCaptureAdmission,
+        DevelopmentTimingPhase::CargoCapturedBytesAndProvenance,
+        DevelopmentTimingPhase::CargoFinalValidation,
+    ];
 
     #[test]
     fn host_timing_is_opt_in_and_enabling_again_preserves_completed_work() {
@@ -201,6 +277,142 @@ mod tests {
             completed.get(DevelopmentTimingPhase::ChildStartup),
             DevelopmentPhaseTiming::default()
         );
+    }
+
+    #[test]
+    fn cargo_checkpoints_record_exact_disjoint_intervals_inside_the_total() {
+        let origin = Instant::now();
+        let mut clock = [0, 3, 8, 15, 26, 39, 56]
+            .map(|offset| origin + Duration::from_nanos(offset))
+            .into_iter();
+        let mut timings = Some(DevelopmentTimingSnapshot::default());
+        let result = measure(
+            &mut timings,
+            DevelopmentTimingPhase::CargoBuild,
+            |timings| {
+                measure_cargo_with_clock(
+                    timings,
+                    |checkpoint| {
+                        for point in CARGO_POINTS {
+                            checkpoint(point);
+                        }
+                        Ok::<_, &str>(17)
+                    },
+                    || clock.next().expect("one clock read per elapsed boundary"),
+                )
+            },
+        );
+        assert_eq!(result, Ok(17));
+        assert_eq!(clock.next(), None);
+        let completed = timings.unwrap();
+        let mut segment_total = Duration::ZERO;
+        for (phase, elapsed) in CARGO_SEGMENTS
+            .into_iter()
+            .zip([3, 5, 7, 11, 13, 17].map(Duration::from_nanos))
+        {
+            assert_eq!(
+                completed.get(phase),
+                DevelopmentPhaseTiming {
+                    count: 1,
+                    failures: 0,
+                    total_elapsed: elapsed,
+                    max_elapsed: elapsed,
+                },
+                "{phase:?}"
+            );
+            segment_total += elapsed;
+        }
+        assert_eq!(segment_total, Duration::from_nanos(56));
+        let total = completed.get(DevelopmentTimingPhase::CargoBuild);
+        assert_eq!((total.count, total.failures), (1, 0));
+        assert_eq!(
+            completed.get(DevelopmentTimingPhase::SourceCheck),
+            DevelopmentPhaseTiming::default()
+        );
+    }
+
+    #[test]
+    fn cargo_errors_finish_only_the_current_segment_and_preserve_the_original_error() {
+        let origin = Instant::now();
+        for reached in 0..=CARGO_POINTS.len() {
+            let mut timings = Some(DevelopmentTimingSnapshot::default());
+            let mut clock_reads = 0;
+            let failure = Box::new(reached);
+            let original_error = std::ptr::from_ref(failure.as_ref());
+            let result = measure(
+                &mut timings,
+                DevelopmentTimingPhase::CargoBuild,
+                |timings| {
+                    measure_cargo_with_clock(
+                        timings,
+                        |checkpoint| {
+                            for point in CARGO_POINTS.into_iter().take(reached) {
+                                checkpoint(point);
+                            }
+                            Err::<(), _>(failure)
+                        },
+                        || {
+                            let observed = origin + Duration::from_nanos(clock_reads);
+                            clock_reads += 1;
+                            observed
+                        },
+                    )
+                },
+            );
+            let returned_error = result.unwrap_err();
+            assert_eq!(std::ptr::from_ref(returned_error.as_ref()), original_error);
+            assert_eq!(*returned_error, reached);
+            assert_eq!(clock_reads, reached as u64 + 2);
+            let completed = timings.unwrap();
+            for (index, phase) in CARGO_SEGMENTS.into_iter().enumerate() {
+                let expected = if index <= reached {
+                    DevelopmentPhaseTiming {
+                        count: 1,
+                        failures: u64::from(index == reached),
+                        total_elapsed: Duration::from_nanos(1),
+                        max_elapsed: Duration::from_nanos(1),
+                    }
+                } else {
+                    DevelopmentPhaseTiming::default()
+                };
+                assert_eq!(completed.get(phase), expected, "{reached}: {phase:?}");
+            }
+            let total = completed.get(DevelopmentTimingPhase::CargoBuild);
+            assert_eq!((total.count, total.failures), (1, 1));
+        }
+    }
+
+    #[test]
+    fn disabled_cargo_measurement_never_reads_the_clock_or_enables_observation() {
+        for failed in [false, true] {
+            let mut timings = None;
+            let mut checkpoints = 0;
+            let result = measure_cargo_with_clock(
+                &mut timings,
+                |checkpoint| {
+                    for point in CARGO_POINTS {
+                        checkpoint(point);
+                        checkpoints += 1;
+                    }
+                    if failed {
+                        Err("original failure")
+                    } else {
+                        Ok(17)
+                    }
+                },
+                || panic!("disabled Cargo timing must never read the clock"),
+            );
+            assert_eq!(
+                result,
+                if failed {
+                    Err("original failure")
+                } else {
+                    Ok(17)
+                }
+            );
+            assert_eq!(checkpoints, CARGO_POINTS.len());
+            assert_eq!(timings, None);
+        }
     }
 
     #[test]
