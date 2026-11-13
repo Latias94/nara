@@ -4666,6 +4666,15 @@ managed controls, original native retirement and independent GPU replay pixels. 
 keeps that finite visual evidence distinct from canonical desktop state restoration, held-input
 continuity, scheduling-phase/native pause-sampling corrections and the complete rebuilt-game
 adoption still required below. UI and physical mixed-DPI work remain paused.
+The [scheduling continuation successor](2026-11-13-rust-state-reconstruction-plan.md#scheduling-continuation-qualification)
+now preserves actual policy and pending phase through the original App time owner, with concrete
+Headless/desktop delegates. Game resume and finite continuity messages move to version two;
+the candidate keeps fresh Runtime history while reconstructing nonzero remainder and legal debt.
+Native elapsed intervals settle paused waiting into RealTime without virtual catch-up, preserving
+explicit headless delta semantics. Complete App, ordinary game, Winit CPU and selected native
+Winit pass 178/178, 97/97, 67/67 and 5/5. The actual desktop game/GPU consumer passes 1/1 through
+the new time operation and all previous assertions. The linked record retains review corrections,
+separate actual-build evidence and the remaining desktop input/service/adoption gates.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

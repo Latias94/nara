@@ -2560,6 +2560,18 @@ execution and measured budgets remain open. Source study also identifies the req
 continuation and native pause-sampling correction; no phase is silently cleared. Editor UI and
 physical mixed-DPI work stay paused.
 
+The [scheduling continuation successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#scheduling-continuation-qualification)
+adds portable actual time policy and pending duration through the original managed time owner,
+preserving local history and deriving interpolation. Headless/desktop delegates require original
+paused maintenance after application. Native `drive_elapsed` accounts for past paused waits in
+RealTime without virtual catch-up; explicit supplied-delta behavior remains. Game resume and
+continuity protocol version two require the time value. App passes 178/178, ordinary game 97/97,
+all-feature Winit CPU 67/67 and selected native Winit 5/5; an actual desktop game/GPU replay passes
+1/1 through the new public time operation. Independent review corrects authority callbacks that
+report a fault while returning success, with before/after application regressions. The linked record
+retains actual rebuild evidence and platform limits. Complete desktop reconstruction, input/service eligibility,
+adoption, foreign execution, costs and full R12 remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

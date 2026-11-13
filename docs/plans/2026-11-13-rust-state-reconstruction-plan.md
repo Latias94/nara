@@ -645,8 +645,9 @@ alone. The concrete four-key game must drive the interface, with typed driver, n
 and actual rebuilt-game acceptance. Capture must also reject an unconsumed/staged release;
 comparing only the game's held bits or one input scan cursor is insufficient. Bevy's pinned
 keyboard focus cleanup/synthetic filtering and Godot's `release_pressed_events` provide related
-focus policy evidence, not this cross-Runtime transfer. Nonzero time remainder/debt and scaling
-remain separately refused by the existing game format; this input work does not erase them.
+focus policy evidence, not this cross-Runtime transfer. Version one separately refused nonzero
+time remainder/debt and scaling. The time successor below addresses phase through its original
+owner; it does not make desktop input continuation eligible.
 
 ### Desktop Time Continuity Findings
 
@@ -667,18 +668,95 @@ contradictory independent pending/remainder/debt values. Derive render interpola
 that same owner. Keep the candidate's new Runtime/frame/tick identity and the game's separate
 logical clock; do not copy the entire time resources or private active-frame fields.
 
-This operation remains unimplemented and its public value/API is not selected. It cannot simply
+At `ce4fdb0` this operation is unimplemented and its public value/API is not selected. It cannot simply
 mutate FixedTime from game `resume::finish`: TaskUpdate executes after the frame plan is already
 committed. Version the bounded game format and exact-state oracle together with the managed
 time operation, and apply it before final canonical comparison and restored presentation.
 
-Winit also owns the new process's `last_frame` sampling baseline. Its current Wait maintenance
+The current implementation unit selects one portable `RuntimeTimeContinuation` and concrete
+capture/application methods on the original Runtime, projected through the existing Headless
+and desktop owners. It carries actual policy plus pending duration, preserving the receiving
+Runtime's history and deriving interpolation. The game format moves to version two with a
+required explicit time value; version one is refused. The game can initialize the fresh
+candidate's phase before admitting its isolated restore command, then complete paused
+maintenance. Exact stepping and later reconstruction maintenance preserve it, so no active-frame
+time mutation or extra game coordinator is needed. Verify nonzero remainder, legal debt,
+policy/refusal/fault preservation and matched subsequent-delta gameplay, then qualify native
+pause sampling and the actual desktop time operation. Full desktop input/adoption remains open.
+
+The selected native correction distinguishes supplied next intervals from already elapsed
+wall-clock intervals through `RuntimeInstance::drive_elapsed`. Entering an elapsed interval
+Paused preserves that interval's paused App policy even if Resume applies at its end; the
+original RealTime receives the whole duration. The next interval advances virtual time. Winit
+keeps its original `last_frame` sample and uses this entry without an extra App frame, new clock
+or baseline reset. Explicit `drive(delta)`, Stop and exact-step behavior retain their contracts.
+The pinned Bevy time source distinguishes Instant and ManualDuration inputs; Godot keeps native
+sampling separate from Scene processing pause. Those implementations support the ownership
+comparison but are not an existing drop-in fix for Nara's retained Wait session.
+
+Winit also owns the new process's `last_frame` sampling baseline. At `ce4fdb0` Wait maintenance
 does not update that baseline, so paused/hidden qualification time can enter the next resumed
 delta. Define the native pause/activation sampling contract together with the original real/
 virtual-time policy; do not serialize an Instant, clear accumulated phase or disguise waiting as
 simulation. Acceptance needs a nonzero-remainder Running/Pause capture, matched subsequent
 delta sequences, legal debt and policy refusals, plus a long paused/hidden wait control. Until
-then, retain the incumbent and report the existing remainder/debt refusal honestly.
+qualification, retain the incumbent and report the existing remainder/debt refusal honestly.
+
+### Scheduling Continuation Qualification
+
+Implementation revisions: App time owner and elapsed entry `a18bf17`, original Host/Winit
+integration `1fdcbd5`, and game format/protocol plus complete consumer updates `b86269d`.
+
+The concrete time owner now carries policy plus one pending duration, validates the receiver's
+actual policy, preserves local history and derives render interpolation. Headless and desktop
+delegates retain their original healthy paused boundary and application/fault distinction. Game
+resume version two requires an explicit bounded time object and refuses version one. Its finite
+continuity protocol also moves to version two, refusing an old child at the original version gate.
+Progress saves retain their separate format and migration. The game initializes a fresh candidate before
+its isolated restore command, so exact steps and reconstruction maintenance preserve phase.
+
+Independent core review finds one concrete authority gap: a validator can report a canonical
+fault while returning Ok. The original common validator now rechecks the reporter after each
+callback, so capture cannot return success and an entry fault cannot apply phase. Regression
+controls distinguish that from a later application fault, preserving both the actual applied
+fact and first reported fault. Bounded rereview closes the finding. Independent game and native
+reviews find no remaining P1/P2. Missing-resource, actual Last-stage policy changes, portable
+duration overflow, signed-zero conversion and the outer Host's failed-close state are exercised.
+
+| Scope | Actual result |
+| --- | --- |
+| Complete App and authority controls | 178/178, one intentional skip, run `3dddbabf-a34f-4aef-b19b-3ca261e2d38a`. Includes old explicit Resume/Step behavior and original lifecycle tests. |
+| Final ordinary source/headless game | 97/97, two actual-build cases kept separate, run `025195e0-d918-46c1-a284-55f6c6a3400b`, 12.114 seconds. Includes the final protocol version. Complete meaningful nonzero-phase and PreserveDebt reconstruction match subsequent delta sequences, full state and fresh Runtime history. Format/policy refusals and applied-fault physical Close pass. |
+| All-feature Winit CPU | 67/67, 15 native cases skipped, run `be66e762-dc90-4d78-a54d-0333c1f99d71`. Deterministic original boundary calls settle a 60-second paused Wait with full RealTime and preserved 13 ms phase; the next 7 ms triggers one tick. Hidden, debt, refusal, Stop and fault controls pass. |
+| Selected native Winit | 5/5, run `d5db4515-9f45-4a0d-98aa-947733c55c04`. Original reusable/maintenance/hidden/fullscreen/close trajectories pass; mixed-DPI cases are not selected. |
+| Actual desktop game and independent GPU replay | 1/1, run `65cc2be7-8caf-4247-b2c7-6cf94ce049f5`, 5.886 seconds after an 8m24s release build. The original public Host initializes 13 ms phase, refuses capture until its next paused frame and returns the exact value. All prior gameplay/control/native-retirement assertions remain, and original sealed/presented time facts match the public value before independent pixel replay. |
+| Actual Rust builds and production adoption | 2/2, run `6710033d-dda7-4e86-a81a-19ce154f6d4a`, 230.833 seconds including nested Cargo. Original A/B/C reconstruction passes in 162.590 seconds and production Host adoption in 68.242 seconds through the version-two message/state shape. All prior source, failure, isolation, nominal-ticket, Pending-time execution and physical retirement assertions remain. These regressions retain their source/headless placement. |
+
+The first ordinary game compile finds a new test-plugin helper returning `Result<&mut App>`
+instead of `Result<()>`; its explicit success return is corrected before execution. Two later
+runs pass 96/97 and expose mistakes in the new debt fixture: local-headless does not imply
+PreserveDebt, and 150 ms plus the later 60 ms must retain 10 ms at a 20 ms timestep. The fixture
+now explicitly selects preserve-debt in its private source copy and checks both precise durations;
+all intermediate state and continued-gameplay assertions remain. The final 97/97 above passes.
+
+Correctness Clippy passes for App/Winit all-target/all-feature, the root desktop library/public
+control test, and all desktop sample targets. The minimal desktop root library still builds
+without default features, runtime-2d or serde. Root/sample formatting, affected TOML, added local
+links/fragments and whitespace checks pass. Existing advisory warnings remain outside the
+correctness gate. All five scoped implementation/review threads are closed; all owned Cargo and
+native test processes reach their original terminal observations.
+
+Executed scope is Windows x64, hardware DX12, Rust 1.95.0, release/locked/offline, jobs one and the
+shared root target. The 60-second injected CPU interval is deterministic state-machine evidence,
+not a physical 60-second native pause measurement. Actual native/game and nested-build results
+above retain their own scope. No frame-time, compiler-latency, memory or cross-platform budget
+is inferred. The finite desktop picture expectation still lacks authoritative full configuration
+and private inactive-level state; it is not admitted as a restore payload. Game scaling other
+than one, desktop canonical service/input reconstruction and post-start adoption remain open.
+
+This is a scheduling continuation prerequisite, not desktop canonical reconstruction, native
+held-key transfer, scanout, physical mixed-DPI or full R12. The existing desktop control consumer
+and actual rebuilt-game trajectories must retain their separate execution evidence. UI stays paused.
 
 ### Desktop Service Inventory And Placement
 
