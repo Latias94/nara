@@ -2612,6 +2612,19 @@ Editor Play remains separate. Continuous Editor Play, unsupported service/state 
 cross-platform execution, numeric budgets and complete R12 remain open. UI and mixed-DPI remain
 paused.
 
+The following [continuous desktop development successor](../../plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-development-qualification)
+at `a1490b9`/`ec57133` connects that concrete game Host to original continuous native execution. Read-only execution
+status distinguishes managed Runtime state from game phase, complete capture and presentation.
+Original Pause/Resume tickets and explicit input activation retain their existing owners;
+paused-only request refusals preserve the Running incumbent. The actual A160/B80/private-structure
+C native trajectory passes 1/1, including matched input, stale candidate refusal after resumed
+play, exact restored presentation, Pending-predecessor continuous gameplay and Running Close.
+The ordinary JSON CLI's actual original/adopted execution and cleanup also pass. Protocol four
+does not extend supervised Editor Play. Final ordinary/desktop CPU 103/103 and 76/76, original
+actual headless builds 2/2 and original paused desktop adoption 1/1 pass. The linked qualification keeps CPU/compatibility,
+hardware/backend and cost scopes explicit. UI, full R12 and broader measured product completion
+remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

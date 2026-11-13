@@ -1037,3 +1037,102 @@ pause, input freeze, rebuild, correct-result confirmation and postcommit activat
 controls. Measure edit-to-correct-playable-result and retained/idle runtime costs separately from
 compiler time before broadening service migration. Supervised Editor Play requires reconciliation
 of its existing protocol owner; this game-owned command path does not silently extend it.
+
+## Continuous Desktop Development Successor
+
+Status: implemented and qualified within the finite Windows workflow below. Extend the same
+concrete source/desktop development Host to run the ordinary game continuously between control
+requests. The original desktop main thread keeps pumping
+its existing native event loop. Only original managed Runtime Pause/Resume tickets can change
+execution; no new scheduler, event loop, input route or synthetic frame delta is introduced.
+Desktop-only execution status reports actual managed state, native activation and read-only game
+observation. It is distinct from complete canonical paused capture and original presentation.
+
+Resume requires original native activation. Pause waits for its exact ticket and a full original
+paused boundary; pending native/game input may still refuse canonical capture and must not be
+silently dropped. Capture, exact Step, probe preparation and adoption keep their paused contracts.
+A control refusal before admission remains recoverable. A failure after admitted control retains
+the original owner and truthful outcome/cleanup path. Native activation is separate from Resume.
+Prepared candidates stay hidden, isolated and paused. Adoption refuses a Running incumbent;
+after Pause, any changed canonical state, including continued time, invalidates the old probe
+basis and requires new qualification. No extra generic revision owner replaces the full-state
+comparison.
+
+Use a real continuous desktop consumer with bounded matched native key delivery and complete
+physical cleanup: original active play, Pause/isolate/capture, actual body/private-structure
+builds, restored presentation, adoption, explicit activation, Resume and further native gameplay.
+Keep all prior exact-step, source/probe/failure and Pending-retirement tests. Ordinary JSON CLI
+must execute the new controls through the production Host. Protocol version four makes the new
+execution operations explicit; resume format two and supervised Editor Play remain separate.
+Record actual elapsed/correct-result observations without claiming a latency distribution or
+numeric performance budget from one acceptance run. UI and physical mixed-DPI remain paused.
+
+### Continuous Development Qualification
+
+Date: 2026-11-14. Production implementation: `a1490b9`; actual native consumer: `ec57133`.
+The concrete child uses the original
+`DesktopRun::observe` for `ExecutionStatus`, separately reporting managed Running/Paused,
+native activation and game observation. Pause/Resume wait for their exact original control
+ticket, then verify actual Runtime state. Repeated controls return actual state without claiming
+a new ticket; repeated Pause still completes original paused maintenance. Resume refuses absent
+activation before control admission. A later control wait/observation failure fences successor
+execution and keeps original cleanup custody. Running-only observation is not a canonical
+capture or a presentation proof.
+
+All paused-only child operations now refuse Running before entering mutation/failure handling.
+This matters for ordinary Step/capture refusal and for an existing candidate's attempted adoption:
+neither may accidentally retire a healthy Running incumbent. Source/dual-state/presentation
+revalidation remains unchanged; a candidate prepared before subsequent continuous gameplay cannot
+silently replace that newer state. The CLI returns successful execution controls independently
+from a later expected full-capture refusal. No implicit Pause, Resume or activation is added.
+
+Independent child/control and Host/process/CLI reviews find no remaining P1/P2. The new native
+consumer sends matched scan-code D Down/Up to the exact foreground child. It reads actual
+completed tick differences and applies each selected executable's movement law; it does not use
+requested Step, manufactured frame deltas or status polling as proof of a tick. It also checks
+movement cessation after Up, stale prepared/cancelled/consumed tickets, original source facts,
+complete canonical paused restore/presentation, Pending-predecessor play and Running Close.
+Its guard releases injected input and restores the observed original foreground; failed cleanup
+retains original owners and source/work copies.
+
+| Scope | Actual result |
+| --- | --- |
+| Ordinary game library, finite child and CLI CPU targets | 73/73, run `95b2d3da-58b6-4fbc-afad-756f457379ec`, 10.612 seconds. Includes actual unchanged headless state after all three desktop-control refusals, continued original Step/Close and rejection of caller-supplied execution facts. |
+| Final complete ordinary source/headless package | 103/103, two actual-build cases kept separate, run `fb91213f-6af9-4670-b0f4-0eab301764da`, 12.307 seconds. Includes complete resume, scheduling phase, source fencing, progress/save and CLI controls. |
+| Final desktop-feature library, finite child and CLI CPU targets | 76/76, run `c4a944eb-4bac-4816-abf9-c97ae9764e09`, 8.286 seconds. Retained Close, post-admission timeout, placement and execution-fact refusal controls remain. |
+| Existing actual source/headless A/B/C and production Host adoption | 2/2, two ordinary cases outside the ignored-only filter, run `faf5ec20-a6cf-4409-bfc9-8194669469b8`, 115.818 seconds including nested Cargo. The original A/B/C trajectory passes in 48.109 seconds and production Host adoption in 67.709 seconds. The latter now additionally refuses all three desktop controls while preserving the exact live headless state and route. |
+| Existing actual paused desktop A/B/C adoption | 1/1, run `5fb0bc06-05d1-41b0-9d4c-3c0041d12126`, 124.229 seconds including nested Cargo. All original compile/probe/source-drift/state/ticket/complete-presentation/activation/Pending-time/physical-cleanup controls pass through protocol four. |
+| Actual continuous desktop body/private-structure rebuild/adoption | 1/1, run `aca24f64-97bd-4ff1-a216-20a159b25214`, 102.744 seconds including nested dev-profile Cargo after a 1m11s outer release build. A160, edited B80 and structurally edited C execute real native input continuously; resumed stale-candidate refusal, independent predecessor cleanup and final Running Close pass. |
+| Ordinary continuous JSON CLI and actual native processes | 1/1 complete trajectory. Original and freshly adopted children each advance 30 naturally completed ticks, with recoverable Running-operation refusals, repeated controls, stable paused captures, exact restored presentation, Pending-time play and actual normal native exits. The contained children report hardware Vulkan. Logged observation blocks are approximately 1.924 seconds each and include control/IPC/paused confirmation work; these are not frame-time or throughput measurements. Work storage is removed after the exact process handles are observed exited. |
+
+The sample adds only a Windows test dependency edge to the already locked `windows-sys 0.61.2`
+for actual matched input and foreground observation. No dependency version changes, runtime
+process-environment widening, new native authority, public root Host API or scheduler is required.
+Production library/bin checking passes under locked/offline resolution. Native execution is
+Windows x64 with a real hardware adapter selected by the contained child's default policy.
+The complete scenario duration includes several builds/probes, native activation and cleanup;
+it is not a per-edit latency, performance improvement or P50/P95 result. This game-owned continuous
+workflow does not integrate supervised Editor Play, remove finite session bounds, migrate arbitrary
+native services or qualify Linux/macOS. Full R12 and measured product/cost goals remain active.
+
+Correctness Clippy passes all default and desktop-feature sample targets. Root/sample format
+checks, the unchanged-version manifest/lock dependency edge, added local links/fragments and
+whitespace checks pass. Existing style/dead-code warnings remain outside that gate. The two
+production review lanes and additional native-consumer custody review are independent from
+implementation; no remaining P1/P2 is found. This is static review, not injected execution of
+SendInput failure, external focus theft or native cleanup timeout. All six scoped threads are
+closed. All owned Cargo/native/CLI sequences are terminal, and the original physical cleanup
+observations above retain their actual scope. Only the game-owned concrete Host,
+protocol, CLI and consumers change; the root native process, Input, Winit, scheduler and GPU owners
+retain their already qualified source. This is why no unrelated Editor or complete framework
+matrix is repeated for this unit.
+
+The next cost attribution should separate actual Cargo work from source checks, captured
+executable installation, startup/restore, complete-state probing, fresh-adopter presentation,
+activation and predecessor retirement. For continuous execution, compare the ordinary game with
+the development presentation observer under the same scene and pacing: the latter currently
+captures canonical state and computes a digest at every eligible Seal, retaining eight inputs.
+Measure that work, native polling and finite file-protocol traffic before choosing a cache or
+notification optimization. Retaining complete source/state/presentation checks is part of any
+accepted optimization. No full service serializer, replacement native transport or new scheduler
+is implied by this measurement follow-up.

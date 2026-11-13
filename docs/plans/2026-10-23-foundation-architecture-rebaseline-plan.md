@@ -4714,6 +4714,19 @@ pixels, compile/probe/source-drift refusals, input review corrections and remain
 This is a concrete paused/Step-driven game development Host, not continuous Editor Play,
 arbitrary service migration, a measured iteration/performance budget or complete R12. UI and
 physical mixed-DPI work remain paused.
+The following [continuous desktop development unit](2026-11-13-rust-state-reconstruction-plan.md#continuous-development-qualification)
+at `a1490b9`/`ec57133` adds ordinary running play to that same concrete game Host. Original native pumping continues
+between requests; execution status is separate from canonical capture and original presentation.
+Original Pause/Resume tickets retain the Runtime authority, explicit activation gates Resume and
+paused-only requests refuse Running recoverably. The independent actual A160/B80/private-structure
+C trajectory passes 1/1 through matched native input, complete restoration and post-adoption play,
+resumed stale-candidate refusal, Pending-predecessor play and final Running Close. An ordinary JSON
+CLI likewise proves original/adopted continuous execution, refusal recovery and actual normal
+physical cleanup. Final ordinary/desktop CPU 103/103 and 76/76, original actual headless builds
+2/2 and original paused desktop adoption 1/1 pass. The linked record retains exact qualification,
+independent review, platform and cost limits.
+Protocol four is game-owned; supervised Editor Play and paused UI remain separate. Full R12 and
+representative edit-to-correct-result/steady-state cost measurements remain open.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

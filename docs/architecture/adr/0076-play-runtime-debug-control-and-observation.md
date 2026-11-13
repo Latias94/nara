@@ -457,6 +457,16 @@ The concrete game-owned presentation observer is explicitly classified and finge
 bounded state/Seal history and original presentation receipt are observations; they grant no
 native or cross-process authority and cannot be replaced by the callback's latest game state.
 
+The concrete game-owned desktop development Host can also drive ordinary continuous execution
+through the same retained main-thread native pump. Execution status is a read-only observation
+of original managed state, input activation and game phase; it does not establish a canonical
+capture or a presented frame. Pause/Resume use original managed tickets, and Resume requires
+explicit native activation. Paused-only capture, exact Step and rebuild/adoption operations
+refuse continuous execution before admitting mutation. Pause does not discard deferred Input or
+manufacture an extra simulation tick to make capture pass. A failure after control admission
+retains its original outcome and cleanup owner; a pre-admission refusal remains recoverable.
+These game-owned controls do not extend the separate supervised Editor Play launch protocol.
+
 ### Proposed Ownership Refinement
 
 The first row below is accepted. RGF-U17 implements the concrete Host/tooling split as Trial

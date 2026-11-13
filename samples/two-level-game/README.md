@@ -165,6 +165,9 @@ Rust/Cargo build inputs. The CLI emits one `ready` record, then one result for e
 | JSON operation | Result |
 | --- | --- |
 | `{"operation":"observe"}` | Complete current `capture`. |
+| `{"operation":"execution_status"}` | Desktop-only current managed Running/Paused state, native activation and read-only game observation. Does not imply canonical capture or presentation. |
+| `{"operation":"pause"}` | Apply original desktop Pause and reach a complete paused boundary. Pending input can still refuse canonical capture. |
+| `{"operation":"resume"}` | Apply original desktop Resume after explicit native activation; the child continues pumping while the CLI waits for later input. |
 | `{"operation":"step","commands":[]}` | One ordinary fixed tick and its complete capture. Semantic movement commands use `{"operation":"move","direction":1,"pressed":true}`; directions are left/right/up/down = 0/1/2/3. |
 | `{"operation":"prepare","basis":STATE,"probes":[{"commands":[],"expected":NEXT_STATE}]}` | Actual build, complete-state probe qualification and one retained candidate. Replace `STATE`/`NEXT_STATE` with full objects; expected state is supplied by the caller. |
 | `{"operation":"adopt"}` | `committed:true`, new active generation and independent `retirement:"pending"`. Uses the CLI's retained ticket; generation observations grant no selection authority. |
@@ -275,7 +278,7 @@ compiling the Host with that feature alone does not select native execution. `re
 the actual placement. Contained product launches retain the reviewed desktop-session environment
 projection; parent `WGPU_BACKEND` and `NARA_WGPU_FORCE_FALLBACK` hints are not inherited. The child
 uses the stock default selection and reports its actual adapter/backend in presentation results.
-Explicit graphics selection is not yet a development-Host option. The three desktop-only JSON operations above refuse source/headless
+Explicit graphics selection is not yet a development-Host option. Desktop-only JSON operations refuse source/headless
 placement. Prepare and adopt can leave the incumbent isolated even after refusal; explicitly
 activate the retained game when native input should resume. A committed adoption remains
 committed if subsequent activation fails. A `closing` child keeps its original native owner
@@ -287,9 +290,37 @@ Run the production desktop Host's actual body/private-structure edit qualificati
 cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_desktop --run-ignored only --test-threads=1 --no-fail-fast
 ```
 
-This game-owned development protocol is version three and requires explicit placement in every
+This game-owned development protocol is version four and requires explicit placement in every
 reply. It refuses old children at the existing version gate. The resume format remains version
 two; progress saves and the supervised Editor Play protocol retain their separate formats.
+
+For continuous desktop play, call `activate_input`, then `resume`. Query `execution_status` while
+the original native pump runs; its Runtime state is independent of the game's travel phase.
+`observe`, exact `step`, capture-dependent `prepare`/`adopt`, presentation confirmation and native
+input changes retain their paused-only contract. A running refusal preserves the same live game.
+Call `pause`, settle any original pending Input through explicit controls if necessary, then
+`isolate_input` and capture before preparing a rebuild. Pause never discards an input edge or
+silently inserts a simulation tick. After adoption, call `activate_input` and `resume` explicitly.
+Predecessor cleanup may stay Pending while the adopted game runs.
+
+Successful execution controls return `result.execution_status`. Complete capture remains a
+separate `capture` or `capture_error` field: expected refusal to capture a Running Runtime cannot
+turn an applied Resume into an unsuccessful control response. Repeated controls return the actual
+current state; no new ticket is claimed when already at the requested state. A control failure
+after admission retains the original child for cleanup. Close and EOF can retire a Running child
+through the same original native owner. Blocking CLI stdin does not block that child; the existing
+finite process/session limits and synchronous build/cancellation limits still apply.
+
+The independent continuous native qualification uses actual matched Windows D Down/Up, original
+paused captures, real Rust body/private-structure rebuilds and post-adoption native gameplay:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test continuous_desktop --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+Keep the desktop available and physical D initially Up. Its bounded native input guard releases
+an injected hold during failure cleanup. Actual results and limits belong to the
+[continuous development unit](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#continuous-desktop-development-successor).
 
 ## Ownership And Limits
 
