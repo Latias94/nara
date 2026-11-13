@@ -377,7 +377,14 @@ impl Fixture {
             struct_text(&self.read(GAMEPLAY), "pub struct GameSnapshot {"),
             snapshot
         );
-        assert!(self.read(GAMEPLAY).contains("direction * 80.0 * delta"));
+        let after = self.read(GAMEPLAY);
+        for law in ["direction * 160.0 * delta", "direction * 80.0 * delta"] {
+            assert_eq!(
+                after.matches(law).count(),
+                source.matches(law).count(),
+                "private structural editing must preserve the movement implementation"
+            );
+        }
         changed
     }
 }
