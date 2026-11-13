@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-11-13
 **Amended**: 2026-10-23 for managed mutation baselines, retained desired observations, owned rescan,
 Image-owned prepared capture and bounded recovery continuity, and separate identity, residency
 ownership and policy
@@ -131,6 +132,13 @@ The accepted identity, ownership and reload contract is:
   using a verified mounted artifact even when no authoring tree is present.
 - Source-change translation or scheduling failures produce structured diagnostics; they must not be
   silently dropped.
+- Live typed source-build refresh follows [ADR0103](0103-concrete-domain-owned-asset-import-execution.md#live-typed-source-builds-and-dependent-refresh-2026-11-13-refinement):
+  current success adopts value and complete raw subscriptions together; current failure preserves
+  last-good and updates only bounded retry observations. Superseded or cancelled work changes
+  neither set. A missing required input remains subscribed so creation can recover first load.
+  Auxiliary deletion triggers dependent rebuilding and does not revoke the dependent's last-good
+  value as if its principal source had been removed. Principal-source removal retains the original
+  revocation policy. Already escaped immutable Runtime bases retain their original contents.
 - Notify directory, unknown, ambiguous rename, and overflow observations create a sticky rescan
   obligation. Draining or reporting `RescanRequired` does not complete it. `AssetWatchRescan` starts
   a replacement watcher before Host reconciliation. A private runtime resource owns that watcher

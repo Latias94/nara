@@ -77,8 +77,10 @@ flowchart LR
   closed tracked execution, actual target cooking and complete reusable artifact groups.
 - The unused `TypedImporter<T>`, generic `ImportedAsset<T>`, erased importer registry, registration
   API, provider ID, and metadata that no executor consumes are removed rather than deprecated.
-- Failed, cancelled, over-budget, stale, and superseded work publishes no new asset state. A prior
-  verified value remains last-good according to the existing asset replacement contract.
+- Failed, cancelled, over-budget, stale, and superseded work publishes no new usable asset value
+  or successful dependency set. A prior verified value remains last-good according to the existing
+  asset replacement contract. Current failed execution may publish its diagnostic and separately
+  bounded retry observations under the live source-build refinement below.
 - A named importer workflow may motivate a typed owner/facet design or bounded experiment now;
   it does not need two production domains before design can begin. Freezing a reusable execution
   protocol requires evidence for the actual shared authority, errors, task custody, budgets and
@@ -322,6 +324,47 @@ cross-file snapshot, ABA detection, hermetic compilation or global latest-state 
 The assembler may prepare exact captured historical content without claiming freshness. Current
 selection and its original observation custody remain with the compiled Host, as specified by
 [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md#finite-cooked-player-delivery).
+
+### Live Typed Source Builds And Dependent Refresh (2026-11-13 refinement)
+
+An explicitly compiled root source-build adapter may join the existing `AssetSourcePlugin` and
+Tasks phases to refresh one typed CPU product family. Asset owns source-kind/type registration,
+request identity and generations; the root adapter owns actual `SourceAssetBuild` and codec
+execution, original capabilities/store, budgets and typed adoption. Registration does not discover
+importers or execute an erased decoder. Image-specific recovery remains in Image.
+
+Source kind selects one routing authority. Different kinds may share a Rust product type while
+retaining separate request authorities and per-ID type claims. A reload request is bound to its
+original generation resource when issued; replacing that resource cannot revive an old request
+by recreating its numeric counter. Root and Image consumers validate that same original issuer.
+
+The current value belongs to the existing `Assets<T>` and `AssetStates`. A cloneable immutable
+built-value wrapper retains its product, verified encoded group and decoded reservation together;
+a bare product `Arc` cannot escape that accounting owner. This does not add a parallel live asset
+dictionary, change persistent Product IDs, or republish an existing immutable Scene/Runtime base.
+
+Asset's dependency owner maintains canonical raw-path subscriptions for each admitted typed
+source: the complete last-successful set and a separate latest-failed-execution retry set. A raw
+auxiliary path, including observed absence, needs no invented source UUID. Attempts retain actual
+bounded observations on failure as well as success, including primary/metadata selection facts.
+Authority, budget and I/O failures stay distinct from observed `NotFound`.
+
+Semantic source notifications preserve which raw principal and metadata sidecar inputs actually
+changed, including after coalescing. A sidecar event keeps existing principal invalidation
+semantics but cannot be reinterpreted as a raw principal-content event. Exact raw subscriptions
+match those original input facts without refreshing unrelated source-only or sidecar-only readers.
+
+Only current typed adoption may replace successful subscriptions, in the same commit as the
+value after validating original request generation, value/state baseline and observed inputs.
+Artifact-store publication alone grants no live-adoption authority. Success replaces the complete
+set and clears retry observations; obsolete A-to-B input edges are removed. Current failed
+execution preserves last-good and successful subscriptions and replaces only its bounded retry
+set. Admission rejection without execution does not erase recovery observations. A global work,
+retained or count refusal after partial selection reads also preserves the existing retry set;
+partial observation is not a complete replacement attempt. Superseded or
+cancelled results change neither set. Warm reuse restores verified inputs and original selection
+facts without executing the domain. Revalidation covers inputs created or changed during the
+attempt before they were subscribed, avoiding a permanently missed first-load recovery.
 
 ## Alternatives Considered
 

@@ -143,3 +143,106 @@ with one build job and no overlap.
 
 This prerequisite adds no retry-observation store or automatic typed source-refresh path.
 The selected receiving owner and complete successor workflow above remain to be implemented.
+
+### Dependent Refresh Implementation And Review
+
+The successor candidate extends original Asset source resolution, generation-bound requests,
+Tasks phases and typed `Assets<T>` adoption. It adds no parallel live value store, watcher or
+task queue. The root adapter selects one compiled build family and retains its original source
+capability, store and immutable output owner; the pure domain/codec facets remain unchanged.
+The [public workflow](../guides/project-asset-domains.md#live-typed-source-refresh) is exercised
+by the independent TextBundle consumer, with separate owner regressions for exact budgets,
+principal removal and same-generation state/slot mutation.
+
+The first affected Asset/Image run passes 319/319 with one existing ignored case
+(`nara-dependent-refresh-asset-image-first-20261113.log`). The first independent live-refresh
+and durable-build run passes 24/24 with no skips (`14e10791-b466-4658-bde8-cffde55b804d`). These
+are intermediate source scopes, not final qualification after review corrections.
+
+Independent review identifies two lower routing defects. The generic queue-capacity preflight
+initially skipped deletion observations for known published sources. A loaded-value regression
+fails against it with the deleted source still usable (run
+`8c05ea80-d2ec-474b-b378-5ff9ebc37656`). The resolver now observes invalidation and supersedes
+known attempts even when cleanup cannot be queued, without claiming a fresh unknown ID or
+entering Loading. Type conflicts still reject before these mutations.
+
+The original watcher also normalizes metadata sidecar notifications to a principal path. Exact
+raw subscriptions initially missed that provenance and could notify an unrelated source reader
+(red run `7ca8270b-4e66-46ec-8806-aceeb232e931`). Semantic changes now retain independent raw
+source/metadata origin flags through coalescing; the resolver queries only the represented raw
+inputs. Sidecar removal preserves its existing principal invalidation semantics. New watcher
+translator-to-resolver consumers test both Published and Retry sets and keep Image's original
+principal behavior. The initial failing watcher assertions also exposed a test cleanup abort;
+the fixture must retire its original Runtime before resuming any assertion panic.
+
+Root review additionally requires that a partial observation followed by global work/retained
+admission refusal cannot erase a previous retry set. Dedicated actual worker regressions hold
+the original store's allowance after selection reads or before the first auxiliary trace entry;
+they must prove refusal without autonomous retry and recovery from a later input-only event.
+Final qualification below must supersede the intermediate results and include all corrections.
+
+Those two regressions fail against the initial adopter with the real missing `c.txt` retry
+subscription removed (`c0644510-6c54-44c4-9ed4-36ad8dda667b`: 13/15 pass, two fail). The corrected
+adopter preserves retry on global allocation/count refusal and checks that actual replay/domain
+input execution began before replacing a failed-attempt set. The producer retains failure
+classification and exact attempted paths; a nonempty selection prefix is not treated as complete
+execution. Failed I/O/source-byte reads alone may be re-probed under their original bound;
+persistent refusal does not create an autonomous retry loop.
+
+The shared request also binds its original generation resource at issuance. A replacement owner
+cannot revive an old completion by recreating the numeric counter. Different source kinds may
+share a product type with independent authority and per-ID claims; the initial global type
+exclusivity was unnecessary. Root and Image controls exercise old success/failure/removal and
+new-owner recovery. Successful metadata adoption acknowledges its exact dirty observation.
+The independent successor also checks a successful new-input decode whose only change event
+was consumed before that path was subscribed.
+
+Final lower Asset, Watch and Image qualification passes 366/366 with one existing measurement
+case skipped (`e6cc3811-0d80-412e-8f8e-3af3b065c7e7`). It includes the complete Image scope/recovery
+suite, original and new issuer rejection controls, raw-path subscription limits/refunds, source
+notification coalescing and actual watcher-translation-to-resolver consumers. Two fixture
+corrections retain their original assertions: Image request setup uses public typed publication
+instead of a crate-private state setter, and the de-duplication fixture subscribes to the actual
+sidecar raw path rather than its normalized principal. Final bounded independent review reports
+no remaining P1/P2 in the corrected boundaries. Root/public qualification remains separate below.
+
+### Final Dependent Refresh Qualification
+
+All commands use Rust 1.95.0 on Windows x64, `--locked --offline --release`, one build job and
+the original root target. No concurrent Cargo, clean, compiler/dependency upgrade or remote
+publication is part of this unit.
+
+| Executed scope | Actual result |
+| --- | --- |
+| Asset, Watch and Image library tests, all features | 366/366; one existing task-facility measurement ignored. Run `e6cc3811-0d80-412e-8f8e-3af3b065c7e7`. |
+| Root `asset_build`, `runtime_content` and `cooked_content` tests with `project-workflow,tooling` | 111/111; 1,326 unrelated tests filtered. Run `b24920b3-e510-4d80-b0a7-9ca24098effd`. |
+| Complete independently locked asset-domain consumer package | 95/95 with no skips. Run `7266af8c-d577-4980-a191-c25e11ee6473`. Includes six live-refresh trajectories and original source/processed/retained-base/durable consumers. |
+
+The root regressions prove both repaired budget-refusal paths, original generation-owner
+replacement, same-generation slot/state mutation, principal removal and original decoded
+custody. The independent consumer edits actual required/optional inputs, replaces A with B,
+retains last-good while retrying a newly missing input, restores subscriptions on warm reuse,
+and rejects a superseded successful decode. Both failed-input creation and successful-input
+change races consume their sole early source event before subscription and still reach current
+content through the original queue. Metadata-only warm adoption clears the original dirty
+observation without executing the build. Original and successor groups feed actual retained
+Runtime delivery; escaped values and bases keep their own text after source/cache removal.
+
+These are source-authoring/development typed CPU workflows and bounded storage/authority
+checks. The watcher tests exercise real translation and existing runtime watcher ownership;
+they do not qualify every native filesystem or a new watching backend. No GPU/native Editor,
+physical mixed-DPI, numeric performance budget, general processed-input scheduler, streaming,
+automatic immutable Scene/base replacement or full R6/R11/R12 completion is claimed. The
+complete foundation Goal remains active. Final static checks and local commits follow this
+functional qualification; documentation closure does not require rerunning these tests.
+
+The locked/offline release workspace all-target/all-feature check passes, as do the independent
+asset-domain consumer's all-target Clippy gate with `-D warnings` and the owning Asset/Watch/Image/
+root all-target/all-feature gate with `-D clippy::correctness`. Existing general root and
+dependency warnings remain. Two newly added test-only Clippy suggestions are simplified without
+changing assertions, then the lower all-target/all-feature correctness gate passes again.
+Pure Asset, serde-only Asset, minimal root runtime-core and portable `wasm32-unknown-unknown`
+runtime-core production-library checks pass; Wasm is compile-only. These checks make no Rust
+1.100 or foreign-native execution claim. Root and independent formatting, local document links
+and final whitespace/staged-scope checks complete delivery. No new dependency or lockfile
+change belongs to this unit; pre-existing UI/platform working-tree edits remain separate.

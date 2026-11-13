@@ -762,6 +762,13 @@ importer/decoder calls. Reconcile ADRs 0007/0037/0103 for this concrete ownershi
 implementation. This unit adopts neither Proposed0087's general scheduler nor a new watcher
 platform, and can proceed independently of complete CP2 extraction.
 
+The November 13 [execution and qualification record](2026-10-31-local-artifact-build-plan.md#dependent-source-refresh-successor-november-13)
+selects the existing Asset source resolver, Tasks and typed `Assets<T>` as the live receiving
+path. It records complete raw subscriptions, independent retry observations, original request
+issuer identity and bounded immutable decoded custody. The [public workflow](../guides/project-asset-domains.md#live-typed-source-refresh)
+and independent TextBundle trajectory qualify this source-build adapter separately from immutable
+Scene/Runtime content publication, processed-input scheduling and the remainder of R6.
+
 The [ordered importer and delivery plan](2026-10-29-asset-import-and-runtime-delivery-plan.md)
 first moves the existing executing source facet below root/Scene/2D while preserving all actual
 consumers, then qualifies compound continuity and processed delivery. Its

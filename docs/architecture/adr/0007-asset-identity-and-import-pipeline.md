@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-11-02
+**Last Revised**: 2026-11-13
 **Refined By**: ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0050: Asset Root,
 Symlink, Junction, and Package Trust Policy; ADR 0051: Persistent File Envelope, Migration, and
 Golden Fixtures; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
@@ -134,6 +134,13 @@ directory capability and reload tasks, requiring Asset source execution and Task
 remains independently selected. Watchers require Asset source execution and retain their own
 physical-close obligation. Source reload tasks continue to return through the existing Tasks
 owner; dropping a request or job handle does not establish physical completion.
+
+The live typed source-build refinement in [ADR0103](0103-concrete-domain-owned-asset-import-execution.md#live-typed-source-builds-and-dependent-refresh-2026-11-13-refinement)
+joins those phases through an explicitly selected source-kind/type consumer. Canonical raw-path
+subscriptions route real auxiliary changes without requiring auxiliary metadata or UUIDs. Their
+complete successful set changes only with current typed value adoption; a separate bounded
+failed-attempt set supports recovery. Both obey original generation and value/state guards.
+Registration owns routing and type admission, not importer discovery or generic execution.
 
 Default Runtime and presentation composition can therefore execute processed or procedural
 content without source resources or I/O authority. A source Host may own a real database and use

@@ -7,7 +7,9 @@ mod budget;
 mod execute;
 mod format;
 mod images;
+mod live_value;
 mod model;
+mod source_reload;
 mod store;
 
 pub use execute::{
@@ -15,11 +17,13 @@ pub use execute::{
     build_source,
 };
 pub use images::{build_image_import, cook_image_group};
+pub use live_value::BuiltSourceAsset;
 pub use model::{
     ArtifactBuildDefinition, ArtifactBuildError, ArtifactBuildLimits, ArtifactBuildObservation,
     ArtifactBuildOutput, ArtifactBuildSeed, ArtifactContentDigest, ArtifactGroupCandidate,
     ArtifactGroupMember, ArtifactRecipeDigest, ArtifactSeedDigest,
 };
+pub use source_reload::{SourceAssetBuildPlugin, SourceAssetBuildStats};
 pub use store::{
     ArtifactBuildStore, ArtifactCommitReceipt, ArtifactPublicationPoint, VerifiedArtifactGroup,
 };

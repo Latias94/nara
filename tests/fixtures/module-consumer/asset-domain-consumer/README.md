@@ -80,3 +80,32 @@ Runtime pack and managed travel through public APIs. The sibling
 [Image consumer](../tests/durable_image_build.rs) executes actual processed-input cooking for
 different target dimensions. These build operations do not install an importer registry or
 qualify target executable selection, a packaged Player or GPU cooking.
+
+The [dependent-resource refresh consumer](tests/dependent_resource_refresh.rs) installs the
+compiled `SourceAssetBuildPlugin` alongside the public Asset, source-change and Task plugins.
+It reserves a real catalogue record and advances a managed App from one initial source
+observation to `Assets<BuiltSourceAsset<TextBundle>>`. Subsequent refreshes use real file edits
+and `AssetSourceChanges`: required suffix change/deletion/recreation, optional build-suffix
+creation/change/deletion, explicit A-to-B selector and metadata rebind, and removal of obsolete
+inputs. Atomic worker counters check that obsolete and unrelated observations perform no build
+or decode. A fresh App reuses the stored group without executing the domain and restores both
+required and optional subscriptions through actual subsequent refreshes.
+
+The same consumer checks first-load recovery from a missing required input, last-good retention
+and retry subscriptions after selecting a missing new input, creation while a real failing
+build is held, and superseded successful decode completion. Finite consumer-owned worker gates
+make the failure and stale-result cuts deterministic without engine-private hooks. The wrapper
+delegates import, build, codec, identity and budget promises to the actual `TextBundleDomain`.
+The blocked-failure trajectory also repairs a tracked source-byte refusal before its retry
+subscription exists, then checks that a persistent oversized input stops in Failed until a real
+repair observation arrives.
+
+Two further trajectories hold a successful decode while its newly discovered input changes
+before subscription, and hold a metadata-only warm decode until current adoption acknowledges
+the original dirty observation. The first consumes the only early raw event and still reaches
+the current content; the second retains the original group without executing the build again.
+
+Its original and successor live groups also feed the retained Runtime delivery helper; escaped
+built-value owners and immutable Runtime bases retain their respective cooked text after live
+refresh, App replacement and source/cache removal. These are semantic-input and CPU/managed
+Runtime tests; native filesystem watching and GPU residency require their own qualification.

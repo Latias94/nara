@@ -23,6 +23,9 @@ use super::{
     budget::ArtifactBuildLease,
 };
 
+mod observations;
+pub(super) use observations::SourceBuildObservations;
+
 /// Actual authorized source root/scope and compiled operation selected by the Host.
 pub struct ArtifactSourceRequest {
     pub(super) directory: DirectoryCapability,
@@ -171,6 +174,7 @@ pub(super) struct SourceInputs<'a> {
     pub(super) store: &'a ArtifactBuildStore,
     pub(super) request: &'a ArtifactSourceRequest,
     inputs: BTreeMap<AssetSourcePath, Input>,
+    trace: Option<&'a mut SourceBuildObservations>,
 }
 
 impl SourceInputs<'_> {
@@ -182,10 +186,14 @@ impl SourceInputs<'_> {
             store,
             request,
             inputs: BTreeMap::new(),
+            trace: None,
         }
     }
 
     pub(super) fn forget_dependencies(&mut self) {
+        if let Some(trace) = &mut self.trace {
+            trace.retain_selection(self.request);
+        }
         self.inputs.retain(|_, input| {
             if input.local == self.request.path {
                 input.record = true;
@@ -206,6 +214,21 @@ impl SourceInputs<'_> {
         limit: ByteLimit,
         record: bool,
     ) -> Result<Option<Arc<[u8]>>, ArtifactBuildError> {
+        let result = self.read_inner(path, limit, record);
+        if let Err(error) = &result
+            && let Some(trace) = &mut self.trace
+        {
+            trace.failed(path, limit, error);
+        }
+        result
+    }
+
+    fn read_inner(
+        &mut self,
+        path: &AssetPath,
+        limit: ByteLimit,
+        record: bool,
+    ) -> Result<Option<Arc<[u8]>>, ArtifactBuildError> {
         let prefix_bytes = self.request.scope.prefix().map_or(Ok(0), |prefix| {
             prefix
                 .as_str()
@@ -220,6 +243,9 @@ impl SourceInputs<'_> {
             .ok_or(ArtifactBuildError::Overflow)?;
         let path_lease = self.store.reserve_work(path_work)?;
         let canonical = self.request.scope.resolve(path);
+        if let Some(trace) = &mut self.trace {
+            trace.track(self.store, &canonical, path)?;
+        }
         if let Some(input) = self.inputs.get_mut(&canonical) {
             if input
                 .snapshot
@@ -396,6 +422,16 @@ impl SourceInputs<'_> {
     }
 }
 
+impl Drop for SourceInputs<'_> {
+    fn drop(&mut self) {
+        if let Some(trace) = &mut self.trace {
+            for (path, input) in std::mem::take(&mut self.inputs) {
+                trace.capture(&path, input.snapshot);
+            }
+        }
+    }
+}
+
 /// Executes one explicitly selected source/build/codec family or reuses verified current output.
 ///
 /// Metadata identity and normalized settings are admitted before lookup. Every returned input
@@ -412,15 +448,41 @@ where
     D::Settings: Serialize,
 {
     catch_unwind(AssertUnwindSafe(|| {
-        build_source_inner::<D>(store, request, &mut control)
+        build_source_inner::<D>(store, request, &mut control, None)
     }))
     .unwrap_or(Err(ArtifactBuildError::Panicked))
+}
+
+pub(super) struct ObservedSourceBuild {
+    pub(super) result: Result<ArtifactBuildResult, ArtifactBuildError>,
+    pub(super) observations: SourceBuildObservations,
+}
+
+pub(super) fn build_source_observed<D>(
+    store: &ArtifactBuildStore,
+    request: &ArtifactSourceRequest,
+    mut control: impl FnMut(ArtifactPublicationPoint) -> Result<(), ArtifactBuildError>,
+) -> ObservedSourceBuild
+where
+    D: SourceAssetBuild,
+    D::Settings: Serialize,
+{
+    let mut observations = SourceBuildObservations::default();
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        build_source_inner::<D>(store, request, &mut control, Some(&mut observations))
+    }))
+    .unwrap_or(Err(ArtifactBuildError::Panicked));
+    ObservedSourceBuild {
+        result,
+        observations,
+    }
 }
 
 fn build_source_inner<D>(
     store: &ArtifactBuildStore,
     request: &ArtifactSourceRequest,
     control: &mut impl FnMut(ArtifactPublicationPoint) -> Result<(), ArtifactBuildError>,
+    observations: Option<&mut SourceBuildObservations>,
 ) -> Result<ArtifactBuildResult, ArtifactBuildError>
 where
     D: SourceAssetBuild,
@@ -448,6 +510,7 @@ where
         .ok_or(ArtifactBuildError::Overflow)?;
     let _operation = store.reserve_work(fixed_work)?;
     let mut inputs = SourceInputs::new(store, request);
+    inputs.trace = observations;
     let (actual, normalized) = admit_metadata::<D::Settings>(
         &mut inputs,
         &AssetSourceKind::Other(D::SOURCE_KIND.to_owned()),
@@ -476,6 +539,9 @@ where
         )?,
     };
     let reason = if let Some(group) = store.lookup_seed(&seed)? {
+        if let Some(trace) = &mut inputs.trace {
+            trace.begin_input_execution();
+        }
         if let Some(changed) = inputs.replay(group.observations())? {
             inputs.forget_dependencies();
             ArtifactBuildReason::RawInputChanged(changed)
@@ -487,6 +553,9 @@ where
     } else {
         ArtifactBuildReason::NoPriorSuccess
     };
+    if let Some(trace) = &mut inputs.trace {
+        trace.begin_input_execution();
+    }
     let mut read_failure = None;
     let built = {
         let mut reader = |path: &AssetPath, limit| {

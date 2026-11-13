@@ -229,7 +229,7 @@ impl fmt::Display for ArtifactBuildError {
             Self::Aborted => f.write_str("artifact publication was aborted"),
             Self::Panicked => f.write_str("trusted artifact operation panicked"),
             Self::Domain(_) => f.write_str("artifact domain operation was rejected"),
-            Self::Codec(error) => write!(f, "artifact encoder failed: {error}"),
+            Self::Codec(error) => write!(f, "artifact Runtime codec failed: {error}"),
             Self::Image(error) => write!(f, "artifact Image import failed: {error}"),
             Self::Cook(error) => write!(f, "artifact Image cook failed: {error}"),
             Self::DeterminismConflict => {

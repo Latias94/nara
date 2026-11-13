@@ -399,6 +399,77 @@ and [Image cook/delivery consumer](../../tests/fixtures/module-consumer/tests/du
 for complete capability-backed examples. Target executable selection and a packaged Player
 remain separate from these local build operations.
 
+## Live Typed Source Refresh
+
+An authoring or development Host can select `SourceAssetBuildPlugin<D>` to connect this build
+facet to the existing Asset source-change and Tasks phases. It requires `AssetPlugin`,
+`AssetSourcePlugin` and `TaskPlugin`; it does not install a watcher. The Host supplies the same
+actual read capability, canonical scope, compiled definition and shared store used for finite
+builds. The plugin ID is the domain's build ID, and a source kind has one typed consumer.
+Different kinds may use the same product type; their registrations and request authorities
+remain separate, while actual handles are type-checked per asset ID.
+
+```rust,ignore
+use std::sync::Arc;
+use nara::asset::{
+    AssetPlugin, AssetSourcePlugin, AssetServer, ProjectAssetDatabase,
+    AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
+};
+use nara::asset_build::{BuiltSourceAsset, SourceAssetBuildPlugin};
+use nara::tasks::TaskPlugin;
+
+app.add_plugins((
+    AssetPlugin,
+    AssetSourcePlugin,
+    TaskPlugin::new(task_configuration),
+    SourceAssetBuildPlugin::<MyDomain>::new(
+        Arc::clone(&store), source_directory, source_scope, selected_build_definition,
+    ),
+))?;
+app.world_mut()?.resource_mut::<ProjectAssetDatabase>().insert(record.clone())?;
+let handle = app.world_mut()?.resource_mut::<AssetServer>()
+    .reserve_record::<BuiltSourceAsset<MyProduct>>(&record)?;
+app.world_mut()?.resource_mut::<AssetSourceChanges>().push(
+    AssetSourceChange::new(record.path().clone(), AssetSourceChangeKind::Modified),
+)?;
+```
+
+Advance the managed App through its ordinary runtime. Systems read the original
+`Assets<BuiltSourceAsset<MyProduct>>` and `AssetStates` to distinguish Loading, Failed and usable
+content. `value()` borrows the typed product; clone the complete wrapper when retaining it across
+updates. The wrapper retains its original encoded group and decoded reservation together, even
+after replacement. `group()` exposes the closed build recipe; it is distinct from a source
+`ImportRecipeDigest` and is not copied into that state field.
+
+After the initial request, producers only submit semantic `AssetSourceChanges`. The adapter
+derives complete canonical raw-path subscriptions from actual successful reads, including
+optional absence and primary/metadata selection. Auxiliary files need no `.meta` or source UUID.
+Current value adoption replaces the successful set and clears failed-attempt retry inputs;
+successful A-to-B changes remove A. A current source-execution failure preserves last-good and
+records bounded retry inputs. Warm reuse replays current inputs and restores subscriptions without
+executing the domain. Superseded, cancelled or stale completions cannot adopt a value or edges.
+Currentness includes the original issuing generation resource, not only its numeric counter.
+
+Metadata notifications retain their actual raw origin while keeping the existing principal
+invalidation semantics. Explicit producers use `MetaModified` for sidecar changes and
+`AssetSourceChange::metadata_removed` for a sidecar deletion; ordinary `Removed` denotes a source
+file deletion. Coalescing preserves both actual input flags, so a sidecar-only change does not
+refresh a consumer that reads only the source bytes. The native watch translator supplies those
+facts automatically.
+
+Configure the adapter's `with_pending_limit`, original Task/store limits and dependency graph's
+`SourceSubscriptionLimits` for the workload. Admission refusal is diagnosed and retains existing
+recovery inputs; it does not imply an unbounded retry loop. Principal removal revokes usable
+publication even if the request queue refuses cleanup. Logical pending counters in
+`SourceAssetBuildStats<D>` are not evidence of physical worker retirement: obsolete work retains
+its original inputs and allowances until Tasks retires it.
+
+The independent [live refresh consumer](../../tests/fixtures/module-consumer/asset-domain-consumer/tests/dependent_resource_refresh.rs)
+contains complete source editing, rebind, failure/recovery, warm reuse and retained Runtime
+workflows. This adapter updates its explicitly selected typed asset store. Existing immutable
+Source/Processed Scene collections and escaped Runtime bases keep their original publication
+owners; a processed Runtime does not acquire source execution by using a codec.
+
 ## Executable Delivery
 
 Declare the domain package in the game's own Cargo dependencies and register it in the product
