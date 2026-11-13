@@ -74,7 +74,7 @@ pub(crate) use catalogue::asset_record_retained_bytes;
 use closure::{ProjectContentClosureBuilder, ProjectContentClosureDraft};
 pub use closure::{
     ProjectContentClosureReceipt, ProjectContentMemberKind, ProjectContentMemberReceipt,
-    StartupContentClosureReceipt,
+    ProjectSceneContentStamp, StartupContentClosureReceipt,
 };
 pub use delivery::ProjectContentDeliveryReceipt;
 pub(crate) use domains::ProjectAssetDomains;
@@ -367,6 +367,12 @@ impl ProjectContentSnapshot {
         self.inner.content_closure.content_digest()
     }
 
+    /// Copies the content stamp from this snapshot's original admitted source closure.
+    #[must_use]
+    pub fn content_stamp(&self) -> ProjectSceneContentStamp {
+        self.inner.content_closure.stamp()
+    }
+
     /// Returns independently retained source facts, without retaining this decoded generation.
     #[must_use]
     pub fn content_closure(&self) -> ProjectContentClosureReceipt {
@@ -504,6 +510,7 @@ impl ProjectContentSnapshot {
         SceneSource::from_project_content(
             Arc::clone(&self.inner.sources.scenes.selected.compiled),
             Arc::clone(&self.inner.sources),
+            Some(self.content_stamp()),
             self.inner._runtime_lease.clone(),
             self.inner._generation_lease.clone(),
             startup_scene_retained_bytes(&self.inner.sources.scenes.selected.compiled)
@@ -570,6 +577,7 @@ impl ProjectContentSnapshot {
         Ok(SceneSource::from_project_content(
             Arc::new(compiled_candidate),
             Arc::clone(&self.inner.sources),
+            None,
             lease,
             self.inner._generation_lease.clone(),
             retained_bytes,
@@ -4111,6 +4119,47 @@ mod tests {
     };
 
     #[test]
+    fn source_content_stamp_copies_original_closure_facts_without_retaining_budget() {
+        let project = LazyContentProject::new();
+        let (candidate, plan, loader) = project.inputs();
+        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let receipt = snapshot.content_closure();
+        let baseline = loader.budget_snapshot();
+        let stamp = snapshot.content_stamp();
+        let copied = stamp;
+
+        assert_eq!(stamp, copied);
+        assert_eq!(stamp, receipt.stamp());
+        assert_eq!(
+            stamp.schema_fingerprint(),
+            plan.schema_validation().composition_fingerprint()
+        );
+        assert_eq!(stamp.schema_fingerprint(), receipt.schema_fingerprint());
+        assert_eq!(stamp.manifest_digest(), project.digest("nara.toml"));
+        assert_eq!(stamp.manifest_digest(), receipt.manifest_digest());
+        assert_eq!(stamp.content_digest(), receipt.content_digest());
+        assert_eq!(stamp.closure_plan_digest(), receipt.closure_plan_digest());
+        assert_eq!(
+            receipt
+                .members()
+                .iter()
+                .find(|member| member.kind() == ProjectContentMemberKind::Scene)
+                .unwrap()
+                .digest(),
+            project.digest("scenes/startup.scene.json")
+        );
+        assert_eq!(loader.budget_snapshot(), baseline);
+
+        drop(snapshot);
+        assert_eq!(loader.budget_snapshot().active_generations(), 0);
+        assert!(loader.budget_snapshot().active_reservations() > 0);
+        assert_eq!(receipt.stamp(), stamp);
+        drop(receipt);
+        assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+        assert_eq!(copied, stamp);
+    }
+
+    #[test]
     fn runtime_content_loads_mixed_root_records_and_data_declared_assets() {
         let project = LazyContentProject::new();
         let owner = data_owner();
@@ -4904,6 +4953,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(rebound.document(), snapshot.compiled_scene());
+        assert_eq!(rebound.source_content_stamp(), None);
         drop((rebound, snapshot));
         assert_eq!(loader.budget_snapshot().active_reservations(), 0);
     }

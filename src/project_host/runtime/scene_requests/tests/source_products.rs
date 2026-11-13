@@ -278,7 +278,21 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
     for managed in [false, true] {
         let fixture = Fixture::new();
         let root = fixture.root.clone();
-        fixture.with_world(move |world| {
+        let context = fixture.context();
+        let Context::Source {
+            candidate,
+            plan,
+            loader,
+            ..
+        } = context.as_ref()
+        else {
+            unreachable!()
+        };
+        let snapshot = loader.load(candidate, plan).unwrap();
+        let original_closure = snapshot.content_closure();
+        let original_stamp = snapshot.content_stamp();
+        let source = snapshot.scene_source();
+        with_context_world_and_startup(context, source, Some(snapshot), move |world| {
             world.insert_resource(pools());
             write_metadata(
                 &root,
@@ -288,8 +302,41 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
                 AssetSourceKind::Scene,
             );
             let expected = CurrentScene::get(world).unwrap().receipt().clone();
+            let original_source = CurrentScene::get(world).unwrap().source_view();
+            assert_eq!(
+                CurrentScene::get(world).unwrap().source_content_stamp(),
+                Some(original_stamp)
+            );
+            assert_eq!(original_closure.stamp(), original_stamp);
             let request = ProjectScenes::scope(world, |scenes| scenes.request(primary(2))).unwrap();
             wait_for_request(world, request, ProjectSceneRequestState::Ready);
+            let captured_closure = {
+                let owner = world.resource::<RequestOwner>();
+                let Some(Slot::Ready {
+                    content: PreparedSceneContent::Source(snapshot),
+                    ..
+                }) = owner.slot.as_ref()
+                else {
+                    panic!("source preparation retains its original closure receipt")
+                };
+                snapshot.content_closure()
+            };
+            let prepared_stamp = ProjectScenes::scope(world, |scenes| {
+                scenes
+                    .prepared(request)
+                    .unwrap()
+                    .source_content_stamp()
+                    .unwrap()
+            });
+            assert_eq!(prepared_stamp, captured_closure.stamp());
+            assert_ne!(
+                prepared_stamp.content_digest(),
+                original_stamp.content_digest()
+            );
+            assert_ne!(
+                prepared_stamp.closure_plan_digest(),
+                original_stamp.closure_plan_digest()
+            );
             if managed {
                 begin_prepared_project_scene_travel(world, request, limits(), &[], |_| {}).unwrap();
             }
@@ -312,6 +359,12 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
             write_scene(&root, "second.scene.json", "changed-after-capture");
             write_scene(&root, "startup.scene.json", "retargeted");
             assert_eq!(CurrentScene::get(world).unwrap().receipt(), &expected);
+            assert_eq!(original_closure.stamp(), original_stamp);
+            assert_eq!(captured_closure.stamp(), prepared_stamp);
+            assert_eq!(
+                CurrentScene::get(world).unwrap().source_content_stamp(),
+                Some(original_stamp)
+            );
             if managed {
                 world.resource_mut::<nara_app::RealTime>().frame += 1;
                 poll_project_scene_requests(world);
@@ -320,6 +373,7 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
                     let view = scenes.prepared(request).unwrap();
                     assert_eq!(view.selected_scene_product(), Some(primary(2)));
                     assert_eq!(view.selected_scene_path(), Some(&selected()));
+                    assert_eq!(view.source_content_stamp(), Some(prepared_stamp));
                     assert_eq!(
                         view.scene().roots(),
                         [SceneEntityId::new("second").unwrap()]
@@ -338,6 +392,10 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
             });
             let current = CurrentScene::get(world).unwrap();
             assert_ne!(current.receipt().instance_id(), expected.instance_id());
+            assert_eq!(current.source_content_stamp(), Some(prepared_stamp));
+            assert_eq!(original_closure.stamp(), original_stamp);
+            assert_eq!(captured_closure.stamp(), prepared_stamp);
+            assert_eq!(original_source.with_document(|_| ()), None);
             assert_eq!(
                 current.source().roots(),
                 [SceneEntityId::new("second").unwrap()]
@@ -350,6 +408,11 @@ fn source_product_ready_and_queued_publication_never_rediscover_or_retarget() {
                     .path()
                     .as_str(),
                 "scenes/second.scene.json"
+            );
+            let mut access = SystemState::<CurrentScene>::new(world);
+            assert_eq!(
+                access.get(world).unwrap().source_content_stamp(),
+                Some(prepared_stamp)
             );
         });
     }

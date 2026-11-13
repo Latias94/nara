@@ -262,6 +262,21 @@ without manually constructing a system parameter. The returned `CurrentSceneView
 the World borrow. Construct any owned game data while inspecting it, then release the borrow before
 replacement or Restart. Its optional `source_view()` remains weak and cannot extend retired content.
 
+Saved-source Scenes expose `source_content_stamp()` on `CurrentScene` and `CurrentSceneView`.
+`ProjectContentSnapshot::content_stamp()` and a prepared request's `source_content_stamp()` expose
+the same frozen `ProjectSceneContentStamp`; `ProjectContentClosureReceipt::stamp()` copies it
+without retaining decoded content or the receipt's budget. It observes the originally admitted
+Schema fingerprint, manifest, runtime-content digest and full closure-plan digest. Later disk
+edits do not change that observation. Direct, processed and Editor working-copy Scenes return
+`None`; a dirty projection cannot attest the bytes admitted from disk.
+
+The full closure-plan digest includes the admission's ordered directory/member plan and any
+Schema-bundle member. Startup and travel admissions may therefore differ even when their runtime
+content is identical. A game's resume format must select and validate its own compatibility
+facts. Two-Level Game compares per-level manifest/runtime-content digests, global Schema and
+actual App configuration; a source stamp grants neither loading authority nor universal checkpoint
+compatibility. See the [game reconstruction workflow](../../samples/two-level-game/README.md).
+
 Hosted products request startup or a declared delivery root through the `ProjectScenes` system
 parameter. Keep the returned `ProjectSceneRequestId` and observe its state. `Ready` exposes a
 borrowed `prepared(id)` view of the target document, Source/Product selection and expected current

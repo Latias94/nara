@@ -88,7 +88,8 @@ pub use crate::project_content::{
     ProjectContentLimits, ProjectContentLoader, ProjectContentMemberKind,
     ProjectContentMemberReceipt, ProjectContentRevision, ProjectContentSnapshot,
     ProjectDomainAssets, ProjectImageContent, ProjectInputContent, ProjectPrefabContent,
-    ProjectSceneContent, ProjectTileSetContent, StartupContentClosureReceipt,
+    ProjectSceneContent, ProjectSceneContentStamp, ProjectTileSetContent,
+    StartupContentClosureReceipt,
 };
 pub use composition::{
     CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,

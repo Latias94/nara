@@ -44,7 +44,8 @@ use nara_scene::{
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::{
-    ProjectContentGenerationLease, ProjectContentLease, ProjectSourceContent,
+    ProjectContentGenerationLease, ProjectContentLease, ProjectSceneContentStamp,
+    ProjectSourceContent,
 };
 #[cfg(feature = "serde")]
 use crate::scene_retention::direct_runtime_scene_retained_bytes;
@@ -90,6 +91,7 @@ enum SceneRetention {
         _lease: ProjectContentLease,
         _generation: ProjectContentGenerationLease,
         sources: Arc<ProjectSourceContent>,
+        content_stamp: Option<ProjectSceneContentStamp>,
         retained_bytes: usize,
         schema_authority: Arc<nara_scene::SceneComponentBindingsWitness>,
     },
@@ -202,6 +204,7 @@ impl SceneSource {
     pub(crate) fn from_project_content(
         candidate: Arc<CompiledSceneCandidate>,
         sources: Arc<ProjectSourceContent>,
+        content_stamp: Option<ProjectSceneContentStamp>,
         lease: ProjectContentLease,
         generation: ProjectContentGenerationLease,
         retained_bytes: usize,
@@ -213,6 +216,7 @@ impl SceneSource {
                 _lease: lease,
                 _generation: generation,
                 sources,
+                content_stamp,
                 retained_bytes,
                 schema_authority,
             },
@@ -280,6 +284,14 @@ impl SceneSource {
             #[cfg(all(feature = "runtime-2d", feature = "serde"))]
             SceneRetention::RuntimeContent { .. } => false,
             SceneRetention::Direct { .. } => false,
+        }
+    }
+
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    pub(crate) fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
+        match &self.retention {
+            SceneRetention::Project { content_stamp, .. } => *content_stamp,
+            SceneRetention::RuntimeContent { .. } | SceneRetention::Direct { .. } => None,
         }
     }
 
@@ -483,6 +495,16 @@ impl CurrentScene<'_> {
         self.owner.source()
     }
 
+    /// Returns the original admitted source-content stamp for a Project Scene.
+    ///
+    /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
+    /// frozen even if files subsequently change.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[must_use]
+    pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
+        self.owner.source.source_content_stamp()
+    }
+
     /// Returns the successful receipt paired with the admitted source.
     #[must_use]
     pub fn receipt(&self) -> &SpawnedSceneInstance {
@@ -504,6 +526,16 @@ impl CurrentSceneView<'_> {
     #[must_use]
     pub fn source(&self) -> &CompiledSceneDocument {
         self.owner.source()
+    }
+
+    /// Returns the original admitted source-content stamp for a Project Scene.
+    ///
+    /// Direct, processed and Editor working-copy Scenes return `None`. Saved-source stamps stay
+    /// frozen even if files subsequently change.
+    #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+    #[must_use]
+    pub fn source_content_stamp(&self) -> Option<ProjectSceneContentStamp> {
+        self.owner.source.source_content_stamp()
     }
 
     /// Returns the successful receipt paired with the admitted source.
@@ -975,6 +1007,11 @@ mod tests {
             ));
             assert!(std::ptr::eq(current.source(), scheduled.source()));
             assert!(std::ptr::eq(current.receipt(), scheduled.receipt()));
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            {
+                assert_eq!(current.source_content_stamp(), None);
+                assert_eq!(scheduled.source_content_stamp(), None);
+            }
             let source_view = current.source_view();
             let scheduled_view = scheduled.source_view();
             assert!(Weak::ptr_eq(&source_view.source, &scheduled_view.source));

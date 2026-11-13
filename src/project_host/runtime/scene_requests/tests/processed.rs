@@ -104,6 +104,15 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
             world.insert_resource(pools());
             let expected = CurrentScene::get(world).unwrap().receipt().clone();
             let source_view = CurrentScene::get(world).unwrap().source_view();
+            assert_eq!(
+                CurrentScene::get(world).unwrap().source_content_stamp(),
+                None
+            );
+            let mut current_access = SystemState::<CurrentScene>::new(world);
+            assert_eq!(
+                current_access.get(world).unwrap().source_content_stamp(),
+                None
+            );
             ProjectScenes::scope(world, |scenes| {
                 assert_eq!(
                     scenes.request(selected()),
@@ -124,6 +133,7 @@ fn processed_view_and_admission_require_exact_base_product_and_content_mode() {
                     &ProjectSceneSelection::Product(later_product())
                 );
                 assert_eq!(view.selected_scene_path(), None);
+                assert_eq!(view.source_content_stamp(), None);
                 assert_eq!(view.selected_scene_product(), Some(later_product()));
                 assert_eq!(view.expected_instance(), &expected);
                 assert_eq!(view.scene().roots(), [entity("later")]);

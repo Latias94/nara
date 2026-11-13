@@ -116,6 +116,17 @@ pub struct PreparedProjectSceneView<'a> {
 }
 
 impl PreparedProjectSceneView<'_> {
+    /// Returns the original admitted source-content stamp for this prepared Project Scene.
+    ///
+    /// Processed content returns `None`. Committing source content preserves this frozen stamp.
+    #[must_use]
+    pub fn source_content_stamp(&self) -> Option<crate::project_content::ProjectSceneContentStamp> {
+        match self.content {
+            PreparedSceneContent::Source(snapshot) => Some(snapshot.content_stamp()),
+            PreparedSceneContent::Processed(_) => None,
+        }
+    }
+
     /// Typed CPU data prepared for the target Scene, before its explicit commit.
     #[must_use]
     pub fn domain_assets(&self) -> &crate::project_host::ProjectDomainAssets {

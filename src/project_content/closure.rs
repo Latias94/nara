@@ -69,6 +69,43 @@ impl ProjectContentMemberReceipt {
     }
 }
 
+/// Frozen content observations copied from an admitted source Scene closure receipt.
+///
+/// This small value retains no source authority, decoded content or budget. It describes the
+/// original admitted closure, not live filesystem validity or a universal checkpoint/catalog
+/// identity. Physical file identity and process-local settings lineage remain with the receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProjectSceneContentStamp {
+    schema_fingerprint: SchemaCompositionFingerprint,
+    manifest_digest: ContentDigest,
+    content_digest: ContentDigest,
+    closure_plan_digest: ContentDigest,
+}
+
+impl ProjectSceneContentStamp {
+    #[must_use]
+    pub const fn schema_fingerprint(self) -> SchemaCompositionFingerprint {
+        self.schema_fingerprint
+    }
+
+    #[must_use]
+    pub const fn manifest_digest(self) -> ContentDigest {
+        self.manifest_digest
+    }
+
+    /// Returns the admitted runtime-content digest, excluding manifest and schema-bundle facts.
+    #[must_use]
+    pub const fn content_digest(self) -> ContentDigest {
+        self.content_digest
+    }
+
+    /// Returns the admitted ordered directory/member plan, including manifest and schema bundle.
+    #[must_use]
+    pub const fn closure_plan_digest(self) -> ContentDigest {
+        self.closure_plan_digest
+    }
+}
+
 /// Ordered, bounded source facts for one explicitly selected Scene content closure.
 ///
 /// This receipt retains source facts and their budget, not decoded Scene or Image values. Its
@@ -99,6 +136,17 @@ pub(super) struct ProjectContentClosureReceiptInner {
 }
 
 impl ProjectContentClosureReceipt {
+    /// Copies the original admitted content observations without retaining this receipt's budget.
+    #[must_use]
+    pub fn stamp(&self) -> ProjectSceneContentStamp {
+        ProjectSceneContentStamp {
+            schema_fingerprint: self.inner.schema_fingerprint,
+            manifest_digest: self.inner.manifest_digest,
+            content_digest: self.inner.content_digest,
+            closure_plan_digest: self.inner.closure_plan_digest,
+        }
+    }
+
     #[must_use]
     pub fn selected_scene_path(&self) -> &ProjectPath {
         &self.inner.selected_scene_path
