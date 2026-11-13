@@ -1926,6 +1926,7 @@ dependencies = [
  "nara_ecs",
  "nara_input",
  "nara_window",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

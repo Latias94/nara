@@ -7,6 +7,8 @@ pub mod levels;
 pub mod resume;
 pub mod save;
 
+#[cfg(feature = "desktop")]
+pub use gameplay::movement_keyboard_bindings;
 pub use gameplay::resume::{GameResumeError, capture_resume, request_resume};
 pub use gameplay::{
     GamePhase, GameSnapshot, RunOptions, Scenario, configured_recipe, product_recipe,

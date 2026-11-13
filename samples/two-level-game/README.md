@@ -222,7 +222,11 @@ oracle and platform limits belong to the
 [desktop development plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-development-and-original-native-session).
 This consumer does not yet reconstruct a desktop game or adopt a rebuilt executable. Its visual
 expectation is not an authoritative `ResumeState` capture; complete desktop service eligibility
-and held-input transfer remain required before extending the development Host to this placement.
+and canonical restoration remain required before extending the development Host to this placement.
+The keyboard-continuation trajectory additionally starts isolated, restores the actual movement
+bindings without Started, and reconciles a key released before focus acquisition. One original
+exact Step must stop movement before native activation. This exercises the input prerequisite;
+it does not qualify a rebuilt desktop candidate.
 
 ## Ownership And Limits
 

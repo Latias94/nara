@@ -63,5 +63,6 @@ fn public_desktop_poll_controls_real_gameplay_and_retires_original_native_owners
     assert!(receipt.containment_empty() && receipt.readers_stopped() && receipt.output_drained());
     assert!(!receipt.force_killed());
     assert!(!process.output_loss_observed());
+    assert!(output.contains("two_level_desktop_keyboard: ok restored_hold=true release_gap_reconciled=true stopped_before_movement=true"), "{output}");
     assert!(output.contains("two_level_desktop_control: ok paused_capture=true exact_steps=true ordinary_gameplay=true original_native_retired=true"), "{output}");
 }

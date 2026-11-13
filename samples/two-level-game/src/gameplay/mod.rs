@@ -2,6 +2,8 @@ mod commands;
 mod content;
 #[cfg(feature = "desktop")]
 mod input;
+#[cfg(feature = "desktop")]
+pub use input::movement_keyboard_bindings;
 pub(crate) mod resume;
 mod storage;
 mod travel;

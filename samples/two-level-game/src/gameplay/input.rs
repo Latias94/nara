@@ -19,6 +19,41 @@ const DECLARATION: PluginDeclaration = PluginDeclaration::new(ID, PluginCategory
         nara::gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
     ]);
 
+/// Movement keys in command-payload direction order: left, right, up, down.
+pub(crate) const MOVE_KEYS: [KeyCode; 4] = [
+    KeyCode::Character('a'),
+    KeyCode::Character('d'),
+    KeyCode::Character('w'),
+    KeyCode::Character('s'),
+];
+
+pub(crate) fn movement_action(direction: usize) -> Option<ActionId> {
+    let KeyCode::Character(key) = MOVE_KEYS.get(direction)? else {
+        return None;
+    };
+    Some(ActionId::new(format!("two-level-game.move-{key}")).expect("static movement action"))
+}
+
+pub(crate) fn movement_binding(direction: usize) -> Option<ActionBinding> {
+    let key = *MOVE_KEYS.get(direction)?;
+    Some(
+        ActionBinding::key(movement_action(direction)?, key)
+            .with_context(ActionContext::gameplay()),
+    )
+}
+
+/// Exact keyboard Button declarations corresponding to the game's four held movement bits.
+pub fn movement_keyboard_bindings() -> [nara::input::KeyboardActionBinding; 4] {
+    std::array::from_fn(|direction| {
+        let binding = movement_binding(direction).expect("static movement binding");
+        nara::input::KeyboardActionBinding {
+            key: MOVE_KEYS[direction],
+            action: binding.action,
+            context: binding.context,
+        }
+    })
+}
+
 #[derive(Default)]
 pub(super) struct DesktopInputPlugin;
 impl Plugin for DesktopInputPlugin {
@@ -30,11 +65,10 @@ impl Plugin for DesktopInputPlugin {
         builder
             .declare_context(ActionContext::gameplay(), true)
             .map_err(action_map_error)?;
-        for (direction, key) in ['a', 'd', 'w', 's'].into_iter().enumerate() {
-            let id = ActionId::new(format!("two-level-game.move-{key}")).unwrap();
-            builder
-                .bind(ActionBinding::key(id.clone(), KeyCode::Character(key)))
-                .map_err(action_map_error)?;
+        for direction in 0..MOVE_KEYS.len() {
+            let binding = movement_binding(direction).expect("static movement binding");
+            let id = binding.action.clone();
+            builder.bind(binding).map_err(action_map_error)?;
             for (phase, pressed) in [(ActionPhase::Started, true), (ActionPhase::Released, false)] {
                 bind(app, id.clone(), phase, movement(direction, pressed))?;
             }
@@ -89,3 +123,6 @@ fn bind(
             message: error.to_string(),
         })
 }
+
+#[cfg(test)]
+mod tests;

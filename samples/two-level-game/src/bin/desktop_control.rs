@@ -23,6 +23,7 @@ use nara::{
     project_host::{
         DesktopControlError, DesktopPresentationControl, DesktopRun, DesktopRunIntent,
         DesktopRunOptions, DesktopRunOutcome, DesktopRunProgress, WinitEventLoop,
+        WinitInputActivation,
     },
     window::{
         WindowId,
@@ -80,6 +81,7 @@ fn main() -> ExitCode {
         .with_event_loop(event_loop)
         .with_initial_pause()
         .with_initial_visibility(false)
+        .with_input_isolation(true)
         .with_presentation_observer(move |observation| {
             if let Some(world) = observation.world() {
                 observed
@@ -242,6 +244,8 @@ impl Game {
         let moved = self.snapshot()?;
         assert_eq!(moved.held, [false, true, false, false]);
         assert!(moved.player.x > initial.player.x);
+        self.qualify_keyboard_release_gap()?;
+        self.step(Some(movement(true)?))?;
         for _ in 0..120 {
             if self.snapshot()?.score == 10 {
                 break;
@@ -326,6 +330,77 @@ impl Game {
             .map_err(|error| error.to_string())?;
         self.expected = Some(expected);
         assert!(self.run.capture(|_| ()).is_ok());
+        Ok(())
+    }
+
+    fn qualify_keyboard_release_gap(&mut self) -> Result<(), String> {
+        let bindings = two_level_game::movement_keyboard_bindings();
+        let held = self.snapshot()?.held;
+        assert_eq!(held, [false, true, false, false]);
+        let pending = bindings
+            .iter()
+            .cloned()
+            .zip(held)
+            .map(|(binding, held)| nara::input::KeyboardHold { binding, held })
+            .collect();
+        self.run
+            .restore_keyboard_holds(pending)
+            .map_err(|error| error.to_string())?;
+        assert!(self.run.capture(|_| ()).is_err());
+        self.settle()?;
+        let observed = self
+            .run
+            .capture_keyboard_holds(&bindings)
+            .map_err(|error| error.to_string())?;
+        assert_eq!(
+            observed.iter().map(|hold| hold.held).collect::<Vec<_>>(),
+            held
+        );
+        assert_eq!(
+            self.run.input_activation(),
+            Some(WinitInputActivation::Isolated)
+        );
+        assert!(self.run.request_control(RuntimeControl::Resume).is_err());
+        self.run.reveal().map_err(|error| error.to_string())?;
+        self.settle()?;
+        self.run
+            .request_input_activation()
+            .map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if let Some(error) = self.run.input_activation_error() {
+                return Err(error.to_string());
+            }
+            match self.run.input_activation() {
+                Some(WinitInputActivation::AwaitingFocus) => self.poll(deadline)?,
+                Some(WinitInputActivation::ReconciliationPending) => break,
+                state => {
+                    return Err(format!(
+                        "keyboard release-gap fixture requires D physically up and focused reconciliation, got {state:?}"
+                    ));
+                }
+            }
+        }
+        self.settle()?;
+        assert!(self.run.capture_keyboard_holds(&bindings).is_err());
+        let before = self.snapshot()?;
+        self.step(None)?;
+        assert_eq!(self.snapshot()?.held, [false; 4]);
+        assert_eq!(self.snapshot()?.player, before.player);
+        while self.run.input_activation() != Some(WinitInputActivation::Active) {
+            self.poll(deadline)?;
+        }
+        self.settle()?;
+        assert!(
+            self.run
+                .capture_keyboard_holds(&bindings)
+                .map_err(|error| error.to_string())?
+                .iter()
+                .all(|hold| !hold.held)
+        );
+        println!(
+            "two_level_desktop_keyboard: ok restored_hold=true release_gap_reconciled=true stopped_before_movement=true"
+        );
         Ok(())
     }
 
