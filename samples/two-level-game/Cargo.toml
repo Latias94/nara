@@ -33,3 +33,9 @@ path = "src/bin/headless.rs"
 name = "desktop"
 path = "src/bin/desktop.rs"
 required-features = ["desktop"]
+
+[[bin]]
+name = "continuity"
+path = "src/bin/continuity.rs"
+test = true
+bench = false
