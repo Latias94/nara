@@ -40,6 +40,14 @@ queue. Paused drives still maintain real-time tasks, rendering and cleanup witho
 simulation time. After startup, use Runtime controls to keep lifecycle state and time policy
 in agreement rather than treating the settings resource as a second control queue.
 
+An exact-tick `HeadlessRun` performs one paused maintenance frame before its requested fixed
+transactions, including when Startup already paused the Runtime. This entry frame lets real-time
+tasks publish readiness without running variable gameplay or advancing simulation. An exit from
+that frame ends the run before any fixed tick. Ordinary frame-mode runs execute only their
+requested complete frames; they do not receive an additional exact-mode entry frame.
+Readiness is still required before stepping. Use frame mode when initialization needs further
+service passes rather than assuming that one maintenance frame completes asynchronous work.
+
 Construct the App on the thread that will drive and retire it. App, sealed candidates, runtime
 instances and failure/retirement owners are non-Send/non-Sync because their World may retain
 thread-affine or NonSend state. Transfer a replayable recipe or definition to another thread and

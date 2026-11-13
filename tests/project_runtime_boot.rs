@@ -41,6 +41,7 @@ use nara::{
         PluginHook, PluginId, PluginPreflightContext, PluginShutdownContext,
         PluginShutdownObligationId, RuntimeCloseContext, RuntimeCloseParticipant,
         RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
+        RuntimeTimeSettings, StartupStage,
     },
     diagnostic::{DiagnosticReport, DiagnosticValueRef},
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
@@ -1067,6 +1068,138 @@ fn product_action_distinguishes_complete_frames_from_exact_fixed_ticks() {
             &HeadlessRunOutcome::Completed(FrameStages(expected)),
             "{report:#?}"
         );
+    }
+}
+
+#[derive(Debug, Resource)]
+struct MaintenanceReady(bool);
+
+#[derive(Debug, Default)]
+struct InitiallyPausedPlugin<const REQUIRE_MAINTENANCE: bool>;
+
+impl<const REQUIRE_MAINTENANCE: bool> Plugin for InitiallyPausedPlugin<REQUIRE_MAINTENANCE> {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.initially-paused-headless"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            StartupStage::Core,
+            |mut settings: ResMut<RuntimeTimeSettings>| settings.set_paused(true),
+        )?;
+        if REQUIRE_MAINTENANCE {
+            app.insert_resource(MaintenanceReady(false))?
+                .add_simulation_condition(|world| world.resource::<MaintenanceReady>().0)?
+                .add_systems(
+                    CoreStage::TaskUpdate,
+                    |mut ready: ResMut<MaintenanceReady>| {
+                        ready.0 = true;
+                    },
+                )?;
+        }
+        Ok(())
+    }
+}
+
+fn initially_paused_exact_tick_product<const REQUIRE_MAINTENANCE: bool>() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<FrameStagesPlugin>()
+        .unwrap()
+        .add_plugin::<InitiallyPausedPlugin<REQUIRE_MAINTENANCE>>()
+        .unwrap();
+    let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
+    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+    let report = execute_to_terminal(&mut run);
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(FrameStages(vec!["task", "last", "fixed", "fixed"])),
+        "{report:#?}"
+    );
+    assert!(!report.diagnostics().has_errors());
+}
+
+#[test]
+fn initially_paused_exact_tick_product_runs_maintenance_before_stepping() {
+    initially_paused_exact_tick_product::<false>();
+}
+
+#[test]
+fn initially_paused_exact_tick_product_can_restore_readiness_in_maintenance() {
+    initially_paused_exact_tick_product::<true>();
+}
+
+#[test]
+fn initially_paused_frame_product_runs_only_its_requested_maintenance_frames() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<FrameStagesPlugin>()
+        .unwrap()
+        .add_plugin::<InitiallyPausedPlugin<false>>()
+        .unwrap();
+    let intent = HeadlessRunIntent::frames(NonZeroU32::new(2).unwrap(), Duration::from_millis(20))
+        .with_recipe(recipe);
+    let mut run = HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+    let report = execute_to_terminal(&mut run);
+    assert_eq!(
+        report.outcome(),
+        &HeadlessRunOutcome::Completed(FrameStages(vec!["task", "last", "task", "last"])),
+        "{report:#?}"
+    );
+}
+
+#[derive(Debug, Default)]
+struct MaintenanceExitPlugin;
+
+impl Plugin for MaintenanceExitPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        const DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("nara.test.maintenance-exit"),
+            PluginCategory::Runtime,
+        );
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(
+            CoreStage::TaskUpdate,
+            |mut exit: ResMut<AppExitRequests>| {
+                exit.request_exit();
+            },
+        )?;
+        Ok(())
+    }
+}
+
+#[test]
+fn exact_tick_product_honors_exit_from_entry_maintenance_without_stepping() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    for initially_paused in [false, true] {
+        let mut recipe = ProductRecipe::new()
+            .add_plugin::<FrameStagesPlugin>()
+            .unwrap()
+            .add_plugin::<MaintenanceExitPlugin>()
+            .unwrap();
+        if initially_paused {
+            recipe = recipe.add_plugin::<InitiallyPausedPlugin<false>>().unwrap();
+        }
+        let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap()).with_recipe(recipe);
+        let mut run =
+            HeadlessRun::<FrameStages>::new(project.root_capability(), intent, Vec::new());
+        let report = execute_to_terminal(&mut run);
+        assert_eq!(
+            report.outcome(),
+            &HeadlessRunOutcome::Completed(FrameStages(vec!["task", "last"])),
+            "initially_paused={initially_paused}: {report:#?}"
+        );
+        assert!(!report.diagnostics().has_errors());
     }
 }
 

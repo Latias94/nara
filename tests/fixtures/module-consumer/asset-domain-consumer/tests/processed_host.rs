@@ -14,11 +14,11 @@ use std::{
 };
 
 use nara::{
-    ProductRecipe, SchemaContribution,
-    advanced_prelude::{CurrentScene, add_startup_scene_activation_systems},
+    ProductConfiguration, ProductRecipe, SchemaContribution,
+    advanced_prelude::{CurrentScene, SceneSourceView, add_startup_scene_activation_systems},
     app::{
-        App, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-        PluginSchemaProviderId,
+        App, AppExitRequests, CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError,
+        PluginId, PluginSchemaProviderId, PluginShutdownContext, RuntimeTimeSettings, StartupStage,
     },
     asset::{
         AssetDependencyGraph, AssetMeta, AssetMetaIdentity, AssetMetaIdentityCandidate, AssetPath,
@@ -26,7 +26,7 @@ use nara::{
         AssetSourceRoot, ProjectAssetDatabase,
     },
     core::{ByteLimit, FormatKind, FormatVersion, ItemLimit},
-    ecs::{Component, Resource, World},
+    ecs::{Component, ResMut, Resource, World},
     fs::ContentDigest,
     identity::{EntityLookup, SpawnedSceneInstance},
     project::{ProductCapability, ProjectPath, RuntimeConfiguration, RuntimePreset},
@@ -137,17 +137,147 @@ impl Plugin for HostProbePlugin {
 
 fn recipe() -> ProductRecipe {
     // Selecting the Runtime facet of this source-capable domain never selects its importer.
+    probe_recipe::<_, true>(SchemaContribution::<HostProbePlugin>::for_default([PROVIDER]).unwrap())
+}
+
+fn probe_recipe<P: Plugin, const OBSERVE: bool>(
+    contribution: SchemaContribution<P>,
+) -> ProductRecipe {
     ProductRecipe::new()
-        .add_contribution(SchemaContribution::<HostProbePlugin>::for_default([PROVIDER]).unwrap())
+        .add_contribution(contribution)
         .unwrap()
-        .add_runtime_asset_codec::<TextBundleDomain, ObservedCodec<false>>(
+        .add_runtime_asset_codec::<TextBundleDomain, ObservedCodec<false, OBSERVE>>(
             RuntimeCodecDefinitionId::new("consumer.processed-host.text-bundle", 1),
         )
         .unwrap()
-        .add_runtime_asset_codec::<TextBundleDomain, ObservedCodec<true>>(
+        .add_runtime_asset_codec::<TextBundleDomain, ObservedCodec<true, OBSERVE>>(
             RuntimeCodecDefinitionId::new("consumer.processed-host.alternate-text-bundle", 1),
         )
         .unwrap()
+}
+
+#[derive(Clone)]
+struct ExactEntryConfiguration {
+    initially_paused: bool,
+    exit_on_maintenance: bool,
+    shutdowns: Arc<AtomicU64>,
+}
+
+impl ProductConfiguration for ExactEntryConfiguration {
+    fn write_canonical(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(b"consumer.processed-host.exact-entry.v1");
+        output.extend_from_slice(&[
+            u8::from(self.initially_paused),
+            u8::from(self.exit_on_maintenance),
+        ]);
+    }
+}
+
+struct ExactEntryPlugin(ExactEntryConfiguration);
+
+impl Plugin for ExactEntryPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        static DECLARATION: PluginDeclaration = PluginDeclaration::new(
+            PluginId::new("consumer.processed-host.exact-entry"),
+            PluginCategory::Runtime,
+        )
+        .requires_plugins(&[nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID])
+        .provides_schema(&[PROVIDER_ID]);
+        &DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let initially_paused = self.0.initially_paused;
+        let exit_on_maintenance = self.0.exit_on_maintenance;
+        app.init_resource::<ExactEntryOutcome>()?
+            .add_systems(
+                StartupStage::Core,
+                move |mut settings: ResMut<RuntimeTimeSettings>| {
+                    settings.set_paused(initially_paused);
+                },
+            )?
+            .add_simulation_condition(|world| world.resource::<ExactEntryOutcome>().ready)?
+            .add_systems(CoreStage::TaskUpdate, move |world: &mut World| {
+                record_exact_entry(world, "task");
+                let mut outcome = world.resource_mut::<ExactEntryOutcome>();
+                assert!(!outcome.ready);
+                outcome.ready = true;
+                if exit_on_maintenance {
+                    world.resource_mut::<AppExitRequests>().request_exit();
+                }
+            })?
+            .add_systems(CoreStage::PreUpdate, |world: &mut World| {
+                record_exact_entry(world, "pre");
+            })?
+            .add_systems(CoreStage::FixedUpdate, |world: &mut World| {
+                record_exact_entry(world, "fixed");
+            })?
+            .add_systems(CoreStage::Update, |world: &mut World| {
+                record_exact_entry(world, "update");
+            })?
+            .add_systems(CoreStage::Last, |world: &mut World| {
+                record_exact_entry(world, "last");
+            })?;
+        add_startup_scene_activation_systems(app, move |world: &mut World| {
+            assert_eq!(
+                world.resource::<RuntimeTimeSettings>().paused(),
+                initially_paused,
+            );
+            assert_processed_resources(world);
+            let (receipt, allocations) = inspect_live(world, false);
+            let source = CurrentScene::get(world).unwrap().source_view();
+            assert_eq!(
+                source.with_runtime_scene(|scene| scene.source_key().clone()),
+                Some(SourceDocumentKey::stable_asset(
+                    stable(STARTUP),
+                    SourceDocumentKind::Scene,
+                )),
+            );
+            assert!(source.with_compiled_scene(|_, _| ()).is_none());
+            let mut outcome = world.resource_mut::<ExactEntryOutcome>();
+            assert!(!outcome.ready);
+            assert!(outcome.stages.is_empty());
+            outcome.startup_receipt = Some(receipt);
+            outcome.startup_source = Some(source);
+            outcome.startup_allocation = allocations[0];
+        })?;
+        Ok(())
+    }
+
+    fn shutdown(&self, _context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        self.0.shutdowns.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, Resource)]
+struct ExactEntryOutcome {
+    stages: Vec<&'static str>,
+    ready: bool,
+    startup_receipt: Option<SpawnedSceneInstance>,
+    startup_source: Option<SceneSourceView>,
+    startup_allocation: usize,
+}
+
+fn record_exact_entry(world: &mut World, stage: &'static str) {
+    assert_processed_resources(world);
+    let (receipt, allocations) = inspect_live(world, false);
+    let current = CurrentScene::get(world).unwrap();
+    let outcome = world.resource::<ExactEntryOutcome>();
+    assert_eq!(Some(&receipt), outcome.startup_receipt.as_ref());
+    assert_eq!(allocations[0], outcome.startup_allocation);
+    assert_eq!(
+        outcome
+            .startup_source
+            .as_ref()
+            .unwrap()
+            .with_runtime_scene(|scene| std::ptr::eq(scene.document(), current.source())),
+        Some(true),
+    );
+    if stage != "task" {
+        assert!(outcome.ready);
+    }
+    world.resource_mut::<ExactEntryOutcome>().stages.push(stage);
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -409,6 +539,10 @@ fn assert_last_good(world: &World) {
 fn assert_source_free(world: &World) {
     let probe = CODEC_PROBE.0.lock().unwrap();
     assert!(!probe.removed_root.as_ref().unwrap().exists());
+    assert_processed_resources(world);
+}
+
+fn assert_processed_resources(world: &World) {
     assert!(!world.contains_resource::<ProjectAssetDatabase>());
     assert!(!world.contains_resource::<AssetDependencyGraph>());
     assert!(!world.contains_resource::<AssetSourceRoot>());
@@ -600,9 +734,11 @@ fn assert_counts(expected: [usize; 3]) {
 
 /// Both formats delegate actual domain decoding, cost and Product membership to the library.
 /// The alternate format changes only the envelope kind, exercising one family's format routing.
-struct ObservedCodec<const ALTERNATE: bool>;
+struct ObservedCodec<const ALTERNATE: bool, const OBSERVE: bool = true>;
 
-impl<const ALTERNATE: bool> RuntimeAssetCodec<TextBundle> for ObservedCodec<ALTERNATE> {
+impl<const ALTERNATE: bool, const OBSERVE: bool> RuntimeAssetCodec<TextBundle>
+    for ObservedCodec<ALTERNATE, OBSERVE>
+{
     const RUNTIME_KIND: &'static str = if ALTERNATE {
         "consumer_text_bundle_alternate"
     } else {
@@ -640,6 +776,9 @@ impl<const ALTERNATE: bool> RuntimeAssetCodec<TextBundle> for ObservedCodec<ALTE
         } else {
             TextBundleDomain::decode_runtime(encoded)?
         };
+        if !OBSERVE {
+            return Ok(product);
+        }
         let mut probe = CODEC_PROBE.0.lock().unwrap();
         let index = if product.source() == stable(BUNDLE_A) {
             0
@@ -755,6 +894,88 @@ fn source_free_headless_host_keeps_last_good_and_commits_compound_collections() 
     }
 }
 
+fn processed_exact_entry(initially_paused: bool, exit_on_maintenance: bool) -> ExactEntryOutcome {
+    let shutdowns = Arc::new(AtomicU64::new(0));
+    let contribution = SchemaContribution::<ExactEntryPlugin>::configured(
+        ExactEntryConfiguration {
+            initially_paused,
+            exit_on_maintenance,
+            shutdowns: Arc::clone(&shutdowns),
+        },
+        |configuration| ExactEntryPlugin(configuration.clone()),
+        [PROVIDER],
+    )
+    .unwrap();
+    let (base, removed_root) =
+        Fixture::with_recipe(probe_recipe::<_, false>(contribution)).capture_and_remove_content();
+    assert!(!removed_root.exists());
+    let options = HeadlessRunOptions::new(NonZeroU32::new(2).unwrap())
+        .with_cleanup_timeout(Duration::from_millis(10));
+    let mut run = HeadlessRun::<ExactEntryOutcome>::from_runtime_content(base, options, Vec::new());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let report = run.execute_bounded();
+        assert!(report.startup_content_closure().is_none());
+        match report.outcome() {
+            HeadlessRunOutcome::Completed(outcome) => {
+                assert!(
+                    !report.diagnostics().has_errors(),
+                    "initially_paused={initially_paused}, exit_on_maintenance={exit_on_maintenance}: {report:#?}",
+                );
+                assert!(outcome.ready);
+                assert!(outcome.startup_receipt.is_some());
+                assert!(
+                    outcome
+                        .startup_source
+                        .as_ref()
+                        .unwrap()
+                        .with_runtime_scene(|_| ())
+                        .is_none(),
+                    "the original processed Scene owner must retire before completion",
+                );
+                assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+                assert!(!removed_root.exists());
+                let repeated = run.execute_bounded();
+                assert!(repeated.startup_content_closure().is_none());
+                let HeadlessRunOutcome::Completed(repeated_outcome) = repeated.outcome() else {
+                    panic!("completed processed Host changed its terminal state: {repeated:#?}")
+                };
+                assert_eq!(repeated_outcome.stages, outcome.stages);
+                assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+                return outcome.clone();
+            }
+            HeadlessRunOutcome::Failed => panic!(
+                "processed exact entry failed with initially_paused={initially_paused}, exit_on_maintenance={exit_on_maintenance}: {report:#?}",
+            ),
+            HeadlessRunOutcome::CleanupIncomplete => {
+                assert!(
+                    Instant::now() < deadline,
+                    "processed exact-entry cleanup did not return: {report:#?}",
+                );
+                yield_worker();
+            }
+        }
+    }
+}
+
+#[test]
+fn initially_paused_processed_exact_entry_restores_readiness_before_two_ticks() {
+    let outcome = processed_exact_entry(true, false);
+    assert_eq!(outcome.stages, ["task", "last", "fixed", "fixed"]);
+}
+
+#[test]
+fn processed_exact_entry_honors_maintenance_exit_without_stepping() {
+    for initially_paused in [false, true] {
+        let outcome = processed_exact_entry(initially_paused, true);
+        assert_eq!(
+            outcome.stages,
+            ["task", "last"],
+            "initially_paused={initially_paused}",
+        );
+    }
+}
+
 struct Fixture {
     root: PathBuf,
     expected: RuntimeContentExpectation,
@@ -763,6 +984,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_recipe(recipe())
+    }
+
+    fn with_recipe(recipe: ProductRecipe) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "nara-processed-host-consumer-{}-{}",
@@ -773,7 +998,6 @@ impl Fixture {
         fs::create_dir(root.join("authoring")).unwrap();
         fs::create_dir(root.join("runtime")).unwrap();
         fs::write(root.join("authoring/suffix.txt"), b" runtime").unwrap();
-        let recipe = recipe();
         let mut configuration = RuntimeConfiguration::default();
         configuration.runtime.preset = RuntimePreset::LocalHeadless;
         configuration.capabilities.requested = vec![ProductCapability::Runtime2d];
@@ -897,6 +1121,12 @@ impl Fixture {
     }
 
     fn capture_and_remove(self) -> RuntimeContentBase {
+        let (base, root) = self.capture_and_remove_content();
+        CODEC_PROBE.0.lock().unwrap().removed_root = Some(root);
+        base
+    }
+
+    fn capture_and_remove_content(self) -> (RuntimeContentBase, PathBuf) {
         let base = RuntimeContentBase::open(
             &open_explicit_product_project_root(&self.root).unwrap(),
             &self.expected,
@@ -907,8 +1137,7 @@ impl Fixture {
         let root = checked_fixture_root(&self.root);
         fs::remove_dir_all(&root).unwrap();
         assert!(!root.exists());
-        CODEC_PROBE.0.lock().unwrap().removed_root = Some(root);
-        base
+        (base, root)
     }
 }
 

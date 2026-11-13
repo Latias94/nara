@@ -83,6 +83,10 @@ impl<O> fmt::Debug for HeadlessRunOptions<O> {
 }
 
 impl<O> HeadlessRunOptions<O> {
+    /// Runs exact fixed transactions after one paused maintenance frame.
+    ///
+    /// Entry maintenance also runs when Startup already paused the Runtime. An exit from that
+    /// frame ends the run before any fixed transaction.
     #[must_use]
     pub fn new(fixed_ticks: NonZeroU32) -> Self {
         Self {
@@ -137,7 +141,8 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
 impl<O> HeadlessRunIntent<O> {
     /// Runs exactly this many fixed transactions, without normal gameplay frame stages.
     ///
-    /// Entering exact-step mode first runs one paused maintenance frame.
+    /// Entering exact-step mode first runs one paused maintenance frame, including an initially
+    /// paused Runtime. An exit from maintenance ends the run before any fixed transaction.
     /// Use [`Self::frames`] when gameplay requires local input collection, background result
     /// integration, variable updates or other normal frame work.
     #[must_use]
@@ -753,11 +758,19 @@ where
             }
         }
 
+        let mut preparation = match drive {
+            HeadlessDrive::ExactTicks(_) => Some(host.prepare_exact_tick_run()),
+            HeadlessDrive::Frames { .. } => None,
+        };
         let mut terminal_outcome = None;
         for _ in 0..drive.count() {
-            let driven = match drive {
-                HeadlessDrive::ExactTicks(_) => host.drive_one_fixed_tick(),
-                HeadlessDrive::Frames { real_delta, .. } => host.drive_one_frame(real_delta),
+            let driven = match preparation.take() {
+                Some(Ok(Some(exit))) => Ok(Some(exit)),
+                Some(Err(fault)) => Err(fault),
+                Some(Ok(None)) | None => match drive {
+                    HeadlessDrive::ExactTicks(_) => host.drive_one_fixed_tick(),
+                    HeadlessDrive::Frames { real_delta, .. } => host.drive_one_frame(real_delta),
+                },
             };
             let app_exit = match driven {
                 Ok(app_exit) => app_exit,

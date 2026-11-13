@@ -1152,6 +1152,9 @@ preserves the final configured/Startup time policy through public Runtime promot
 [two-level marker recovery](2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 keeps the committed Scene source/receipt while repairing game-owned dynamic representation and
 retiring it on later travel. Their bounded CPU evidence does not complete R10 or the rebaseline.
+The [Headless exact-entry successor](2026-11-03-joint-motion-execution-plan.md#headless-exact-run-entry-maintenance-november-13)
+follows the initial-pause contract through source and processed product Hosts, with explicit
+one-time paused maintenance, readiness publication and exit before any exact transaction.
 
 **Design:** D09. **State:** the [joint motion/execution unit](2026-11-03-joint-motion-execution-plan.md)
 has bounded independent, captured-discontinuity Windows/DX12 and same-World prediction/offline-PCM

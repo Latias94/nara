@@ -1320,11 +1320,11 @@ impl ProjectHost {
         Ok(exit)
     }
 
-    fn drive_one_fixed_tick(&mut self) -> Result<Option<AppExit>, HostFault> {
+    fn prepare_exact_tick_run(&mut self) -> Result<Option<AppExit>, HostFault> {
         let ProjectHostSlot::Running(published) = &mut self.slot else {
             return Err(HostFault::new(single_error(
                 "project.run.runtime-unavailable",
-                "Project runtime is not available for a fixed tick",
+                "Project runtime is not available for exact-step preparation",
             )));
         };
 
@@ -1336,7 +1336,7 @@ impl ProjectHost {
             self.delivered_runtime_fault = Some(generation);
             return Err(HostFault::new(runtime_scope_failure_report(fault)));
         }
-        if runtime.state() == RuntimeState::Running {
+        let pause = if runtime.state() == RuntimeState::Running {
             let RuntimeControlRequestResult::Accepted(pause) =
                 runtime.request_control(RuntimeControl::Pause)
             else {
@@ -1345,18 +1345,53 @@ impl ProjectHost {
                     "Project runtime rejected exact-step preparation",
                 )));
             };
-            runtime.drive(Duration::ZERO).map_err(|error| {
-                self.delivered_runtime_fault = Some(generation);
-                HostFault::new(runtime_scope_failure_report(error.fault()))
-            })?;
-            if runtime.state() != RuntimeState::Paused
-                || runtime.control_status(pause) != Some(RuntimeControlStatus::Applied)
-            {
-                return Err(HostFault::new(single_error(
-                    "project.run.pause-failed",
-                    "Project runtime could not enter exact-step mode",
-                )));
-            }
+            Some(pause)
+        } else if runtime.state() == RuntimeState::Paused {
+            None
+        } else {
+            return Err(HostFault::new(single_error(
+                "project.run.exact-step-unavailable",
+                "Project runtime is not available for exact-step preparation",
+            )));
+        };
+        let outcome = runtime.drive(Duration::ZERO).map_err(|error| {
+            self.delivered_runtime_fault = Some(generation);
+            HostFault::new(runtime_scope_failure_report(error.fault()))
+        })?;
+        if runtime.state() != RuntimeState::Paused
+            || pause.is_some_and(|ticket| {
+                runtime.control_status(ticket) != Some(RuntimeControlStatus::Applied)
+            })
+        {
+            return Err(HostFault::new(single_error(
+                "project.run.pause-failed",
+                "Project runtime could not enter exact-step mode",
+            )));
+        }
+        let frame = outcome.frame().ok_or_else(|| {
+            HostFault::new(single_error(
+                "project.run.frame-unavailable",
+                "Project runtime did not execute exact-step entry maintenance",
+            ))
+        })?;
+        verify_published_runtime_registry(runtime.world(), &expected)?;
+        Ok(frame.exit)
+    }
+
+    fn drive_one_fixed_tick(&mut self) -> Result<Option<AppExit>, HostFault> {
+        let ProjectHostSlot::Running(published) = &mut self.slot else {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-unavailable",
+                "Project runtime is not available for a fixed tick",
+            )));
+        };
+        let expected = published._plan.schema_validation().bindings().clone();
+        let generation = published.runtime().generation();
+        verify_published_runtime_registry(published.runtime().world(), &expected)?;
+        let runtime = published.runtime_mut();
+        if let Some(fault) = runtime.fault() {
+            self.delivered_runtime_fault = Some(generation);
+            return Err(HostFault::new(runtime_scope_failure_report(fault)));
         }
         if runtime.state() != RuntimeState::Paused {
             return Err(HostFault::new(single_error(

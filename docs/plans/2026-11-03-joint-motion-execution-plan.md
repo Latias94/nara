@@ -183,3 +183,80 @@ The [managed Runtime guide](../guides/managed-runtime-runner.md) describes the i
 precedence. This correction adds no gameplay-state machine, background-window policy, new
 scheduler or native presentation qualification. Full R4c/R10 and the foundation rebaseline
 remain open.
+
+## Headless exact-run entry maintenance (November 13)
+
+Follow the public startup-pause correction through the original product Host. An exact-tick
+`HeadlessRunIntent` promises one paused maintenance frame before its fixed transactions; the
+current private driver infers first entry solely from `RuntimeState::Running`. Starting paused
+can skip task integration and reject a product whose simulation readiness is restored there.
+The same driver discards an App exit returned by its entry maintenance frame before stepping.
+
+Reproduce both behaviors through the public HeadlessRun and compiled product recipe. Separate
+the Host's explicit once-per-run exact-mode preparation from its one-exact-tick operation.
+Preparation must use the same published Runtime, apply Pause only when needed, drive one paused
+maintenance frame, retain original registry/fault admission, and propagate exit before a fixed
+transaction. Frame-mode runs retain their existing path and time policy. Do not add another
+Runtime, clock, scheduler, retry loop, preparation flag or generalized driver abstraction.
+
+Pinned Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`,
+`crates/bevy_app/src/main_schedule.rs::Main::run_main`, keeps one-time startup orchestration
+separate from ordinary schedule dispatch. This supports an explicit existing-Host phase here;
+it is not an exact-step API to copy or evidence of Nara behavior.
+
+Acceptance covers initially Running/Paused entry, maintenance-restored readiness, two exact
+ticks with a single maintenance frame, exit before the first fixed tick, unchanged ordinary
+frame/zero-scale behavior, original cleanup/fault delivery, source and processed product entry.
+Independently review the changed Host boundary and run focused serial release nextest followed
+by the affected public/core consumer controls. This is a runtime successor; Editor UI and mixed
+DPI remain deferred, and the full foundation rebaseline remains active.
+
+The public pre-fix run `93f1bd03-dc23-42bc-ac74-9dd3d2767e6b` passes the existing exact/frame
+control and fails both initially-paused cases: one observes only two fixed stages, while the
+readiness case fails with `project.run.exact-step-rejected`. Run
+`c7e081ec-0bb0-434d-a3f3-4f4c1d7ba0a0` passes the initially-paused ordinary-frame control but
+fails entry Exit, observing `task, last, fixed, fixed` instead of `task, last`. These are executed
+release-mode public product regressions, not inferred failures or performance measurements.
+
+The corrected public startup cohort `f55989c8-662e-4f2c-88d9-9a73544e45f6` passes 21/21 with no
+skips. Besides all four new tests it retains stable Image/TileSet publication, source-closure
+continuity, tick/frame limits, fixed-tick exit, terminal snapshots, exact command admission and
+same-owner incomplete cleanup. A separate source/test correctness review finds no confirmed
+P1/P2. The extended four-mode fault/retirement control exercises an already reported fault;
+it does not independently inject a new fault during entry maintenance.
+
+The independently locked processed Host cohort `5b296e64-7fa6-4c7d-b2ca-5f4aeae7d9e3` passes
+3/3 with no skips, including both new exact-entry cases and the original compound-asset travel
+test. Actual `RuntimeContentBase` input is captured before removing its input directory. The
+new cases preserve the original Scene receipt, processed document and asset allocation through
+entry and ticks, observe weak source retirement and one shutdown, and retain a stable repeated
+terminal result without a source Check receipt. These cases decode through the same domain
+codec without recording in the existing travel test's shared counters; its test body and
+assertions remain unchanged.
+
+Both executed cohorts use Rust 1.95.0, offline locked dependencies, release mode, one build job,
+the original root target and serial nextest on Windows. Root qualification selects
+`runtime-2d,serde,project-tooling` without default features; the independent consumer retains its
+own declared feature closure. Reproduction targets are:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara --no-default-features --features runtime-2d,serde,project-tooling --test project_runtime_boot --test-threads=1 --no-fail-fast --no-tests fail
+cargo +1.95.0 nextest run --locked --offline --release --manifest-path tests/fixtures/module-consumer/Cargo.toml -p nara-asset-domain-consumer --test processed_host --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Final affected Host/public run `925bfe82-6940-48d3-8e5f-8331404a7528` passes 71/71: 50 Host
+tests plus the 21 public startup tests. The other 781 library tests are outside this filter,
+not newly qualified. This includes exact stepping, four-mode reported-fault/retirement handling,
+real task shutdown, incomplete same-owner cleanup, original startup/publication failures,
+processed Input custody and Scene request cancellation/travel. The command is:
+
+```text
+cargo +1.95.0 nextest run --locked --offline --release -p nara --no-default-features --features runtime-2d,serde,project-tooling --lib --test project_runtime_boot -E 'test(project_host::runtime::tests::) | binary(project_runtime_boot)' --test-threads=1 --no-fail-fast --no-tests fail
+```
+
+Correctness Clippy passes for the root library/public startup target with that feature selection
+and for the independently locked `processed_host` target. Root-package and asset-domain-consumer
+format checks, added document links/fragments and staged whitespace checks pass. Existing
+non-correctness warnings remain. This qualifies the bounded Headless entry replacement on
+Windows CPU execution; it supplies no native presentation, other-platform, seat/gamepad,
+asynchronous-initialization completion or whole-R10 qualification.

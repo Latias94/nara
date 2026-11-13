@@ -6894,6 +6894,7 @@ fn product_tick_uses_one_exact_step() {
         .resource::<nara_app::FixedTime>()
         .tick();
 
+    assert_eq!(host.prepare_exact_tick_run().unwrap(), None);
     assert_eq!(host.drive_one_fixed_tick().unwrap(), None);
 
     let ProjectHostSlot::Running(published) = &host.slot else {
@@ -6942,8 +6943,9 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
 
 #[test]
 fn reported_execution_fault_is_not_reemitted_by_runtime_retirement() {
-    let drives: [fn(&mut ProjectHost) -> Result<(), HostFault>; 3] = [
+    let drives: [fn(&mut ProjectHost) -> Result<(), HostFault>; 4] = [
         |host| host.drive_one_frame(Duration::ZERO).map(|_| ()),
+        |host| host.prepare_exact_tick_run().map(|_| ()),
         |host| host.drive_one_fixed_tick().map(|_| ()),
         |host| host.drive_running_runtime(Duration::ZERO),
     ];
@@ -7670,6 +7672,7 @@ fn real_task_shutdown_retains_the_host_epoch_and_owner_until_later_drives_comple
     let epoch = attempt.epoch;
     host.complete_start(&mut attempt).unwrap();
     let first_generation = running_generation(&host);
+    assert_eq!(host.prepare_exact_tick_run().unwrap(), None);
     assert_eq!(host.drive_one_fixed_tick().unwrap(), None);
 
     let stop_started = std::time::Instant::now();

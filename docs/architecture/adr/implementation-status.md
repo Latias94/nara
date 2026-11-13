@@ -2438,6 +2438,18 @@ an initially paused configuration. The release-mode App library/public cohort pa
 with one explicit skip on Windows. This does not qualify gameplay-state transitions, desktop
 background policy or complete R4c/R10.
 
+The November 13 [Headless exact-entry successor](../../plans/2026-11-03-joint-motion-execution-plan.md#headless-exact-run-entry-maintenance-november-13)
+separates once-per-run product preparation from individual fixed transactions under the same
+ADR0039/0084 Runtime owner. Entry always drives one paused maintenance frame, including an
+initially paused Runtime, and can restore simulation readiness there. Entry Exit stops before
+any fixed transaction through the original result/retirement path. Normal frame-mode driving
+retains its original policy. The final affected cohort passes 71/71, comprising 50 Host tests
+and all 21 selected public startup tests;
+the independent processed Host cohort passes 3/3, including exact original Scene/source/asset
+custody and shutdown observations after removing input files. Both retain Windows CPU scope;
+the linked plan distinguishes the RED evidence, independent review and remaining scope. This
+adds no scheduler, public phase interface, gameplay-state machine or native qualification.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
