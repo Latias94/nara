@@ -61,6 +61,27 @@ Use `request_control` and `drive` for pause, resume, exact fixed-tick stepping, 
 close. A request is accepted separately from the later operation result; inspect its ticket with
 `control_status` after a drive. Stop is finite only when the runtime reaches `RuntimeState::Stopped`.
 
+Use `drive(delta)` when the Host supplies the next interval explicitly, including finite headless
+or controlled simulation. Native wall-clock runners use `drive_elapsed(delta)` for an interval
+that already elapsed under the previous state. If it entered paused and Resume applies, that
+single drive completes the original paused App transaction: RealTime includes the wait, virtual
+time and fixed pending phase do not advance, and the returned state is Running. The next native
+interval runs normally. No extra App frame or sampling reset is introduced; Stop still produces
+no frame, and an exact step retains its original one-tick policy. A control's Applied result
+does not erase a fault in the ensuing App transaction.
+
+`capture_time_continuation()` requires a healthy full paused frame and no pending control.
+Its portable value records actual timestep, caps, catch-up policy, scale, maximum delta and
+pending virtual time. It contains no prior Runtime/frame/tick identity. Construct a value from
+validated settings with `RuntimeTimeContinuation::new`, then apply it through
+`restore_time_continuation(value)` at the receiving paused boundary. Policy must match exactly.
+The owner preserves local time history and derives interpolation from pending time. Complete
+another full paused frame before capture; exact stepping does not replace that maintenance.
+
+An ordinary rejection changes no time. `RuntimeTimeContinuationError::Faulted` retains whether
+initialization already applied and any refused output separately from its original sticky fault.
+The game still owns full state eligibility, service classification and its logical clock.
+
 For a finite headless or one-shot loop, `finish` consumes the runtime and performs one finite close
 attempt. Success returns `RuntimeCloseEvidence`. An incomplete attempt or terminal shutdown failure
 returns `RuntimeRetirement`; retain it and poll `drive_retirement`, inspecting both its state and

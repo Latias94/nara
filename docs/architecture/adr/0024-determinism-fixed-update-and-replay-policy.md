@@ -102,6 +102,22 @@ these simulation properties. Real runtime faults retain ADR 0084's sticky-fault 
 close/reconstruction contract. The bounded prediction comparison does not select general STM,
 a distributed runtime, a universal VM snapshot or a mandatory author language.
 
+### Fresh-Runtime Scheduling Continuation
+
+The time owner may capture a portable fixed scheduling continuation at a healthy, complete
+paused App-frame boundary. It includes unconsumed virtual time and the actual timestep,
+work/debt caps, catch-up policy, scale and maximum delta. These policy facts must match the
+receiving Runtime. PreserveDebt continuations retain at most the configured whole-tick debt;
+the owner never clears phase to make incompatible state acceptable.
+
+Controlled application preserves the candidate's own Runtime identity and real/virtual/fixed
+history counters. It changes only pending scheduling phase and its derived interpolation state,
+then requires a new paused maintenance frame before capture. A fresh game candidate may apply
+it before its isolated reconstruction command: exact steps and paused maintenance preserve
+that phase. Game state and logical time remain the game's separate reconstruction inventory.
+Refusal has no time mutation; a fault after application retains the applied fact and original
+fault. No operation runs user schedules or exposes mutable World access during initialization.
+
 ## Alternatives Considered
 
 ### Option A: Best-effort frame-rate-dependent simulation

@@ -63,7 +63,18 @@ The product contract is:
   advances immediately before each fixed schedule run.
 - **Render interpolation** uses fixed overstep/interpolation data and must not mutate simulation
   state.
+- Fresh-runtime continuation carries pending fixed scheduling phase and actual time policy
+  through the original managed time owner. The receiver validates its own policy, preserves its
+  local clock history and derives interpolation from the applied phase. Initialization is outside
+  an active frame and invalidates the previous completed-paused boundary; the next full paused
+  maintenance frame reestablishes it. ADR0024 owns the bounded continuation contract.
 - `run_once(delta)` receives real elapsed time. It must not silently mean virtual or fixed delta.
+- Managed `drive(delta)` accepts an explicit next interval. A native runner instead delivers
+  already elapsed wall-clock intervals through `drive_elapsed(delta)`. When that interval began
+  paused, applying Resume settles one original paused App transaction: RealTime receives the
+  full interval, existing fixed debt/phase stay intact, and virtual advancement starts with the
+  next interval. Stop creates no settling frame, and exact-step semantics remain unchanged.
+  Neither path resets the native sampling baseline or silently drops elapsed time.
 - The managed path calls the same App-owned frame transactions through `RuntimeInstance::drive`.
   Platform adapters do not reconstruct clocks or invoke `App::run_once` behind runtime lifecycle
   state.

@@ -29,6 +29,7 @@ use crate::{
 mod close;
 mod fault_route;
 mod owner;
+mod time_continuation;
 
 pub use close::{
     RuntimeClosePendingParticipant, RuntimeObligationLedger, RuntimeObligationLedgerError,
@@ -155,9 +156,10 @@ pub(crate) fn validate_managed_runtime_authority(
     let fault = (world.get_resource::<RuntimeGeneration>() != Some(&generation))
         .then(runtime_fault_bridge_authority_fault)
         .or_else(|| {
-            authorities
-                .iter()
-                .find_map(|owner| (owner.validator)(world, Some(generation)).err())
+            authorities.iter().find_map(|owner| {
+                let result = (owner.validator)(world, Some(generation));
+                reporter.fault().or_else(|| result.err())
+            })
         })
         .or_else(|| {
             validate_runtime_fault_bridge_authority(
@@ -2112,6 +2114,7 @@ pub struct RuntimeInstance {
     next_control_ticket: u64,
     stop_ticket: Option<RuntimeControlTicket>,
     active_close_ticket: Option<RuntimeControlTicket>,
+    last_frame_kind: Option<RuntimeFrameKind>,
 }
 
 impl Debug for RuntimeInstance {
@@ -2251,6 +2254,7 @@ impl RuntimeInstance {
             next_control_ticket: 1,
             stop_ticket: None,
             active_close_ticket: None,
+            last_frame_kind: None,
         }
     }
 
@@ -2525,6 +2529,44 @@ impl RuntimeInstance {
         &mut self,
         real_delta: Duration,
     ) -> Result<RuntimeDriveOutcome, RuntimeDriveError> {
+        self.drive_with_interval(real_delta, false)
+    }
+
+    /// Delivers elapsed wall-clock time sampled by a native runner.
+    ///
+    /// If the Runtime entered this interval paused, Resume settles that elapsed interval through
+    /// one original paused App transaction. Real time advances fully; virtual time and existing
+    /// fixed debt remain paused until the next interval. Explicit [`Self::drive`] input retains
+    /// its supplied next-interval behavior. Stop and exact-step control keep their original path.
+    pub fn drive_elapsed(
+        &mut self,
+        real_delta: Duration,
+    ) -> Result<RuntimeDriveOutcome, RuntimeDriveError> {
+        self.drive_with_interval(real_delta, true)
+    }
+
+    fn drive_with_interval(
+        &mut self,
+        real_delta: Duration,
+        elapsed_interval: bool,
+    ) -> Result<RuntimeDriveOutcome, RuntimeDriveError> {
+        let paused_interval = elapsed_interval && self.state() == RuntimeState::Paused;
+        self.last_frame_kind = None;
+        let result = self.drive_inner(real_delta, paused_interval);
+        if let Ok(outcome) = &result
+            && outcome.frame().is_some_and(|frame| frame.exit.is_none())
+            && self.fault().is_none()
+        {
+            self.last_frame_kind = outcome.frame_kind();
+        }
+        result
+    }
+
+    fn drive_inner(
+        &mut self,
+        real_delta: Duration,
+        paused_interval: bool,
+    ) -> Result<RuntimeDriveOutcome, RuntimeDriveError> {
         if self.state != RuntimeState::Stopped
             && let Some(fault) = self.owner.reporter().fault()
         {
@@ -2628,7 +2670,12 @@ impl RuntimeInstance {
 
         match self.state {
             RuntimeState::Running => {
-                let frame = self.drive_app_frame(real_delta, RuntimeFrameMode::Running)?;
+                let mode = if paused_interval {
+                    RuntimeFrameMode::Paused
+                } else {
+                    RuntimeFrameMode::Running
+                };
+                let frame = self.drive_app_frame(real_delta, mode)?;
                 Ok(RuntimeDriveOutcome {
                     state: self.state,
                     frame: Some(frame),

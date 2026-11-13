@@ -27,6 +27,7 @@ use thiserror::Error;
 mod failure_metadata;
 mod plugin;
 mod runtime;
+mod time_continuation;
 
 pub use plugin::{
     AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCategory,
@@ -42,6 +43,9 @@ pub use plugin::{
     SealedApp,
 };
 pub use runtime::*;
+pub use time_continuation::{
+    RuntimeTimeContinuation, RuntimeTimeContinuationError, RuntimeTimeContinuationRejection,
+};
 
 #[doc(hidden)]
 pub mod __private {
