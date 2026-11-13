@@ -1,7 +1,7 @@
 # Nara UI Integration And Product Development Handoff
 
 Prepared November 12, 2026 for the Nara development session.
-Updated November 13, 2026 with qualified intrinsic geometry and reproduced native sample gaps.
+Updated November 13, 2026 with qualified native input entry and Editor quality priorities.
 The Nara foundation rebaseline remains active. This document is a navigation and handoff record;
 Accepted ADRs retain architecture authority, and executable results retain their stated scope.
 The separate framework roadmap belongs to Open-GPUI's
@@ -23,6 +23,12 @@ local Jellyflow `74f7f54`; the subsequent `0a9453a` Workflow repair closes its t
 sample failures. Exact qualification and remaining scope are recorded below.
 The complete native Dialogue product remains open. Continue from those boundaries
 without repeating the standalone connection or treating library readiness as a completed editor.
+
+The November 13 user feedback prioritizes cross-monitor movement/DPI, unnecessary redraw work
+and a coherent Editor visual workflow before further catalogue expansion. Follow
+[UI quality and component development](#ui-quality-and-component-development) below. The full
+Dialogue product remains the next integration deliverable; this quality work does not replace
+its external-document, multiline, popup, Session/file or preview requirements.
 
 ## Start Here
 
@@ -499,3 +505,100 @@ and 1/1 on Vulkan, six unselected per run. These actual GPU controls retain pixe
 controls, captured movement, Undo, independent navigation and retirement. They do not qualify
 the complete external-domain Dialogue desktop product. The linked plan owns exact runs,
 review scope and the still-open multiline/property/popup, Session/file and preview acceptance.
+
+### Ordinary Window Input Entry
+
+Nara `1cea9f6` sends node/control clicks, captured movement and middle-button pan through the
+ordinary Winit input converter, with explicit focus loss/regain and physical coordinates.
+The complete original GPU trajectory passes on DX12 and Vulkan at actual scale 1.5. The
+[qualification](2026-11-12-dialogue-graph-integration-plan.md#interactive-entry-follow-up)
+retains exact runs, unchanged assertions and its direct-platform-input exceptions. The visible
+title identifies its drag region. Physical desktop drag delivery remains an unresolved user
+observation; these injected events do not close it.
+
+## UI Quality And Component Development
+
+The user's two-monitor Zed comparison is evidence against treating desktop arrangement as a
+sufficient explanation of the Nara movement failure. The independently drawn source Editor
+currently uses Winit and Nara's earlier controls, not the maintained GPUI Windows window or
+`open-gpui-ui-components`. The standalone GPUI graph also uses Nara's Winit-hosted surface.
+Distinguish those native entry points when reproducing the report. Do not imply that Zed,
+the framework's native Windows adapter and Nara's external Host share one window implementation.
+
+The read-only Windows comparison finds two concrete differences, not a reproduced cause.
+Winit 0.30.13's `platform_impl/windows/event_loop.rs` preserves logical client size during
+`WM_DPICHANGED`, adjusts the title-bar grab position and may search positions to reconcile the
+selected monitor. The pinned GPUI Windows `events.rs` applies Windows' suggested rectangle.
+Their move-loop scheduling also differs: GPUI has a native movement timer, while Winit can
+synchronously enter Nara painting from `WM_PAINT`. No current drawn cursor-confinement or
+forced-position loop was found. A real title-bar move/DPI trace must distinguish a rectangle
+that fails to cross from a moved window whose content stops presenting. Injected normalized
+events and programmatic placement cannot validate the native title-bar correction branch.
+
+### Component Responsibilities
+
+Continue the existing layers rather than starting another general UI framework:
+
+| Layer | Responsibility and first consumers |
+| --- | --- |
+| Open-GPUI runtime and platform/render adapters | Element/Entity lifecycle, layout, text, input/focus/IME, custom drawing, admitted presentation and resource lifetime. Keep Nara's original device/queue/Host integration. |
+| Existing `open-gpui-ui-core` and `open-gpui-ui-components` | Reusable control behavior and concrete GPUI controls: Button, TextInput/Textarea, NumberInput, Select, Tree/Table, menus, scrolling and virtualization. These component implementations are fork-owned code, not automatically validated by Zed's upstream runtime pedigree. |
+| Nara Editor theme and components | Design Kit palette, measured density/typography/icon recipes, toolbar/document tabs, property rows and groups, resource-reference fields, hierarchy rows, tool feedback and graph property composition. Session/document/history and graph authority stay with their current owners. |
+
+Use the [complete Design Kit reference](../design/editor-reference/README.md), especially its
+Scene/Inspector and Properties sheets. Its graphite surfaces, restrained teal emphasis,
+compact alignment and explicit state hierarchy are the visual direction. Preserve sRGB input
+conversion through the existing color contract. Reconcile actual font faces, CJK fallback,
+baseline metrics and enlarged text instead of shrinking text or synthesizing weight to match
+the picture. Effects lacking a current drawing capability remain explicit gaps, with simpler
+coherent rendering until their owner can support them.
+
+Build Nara components through real pages before extracting another package. Generic controls
+must work without Nara dependencies; Nara-specific controls may compose them or author ordinary
+custom GPUI elements. There is no mandatory widget registry or second focus/input implementation.
+Editor and game UI can reuse appropriate mechanisms without sharing one product skin.
+
+Component state is View-local: drafts, expansion, scroll, focus and popup state must survive
+compatible parent updates through stable identity and original subscriptions. Accepted values,
+selection facts, dirty state and command completion come from Nara's existing owners. Choose
+Entity boundaries around independently updating regions through the real page, and observe
+notification/render/layout work for a single-field edit. Reusing control code or a Scene packet
+does not by itself establish incremental layout or cheap whole-Editor refresh.
+
+### Immediate Work And Acceptance
+
+1. Reproduce movement on the actual native entry. Compare both directions across negative
+   desktop coordinates and different DPI/work areas. Observe Moved, ScaleFactorChanged, Resized,
+   client/outer bounds and event-loop responsiveness. Audit minimum-size constraints, resize
+   reconciliation and synchronous rendering during the native move loop. Verify ordinary
+   dragging separately from programmatic placement; keep the user's report open until the
+   corresponding path works. Moving an existing native window is distinct from moving docked
+   Views between windows and does not require a new docking owner.
+2. Attribute the current performance complaint before claiming a release improvement. The
+   source audit confirms that every converted event, including ordinary pointer movement,
+   requests redraw. Ordinary Hierarchy also marks paint dirty unconditionally, and Inspector
+   builds its description before immutable snapshot reuse. Panel images already reuse an
+   unchanged original frame. Refine visible-state invalidation through original reducers;
+   `consumed` alone is not a redraw decision. Preserve exposure, geometry, business updates,
+   pending presentation and deadlines. Measure quiet idle, movement within a control and
+   boundary crossings, with description/layout/text/upload/composite/present CPU work separated.
+3. Make the current Source page usable: compact the command region, give editing content
+   space, clarify selection/document/source context and align existing property rows. Keep
+   this frontend's changes bounded; the reusable product component catalogue and complete
+   docking/workspace development belong to the GPUI route.
+4. Exercise the selected framework controls in the complete Dialogue consumer: multiline
+   editing, number/text properties, Select/menu popups and two native Views. A named defect
+   gets a focused regression at its original control or integration owner; report library
+   defects to the independent maintenance session against the fixed source pin. A catalogue
+   listing or old aggregate green tests do not prove these combined native interactions.
+5. Qualify Nara's first coherent visual page with actual accepted-frame captures and real
+   editing, Cancel/Apply, Undo/Redo and Save/Reopen. Check keyboard/focus, invalid/disabled/
+   read-only/pending/result combinations, long paths/CJK and the actual available DPI/work-area
+   transitions. Docking, foreign-platform execution, physical IME and numeric performance
+   budgets retain their own unexecuted scope. Do not qualify the page through static mockups.
+
+The November 13 visual review inspected the two reference PNGs and implementation source, not
+the live application's pixels. The performance review was also source-only: the prior debug
+process had already exited, so no current CPU/FPS sample exists. The release Editor build is a
+comparison prerequisite, not evidence of a speedup. Full Editor visual acceptance and R11e
+cost acceptance remain open.

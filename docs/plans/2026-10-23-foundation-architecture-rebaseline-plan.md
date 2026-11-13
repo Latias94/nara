@@ -3516,6 +3516,22 @@ and explicit workflow feedback; it does not establish a finished component catal
 Editor visual acceptance. Qualify further recipes through complete visual consumers rather than
 treating the Shell's arrangement as their public interface.
 
+**November 13 user feedback and next work:** the visible source page still needs substantial
+visual refinement. Prioritize its native cross-monitor/DPI and unnecessary-redraw investigation
+alongside one coherent editable visual page. Zed moves successfully on the same two monitors;
+desktop arrangement alone does not close Nara's movement report. The current drawn Editor uses
+Winit and the earlier Nara controls, while the GPUI graph uses Nara's external Winit Host;
+neither is the upstream Zed native window implementation. Keep physical reports distinct from
+injected input qualification.
+
+The [component responsibility and quality sequence](2026-11-12-nara-ui-integration-handoff.md#ui-quality-and-component-development)
+builds on existing `open-gpui-ui-core`/`open-gpui-ui-components`, then Nara theme and Editor
+composites. Those generic components are fork-owned implementations and need focused acceptance
+in their actual consumer. Preserve the selected full Dialogue workflow as the next GPUI product
+integration; do not expand the earlier frontend into a second full component catalogue. Current
+source evidence exposes unconditional pointer-event redraw and description-before-cache work,
+but establishes no current release/GPU timing or complete visual acceptance.
+
 **Sources:** the [November 5 style/layout study](../research/2026-10-27-custom-drawn-editor-ui-boundaries.md#november-5-style-layout-and-component-library-readiness)
 pins Zed GPUI/Open-GPUI, upstream `repo-ref/imgui` and `repo-ref/godot`. The
 [UI design](../architecture/ui-foundation-design.md#style-layout-and-visual-component-readiness)
