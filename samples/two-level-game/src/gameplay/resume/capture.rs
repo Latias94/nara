@@ -88,7 +88,14 @@ pub(super) fn eligible(world: &World) -> Result<(), GameResumeError> {
 /// refuse capture. This value contains no World identity or native-service authority.
 pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
-    session.capture(|world| capture_world(world, runtime_time))?
+    session.capture(|world| {
+        if world.contains_resource::<nara::window::backend::WindowPresentationRequirement>() {
+            return Err(GameResumeError::Ineligible(
+                "native presentation requires the desktop capture boundary".into(),
+            ));
+        }
+        capture_world(world, runtime_time)
+    })?
 }
 
 /// Captures the same game-owned state through a real healthy paused desktop Runtime.
@@ -99,10 +106,17 @@ pub fn capture_resume(session: &HeadlessSession) -> Result<ResumeState, GameResu
 #[cfg(feature = "desktop")]
 pub fn capture_desktop_resume(session: &DesktopRun) -> Result<ResumeState, GameResumeError> {
     let runtime_time = RuntimeTimeState::from_continuation(session.capture_time_continuation()?)?;
-    session.capture(|world| capture_world(world, runtime_time))?
+    let holds = session.capture_keyboard_holds(&crate::movement_keyboard_bindings())?;
+    let state = session.capture(|world| capture_world(world, runtime_time))??;
+    if holds.iter().map(|hold| hold.held).ne(state.held) {
+        return Err(GameResumeError::Ineligible(
+            "game movement intent differs from the original keyboard inventory".into(),
+        ));
+    }
+    Ok(state)
 }
 
-fn capture_world(
+pub(crate) fn capture_world(
     world: &World,
     runtime_time: RuntimeTimeState,
 ) -> Result<ResumeState, GameResumeError> {

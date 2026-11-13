@@ -12,7 +12,7 @@ use nara::{
 };
 use serde::Deserialize;
 use two_level_game::{
-    development::protocol::{MAX_STEP_COMMANDS, SemanticCommand},
+    development::protocol::{DevelopmentPlacement, MAX_STEP_COMMANDS, SemanticCommand},
     resume::{ResumeState, encode_resume},
 };
 
@@ -27,6 +27,7 @@ pub(super) struct Arguments {
     pub target_dir: PathBuf,
     pub target: String,
     pub profile: String,
+    pub placement: DevelopmentPlacement,
 }
 
 impl Arguments {
@@ -36,6 +37,7 @@ impl Arguments {
         let mut target_dir = None;
         let mut target = None;
         let mut profile = None;
+        let mut placement = None;
         let mut arguments = std::env::args_os().skip(1);
         while let Some(flag) = arguments.next() {
             let value = arguments
@@ -56,6 +58,13 @@ impl Arguments {
                 }
                 Some("--profile") if profile.is_none() => {
                     profile = Some(value.into_string().map_err(|_| "profile must be UTF-8")?);
+                }
+                Some("--placement") if placement.is_none() => {
+                    placement = Some(match value.to_str() {
+                        Some("headless") => DevelopmentPlacement::SourceHeadless,
+                        Some("desktop") => DevelopmentPlacement::SourceDesktop,
+                        _ => return Err("placement must be headless or desktop".into()),
+                    });
                 }
                 _ => return Err("unknown or repeated develop option".into()),
             }
@@ -81,6 +90,7 @@ impl Arguments {
             target_dir,
             target: target.ok_or("--target TRIPLE is required")?,
             profile: profile.unwrap_or_else(|| "dev".into()),
+            placement: placement.unwrap_or_default(),
         };
         arguments.selection()?;
         Ok(arguments)
@@ -92,7 +102,10 @@ impl Arguments {
             "continuity",
             &self.profile,
             &self.target,
-            std::iter::empty::<String>(),
+            match self.placement {
+                DevelopmentPlacement::SourceHeadless => Vec::new(),
+                DevelopmentPlacement::SourceDesktop => vec!["desktop".to_owned()],
+            },
             false,
         )
         .map_err(|error| error.to_string())
@@ -221,6 +234,9 @@ pub(super) enum Command {
     Adopt {},
     Cancel {},
     RetryCleanup {},
+    IsolateInput {},
+    ConfirmPresentation {},
+    ActivateInput {},
     Close {},
 }
 
@@ -233,6 +249,9 @@ impl Command {
             Self::Adopt {} => "adopt",
             Self::Cancel {} => "cancel",
             Self::RetryCleanup {} => "retry_cleanup",
+            Self::IsolateInput {} => "isolate_input",
+            Self::ConfirmPresentation {} => "confirm_presentation",
+            Self::ActivateInput {} => "activate_input",
             Self::Close {} => "close",
         }
     }

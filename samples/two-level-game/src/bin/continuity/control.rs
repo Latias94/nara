@@ -17,24 +17,32 @@ use nara::{
 use serde::Deserialize;
 
 use super::protocol::{
-    MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply,
-    Request, Response,
+    DevelopmentPlacement, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, READY_FILE,
+    REQUEST_FILE, Reply, Request, Response,
 };
 
 pub(super) struct Arguments {
     pub project_root: PathBuf,
     pub control_dir: PathBuf,
+    pub placement: DevelopmentPlacement,
     session: String,
     generation: String,
 }
 
 impl Arguments {
     pub fn parse() -> Result<Self, String> {
+        Self::parse_from(std::env::args_os().skip(1))
+    }
+
+    pub(super) fn parse_from(
+        arguments: impl IntoIterator<Item = OsString>,
+    ) -> Result<Self, String> {
         let mut project_root = None;
         let mut control_dir = None;
+        let mut placement = None;
         let mut session = None;
         let mut generation = None;
-        let mut arguments = std::env::args_os().skip(1);
+        let mut arguments = arguments.into_iter();
         while let Some(flag) = arguments.next() {
             let value = arguments.next().ok_or("every option requires a value")?;
             match flag.to_str() {
@@ -47,6 +55,20 @@ impl Arguments {
                 Some("--session") if session.is_none() => session = Some(identity(value)?),
                 Some("--generation") if generation.is_none() => {
                     generation = Some(identity(value)?);
+                }
+                Some("--placement") if placement.is_none() => {
+                    placement = Some(match value.to_str() {
+                        Some("headless") => DevelopmentPlacement::SourceHeadless,
+                        Some("desktop") if cfg!(feature = "desktop") => {
+                            DevelopmentPlacement::SourceDesktop
+                        }
+                        Some("desktop") => {
+                            return Err(
+                                "source-desktop continuity requires the desktop feature".into()
+                            );
+                        }
+                        _ => return Err("placement must be headless or desktop".into()),
+                    });
                 }
                 _ => return Err("unknown or repeated continuity option".into()),
             }
@@ -73,6 +95,7 @@ impl Arguments {
         Ok(Self {
             project_root,
             control_dir,
+            placement: placement.unwrap_or_default(),
             session: session.ok_or("--session is required")?,
             generation: generation.ok_or("--generation is required")?,
         })
@@ -102,6 +125,7 @@ impl Arguments {
     pub fn response(&self, request: u64, result: Result<Reply, String>) -> Response {
         Response {
             version: PROTOCOL_VERSION,
+            placement: self.placement,
             session: self.session.clone(),
             generation: self.generation.clone(),
             request,

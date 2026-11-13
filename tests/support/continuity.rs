@@ -208,12 +208,20 @@ impl Fixture {
     }
 
     pub fn request(&self) -> CargoBuildRequest {
+        self.request_features(&[])
+    }
+
+    pub fn desktop_request(&self) -> CargoBuildRequest {
+        self.request_features(&["desktop"])
+    }
+
+    fn request_features(&self, features: &[&str]) -> CargoBuildRequest {
         let selection = CargoBuildSelection::new(
             "two-level-game",
             "continuity",
             "dev",
             &self.host,
-            std::iter::empty::<&str>(),
+            features.iter().copied(),
             false,
         )
         .unwrap();
@@ -968,6 +976,7 @@ fn check_reply_identity(
     request: u64,
 ) -> Result<(), String> {
     if response.version != PROTOCOL_VERSION
+        || response.placement != crate::protocol::DevelopmentPlacement::SourceHeadless
         || response.session != session
         || response.generation != generation
         || response.request != request

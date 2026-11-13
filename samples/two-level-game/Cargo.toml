@@ -53,3 +53,10 @@ path = "src/bin/desktop_control.rs"
 required-features = ["desktop"]
 test = false
 bench = false
+
+[[bin]]
+name = "desktop_reconstruction"
+path = "src/bin/desktop_reconstruction.rs"
+required-features = ["desktop"]
+test = false
+bench = false

@@ -244,6 +244,11 @@ impl Game {
         let moved = self.snapshot()?;
         assert_eq!(moved.held, [false, true, false, false]);
         assert!(moved.player.x > initial.player.x);
+        assert!(matches!(
+            two_level_game::capture_desktop_resume(&self.run),
+            Err(two_level_game::GameResumeError::Ineligible(reason))
+                if reason.contains("keyboard inventory")
+        ));
         self.qualify_keyboard_release_gap()?;
         self.step(Some(movement(true)?))?;
         for _ in 0..120 {

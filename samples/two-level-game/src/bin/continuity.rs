@@ -1,11 +1,15 @@
-//! Game-owned finite source/headless consumer for the actual Rust rebuild/restore Host.
+//! Game-owned finite source consumer for the actual Rust rebuild/restore Host.
 //!
 //! Usage: continuity --project-root ABS --control-dir ABS --session STRING --generation STRING
+//!                   [--placement headless|desktop]
 //! The Host creates a PRIVATE control directory under its temporary root and owns Child
 //! wait/kill. stdout, stderr, stdin and process-local Runtime generations grant no authority.
 
 #[path = "continuity/control.rs"]
 mod control;
+#[cfg(feature = "desktop")]
+#[path = "continuity/desktop.rs"]
+mod desktop;
 use two_level_game::development::protocol;
 
 #[cfg(test)]
@@ -13,6 +17,7 @@ use two_level_game::development::protocol;
 mod tests;
 
 use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
     process::ExitCode,
     thread,
     time::{Duration, Instant},
@@ -30,7 +35,10 @@ use nara::{
 use two_level_game::{GamePhase, GameSnapshot, capture_resume, request_resume};
 
 use control::{Arguments, ControlDirectory};
-use protocol::{Command, MAX_STEP_COMMANDS, Observation, READY_FILE, Reply, SemanticCommand};
+use protocol::{
+    Command, DevelopmentPlacement, MAX_STEP_COMMANDS, Observation, READY_FILE, Reply,
+    SemanticCommand,
+};
 
 const MAX_REQUESTS: usize = 512;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -53,33 +61,58 @@ fn run() -> Result<(), String> {
     let mut control = ControlDirectory::open(&arguments)?;
     let root = two_level_game::open_explicit_project_root(&arguments.project_root)
         .map_err(|error| format!("open source project: {error}"))?;
-    let mut game = Game {
-        session: HeadlessSession::new(root, two_level_game::product_recipe()),
-        sequence: 0,
-        execution_failed: false,
-    };
-    let result = serve(&arguments, &mut control, &mut game);
-    if !game.session.is_closed() {
-        match game.close(Instant::now() + OPERATION_TIMEOUT) {
-            Ok(false) => {}
-            Ok(true) => {
-                return Err(format!(
-                    "{result:?}; original Headless owner closed with failure"
-                ));
-            }
-            Err(error) => return Err(format!("{result:?}; {error}")),
+    let mut game = match arguments.placement {
+        DevelopmentPlacement::SourceHeadless => ChildGame::Headless(Game {
+            session: HeadlessSession::new(root, two_level_game::product_recipe()),
+            sequence: 0,
+            execution_failed: false,
+        }),
+        #[cfg(feature = "desktop")]
+        DevelopmentPlacement::SourceDesktop => ChildGame::Desktop(desktop::DesktopGame::new(root)?),
+        #[cfg(not(feature = "desktop"))]
+        DevelopmentPlacement::SourceDesktop => {
+            return Err("source-desktop continuity requires the desktop feature".into());
         }
+    };
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        serve(&arguments, &mut control, &mut game)
+    }))
+    .unwrap_or_else(|_| Err("continuity panicked; retaining original physical cleanup".into()));
+    if game.is_closed() {
+        return result;
     }
-    result
+    let cleanup = catch_unwind(AssertUnwindSafe(|| {
+        game.close(Instant::now() + OPERATION_TIMEOUT)
+    }))
+    .unwrap_or_else(|_| Err("original physical close panicked".into()));
+    if !game.is_closed() {
+        std::mem::forget(game);
+        return Err(format!(
+            "{result:?}; original physical cleanup remains retained until process exit: {cleanup:?}"
+        ));
+    }
+    match cleanup {
+        Ok(Reply::Closed { failed: false }) => result,
+        Ok(Reply::Closed { failed: true }) => Err(format!(
+            "{result:?}; original game owner closed with failure"
+        )),
+        cleanup => Err(format!(
+            "{result:?}; physical close did not report completion: {cleanup:?}"
+        )),
+    }
 }
 
 fn serve(
     arguments: &Arguments,
     control: &mut ControlDirectory,
-    game: &mut Game,
+    game: &mut ChildGame,
 ) -> Result<(), String> {
     let total_deadline = Instant::now() + TOTAL_TIMEOUT;
-    game.initialize(Instant::now() + OPERATION_TIMEOUT)?;
+    let startup_budget = match arguments.placement {
+        DevelopmentPlacement::SourceHeadless => OPERATION_TIMEOUT,
+        DevelopmentPlacement::SourceDesktop => Duration::from_secs(60),
+    };
+    game.initialize(Instant::now() + startup_budget)?;
     let ready = game.observed()?;
     control.publish(READY_FILE, &arguments.response(0, Ok(ready)))?;
     let mut previous_request = 0;
@@ -94,8 +127,9 @@ fn serve(
         if consumed == MAX_REQUESTS {
             return Err("finite continuity process exhausted its 512 request budget".into());
         }
+        game.poll_idle(Duration::ZERO)?;
         let Some(bytes) = control.receive()? else {
-            thread::sleep(POLL_INTERVAL);
+            game.poll_idle(POLL_INTERVAL)?;
             continue;
         };
         activity = Instant::now();
@@ -115,14 +149,13 @@ fn serve(
             game.execute(request.command, deadline)
         });
         let close_result = if closing {
-            Some(match &result {
-                Ok(Reply::Closed { failed: false }) => Ok(()),
+            match &result {
+                Ok(Reply::Closed { failed: false }) => Some(Ok(())),
                 Ok(Reply::Closed { failed: true }) => {
-                    Err("original Headless owner closed with failure".into())
+                    Some(Err("original game owner closed with failure".into()))
                 }
-                Err(error) => Err(error.clone()),
-                _ => Err("close did not observe terminal physical retirement".into()),
-            })
+                _ => None,
+            }
         } else {
             None
         };
@@ -130,7 +163,7 @@ fn serve(
             &format!("response-{number}.json"),
             &arguments.response(number, result),
         )?;
-        if game.execution_failed {
+        if game.execution_failed() && !closing {
             return Err(
                 "the operation failed after command admission; the original game must retire"
                     .into(),
@@ -138,6 +171,75 @@ fn serve(
         }
         if let Some(result) = close_result {
             return result;
+        }
+    }
+}
+
+enum ChildGame {
+    Headless(Game),
+    #[cfg(feature = "desktop")]
+    Desktop(desktop::DesktopGame),
+}
+
+impl ChildGame {
+    fn initialize(&mut self, deadline: Instant) -> Result<(), String> {
+        match self {
+            Self::Headless(game) => game.initialize(deadline),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.initialize(deadline),
+        }
+    }
+
+    fn observed(&self) -> Result<Reply, String> {
+        match self {
+            Self::Headless(game) => game.observed(),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.observed(),
+        }
+    }
+
+    fn execute(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
+        match self {
+            Self::Headless(game) => game.execute(command, deadline),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.execute(command, deadline),
+        }
+    }
+
+    fn poll_idle(&mut self, max_wait: Duration) -> Result<(), String> {
+        match self {
+            Self::Headless(_) => {
+                if !max_wait.is_zero() {
+                    thread::sleep(max_wait);
+                }
+                Ok(())
+            }
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.poll_idle(max_wait),
+        }
+    }
+
+    fn execution_failed(&self) -> bool {
+        match self {
+            Self::Headless(game) => game.execution_failed,
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.execution_failed(),
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        match self {
+            Self::Headless(game) => game.session.is_closed(),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.is_closed(),
+        }
+    }
+
+    fn close(&mut self, deadline: Instant) -> Result<Reply, String> {
+        match self {
+            Self::Headless(game) => game.close(deadline).map(|failed| Reply::Closed { failed }),
+            #[cfg(feature = "desktop")]
+            Self::Desktop(game) => game.close(deadline),
         }
     }
 }
@@ -214,29 +316,7 @@ impl Game {
             .session
             .runtime_generation()
             .ok_or("the original Runtime generation is unavailable")?;
-        let snapshot = self.snapshot()?;
-        Ok(Reply::Observed {
-            observation: Observation {
-                runtime_generation,
-                engine_tick: snapshot.tick,
-                logical_tick: snapshot.logical_tick,
-                logical_elapsed_nanos: snapshot.logical_elapsed_nanos,
-                player: snapshot.player.to_array(),
-                held: snapshot.held,
-                score: snapshot.score,
-                collected: snapshot.collected,
-                markers: snapshot.markers.iter().map(|marker| marker.get()).collect(),
-                phase: match snapshot.phase {
-                    GamePhase::Running => "running",
-                    GamePhase::Preparing => "preparing",
-                    GamePhase::Reconstructing => "reconstructing",
-                    GamePhase::Degraded => "degraded",
-                }
-                .into(),
-                restoring: snapshot.restoring,
-                error: snapshot.error,
-            },
-        })
+        Ok(observed_snapshot(runtime_generation, self.snapshot()?))
     }
 
     fn execute(&mut self, command: Command, deadline: Instant) -> Result<Reply, String> {
@@ -310,6 +390,13 @@ impl Game {
                     self.frame()?;
                     thread::sleep(POLL_INTERVAL);
                 }
+            }
+            Command::IsolateInput => self.observed(),
+            Command::ConfirmPresentation => {
+                Err("headless placement has no native presentation".into())
+            }
+            Command::ActivateInput => {
+                Err("headless placement has no native input activation".into())
             }
             Command::Close => self.close(deadline).map(|failed| Reply::Closed { failed }),
         }?;
@@ -407,6 +494,31 @@ impl Game {
     }
 }
 
+fn observed_snapshot(runtime_generation: u64, snapshot: GameSnapshot) -> Reply {
+    Reply::Observed {
+        observation: Observation {
+            runtime_generation,
+            engine_tick: snapshot.tick,
+            logical_tick: snapshot.logical_tick,
+            logical_elapsed_nanos: snapshot.logical_elapsed_nanos,
+            player: snapshot.player.to_array(),
+            held: snapshot.held,
+            score: snapshot.score,
+            collected: snapshot.collected,
+            markers: snapshot.markers.iter().map(|marker| marker.get()).collect(),
+            phase: match snapshot.phase {
+                GamePhase::Running => "running",
+                GamePhase::Preparing => "preparing",
+                GamePhase::Reconstructing => "reconstructing",
+                GamePhase::Degraded => "degraded",
+            }
+            .into(),
+            restoring: snapshot.restoring,
+            error: snapshot.error,
+        },
+    }
+}
+
 fn command_draft(command: SemanticCommand) -> Result<GameplayCommandDraft, String> {
     let (id, movement) = match command {
         SemanticCommand::Move { direction, pressed } => {
@@ -435,7 +547,7 @@ fn command_draft(command: SemanticCommand) -> Result<GameplayCommandDraft, Strin
 
 fn check_deadline(deadline: Instant) -> Result<(), String> {
     if Instant::now() >= deadline {
-        Err("continuity operation exceeded its five-second deadline".into())
+        Err("continuity operation exceeded its cooperative deadline".into())
     } else {
         Ok(())
     }

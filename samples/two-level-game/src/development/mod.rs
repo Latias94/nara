@@ -1,9 +1,11 @@
-//! Finite source/headless code iteration for this game over the existing Cargo and process owners.
+//! Finite source-game code iteration over the existing Cargo and process owners.
 //!
 //! The incumbent remains the sole ordinary command target while a candidate is prepared. Probe
 //! execution is isolated and discarded; adoption starts at the captured state in another fresh
 //! process. This game-owned Host does not extend supervised desktop Play or serialize native state.
 
+#[cfg(feature = "desktop")]
+pub mod presentation;
 mod process;
 pub mod protocol;
 mod source;
@@ -26,6 +28,7 @@ use nara::{
 
 use crate::resume::{ResumeState, encode_resume};
 use process::{Executable, Process, Store};
+pub use protocol::{DesktopPresentation, DevelopmentPlacement, InputActivation};
 use protocol::{MAX_STEP_COMMANDS, Observation, SemanticCommand};
 use source::SourceFence;
 
@@ -55,6 +58,7 @@ pub struct ActiveGeneration {
 pub struct PreparedRebuild {
     identity: Arc<()>,
     generation: ActiveGeneration,
+    presentation: Option<DesktopPresentation>,
 }
 
 impl PreparedRebuild {
@@ -62,6 +66,19 @@ impl PreparedRebuild {
     pub const fn generation(&self) -> ActiveGeneration {
         self.generation
     }
+
+    #[must_use]
+    pub fn presentation(&self) -> Option<&DesktopPresentation> {
+        self.presentation.as_ref()
+    }
+}
+
+/// Native activation follows route adoption and preserves its own actual error/result.
+#[derive(Debug, Clone)]
+pub struct ActivationOutcome {
+    pub active: ActiveGeneration,
+    pub activation: InputActivation,
+    pub error: Option<String>,
 }
 
 /// Completion of the original native owners, separately from a successful execution-target change.
@@ -142,7 +159,7 @@ struct Retiring {
     role: RetirementRole,
 }
 
-/// A concrete development Host for the shipped source/headless Two-Level Game.
+/// A concrete development Host for the source Two-Level Game's explicit execution placement.
 ///
 /// The caller grants trust in an explicit source project and existing temporary parent. Builds
 /// use an explicit public Cargo request; this Host never edits source or discovers dependencies.
@@ -152,6 +169,7 @@ struct Retiring {
 /// dropping a live Host is fallback cleanup and is never evidence of graceful retirement.
 pub struct DevelopmentHost {
     project: PathBuf,
+    placement: DevelopmentPlacement,
     store: Store,
     active: Option<LiveGame>,
     candidate: Option<Candidate>,
@@ -168,6 +186,20 @@ pub struct DevelopmentHost {
 
 impl DevelopmentHost {
     pub fn new(project: &Path, work_parent: &Path) -> Result<Self, DevelopmentError> {
+        Self::with_placement(project, work_parent, DevelopmentPlacement::SourceHeadless)
+    }
+
+    pub fn with_placement(
+        project: &Path,
+        work_parent: &Path,
+        placement: DevelopmentPlacement,
+    ) -> Result<Self, DevelopmentError> {
+        if placement == DevelopmentPlacement::SourceDesktop && !cfg!(windows) {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "source desktop development is currently qualified only on Windows",
+            ));
+        }
         if !project.is_absolute() || !work_parent.is_absolute() {
             return Err(DevelopmentError::at(
                 DevelopmentStage::State,
@@ -196,6 +228,7 @@ impl DevelopmentHost {
             .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))?;
         Ok(Self {
             project,
+            placement,
             store,
             active: None,
             candidate: None,
@@ -238,6 +271,56 @@ impl DevelopmentHost {
     #[must_use]
     pub fn active(&self) -> Option<ActiveGeneration> {
         self.active.as_ref().map(|live| live.generation)
+    }
+
+    #[must_use]
+    pub const fn placement(&self) -> DevelopmentPlacement {
+        self.placement
+    }
+
+    /// Freezes native ingress through the active child's original owner before handoff capture.
+    /// A refusal preserves the adopted route; successful isolation requires explicit activation
+    /// to restore ordinary native input, including after a later build or candidate refusal.
+    pub fn isolate_active_input(&mut self) -> Result<Observation, DevelopmentError> {
+        self.active_mut()?
+            .process
+            .isolate_input()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))
+    }
+
+    /// Reveals and activates the already adopted child. A failure does not undo route adoption.
+    pub fn activate_active(&mut self) -> Result<ActivationOutcome, DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "native activation requires the explicit desktop placement",
+            ));
+        }
+        let live = self.active_mut()?;
+        let (activation, error) = live
+            .process
+            .activate_input()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::State, error))?;
+        Ok(ActivationOutcome {
+            active: live.generation,
+            activation,
+            error,
+        })
+    }
+
+    pub fn confirm_active_presentation(&mut self) -> Result<DesktopPresentation, DevelopmentError> {
+        if self.placement != DevelopmentPlacement::SourceDesktop {
+            return Err(DevelopmentError::at(
+                DevelopmentStage::State,
+                "native presentation requires the explicit desktop placement",
+            ));
+        }
+        let live = self.active_mut()?;
+        let state = live
+            .process
+            .capture()
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error))?;
+        qualify_presentation(&mut live.process, &state)
     }
 
     #[must_use]
@@ -292,10 +375,12 @@ impl DevelopmentHost {
                 "rebuild needs one incumbent and no existing candidate",
             ));
         }
-        if request.workspace() != self.project || !eligible_selection(request.selection()) {
+        if request.workspace() != self.project
+            || !eligible_selection(request.selection(), self.placement)
+        {
             return Err(DevelopmentError::at(
                 DevelopmentStage::Build,
-                "the request must select this source game's headless continuity product",
+                "the request must select this source game's exact declared continuity placement",
             ));
         }
         if probes.is_empty() || probes.len() > MAX_PROBE_STEPS || self.rebuilds >= MAX_REBUILDS {
@@ -309,6 +394,9 @@ impl DevelopmentHost {
             probe.expected.validate().map_err(|error| {
                 DevelopmentError::at(DevelopmentStage::Probe, error.to_string())
             })?;
+        }
+        if self.placement == DevelopmentPlacement::SourceDesktop {
+            self.isolate_active_input()?;
         }
         let basis = self.capture()?;
         if !exact_state(&basis, expected_initial)? {
@@ -336,6 +424,9 @@ impl DevelopmentHost {
         let mut probe = self.launch(Arc::clone(&executable))?;
         let qualification = (|| {
             restore_exact(&mut probe.process, &basis)?;
+            if self.placement == DevelopmentPlacement::SourceDesktop {
+                qualify_presentation(&mut probe.process, &basis)?;
+            }
             for step in probes {
                 probe
                     .process
@@ -350,6 +441,9 @@ impl DevelopmentHost {
                         DevelopmentStage::Probe,
                         "the candidate did not match the complete expected game state",
                     ));
+                }
+                if self.placement == DevelopmentPlacement::SourceDesktop {
+                    qualify_presentation(&mut probe.process, &actual)?;
                 }
             }
             Ok(())
@@ -387,9 +481,21 @@ impl DevelopmentHost {
             self.retire(candidate, RetirementRole::Candidate);
             return Err(error);
         }
+        let presentation = if self.placement == DevelopmentPlacement::SourceDesktop {
+            match qualify_presentation(&mut candidate.process, &basis) {
+                Ok(presentation) => Some(presentation),
+                Err(error) => {
+                    self.retire(candidate, RetirementRole::Candidate);
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let ticket = PreparedRebuild {
             identity: Arc::new(()),
             generation: candidate.generation,
+            presentation,
         };
         self.candidate = Some(Candidate {
             ticket: ticket.clone(),
@@ -405,6 +511,9 @@ impl DevelopmentHost {
     /// the adopted game or authorize a second active input route.
     pub fn adopt(&mut self, ticket: &PreparedRebuild) -> Result<AdoptionOutcome, DevelopmentError> {
         self.check_ticket(ticket)?;
+        if self.placement == DevelopmentPlacement::SourceDesktop {
+            self.isolate_active_input()?;
+        }
         self.candidate
             .as_ref()
             .unwrap()
@@ -431,6 +540,9 @@ impl DevelopmentHost {
                 DevelopmentStage::Adopt,
                 "the candidate no longer matches its restored capture",
             ));
+        }
+        if self.placement == DevelopmentPlacement::SourceDesktop {
+            qualify_presentation(&mut candidate.live.process, &basis)?;
         }
         candidate
             .source
@@ -579,14 +691,14 @@ impl DevelopmentHost {
         &mut self,
         captured: CapturedCargoExecutable,
     ) -> Result<Arc<Executable>, DevelopmentError> {
-        if !eligible_selection(captured.provenance().selection())
+        if !eligible_selection(captured.provenance().selection(), self.placement)
             || captured.provenance().selection().target_triple()
                 != captured.provenance().toolchain().host_target()
-            || !captured.provenance().resolved_features().is_empty()
+            || !eligible_features(captured.provenance().resolved_features(), self.placement)
         {
             return Err(DevelopmentError::at(
                 DevelopmentStage::Build,
-                "only the exact native source/headless game product is supported",
+                "only the exact native game product and its declared placement features are supported",
             ));
         }
         let total = self
@@ -615,7 +727,7 @@ impl DevelopmentHost {
         })?;
         let digest = executable.captured().digest();
         let provenance = executable.captured().provenance().digest();
-        match Process::start(&self.project, &mut self.store, executable) {
+        match Process::start(&self.project, &mut self.store, executable, self.placement) {
             Ok(process) => {
                 let generation = ActiveGeneration {
                     sequence,
@@ -675,11 +787,51 @@ impl Drop for DevelopmentHost {
     }
 }
 
-fn eligible_selection(selection: &nara::project_workflow::cargo::CargoBuildSelection) -> bool {
+fn eligible_selection(
+    selection: &nara::project_workflow::cargo::CargoBuildSelection,
+    placement: DevelopmentPlacement,
+) -> bool {
     selection.package() == "two-level-game"
         && selection.target() == "continuity"
         && !selection.default_features()
-        && selection.features().is_empty()
+        && eligible_features(selection.features(), placement)
+}
+
+fn eligible_features(features: &[String], placement: DevelopmentPlacement) -> bool {
+    match placement {
+        DevelopmentPlacement::SourceHeadless => features.is_empty(),
+        DevelopmentPlacement::SourceDesktop => features == ["desktop"],
+    }
+}
+
+fn qualify_presentation(
+    process: &mut Process,
+    state: &ResumeState,
+) -> Result<DesktopPresentation, DevelopmentError> {
+    let expected = ContentDigest::of_bytes(
+        &encode_resume(state)
+            .map_err(|error| DevelopmentError::at(DevelopmentStage::Capture, error.to_string()))?,
+    );
+    let receipt = process
+        .confirm_presentation()
+        .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+    let current = process
+        .observation()
+        .map_err(|error| DevelopmentError::at(DevelopmentStage::Restore, error))?;
+    if receipt.state_digest != *expected.as_bytes()
+        || receipt.runtime_generation != current.runtime_generation
+        || receipt.app_frame == 0
+        || receipt.render_frame == 0
+        || receipt.surface_generation == 0
+        || receipt.backend_instance == 0
+        || receipt.device_epoch == 0
+    {
+        return Err(DevelopmentError::at(
+            DevelopmentStage::Restore,
+            "desktop presentation does not match the original child's exact canonical state",
+        ));
+    }
+    Ok(receipt)
 }
 
 fn restore_exact(process: &mut Process, basis: &ResumeState) -> Result<(), DevelopmentError> {

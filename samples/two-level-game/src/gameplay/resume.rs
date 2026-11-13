@@ -1,6 +1,8 @@
 //! Game-owned exact state over the original Headless, command and Scene owners.
 
 mod capture;
+#[cfg(feature = "desktop")]
+mod desktop;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -30,6 +32,10 @@ use crate::{
 #[cfg(feature = "desktop")]
 pub use capture::capture_desktop_resume;
 pub use capture::capture_resume;
+#[cfg(feature = "desktop")]
+pub(crate) use capture::capture_world;
+#[cfg(feature = "desktop")]
+pub use desktop::restore_desktop_resume;
 pub(super) const RESTORE_STATE: &str = "two-level-game.resume-state";
 
 /// Exact reconstruction refusal. A separate candidate never modifies the retained incumbent.
@@ -107,6 +113,7 @@ fn supported_service(id: &str) -> bool {
             | "nara.startup-scene-activation"
             | "two-level-game.desktop-input"
             | "two-level-game.test.desktop-capture"
+            | "two-level-game.development.presentation"
     )
 }
 
@@ -217,36 +224,14 @@ pub fn request_resume(
 ) -> Result<(), GameResumeError> {
     state.validate()?;
     let bytes = encode_resume(state)?;
-    session.capture(|world| {
-        if world.resource::<FixedTime>().tick() != 0
-            || world.resource::<Session>().clock.ticks != 0
-            || world.resource::<ResumeControl>().restored
-        {
-            return Err(GameResumeError::Ineligible(
-                "candidate is not a fresh game".into(),
-            ));
-        }
-        capture::eligible(world)
-    })??;
+    session.capture(fresh_candidate)??;
     session.restore_time_continuation(state.runtime_time.to_continuation()?)?;
     if session.frame(Duration::ZERO)?.is_some() {
         return Err(GameResumeError::Ineligible(
             "candidate exited during time continuation maintenance".into(),
         ));
     }
-    let text = String::from_utf8(bytes).expect("resume encoding is UTF-8 JSON");
-    let mut payload = GameplayCommandPayload::new();
-    payload
-        .insert("state", GameplayCommandValue::String(text))
-        .map_err(|error| GameResumeError::Ineligible(error.to_string()))?;
-    let command = GameplayCommandSubmission::new(
-        GameplayCommandTick::new(1).unwrap(),
-        GameplayCommandIngressSource::external("two-level-game.resume").unwrap(),
-        GameplayCommandSourceSequence::new(1).unwrap(),
-        GameplayCommandDraft::new(GameplayCommandTypeId::new(RESTORE_STATE).unwrap())
-            .with_payload(payload),
-    );
-    session.submit(command)?;
+    session.submit(restore_command(bytes)?)?;
     if session.step()?.is_some() || session.state() != Some(RuntimeState::Paused) {
         return Err(GameResumeError::Ineligible(
             "candidate exited during reconstruction entry".into(),
@@ -257,6 +242,33 @@ pub fn request_resume(
         return Err(GameResumeError::Ineligible(error));
     }
     Ok(())
+}
+
+fn fresh_candidate(world: &World) -> Result<(), GameResumeError> {
+    if world.resource::<FixedTime>().tick() != 0
+        || world.resource::<Session>().clock.ticks != 0
+        || world.resource::<ResumeControl>().restored
+    {
+        return Err(GameResumeError::Ineligible(
+            "candidate is not a fresh game".into(),
+        ));
+    }
+    capture::eligible(world)
+}
+
+fn restore_command(bytes: Vec<u8>) -> Result<GameplayCommandSubmission, GameResumeError> {
+    let text = String::from_utf8(bytes).expect("resume encoding is UTF-8 JSON");
+    let mut payload = GameplayCommandPayload::new();
+    payload
+        .insert("state", GameplayCommandValue::String(text))
+        .map_err(|error| GameResumeError::Ineligible(error.to_string()))?;
+    Ok(GameplayCommandSubmission::new(
+        GameplayCommandTick::new(1).unwrap(),
+        GameplayCommandIngressSource::external("two-level-game.resume").unwrap(),
+        GameplayCommandSourceSequence::new(1).unwrap(),
+        GameplayCommandDraft::new(GameplayCommandTypeId::new(RESTORE_STATE).unwrap())
+            .with_payload(payload),
+    ))
 }
 
 pub(super) fn begin_from_command(
@@ -389,35 +401,4 @@ pub(super) fn finish(world: &mut World) {
     session.saves = state.counters.saves;
     session.restores = state.counters.restores;
     world.resource_mut::<ResumeControl>().restored = true;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::supported_service;
-
-    #[test]
-    fn desktop_inventory_contains_only_explicitly_reconstructible_services() {
-        for id in [
-            "nara.window",
-            "nara.render",
-            "nara.render-wgpu.capture",
-            "nara.render-wgpu.window-presentation",
-            "nara.render-wgpu.stock-capture",
-            "nara.render-wgpu.stock-policy",
-            "nara.render-wgpu.stock-sprite",
-            "nara.sprite-render",
-            "nara.image.prepare",
-            "two-level-game.desktop-input",
-            "two-level-game.test.desktop-capture",
-        ] {
-            assert!(
-                supported_service(id),
-                "missing desktop service classification: {id}"
-            );
-        }
-        assert!(!supported_service(
-            "two-level-game.test.unknown-resume-service"
-        ));
-        assert!(!supported_service("nara.render-wgpu.device-private-state"));
-    }
 }

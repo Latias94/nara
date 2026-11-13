@@ -33,14 +33,16 @@ use nara::{
 use crate::resume::ResumeState;
 
 use super::protocol::{
-    Command, MAX_IDENTITY_BYTES, MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation,
-    PROTOCOL_VERSION, READY_FILE, REQUEST_FILE, Reply, Request, Response, SemanticCommand,
+    Command, DesktopPresentation, DevelopmentPlacement, InputActivation, MAX_IDENTITY_BYTES,
+    MAX_MESSAGE_BYTES, MAX_STEP_COMMANDS, Observation, PROTOCOL_VERSION, READY_FILE, REQUEST_FILE,
+    Reply, Request, Response, SemanticCommand,
 };
 
 const STORE_PREFIX: &str = "nara-two-level-development-";
 const STORE_MARKER: &str = "owner";
 const MAX_DIRECTORIES: u64 = 64;
 const MAX_REQUESTS: u64 = 512;
+const CLEANUP_REQUESTS: u64 = 8;
 const MAX_SETTLE_FRAMES: usize = 128;
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -467,6 +469,7 @@ pub(super) struct Retirement {
 pub(super) struct Process {
     native: SupervisedProcessOwner,
     executable: Arc<Executable>,
+    placement: DevelopmentPlacement,
     control: PathBuf,
     directory: DirectoryCapability,
     #[cfg(windows)]
@@ -476,6 +479,7 @@ pub(super) struct Process {
     next_request: u64,
     fault: Option<String>,
     closing: bool,
+    close_request: Option<u64>,
     close_result: Option<Result<bool, String>>,
     terminated: bool,
     cleanup_error: Option<String>,
@@ -487,7 +491,16 @@ impl Process {
         project: &Path,
         store: &mut Store,
         executable: Arc<Executable>,
+        placement: DevelopmentPlacement,
     ) -> Result<Self, StartFailure> {
+        #[cfg(not(windows))]
+        if placement == DevelopmentPlacement::SourceDesktop {
+            return Err(
+                "source desktop development processes are supported only on Windows"
+                    .to_owned()
+                    .into(),
+            );
+        }
         if !project.is_absolute() {
             return Err("the game project path must be absolute".to_owned().into());
         }
@@ -541,6 +554,8 @@ impl Process {
             OsStr::new(&session),
             OsStr::new("--generation"),
             OsStr::new(&generation),
+            OsStr::new("--placement"),
+            OsStr::new(placement.argument()),
         ]);
         let limits = ProcessLogLimits::try_from_counts(MAX_LOG_RECORDS, MAX_LOG_BYTES)
             .map_err(|error| format!("configure bounded process logs: {error}"))?;
@@ -550,6 +565,7 @@ impl Process {
         let mut process = Self {
             native,
             executable,
+            placement,
             control,
             directory,
             #[cfg(windows)]
@@ -559,6 +575,7 @@ impl Process {
             next_request: 1,
             fault: None,
             closing: false,
+            close_request: None,
             close_result: None,
             terminated: false,
             cleanup_error: None,
@@ -658,6 +675,31 @@ impl Process {
         )
     }
 
+    pub(super) fn confirm_presentation(&mut self) -> Result<DesktopPresentation, String> {
+        match self.request(
+            Command::ConfirmPresentation,
+            Instant::now() + REQUEST_TIMEOUT,
+        )? {
+            Reply::Presented { presentation } => Ok(presentation),
+            reply => Err(self.protocol_fault(format!(
+                "presentation confirmation returned an unexpected reply: {reply:?}"
+            ))),
+        }
+    }
+
+    pub(super) fn isolate_input(&mut self) -> Result<Observation, String> {
+        self.observed(Command::IsolateInput, Instant::now() + REQUEST_TIMEOUT)
+    }
+
+    pub(super) fn activate_input(&mut self) -> Result<(InputActivation, Option<String>), String> {
+        match self.request(Command::ActivateInput, Instant::now() + REQUEST_TIMEOUT)? {
+            Reply::Activated { activation, error } => Ok((activation, error)),
+            reply => Err(self.protocol_fault(format!(
+                "input activation returned an unexpected reply: {reply:?}"
+            ))),
+        }
+    }
+
     fn observed(&mut self, command: Command, deadline: Instant) -> Result<Observation, String> {
         match self.request(command, deadline)? {
             Reply::Observed { observation } => Ok(observation),
@@ -675,9 +717,12 @@ impl Process {
         if self.closing && !closing {
             return Err("the process has begun physical retirement".into());
         }
-        if self.next_request > MAX_REQUESTS || (!closing && self.next_request == MAX_REQUESTS) {
+        if self.next_request > MAX_REQUESTS
+            || (!closing && self.next_request > MAX_REQUESTS - CLEANUP_REQUESTS)
+        {
             return Err(
-                "the finite process request allowance reserves its last request for Close".into(),
+                "the finite process request allowance reserves its last eight requests for Close"
+                    .into(),
             );
         }
         let packet = Request {
@@ -748,23 +793,24 @@ impl Process {
             packet.request,
             deadline,
         )?;
-        if let Ok(reply) = &response.result
-            && !matches!(
-                (&packet.command, reply),
-                (
-                    Command::Observe
-                        | Command::Step { .. }
-                        | Command::Frame
-                        | Command::Restore { .. },
-                    Reply::Observed { .. }
-                ) | (Command::Capture, Reply::Captured { .. })
-                    | (Command::Close, Reply::Closed { .. })
-            )
-        {
-            return Err(format!(
-                "unexpected game reply for {:?}: {reply:?}",
-                packet.command
-            ));
+        if let Ok(reply) = &response.result {
+            let expected = match &packet.command {
+                Command::Observe
+                | Command::Step { .. }
+                | Command::Frame
+                | Command::Restore { .. }
+                | Command::IsolateInput => matches!(reply, Reply::Observed { .. }),
+                Command::Capture => matches!(reply, Reply::Captured { .. }),
+                Command::ConfirmPresentation => matches!(reply, Reply::Presented { .. }),
+                Command::ActivateInput => matches!(reply, Reply::Activated { .. }),
+                Command::Close => matches!(reply, Reply::Closing | Reply::Closed { .. }),
+            };
+            if !expected {
+                return Err(format!(
+                    "unexpected game reply for {:?}: {reply:?}",
+                    packet.command
+                ));
+            }
         }
         Ok(response)
     }
@@ -785,6 +831,7 @@ impl Process {
             if let Some(bytes) = bytes {
                 let response = decode_response(&bytes)?;
                 if response.version != PROTOCOL_VERSION
+                    || response.placement != self.placement
                     || response.session != self.session
                     || response.generation != self.generation
                     || response.request != request
@@ -885,25 +932,51 @@ impl Process {
         error
     }
 
+    /// A pending game cleanup retains this process for the caller's next explicit Close retry.
     /// `terminated` records fallback termination, independently of the game's Close reply.
     pub(super) fn close(&mut self, deadline: Instant) -> Result<Retirement, String> {
+        if let Err(error) = self.advance() {
+            self.fence(&error);
+            self.cleanup_error = Some(error);
+        }
         self.cache_retirement();
         if let Some(retirement) = self.retired {
             return Ok(retirement);
         }
-        let cooperative_deadline = deadline.min(Instant::now() + COOPERATIVE_CLOSE_TIMEOUT);
-        if !self.closing {
-            self.closing = true;
-            if !self.fenced() && Instant::now() < cooperative_deadline {
-                self.close_result =
-                    Some(match self.request(Command::Close, cooperative_deadline) {
-                        Ok(Reply::Closed { failed }) => Ok(failed),
-                        Ok(reply) => {
-                            Err(self.protocol_fault(format!("unexpected Close reply: {reply:?}")))
-                        }
-                        Err(error) => Err(error),
-                    });
+        self.closing = true;
+        let now = Instant::now();
+        if now >= deadline {
+            return Err(
+                "original native cleanup has no remaining caller drive time; custody retained"
+                    .into(),
+            );
+        }
+        let cooperative_deadline = deadline.min(now + COOPERATIVE_CLOSE_TIMEOUT);
+        if !self.fenced() && self.close_result.is_none() {
+            if self.next_request > MAX_REQUESTS {
+                return Err(
+                    "the game exhausted its eight reserved Close requests; cleanup remains pending and custody is retained"
+                        .into(),
+                );
             }
+            self.close_request = Some(self.next_request);
+            match self.request(Command::Close, cooperative_deadline) {
+                Ok(Reply::Closing) => {
+                    self.close_request = None;
+                    return Err(format!(
+                        "original game cleanup remains pending; custody retained for explicit Close retry: {}",
+                        self.diagnostics(),
+                    ));
+                }
+                Ok(Reply::Closed { failed }) => self.close_result = Some(Ok(failed)),
+                Ok(reply) => {
+                    self.close_result = Some(Err(
+                        self.protocol_fault(format!("unexpected Close reply: {reply:?}"))
+                    ));
+                }
+                Err(error) => self.close_result = Some(Err(error)),
+            }
+            self.close_request = None;
         }
         let mut fallback = self.fenced() || !matches!(self.close_result, Some(Ok(_)));
         let mut retry = self.cleanup_error.is_some();
@@ -948,6 +1021,9 @@ impl Process {
     }
 
     fn cache_retirement(&mut self) {
+        if self.close_request.is_some() {
+            return;
+        }
         if let Some(native) = self.native.cleanup_receipt()
             && self.native.state() == SupervisedProcessState::Complete
             && native.containment_empty()
@@ -964,12 +1040,15 @@ impl Process {
 
     pub(super) fn diagnostics(&self) -> String {
         let mut text = format!(
-            "bounded diagnostic tail (records<={MAX_LOG_RECORDS}, bytes<={MAX_LOG_BYTES}): {:?}; output_loss={}; native_state={:?}; cleanup_receipt={:?}; protocol_fault={:?}; close_result={:?}; fallback_termination_requested={}; cleanup_error={:?}",
+            "bounded diagnostic tail (records<={MAX_LOG_RECORDS}, bytes<={MAX_LOG_BYTES}): {:?}; placement={:?}; output_loss={}; native_state={:?}; cleanup_receipt={:?}; protocol_fault={:?}; closing={}; close_request={:?}; close_result={:?}; fallback_termination_requested={}; cleanup_error={:?}",
             self.native.logs().stats(),
+            self.placement,
             self.native.output_loss_observed(),
             self.native.state(),
             self.native.cleanup_receipt(),
             self.fault,
+            self.closing,
+            self.close_request,
             self.close_result,
             self.terminated,
             self.cleanup_error,

@@ -1,7 +1,7 @@
-//! Caller-driven source/headless development for the Two-Level Game.
+//! Caller-driven source development for the Two-Level Game's explicit execution placement.
 //!
 //! Usage: develop --project-root ABS --work-parent ABS --target-dir ABS --target TRIPLE
-//!                [--profile dev]
+//!                [--profile dev] [--placement headless|desktop]
 //! Supplying this project authorizes execution of its trusted Rust and Cargo build inputs.
 //! stdout contains one ready record followed by newline-delimited JSON command results.
 //! At most 128 commands are accepted. Lifetime checks run between commands and after stdin reads;
@@ -21,7 +21,7 @@ use std::{
 use nara::project_tooling::cargo_build::{CargoBuildFailure, CargoBuildTools, build_executable};
 use serde_json::{Value, json};
 use two_level_game::development::{
-    ActiveGeneration, DevelopmentHost, PreparedRebuild, ProbeStep, RetirementStatus,
+    ActiveGeneration, DevelopmentHost, PreparedRebuild, ProbeStep, RetirementRole, RetirementStatus,
 };
 
 use input::{Arguments, Command};
@@ -53,7 +53,11 @@ fn run(stdout: &mut impl Write) -> ExitCode {
         Ok(captured) => captured,
         Err(failure) => return startup_build_failure(stdout, failure),
     };
-    let mut host = match DevelopmentHost::new(&arguments.project_root, &arguments.work_parent) {
+    let mut host = match DevelopmentHost::with_placement(
+        &arguments.project_root,
+        &arguments.work_parent,
+        arguments.placement,
+    ) {
         Ok(host) => host,
         Err(error) => return startup_error(stdout, output::development_error(&error, None)),
     };
@@ -69,6 +73,7 @@ fn run(stdout: &mut impl Write) -> ExitCode {
             let ready = json!({
                 "operation": "ready",
                 "ok": true,
+                "placement": arguments.placement,
                 "active_before": output::generation(before),
                 "active_after": output::generation(host.active()),
                 "observation": observation,
@@ -78,7 +83,7 @@ fn run(stdout: &mut impl Write) -> ExitCode {
                     "profile": arguments.profile,
                     "target": arguments.target,
                     "default_features": false,
-                    "features": [],
+                    "features": request.selection().features(),
                 },
                 "limits": {
                     "commands": MAX_COMMANDS,
@@ -269,6 +274,7 @@ fn execute(
             match host.prepare_rebuild(&request, &basis, &probes) {
                 Ok(candidate) => {
                     let generation = candidate.generation();
+                    let presentation = candidate.presentation().cloned();
                     *prepared = Some(candidate);
                     let basis =
                         output::state(&basis).map_err(|error| output::error("state", &error))?;
@@ -276,6 +282,7 @@ fn execute(
                         host,
                         json!({
                             "candidate": output::generation(Some(generation)),
+                            "presentation": presentation,
                             "basis": basis,
                             "probe_outcome": {
                                 "status": "all_matched",
@@ -326,6 +333,31 @@ fn execute(
         Command::RetryCleanup {} => Ok(json!({
             "retirement": output::retirement(host.retry_retirement()),
         })),
+        Command::IsolateInput {} => {
+            let observation = host
+                .isolate_active_input()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(with_capture(host, json!({"observation": observation})))
+        }
+        Command::ConfirmPresentation {} => {
+            let presentation = host
+                .confirm_active_presentation()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(json!({"presentation": presentation}))
+        }
+        Command::ActivateInput {} => {
+            let result = host
+                .activate_active()
+                .map_err(|error| output::development_error(&error, None))?;
+            Ok(with_capture(
+                host,
+                json!({
+                    "active": output::generation(Some(result.active)),
+                    "activation": result.activation,
+                    "activation_error": result.error,
+                }),
+            ))
+        }
         Command::Close {} => Err(output::error(
             "state",
             "close must retire the complete development session",
@@ -349,6 +381,7 @@ fn with_capture(host: &mut DevelopmentHost, mut result: Value) -> Value {
 }
 
 fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> ExitCode {
+    let active = host.active();
     let mut retirement = RetirementStatus::Pending;
     let mut attempts = 0;
     for _ in 0..MAX_CLEANUP_PASSES {
@@ -358,7 +391,24 @@ fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> Exi
             break;
         }
     }
-    let success = stop.error.is_none() && retirement == RetirementStatus::Complete;
+    let game_cleanup_error = final_cleanup_error(
+        active,
+        retirement,
+        host.retirements().iter().map(|report| {
+            (
+                report.generation,
+                report.role,
+                report.game_closed
+                    && report.native.exit().success()
+                    && !report.terminated
+                    && !report.native.force_killed()
+                    && report.native.containment_empty()
+                    && report.native.readers_stopped()
+                    && report.native.output_drained(),
+            )
+        }),
+    );
+    let success = stop.error.is_none() && game_cleanup_error.is_none();
     let response = json!({
         "operation": stop.operation,
         "command": stop.command,
@@ -367,7 +417,7 @@ fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> Exi
         "active_after": output::generation(host.active()),
         "retirement": output::retirement(retirement),
         "cleanup_attempts": attempts,
-        "cleanup_error": host.cleanup_error().map(output::text),
+        "cleanup_error": host.cleanup_error().or(game_cleanup_error).map(output::text),
         "retirements": output::retirements(host.retirements()),
         "build_failure": host.last_build_failure().map(output::build_failure),
         "error": stop.error,
@@ -387,6 +437,34 @@ fn finish(mut host: DevelopmentHost, stdout: &mut impl Write, stop: Stop) -> Exi
     }
 }
 
+fn final_cleanup_error(
+    active: Option<ActiveGeneration>,
+    retirement: RetirementStatus,
+    reports: impl IntoIterator<Item = (ActiveGeneration, RetirementRole, bool)>,
+) -> Option<&'static str> {
+    if retirement == RetirementStatus::Pending {
+        return Some("physical cleanup remains incomplete");
+    }
+    let mut active_retired = active.is_none();
+    for (generation, role, normal) in reports {
+        if !matches!(role, RetirementRole::Active | RetirementRole::Predecessor) {
+            continue;
+        }
+        if !normal {
+            return Some(
+                "an active or predecessor game did not retire normally; inspect retirements",
+            );
+        }
+        if role == RetirementRole::Active && Some(generation) == active {
+            active_retired = true;
+        }
+    }
+    if !active_retired {
+        return Some("the current active game has no normal retirement report");
+    }
+    None
+}
+
 fn startup_error(stdout: &mut impl Write, error: Value) -> ExitCode {
     let response = json!({
         "operation": "startup",
@@ -401,6 +479,91 @@ fn startup_error(stdout: &mut impl Write, error: Value) -> ExitCode {
         eprintln!("develop: {error}");
     }
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara::fs::ContentDigest;
+
+    fn generation(sequence: u64) -> ActiveGeneration {
+        ActiveGeneration {
+            sequence,
+            pid: 1,
+            executable: ContentDigest::of_bytes(b"cleanup decision executable"),
+            provenance: ContentDigest::of_bytes(b"cleanup decision provenance"),
+        }
+    }
+
+    #[test]
+    fn abnormal_disposable_history_does_not_fail_normal_active_and_predecessor_cleanup() {
+        let current = generation(4);
+        assert_eq!(
+            final_cleanup_error(
+                Some(current),
+                RetirementStatus::Complete,
+                [
+                    (generation(1), RetirementRole::Probe, false),
+                    (generation(2), RetirementRole::Candidate, false),
+                    (generation(3), RetirementRole::Predecessor, true),
+                    (current, RetirementRole::Active, true),
+                ],
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn abnormal_active_or_predecessor_fails_physically_complete_cleanup() {
+        let current = generation(2);
+        for reports in [
+            [
+                (generation(1), RetirementRole::Predecessor, true),
+                (current, RetirementRole::Active, false),
+            ],
+            [
+                (generation(1), RetirementRole::Predecessor, false),
+                (current, RetirementRole::Active, true),
+            ],
+        ] {
+            assert!(
+                final_cleanup_error(Some(current), RetirementStatus::Complete, reports).is_some(),
+            );
+        }
+    }
+
+    #[test]
+    fn predecessor_or_disposable_reports_cannot_replace_current_active_retirement() {
+        let current = generation(2);
+        for reports in [
+            vec![],
+            vec![(generation(1), RetirementRole::Active, true)],
+            vec![(current, RetirementRole::Predecessor, true)],
+            vec![(current, RetirementRole::Candidate, true)],
+            vec![(current, RetirementRole::Probe, true)],
+        ] {
+            assert!(
+                final_cleanup_error(Some(current), RetirementStatus::Complete, reports).is_some(),
+            );
+        }
+    }
+
+    #[test]
+    fn pending_physical_cleanup_never_passes_even_with_normal_game_reports() {
+        let current = generation(2);
+        assert!(
+            final_cleanup_error(
+                Some(current),
+                RetirementStatus::Pending,
+                [
+                    (generation(1), RetirementRole::Predecessor, true),
+                    (current, RetirementRole::Active, true),
+                ],
+            )
+            .is_some(),
+        );
+        assert!(final_cleanup_error(None, RetirementStatus::Pending, []).is_some());
+    }
 }
 
 fn startup_build_failure(stdout: &mut impl Write, mut failure: CargoBuildFailure) -> ExitCode {

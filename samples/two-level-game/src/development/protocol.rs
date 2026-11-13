@@ -9,12 +9,57 @@
 use crate::resume::ResumeState;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_IDENTITY_BYTES: usize = 128;
 pub const MAX_STEP_COMMANDS: usize = 8;
 pub const READY_FILE: &str = "ready.json";
 pub const REQUEST_FILE: &str = "request.json";
+
+/// Explicit execution placement; compilation features do not select a live native owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DevelopmentPlacement {
+    #[default]
+    SourceHeadless,
+    SourceDesktop,
+}
+
+impl DevelopmentPlacement {
+    pub const fn argument(self) -> &'static str {
+        match self {
+            Self::SourceHeadless => "headless",
+            Self::SourceDesktop => "desktop",
+        }
+    }
+}
+
+/// Observation of the original child's native activation, never cross-process authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputActivation {
+    Isolated,
+    AwaitingFocus,
+    ReconciliationPending,
+    Active,
+    Unavailable,
+}
+
+/// Original presentation joined to the exact sealed canonical game state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopPresentation {
+    pub runtime_generation: u64,
+    pub app_frame: u64,
+    pub render_frame: u64,
+    pub window: u64,
+    pub surface_generation: u64,
+    pub backend_instance: u64,
+    pub device_epoch: u64,
+    pub state_digest: [u8; 32],
+    pub adapter_backend: String,
+    pub adapter_type: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,6 +79,9 @@ pub enum Command {
     Frame,
     Capture,
     Restore { state: ResumeState },
+    ConfirmPresentation,
+    IsolateInput,
+    ActivateInput,
     Close,
 }
 
@@ -51,6 +99,7 @@ pub enum SemanticCommand {
 #[serde(deny_unknown_fields)]
 pub struct Response {
     pub version: u32,
+    pub placement: DevelopmentPlacement,
     pub session: String,
     pub generation: String,
     pub request: u64,
@@ -60,9 +109,23 @@ pub struct Response {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
-    Observed { observation: Observation },
-    Captured { state: ResumeState },
-    Closed { failed: bool },
+    Observed {
+        observation: Observation,
+    },
+    Captured {
+        state: ResumeState,
+    },
+    Presented {
+        presentation: DesktopPresentation,
+    },
+    Activated {
+        activation: InputActivation,
+        error: Option<String>,
+    },
+    Closing,
+    Closed {
+        failed: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

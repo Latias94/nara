@@ -9,9 +9,9 @@ pub mod save;
 
 #[cfg(feature = "desktop")]
 pub use gameplay::movement_keyboard_bindings;
-#[cfg(feature = "desktop")]
-pub use gameplay::resume::capture_desktop_resume;
 pub use gameplay::resume::{GameResumeError, capture_resume, request_resume};
+#[cfg(feature = "desktop")]
+pub use gameplay::resume::{capture_desktop_resume, restore_desktop_resume};
 pub use gameplay::{
     GamePhase, GameSnapshot, RunOptions, Scenario, configured_recipe, product_recipe,
 };
