@@ -298,6 +298,11 @@ The following constraints are fixed now:
   gameplay admission and native driver input invalidate the paused boundary until its next
   healthy full frame. The public operation exposes only managed controls, typed gameplay input
   and read-only capture; it does not grant another owner mutable World or GPU authority.
+  A separate concrete time-continuation operation may initialize pending scheduling phase at
+  that managed boundary, validating actual policy and retaining an applied result separately
+  from any later fault. It preserves the fresh Runtime's history and requires new paused
+  maintenance. Game reconstruction may initialize phase before its isolated command because
+  exact stepping and paused maintenance preserve that pending time.
 - A checkpoint is rejected while the gameplay queue is poisoned or quarantined, a batch is active,
   or its closed/acknowledged watermarks do not prove completion for the target tick. Any retained
   future commands and queue sequence/watermark state that affect later admission must participate

@@ -1,6 +1,9 @@
 use super::*;
-use nara_app::{CoreStage, RuntimeControlFailure, RuntimeTimeSettings};
-use nara_ecs::{ResMut, Resource};
+use nara_app::{
+    CoreStage, FixedCatchUpPolicy, FixedTime, RenderTime, RuntimeControlFailure,
+    RuntimeFaultReporter, RuntimeTimeSettings, VirtualTime,
+};
+use nara_ecs::{Res, ResMut, Resource};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 struct FrameCounts {
@@ -29,6 +32,13 @@ fn counted_app(paused: bool) -> App {
     app
 }
 
+fn counted_time_app(paused: bool) -> App {
+    let mut app = counted_app(paused);
+    app.insert_resource(FixedTime::new(Duration::from_millis(20)).unwrap())
+        .unwrap();
+    app
+}
+
 fn cpu_session(app: App, control_flow: WinitControlFlow) -> WinitSession {
     WinitSession {
         app: Some(WinitApp::new(
@@ -43,11 +53,35 @@ fn cpu_session(app: App, control_flow: WinitControlFlow) -> WinitSession {
 }
 
 fn poll_cpu(session: &mut WinitSession) -> WinitRunProgress {
+    poll_cpu_at(session, Instant::now())
+}
+
+fn poll_cpu_at(session: &mut WinitSession, now: Instant) -> WinitRunProgress {
     session.poll_with(|app, event_loop, _first_native_pump| {
         assert!(event_loop.is_none());
-        app.service_boundary_transition(Instant::now());
+        app.service_boundary_transition(now);
         false
     })
+}
+
+fn time_resources(session: &WinitSession) -> (RealTime, VirtualTime, FixedTime, RenderTime) {
+    let world = session.runtime().world();
+    (
+        *world.resource::<RealTime>(),
+        *world.resource::<VirtualTime>(),
+        *world.resource::<FixedTime>(),
+        *world.resource::<RenderTime>(),
+    )
+}
+
+fn continuation(session: &WinitSession, pending: Duration) -> RuntimeTimeContinuation {
+    let world = session.runtime().world();
+    RuntimeTimeContinuation::new(
+        world.resource::<RuntimeTimeSettings>(),
+        world.resource::<FixedTime>(),
+        pending,
+    )
+    .unwrap()
 }
 
 fn counts(session: &WinitSession) -> FrameCounts {
@@ -241,6 +275,388 @@ fn pause_and_exact_step_require_distinct_full_paused_frames_and_wake_wait() {
 }
 
 #[test]
+fn resume_settles_a_long_paused_wait_and_preserves_the_next_tick_phase() {
+    let mut session = cpu_session(counted_time_app(false), WinitControlFlow::Wait);
+    let now = session.app.as_ref().unwrap().last_frame + Duration::from_millis(13);
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    let pause = accepted(session.request_control(RuntimeControl::Pause));
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    assert_eq!(
+        session.control_status(pause),
+        Some(RuntimeControlStatus::Applied)
+    );
+    let phase = session.capture_time_continuation().unwrap();
+    assert_eq!(phase.pending(), Duration::from_millis(13));
+    let before = time_resources(&session);
+    let paused = counts(&session);
+    assert_eq!(before.0.elapsed, Duration::from_millis(13));
+    assert_eq!(before.1.elapsed, Duration::from_millis(13));
+    assert_eq!(before.3.interpolation_alpha, 0.65);
+    assert!(matches!(
+        session.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Rejected(RuntimeControlRejection::InvalidState { .. })
+    ));
+    assert!(session.paused_frame_complete());
+    for seconds in [20, 40, 60] {
+        assert_eq!(
+            poll_cpu_at(&mut session, now + Duration::from_secs(seconds)),
+            WinitRunProgress::Running
+        );
+        assert_eq!(time_resources(&session), before);
+        assert_eq!(counts(&session), paused);
+        assert_eq!(session.capture_time_continuation().unwrap(), phase);
+        assert_eq!(session.app.as_ref().unwrap().last_frame, now);
+    }
+
+    let resume = accepted(session.request_control(RuntimeControl::Resume));
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Pending)
+    );
+    assert_eq!(
+        session.request_control(RuntimeControl::Resume),
+        RuntimeControlRequestResult::Rejected(RuntimeControlRejection::Busy)
+    );
+    let resumed_at = now + Duration::from_secs(60);
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert_eq!(session.runtime().state(), RuntimeState::Running);
+    assert!(!session.paused_frame_complete());
+    let resumed = time_resources(&session);
+    assert_eq!(resumed.0.delta, Duration::from_secs(60));
+    assert_eq!(
+        resumed.0.elapsed,
+        before.0.elapsed + Duration::from_secs(60)
+    );
+    assert_eq!(resumed.0.frame, before.0.frame + 1);
+    assert_eq!(resumed.1.delta, Duration::ZERO);
+    assert_eq!(resumed.1.elapsed, before.1.elapsed);
+    assert_eq!(resumed.1.frame, before.1.frame + 1);
+    assert_eq!(resumed.2, before.2);
+    assert_eq!(resumed.3, before.3);
+    assert_eq!(
+        counts(&session),
+        FrameCounts {
+            tasks: paused.tasks + 1,
+            last: paused.last + 1,
+            ..paused
+        }
+    );
+    assert_eq!(session.app.as_ref().unwrap().last_frame, resumed_at);
+    assert!(!session.app.as_ref().unwrap().frame_requested);
+    assert!(matches!(
+        session.capture_time_continuation(),
+        Err(RuntimeTimeContinuationError::Rejected(
+            RuntimeTimeContinuationRejection::Unavailable {
+                state: RuntimeState::Running
+            }
+        ))
+    ));
+
+    session.app.as_mut().unwrap().request_frame();
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at + Duration::from_millis(7)),
+        WinitRunProgress::Running
+    );
+    let next = time_resources(&session);
+    assert_eq!(next.0.delta, Duration::from_millis(7));
+    assert_eq!(next.1.elapsed, Duration::from_millis(20));
+    assert_eq!(next.2.tick(), 1);
+    assert_eq!(next.2.steps_this_frame(), 1);
+    assert_eq!(next.2.remainder(), Duration::ZERO);
+    assert_eq!(next.2.debt(), Duration::ZERO);
+    assert_eq!(counts(&session).fixed, paused.fixed + 1);
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+}
+
+#[test]
+fn hidden_paused_restore_preserves_refusal_eligibility_and_requires_original_maintenance() {
+    let mut session = cpu_session(counted_time_app(true), WinitControlFlow::Wait);
+    session.app.as_mut().unwrap().initial_visibility = false;
+    let now = session.app.as_ref().unwrap().last_frame;
+    let phase = continuation(&session, Duration::from_millis(13));
+    let incomplete = RuntimeTimeContinuationError::Rejected(
+        RuntimeTimeContinuationRejection::IncompletePausedFrame,
+    );
+    assert_eq!(session.capture_time_continuation(), Err(incomplete.clone()));
+    assert_eq!(
+        session.restore_time_continuation(phase),
+        Err(incomplete.clone())
+    );
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    let before = time_resources(&session);
+    let paused = counts(&session);
+    let mismatched = RuntimeTimeContinuation::new(
+        &RuntimeTimeSettings::default()
+            .with_max_delta(Duration::from_millis(1))
+            .unwrap(),
+        &before.2,
+        phase.pending(),
+    )
+    .unwrap();
+    let error = session.restore_time_continuation(mismatched).unwrap_err();
+    assert_eq!(
+        error,
+        RuntimeTimeContinuationError::Rejected(RuntimeTimeContinuationRejection::PolicyMismatch)
+    );
+    assert!(!error.applied());
+    assert_eq!(error.fault(), None);
+    assert!(session.paused_frame_complete());
+    assert!(!session.app.as_ref().unwrap().frame_requested);
+    assert_eq!(session.app.as_ref().unwrap().last_frame, now);
+    assert_eq!(time_resources(&session), before);
+    assert_eq!(counts(&session), paused);
+    assert_eq!(
+        session.capture_time_continuation().unwrap(),
+        session.runtime().capture_time_continuation().unwrap()
+    );
+
+    let generation = session.runtime().generation();
+    session.restore_time_continuation(phase).unwrap();
+    assert_eq!(session.runtime().generation(), generation);
+    assert!(!session.paused_frame_complete());
+    assert!(session.app.as_ref().unwrap().frame_requested);
+    assert_eq!(session.app.as_ref().unwrap().last_frame, now);
+    assert_eq!(session.capture_time_continuation(), Err(incomplete));
+    let restored = time_resources(&session);
+    assert_eq!(restored.0, before.0);
+    assert_eq!(restored.1, before.1);
+    assert_eq!(restored.2.tick(), before.2.tick());
+    assert_eq!(restored.2.elapsed(), before.2.elapsed());
+    assert_eq!(restored.2.remainder(), phase.pending());
+    assert_eq!(restored.3.remainder, phase.pending());
+    assert_eq!(restored.3.interpolation_alpha, 0.65);
+    assert_eq!(counts(&session), paused);
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    assert!(session.paused_frame_complete());
+    assert_eq!(session.capture_time_continuation().unwrap(), phase);
+    assert_eq!(counts(&session).last, paused.last + 1);
+    let before_wait = time_resources(&session);
+    let before_wait_counts = counts(&session);
+    let resumed_at = now + Duration::from_secs(60);
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    assert_eq!(time_resources(&session), before_wait);
+    assert_eq!(counts(&session), before_wait_counts);
+    let resume = accepted(session.request_control(RuntimeControl::Resume));
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Applied)
+    );
+    let resumed = time_resources(&session);
+    assert_eq!(resumed.0.elapsed, Duration::from_secs(60));
+    assert_eq!(resumed.1.elapsed, Duration::ZERO);
+    assert_eq!(resumed.2, before_wait.2);
+    assert_eq!(resumed.3, before_wait.3);
+    assert_eq!(counts(&session).last, before_wait_counts.last + 1);
+    session.app.as_mut().unwrap().request_frame();
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at + Duration::from_millis(7)),
+        WinitRunProgress::Running
+    );
+    assert_eq!(time_resources(&session).2.tick(), 1);
+    assert_eq!(time_resources(&session).2.remainder(), Duration::ZERO);
+    assert!(!session.app.as_ref().unwrap().initial_visibility);
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+}
+
+#[test]
+fn exact_step_and_elapsed_resume_preserve_legal_fixed_debt() {
+    let mut app = counted_time_app(false);
+    app.insert_resource(
+        FixedTime::new(Duration::from_millis(20))
+            .unwrap()
+            .with_max_steps_per_frame(1)
+            .unwrap()
+            .with_max_debt_steps(3)
+            .unwrap()
+            .with_catch_up_policy(FixedCatchUpPolicy::PreserveDebt),
+    )
+    .unwrap();
+    let mut session = cpu_session(app, WinitControlFlow::Wait);
+    let now = session.app.as_ref().unwrap().last_frame + Duration::from_millis(73);
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    accepted(session.request_control(RuntimeControl::Pause));
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    let phase = session.capture_time_continuation().unwrap();
+    assert_eq!(phase.pending(), Duration::from_millis(53));
+    assert_eq!(phase.debt(), Duration::from_millis(40));
+    assert_eq!(phase.remainder(), Duration::from_millis(13));
+    let before = time_resources(&session);
+    let step = accepted(session.request_control(RuntimeControl::StepFixedTick));
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    assert_eq!(
+        session.control_status(step),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert!(!session.paused_frame_complete());
+    assert!(matches!(
+        session.capture_time_continuation(),
+        Err(RuntimeTimeContinuationError::Rejected(
+            RuntimeTimeContinuationRejection::IncompletePausedFrame
+        ))
+    ));
+    let stepped = time_resources(&session);
+    assert_eq!(stepped.2.tick(), before.2.tick() + 1);
+    assert_eq!(stepped.2.debt(), phase.debt());
+    assert_eq!(stepped.2.remainder(), phase.remainder());
+    assert_eq!(stepped.3, before.3);
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    assert_eq!(session.capture_time_continuation().unwrap(), phase);
+    let paused = time_resources(&session);
+    let resumed_at = now + Duration::from_secs(60);
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    let resume = accepted(session.request_control(RuntimeControl::Resume));
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at),
+        WinitRunProgress::Running
+    );
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Applied)
+    );
+    let resumed = time_resources(&session);
+    assert_eq!(
+        resumed.0.elapsed,
+        paused.0.elapsed + Duration::from_secs(60)
+    );
+    assert_eq!(resumed.1.elapsed, paused.1.elapsed);
+    assert_eq!(resumed.2, paused.2);
+    assert_eq!(resumed.3, paused.3);
+    session.app.as_mut().unwrap().request_frame();
+    assert_eq!(
+        poll_cpu_at(&mut session, resumed_at + Duration::from_millis(7)),
+        WinitRunProgress::Running
+    );
+    let next = time_resources(&session);
+    assert_eq!(next.2.tick(), paused.2.tick() + 1);
+    assert_eq!(next.2.steps_this_frame(), 1);
+    assert_eq!(next.2.debt(), Duration::from_millis(40));
+    assert_eq!(next.2.remainder(), Duration::ZERO);
+    assert_eq!(next.2.discarded_this_frame(), Duration::ZERO);
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+}
+
+#[test]
+fn restore_applied_before_fault_invalidates_the_original_paused_frame() {
+    let mut app = counted_time_app(true);
+    let fault = RuntimeFault::engine(
+        RuntimeFaultKind::RuntimeAuthority,
+        "test.winit-time-continuation-applied",
+    );
+    let reported = fault.clone();
+    app.__install_runtime_authority_validator(
+        PluginId::new("test.winit-time-continuation"),
+        Arc::new(move |world, _| {
+            if world.resource::<FixedTime>().remainder() == Duration::from_millis(13) {
+                Err(reported.clone())
+            } else {
+                Ok(())
+            }
+        }),
+    )
+    .unwrap();
+    let mut session = cpu_session(app, WinitControlFlow::Wait);
+    let now = session.app.as_ref().unwrap().last_frame;
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    let before = time_resources(&session);
+    let paused = counts(&session);
+    let phase = continuation(&session, Duration::from_millis(13));
+    let error = session.restore_time_continuation(phase).unwrap_err();
+    assert!(error.applied());
+    assert_eq!(error.fault(), Some(&fault));
+    assert_eq!(session.runtime().fault(), Some(&fault));
+    let state = session.app.as_ref().unwrap();
+    assert!(!state.paused_frame_complete);
+    assert!(state.frame_requested);
+    assert_eq!(state.last_frame, now);
+    let restored = time_resources(&session);
+    assert_eq!(restored.0, before.0);
+    assert_eq!(restored.1, before.1);
+    assert_eq!(restored.2.tick(), before.2.tick());
+    assert_eq!(restored.2.remainder(), phase.pending());
+    assert_eq!(restored.3.interpolation_alpha, 0.65);
+    assert_eq!(counts(&session), paused);
+    session.request_close();
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+    assert_eq!(counts(&session), paused);
+    assert_eq!(
+        session.into_retired().unwrap().result,
+        Err(runtime_fault_error(&fault))
+    );
+}
+
+#[test]
+fn fault_after_elapsed_resume_retains_applied_control_and_unconsumed_phase() {
+    let mut app = counted_time_app(false);
+    let fault = RuntimeFault::engine(
+        RuntimeFaultKind::RequiredService,
+        "test.winit-elapsed-resume-fault",
+    );
+    let reported = fault.clone();
+    app.add_systems(
+        CoreStage::TaskUpdate,
+        move |real: Res<RealTime>, reporter: Res<RuntimeFaultReporter>| {
+            if real.delta == Duration::from_secs(60) {
+                reporter.report(reported.clone());
+            }
+        },
+    )
+    .unwrap();
+    let mut session = cpu_session(app, WinitControlFlow::Wait);
+    let now = session.app.as_ref().unwrap().last_frame + Duration::from_millis(13);
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    accepted(session.request_control(RuntimeControl::Pause));
+    assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+    let before = time_resources(&session);
+    let resume = accepted(session.request_control(RuntimeControl::Resume));
+    assert_eq!(
+        poll_cpu_at(&mut session, now + Duration::from_secs(60)),
+        WinitRunProgress::Retiring
+    );
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert_eq!(session.runtime().fault(), Some(&fault));
+    assert!(!session.paused_frame_complete());
+    let failed = time_resources(&session);
+    assert_eq!(failed.0.elapsed, before.0.elapsed + Duration::from_secs(60));
+    assert_eq!(failed.1.elapsed, before.1.elapsed);
+    assert_eq!(failed.2.tick(), before.2.tick());
+    assert_eq!(failed.2.debt(), before.2.debt());
+    assert_eq!(failed.2.remainder(), Duration::from_millis(13));
+    assert_eq!(failed.3, before.3);
+    assert_eq!(session.execute(), WinitRunProgress::Retired);
+    assert_eq!(
+        session.control_status(resume),
+        Some(RuntimeControlStatus::Applied)
+    );
+    assert_eq!(
+        session.into_retired().unwrap().result,
+        Err(runtime_fault_error(&fault))
+    );
+}
+
+#[test]
 fn initially_paused_exact_step_cannot_authorize_capture_before_maintenance() {
     let mut session = cpu_session(counted_app(true), WinitControlFlow::Wait);
     assert_eq!(session.runtime().state(), RuntimeState::Paused);
@@ -351,6 +767,7 @@ fn native_driver_input_invalidates_capture_until_the_original_paused_frame() {
         .unwrap();
     assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
     assert!(session.paused_frame_complete());
+    let phase = session.capture_time_continuation().unwrap();
     assert!(
         session
             .app
@@ -366,10 +783,16 @@ fn native_driver_input_invalidates_capture_until_the_original_paused_frame() {
             .unwrap()
     );
     assert!(!session.paused_frame_complete());
+    let incomplete = RuntimeTimeContinuationError::Rejected(
+        RuntimeTimeContinuationRejection::IncompletePausedFrame,
+    );
+    assert_eq!(session.capture_time_continuation(), Err(incomplete.clone()));
+    assert_eq!(session.restore_time_continuation(phase), Err(incomplete));
     let before = counts(&session);
     assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
     assert_eq!(counts(&session).last, before.last + 1);
     assert!(session.paused_frame_complete());
+    assert_eq!(session.capture_time_continuation().unwrap(), phase);
     session
         .app
         .as_mut()
@@ -448,10 +871,15 @@ fn accessibility_update_reconciliation_does_not_permanently_block_capture() {
 fn driver_scope_retains_owned_success_or_rejection_and_the_original_post_fault() {
     for (reject, immediately_close) in [(false, false), (true, false), (false, true), (true, true)]
     {
-        let mut session = cpu_session(counted_app(true), WinitControlFlow::Wait);
-        assert_eq!(poll_cpu(&mut session), WinitRunProgress::Running);
+        let mut session = cpu_session(counted_time_app(true), WinitControlFlow::Wait);
+        let now = session.app.as_ref().unwrap().last_frame;
+        assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+        let phase = continuation(&session, Duration::from_millis(13));
+        session.restore_time_continuation(phase).unwrap();
+        assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
         assert!(session.paused_frame_complete());
         let before = counts(&session);
+        let before_time = time_resources(&session);
         let fault =
             RuntimeFault::engine(RuntimeFaultKind::RequiredService, "test.winit-scope-output");
         let reporter = session.runtime().fault_reporter();
@@ -477,6 +905,16 @@ fn driver_scope_retains_owned_success_or_rejection_and_the_original_post_fault()
         assert_eq!(outcome.post_operation_fault, Some(fault.clone()));
         assert_eq!(session.runtime().fault(), Some(&fault));
         assert!(!session.paused_frame_complete());
+        assert_eq!(time_resources(&session), before_time);
+        let unavailable =
+            RuntimeTimeContinuationError::Rejected(RuntimeTimeContinuationRejection::Unavailable {
+                state: RuntimeState::Faulted,
+            });
+        assert_eq!(
+            session.capture_time_continuation(),
+            Err(unavailable.clone())
+        );
+        assert_eq!(session.restore_time_continuation(phase), Err(unavailable));
         assert!(matches!(
             session.request_control(RuntimeControl::Resume),
             RuntimeControlRequestResult::Rejected(_)
@@ -486,6 +924,7 @@ fn driver_scope_retains_owned_success_or_rejection_and_the_original_post_fault()
         }
         assert_eq!(poll_cpu(&mut session), WinitRunProgress::Retired);
         assert_eq!(counts(&session), before);
+        assert_eq!(time_resources(&session), before_time);
         assert_eq!(
             session.into_retired().unwrap().result,
             Err(runtime_fault_error(&fault))
@@ -494,38 +933,57 @@ fn driver_scope_retains_owned_success_or_rejection_and_the_original_post_fault()
 }
 
 #[test]
-fn accepted_stop_supersedes_pause_and_fences_driver_input_before_the_next_poll() {
-    let mut session = cpu_session(counted_app(false), WinitControlFlow::Wait);
-    let pause = accepted(session.request_control(RuntimeControl::Pause));
-    let stop = accepted(session.request_control(RuntimeControl::Stop));
-    assert_eq!(
-        session.control_status(pause),
-        Some(RuntimeControlStatus::Failed(
-            RuntimeControlFailure::SupersededByStop
-        ))
-    );
-    assert!(session.app.as_ref().unwrap().shutdown.is_started());
-    assert!(matches!(
-        session.__with_driver_scope(|_| panic!("closed input must not run")),
-        Err(RuntimeScopeError::Unavailable { .. })
-    ));
-    assert!(matches!(
-        session.request_control(RuntimeControl::Resume),
-        RuntimeControlRequestResult::Rejected(_)
-    ));
-    assert_eq!(session.execute(), WinitRunProgress::Retired);
-    assert_eq!(
-        session.control_status(stop),
-        Some(RuntimeControlStatus::Applied)
-    );
-    let before = counts(&session);
-    session.request_close();
-    assert_eq!(session.poll(Duration::ZERO), WinitRunProgress::Retired);
-    assert_eq!(counts(&session), before);
-    assert_eq!(
-        session.into_retired().unwrap().result,
-        Ok(AppExit::Requested)
-    );
+fn accepted_stop_supersedes_pending_control_and_fences_driver_input_before_the_next_poll() {
+    for control in [RuntimeControl::Pause, RuntimeControl::Resume] {
+        let mut session = cpu_session(counted_time_app(false), WinitControlFlow::Wait);
+        let now = session.app.as_ref().unwrap().last_frame + Duration::from_millis(13);
+        assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+        if control == RuntimeControl::Resume {
+            accepted(session.request_control(RuntimeControl::Pause));
+            assert_eq!(poll_cpu_at(&mut session, now), WinitRunProgress::Running);
+        }
+        let before = counts(&session);
+        let before_time = time_resources(&session);
+        assert_eq!(before_time.2.remainder(), Duration::from_millis(13));
+        let phase = continuation(&session, Duration::from_millis(13));
+        let pending = accepted(session.request_control(control));
+        let stop = accepted(session.request_control(RuntimeControl::Stop));
+        assert_eq!(
+            session.control_status(pending),
+            Some(RuntimeControlStatus::Failed(
+                RuntimeControlFailure::SupersededByStop
+            ))
+        );
+        assert!(session.app.as_ref().unwrap().shutdown.is_started());
+        assert!(matches!(
+            session.__with_driver_scope(|_| panic!("closed input must not run")),
+            Err(RuntimeScopeError::Unavailable { .. })
+        ));
+        assert!(matches!(
+            session.request_control(RuntimeControl::Resume),
+            RuntimeControlRequestResult::Rejected(_)
+        ));
+        assert!(matches!(
+            session.restore_time_continuation(phase),
+            Err(RuntimeTimeContinuationError::Rejected(
+                RuntimeTimeContinuationRejection::Unavailable { .. }
+            ))
+        ));
+        assert_eq!(session.execute(), WinitRunProgress::Retired);
+        assert_eq!(
+            session.control_status(stop),
+            Some(RuntimeControlStatus::Applied)
+        );
+        assert_eq!(counts(&session), before);
+        assert_eq!(time_resources(&session), before_time);
+        session.request_close();
+        assert_eq!(session.poll(Duration::ZERO), WinitRunProgress::Retired);
+        assert_eq!(counts(&session), before);
+        assert_eq!(
+            session.into_retired().unwrap().result,
+            Ok(AppExit::Requested)
+        );
+    }
 }
 
 #[test]

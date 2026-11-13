@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use nara_app::{
     AppExit, RuntimeClosePolicy, RuntimeControl, RuntimeControlStatus, RuntimeFault, RuntimeState,
+    RuntimeTimeContinuation, RuntimeTimeContinuationError,
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::World;
@@ -43,6 +44,8 @@ pub enum HeadlessSessionError {
     /// Source admission, managed execution or authority validation failed.
     #[error("the Headless product operation failed")]
     Runtime(DiagnosticReport),
+    #[error(transparent)]
+    TimeContinuation(#[from] RuntimeTimeContinuationError),
 }
 
 /// Physical close observation for the original Headless Host.
@@ -285,6 +288,44 @@ impl HeadlessSession {
             return Err(HeadlessSessionError::NotPaused);
         }
         self.observe(operation)
+    }
+
+    /// Captures scheduling phase through the original time owner at this paused boundary.
+    pub fn capture_time_continuation(
+        &self,
+    ) -> Result<RuntimeTimeContinuation, HeadlessSessionError> {
+        self.capture(|_| ())?;
+        self.host
+            .as_ref()
+            .and_then(ProjectHost::running_runtime)
+            .ok_or(HeadlessSessionError::Unavailable)?
+            .capture_time_continuation()
+            .map_err(Into::into)
+    }
+
+    /// Initializes phase without running a schedule or changing the Runtime's local history.
+    /// Complete a subsequent paused `frame(Duration::ZERO)` before capture.
+    pub fn restore_time_continuation(
+        &mut self,
+        value: RuntimeTimeContinuation,
+    ) -> Result<(), HeadlessSessionError> {
+        self.capture(|_| ())?;
+        let result = self
+            .available_host()?
+            .running_runtime_mut()
+            .ok_or(HeadlessSessionError::Unavailable)?
+            .restore_time_continuation(value);
+        if result.is_ok() || result.as_ref().is_err_and(|error| error.applied()) {
+            self.paused_boundary = false;
+        }
+        if let Err(error) = &result
+            && let Some(fault) = error.fault()
+        {
+            self.failed = true;
+            self.diagnostics
+                .extend(super::super::runtime_scope_failure_report(fault));
+        }
+        result.map_err(Into::into)
     }
 
     /// Admits one command through the existing typed gameplay driver port.

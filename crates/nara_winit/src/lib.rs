@@ -81,7 +81,8 @@ use nara_app::{
     AppExit, AppRunError, RuntimeControl, RuntimeControlRejection, RuntimeControlRequestResult,
     RuntimeControlStatus, RuntimeControlTicket, RuntimeDriveError, RuntimeDriverScope,
     RuntimeFault, RuntimeFrameKind, RuntimeInstance, RuntimeScopeError, RuntimeScopeOutcome,
-    RuntimeState,
+    RuntimeState, RuntimeTimeContinuation, RuntimeTimeContinuationError,
+    RuntimeTimeContinuationRejection,
 };
 use nara_input::{
     ButtonDriverInput, ButtonInputDriverError, InputIngressError, InputPointerId, InputSeatId,
@@ -545,6 +546,43 @@ impl WinitSession {
                 && app.is_healthy_live()
                 && app.runtime.state() == RuntimeState::Paused
         })
+    }
+
+    /// Captures scheduling phase after the original session completes healthy paused maintenance.
+    pub fn capture_time_continuation(
+        &self,
+    ) -> Result<RuntimeTimeContinuation, RuntimeTimeContinuationError> {
+        self.check_time_continuation_boundary()?;
+        self.runtime().capture_time_continuation()
+    }
+
+    /// Initializes scheduling phase through the original Runtime's time owner.
+    ///
+    /// Successful initialization, including application before a fault, requires another original
+    /// paused maintenance frame. Refusal before application preserves the prior frame eligibility.
+    pub fn restore_time_continuation(
+        &mut self,
+        value: RuntimeTimeContinuation,
+    ) -> Result<(), RuntimeTimeContinuationError> {
+        self.check_time_continuation_boundary()?;
+        let app = self.app.as_mut().expect("live session owns its Runtime");
+        let result = app.runtime.restore_time_continuation(value);
+        if result.is_ok() || result.as_ref().is_err_and(|error| error.applied()) {
+            app.request_frame();
+        }
+        result
+    }
+
+    fn check_time_continuation_boundary(&self) -> Result<(), RuntimeTimeContinuationError> {
+        let app = self.app.as_ref().expect("live session owns its Runtime");
+        let state = app.runtime.state();
+        if !app.is_healthy_live() || state != RuntimeState::Paused {
+            return Err(RuntimeTimeContinuationRejection::Unavailable { state }.into());
+        }
+        if !self.paused_frame_complete() {
+            return Err(RuntimeTimeContinuationRejection::IncompletePausedFrame.into());
+        }
+        Ok(())
     }
 
     /// Invokes an original typed driver operation and retains its exact output and post-fault.
@@ -1183,7 +1221,7 @@ impl WinitApp {
     fn run_frame_transition(&mut self, delta: Duration) -> EventLoopDirective {
         self.frame_requested = false;
         self.paused_frame_complete = false;
-        let outcome = self.runtime.drive(delta);
+        let outcome = self.runtime.drive_elapsed(delta);
         if let Ok(outcome) = &outcome
             && self.is_healthy_live()
             && self.runtime.state() == RuntimeState::Paused

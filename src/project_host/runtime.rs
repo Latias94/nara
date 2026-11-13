@@ -649,6 +649,13 @@ impl ProjectHost {
         }
     }
 
+    fn running_runtime(&self) -> Option<&RuntimeInstance> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => Some(published.runtime()),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
     fn running_runtime_mut(&mut self) -> Option<&mut RuntimeInstance> {
         match &mut self.slot {
             ProjectHostSlot::Running(published) => Some(published.runtime_mut()),

@@ -663,12 +663,20 @@ completes. The game still validates command watermarks, pending services, logica
 complete state format. A GPU presentation, an empty command batch or a copied game snapshot is
 not a substitute for these checks.
 
-Desktop time continuation remains open: normal running frames can retain fixed remainder/debt,
-and the current Wait sampler can include paused waiting in the next resumed frame's real delta.
-The existing game capture refuses unsupported phase rather than clearing it. This API does not
-qualify faithful scheduling-phase reconstruction or pause-duration exclusion; the
+`capture_time_continuation()` reads actual scheduling phase and policy through the original
+time owner at that same boundary. `restore_time_continuation(value)` requires matching policy,
+preserves local history and derives interpolation, then requests original paused maintenance.
+A refusal preserves the prior boundary; an applied result, including an applied-before-fault
+result, invalidates it. The typed error retains actual application and fault facts. Headless
+products expose the same operation and require a subsequent `frame(Duration::ZERO)`.
+
+Winit delivers wall-clock intervals through `RuntimeInstance::drive_elapsed`. When Resume is
+applied after a paused interval, one original paused transaction accounts for all RealTime while
+preserving virtual phase/debt; simulation resumes with the next interval. Explicit headless
+`drive(delta)` behavior remains unchanged. Full desktop game reconstruction still requires its
+own service, input and canonical-state qualification; the
 [time findings](../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-time-continuity-findings)
-identify the original time/native owners and required acceptance.
+retain that distinction and actual acceptance.
 
 `request_close()` fences new ordinary operations. Continue polling until terminal; an incomplete
 cleanup retains the original native aggregate and never releases the event loop. Explicit

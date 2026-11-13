@@ -1,6 +1,7 @@
 use nara_app::{
     RuntimeControl, RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket,
-    RuntimeFault, RuntimeGeneration, RuntimeScopeError, RuntimeState,
+    RuntimeFault, RuntimeGeneration, RuntimeScopeError, RuntimeState, RuntimeTimeContinuation,
+    RuntimeTimeContinuationError,
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::World;
@@ -37,6 +38,8 @@ pub enum DesktopControlError {
     Authority(DiagnosticReport),
     #[error("the original desktop native operation failed: {0}")]
     Native(nara_app::AppRunError),
+    #[error(transparent)]
+    TimeContinuation(#[from] RuntimeTimeContinuationError),
 }
 
 impl DesktopRun {
@@ -121,6 +124,30 @@ impl DesktopRun {
             return Err(DesktopControlError::NotPaused);
         }
         self.observe(operation)
+    }
+
+    /// Captures scheduling phase through the original time owner at this paused boundary.
+    pub fn capture_time_continuation(
+        &self,
+    ) -> Result<RuntimeTimeContinuation, DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native()?
+            .session
+            .capture_time_continuation()
+            .map_err(Into::into)
+    }
+
+    /// Initializes phase in the original paused Runtime and requests original maintenance.
+    /// Poll until a new full paused frame before game capture or restored presentation.
+    pub fn restore_time_continuation(
+        &mut self,
+        value: RuntimeTimeContinuation,
+    ) -> Result<(), DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native_mut()?
+            .session
+            .restore_time_continuation(value)
+            .map_err(Into::into)
     }
 
     /// Admits one command through the original typed gameplay driver port and requests a frame.
