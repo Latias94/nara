@@ -21,6 +21,7 @@ use std::{
     },
 };
 
+mod keyboard_continuation;
 mod polling;
 
 // These sources test registry ordering, not native pump behavior. The separate Windows tests use

@@ -2708,6 +2708,7 @@ dependencies = [
  "nara_window",
  "raw-window-handle",
  "thiserror 2.0.18",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

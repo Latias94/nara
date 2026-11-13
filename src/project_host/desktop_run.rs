@@ -140,6 +140,13 @@ impl DesktopRunOptions {
         self.runner = self.runner.with_initial_visibility(visible);
         self
     }
+
+    /// Keeps ordinary native input isolated until explicit focus and physical reconciliation.
+    #[must_use]
+    pub fn with_input_isolation(mut self, isolated: bool) -> Self {
+        self.runner = self.runner.with_input_isolation(isolated);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

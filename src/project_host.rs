@@ -16,7 +16,7 @@ pub use desktop_run::{
     DesktopTelemetrySealOutcome, DesktopTelemetrySealReport,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-pub use nara_winit::WinitEventLoop;
+pub use nara_winit::{WinitEventLoop, WinitInputActivation, WinitKeyboardContinuationError};
 
 #[cfg(windows)]
 #[doc(hidden)]

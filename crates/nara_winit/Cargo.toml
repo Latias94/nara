@@ -17,6 +17,13 @@ nara_window = { workspace = true, features = ["runtime"] }
 thiserror = { workspace = true, optional = true }
 winit.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 nara_gameplay.workspace = true
 nara_text.workspace = true

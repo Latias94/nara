@@ -678,6 +678,25 @@ own service, input and canonical-state qualification; the
 [time findings](../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-time-continuity-findings)
 retain that distinction and actual acceptance.
 
+`with_input_isolation(true)` suppresses ordinary keyboard, mouse and pointer ingress while the
+original native owner continues to service lifecycle and focus events. In an isolated healthy
+paused session, `restore_keyboard_holds` admits the game's declared finite inventory through the
+original Input owner. Complete paused maintenance before `capture_keyboard_holds` or activation.
+The game must compare its own held intent and canonical state against that inventory.
+
+After committing the ordinary command route, reveal the same window and call
+`request_input_activation`. Observe `input_activation` and `input_activation_error` while polling;
+visibility and a focus request are insufficient. The current Windows adapter queries the declared
+physical A/D/W/S keys after actual focus acknowledgement. Other keys/backends report unsupported
+activation. A denied focus leaves `AwaitingFocus`; ordinary input and Resume remain gated.
+
+Missing restored holds enter `ReconciliationPending` and produce releases through the original
+Input owner. One accepted `StepFixedTick` consumes the corresponding original stop commands before
+game movement. Complete paused maintenance and physical reconciliation before `Active` permits
+ordinary input and Resume. Synthetic/repeated Down cannot manufacture restored intent. An
+activation failure preserves the paused session and actual operation/fault result; it is not
+an adoption rollback or complete desktop reconstruction.
+
 `request_close()` fences new ordinary operations. Continue polling until terminal; an incomplete
 cleanup retains the original native aggregate and never releases the event loop. Explicit
 `execute()` retries that original cleanup drive. `take_event_loop()` succeeds only after complete

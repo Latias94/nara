@@ -40,6 +40,8 @@ pub enum DesktopControlError {
     Native(nara_app::AppRunError),
     #[error(transparent)]
     TimeContinuation(#[from] RuntimeTimeContinuationError),
+    #[error(transparent)]
+    KeyboardContinuation(#[from] nara_winit::WinitKeyboardContinuationError),
 }
 
 impl DesktopRun {
@@ -148,6 +150,61 @@ impl DesktopRun {
             .session
             .restore_time_continuation(value)
             .map_err(Into::into)
+    }
+
+    /// Captures declared keyboard Button contributions through the original Input owner.
+    /// Game capture must additionally validate its canonical held state and pending commands.
+    pub fn capture_keyboard_holds(
+        &self,
+        bindings: &[nara_input::KeyboardActionBinding],
+    ) -> Result<Vec<nara_input::KeyboardHold>, DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native()?
+            .session
+            .capture_keyboard_holds(bindings)
+            .map_err(Into::into)
+    }
+
+    /// Restores new local Input members in a paused candidate with native input isolated.
+    /// Complete original maintenance before capture or requesting input activation.
+    pub fn restore_keyboard_holds(
+        &mut self,
+        holds: Vec<nara_input::KeyboardHold>,
+    ) -> Result<nara_input::InputAdmission, DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native_mut()?
+            .session
+            .restore_keyboard_holds(holds)
+            .map_err(Into::into)
+    }
+
+    /// Requests actual focus and physical reconciliation after the caller commits its route.
+    /// An unresolved result retains the original paused game and its native input isolation.
+    pub fn request_input_activation(
+        &mut self,
+    ) -> Result<nara_winit::WinitInputActivation, DesktopControlError> {
+        self.capture(|_| ())?;
+        self.live_native_mut()?
+            .session
+            .request_input_activation()
+            .map_err(Into::into)
+    }
+
+    #[must_use]
+    pub fn input_activation(&self) -> Option<nara_winit::WinitInputActivation> {
+        match &self.state {
+            DesktopRunState::Native(native) => Some(native.session.input_activation()),
+            _ => None,
+        }
+    }
+
+    /// Preserves an asynchronous activation refusal or original post-operation fault.
+    #[must_use]
+    pub fn input_activation_error(&self) -> Option<&nara_winit::WinitKeyboardContinuationError> {
+        match &self.state {
+            DesktopRunState::Native(native) => native.session.input_activation_error(),
+            _ => None,
+        }
     }
 
     /// Admits one command through the original typed gameplay driver port and requests a frame.
