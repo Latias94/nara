@@ -271,8 +271,12 @@ impl DesktopGame {
     }
 
     fn wait_quiescent(&mut self, deadline: Instant) -> Result<(), String> {
-        loop {
+        if self.run.progress() == DesktopRunProgress::NotStarted {
             self.poll_live(deadline)?;
+        }
+        loop {
+            check_deadline(deadline)?;
+            self.require_paused()?;
             match self
                 .run
                 .capture(|world| world.resource::<GameSnapshot>().clone())
@@ -294,6 +298,7 @@ impl DesktopGame {
                 Err(DesktopControlError::NotPaused) => {}
                 Err(error) => return Err(format!("desktop paused boundary unavailable: {error}")),
             }
+            self.poll_live(deadline)?;
         }
     }
 
