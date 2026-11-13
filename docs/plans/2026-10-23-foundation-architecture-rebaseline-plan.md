@@ -4655,6 +4655,17 @@ A/B/C regression each pass 1/1, and three actual JSON CLI trajectories pass with
 exit and clean game/containment/readers/output evidence. Desktop post-start integration and
 service classification remain separate; these results do not resume UI, qualify other platforms,
 measure an iteration budget or complete R12.
+The [desktop polling prerequisite](2026-11-13-rust-state-reconstruction-plan.md#desktop-polling-and-control-qualification)
+now retains the original native aggregate between caller polls, with managed Pause/Resume/exact
+Step, typed gameplay input and read-only capture after a healthy full paused App frame. Blocking
+execution and bounded polling share original Runtime/event-loop/presentation/retirement owners;
+hidden startup and explicit same-window reveal do not qualify candidate input isolation or
+adoption. Core, Winit CPU, selected original native Winit and root/public controls pass 168/168,
+62/62, 5/5 and 23/23 respectively. An ordinary desktop game passes 1/1 through actual gameplay,
+managed controls, original native retirement and independent GPU replay pixels. The linked record
+keeps that finite visual evidence distinct from canonical desktop state restoration, held-input
+continuity, scheduling-phase/native pause-sampling corrections and the complete rebuilt-game
+adoption still required below. UI and physical mixed-DPI work remain paused.
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

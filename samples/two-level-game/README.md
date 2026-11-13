@@ -189,6 +189,33 @@ cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --lo
 Actual results and platform limits belong to the
 [current plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#game-owned-development-host-and-adoption).
 
+## Caller-Driven Desktop Control
+
+The separate [`desktop_control`](src/bin/desktop_control.rs) consumer uses the ordinary desktop
+recipe with the original `DesktopRun` retained between polls. It starts hidden and paused, drives
+movement, pickups, markers and travel through public semantic commands, then exercises exact
+fixed steps, reveal, Resume/Pause and physical retirement. The original presentation receipt is
+joined to its exact retained stock render input. After the original native owners retire, a
+separate image replay checks finite player, marker, pickup-interior and background pixels.
+That readback is not a capture of the swapchain or display.
+
+From the engine root on Windows, set `WGPU_BACKEND=dx12` and
+`NARA_WGPU_FORCE_FALLBACK=0`. Reuse the toolchain, serial build and shared target settings above,
+then run:
+
+```text
+cargo +1.95.0 run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --bin desktop_control
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test desktop_control --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+The ignored test launches that ordinary executable through the shared contained-process owner
+and checks its actual exit, containment, readers and output. Executed results, the finite pixel
+oracle and platform limits belong to the
+[desktop development plan](../../docs/plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-development-and-original-native-session).
+This consumer does not yet reconstruct a desktop game or adopt a rebuilt executable. Its visual
+expectation is not an authoritative `ResumeState` capture; complete desktop service eligibility
+and held-input transfer remain required before extending the development Host to this placement.
+
 ## Ownership And Limits
 
 - `CurrentScene` is the only source/Scene-instance authority. Gameplay retains a logical `LevelKey`

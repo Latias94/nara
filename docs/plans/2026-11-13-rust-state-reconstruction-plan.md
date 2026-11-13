@@ -1,7 +1,8 @@
 # Rust State Capture, Rebuild And Reconstruction
 
-Date: 2026-11-13. Status: qualified for the shipped Windows source/headless workflow;
-complete R12 remains open. Owner: the foundation rebaseline R12 runtime lane.
+Date: 2026-11-13. Status: qualified for the shipped Windows source/headless workflow and the
+finite desktop control/presentation consumer; desktop reconstruction/adoption and complete R12
+remain open. Owner: the foundation rebaseline R12 runtime lane.
 Editor UI and physical mixed-DPI work remain paused.
 
 ## Complete Outcome
@@ -15,7 +16,8 @@ compatibility and restore failures must leave a usable original game. A checksum
 progress-save reload, unchanged executable restart or successful startup alone cannot complete
 this unit.
 
-The owning contracts are [ADR0076](../architecture/adr/0076-play-runtime-debug-control-and-observation.md),
+The owning contracts are [ADR0024](../architecture/adr/0024-determinism-fixed-update-and-replay-policy.md),
+[ADR0076](../architecture/adr/0076-play-runtime-debug-control-and-observation.md),
 [ADR0093](../architecture/adr/0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md),
 [ADR0110](../architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md)
 and [ADR0116](../architecture/adr/0116-standalone-supervised-editor-play.md). The existing
@@ -479,3 +481,238 @@ This remains Windows x64, Rust 1.95.0, release/locked/offline, one Cargo job and
 budgets. Linux execution, desktop post-start exchange/service classification, hard compiler
 interruption, native-effect rollback, open save storage and full R12 remain open. Editor UI and
 physical mixed-DPI work stay paused.
+
+## Desktop Development And Original Native Session
+
+Status: active. Extend the game-owned development workflow through an actual desktop product.
+Keep the complete outcome: real body/private-structure edits, canonical state restoration, correct
+native presentation, sole-route adoption and original Runtime/GPU/window/process retirement.
+The source/headless qualification above is the control, not desktop acceptance. Editor UI,
+dialogue integration UI and physical mixed-DPI work remain paused.
+
+At `8cd36d4`, `DesktopRun` owns the original Runtime, Winit session, local WGPU Host and project
+context, but its initial execution blocks until shutdown. The presentation observer is read-only
+and cannot Pause/Step/submit/capture. A game-owned finite protocol must keep native events and
+original presentation/retirement responsive while waiting for requests. Deepen that existing
+owner with caller-driven native polling and managed control; do not put game control into the
+renderer, add a second Runtime/event pump or expose unrestricted mutable World/GPU access.
+
+The local source comparison pins Bevy `03ed5a27c92715c8fa2188f31f04e454ec39942f`
+(`crates/bevy_app/src/app.rs`, `crates/bevy_winit/src/state.rs`) and Godot
+`7a37606a433c0e7735525037cdf774f043146a21` (`core/os/main_loop.h`, `main/main.cpp`). Both keep
+native dispatch and simulation iteration distinguishable within the original engine application.
+Nara retains its stricter managed authority and original cleanup contracts instead of adding a
+parallel external driver. Those source references are architectural evidence, not native
+qualification of this implementation.
+
+The dependency-ordered implementation is:
+
+1. Record the original managed drive's full-App-frame versus exact-fixed-tick completion explicitly.
+   An exact tick does not include the later paused maintenance frame and cannot authorize capture
+   by itself. Native polling retains this original fact and invalidates capture after new controls,
+   submitted gameplay or native driver input. Game capture still validates its own queues, source,
+   logical time and authoritative services.
+2. Refactor the existing retained Winit session so bounded polling and blocking execution share
+   one native dispatch/retirement implementation. Keep the original event loop, mapped windows,
+   input connections, providers, GPU results and affinity until actual retirement. Polling never
+   treats a live game as cleanup failure or silently renews an expired cleanup drive. Explicit
+   Close/retry retains the original owner. Support initially paused, non-activating hidden native
+   candidates and explicit reveal through this same owner.
+3. Expose concrete polling, managed controls/results, bounded gameplay submission and healthy
+   paused capture through `DesktopRun`. Source/processed construction and the existing blocking
+   launch reuse its original ownership and close path. A poll wait bounds native waiting, not
+   arbitrary source startup, callbacks, drivers or compiler work.
+4. Classify the actual desktop game inventory. Rebuild native window/input/GPU/derived extraction
+   services in a fresh Runtime; never serialize handles or broadly allow every desktop plugin.
+   Preserve exact game configuration/Schema/content compatibility and refuse unsupported save,
+   watch, task, physics/audio or other authoritative services. Share the game's capture/restore
+   semantics between the two real placements without a universal serialization/provider layer.
+5. Add an explicit desktop execution selection to the existing game development owner and finite
+   child protocol. Keep immutable executable/source observations, session/request correlation,
+   isolated disposable probes, a fresh original-basis adopter and final revalidation. Candidates
+   must not receive ordinary native or semantic input before qualification. The first visible
+   candidate picture must be its restored game; mere startup READY is insufficient. Define and
+   exercise reveal/adoption failure and post-commit cleanup outcomes without hiding effects or
+   discarding a usable incumbent.
+6. Qualify the actual ordinary desktop game and public managed control before joining it to real
+   A/B/C builds. Capture the original stock render input and correlate the exact Runtime/App/render/
+   View/window/device identities with an actual surface presentation. Use finite game-specific
+   GPU pixel oracles over that captured input; distinguish replay readback from original-window
+   pixels and do not claim scanout. Keep actual gameplay, draw capture and presentation joined.
+7. Run the production desktop adoption trajectory with compile/start/capture/restore/probe/source/
+   presentation refusal, stale/foreign/consumed identities, Pending-time continued play and exact
+   original GPU/window/process cleanup. First qualify on Windows/DX12 hardware, explicit native
+   target, serial Cargo and shared `target`; retain unsupported-platform and performance limits.
+8. Update ADR0076, ADR0116's separate game placement, guides and the R12 ledger with actual results.
+   `desktop-supervised-play/v1` retains one active child and one-shot READY. A future Editor
+   integration needs explicit eligibility and its original source/generation/nominal owner;
+   completing the game placement does not silently extend that protocol or complete R12.
+
+### Desktop Polling And Control Qualification
+
+Implementation revisions are `f707d24` for original frame kind, `70d6a4f` for retained Winit
+polling, `92c5986` for public desktop Host control and `6d3a865` for the ordinary game/GPU consumer.
+Every managed drive outcome carries its actual full-App-frame or exact-fixed-tick execution
+kind. The retained Winit session and
+public desktop product now use that fact for paused capture. Blocking execution and bounded
+polling share the original native pump, Runtime, presentation driver and physical retirement.
+The public product admits managed controls and typed gameplay commands without exposing mutable
+World or graphics authority. Source and supplied-Runtime construction retain the same close path.
+
+Independent core/Host, native-session and game-render consumer reviews close five concrete
+lifecycle/evidence corrections: ordinary startup cleanup polls cannot renew an incomplete drive;
+initial Pause refuses an already pending Resume; its startup failure survives delayed cleanup;
+an already recorded Runtime fault survives immediate Close; and hidden fullscreen selection is
+deferred until reveal of the same original window. The game consumer additionally requires a
+presentation at or after its captured App-frame floor, so an old matching picture cannot satisfy
+the final Resume/Pause witness. These corrections retain the original assertions and owners.
+
+| Scope | Actual result |
+| --- | --- |
+| Complete `nara_app` | 168/168, one intentional skip, run `9a3d27ff-2d55-410f-bf69-57693348093f`; includes the explicit frame-kind controls. |
+| Final all-feature Winit CPU | 62/62, 15 native cases skipped, run `4bbc55d7-da08-483d-974c-a9d2bbd1d072`. Original controls plus live polling, paused-boundary invalidation, retained post-fault output and explicit-only incomplete-cleanup retry pass. |
+| Selected original native Winit | 5/5, run `e464131a-30dc-44c7-9318-f11815b6fa0b`. Same-window hidden/reveal/fullscreen/close, sequential pump custody and Wait maintenance pass. Physical mixed-DPI cases are not selected. |
+| Root desktop Host and public control | 23/23, 654 unrelated cases skipped, run `f0ba72a0-d5f4-4711-84c2-159e81e1b8ff`. Includes original presentation/retirement controls, startup Pause refusal, retained incomplete cleanup and close-before-source-start. |
+| Actual ordinary desktop game and GPU replay | 1/1, no skips, run `503ee101-d33f-4e1f-91bb-2c13d10f42dd`, 3.793 seconds. Main-thread child first refuses a pending-Resume initial-pause conflict and recovers its physical pump, then runs actual movement/pickup/marker/travel/Step/reveal/Resume/Pause through public APIs. Original native retirement, contained child exit/readers/output and independent pixel readback pass without force kill or output loss. Its first release build separately takes 18m22s. |
+| Final default source/headless sample regression | 78/78, two actual-build cases intentionally skipped, run `20486457-bb06-4803-bf6e-a5b33e6d1b37`, 10.792 seconds after an 8m36s release rebuild. Preserves the shipped empty-feature recipe and all ordinary state/source/CLI/gameplay checks. Desktop compilation installs a different input inventory, as documented below. |
+
+The independently compiled game consumer uses its ordinary desktop recipe and stock render
+transport. It retains at most eight original inputs after Seal and before Publish, joining the
+selected input to the exact Runtime/App/render/View/window/device/extent presentation facts.
+Its separate image replay occurs after original native retirement. Finite pixel expectations
+cover the non-anchor player, Cavern marker, visible pickup white/shadow interiors and background;
+they do not cover diamond transparency contours, Meadow disappearance pixels, the swapchain or
+scanout. The visual expectation deliberately has no observed configuration fingerprint and is
+never admitted as a canonical restore state. Full desktop state/service classification and input
+continuity remain the subsequent complete outcome below.
+
+This is Windows x64, hardware DX12, Rust 1.95.0, release/locked/offline, one Cargo job and the
+shared root target. Elapsed build/test observations are not edit-latency or frame-time budgets.
+The sample enables a direct optional WGPU dependency at the existing engine Git revision; its
+lock changes only that package edge. Physical keyboard transfer, serialized scheduling phase,
+native pause-duration exclusion, actual desktop A/B/C adoption, foreign native execution and
+full R12 remain open. UI and physical mixed-DPI execution stay paused.
+
+The minimal `desktop-winit,render-wgpu` root library builds with default features disabled and
+without `runtime-2d` or `serde`. Correctness Clippy passes for all-feature App/Winit targets,
+the selected root desktop library/public test and all desktop sample targets. Root/sample
+formatting, affected TOML/lock parsing, added local links/fragments and whitespace checks pass;
+existing advisory warnings remain. The scoped implementation/review threads and both bounded
+follow-up source-study threads are closed. Those studies identify the still-unimplemented
+input, time and service-inventory work below rather than claiming another accepted workflow.
+
+### Desktop Input Continuity Findings
+
+The source audit identifies a concrete missing owner operation. Restoring `Session::held[right]`
+does not restore an `InputTimeline` member or `SemanticActions` contribution. The original release
+path ignores a key with no active member, so a later native Release can leave restored movement
+stuck. Desktop acceptance therefore still requires transferred held intent and its subsequent
+release, including a real window dispatch trajectory; a neutral-only capture is only a control.
+
+The bounded follow-up source study identifies the concrete implementation pressure. The four
+game bindings are `a/d/w/s`, four Button actions in the `gameplay` context. A restored member
+must also establish the original `ButtonInput` projection: its normal Release currently expects
+an existing member, so installing only `SemanticActions` would still be incomplete. Input
+quiescence must include retained deferred action records, not only `action_scanned`; a paused
+frame can scan a Release while deferring its semantic effect. The original timeline's retained
+record accounting provides a conservative refusal before a more precise predicate is justified.
+
+The restored member's admission provenance and a later native terminal trigger are separate
+facts; the old process's press sequence must not become the new member's authority. The current
+Winit keyboard match discards `is_synthetic`, and its input gate initially assumes focus even
+for a hidden window. Preserve that flag and add explicit dormant/activation handling through
+the original owner before claiming hidden candidate input isolation. A visibility change alone
+does not establish focus or distinguish a key released during the cross-process focus gap.
+
+The selected direction retains the original Input owner: explicitly admit a bounded restored
+logical contribution, with new local member/endpoint authority and original terminal allowances,
+without fabricating a physical Press or repeating a Started gameplay command. Native trigger
+provenance remains distinct from restored contribution provenance. Future release, focus loss,
+mapping/context cancellation and native retirement must settle that original contribution once;
+re-enabling a context or receiving repeated/synthetic Down cannot resurrect it. No separate key
+state map, gameplay side channel or replay-queue policy becomes a second input authority.
+
+The hidden candidate and disposable probe need explicit native input isolation in the original
+session. Lifecycle events still pass through original window dispatch. Adopt the sole ordinary
+route before a reveal that can change incumbent focus; post-commit activation failure remains
+an activation result with retained paused owners, not a false adoption rollback. Dormant logical
+intent, real focus acquisition, activation and cancellation need their own exact original-owner
+observations. `with_initial_visibility(false)` alone does not prove those semantics.
+
+The public implementation and bounded record/token shapes remain unimplemented design work;
+do not reserve a generic continuity framework or accept a proposed signature from source study
+alone. The concrete four-key game must drive the interface, with typed driver, native dispatch
+and actual rebuilt-game acceptance. Capture must also reject an unconsumed/staged release;
+comparing only the game's held bits or one input scan cursor is insufficient. Bevy's pinned
+keyboard focus cleanup/synthetic filtering and Godot's `release_pressed_events` provide related
+focus policy evidence, not this cross-Runtime transfer. Nonzero time remainder/debt and scaling
+remain separately refused by the existing game format; this input work does not erase them.
+
+### Desktop Time Continuity Findings
+
+Source inspection identifies a second required continuation owner. Winit supplies wall-clock
+deltas, so a normal Running full frame followed by Pause can retain nonzero fixed remainder.
+Paused maintenance and exact steps preserve it. With a 20 ms timestep, a 16 ms running frame
+followed by Pause leaves 16 ms pending even if no fixed tick ran. The current game format
+correctly refuses that capture; an initially paused, exact-step-only trajectory cannot replace
+ordinary desktop reconstruction acceptance. This is a source-derived behavior, not a measured
+refusal rate or a claim that every Resume/Pause has nonzero remainder.
+
+The game's logical completed ticks and elapsed time do not describe this phase. With 13 ms
+pending, the same next 7 ms should trigger a tick; a fresh candidate reset to zero would not.
+The original `nara_app` FixedTime/TimeFramePlan owner therefore needs a bounded continuation
+capture/initialization operation at a healthy managed boundary. Preserve pending phase and
+validate actual timestep, work/debt caps, catch-up policy, scale and max delta without admitting
+contradictory independent pending/remainder/debt values. Derive render interpolation through
+that same owner. Keep the candidate's new Runtime/frame/tick identity and the game's separate
+logical clock; do not copy the entire time resources or private active-frame fields.
+
+This operation remains unimplemented and its public value/API is not selected. It cannot simply
+mutate FixedTime from game `resume::finish`: TaskUpdate executes after the frame plan is already
+committed. Version the bounded game format and exact-state oracle together with the managed
+time operation, and apply it before final canonical comparison and restored presentation.
+
+Winit also owns the new process's `last_frame` sampling baseline. Its current Wait maintenance
+does not update that baseline, so paused/hidden qualification time can enter the next resumed
+delta. Define the native pause/activation sampling contract together with the original real/
+virtual-time policy; do not serialize an Instant, clear accumulated phase or disguise waiting as
+simulation. Acceptance needs a nonzero-remainder Running/Pause capture, matched subsequent
+delta sequences, legal debt and policy refusals, plus a long paused/hidden wait control. Until
+then, retain the incumbent and report the existing remainder/debt refusal honestly.
+
+### Desktop Service Inventory And Placement
+
+The ordinary desktop profile adds the following ten plugins to the supported headless inventory.
+All ten are currently outside the game's resume allowlist and therefore refused. The following
+classification describes the required successor; support is not implemented by this source study.
+
+| Plugin | Required continuation classification |
+| --- | --- |
+| `nara.render` | Rebuild Views, render frame/status and transform presentation projection. |
+| `nara.image.prepare` | Rebuild prepared images from the same admitted assets and source facts. |
+| `nara.sprite-render` | Rebuild extraction, ordering and batches from reconstructed game state. |
+| `nara.window` | Create new native/window registry state; retain original retirement and new focus authority. |
+| `nara.render-wgpu.capture` | Rebuild packet slot, managed connection and backend state under the fresh owner. |
+| `nara.render-wgpu.window-presentation` | Rebuild the original candidate's surface/presentation; keep receipts local to their owner. |
+| `nara.render-wgpu.stock-capture` | Rebuild stock builder/draft and preserve its close obligations. |
+| `nara.render-wgpu.stock-policy` | Reinstall the same validated stock policy/composer configuration. |
+| `nara.render-wgpu.stock-sprite` | Reconstruct capture contributions from the new sprite batches. |
+| `two-level-game.desktop-input` | Rebuild binding configuration; implement the authoritative input continuation above before admission. |
+
+There is no separate `nara.winit` plugin in this inventory; `nara.render-components` already
+belongs to the shared inventory. Compilation features and actual placement remain distinct:
+`configured_recipe` currently installs desktop-input whenever compiled with the `desktop`
+feature, even for a selected headless profile. That combination adds only desktop-input and is
+also refused by the current explicit inventory. The development Host currently requires empty
+features. Classifying desktop-input must explicitly resolve this combination rather than
+accidentally changing its eligibility through an expanded allowlist.
+
+The concrete game successor should share private eligibility, canonical World capture,
+fresh-candidate checks and restore-command construction between its two public placements.
+Desktop restoration submits through `DesktopRun`, polls the original Step ticket and completes
+paused maintenance through the existing game `begin_from_command`, travel and finish owners.
+Extend the finite continuity child/protocol, process client, development Host and CLI with
+explicit placement, restored-presentation confirmation and separate adoption/activation/
+retirement results. Preserve the current executable/source envelope, disposable probe, fresh
+adopter and final source/dual-state revalidation. These are required implementation changes;
+the current visual control consumer does not satisfy them.

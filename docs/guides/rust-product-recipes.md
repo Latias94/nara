@@ -627,3 +627,59 @@ remain an incomplete implementation of
 Stable asset identity generation enables `getrandom`'s `wasm_js` backend only for this target,
 using Web Crypto through `wasm-bindgen`. Native targets keep their existing entropy provider.
 Successful compilation does not provide an entropy source to a non-JavaScript Wasm host.
+
+## Caller-Driven Desktop Control
+
+`DesktopRun::poll(max_wait)` starts or advances the original native product without waiting for
+game exit. It retains the same Runtime, physical event loop, native windows, project context and
+local presentation owner between calls. `execute()` keeps the ordinary blocking workflow and
+explicitly retries retained incomplete cleanup through those same owners. Native main-thread
+affinity applies to construction, polling, operations and retirement.
+
+`DesktopRunProgress` distinguishes `NotStarted`, live `Running` (including Paused), `Retiring`,
+`CleanupIncomplete`, `Completed(exit)` and `Failed`. `max_wait` bounds native waiting during one
+poll; it does not impose a hard deadline on synchronous source/startup work, user callbacks,
+managed frames, graphics drivers or compiler/build-script calls. Keep callbacks prompt.
+
+Use `DesktopRunOptions::with_initial_pause()` for a game-owned controlled session and
+`with_initial_visibility(false)` to create its original native window hidden and non-activating.
+`reveal()` acts on that live original window and requests another native frame; it does not
+qualify a reconstructed game or grant a second active input route. A development Host remains
+responsible for candidate state, input isolation, reveal/adoption policy and source compatibility.
+For an initially hidden fullscreen selection, the same window starts windowed; reveal applies
+its retained fullscreen selection. This avoids the fixed Winit creation path's foreground
+activation behavior before explicit reveal. It does not qualify monitor movement or mixed DPI.
+
+`request_control(Pause | Resume | StepFixedTick)` returns the original managed ticket. Poll and
+inspect `control_status(ticket)`; acceptance alone does not mean the operation ran. `submit`
+admits a finite `GameplayCommandSubmission` through the original command queue. Ordinary queue
+rejection preserves the game. A `CommandFault` retains both the actual admission outcome and the
+fault discovered afterward, so a consumer must reconcile that output before following fault policy.
+
+`observe` reads the original healthy World. `capture` additionally requires the original healthy
+completed paused App frame. An exact fixed tick alone leaves later App stages unexecuted. New
+controls, semantic submission or native driver input invalidate capture until paused maintenance
+completes. The game still validates command watermarks, pending services, logical time and its
+complete state format. A GPU presentation, an empty command batch or a copied game snapshot is
+not a substitute for these checks.
+
+Desktop time continuation remains open: normal running frames can retain fixed remainder/debt,
+and the current Wait sampler can include paused waiting in the next resumed frame's real delta.
+The existing game capture refuses unsupported phase rather than clearing it. This API does not
+qualify faithful scheduling-phase reconstruction or pause-duration exclusion; the
+[time findings](../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-time-continuity-findings)
+identify the original time/native owners and required acceptance.
+
+`request_close()` fences new ordinary operations. Continue polling until terminal; an incomplete
+cleanup retains the original native aggregate and never releases the event loop. Explicit
+`execute()` retries that original cleanup drive. `take_event_loop()` succeeds only after complete
+retirement, permitting the existing sequential-session workflow without replacing Runtime or
+window authority. Drop remains a last-resort cleanup policy, not a passing retirement observation.
+
+The independently compiled Two-Level Game's `desktop_control` binary exercises this public path
+with its ordinary desktop recipe and stock rendering. Build it with the sample's `desktop`
+feature, then run its separately ignored `desktop_control` test target serially with an explicit
+hardware backend and `NARA_WGPU_FORCE_FALLBACK=0`. Executed results and limitations belong to the
+[desktop development plan](../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-development-and-original-native-session).
+This control path does not extend `desktop-supervised-play/v1` or qualify desktop reconstruction
+and adoption without their complete consumer evidence.

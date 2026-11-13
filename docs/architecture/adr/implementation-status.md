@@ -2545,6 +2545,21 @@ Windows logical/native inventory-path mismatch. The linked plan records runs, fi
 Windows Rust 1.95 scope. Desktop adoption, unsupported services, hard compiler interruption,
 performance budgets, Linux execution and the complete R12/foundation outcome remain open.
 
+The November 14 [desktop polling prerequisite](../../plans/2026-11-13-rust-state-reconstruction-plan.md#desktop-polling-and-control-qualification)
+distinguishes exact fixed ticks from full App frames and keeps one original desktop aggregate
+between caller polls. Managed controls, typed gameplay submission, healthy paused read-only
+capture, hidden startup/reveal and physical Close share the existing Runtime, native pump and
+presentation owners. Core qualification passes 168/168, all-feature Winit CPU 62/62, selected
+original native Winit 5/5 and root desktop/public controls 23/23. An ordinary desktop game child
+also passes 1/1 through actual gameplay, managed controls, original native retirement and
+independent GPU replay pixels; the final default source/headless sample regression passes 78/78.
+The linked record separates finite visual evidence, canonical capture and independent review
+corrections.
+Complete desktop canonical reconstruction, held-input transfer, rebuilt-game adoption, foreign
+execution and measured budgets remain open. Source study also identifies the required time
+continuation and native pause-sampling correction; no phase is silently cleared. Editor UI and
+physical mixed-DPI work stay paused.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real
