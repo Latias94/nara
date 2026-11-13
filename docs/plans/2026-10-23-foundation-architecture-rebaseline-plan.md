@@ -1142,6 +1142,17 @@ than requiring their public topology.
 
 ## R10: Motion, Time, Repeatability And Concrete Domain Seams
 
+**November 13 execution priority:** the user has paused Editor UI and mixed-DPI development
+to continue engine-runtime work. Preserve their uncommitted checkpoints. Start from the actual
+two-level game and existing managed motion/time consumers; select concrete runtime corrections
+from source and executable evidence before adding another backend or general interface.
+
+The [managed startup pause correction](2026-11-03-joint-motion-execution-plan.md#managed-startup-pause-correction-november-13)
+preserves the final configured/Startup time policy through public Runtime promotion. The
+[two-level marker recovery](2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
+keeps the committed Scene source/receipt while repairing game-owned dynamic representation and
+retiring it on later travel. Their bounded CPU evidence does not complete R10 or the rebaseline.
+
 **Design:** D09. **State:** the [joint motion/execution unit](2026-11-03-joint-motion-execution-plan.md)
 has bounded independent, captured-discontinuity Windows/DX12 and same-World prediction/offline-PCM
 qualification. The [authored collision unit](2026-11-04-authored-collision-derivation-plan.md)

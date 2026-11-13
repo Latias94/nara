@@ -1,3 +1,5 @@
+mod recovery;
+
 use std::{
     num::NonZeroU32,
     time::{Duration, Instant},

@@ -2438,6 +2438,16 @@ an initially paused configuration. The release-mode App library/public cohort pa
 with one explicit skip on Windows. This does not qualify gameplay-state transitions, desktop
 background policy or complete R4c/R10.
 
+The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
+qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
+repairing damaged dynamic representation and replacing a legally retired owned marker. Real
+Degraded Retry preserves the original committed Scene source/receipt and logical progress,
+recovers exact runtime identity/components/root membership, then permits ordinary travel and
+retirement without removing an unrelated entity. The release-mode sample cohort passes 32/32
+with no skips on Windows. Partial repair effects remain possible on failure; native physics/audio
+reconstruction, general rollback, arbitrary authored-component recovery and other platforms are
+not qualified.
+
 The [ordinary Application progress successor](../../knowledge/engineering/verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md)
 provides one public bounded no-action pass across Open, Session and physical retirement.
 Native maintenance shares it without changing effects-only wake ownership; real submissions

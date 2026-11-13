@@ -3,11 +3,8 @@ use std::collections::BTreeSet;
 use nara::{
     advanced_prelude::CurrentScene,
     ecs::{Component, World},
-    hierarchy::{
-        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyRoots,
-        HierarchyWriter, Parent,
-    },
-    identity::{EntityLookup, spawn_identity_entity},
+    hierarchy::{HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
+    identity::{EntityLookup, WorldIdentityDomain, spawn_identity_entity},
     prelude::{Color, Transform2d, Vec2},
     sprite::Sprite,
 };
@@ -170,6 +167,36 @@ fn rebuild_markers(world: &mut World) -> Result<(), String> {
         .filter(|marker| marker.level == key)
         .cloned()
         .collect::<Vec<_>>();
+    let tokens = world.resource::<Session>().markers.clone();
+    let domain = world
+        .get_resource::<WorldIdentityDomain>()
+        .ok_or("marker identity domain is unavailable")?;
+    let mut live_tokens = Vec::with_capacity(tokens.len());
+    let mut live_ids = BTreeSet::new();
+    for token in tokens {
+        if token.domain_id() != domain.id() {
+            return Err("a dynamic marker token belongs to another identity domain".into());
+        }
+        if !world.entities().contains(token.entity()) {
+            continue;
+        }
+        if !matches!(domain.locators_for_token(world, token), Ok(None)) {
+            return Err(
+                "a live dynamic marker no longer has its exact runtime-only identity".into(),
+            );
+        }
+        let marker = world
+            .get::<DynamicMarker>(token.entity())
+            .ok_or("a live owned entity is missing its dynamic marker identity")?;
+        if !records.iter().any(|record| record.id == marker.id) {
+            return Err("a live owned marker has no current-level checkpoint record".into());
+        }
+        if !live_ids.insert(marker.id) {
+            return Err("live owned markers have duplicate game identities".into());
+        }
+        live_tokens.push(token);
+    }
+    world.resource_mut::<Session>().markers = live_tokens;
     for marker in records {
         let existing = world
             .resource::<Session>()
@@ -185,34 +212,32 @@ fn rebuild_markers(world: &mut World) -> Result<(), String> {
             Some(token) => token,
             None => {
                 let token = spawn_identity_entity(world).map_err(|error| error.to_string())?;
-                world.entity_mut(token.entity()).insert((
-                    DynamicMarker { id: marker.id },
-                    Transform2d {
-                        translation: Vec2::from_array(marker.position),
-                        ..Transform2d::IDENTITY
-                    },
-                    Sprite::from_color(Vec2::splat(10.0), Color::rgb(1.0, 0.3, 0.8)),
-                ));
                 world.resource_mut::<Session>().markers.push(token);
                 token
             }
         };
-        if world
-            .resource::<HierarchyRoots>()
-            .as_slice()
-            .contains(&token.entity())
-        {
-            continue;
-        }
-        if world.get::<Parent>(token.entity()).is_some() {
-            return Err("dynamic marker is unexpectedly parented".into());
-        }
-        HierarchyWriter::new(world)
-            .apply(HierarchyOperation::Place {
+        world.entity_mut(token.entity()).insert((
+            DynamicMarker { id: marker.id },
+            Transform2d::from_translation(Vec2::from_array(marker.position)),
+            Sprite::from_color(Vec2::splat(10.0), Color::rgb(1.0, 0.3, 0.8)),
+        ));
+        let placement = HierarchyPlacement::last(HierarchyPlacementOwner::Root);
+        let operation = match HierarchyPlacement::current(world, token.entity()) {
+            Some(from) if from.owner == HierarchyPlacementOwner::Root => continue,
+            Some(from) => HierarchyOperation::Move {
                 entity: token.entity(),
-                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-            })
+                from,
+                to: placement,
+            },
+            None => HierarchyOperation::Place {
+                entity: token.entity(),
+                placement,
+            },
+        };
+        HierarchyWriter::new(world)
+            .apply(operation)
             .map_err(|error| error.to_string())?;
     }
+    observe_markers(world)?;
     Ok(())
 }

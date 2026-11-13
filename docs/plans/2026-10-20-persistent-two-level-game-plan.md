@@ -148,6 +148,45 @@ Acceptance: save in B, terminate, restore in a fresh process, return to A, retai
 objects and progress; cover two source instances, dynamic identity, old-format migration, corrupt
 or missing content and interrupted/conflicting writes. Exported runs use the same game interfaces.
 
+## November 13 marker reconstruction recovery
+
+The existing two-level consumer exposes `Degraded` after a committed marker loses its runtime
+representation or is legally retired. Retry previously reused live markers without rebuilding
+their components, and retained dead tokens when allocating replacements. Both paths therefore
+remained degraded without any failed Scene preparation to retry.
+
+Repair this consumer's existing reconstruction owner. Validate each retained token's original
+World identity domain and exact runtime-only live identity before reuse. Remove physically absent
+owned tokens, reject ambiguous live identities, and restore checkpoint-backed Transform/Sprite
+values and root placement through the existing identity and hierarchy writers. Keep one bounded
+owned token set and validate the resulting all-World marker set. A missing authored Scene object
+or native reconstruction failure retains its explicit failure behavior.
+Later repair failure may retain partial game-owned component/entity/hierarchy effects and returns
+the caller to `Degraded`; this consumer does not promise rollback.
+
+Two complete managed HeadlessRun regressions first create markers across Meadow, Cavern 0 and
+Cavern 1, return to Cavern 0, then remove its marker representation or legally retire the marker.
+They observe natural degradation and issue the real Retry command. Recovery must preserve the
+exact original committed `CurrentScene` receipt/source, Progress and ActiveLevel; restore exact
+components, game identity and root membership; retain stable running frames and an unrelated
+runtime entity; then travel again and retire the old marker. No replacement Scene transaction,
+second runtime owner, checkpoint mutation or reconstruction of other levels is admitted.
+
+The pre-fix release-mode run `1264b200-a5ff-405d-824a-5cb94e1875e1` passes all 30 existing tests
+and fails both new cases at Retry remaining `Degraded`. This is a combined existing-control and
+RED run, not a separate pristine-source baseline. Native physics/audio reconstruction, general
+rollback, arbitrary missing authored components and other platform execution remain open.
+
+The corrected release-mode run `acd1f0dc-0021-40c1-a41f-3e55b2f9719a` passes 32/32 with no
+skips: both recovery trajectories and all original save, fresh-process restore, travel and
+retained-source controls. It uses Rust 1.95.0, locked offline dependencies, the original root
+target, one build job and serial nextest execution on Windows. Independent review finds no
+confirmed P1/P2; foreign-token refusal, Parent-to-Root repair and later repair failure remain
+source-reviewed branches rather than separately executed scenarios. This is CPU/headless
+evidence, not native desktop or cross-platform qualification.
+All-target correctness Clippy and sample formatting checks pass. Existing dependency and
+headless-entry warnings remain; no warning-free or desktop-feature qualification is claimed.
+
 ## Follow-Up Triggers
 
 The first required physics/audio domain proves its own native acquisition, teardown and

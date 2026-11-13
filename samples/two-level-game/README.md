@@ -76,8 +76,13 @@ key or that a particular platform has passed the full interactive trajectory.
   markers after commit. A reconstruction failure reports `Degraded`; it does not claim that the old
   World was rolled back. R retries reconstruction without reusing a stale Scene receipt.
   The automated trajectory verifies ordinary current-level Retry, including changed source files.
-  Recovery from an injected
-  post-commit native reconstruction failure has not been qualified by that trajectory.
+  Separate complete-frame CPU tests remove a committed marker's Sprite/root placement and alter
+  its Transform, or legally retire its entity. Degraded Retry restores the exact checkpoint-backed
+  marker while preserving the original `CurrentScene` receipt/source and logical progress; later
+  travel retires the recovered marker and leaves unrelated runtime entities intact. These cases
+  do not qualify native physics/audio reconstruction or arbitrary missing authored components.
+  The [recovery qualification](../../docs/plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
+  records the original failures, consumer checks and execution scope.
 - The versioned slot contains only explicit checkpoint/progress facts. Restore rebuilds movement,
   player position and dynamic entities at the authored checkpoint; it is not arbitrary-tick replay
   or serialization of World entities, tasks, handles, native resources or every component.
@@ -104,7 +109,9 @@ exact-tick API intentionally omits ordinary gameplay frame stages. This finite s
 200,000-frame ceiling and reports 30 seconds without actual progress using a monotonic clock;
 neither is a gameplay performance guarantee or an interrupt of a blocked synchronous operation.
 Travel, fresh-process save/restore and retained-source Retry pass the sample's 24-test Windows
-cohort. The release export separately passes both startup product observations and the same three
+cohort. The November 13 release-mode CPU/headless cohort passes 32/32, including both marker
+recovery trajectories and the original save/travel controls. The earlier release export
+separately passes both startup product observations and the same three
 travel/save/restore operations from an unrelated directory. This does not qualify other platforms
 or a complete interactive desktop control trajectory.
 
