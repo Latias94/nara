@@ -4740,6 +4740,19 @@ Inclusive phases are not additive; further attribution targets Cargo and child/c
 turnaround. Larger workloads, reliable tails, foreign execution, numeric budgets and full R12
 remain open. Editor UI and physical mixed-DPI work remain paused.
 
+The [paused-control successor](../benchmarks/2026-11-14-development-runtime-costs.md#paused-control-turnaround-successor)
+at `d11a8c0`/`ebbc1e6` attributes six existing Cargo checkpoint intervals and checks the original
+complete paused boundary before requesting another native poll. Matched public control runs keep
+identical complete state/status, with capture/fresh-presentation medians 135.344/461.789 ms before
+and 60.965/268.541 ms after; status-query variation overlaps. All eighteen complete rebuild
+workflows pass again, with no-edit/body/private-structure medians 12.6964/20.9315/23.1441 seconds.
+Sequential compiler/cache/load variation prevents claiming a stable full-workflow speedup.
+Original continuous/paused native adoption passes 2/2, final all-feature/default ordinary tests
+113/113 and 110/110, and correctness Clippy/formatting pass. Startup, input, complete frame,
+fresh receipt, source/tool validation and physical retirement keep their existing owners.
+Metadata/rechecks and two-child startup remain the next attribution targets. Full R12 remains
+active; paused UI and physical mixed-DPI scope is preserved.
+
 Join body and structural edits to restoration of the same meaningful playable situation, including
 capture/build/restore failures. Reconcile ADR 0116's current one-READY launch protocol before
 adding post-launch capture exchange; ADR 0093 already admits reliable rebuild/restore. Preserve

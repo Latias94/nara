@@ -331,6 +331,28 @@ boundaries. Subtract counts/totals across an attempt while unsaturated; a differ
 not an attempt maximum. Restore/probe/adoption spans include child phases, so never add phase
 totals as disjoint work. These observations contain no authority and change no result or cleanup.
 
+The `CargoBuild` total contains six elapsed segments taken at the existing adapter checkpoints:
+`CargoAdmissionAndToolObservation`, `CargoMetadataAndRechecks`,
+`CargoCompilationAndArtifactChecks`, `CargoCaptureAdmission`,
+`CargoCapturedBytesAndProvenance` and `CargoFinalValidation`. Each includes the checks adjacent
+to its endpoints; the compilation segment also includes Cargo output decoding and artifact
+hashing. An error completes only its current segment as failed. These segments partition the
+observed adapter interval, but adding them to `CargoBuild` would count the same work twice.
+
+The ignored `development_turnaround` consumer measures one excluded warmup and ten retained
+requests for each of capture, execution status and fresh canonical presentation. Request order
+rotates within one hidden, input-isolated paused game. Every result must retain the complete
+original state or original presentation identity; no Step or Resume is used during sampling.
+Set an explicit absolute **new** `NARA_DEVELOPMENT_TURNAROUND_OUTPUT` JSON path and the same
+toolchain/offline/jobs/target environment used below, then run:
+
+```text
+cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_turnaround --run-ignored only --test-threads=1 --no-fail-fast
+```
+
+Its API wall spans include original file transport and native work, not CPU alone. Output is
+written only after normal original process cleanup and source-fixture removal.
+
 The ignored `development_cost` test measures one excluded warmup plus five retained no-edit,
 actual body-edit and private-structure-edit attempts per class, through the complete production
 desktop workflow. Set an explicit absolute **new** `NARA_DEVELOPMENT_COST_OUTPUT` JSON path,

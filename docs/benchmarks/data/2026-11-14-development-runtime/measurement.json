@@ -37,10 +37,32 @@
     "file": "runtime-wall-exploratory.json",
     "scope": "earlier same-pacing whole-frame span diagnostic before process-counter instrumentation; not a before/after optimization comparison"
   },
+  "paused_control_successor": {
+    "base_revision": "5b1b83f",
+    "qualified_attribution_revision": "d11a8c0b1e73c4f717d070f3b14c0a03b7468f4b",
+    "qualified_wait_revision": "ebbc1e630df4fb2d77663b40bfacae4e65d45273",
+    "consumer_note": "After native observations, timing-scope wording was clarified and a local binding renamed; the measured operations and original raw values are unchanged.",
+    "source_state": "six Cargo segments and the new control consumer were present in both control variants; only the declared child wait implementation differs; changes were uncommitted during measurement",
+    "before_nextest_run": "d2233cb8-6cf6-4d28-849f-086faff672d0",
+    "after_nextest_run": "6940ede9-029d-495c-9c95-3152af29e309",
+    "complete_workflow_nextest_run": "3aa881d4-719a-4692-baa1-d26040df8cfa",
+    "complete_workflow_command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_cost --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail --success-output immediate",
+    "complete_workflow_comparison": "initial workflow baseline predates six-segment Cargo instrumentation; successor includes that optional observation; local sequential compilation/cache/load variation prevents a stable end-to-end speedup claim",
+    "native_regression_run": "9561f554-5dbd-4663-9a11-1b0fdf421b20",
+    "ordinary_all_features_run": "fdc5fbf1-2350-43a6-82e9-4a721a62264e",
+    "ordinary_default_features_run": "ba2c2509-4fbc-4077-89bf-c05ace5e905e",
+    "command": "cargo +1.95.0 nextest run --manifest-path samples/two-level-game/Cargo.toml --locked --offline --release --features desktop --test development_turnaround --run-ignored only --test-threads=1 --no-fail-fast --no-tests fail",
+    "output_environment": "NARA_DEVELOPMENT_TURNAROUND_OUTPUT selects a distinct absolute new file for each variant",
+    "native_scope": "parent DX12 hint; sealed child reports its actual discrete Vulkan adapter",
+    "shared_root_scope": "root dependencies were not modified by this unit and are not frozen by child provenance; recorded HEAD/status are setup observations, not an isolated complete source snapshot"
+  },
   "data_sha256_basis": "Repository blob bytes with LF line endings, as required by the existing root .gitattributes; JSON values are unchanged from the measured records.",
   "data_sha256": {
     "workflow-baseline.json": "2f6d7cc23c5f0bfcaf4d524bc2b2e5bf74640e63fce58c635d667acaf4f63713",
     "runtime-process-baseline.json": "a864bfe2290481c8c698d9ca5444df83b09e4eba9f47d7743166c43ada4a6a9c",
-    "runtime-wall-exploratory.json": "01cb28de7a89d748e6de60ee2d24b56c31a7110638662285b3aaf618cf9facc7"
+    "runtime-wall-exploratory.json": "01cb28de7a89d748e6de60ee2d24b56c31a7110638662285b3aaf618cf9facc7",
+    "control-before.json": "fb927aca36b11e6edeb92cd9ada8e09e4a3ec91599962fe10f7c9c0febe8af91",
+    "control-after.json": "d43078ed3e369d7953370b9dd24b82444425df28beb465511df91a1f009c3f8b",
+    "workflow-after.json": "cda33048754068158adeabb5fbdb89303de169d501897c10033c1c0168fc8516"
   }
 }

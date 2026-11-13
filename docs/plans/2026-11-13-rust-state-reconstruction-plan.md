@@ -1236,3 +1236,62 @@ read-only review; no remaining P1/P2 is found. All five scoped threads close and
 Cargo/native processes reach terminal observations. Whole-process CPU quantization, sequential
 driver/cache memory carryover, small workloads, sample count and unchanged foreign/Editor scope
 remain limitations, not performance budgets.
+
+### Cargo Segments And Paused Control Turnaround
+
+Status: qualified within the finite Windows scope below, at `d11a8c0`/`ebbc1e6`.
+Attribute the original Cargo adapter
+through its existing `CargoBuildPoint` boundaries, keeping the total Host phase and explicitly
+inclusive segment names. The intervals include their adjacent source/tool/lease checks; a build
+segment is not raw compiler time. Disabled Host observation must remain free of instrumentation
+clock reads. Preserve the existing callback admission, failures, retained cleanup and exact
+captured result rather than adding another build or trace owner.
+
+Measure repeated actual paused capture, execution-status and canonical-presentation requests
+through the public production desktop Host before changing the child. Keep a meaningful complete
+game state, rotate request order, exclude warmups, preserve the exact original state and
+presentation identities and physically retire the original process. Retain raw samples and the
+actual compiler/features/native backend. A response duration includes file transport and original
+native work; it is not a CPU-only or interprocess transport benchmark.
+
+The current child's quiescence wait polls the native Runtime before checking whether its original
+complete paused boundary is already eligible for capture. Evaluate checking that original
+authority first and polling only when it is incomplete. Preserve the serve loop's native ingress
+poll before request reception, deadline/health checks, pending maintenance, strict capture
+eligibility and fresh presentation confirmation. No cached state, weaker receipt, skipped source
+check or replacement input/pump authority may stand in for the original completed frame.
+
+Choose and qualify this change only against matched before/after control observations and the
+complete no-edit/body/private-structure rebuild endpoint. Keep initial startup, Running controls,
+stale-candidate refusal, failure custody, matched input and physical Close in their existing
+regression scope. Numerical tails, foreign platforms, Editor integration and full R12 remain open.
+
+The [paused-control report](../benchmarks/2026-11-14-development-runtime-costs.md#paused-control-turnaround-successor)
+retains before/after runs `d2233cb8`/`6940ede9`: one excluded warmup and ten retained requests
+per operation in each original child. Exact complete canonical bytes and execution status agree;
+the only changed declared child input is the quiescence wait. Capture and fresh-presentation
+medians change from 135.344/461.789 ms to 60.965/268.541 ms. Status-query ranges overlap.
+Original input reception, initial startup, complete paused-frame authority and fresh original
+presentation remain required. These correlated process-local samples do not establish tails,
+CPU savings or scanout latency.
+
+Complete workflow run `3aa881d4` passes all eighteen real no-edit/body/private-structure attempts
+in 419.557 seconds. Correct-running retained medians are 12.6964/20.9315/23.1441 seconds,
+including original probe disposal, fresh restoration, final revalidation, post-adoption Step and
+natural resumed execution; predecessor retirement remains separate. All phase failures are zero.
+The older full-workflow baseline predates the six-segment instrumentation and runs under varying
+compile/cache/load conditions, so the report does not claim a stable end-to-end improvement.
+Native continuous and paused-adoption regressions pass 2/2 in `9561f554`, preserving the
+original input, stale-candidate refusal and physical-cleanup assertions.
+
+Six original Cargo intervals now expose metadata/rechecks at roughly 1.3–1.5 seconds and
+compilation/checks/decoding/artifact hashing at roughly 2.0/10.4/12.2 seconds by class.
+Two original child startups still cost roughly 3.2 seconds. Further attribution should focus on
+those existing owners. Captured-byte/provenance and final-validation stages remain small;
+no cache or weaker validation is selected from these observations. Two independent source and
+measurement reviews find no remaining P1/P2; their platform, outer-source and sample limits are
+retained in the report.
+Final all-feature/default ordinary tests pass 113/113 and 110/110 in `fdc5fbf1`/`ba2c2509`, with
+hardware/actual-build cases kept separate. All-target/all-feature correctness Clippy and sample
+formatting pass. Four scoped agents close; existing warnings and broader platform/product limits
+remain. UI and physical mixed-DPI work stay paused, and full R12 remains active.

@@ -2636,6 +2636,18 @@ adoption 1/1 pass. The linked report retains raw data/digests, inclusive-phase e
 independent review, actual platform scope and remaining numeric/Editor limits. No performance
 change or full R12 completion is selected from these observations.
 
+The subsequent [paused-control attribution and correction](../../benchmarks/2026-11-14-development-runtime-costs.md#paused-control-turnaround-successor)
+at `d11a8c0`/`ebbc1e6` preserves that complete endpoint while avoiding an extra native poll when
+the original healthy complete paused frame already permits capture. Matched control observations
+retain identical state/status and fresh original presentation, with capture/presentation medians
+135.344/461.789 ms before and 60.965/268.541 ms after. All eighteen full rebuild attempts and
+both original continuous/paused native adoption trajectories pass; final all-feature/default
+ordinary tests pass 113/113 and 110/110. Six original Cargo checkpoint intervals retain source,
+tool, lease and artifact verification. Independent review, correctness Clippy and formatting pass.
+The linked record preserves correlated-sample, shared-source, compiler/cache/load and native
+scope limits; neither full-workflow tails nor a shipping CPU budget is established. Full R12 and
+Editor integration remain open.
+
 The November 13 [two-level marker recovery](../../plans/2026-10-20-persistent-two-level-game-plan.md#november-13-marker-reconstruction-recovery)
 qualifies two concrete ADR0027 recovery cases through complete managed HeadlessRun frames:
 repairing damaged dynamic representation and replacing a legally retired owned marker. Real

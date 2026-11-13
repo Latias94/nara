@@ -177,9 +177,132 @@ feature/profile scope and data digests. Digests cover repository blob bytes with
 following the existing root `.gitattributes`; this newline normalization changes no JSON values.
 Final integrity checks compare the staged blobs as well as decoded observations, so Windows
 working-copy newline conversion cannot silently invalidate the published digests.
-No result is a before/after optimization speedup claim.
+Those initial baseline and observer records are not a before/after optimization comparison.
+The subsequent paused-control change has its own matched observations below.
 
 Representative larger content, uninstrumented production CPU costs, controlled memory retention,
 other graphics backends/platforms, measured idle-policy improvements and reliable latency tails
 remain open. Complete state/source/presentation checks, physical retirement and the separate
 supervised Editor Play protocol are preserved. UI and mixed-DPI work remain paused.
+
+## Paused Control Turnaround Successor
+
+Implementation revisions are `d11a8c0b1e73c4f717d070f3b14c0a03b7468f4b` for the six Cargo
+segments/public control consumer and `ebbc1e630df4fb2d77663b40bfacae4e65d45273` for the child
+wait change. Runs used the same production source before those commits. Consumer wording was
+later clarified to distinguish API-internal validation from caller-side checks, and a local
+binding was renamed; neither changes the measured operations or retained observation values.
+
+The original child called `poll_live` before every quiescence check, including when its original
+healthy complete paused boundary was already eligible for capture. The successor checks that
+same original authority first and polls only when it is incomplete. Startup still drives a
+NotStarted Runtime before checking pause; each loop checks the deadline and paused state.
+Maintenance still invalidates the previous boundary, native ingress is still polled before
+request reception, and confirmation still requires a fresh original presentation. No state
+cache, transport replacement, weaker validation or alternate native owner is introduced.
+
+The new ordinary `development_turnaround` consumer builds and starts a real child, collects both
+levels' pickups and markers, travels, releases movement and retains a complete canonical paused
+basis. It rotates capture, execution status and fresh presentation within that one hidden,
+input-isolated process. Each operation has one excluded warmup and ten retained requests.
+Before and after use the same consumer source digest, actual tools, target, features and
+complete canonical state/status. The only changed declared child input is
+`src/bin/continuity/desktop.rs`. Both original processes close normally, without fallback, before
+their source fixtures are removed and result files are written.
+
+| Complete public API call | Before median | After median | After range |
+| --- | ---: | ---: | ---: |
+| Capture | 135.344 ms | 60.965 ms | 59.273–76.799 ms |
+| Execution status | 70.822 ms | 66.817 ms | 39.238–78.546 ms |
+| Fresh canonical presentation | 461.789 ms | 268.541 ms | 253.535–301.732 ms |
+
+Before run `d2233cb8-6cf6-4d28-849f-086faff672d0` passes 1/1 in 40.114 seconds; after run
+`6940ede9-029d-495c-9c95-3152af29e309` passes 1/1 in 32.721 seconds. Captured canonical bytes,
+logical clock and complete execution status are identical between the two measured processes.
+Actual returned receipts identify a discrete Vulkan adapter; the contained child's environment
+does not inherit the parent's DX12 hint. These are complete API wall spans, including API-internal
+validation, encoding, file transport and native waits. Only caller-side validation/report
+assembly, startup, preparation and cleanup are excluded from the per-call timer.
+
+The observed capture and fresh-presentation medians decrease by about 55% and 42% respectively.
+Execution-status samples overlap and do not establish a separate status-query improvement.
+Ten correlated requests in one process per variant do not establish independent-process
+distributions, stable tails, CPU savings or scanout latency. Shared root dependencies are not
+snapshotted by the child inventory; HEAD/status and the explicit outer build command describe
+this local qualification envelope, rather than an isolated source or hardware experiment.
+
+Raw [before control observations](data/2026-11-14-development-runtime/control-before.json) and
+[after control observations](data/2026-11-14-development-runtime/control-after.json) retain all
+samples, exact original responses, tool/input provenance and physical cleanup. The six new
+Cargo checkpoint segments remain within the original `CargoBuild` total, including adjacent
+validation work. Their complete rebuild observations and regression qualification follow the
+same correct-running endpoint as the initial baseline.
+
+### Complete Rebuild And Cargo Segments
+
+Run `3aa881d4-719a-4692-baa1-d26040df8cfa` passes all 18 complete workflows in 419.557 seconds.
+It retains the same three warmups/fifteen measured attempts, probes, fresh-adopter restoration,
+final source/state/presentation validation, changed-logic Step, native activation, naturally
+resumed ticks and normal original cleanup. No-edit still returns one identical executable digest
+across its six builds; body and structural cohorts each produce six different executable digests.
+Every recorded phase has zero returned failures.
+
+| Workflow | Initial correct-running median | Successor median | Successor range | Successor Prepare | Successor Adopt |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No edit | 14.7706 s | 12.6964 s | 12.5336–16.6993 s | 10.9609 s | 0.6861 s |
+| Body edit | 23.7901 s | 20.9315 s | 19.1596–24.8939 s | 19.1911 s | 0.6588 s |
+| Private structure edit | 25.4273 s | 23.1441 s | 22.3167–24.3183 s | 21.4156 s | 0.6521 s |
+
+Predecessor cleanup remains outside the correct-running interval, with successor medians
+0.3245/0.3917/0.3691 seconds. The complete workflow's before record predates six-segment Cargo
+instrumentation; the successor includes that additional optional observation. Unlike the matched
+control pair, this is a sequential local comparison with varying compilation cost, caches and
+uncontrolled background work. Overlapping ranges and five retained samples do not establish a
+stable end-to-end speedup or a latency-tail budget.
+
+Successor per-attempt Cargo segment medians, in seconds:
+
+| Original adapter interval | No edit | Body | Structure |
+| --- | ---: | ---: | ---: |
+| Entry through BeforeMetadata: admission/tool observation | 0.2412 | 0.2049 | 0.1724 |
+| BeforeMetadata through BeforeBuild: metadata and rechecks | 1.5414 | 1.2933 | 1.3158 |
+| BeforeBuild through AfterBuild: compilation, checks, decoding and artifact hash | 1.9607 | 10.4497 | 12.2498 |
+| AfterBuild through BeforeCapture: capture admission | 0.0542 | 0.0551 | 0.0791 |
+| BeforeCapture through BeforeReturn: bytes/provenance | 0.0427 | 0.0458 | 0.0671 |
+| BeforeReturn through return: final validation | 0.0976 | 0.0953 | 0.1198 |
+| Complete CargoBuild total | 3.8238 | 12.0092 | 14.2737 |
+
+These six intervals partition each individual adapter call; their separately computed medians
+must not be added to reconstruct a median total, and the total must not be added to its segments.
+The compile interval is not raw rustc time. Source/tool checks, Cargo itself, decoding and the
+artifact hash remain included. No source, tool, lease or executable revalidation was removed.
+
+Original two-child startup remains about 3.15–3.20 seconds. Thirteen complete captures now
+take median totals 1.1086/1.0549/1.0867 seconds, six original presentation confirmations
+1.2359/1.2267/1.2266 seconds, and three complete probe steps 1.4342/1.4361/1.4270 seconds.
+Those parent/child phases overlap. The attribution supports retaining the small quiescence-wait
+change and focusing subsequent work on metadata/rechecks and original child startup, rather than
+adding executable-installation or witness caches.
+
+The [successor workflow samples](data/2026-11-14-development-runtime/workflow-after.json) retain
+all phase counts, elapsed values, source-edit classes and cleanup results. Complete platform,
+Editor, hard compiler cancellation and representative production budgets remain outside this
+bounded qualification.
+
+### Successor Qualification
+
+| Scope | Actual result |
+| --- | --- |
+| Initial desktop-feature library, child and CLI CPU targets | 83/83, one ignored native consumer, run `ea652361-9e7d-4981-a54c-95fef7694569`, 8.201 seconds. Includes all seven timing tests. |
+| Matched before/after control requests | Each 1/1, runs `d2233cb8-6cf6-4d28-849f-086faff672d0` and `6940ede9-029d-495c-9c95-3152af29e309`. Each retains thirty measured requests and three warmups. |
+| Complete successor native rebuild/adoption | 1/1, run `3aa881d4-719a-4692-baa1-d26040df8cfa`, 419.557 seconds; eighteen actual workflows. |
+| Original continuous and paused native adoption | 2/2, run `9561f554-5dbd-4663-9a11-1b0fdf421b20`, 206.580 seconds. Includes actual input, stale/refused candidate custody, restored presentation and Running Close. |
+| Final all-feature ordinary sample | 113/113, eight ignored hardware/actual-build consumers separate, run `fdc5fbf1-2350-43a6-82e9-4a721a62264e`, 11.255 seconds. |
+| Final default-feature ordinary sample | 110/110, two ignored actual-build consumers separate, run `ba2c2509-4fbc-4077-89bf-c05ace5e905e`, 10.658 seconds. |
+
+All-target/all-feature correctness Clippy and sample formatting pass. Existing style/dead-code
+warnings remain. Two independent bounded reviews cover the actual wait change and Cargo/control
+observation contract, with no remaining P1/P2. All four scoped agents are closed. The native
+process/file owners retain their earlier qualification; unrelated Editor, UI and complete
+framework matrices are not repeated. No shipping CPU saving, general cached-state mechanism,
+foreign native execution or full R12 completion follows from these results.
