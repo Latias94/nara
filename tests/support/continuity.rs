@@ -1,14 +1,16 @@
 //! The Two-Level Game's finite edit/build/process qualification Host.
 //!
-//! This owns only its copied project, captured executable installations and direct children.
+//! This owns its copied project, captured executable installations and shared process owners.
 //! It deliberately uses the public Cargo adapter and the game's ordinary process protocol.
+//! Diagnostics retain a bounded in-memory tail, separately from file-based game packets.
 
 use std::{
+    cell::RefCell,
     collections::BTreeSet,
     fs::{self, File},
     io::{Read, Write},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
-    process::{Child, Command as NativeCommand, ExitStatus, Stdio},
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -16,7 +18,7 @@ use std::{
 use nara::{
     core::{ByteLimit, DepthLimit, ItemLimit, SerdeShapeLimits, preflight_serde_shape},
     fs::{
-        ContentDigest, FileCapability, RelativeComponent, RelativePath,
+        ContentDigest, DirectoryCapability, FileCapability, RelativeComponent, RelativePath,
         RestrictiveCapabilityHandleLease,
     },
     project_tooling::{
@@ -25,6 +27,12 @@ use nara::{
             CargoBuildTools, build_executable,
         },
         host_fs,
+        process::{
+            ExactExecutableLaunchAuthority, ProcessLogLimits, ProcessOutputStream,
+            SupervisedProcessCommand, SupervisedProcessOwner,
+            SupervisedProcessState as ProcessState, SupervisedProductEnvironmentPolicy,
+            SupervisedProductProcessCommand,
+        },
     },
     project_workflow::cargo::{CargoBuildError, CargoBuildSelection},
 };
@@ -39,7 +47,9 @@ const TEMP_PREFIX: &str = "nara-two-level-continuity-";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 const RETIRE_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_LOG: u64 = 2 * 1024 * 1024;
+const MAX_LOG_RECORDS: usize = 256;
+const MAX_LOG_BYTES: usize = 2 * 1024 * 1024;
+const MAX_TOOL_STDOUT: usize = 16 * 1024;
 const POLL: Duration = Duration::from_millis(10);
 pub const GAMEPLAY: &str = "src/gameplay/mod.rs";
 pub const COMPILE_ERROR: &str = "intentional R12 Two-Level Game candidate failure";
@@ -54,6 +64,7 @@ pub struct Fixture {
     tools: CargoBuildTools,
     host: String,
     inputs: Vec<String>,
+    pending_cleanup: RefCell<Vec<SupervisedProcessOwner>>,
 }
 
 impl Fixture {
@@ -108,6 +119,7 @@ impl Fixture {
             tools,
             host: String::new(),
             inputs: Vec::new(),
+            pending_cleanup: RefCell::new(Vec::new()),
         };
         fixture.host = fixture.probe_host();
         for directory in ["src", "assets", "scenes", "prefabs", "schema"] {
@@ -150,18 +162,17 @@ impl Fixture {
     }
 
     fn probe_host(&self) -> String {
-        let mut command =
-            NativeCommand::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
-        command
-            .current_dir(&self.repository)
-            .args(["-vV"])
-            .env("RUSTUP_AUTO_INSTALL", "0");
-        let directory = self.directory("toolchain-observation");
-        let mut child = DirectChild::spawn(command, &directory).unwrap();
-        let status = child.wait(REQUEST_TIMEOUT).unwrap();
-        assert!(status.success(), "{}", child.diagnostics());
-        let text =
-            String::from_utf8(read_bounded(&child.stdout, MAX_LOG as usize).unwrap()).unwrap();
+        let command = SupervisedProcessCommand::new(self.tools.rustc_path(), &self.repository)
+            .arguments(["-vV"])
+            .environment("RUSTUP_AUTO_INSTALL", "0")
+            .bounded_stdout(NonZeroUsize::new(MAX_TOOL_STDOUT).unwrap());
+        let owner = SupervisedProcessOwner::spawn(&command, log_limits()).unwrap();
+        let mut native = FiniteProcess::new(self, owner);
+        let bytes = match native.capture_stdout(REQUEST_TIMEOUT) {
+            Ok(bytes) => bytes,
+            Err(error) => panic!("{}", native.fail(error)),
+        };
+        let text = String::from_utf8(bytes).unwrap();
         assert!(text.lines().any(|line| line == "release: 1.95.0"), "{text}");
         text.lines()
             .find_map(|line| line.strip_prefix("host: "))
@@ -365,6 +376,31 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        self.pending_cleanup.get_mut().retain_mut(|owner| {
+            if let Err(error) = cleanup_process(owner) {
+                eprintln!(
+                    "continuity outer cleanup still owns native process {}: {error}; {}",
+                    owner.process_id(),
+                    diagnostics(owner),
+                );
+                true
+            } else {
+                false
+            }
+        });
+        if !self.pending_cleanup.get_mut().is_empty() {
+            let pending = std::mem::take(self.pending_cleanup.get_mut());
+            let count = pending.len();
+            std::mem::forget(pending);
+            eprintln!(
+                "continuity retains {count} unresolved native owners and their tree at {} until test-process exit",
+                self.root.display(),
+            );
+            if !std::thread::panicking() {
+                panic!("continuity native cleanup remains incomplete after outer retry");
+            }
+            return;
+        }
         let Ok(resolved) = self.root.canonicalize() else {
             return;
         };
@@ -491,6 +527,7 @@ fn group_held_access(source: &str, receiver: &str) -> (String, usize) {
 /// A unique installation independent of mutable Cargo output, with no surviving writable handle.
 pub struct Executable {
     path: PathBuf,
+    directory: DirectoryCapability,
     file: FileCapability,
     _read_lease: RestrictiveCapabilityHandleLease,
     _directory_lease: RestrictiveCapabilityHandleLease,
@@ -523,12 +560,26 @@ impl Executable {
         );
         let installed = Self {
             path,
+            directory,
             file,
             _read_lease: read_lease,
             _directory_lease: directory_lease,
         };
         installed.assert_exact(captured);
         installed
+    }
+
+    fn launch_authority(&self) -> Result<ExactExecutableLaunchAuthority, String> {
+        let executable = self
+            .file
+            .duplicate_restrictive_executable_host_handle()
+            .map_err(|error| error.to_string())?;
+        let directory = self
+            .directory
+            .duplicate_restrictive_host_handle()
+            .map_err(|error| error.to_string())?;
+        ExactExecutableLaunchAuthority::from_verified_handles(executable, directory)
+            .map_err(|error| error.to_string())
     }
 
     pub fn assert_exact(&self, captured: &CapturedCargoExecutable) {
@@ -570,7 +621,7 @@ impl CapturedState {
 
 /// Only the declared finite control protocol; this is not a runtime supervisor or Editor bridge.
 pub struct GameProcess<'a> {
-    native: DirectChild,
+    native: FiniteProcess<'a>,
     _executable: &'a Executable,
     control: PathBuf,
     session: String,
@@ -581,7 +632,7 @@ pub struct GameProcess<'a> {
 
 impl<'a> GameProcess<'a> {
     pub fn spawn(
-        fixture: &Fixture,
+        fixture: &'a Fixture,
         executable: &'a Executable,
         label: &str,
     ) -> Result<Self, String> {
@@ -589,7 +640,7 @@ impl<'a> GameProcess<'a> {
     }
 
     pub fn spawn_in(
-        fixture: &Fixture,
+        fixture: &'a Fixture,
         executable: &'a Executable,
         label: &str,
         project: &Path,
@@ -601,36 +652,53 @@ impl<'a> GameProcess<'a> {
             fixture.root.file_name().unwrap().to_str().unwrap()
         );
         let generation = format!("build-{label}");
-        let mut command = NativeCommand::new(&executable.path);
-        command
-            .current_dir(&control)
-            .arg("--project-root")
-            .arg(project)
-            .arg("--control-dir")
-            .arg(&control)
-            .arg("--session")
-            .arg(&session)
-            .arg("--generation")
-            .arg(&generation);
-        command
-            .env_clear()
-            .env("PATH", control.join("no-cargo-on-path"));
-        for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
-        let mut native = DirectChild::spawn(command, &control)?;
-        let ready_bytes = native.wait_file(&control.join("ready.json"), START_TIMEOUT)?;
-        let ready_response = decode_response(&ready_bytes)?;
-        let ready = match checked_reply(ready_response, &session, &generation, 0)? {
-            Reply::Observed { observation } => observation,
-            reply => {
-                return Err(format!(
+        #[cfg(windows)]
+        let environment = SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession;
+        #[cfg(not(windows))]
+        let environment = SupervisedProductEnvironmentPolicy::Sealed;
+        let command = SupervisedProductProcessCommand::new(environment, &control).arguments([
+            std::ffi::OsStr::new("--project-root"),
+            project.as_os_str(),
+            std::ffi::OsStr::new("--control-dir"),
+            control.as_os_str(),
+            std::ffi::OsStr::new("--session"),
+            std::ffi::OsStr::new(&session),
+            std::ffi::OsStr::new("--generation"),
+            std::ffi::OsStr::new(&generation),
+        ]);
+        let owner = SupervisedProcessOwner::spawn_exact(
+            executable.launch_authority()?,
+            &command,
+            log_limits(),
+        )
+        .map_err(|error| error.to_string())?;
+        let mut native = FiniteProcess::new(fixture, owner);
+        let bootstrap = (|| {
+            let bytes = native.wait_file(&control.join("ready.json"), START_TIMEOUT)?;
+            let response = decode_response(&bytes)?;
+            match checked_reply(response, &session, &generation, 0)? {
+                Reply::Observed { observation } => Ok(observation),
+                reply => Err(format!(
                     "bootstrap did not observe the paused game: {reply:?}"
-                ));
+                )),
             }
+        })();
+        let ready = match bootstrap {
+            Ok(ready) => ready,
+            Err(error) => return Err(native.fail(error)),
         };
+        if ready.phase != "running"
+            || ready.restoring
+            || ready.error.is_some()
+            || ready.engine_tick != 0
+            || ready.logical_tick != 0
+            || ready.logical_elapsed_nanos != 0
+            || ready.runtime_generation == 0
+        {
+            return Err(native.fail(format!(
+                "bootstrap did not produce a fresh initialized paused game: {ready:?}"
+            )));
+        }
         assert_running(&ready);
         assert_eq!(
             ready.engine_tick, 0,
@@ -651,7 +719,7 @@ impl<'a> GameProcess<'a> {
     }
 
     pub fn pid(&self) -> u32 {
-        self.native.child.as_ref().unwrap().id()
+        self.native.owner().unwrap().process_id()
     }
 
     pub fn request(&mut self, command: Command) -> Result<Reply, String> {
@@ -665,10 +733,37 @@ impl<'a> GameProcess<'a> {
             command,
         };
         let response = self.receive(&packet)?;
-        checked_reply(response, &self.session, &self.generation, request)
+        response.result
     }
 
     fn receive(&mut self, packet: &Request) -> Result<Response, String> {
+        let result = self.exchange(packet).and_then(|response| {
+            check_reply_identity(&response, &self.session, &self.generation, packet.request)?;
+            if let Ok(reply) = &response.result
+                && !matches!(
+                    (&packet.command, reply),
+                    (
+                        Command::Observe
+                            | Command::Step { .. }
+                            | Command::Frame
+                            | Command::Restore { .. },
+                        Reply::Observed { .. }
+                    ) | (Command::Capture, Reply::Captured { .. })
+                        | (Command::Close, Reply::Closed { .. })
+                )
+            {
+                return Err(format!(
+                    "unexpected game reply for {:?}: {reply:?}",
+                    packet.command,
+                ));
+            }
+            Ok(response)
+        });
+        result.map_err(|error| self.native.fail(error))
+    }
+
+    fn exchange(&mut self, packet: &Request) -> Result<Response, String> {
+        self.native.check()?;
         let bytes = serde_json::to_vec(packet).map_err(|error| error.to_string())?;
         assert!(bytes.len() <= MAX_MESSAGE_BYTES);
         let inbox = self.control.join("request.json");
@@ -802,10 +897,16 @@ impl<'a> GameProcess<'a> {
             },
         };
         let mut response = self.receive(&packet)?;
-        let actual = checked_reply(response.clone(), &self.session, &self.generation, request)
-            .expect(
-                "the actual restore reply must pass identity before its stale replay is tested",
-            );
+        let actual = match checked_reply(response.clone(), &self.session, &self.generation, request)
+        {
+            Ok(reply) => reply,
+            Err(error) => return Err(self.native.fail(error)),
+        };
+        if !matches!(actual, Reply::Observed { .. }) {
+            return Err(self.native.fail(format!(
+                "the real restore must succeed before testing a stale reply: {response:?}"
+            )));
+        }
         assert!(
             matches!(actual, Reply::Observed { .. }),
             "the real restore must succeed before testing a stale reply: {response:?}"
@@ -820,19 +921,32 @@ impl<'a> GameProcess<'a> {
     }
 
     pub fn close(mut self) {
-        match self.request(Command::Close).unwrap() {
-            Reply::Closed { failed } => assert!(!failed, "physical normal Close reported failure"),
-            reply => panic!("Close must acknowledge physical retirement: {reply:?}"),
+        let reply = match self.request(Command::Close) {
+            Ok(reply) => reply,
+            Err(error) => panic!("{}", self.native.fail(error)),
+        };
+        if !matches!(reply, Reply::Closed { failed: false }) {
+            let error =
+                format!("Close must acknowledge physical retirement without failure: {reply:?}");
+            panic!("{}", self.native.fail(error));
         }
-        let status = self.native.wait(RETIRE_TIMEOUT).unwrap();
+        if let Err(error) = self.native.wait(RETIRE_TIMEOUT) {
+            panic!("{}", self.native.fail(error));
+        }
+        let owner = self.native.owner().unwrap();
+        let receipt = owner.cleanup_receipt().unwrap();
         assert!(
-            status.success(),
+            receipt.exit().success(),
             "normal Close must exit successfully: {}",
             self.native.diagnostics()
         );
         assert!(
-            self.native.child.is_none(),
-            "normal Close must reap the direct child"
+            receipt.containment_empty() && receipt.readers_stopped() && receipt.output_drained(),
+            "normal Close must reap the child, empty native containment, stop readers and drain output"
+        );
+        assert!(
+            !self.native.fallback_terminate_requested,
+            "fallback termination cannot establish a clean game Close"
         );
     }
 }
@@ -843,6 +957,16 @@ fn checked_reply(
     generation: &str,
     request: u64,
 ) -> Result<Reply, String> {
+    check_reply_identity(&response, session, generation, request)?;
+    response.result
+}
+
+fn check_reply_identity(
+    response: &Response,
+    session: &str,
+    generation: &str,
+    request: u64,
+) -> Result<(), String> {
     if response.version != PROTOCOL_VERSION
         || response.session != session
         || response.generation != generation
@@ -853,7 +977,7 @@ fn checked_reply(
             response.version, response.session, response.generation, response.request
         ));
     }
-    response.result
+    Ok(())
 }
 
 fn observed(reply: Reply) -> Observation {
@@ -869,75 +993,44 @@ pub fn assert_running(observation: &Observation) {
     assert!(observation.error.is_none(), "{observation:?}");
 }
 
-struct DirectChild {
-    child: Option<Child>,
-    stdout: PathBuf,
-    stderr: PathBuf,
+struct FiniteProcess<'a> {
+    owner: Option<SupervisedProcessOwner>,
+    fixture: &'a Fixture,
+    fallback_terminate_requested: bool,
 }
 
-impl DirectChild {
-    fn spawn(mut command: NativeCommand, directory: &Path) -> Result<Self, String> {
-        let stdout = directory.join("stdout.log");
-        let stderr = directory.join("stderr.log");
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(
-                File::create_new(&stdout).map_err(|error| error.to_string())?,
-            ))
-            .stderr(Stdio::from(
-                File::create_new(&stderr).map_err(|error| error.to_string())?,
-            ));
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
+impl<'a> FiniteProcess<'a> {
+    fn new(fixture: &'a Fixture, owner: SupervisedProcessOwner) -> Self {
+        Self {
+            owner: Some(owner),
+            fixture,
+            fallback_terminate_requested: false,
         }
-        let child = command
-            .spawn()
-            .map_err(|error| format!("{command:?}: {error}"))?;
-        Ok(Self {
-            child: Some(child),
-            stdout,
-            stderr,
-        })
     }
 
-    fn logs_bounded(&self) -> Result<(), String> {
-        for path in [&self.stdout, &self.stderr] {
-            let length = fs::metadata(path).map_err(|error| error.to_string())?.len();
-            if length > MAX_LOG {
-                return Err(format!(
-                    "native diagnostic log exceeded {MAX_LOG} bytes: {}",
-                    path.display()
-                ));
-            }
-        }
-        Ok(())
+    fn owner(&self) -> Result<&SupervisedProcessOwner, String> {
+        self.owner
+            .as_ref()
+            .ok_or_else(|| "native cleanup custody was retained by the fixture".into())
     }
 
     fn diagnostics(&self) -> String {
-        let text = |path: &Path| match read_bounded(path, MAX_LOG as usize) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-            Err(error) => error,
-        };
-        format!(
-            "stdout:\n{}\nstderr:\n{}",
-            text(&self.stdout),
-            text(&self.stderr)
-        )
+        self.owner().map(diagnostics).unwrap_or_else(|error| error)
+    }
+
+    fn advance(&mut self) -> Result<bool, String> {
+        self.owner
+            .as_mut()
+            .ok_or("native cleanup custody was retained by the fixture")?
+            .advance(Instant::now())
+            .map(|observation| observation.exit().is_some())
+            .map_err(|error| error.to_string())
     }
 
     fn check(&mut self) -> Result<(), String> {
-        self.logs_bounded()?;
-        if let Some(status) = self
-            .child
-            .as_mut()
-            .unwrap()
-            .try_wait()
-            .map_err(|error| error.to_string())?
-        {
+        if self.advance()? {
             return Err(format!(
-                "native child exited before the requested result ({status}): {}",
+                "native process exited before the requested result: {}",
                 self.diagnostics()
             ));
         }
@@ -947,15 +1040,18 @@ impl DirectChild {
     fn wait_file(&mut self, path: &Path, timeout: Duration) -> Result<Vec<u8>, String> {
         let deadline = Instant::now() + timeout;
         loop {
-            self.logs_bounded()?;
+            let exited = self.advance()?;
             if path.exists() {
                 return read_bounded(path, MAX_MESSAGE_BYTES);
             }
-            if let Err(error) = self.check() {
+            if exited {
                 if path.exists() {
                     return read_bounded(path, MAX_MESSAGE_BYTES);
                 }
-                return Err(error);
+                return Err(format!(
+                    "native process exited before the requested result: {}",
+                    self.diagnostics()
+                ));
             }
             if Instant::now() >= deadline {
                 return Err(format!(
@@ -968,15 +1064,18 @@ impl DirectChild {
         }
     }
 
-    fn wait(&mut self, timeout: Duration) -> Result<ExitStatus, String> {
+    fn wait(&mut self, timeout: Duration) -> Result<(), String> {
         let deadline = Instant::now() + timeout;
         loop {
-            self.logs_bounded()?;
-            let child = self.child.as_mut().unwrap();
-            if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-                child.wait().map_err(|error| error.to_string())?;
-                self.child = None;
-                return Ok(status);
+            let owner = self
+                .owner
+                .as_mut()
+                .ok_or("native cleanup custody was retained by the fixture")?;
+            owner
+                .advance(Instant::now())
+                .map_err(|error| error.to_string())?;
+            if owner.state() == ProcessState::Complete {
+                return check_cleanup(owner);
             }
             if Instant::now() >= deadline {
                 return Err(format!(
@@ -987,38 +1086,154 @@ impl DirectChild {
             std::thread::sleep(POLL);
         }
     }
-}
 
-impl Drop for DirectChild {
-    fn drop(&mut self) {
-        let Some(child) = self.child.as_mut() else {
-            return;
-        };
-        let kill = child.kill();
-        let deadline = Instant::now() + RETIRE_TIMEOUT;
+    fn capture_stdout(&mut self, timeout: Duration) -> Result<Vec<u8>, String> {
+        let deadline = Instant::now() + timeout;
+        let mut bytes = Vec::new();
         loop {
-            match child.try_wait() {
-                Ok(Some(_)) => {
-                    let _ = child.wait();
-                    return;
+            let owner = self
+                .owner
+                .as_mut()
+                .ok_or("native cleanup custody was retained by the fixture")?;
+            let (_, outputs) = owner
+                .advance_with_output(Instant::now())
+                .map_err(|error| error.to_string())?;
+            for output in outputs {
+                if output.stream() != ProcessOutputStream::Stdout {
+                    continue;
                 }
-                Err(error) => {
-                    eprintln!(
-                        "continuity fallback could not reap child {}: {error}; kill={kill:?}",
-                        child.id()
-                    );
-                    return;
+                if output.loss() || output.bytes().len() > MAX_TOOL_STDOUT - bytes.len() {
+                    return Err("the compiler probe lost its bounded exact stdout".into());
                 }
-                Ok(None) if Instant::now() >= deadline => {
-                    eprintln!(
-                        "continuity fallback could not confirm retirement of child {}; kill={kill:?}",
-                        child.id()
-                    );
-                    return;
+                bytes.extend_from_slice(output.bytes());
+            }
+            if owner.state() == ProcessState::Complete {
+                check_cleanup(owner)?;
+                if !owner.cleanup_receipt().unwrap().exit().success() {
+                    return Err(format!("compiler probe failed: {}", self.diagnostics()));
                 }
-                Ok(None) => std::thread::sleep(POLL),
+                return Ok(bytes);
+            }
+            if Instant::now() >= deadline {
+                return Err(format!("compiler probe exceeded {timeout:?}"));
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+
+    fn fail(&mut self, error: String) -> String {
+        let Some(owner) = self.owner.as_mut() else {
+            return format!("{error}; {}", self.diagnostics());
+        };
+        self.fallback_terminate_requested |= owner.state() != ProcessState::Complete;
+        match cleanup_process(owner) {
+            Ok(()) => format!(
+                "{error}; native cleanup complete, fallback_terminate_requested={}; {}",
+                self.fallback_terminate_requested,
+                self.diagnostics(),
+            ),
+            Err(cleanup) => {
+                let tail = self.diagnostics();
+                self.fixture
+                    .pending_cleanup
+                    .borrow_mut()
+                    .push(self.owner.take().unwrap());
+                format!(
+                    "{error}; native cleanup retained for outer retry: {cleanup}; fallback_terminate_requested={}; {tail}",
+                    self.fallback_terminate_requested,
+                )
             }
         }
+    }
+}
+
+impl Drop for FiniteProcess<'_> {
+    fn drop(&mut self) {
+        if self
+            .owner
+            .as_ref()
+            .is_some_and(|owner| owner.state() != ProcessState::Complete)
+        {
+            let error = self.fail("finite native owner dropped without completed Close".into());
+            eprintln!("continuity fallback: {error}");
+        }
+    }
+}
+
+fn log_limits() -> ProcessLogLimits {
+    ProcessLogLimits::new(
+        NonZeroUsize::new(MAX_LOG_RECORDS).unwrap(),
+        NonZeroUsize::new(MAX_LOG_BYTES).unwrap(),
+    )
+}
+
+fn diagnostics(owner: &SupervisedProcessOwner) -> String {
+    let mut text = format!(
+        "bounded diagnostic tail (records<={MAX_LOG_RECORDS}, bytes<={MAX_LOG_BYTES}): {:?}; output_loss={}; cleanup_receipt={:?}",
+        owner.logs().stats(),
+        owner.output_loss_observed(),
+        owner.cleanup_receipt(),
+    );
+    for entry in owner.logs().iter() {
+        text.push_str(&format!(
+            "\n{:?} truncated_prefix_bytes={}: {}",
+            entry.stream(),
+            entry.truncated_prefix_bytes(),
+            String::from_utf8_lossy(entry.bytes()),
+        ));
+    }
+    text
+}
+
+fn check_cleanup(owner: &SupervisedProcessOwner) -> Result<(), String> {
+    let receipt = owner
+        .cleanup_receipt()
+        .ok_or("native cleanup has not published a receipt")?;
+    if owner.state() != ProcessState::Complete
+        || !receipt.containment_empty()
+        || !receipt.readers_stopped()
+        || !receipt.output_drained()
+    {
+        return Err(
+            "native cleanup has not emptied containment, stopped readers and drained output".into(),
+        );
+    }
+    Ok(())
+}
+
+fn cleanup_process(owner: &mut SupervisedProcessOwner) -> Result<(), String> {
+    if owner.state() == ProcessState::Complete {
+        return check_cleanup(owner);
+    }
+    let now = Instant::now();
+    let deadline = now + RETIRE_TIMEOUT;
+    let mut last_error = owner
+        .request_terminate(now)
+        .err()
+        .map(|error| error.to_string());
+    let mut retry_at = now;
+    loop {
+        let now = Instant::now();
+        if let Err(error) = owner.advance(now) {
+            last_error = Some(error.to_string());
+        }
+        if owner.state() == ProcessState::Complete {
+            return check_cleanup(owner);
+        }
+        if now >= deadline {
+            return Err(format!(
+                "native cleanup exceeded {RETIRE_TIMEOUT:?}: state={:?}, last_error={last_error:?}",
+                owner.state(),
+            ));
+        }
+        if last_error.is_some() && now >= retry_at {
+            last_error = owner
+                .retry_cleanup(now)
+                .err()
+                .map(|error| error.to_string());
+            retry_at = now + Duration::from_secs(1);
+        }
+        std::thread::sleep(POLL);
     }
 }
 
