@@ -2213,14 +2213,21 @@ impl RuntimeInstance {
         generation: RuntimeGeneration,
         fault: Option<RuntimeFault>,
     ) -> Self {
+        let state = if fault.is_some() {
+            RuntimeState::Faulted
+        } else if owner
+            .world
+            .get_resource::<RuntimeTimeSettings>()
+            .is_some_and(RuntimeTimeSettings::paused)
+        {
+            RuntimeState::Paused
+        } else {
+            RuntimeState::Running
+        };
         Self {
             owner,
             generation,
-            state: if fault.is_some() {
-                RuntimeState::Faulted
-            } else {
-                RuntimeState::Running
-            },
+            state,
             pending_control: None,
             control_results: VecDeque::new(),
             next_control_ticket: 1,

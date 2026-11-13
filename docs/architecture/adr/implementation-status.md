@@ -2430,6 +2430,14 @@ also continues physical maintenance after Workspace retirement. Exact verificati
 Application progress ergonomics belong to the record; no general fault bus or lifecycle redesign
 is introduced by this correction.
 
+The November 13 [managed startup pause correction](../../plans/2026-11-03-joint-motion-execution-plan.md#managed-startup-pause-correction-november-13)
+restores ADR0039/0084's existing Startup time-policy contract: promotion preserves the final pause
+setting and exposes matching Runtime state, with faults retaining priority. Public configured and
+Startup pause cases retain real-time maintenance, exact Step and Resume; Startup can also resume
+an initially paused configuration. The release-mode App library/public cohort passes 164/164
+with one explicit skip on Windows. This does not qualify gameplay-state transitions, desktop
+background policy or complete R4c/R10.
+
 The [ordinary Application progress successor](../../knowledge/engineering/verification/2026-10/2026-10-26T063246Z-one-bounded-application-no-action-pass-through-open-and-physical-retirement-f8c6241efa2b48f8af54f1603482cd39.md)
 provides one public bounded no-action pass across Open, Session and physical retirement.
 Native maintenance shares it without changing effects-only wake ownership; real submissions

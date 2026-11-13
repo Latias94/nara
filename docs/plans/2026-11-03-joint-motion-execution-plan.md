@@ -155,3 +155,31 @@ retains the RED counterexamples, exact commands, independent review and limits. 
 the selected state/refusal/confirmation boundary. R4c's remaining consumers and the separate R10
 collision/affine-authoring requirements stay open; no production phase or generic prediction API
 is frozen by this result.
+
+## Managed startup pause correction (November 13)
+
+Runtime work resumes while Editor UI and physical mixed-DPI qualification are deferred. The
+public `RuntimeInstance::start` path previously reset the pause setting after Startup and always
+promoted a healthy owner as `Running`. This contradicted ADR0039's committed Startup time policy;
+the existing internal clock test did not exercise managed promotion.
+
+Preparation now validates time resources without changing them. Promotion reads the final
+`RuntimeTimeSettings` pause value, with faults retaining priority. Configuration and Startup may
+each request an initially paused Runtime; Startup may also resume an initially paused
+configuration. Subsequent control still belongs to the existing Runtime queue.
+
+The new public regressions exercise paused real-time task/render/cleanup progress with no
+simulation advance, exact `StepFixedTick`, applied control tickets, `Resume`, and ordinary
+retirement. The pre-fix run `61b39082-df59-4033-979d-129c8c16ce68` passed one control and failed
+both paused-start cases at the initial state assertion. The focused corrected run
+`2d05b0b1-5979-43db-8cb7-8b304ef91ef1` passes 5/5. The release-mode App library/public cohort
+`0ce5ad05-d9f9-4c7b-97cb-1dd8cf4fcfc5` passes 164/164 with one explicit skip on Windows,
+using Rust 1.95.0, offline locked dependencies, one build job and serial nextest execution.
+Independent review found no confirmed P1/P2 issue in the changed startup/control path.
+All-target/all-feature correctness Clippy and package formatting checks pass. Existing Clippy
+warnings remain; this is not a warning-free workspace claim.
+
+The [managed Runtime guide](../guides/managed-runtime-runner.md) describes the initial pause
+precedence. This correction adds no gameplay-state machine, background-window policy, new
+scheduler or native presentation qualification. Full R4c/R10 and the foundation rebaseline
+remain open.

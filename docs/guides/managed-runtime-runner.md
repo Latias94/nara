@@ -32,6 +32,14 @@ These start methods synchronously configure and start the runtime. A failed star
 one finite close attempt before returning its owner. They are not nonblocking UI startup APIs.
 The first-party product Hosts own responsive project preparation and staged publication.
 
+`RuntimeTimeSettings::with_paused(true)` configures an initially paused Runtime. Startup systems
+may also set the final pause value. Successful start preserves that value and exposes matching
+`RuntimeState::Paused` or `Running` immediately; promotion does not reset the game clock policy.
+An initially paused Runtime accepts `StepFixedTick` and `Resume` through the ordinary control
+queue. Paused drives still maintain real-time tasks, rendering and cleanup without accumulating
+simulation time. After startup, use Runtime controls to keep lifecycle state and time policy
+in agreement rather than treating the settings resource as a second control queue.
+
 Construct the App on the thread that will drive and retire it. App, sealed candidates, runtime
 instances and failure/retirement owners are non-Send/non-Sync because their World may retain
 thread-affine or NonSend state. Transfer a replayable recipe or definition to another thread and

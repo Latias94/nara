@@ -1921,16 +1921,7 @@ impl runtime::RuntimeOwnerState {
         Ok(())
     }
 
-    pub(crate) fn prepare_managed_runtime(&mut self) -> Result<(), AppRunError> {
-        {
-            let Some(mut settings) = self.world.get_resource_mut::<RuntimeTimeSettings>() else {
-                return Err(TimeFrameError::MissingResource {
-                    resource: TimeFrameResource::RuntimeTimeSettings,
-                }
-                .into());
-            };
-            settings.set_paused(false);
-        }
+    pub(crate) fn prepare_managed_runtime(&self) -> Result<(), AppRunError> {
         TimeFramePlan::from_world(&self.world, Duration::ZERO, false)?;
         Ok(())
     }
