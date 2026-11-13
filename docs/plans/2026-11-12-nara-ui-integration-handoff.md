@@ -30,6 +30,103 @@ and a coherent Editor visual workflow before further catalogue expansion. Follow
 Dialogue product remains the next integration deliverable; this quality work does not replace
 its external-document, multiline, popup, Session/file or preview requirements.
 
+## November 13 Dialogue Controls Continuation
+
+The coordinated Open-GPUI framework-evolution work adds an independent
+`dialogue-workflow` feature to the existing GPUI fixture. It presents two Views
+directly over the original immutable `DialogueSnapshot`; the original Session,
+history, persistence and engine RenderHost remain authoritative. View-local node
+selection, drafts, popup, scrolling and preview cursors remain independent. This
+control page does not require Jellyflow's unavailable external-document API and
+does not replace the still-open graph-canvas/drag integration.
+
+The page includes Line/Choice/End text, speaker, targets and choice ordering,
+position fields, node creation/deletion, entry selection, Apply/Cancel,
+Undo/Redo, Save/Reopen and conversation preview. The native smoke source checks
+retired accepted callbacks after Cancel/Reopen/close, deletion of the property
+target followed by selection without Undo, and ordinary Winit keyboard editing.
+These source assertions do not establish native runtime qualification.
+
+Rust 1.100 with the real Windows SDK cross-compiles the actual Windows example
+and extended smoke source. The final canonical manifest and lock select the local,
+unpublished Open-GPUI `68d52b009dde3c784b01268208cb1d0ed690e99c`; the same actual
+Windows target also compiles on Rust 1.95. The final canonical Git consumer passes
+83 portable library cases and resolves 23 GPUI packages to one source identity.
+The twelve actual Session/file cases all fail
+on this Mac at original Host Open: NaraFS's exact-spelling and local-identity
+guarantees currently support Windows/Linux. Those guarantees were not bypassed.
+Run the Session/file cohort and the complete ignored native workflow separately
+on Windows DX12 and Vulkan with the exact selected source; keep clipboard, physical
+IME, graph gestures and Editor-default qualification distinct.
+
+The [fixture README](../../tests/fixtures/gpui-engine-consumer/README.md#two-view-dialogue-workflow-not-yet-qualified)
+owns the current source/compiler boundary, commands, successful compilation and
+retained failures. Earlier `f75c10b` native results retain that historical scope;
+they do not qualify the new current-API control page or a later local Git pin.
+
+The existing final review run `20261113-165020-dff6809b` is now complete against its
+immutable `1e2dc6be47bfbe5b34d7e8b5271de779fd3fc3d7` snapshot. All six prior reviewer
+returns were preserved; independent merge, validation and report contexts confirmed four
+findings and returned `Ready with fixes`. The receipt remains in the original `/tmp` run.
+The live Nara follow-up corrects three-way field/choice merging, explicit Current/Draft
+resolution, retired node action bindings and per-View bounded preview scrolling. It also
+separates Dialogue-only native driving and smoke helpers, asserts actual peer editing and
+Cancel restoration after close, and queues Apply/Undo before retiring each View. An independent
+follow-up also found that Remove after Review could leave Use Current clearing a choice-field
+conflict without restoring its member. Resolution now returns success only after handling the
+field: locally removed choices adopt the complete current member; absent current members keep
+the conflict until an explicit member resolution. Apply retains its original refusal. Pure
+regressions cover both label and target; the public Session regression includes stable ID,
+target, label and original Undo/Redo. The selected GPUI manifest/lock is unchanged.
+
+The fourth finding now has a bounded finder implementation. Each
+Dialogue View has an independent collapsible Browser query/selection over the original
+source index. The only original-owner API addition is `EditorProjectBrowserView::shared_snapshot`,
+which shares its existing immutable Arc with the existing local query state. Since the
+TrustedCompiled lane deliberately has no generic source index, only Dialogue mode selects
+the existing `EditorProjectOpenHost` authoring route for its one Session. Assets are read-only;
+indexed Scene/Prefab Open uses the original Browser intent, generation validation and result
+acknowledgement. Dialogue retains its existing extension-document Open/Save/Reopen owner.
+No Dialogue schema field, filesystem service, second index or document owner was introduced.
+The fixture seeds a Chinese/long-path resource before original Open. A pure regression covers
+query/selection independence across refresh and removal; the native prelude exercises accepted
+controls, the full path, the original asynchronous Scene Open terminal result, stale generation
+refusal and retained local state after collapse. The resource UI uses ordinary user-facing
+operation messages; owner request/outcome details remain in logs.
+
+Final verification on Rust 1.95.0 passes **93/93** portable library cases, no skips, nextest
+`1073d26e-99ec-4cea-8aab-349548b46eb9`, including resource lookup and both final choice-resolution
+regressions. The 91-case run `6c75d87e-0f8d-401d-82ef-0d9cb060682c` predates that last correction.
+The updated Session test target passes `--no-run` compilation. The actual Windows example with
+`dialogue-workflow,ui-work-observation` passes the canonical locked Windows SDK check using
+`cargo +1.95.0 xwin check --cross-compiler clang-cl`. All Cargo commands ran serially with one
+build job and the existing root `target`; library tests used the unoptimized test profile.
+Task-scoped formatting also passed without changes to unrelated Rust files. Logs are
+`/tmp/nara-editor-dialogue-final-fmt.log`, `/tmp/nara-editor-dialogue-final-library-tests.log`,
+`/tmp/nara-editor-dialogue-final-session-compile.log` and
+`/tmp/nara-editor-dialogue-final-windows-msrv.log`. The initial broader formatting pass is in
+`/tmp/nara-editor-dialogue-followup-fmt.log`. The Cargo slot was released after all commands
+reached terminal success; source changes remain local.
+
+Coordinator confirmation repeats the exact final library source on both Rust 1.95.0
+and the updated Rust 1.100.0: **93/93** in each, runs
+`734e2acd-0b1b-43d0-ada7-745f76cc9eb4` and
+`358ed07d-bd75-471e-b2ce-2e1034af87fb`. The final canonical Windows SDK example and
+Session compile-only check pass again. The added choice-resolution P2 is independently
+source-rechecked closed. The coordinator's final four-file workflow/Session hash,
+using sorted repository-relative `path\0bytes\0`, is
+`b29dad4b8ccbefa5e3a542775cf567ab31fdac6d39ee4ce4c29b8b2bfbbfa0c1`.
+The original Browser snapshot seam is committed separately as
+`e6cd99a09d414700a7329180af43e0fbba0ac85f`; the complete consumer is
+`0caee7fdf73af0ddf5274c9fcfc8a677875a364b`. Both remain local and the exact
+Open-GPUI source pin remains `68d52b009dde3c784b01268208cb1d0ed690e99c`.
+
+The historical macOS Session result remains **0/12** at `project.editor.prefabs-open-failed`;
+the updated Session regressions were compiled, not executed. Windows native DX12/Vulkan and
+the finder/smoke trajectories have not executed. The fixture README records the precise
+route, commands and qualification limits. No earlier receipt was rewritten as final-source
+review or native acceptance.
+
 ## Start Here
 
 | Project | Checkout | Maintenance responsibility |

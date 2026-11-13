@@ -234,9 +234,10 @@ task-local nextest 0.9.151. The final Windows SDK check is repeated successfully
 22.75 seconds, and the current Session target again compiles without execution. Logs
 are `/tmp/nara-editor-dialogue-final-consumer-library.log`,
 `/tmp/nara-editor-dialogue-final-rust1100-library.log` and the Windows/Session paths
-above. Final independent source recheck closes the Review/Remove/Current finding;
-the four-file workflow/Session scope fingerprint is
-`1e338b40e9d16198204e984180119c7a3361130dc0905a221dde52602498c082`.
+above. Final independent source recheck closes the Review/Remove/Current finding.
+The coordinator computes the final four-file workflow/Session scope fingerprint,
+sorting repository-relative paths and concatenating `path\0bytes\0`, as
+`b29dad4b8ccbefa5e3a542775cf567ab31fdac6d39ee4ce4c29b8b2bfbbfa0c1`.
 This bounded recheck does not rewrite the original six-reviewer report or grant
 unexecuted native qualification.
 
